@@ -1,4 +1,4 @@
-# The Chalk tutorial
+# The ChalkQL tutorial
 
 Eighteen chapters over one marketplace — customers, suppliers, products, orders and their
 lines, employees, regions, warehouses, stock and rates — each one a small program that prints

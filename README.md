@@ -1,12 +1,12 @@
-# **Democratise access to your data with confidence.**
+# ChalkQL — SQL, safely.
 
 [![NuGet](https://img.shields.io/nuget/v/ChalkQL.svg)](https://www.nuget.org/packages/ChalkQL) [![ci](https://github.com/markhammond/chalkql/actions/workflows/ci.yml/badge.svg)](https://github.com/markhammond/chalkql/actions/workflows/ci.yml)
 
-ChalkQL applies zero-trust principles to SQL, rewriting queries to enforce need-to-know access, with tenant isolation across federated data sources. *Federated SQL query planning and optimisation for .NET, powered by <a href="https://calcite.apache.org">Apache Calcite</a>.*
+ChalkQL applies zero-trust principles to SQL, rewriting queries to enforce need-to-know access and tenant isolation across federated data sources. *Federated SQL query planning and optimisation for .NET, powered by <a href="https://calcite.apache.org">Apache Calcite</a>.*
 
 Targets .NET 10. JDK 21+ needed for Apache Calcite planner.
 
-## Why ChalkQL
+## Democratise access to your data with confidence.
 
 The objective is simple: just write the SQL you mean and let ChalkQL enforce fine-grained authorisation. Applications and agents increasingly need to query data they do not completely own, across sources with different capabilities and trust boundaries. Access control is too often entangled with individual queries, views, ORMs, or application code — conflating query intent with what a principal is permitted to know.
 
@@ -143,6 +143,7 @@ By delegating parsing, validation, decorrelation, and optimisation to Calcite, C
 
 Several open-source projects approach data access, authorisation, and querying in ways worth contemplating:
 
+* [**Triceps**](https://triceps.sourceforge.net) — a toolkit for building your own CEP when you might want replayable event streams with time-travel debugging.
 * [**Elixir Ecto**](https://github.com/elixir-ecto/ecto) — a sublime non-ORM for composable querying.
 * [**Hasura**](https://github.com/hasura/graphql-engine) — summoning the power of declarative data access.
 * [**Authz**](https://github.com/eko/authz) — treating authorisation as expressive application policy.
@@ -151,11 +152,14 @@ Several open-source projects approach data access, authorisation, and querying i
 * [**Cayuga**](https://sourceforge.net/projects/cayuga/) — formal query semantics and scalable stream processing needn't be opposing goals.
 * [**BabyKusto**](https://github.com/davidnx/baby-kusto-csharp) — the little .NET engine that could, with a pleasant query language for mere humans.
 * [**Apache Calcite**](https://github.com/apache/calcite) — the venerable relational parsing, planning, and optimisation foundation on which ChalkQL rests.
+* [**Readyset**](https://github.com/readysettech/readyset) — an incremental-dataflow engine for materialising just about anything SQL-shaped. Also witchcraft.
+
+There’s a lot to consider.
 
 ## A kindred spirit
 
 [**calcite-dotnet**](https://github.com/ikvmnet/calcite-dotnet) builds upon the remarkable [**IKVM**](https://github.com/ikvmnet/ikvm) to provide in-process interoperability between Apache Calcite and the .NET runtime.
-The tenacity required to see such an ambitious integration through is itself a source of motivation, and its evolution may offer Chalk a future path towards deeper in-process integration.
+The tenacity required to see such an ambitious integration through is itself a source of motivation, and its evolution may offer ChalkQL a future path towards deeper in-process integration.
 
 ## Indicative numbers
 
