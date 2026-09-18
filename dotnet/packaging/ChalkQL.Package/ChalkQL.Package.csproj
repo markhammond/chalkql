@@ -14,14 +14,33 @@
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-
     <IsPackable>true</IsPackable>
     <PackageId>ChalkQL</PackageId>
     <PackageTags>
       sql;federated-sql;poco;query-engine;planner;optimizer;apache-calcite;calcite;arrow;
       access-control;authorization;entitlements;multi-tenant
     </PackageTags>
-    <Description>Federated SQL query planning and execution for .NET, powered by Apache Calcite.</Description>
+    <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageReleaseNotes>
+      Initial public release of ChalkQL.
+    </PackageReleaseNotes>
+
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <RepositoryUrl>https://github.com/markhammond/chalkql.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+
+    <Authors>Mark Hammond</Authors>
+    <Description>
+      Federated SQL query planning and execution for .NET, powered by Apache Calcite.
+    </Description>
+    
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    
 
     <!--
       Packaging projects deliberately opt out of Central Package Management. They synthesise the
@@ -39,6 +58,12 @@
     <PackageTfm>net10.0</PackageTfm>
   </PropertyGroup>
 
+  <ItemGroup>
+    <None Include="README.md"
+          Pack="true"
+          PackagePath="/" />
+  </ItemGroup>
+  
   <!-- Generated from the direct PackageReferences of the constituent projects. -->
   <Import Project="../generated/ChalkQL.Dependencies.props"
           Condition="Exists('../generated/ChalkQL.Dependencies.props')" />

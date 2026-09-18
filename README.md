@@ -1,10 +1,18 @@
 # **Democratise access to your data with confidence.**
 
+[![NuGet](https://img.shields.io/nuget/v/ChalkQL.svg)](https://www.nuget.org/packages/ChalkQL) [![ci](https://github.com/markhammond/chalkql/actions/workflows/ci.yml/badge.svg)](https://github.com/markhammond/chalkql/actions/workflows/ci.yml)
+
 ChalkQL applies zero-trust principles to SQL, rewriting queries to enforce need-to-know access, with tenant isolation across federated data sources. *Federated SQL query planning and optimisation for .NET, powered by <a href="https://calcite.apache.org">Apache Calcite</a>.*
+
+Targets .NET 10. JDK 21+ needed for Apache Calcite planner.
 
 ## Why ChalkQL
 
 The objective is simple: just write the SQL you mean and let ChalkQL enforce fine-grained authorisation. Applications and agents increasingly need to query data they do not completely own, across sources with different capabilities and trust boundaries. Access control is too often entangled with individual queries, views, ORMs, or application code — conflating query intent with what a principal is permitted to know.
+
+### Live streaming pivots _using_ idiomatic SQL.
+
+The <a href="docs/tutorial.md">tutorial</a> builds from ordinary C# objects and federated queries through to a live inventory view combining streaming state, temporal joins and tenancy-aware access control.
 
 ### Where separation of concerns matters.
 
@@ -83,14 +91,14 @@ A handful of open-source projects overlap with parts of ChalkQL’s capability s
 
 The comparison reflects publicly documented capabilities and is intended to distinguish architectural models rather than imply that an undocumented capability cannot be implemented by another project.
 
-## Well-mannered scalability
+## Choose your own topology
 
 ChalkQL is predominantly an embedded **.NET library**. A host application may instantiate any number of `ChalkEngine` contexts, each with an application-defined instance name. Engines and planner sidecars have a many-to-many relationship, with planning workloads partitioned by instance and governed through priorities, deadlines, time-slicing, and compute budgets.
 
 ```text
-┌─ your .NET application ─────────────┐    N : M · planning · scheduling   ┌─ planner sidecars · JVM ─┐
-│ ChalkEngine × N · app-defined names │ ◀────────────────────────────────▶ │    Apache Calcite × M    │
-└─────────────────────────────────────┘                                    └──────────────────────────┘
+┌─ your .NET application ─────────────┐           N : M          ┌─ planner JVM sidecars ─┐
+│ ChalkEngine × N · app-defined names │ ◀──────────────────────▶ │   Apache Calcite × M   │
+└─────────────────────────────────────┘   planning · scheduling  └────────────────────────┘
 ```
 
 Apache Calcite query planning and optimisation are provided by lightweight JVM sidecars, while ChalkQL’s vectorised execution engine remains within the .NET host. The diagram below shows one path through that topology.

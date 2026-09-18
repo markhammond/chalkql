@@ -29,8 +29,8 @@ Two tenancies — customers and suppliers — are two **perspectives** over one 
 graph, which is what the entitlement chapters are about:
 
 ```text
-                        order_details
-                        /           \
+                       order_details
+                      /             \
                    orders         products
                      │               │
                  customers       suppliers
