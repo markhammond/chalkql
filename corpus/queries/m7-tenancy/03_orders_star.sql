@@ -1,0 +1,12 @@
+-- §8 corpus 03. The subject dimension: a member sees their own orders wherever they are, and the
+-- created-by fail-safe gives a principal the orders they created in an organisation they cannot
+-- otherwise see. The star includes `amount`, which is population-only for the auditor, so for that
+-- one principal the whole statement is a POLICY refusal — §8's query 07's other half, reached by a
+-- star rather than by naming the column.
+-- expect: principals(all)
+-- expect: policy(u6)
+-- expect: policy(u6-two-orgs)
+-- D266: the regional auditor holds the same auditor role, confined to one region, so
+-- `amount` is population-only for it too and the statement is refused the same way.
+-- expect: policy(u10-in-a-region)
+SELECT * FROM orders ORDER BY id

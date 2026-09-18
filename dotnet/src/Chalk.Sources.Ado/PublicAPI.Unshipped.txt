@@ -1,0 +1,115 @@
+#nullable enable
+Chalk.Sources.Ado.AdoCapabilities
+Chalk.Sources.Ado.AdoParameters
+Chalk.Sources.Ado.AdoProviderTraits
+Chalk.Sources.Ado.AdoProviderTraits.AdoProviderTraits() -> void
+Chalk.Sources.Ado.AdoProviderTraits.Text.get -> Chalk.Sources.Ado.TextStrategy?
+Chalk.Sources.Ado.AdoProviderTraits.Text.init -> void
+Chalk.Sources.Ado.AdoSource
+Chalk.Sources.Ado.AdoSource.Capabilities.get -> Chalk.Catalog.SourceCapabilities!
+Chalk.Sources.Ado.AdoSource.DescribeSchema() -> Chalk.Catalog.SchemaDescriptor!
+Chalk.Sources.Ado.AdoSource.ExecuteQueryAsync(Chalk.Sources.RemoteQueryRequest! request, Chalk.Sources.ScanContext! context, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Sources.Ado.AdoSource.Fetch.get -> Chalk.Sources.Ado.IRemoteFetch!
+Chalk.Sources.Ado.AdoSource.NativeStringLayout.get -> Chalk.Sources.StringLayouts
+Chalk.Sources.Ado.AdoSource.Options.get -> Chalk.Sources.SourceOptions!
+Chalk.Sources.Ado.AdoSource.Profile.get -> Chalk.Catalog.DialectProfileDescriptor!
+Chalk.Sources.Ado.AdoSource.RefreshAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+Chalk.Sources.Ado.AdoSource.RefreshTableAsync(string! table, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+Chalk.Sources.Ado.AdoSource.ScanAsync(Chalk.Sources.ScanRequest! request, Chalk.Sources.ScanContext! context, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Sources.Ado.AdoSource.SchemaName.get -> string!
+Chalk.Sources.Ado.AdoSource.SourceId.get -> string!
+Chalk.Sources.Ado.AdoSource.Table(string! name) -> Chalk.Sources.Ado.AdoTable
+Chalk.Sources.Ado.AdoSourceBuilder
+Chalk.Sources.Ado.AdoSourceBuilder.AddFunction(string! name, System.Action<Chalk.Catalog.FunctionBuilder!>! configure) -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.AddTable(string! name, System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ColumnDescriptor!>! columns, out Chalk.Sources.Ado.AdoTable table, string? remoteName = null, System.Action<Chalk.Sources.Ado.AdoTableBuilder!>? configure = null) -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.AddTable(string! name, System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ColumnDescriptor!>! columns, string? remoteName = null, System.Action<Chalk.Sources.Ado.AdoTableBuilder!>? configure = null) -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.AdoSourceBuilder(string! sourceId, System.Data.Common.DbProviderFactory! factory, string! connectionString, string! schemaName = "main") -> void
+Chalk.Sources.Ado.AdoSourceBuilder.AdoSourceBuilder(string! sourceId, System.Func<System.Data.Common.DbConnection!>! connect, string! schemaName = "main") -> void
+Chalk.Sources.Ado.AdoSourceBuilder.Build() -> Chalk.Sources.Ado.AdoSource!
+Chalk.Sources.Ado.AdoSourceBuilder.Capabilities(Chalk.Catalog.SourceCapabilities! capabilities) -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.Costs(Chalk.Catalog.CostProfile! costProfile) -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.Dialect(Chalk.Catalog.DialectProfileDescriptor! profile) -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.DiscoverTables(string? schema = null) -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.Entitlement(string! table, Chalk.Entitlements.TableEntitlementDescriptor! entitlement) -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.Fetch(Chalk.Sources.Ado.IRemoteFetch! fetch) -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.Options(Chalk.Sources.SourceOptions! options) -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.Provider(Chalk.Sources.Ado.AdoProviderTraits! traits) -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.RowCountMode
+Chalk.Sources.Ado.AdoSourceBuilder.RowCountMode.Exact = 1 -> Chalk.Sources.Ado.AdoSourceBuilder.RowCountMode
+Chalk.Sources.Ado.AdoSourceBuilder.RowCountMode.Unknown = 0 -> Chalk.Sources.Ado.AdoSourceBuilder.RowCountMode
+Chalk.Sources.Ado.AdoSourceBuilder.RowCounts(Chalk.Sources.Ado.AdoSourceBuilder.RowCountMode mode) -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.TrustSourceRowSecurity() -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoTable
+Chalk.Sources.Ado.AdoTable.AdoTable() -> void
+Chalk.Sources.Ado.AdoTable.Equals(Chalk.Sources.Ado.AdoTable other) -> bool
+Chalk.Sources.Ado.AdoTable.Name.get -> string!
+Chalk.Sources.Ado.AdoTable.Runtime.get -> Chalk.Sources.ISourceRuntime!
+Chalk.Sources.Ado.AdoTable.Schema.get -> string!
+Chalk.Sources.Ado.AdoTable.SourceId.get -> string!
+Chalk.Sources.Ado.AdoTableBuilder
+Chalk.Sources.Ado.AdoTableBuilder.Costs(Chalk.Catalog.CostProfile! costProfile) -> Chalk.Sources.Ado.AdoTableBuilder!
+Chalk.Sources.Ado.AdoTableBuilder.ForeignKey(string! name, string![]! columns, string! parentTable, string![]! parentColumns) -> Chalk.Sources.Ado.AdoTableBuilder!
+Chalk.Sources.Ado.AdoTableBuilder.Index(string! name, bool unique, params string![]! columns) -> Chalk.Sources.Ado.AdoTableBuilder!
+Chalk.Sources.Ado.AdoTableBuilder.RowCount(long rows, Chalk.Ir.RowCountKind kind = Chalk.Ir.RowCountKind.Estimate) -> Chalk.Sources.Ado.AdoTableBuilder!
+Chalk.Sources.Ado.AdoTableBuilder.UniqueKey(params string![]! columns) -> Chalk.Sources.Ado.AdoTableBuilder!
+Chalk.Sources.Ado.AdoTypeMapping
+Chalk.Sources.Ado.DbDataReaderFetch
+Chalk.Sources.Ado.DbDataReaderFetch.FetchAsync(Chalk.Sources.Ado.RemoteFetchRequest! request, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Sources.Ado.DbDataReaderFetch.Name.get -> string!
+Chalk.Sources.Ado.IRemoteFetch
+Chalk.Sources.Ado.IRemoteFetch.FetchAsync(Chalk.Sources.Ado.RemoteFetchRequest! request, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Sources.Ado.IRemoteFetch.Name.get -> string!
+Chalk.Sources.Ado.IRemoteFetch.NativeStringLayout.get -> Chalk.Sources.StringLayouts
+Chalk.Sources.Ado.RemoteFetchRequest
+Chalk.Sources.Ado.RemoteFetchRequest.Arena.get -> Chalk.Sources.ExecutionArena!
+Chalk.Sources.Ado.RemoteFetchRequest.Arena.init -> void
+Chalk.Sources.Ado.RemoteFetchRequest.BatchSize.get -> int
+Chalk.Sources.Ado.RemoteFetchRequest.BatchSize.init -> void
+Chalk.Sources.Ado.RemoteFetchRequest.ColumnTypes.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>!
+Chalk.Sources.Ado.RemoteFetchRequest.ColumnTypes.init -> void
+Chalk.Sources.Ado.RemoteFetchRequest.Connection.get -> System.Data.Common.DbConnection!
+Chalk.Sources.Ado.RemoteFetchRequest.Connection.init -> void
+Chalk.Sources.Ado.RemoteFetchRequest.OutputSchema.get -> Apache.Arrow.Schema!
+Chalk.Sources.Ado.RemoteFetchRequest.OutputSchema.init -> void
+Chalk.Sources.Ado.RemoteFetchRequest.ParameterNames.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Sources.Ado.RemoteFetchRequest.ParameterNames.init -> void
+Chalk.Sources.Ado.RemoteFetchRequest.ParameterTypes.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>!
+Chalk.Sources.Ado.RemoteFetchRequest.ParameterTypes.init -> void
+Chalk.Sources.Ado.RemoteFetchRequest.Parameters.get -> System.Collections.Generic.IReadOnlyList<object?>!
+Chalk.Sources.Ado.RemoteFetchRequest.Parameters.init -> void
+Chalk.Sources.Ado.RemoteFetchRequest.Profile.get -> Chalk.Catalog.DialectProfileDescriptor!
+Chalk.Sources.Ado.RemoteFetchRequest.Profile.init -> void
+Chalk.Sources.Ado.RemoteFetchRequest.RemoteFetchRequest() -> void
+Chalk.Sources.Ado.RemoteFetchRequest.SourceId.get -> string!
+Chalk.Sources.Ado.RemoteFetchRequest.SourceId.init -> void
+Chalk.Sources.Ado.RemoteFetchRequest.Sql.get -> string!
+Chalk.Sources.Ado.RemoteFetchRequest.Sql.init -> void
+Chalk.Sources.Ado.RemoteFetchRequest.Stats.get -> Chalk.Sources.ExecutionStats!
+Chalk.Sources.Ado.RemoteFetchRequest.Stats.init -> void
+Chalk.Sources.Ado.RemoteFetchRequest.Subject.get -> string!
+Chalk.Sources.Ado.RemoteFetchRequest.Subject.init -> void
+Chalk.Sources.Ado.RemoteFetchRequest.Timeout.get -> System.TimeSpan
+Chalk.Sources.Ado.RemoteFetchRequest.Timeout.init -> void
+Chalk.Sources.Ado.RemoteFetchRequest.Traits.get -> Chalk.Sources.Ado.AdoProviderTraits?
+Chalk.Sources.Ado.RemoteFetchRequest.Traits.init -> void
+Chalk.Sources.Ado.TextStrategy
+Chalk.Sources.Ado.TextStrategy.Bytes = 1 -> Chalk.Sources.Ado.TextStrategy
+Chalk.Sources.Ado.TextStrategy.Chars = 2 -> Chalk.Sources.Ado.TextStrategy
+Chalk.Sources.Ado.TextStrategy.String = 3 -> Chalk.Sources.Ado.TextStrategy
+Chalk.Sources.Ado.TextStrategy.Undecided = 0 -> Chalk.Sources.Ado.TextStrategy
+override Chalk.Sources.Ado.AdoTable.GetHashCode() -> int
+override Chalk.Sources.Ado.AdoTable.ToString() -> string!
+static Chalk.Sources.Ado.AdoCapabilities.Aggregates.get -> System.Collections.Generic.IReadOnlyList<Chalk.Ir.AggregateFunctionId>!
+static Chalk.Sources.Ado.AdoCapabilities.FiltersOnly(Chalk.Catalog.DialectProfileDescriptor! profile, int maxInList = 1000) -> Chalk.Catalog.SourceCapabilities!
+static Chalk.Sources.Ado.AdoCapabilities.For(Chalk.Catalog.DialectProfileDescriptor! profile, int maxInList = 1000) -> Chalk.Catalog.SourceCapabilities!
+static Chalk.Sources.Ado.AdoCapabilities.ScalarFunctions.get -> System.Collections.Generic.IReadOnlyList<Chalk.Ir.FunctionId>!
+static Chalk.Sources.Ado.AdoParameters.Bind(System.Data.Common.DbCommand! command, Chalk.Sources.Ado.RemoteFetchRequest! request) -> void
+static Chalk.Sources.Ado.AdoParameters.Bind(System.Data.Common.DbCommand! command, System.Collections.Generic.IReadOnlyList<string!>! names, System.Collections.Generic.IReadOnlyList<object?>! values, System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>! types) -> void
+static Chalk.Sources.Ado.AdoParameters.Rewrite(string! sql, Chalk.Ir.ParameterPlaceholder style) -> (string! Sql, System.Collections.Generic.IReadOnlyList<string!>! Names)
+static Chalk.Sources.Ado.AdoTable.operator !=(Chalk.Sources.Ado.AdoTable left, Chalk.Sources.Ado.AdoTable right) -> bool
+static Chalk.Sources.Ado.AdoTable.operator ==(Chalk.Sources.Ado.AdoTable left, Chalk.Sources.Ado.AdoTable right) -> bool
+static Chalk.Sources.Ado.AdoTypeMapping.FromSqlType(string! sqlType, bool nullable, int precision = 0, int scale = 0) -> Chalk.Catalog.ChalkType?
+static Chalk.Sources.Ado.AdoTypeMapping.IsCompatible(object! value, Chalk.Catalog.ChalkType type) -> bool
+static Chalk.Sources.Ado.AdoTypeMapping.ToDbType(Chalk.Catalog.ChalkType type) -> System.Data.DbType
+static Chalk.Sources.Ado.DbDataReaderFetch.Instance.get -> Chalk.Sources.Ado.DbDataReaderFetch!
+~override Chalk.Sources.Ado.AdoTable.Equals(object obj) -> bool

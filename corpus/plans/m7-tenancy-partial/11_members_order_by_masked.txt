@@ -1,0 +1,54 @@
+-- u1
+report id:Full, last_name:PerRow, members:Some
+3|E
+
+-- u2
+report id:Full, last_name:PerRow, members:Some
+2|I
+
+-- u3
+report id:Full, last_name:Redacted, members:Some
+3|<null>
+
+-- u3-in-o1
+report id:Full, last_name:Redacted, members:Some
+
+-- u4
+report id:Full, last_name:Full, members:All
+3|Ek CANARY-LAST-03
+
+-- u5
+report id:Full, last_name:Redacted, members:Some
+
+-- u6
+report id:Full, last_name:PerRow, members:Some
+2|226b5c1078fd4adfc38c6a0a8893c273
+
+-- u6-two-orgs
+report id:Full, last_name:PerRow, members:Some
+2|226b5c1078fd4adfc38c6a0a8893c273
+
+-- u7
+report id:Full, last_name:Redacted, members:Some
+
+-- u8
+report id:Full, last_name:Redacted, members:Some
+1|<null>
+
+-- u9
+report id:Full, last_name:Redacted, members:Some
+1|<null>
+
+-- u10-in-a-region
+report id:Full, last_name:Redacted, members:Some
+
+-- u11-subject-in-a-region
+report id:Full, last_name:Redacted, members:Some
+
+-- u14-a-vendor
+report id:Full, last_name:Redacted, members:Some
+
+-- u15-a-vendor-and-an-org
+report id:Full, last_name:PerRow, members:Some
+2|Ito CANARY-LAST-02
+

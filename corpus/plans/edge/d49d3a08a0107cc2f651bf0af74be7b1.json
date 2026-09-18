@@ -1,0 +1,365 @@
+{
+  "irVersion": 1,
+  "planDigest": "18421843134743811951",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "x",
+        "type": {
+          "kind": "TYPE_KIND_I32"
+        }
+      },
+      {
+        "name": "y",
+        "type": {
+          "kind": "TYPE_KIND_I32"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "x",
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          }
+        },
+        {
+          "name": "y",
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          }
+        }
+      ]
+    },
+    "estRowCount": 8,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "project": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "x",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              }
+            },
+            {
+              "name": "EXPR$0",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              }
+            }
+          ]
+        },
+        "estRowCount": 8,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_I32"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_I32"
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "sort": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "x",
+                  "type": {
+                    "kind": "TYPE_KIND_I32"
+                  }
+                },
+                {
+                  "name": "EXPR$0",
+                  "type": {
+                    "kind": "TYPE_KIND_I32"
+                  }
+                }
+              ]
+            },
+            "estRowCount": 8,
+            "nestedLoopJoin": {
+              "left": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "x",
+                      "type": {
+                        "kind": "TYPE_KIND_I32"
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 2,
+                "collations": [
+                  {
+                    "fields": [
+                      {
+                        "expr": {
+                          "type": {
+                            "kind": "TYPE_KIND_I32"
+                          },
+                          "fieldRef": {}
+                        },
+                        "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                      }
+                    ]
+                  }
+                ],
+                "virtualTable": {
+                  "rows": [
+                    {
+                      "values": [
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_I32"
+                          },
+                          "literal": {
+                            "i32Value": 1
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "values": [
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_I32"
+                          },
+                          "literal": {
+                            "i32Value": 2
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              "right": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "EXPR$0",
+                      "type": {
+                        "kind": "TYPE_KIND_I32"
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 4,
+                "project": {
+                  "input": {
+                    "rowType": {
+                      "fields": [
+                        {
+                          "name": "EXPR$0",
+                          "type": {
+                            "kind": "TYPE_KIND_LIST",
+                            "element": {
+                              "kind": "TYPE_KIND_I32"
+                            }
+                          }
+                        },
+                        {
+                          "name": "EXPR$0",
+                          "type": {
+                            "kind": "TYPE_KIND_I32"
+                          }
+                        }
+                      ]
+                    },
+                    "estRowCount": 4,
+                    "unnest": {
+                      "input": {
+                        "rowType": {
+                          "fields": [
+                            {
+                              "name": "EXPR$0",
+                              "type": {
+                                "kind": "TYPE_KIND_LIST",
+                                "element": {
+                                  "kind": "TYPE_KIND_I32"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "estRowCount": 1,
+                        "project": {
+                          "input": {
+                            "rowType": {
+                              "fields": [
+                                {
+                                  "name": "ZERO",
+                                  "type": {
+                                    "kind": "TYPE_KIND_I32"
+                                  }
+                                }
+                              ]
+                            },
+                            "estRowCount": 1,
+                            "collations": [
+                              {
+                                "fields": [
+                                  {
+                                    "expr": {
+                                      "type": {
+                                        "kind": "TYPE_KIND_I32"
+                                      },
+                                      "fieldRef": {}
+                                    },
+                                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                  }
+                                ]
+                              }
+                            ],
+                            "virtualTable": {
+                              "rows": [
+                                {
+                                  "values": [
+                                    {
+                                      "type": {
+                                        "kind": "TYPE_KIND_I32"
+                                      },
+                                      "literal": {
+                                        "i32Value": 0
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          },
+                          "exprs": [
+                            {
+                              "type": {
+                                "kind": "TYPE_KIND_LIST",
+                                "element": {
+                                  "kind": "TYPE_KIND_I32"
+                                }
+                              },
+                              "literal": {
+                                "listValue": {
+                                  "elements": [
+                                    {
+                                      "i32Value": 3
+                                    },
+                                    {
+                                      "i32Value": 4
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "exprs": [
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_I32"
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    }
+                  ]
+                }
+              },
+              "type": "JOIN_TYPE_INNER"
+            }
+          },
+          "fields": [
+            {
+              "expr": {
+                "type": {
+                  "kind": "TYPE_KIND_I32"
+                },
+                "fieldRef": {}
+              },
+              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+            },
+            {
+              "expr": {
+                "type": {
+                  "kind": "TYPE_KIND_I32"
+                },
+                "fieldRef": {
+                  "index": 1
+                }
+              },
+              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+            }
+          ]
+        }
+      },
+      "exprs": [
+        {
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          },
+          "fieldRef": {}
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          },
+          "fieldRef": {
+            "index": 1
+          }
+        }
+      ]
+    }
+  }
+}

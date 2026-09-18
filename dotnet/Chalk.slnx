@@ -1,0 +1,40 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Chalk.Ir/Chalk.Ir.csproj" />
+    <File Path="src\Chalk.Arrow\ArrowUtf8Extensions.cs" />
+    <Project Path="src/Chalk.Catalog/Chalk.Catalog.csproj" />
+    <Project Path="src/Chalk.Sources.Abstractions/Chalk.Sources.Abstractions.csproj" />
+    <Project Path="src/Chalk.Sources.Poco/Chalk.Sources.Poco.csproj" />
+    <Project Path="src/Chalk.Sources.Ado/Chalk.Sources.Ado.csproj" />
+    <Project Path="src/Chalk.Sources.DuckDb/Chalk.Sources.DuckDb.csproj" />
+    <Project Path="src/Chalk.Sources.Conformance/Chalk.Sources.Conformance.csproj" />
+    <Project Path="src/Chalk.Execution/Chalk.Execution.csproj" />
+    <Project Path="src/Chalk.Client/Chalk.Client.csproj" />
+    <Project Path="src/Chalk.Entitlements/Chalk.Entitlements.csproj" />
+    <Project Path="src/Chalk.Entitlements.Tenancy/Chalk.Entitlements.Tenancy.csproj" />
+    <Project Path="src\Chalk.Planner\Chalk.Planner.csproj" />
+    <Project Path="src\Chalk\Chalk.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Chalk.TestKit/Chalk.TestKit.csproj" />
+    <Project Path="tests/Chalk.Ir.Tests/Chalk.Ir.Tests.csproj" />
+    <Project Path="tests/Chalk.Catalog.Tests/Chalk.Catalog.Tests.csproj" />
+    <Project Path="tests/Chalk.Entitlements.Tenancy.Tests/Chalk.Entitlements.Tenancy.Tests.csproj" />
+    <Project Path="tests/Chalk.Sources.Poco.Tests/Chalk.Sources.Poco.Tests.csproj" />
+    <Project Path="tests/Chalk.Sources.Ado.Tests/Chalk.Sources.Ado.Tests.csproj" />
+    <Project Path="tests/Chalk.Execution.Tests/Chalk.Execution.Tests.csproj" />
+    <Project Path="tests/Chalk.Integration.Tests/Chalk.Integration.Tests.csproj" />
+    <Project Path="tests/Chalk.Architecture.Tests/Chalk.Architecture.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Chalk.CorpusTool/Chalk.CorpusTool.csproj" />
+  </Folder>
+  <Folder Name="/bench/">
+    <Project Path="bench/Chalk.Benchmarks/Chalk.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/Chalk.Sample.Quickstart/Chalk.Sample.Quickstart.csproj" />
+    <Project Path="samples/Chalk.Sample.AkadeIndexedSet/Chalk.Sample.AkadeIndexedSet.csproj" />
+    <Project Path="samples/Chalk.Sample.Tutorial/Chalk.Sample.Tutorial.csproj" />
+  </Folder>
+</Solution>

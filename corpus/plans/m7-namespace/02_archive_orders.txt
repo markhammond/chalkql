@@ -1,0 +1,30 @@
+-- ledger-only
+report id:Full, org_id:Full, amount:Full, note:Full, archive.orders:Some
+
+-- archive-only
+report id:Full, org_id:Full, amount:PerRow, note:Full, archive.orders:Some
+1|1|-1|ARCHIVE-NOTE-01
+3|2|-1|ARCHIVE-NOTE-03
+
+-- both
+report id:Full, org_id:Full, amount:PerRow, note:Full, archive.orders:Some
+1|1|-1|ARCHIVE-NOTE-01
+3|2|-1|ARCHIVE-NOTE-03
+
+-- global
+report id:Full, org_id:Full, amount:PerRow, note:Full, archive.orders:All
+1|1|-1|ARCHIVE-NOTE-01
+2|1|-1|ARCHIVE-NOTE-02
+3|2|-1|ARCHIVE-NOTE-03
+4|2|-1|ARCHIVE-NOTE-04
+
+-- owner
+report id:Full, org_id:Full, amount:Full, note:Full, archive.orders:Some
+1|1|2001|ARCHIVE-NOTE-01
+
+-- subject
+report id:Full, org_id:Full, amount:Full, note:Full, archive.orders:Some
+
+-- auditor-in-ledger
+report id:Full, org_id:Full, amount:Full, note:Full, archive.orders:Some
+

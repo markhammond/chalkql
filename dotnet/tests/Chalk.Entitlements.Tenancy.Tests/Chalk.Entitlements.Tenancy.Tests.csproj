@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Entitlements.Tenancy.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Chalk.Entitlements.Tenancy/Chalk.Entitlements.Tenancy.csproj" />
+    <ProjectReference Include="../Chalk.TestKit/Chalk.TestKit.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CHALK001</NoWarn>
+  </PropertyGroup>
+
+</Project>

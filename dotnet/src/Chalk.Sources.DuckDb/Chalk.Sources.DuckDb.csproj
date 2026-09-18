@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Sources.DuckDb</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>Chalk DuckDB source: the ADO.NET source with a native data-chunk reader, so a fetched row costs nothing on the managed heap.</Description>
+    <!-- The whole point of the package: pointers into DuckDB's own vectors (D148). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!--
+    DuckDB.NET.Data, not Data.Full and not Bindings.Full as 24-zero-gc.md §6 said (D148a, ADR 0024):
+    DuckDBConnection and DuckDBCommand.ExecuteArrowBatchesAsync live in DuckDB.NET.Data, and the
+    `.Full` suffix adds only the native libduckdb runtime packages. Leaving those out makes the
+    native library the host's choice — DuckDB.NET.Bindings.Full at the same version, or its own
+    build of the same DuckDB release — which is what a library package should do. Chalk.Sources.Ado
+    is untouched and still depends on System.Data.Common alone (D85).
+  -->
+  <ItemGroup>
+    <PackageReference Include="Apache.Arrow" />
+    <PackageReference Include="DuckDB.NET.Data" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Chalk.Sources.Abstractions/Chalk.Sources.Abstractions.csproj" />
+    <ProjectReference Include="../Chalk.Sources.Ado/Chalk.Sources.Ado.csproj" />
+    <ProjectReference Include="../Chalk.Catalog/Chalk.Catalog.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Chalk.Integration.Tests" />
+    <InternalsVisibleTo Include="Chalk.TestKit" />
+    <InternalsVisibleTo Include="Chalk.Benchmarks" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <!--
+    CHALK001 is the experimental id the columnar views carry (D79); this package is one of them.
+    RS0026 fires on the two AddDuckDbSource overloads, which differ in how a connection is supplied
+    and both end in the optional schema name — the same shape, and the same reason, as the two
+    AdoSourceBuilder constructors (ADR 0014).
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CHALK001;RS0026</NoWarn>
+  </PropertyGroup>
+
+</Project>

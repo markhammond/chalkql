@@ -1,0 +1,75 @@
+-- u1
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+1|1|northwind opening CANARY-CONTENT-01|01/01/2024 09:00:00
+2|1|northwind reply CANARY-CONTENT-02|<null>
+3|2|northwind second thread CANARY-CONTENT-03|<null>
+4|3|southerly|02/02/2024 10:00:00
+
+-- u2
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+1|1|northwind|01/01/2024 09:00:00
+2|1|northwind|<null>
+3|2|northwind|<null>
+
+-- u3
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+4|3|southerly opening CANARY-CONTENT-04|02/02/2024 10:00:00
+
+-- u3-in-o1
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+
+-- u4
+report id:Full, thread_id:Full, content:Full, first_viewed_at:Full, messages:Some, threads:All
+1|1|northwind opening CANARY-CONTENT-01|01/01/2024 09:00:00
+2|1|northwind reply CANARY-CONTENT-02|<null>
+3|2|northwind second thread CANARY-CONTENT-03|<null>
+4|3|southerly opening CANARY-CONTENT-04|02/02/2024 10:00:00
+5|4|eastward opening CANARY-CONTENT-05|<null>
+
+-- u5
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+
+-- u6
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+1|1|<null>|01/01/2024 09:00:00
+2|1|<null>|<null>
+3|2|<null>|<null>
+
+-- u6-two-orgs
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+1|1|<null>|01/01/2024 09:00:00
+2|1|<null>|<null>
+3|2|<null>|<null>
+4|3|<null>|02/02/2024 10:00:00
+
+-- u7
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+
+-- u8
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+1|1|<null>|01/01/2024 09:00:00
+2|1|<null>|<null>
+3|2|<null>|<null>
+
+-- u9
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+1|1|<null>|01/01/2024 09:00:00
+2|1|<null>|<null>
+3|2|<null>|<null>
+4|3|<null>|02/02/2024 10:00:00
+
+-- u10-in-a-region
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+
+-- u11-subject-in-a-region
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+
+-- u14-a-vendor
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+
+-- u15-a-vendor-and-an-org
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+1|1|northwind opening CANARY-CONTENT-01|01/01/2024 09:00:00
+2|1|northwind reply CANARY-CONTENT-02|<null>
+3|2|northwind second thread CANARY-CONTENT-03|<null>
+

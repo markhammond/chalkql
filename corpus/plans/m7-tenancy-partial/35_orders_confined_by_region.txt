@@ -1,0 +1,99 @@
+-- u1
+report id:Full, member_id:PerRow, org_id:PerRow, region_id:Full, note:PerRow, orders:Some
+1|1|1|1|n1 CANARY-NOTE-01
+2|1|1|2|n2 CANARY-NOTE-02
+3|2|1|1|n3 CANARY-NOTE-03
+4|2|1|2|n4 CANARY-NOTE-04
+5|3|2|1|********
+6|4|2|3|********
+7|5|3|3|n7 CANARY-NOTE-07
+
+-- u2
+report id:Full, member_id:PerRow, org_id:PerRow, region_id:Full, note:PerRow, orders:Some
+1|1|1|1|********
+2|1|1|2|********
+3|2|1|1|********
+4|2|1|2|n4 CANARY-NOTE-04
+
+-- u3
+report id:Full, member_id:PerRow, org_id:PerRow, region_id:Full, note:PerRow, orders:Some
+5|3|2|1|n5 CANARY-NOTE-05
+6|4|2|3|n6 CANARY-NOTE-06
+
+-- u3-in-o1
+report id:Full, member_id:PerRow, org_id:PerRow, region_id:Full, note:PerRow, orders:Some
+5|3|2|1|n5 CANARY-NOTE-05
+6|4|2|3|n6 CANARY-NOTE-06
+
+-- u4
+report id:Full, member_id:Full, org_id:Full, region_id:Full, note:Full, orders:All
+1|1|1|1|n1 CANARY-NOTE-01
+2|1|1|2|n2 CANARY-NOTE-02
+3|2|1|1|n3 CANARY-NOTE-03
+4|2|1|2|n4 CANARY-NOTE-04
+5|3|2|1|n5 CANARY-NOTE-05
+6|4|2|3|n6 CANARY-NOTE-06
+7|5|3|3|n7 CANARY-NOTE-07
+
+-- u5
+report id:Full, member_id:PerRow, org_id:PerRow, region_id:Full, note:PerRow, orders:Some
+
+-- u6
+report id:Full, member_id:PerRow, org_id:PerRow, region_id:Full, note:PerRow, orders:Some
+1|1|1|1|********
+2|1|1|2|********
+3|2|1|1|********
+4|2|1|2|********
+
+-- u6-two-orgs
+report id:Full, member_id:PerRow, org_id:PerRow, region_id:Full, note:PerRow, orders:Some
+1|1|1|1|********
+2|1|1|2|********
+3|2|1|1|********
+4|2|1|2|********
+5|3|2|1|********
+6|4|2|3|********
+
+-- u7
+report id:Full, member_id:PerRow, org_id:PerRow, region_id:Full, note:PerRow, orders:Some
+
+-- u8
+report id:Full, member_id:PerRow, org_id:PerRow, region_id:Full, note:PerRow, orders:Some
+1|1|1|1|<null>
+2|1|1|2|<null>
+3|2|1|1|<null>
+4|2|1|2|<null>
+
+-- u9
+report id:Full, member_id:PerRow, org_id:PerRow, region_id:Full, note:PerRow, orders:Some
+1|1|1|1|<null>
+2|1|1|2|<null>
+3|2|1|1|<null>
+4|2|1|2|<null>
+5|3|2|1|<null>
+6|4|2|3|<null>
+
+-- u10-in-a-region
+report id:Full, member_id:PerRow, org_id:PerRow, region_id:Full, note:PerRow, orders:Some
+2|1|1|2|********
+4|2|1|2|********
+
+-- u11-subject-in-a-region
+report id:Full, member_id:PerRow, org_id:PerRow, region_id:Full, note:PerRow, orders:Some
+1|1|1|1|n1 CANARY-NOTE-01
+
+-- u14-a-vendor
+report id:Full, member_id:PerRow, org_id:PerRow, region_id:Full, note:PerRow, orders:Some
+1|<null>|<null>|1|<null>
+5|<null>|<null>|1|<null>
+7|<null>|<null>|3|<null>
+
+-- u15-a-vendor-and-an-org
+report id:Full, member_id:PerRow, org_id:PerRow, region_id:Full, note:PerRow, orders:Some
+1|1|1|1|n1 CANARY-NOTE-01
+2|1|1|2|n2 CANARY-NOTE-02
+3|2|1|1|n3 CANARY-NOTE-03
+4|2|1|2|n4 CANARY-NOTE-04
+5|<null>|<null>|1|<null>
+7|<null>|<null>|3|<null>
+

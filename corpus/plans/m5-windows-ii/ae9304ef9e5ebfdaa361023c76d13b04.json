@@ -1,0 +1,338 @@
+{
+  "irVersion": 1,
+  "planDigest": "13835784681431664743",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "window_start",
+        "type": {
+          "kind": "TYPE_KIND_TIMESTAMP",
+          "precision": 9
+        }
+      },
+      {
+        "name": "window_end",
+        "type": {
+          "kind": "TYPE_KIND_TIMESTAMP",
+          "precision": 9
+        }
+      },
+      {
+        "name": "trades",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "window_start",
+          "type": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          }
+        },
+        {
+          "name": "window_end",
+          "type": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          }
+        },
+        {
+          "name": "trades",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 301,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "window_start",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              }
+            },
+            {
+              "name": "window_end",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              }
+            },
+            {
+              "name": "trades",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            }
+          ]
+        },
+        "estRowCount": 301,
+        "hashAggregate": {
+          "aggregate": {
+            "input": {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "symbol",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  },
+                  {
+                    "name": "ts",
+                    "type": {
+                      "kind": "TYPE_KIND_TIMESTAMP",
+                      "nullable": true,
+                      "precision": 9
+                    }
+                  },
+                  {
+                    "name": "price",
+                    "type": {
+                      "kind": "TYPE_KIND_FP64"
+                    }
+                  },
+                  {
+                    "name": "size",
+                    "type": {
+                      "kind": "TYPE_KIND_I64"
+                    }
+                  },
+                  {
+                    "name": "window_start",
+                    "type": {
+                      "kind": "TYPE_KIND_TIMESTAMP",
+                      "precision": 9
+                    }
+                  },
+                  {
+                    "name": "window_end",
+                    "type": {
+                      "kind": "TYPE_KIND_TIMESTAMP",
+                      "precision": 9
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 3010,
+              "collations": [
+                {
+                  "fields": [
+                    {
+                      "expr": {
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        },
+                        "fieldRef": {}
+                      },
+                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                    },
+                    {
+                      "expr": {
+                        "type": {
+                          "kind": "TYPE_KIND_TIMESTAMP",
+                          "nullable": true,
+                          "precision": 9
+                        },
+                        "fieldRef": {
+                          "index": 1
+                        }
+                      },
+                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                    }
+                  ]
+                }
+              ],
+              "session": {
+                "input": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "symbol",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      },
+                      {
+                        "name": "ts",
+                        "type": {
+                          "kind": "TYPE_KIND_TIMESTAMP",
+                          "nullable": true,
+                          "precision": 9
+                        }
+                      },
+                      {
+                        "name": "price",
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        }
+                      },
+                      {
+                        "name": "size",
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 3010,
+                  "collations": [
+                    {
+                      "fields": [
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "fieldRef": {}
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        },
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_TIMESTAMP",
+                              "nullable": true,
+                              "precision": 9
+                            },
+                            "fieldRef": {
+                              "index": 1
+                            }
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        }
+                      ]
+                    }
+                  ],
+                  "read": {
+                    "table": {
+                      "sourceId": "mem",
+                      "schema": "main",
+                      "table": "trades_sparse"
+                    },
+                    "projection": [
+                      0,
+                      1,
+                      2,
+                      3
+                    ]
+                  }
+                },
+                "partitionKeys": [
+                  0
+                ],
+                "timeColumn": 1,
+                "gap": {
+                  "type": {
+                    "kind": "TYPE_KIND_INTERVAL_DAY"
+                  },
+                  "literal": {
+                    "intervalDayValue": "7200000000"
+                  }
+                }
+              }
+            },
+            "groupings": [
+              {
+                "keys": [
+                  0,
+                  4,
+                  5
+                ]
+              }
+            ],
+            "measures": [
+              {
+                "function": "AGGREGATE_FUNCTION_ID_COUNT",
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_STRING"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        },
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_TIMESTAMP",
+              "precision": 9
+            },
+            "fieldRef": {
+              "index": 1
+            }
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

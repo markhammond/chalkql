@@ -1,0 +1,53 @@
+-- u1
+report id:Full, org_id:Full, first_name:PerRow, last_name:PerRow, national_id:Redacted, postcode:Full, members:Some
+1|1|Tara CANARY-FIRST-01|Ng CANARY-LAST-01|<null>|2000
+3|2|T|E|<null>|3000
+7|2|T|V|<null>|3002
+
+-- u2
+report id:Full, org_id:Full, first_name:Masked, last_name:Masked, national_id:Redacted, postcode:Full, members:Some
+1|1|T|N|<null>|2000
+
+-- u3
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:Some
+
+-- u3-in-o1
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:Some
+
+-- u4
+report id:Full, org_id:Full, first_name:Full, last_name:Full, national_id:Redacted, postcode:Full, members:All
+1|1|Tara CANARY-FIRST-01|Ng CANARY-LAST-01|<null>|2000
+3|2|Tomas CANARY-FIRST-03|Ek CANARY-LAST-03|<null>|3000
+7|2|Tara CANARY-FIRST-01|Vo CANARY-LAST-07|<null>|3002
+
+-- u5
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:None
+
+-- u6
+report id:Full, org_id:Full, first_name:Masked, last_name:Masked, national_id:Redacted, postcode:Full, members:Some
+
+-- u6-two-orgs
+report id:Full, org_id:Full, first_name:Masked, last_name:Masked, national_id:Redacted, postcode:Full, members:Some
+
+-- u7
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:None
+
+-- u8
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Tested, postcode:Full, members:Some
+
+-- u9
+POLICY Refused by the entitlements: main.members.national_id is population-only for this principal and a projection to the result is not one of the aggregates it permits.
+
+-- u10-in-a-region
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:None
+
+-- u11-subject-in-a-region
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:None
+
+-- u14-a-vendor
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:None
+
+-- u15-a-vendor-and-an-org
+report id:Full, org_id:Full, first_name:Full, last_name:Full, national_id:Redacted, postcode:Full, members:Some
+1|1|Tara CANARY-FIRST-01|Ng CANARY-LAST-01|<null>|2000
+

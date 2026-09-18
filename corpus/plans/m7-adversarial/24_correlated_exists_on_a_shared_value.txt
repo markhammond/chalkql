@@ -1,0 +1,65 @@
+-- u1
+report id:Full, members:Some, orders:Some
+1
+2
+3
+4
+
+-- u2
+report id:Full, members:Some, orders:Some
+1
+2
+
+-- u3
+report id:Full, members:Some, orders:Some
+3
+
+-- u3-in-o1
+report id:Full, members:Some, orders:Some
+
+-- u4
+report id:Full, members:All, orders:All
+1
+2
+3
+4
+5
+
+-- u5
+report id:Full, members:None, orders:Some
+
+-- u6
+F62 EntitlementException: Refused by the entitlements: main.orders.amount is population-only for this principal and a sub-query's result is not one of the aggregates it permits.
+
+-- u6-two-orgs
+F62 EntitlementException: Refused by the entitlements: main.orders.amount is population-only for this principal and a sub-query's result is not one of the aggregates it permits.
+
+-- u7
+report id:Full, members:None, orders:Some
+
+-- u8
+report id:Full, members:Some, orders:Some
+1
+2
+
+-- u9
+report id:Full, members:Some, orders:Some
+1
+2
+3
+4
+
+-- u10-in-a-region
+F62 EntitlementException: Refused by the entitlements: main.orders.amount is population-only for this principal and a sub-query's result is not one of the aggregates it permits.
+
+-- u11-subject-in-a-region
+report id:Full, members:None, orders:Some
+
+-- u14-a-vendor
+report id:Full, members:None, orders:Some
+
+-- u15-a-vendor-and-an-org
+report id:Full, members:Some, orders:Some
+1
+2
+

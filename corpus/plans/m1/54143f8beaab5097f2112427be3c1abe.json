@@ -1,0 +1,702 @@
+{
+  "irVersion": 1,
+  "planDigest": "10932040271984514661",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "ts",
+        "type": {
+          "kind": "TYPE_KIND_TIMESTAMP",
+          "precision": 9
+        }
+      },
+      {
+        "name": "open",
+        "type": {
+          "kind": "TYPE_KIND_FP64"
+        }
+      },
+      {
+        "name": "high",
+        "type": {
+          "kind": "TYPE_KIND_FP64"
+        }
+      },
+      {
+        "name": "low",
+        "type": {
+          "kind": "TYPE_KIND_FP64"
+        }
+      },
+      {
+        "name": "close",
+        "type": {
+          "kind": "TYPE_KIND_FP64"
+        }
+      },
+      {
+        "name": "volume",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      },
+      {
+        "name": "vwap",
+        "type": {
+          "kind": "TYPE_KIND_DECIMAL",
+          "nullable": true,
+          "precision": 28,
+          "scale": 10
+        }
+      },
+      {
+        "name": "trade_count",
+        "type": {
+          "kind": "TYPE_KIND_I32",
+          "nullable": true
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "ts",
+          "type": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          }
+        },
+        {
+          "name": "open",
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          }
+        },
+        {
+          "name": "high",
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          }
+        },
+        {
+          "name": "low",
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          }
+        },
+        {
+          "name": "close",
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          }
+        },
+        {
+          "name": "volume",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        },
+        {
+          "name": "vwap",
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "nullable": true,
+            "precision": 28,
+            "scale": 10
+          }
+        },
+        {
+          "name": "trade_count",
+          "type": {
+            "kind": "TYPE_KIND_I32",
+            "nullable": true
+          }
+        }
+      ]
+    },
+    "estRowCount": 1,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 2
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 3
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 4
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 5
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {
+                "index": 6
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              },
+              "fieldRef": {
+                "index": 7
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 8
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      },
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 2
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 3
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 4
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 5
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {
+                "index": 6
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              },
+              "fieldRef": {
+                "index": 7
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 8
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      },
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 2
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 3
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 4
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 5
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {
+                "index": 6
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              },
+              "fieldRef": {
+                "index": 7
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 8
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      },
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 3
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 4
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 5
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {
+                "index": 6
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              },
+              "fieldRef": {
+                "index": 7
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 8
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      },
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 4
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 5
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {
+                "index": 6
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              },
+              "fieldRef": {
+                "index": 7
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 8
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      },
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 5
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {
+                "index": 6
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              },
+              "fieldRef": {
+                "index": 7
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 8
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      },
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {
+                "index": 6
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              },
+              "fieldRef": {
+                "index": 7
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 8
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      },
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              },
+              "fieldRef": {
+                "index": 7
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 8
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      },
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 8
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "virtualTable": {}
+  }
+}

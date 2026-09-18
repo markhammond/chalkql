@@ -1,0 +1,66 @@
+-- u1
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+1|1|northwind-a
+2|3|northwind-b
+3|4|southerly-a
+
+-- u2
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+1|1|northwind-a
+2|3|northwind-b
+
+-- u3
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+3|4|southerly-a
+
+-- u3-in-o1
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+
+-- u4
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:All
+1|1|northwind-a
+2|3|northwind-b
+3|4|southerly-a
+
+-- u5
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+
+-- u6
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+1|1|northwind-a
+2|3|northwind-b
+
+-- u6-two-orgs
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+1|1|northwind-a
+2|3|northwind-b
+3|4|southerly-a
+
+-- u7
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+
+-- u8
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+1|1|northwind-a
+2|3|northwind-b
+
+-- u9
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+1|1|northwind-a
+2|3|northwind-b
+3|4|southerly-a
+
+-- u10-in-a-region
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+
+-- u11-subject-in-a-region
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+
+-- u14-a-vendor
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+
+-- u15-a-vendor-and-an-org
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+1|1|northwind-a
+2|3|northwind-b
+

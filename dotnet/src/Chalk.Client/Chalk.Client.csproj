@@ -1,0 +1,97 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Client</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>Chalk client: ChalkEngine, IQueryPlanner and the gRPC transport to the Calcite planner sidecar.</Description>
+    <PlannerJarGlob>$(RepoRoot)planner/build/libs/chalk-planner-*-all.jar</PlannerJarGlob>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Apache.Arrow" />
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Chalk.Ir/Chalk.Ir.csproj" />
+    <ProjectReference Include="../Chalk.Catalog/Chalk.Catalog.csproj" />
+    <ProjectReference Include="../Chalk.Sources.Abstractions/Chalk.Sources.Abstractions.csproj" />
+    <ProjectReference Include="../Chalk.Execution/Chalk.Execution.csproj" />
+  </ItemGroup>
+
+  <!-- Only planner.proto: the IR messages it imports come from Chalk.Ir through the project reference. -->
+  <ItemGroup>
+    <Protobuf Include="$(ProtoRootDir)/chalk/v1/planner.proto" ProtoRoot="$(ProtoRootDir)"
+              GrpcServices="Client" Access="Public" AdditionalProtocArguments="--experimental_allow_proto3_optional" />
+    <Protobuf Include="$(ProtoRootDir)/chalk/v1/types.proto;$(ProtoRootDir)/chalk/v1/dialect.proto;$(ProtoRootDir)/chalk/v1/expr.proto;$(ProtoRootDir)/chalk/v1/plan.proto;$(ProtoRootDir)/chalk/v1/catalog.proto"
+              ProtoRoot="$(ProtoRootDir)" GrpcServices="None" CompileOutputs="false" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <_PlannerJar Include="$(PlannerJarGlob)" />
+    <EmbeddedResource Include="@(_PlannerJar)" LogicalName="Chalk.Client.chalk-planner.jar" />
+  </ItemGroup>
+
+  <!--
+    Normal .NET development may build without first building the JVM sidecar.
+    Distribution builds set RequireEmbeddedPlannerJar=true so a package can never
+    accidentally ship a Chalk.Client.dll without its embedded planner.
+  -->
+  <Target Name="RequireEmbeddedPlannerJar"
+          BeforeTargets="PrepareResources"
+          Condition="'$(RequireEmbeddedPlannerJar)' == 'true'">
+    <Error Condition="'@(_PlannerJar->Count())' != '1'"
+           Text="Chalk.Client embeds exactly one planner jar and found @(_PlannerJar->Count()) matching $(PlannerJarGlob); build planner:shadowJar first." />
+  </Target>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Chalk.Client.Tests" />
+    <!-- The one extension package in the tree; the seam it uses is documented on PreparedQuery.Decorate. -->
+    <InternalsVisibleTo Include="Chalk.Entitlements" />
+    <InternalsVisibleTo Include="Chalk.Integration.Tests" />
+    <InternalsVisibleTo Include="Chalk.TestKit" />
+    <InternalsVisibleTo Include="Chalk.CorpusTool" />
+    <InternalsVisibleTo Include="Chalk.Benchmarks" />
+  </ItemGroup>
+
+  <!--
+    The public surface is reviewed rather than discovered (F7). PublicAPI.Shipped.txt is empty until
+    the first tagged release; everything this package exposes is listed in PublicAPI.Unshipped.txt,
+    so adding, removing or changing a public symbol shows up as a diff on that file.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <!--
+    Two public-API rules are reported rather than enforced here (F7, ADR 0014).
+
+    RS0041 ("uses some oblivious reference types") fires on every member of the protobuf and gRPC
+    types protoc generates into this package: generated code carries no nullable annotations, D14
+    forbids checking any of it in, and there is nowhere to add them. The API file records those
+    members with the analyzer's own `~` prefix, which is the accurate answer.
+
+    RS0026 ("do not add multiple overloads with optional parameters") fires on ExecuteAsync and
+    QueryAsync, whose three parameter-style overloads each end in `arena = null, ct = default`
+    (04-client.md §7.3, D32). That shape is the design; the rule is about what adding another one
+    would cost, and is noted in ADR 0014 for the owner to settle before the first release.
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);RS0041;RS0026</NoWarn>
+  </PropertyGroup>
+
+  <!--
+    CHALK001 is the experimental id the Tier 2 kernel interface and the columnar views carry (D79).
+    The engine and the in-box sources are the code those types were extracted from, so they opt in
+    once here rather than at every use.
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CHALK001</NoWarn>
+  </PropertyGroup>
+
+</Project>

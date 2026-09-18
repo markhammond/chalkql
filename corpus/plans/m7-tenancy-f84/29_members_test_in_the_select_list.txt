@@ -1,0 +1,71 @@
+-- u1
+report id:Full, confirmed:Redacted, members:Some
+1|<null>
+2|<null>
+3|<null>
+4|<null>
+7|<null>
+
+-- u2
+report id:Full, confirmed:Redacted, members:Some
+1|<null>
+2|<null>
+
+-- u3
+report id:Full, confirmed:Redacted, members:Some
+3|<null>
+
+-- u3-in-o1
+report id:Full, confirmed:Redacted, members:Some
+
+-- u4
+report id:Full, confirmed:Redacted, members:All
+1|<null>
+2|<null>
+3|<null>
+4|<null>
+5|<null>
+6|<null>
+7|<null>
+
+-- u5
+report id:Full, confirmed:Redacted, members:None
+
+-- u6
+report id:Full, confirmed:Redacted, members:Some
+1|<null>
+2|<null>
+
+-- u6-two-orgs
+report id:Full, confirmed:Redacted, members:Some
+1|<null>
+2|<null>
+3|<null>
+4|<null>
+7|<null>
+
+-- u7
+report id:Full, confirmed:Redacted, members:None
+
+-- u8
+report id:Full, confirmed:Tested, members:Some
+1|True
+2|False
+
+-- u9
+POLICY Refused by the entitlements: main.members.national_id is population-only for this principal and a value use (=($4, ?0)) is not one of the aggregates it permits.
+
+-- u10-in-a-region
+report id:Full, confirmed:Redacted, members:None
+
+-- u11-subject-in-a-region
+report id:Full, confirmed:Redacted, members:None
+
+-- u14-a-vendor
+report id:Full, confirmed:Redacted, members:None
+
+-- u15-a-vendor-and-an-org
+report id:Full, confirmed:Redacted, members:Some
+1|<null>
+2|<null>
+

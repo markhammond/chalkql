@@ -1,0 +1,364 @@
+{
+  "irVersion": 1,
+  "planDigest": "9231774970677952671",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "aid",
+        "type": {
+          "kind": "TYPE_KIND_I32"
+        }
+      },
+      {
+        "name": "bid",
+        "type": {
+          "kind": "TYPE_KIND_I32",
+          "nullable": true
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "aid",
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          }
+        },
+        {
+          "name": "bid",
+          "type": {
+            "kind": "TYPE_KIND_I32",
+            "nullable": true
+          }
+        }
+      ]
+    },
+    "estRowCount": 8.25,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "aid",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              }
+            },
+            {
+              "name": "bid",
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              }
+            }
+          ]
+        },
+        "estRowCount": 8.25,
+        "project": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "id",
+                  "type": {
+                    "kind": "TYPE_KIND_I32"
+                  }
+                },
+                {
+                  "name": "region",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                },
+                {
+                  "name": "id0",
+                  "type": {
+                    "kind": "TYPE_KIND_I32",
+                    "nullable": true
+                  }
+                },
+                {
+                  "name": "region0",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING",
+                    "nullable": true
+                  }
+                }
+              ]
+            },
+            "estRowCount": 8.25,
+            "hashJoin": {
+              "left": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "id",
+                      "type": {
+                        "kind": "TYPE_KIND_I32"
+                      }
+                    },
+                    {
+                      "name": "region",
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 6,
+                "project": {
+                  "input": {
+                    "rowType": {
+                      "fields": [
+                        {
+                          "name": "id",
+                          "type": {
+                            "kind": "TYPE_KIND_I32"
+                          }
+                        },
+                        {
+                          "name": "region",
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          }
+                        },
+                        {
+                          "name": "amount",
+                          "type": {
+                            "kind": "TYPE_KIND_I32",
+                            "nullable": true
+                          }
+                        },
+                        {
+                          "name": "label",
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          }
+                        }
+                      ]
+                    },
+                    "estRowCount": 6,
+                    "read": {
+                      "table": {
+                        "sourceId": "mem",
+                        "schema": "main",
+                        "table": "sales"
+                      },
+                      "projection": [
+                        0,
+                        1,
+                        2,
+                        3
+                      ]
+                    }
+                  },
+                  "exprs": [
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_I32"
+                      },
+                      "fieldRef": {}
+                    },
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    }
+                  ]
+                }
+              },
+              "right": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "id",
+                      "type": {
+                        "kind": "TYPE_KIND_I32"
+                      }
+                    },
+                    {
+                      "name": "region",
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 6,
+                "project": {
+                  "input": {
+                    "rowType": {
+                      "fields": [
+                        {
+                          "name": "id",
+                          "type": {
+                            "kind": "TYPE_KIND_I32"
+                          }
+                        },
+                        {
+                          "name": "region",
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          }
+                        },
+                        {
+                          "name": "amount",
+                          "type": {
+                            "kind": "TYPE_KIND_I32",
+                            "nullable": true
+                          }
+                        },
+                        {
+                          "name": "label",
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          }
+                        }
+                      ]
+                    },
+                    "estRowCount": 6,
+                    "read": {
+                      "table": {
+                        "sourceId": "mem",
+                        "schema": "main",
+                        "table": "sales"
+                      },
+                      "projection": [
+                        0,
+                        1,
+                        2,
+                        3
+                      ]
+                    }
+                  },
+                  "exprs": [
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_I32"
+                      },
+                      "fieldRef": {}
+                    },
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    }
+                  ]
+                }
+              },
+              "leftKeys": [
+                1
+              ],
+              "rightKeys": [
+                1
+              ],
+              "postJoinFilter": {
+                "type": {
+                  "kind": "TYPE_KIND_BOOL"
+                },
+                "call": {
+                  "function": "FUNCTION_ID_LT",
+                  "args": [
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_I32"
+                      },
+                      "fieldRef": {}
+                    },
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_I32"
+                      },
+                      "fieldRef": {
+                        "index": 2
+                      }
+                    }
+                  ]
+                }
+              },
+              "type": "JOIN_TYPE_LEFT"
+            }
+          },
+          "exprs": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {}
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 2
+              }
+            }
+          ]
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_I32"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        },
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_I32",
+              "nullable": true
+            },
+            "fieldRef": {
+              "index": 1
+            }
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

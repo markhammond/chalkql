@@ -1,0 +1,6 @@
+-- FULL
+ChalkFilter(condition=[IS NOT NULL($8)])
+  ChalkIndexLookup(table=[[main, bars]], index=[ix_bars_symbol_ts], ranges=[[[['BTCUSDT':VARCHAR CHARACTER SET "UTF-8"], ['BTCUSDT':VARCHAR CHARACTER SET "UTF-8"]], [['ETHUSDT':VARCHAR CHARACTER SET "UTF-8"], ['ETHUSDT':VARCHAR CHARACTER SET "UTF-8"]]]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])
+-- NONE
+ChalkFilter(condition=[AND(SEARCH($0, Sarg['BTCUSDT':VARCHAR CHARACTER SET "UTF-8", 'ETHUSDT':VARCHAR CHARACTER SET "UTF-8"]:VARCHAR CHARACTER SET "UTF-8"), IS NOT NULL($8))])
+  ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])

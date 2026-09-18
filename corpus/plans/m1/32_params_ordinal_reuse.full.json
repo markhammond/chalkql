@@ -1,0 +1,493 @@
+{
+  "irVersion": 1,
+  "planDigest": "9887439839781491214",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "ts",
+        "type": {
+          "kind": "TYPE_KIND_TIMESTAMP",
+          "precision": 9
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "ts",
+          "type": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          }
+        }
+      ]
+    },
+    "estRowCount": 1890,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      },
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      },
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "project": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              }
+            },
+            {
+              "name": "trade_count",
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              }
+            }
+          ]
+        },
+        "estRowCount": 1890,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          },
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          },
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "filter": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "symbol",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                },
+                {
+                  "name": "ts",
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  }
+                },
+                {
+                  "name": "trade_count",
+                  "type": {
+                    "kind": "TYPE_KIND_I32",
+                    "nullable": true
+                  }
+                }
+              ]
+            },
+            "estRowCount": 7560,
+            "collations": [
+              {
+                "fields": [
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {}
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  },
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_TIMESTAMP",
+                        "precision": 9
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  }
+                ]
+              },
+              {
+                "fields": [
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_TIMESTAMP",
+                        "precision": 9
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  }
+                ]
+              },
+              {
+                "fields": [
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_TIMESTAMP",
+                        "precision": 9
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  },
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {}
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  }
+                ]
+              }
+            ],
+            "indexLookup": {
+              "table": {
+                "sourceId": "mem",
+                "schema": "main",
+                "table": "bars"
+              },
+              "index": "ix_bars_symbol_ts",
+              "ranges": [
+                {
+                  "lower": [
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING",
+                        "nullable": true
+                      },
+                      "param": {
+                        "index": 1
+                      }
+                    },
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_TIMESTAMP",
+                        "nullable": true,
+                        "precision": 9
+                      },
+                      "param": {}
+                    }
+                  ],
+                  "lowerInclusive": true,
+                  "upper": [
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING",
+                        "nullable": true
+                      },
+                      "param": {
+                        "index": 1
+                      }
+                    }
+                  ],
+                  "upperInclusive": true
+                }
+              ],
+              "projection": [
+                0,
+                1,
+                8
+              ]
+            }
+          },
+          "condition": {
+            "type": {
+              "kind": "TYPE_KIND_BOOL",
+              "nullable": true
+            },
+            "call": {
+              "function": "FUNCTION_ID_OR",
+              "args": [
+                {
+                  "type": {
+                    "kind": "TYPE_KIND_BOOL"
+                  },
+                  "call": {
+                    "function": "FUNCTION_ID_IS_NULL",
+                    "args": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_I32",
+                          "nullable": true
+                        },
+                        "fieldRef": {
+                          "index": 2
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": {
+                    "kind": "TYPE_KIND_BOOL",
+                    "nullable": true
+                  },
+                  "call": {
+                    "function": "FUNCTION_ID_AND",
+                    "args": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_BOOL",
+                          "nullable": true
+                        },
+                        "call": {
+                          "function": "FUNCTION_ID_LT",
+                          "args": [
+                            {
+                              "type": {
+                                "kind": "TYPE_KIND_TIMESTAMP",
+                                "precision": 9
+                              },
+                              "fieldRef": {
+                                "index": 1
+                              }
+                            },
+                            {
+                              "type": {
+                                "kind": "TYPE_KIND_TIMESTAMP",
+                                "nullable": true,
+                                "precision": 9
+                              },
+                              "param": {
+                                "index": 2
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_BOOL",
+                          "nullable": true
+                        },
+                        "call": {
+                          "function": "FUNCTION_ID_GE",
+                          "args": [
+                            {
+                              "type": {
+                                "kind": "TYPE_KIND_TIMESTAMP",
+                                "precision": 9
+                              },
+                              "fieldRef": {
+                                "index": 1
+                              }
+                            },
+                            {
+                              "type": {
+                                "kind": "TYPE_KIND_TIMESTAMP",
+                                "nullable": true,
+                                "precision": 9
+                              },
+                              "param": {
+                                "index": 3
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "exprs": [
+        {
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          },
+          "fieldRef": {}
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          },
+          "fieldRef": {
+            "index": 1
+          }
+        }
+      ]
+    }
+  },
+  "parameterTypes": [
+    {
+      "kind": "TYPE_KIND_TIMESTAMP",
+      "nullable": true,
+      "precision": 9
+    },
+    {
+      "kind": "TYPE_KIND_STRING",
+      "nullable": true
+    },
+    {
+      "kind": "TYPE_KIND_TIMESTAMP",
+      "nullable": true,
+      "precision": 9
+    },
+    {
+      "kind": "TYPE_KIND_TIMESTAMP",
+      "nullable": true,
+      "precision": 9
+    }
+  ]
+}

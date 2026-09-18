@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Catalog.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Chalk.Catalog/Chalk.Catalog.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.Abstractions/Chalk.Sources.Abstractions.csproj" />
+    <ProjectReference Include="../Chalk.TestKit/Chalk.TestKit.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CHALK001</NoWarn>
+  </PropertyGroup>
+
+</Project>

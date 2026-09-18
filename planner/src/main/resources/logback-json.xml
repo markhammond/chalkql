@@ -1,0 +1,13 @@
+<configuration>
+  <!-- Selected by CHALK_PLANNER_LOG_FORMAT=json; Main sets logback.configurationFile before the
+       first logger exists. Same levels as logback.xml, machine-readable layout. -->
+  <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+    <target>System.err</target>
+    <encoder class="ch.qos.logback.classic.encoder.JsonEncoder" />
+  </appender>
+  <logger name="org.apache.calcite" level="WARN" />
+  <logger name="io.grpc" level="WARN" />
+  <root level="INFO">
+    <appender-ref ref="STDERR" />
+  </root>
+</configuration>

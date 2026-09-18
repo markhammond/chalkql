@@ -1,0 +1,60 @@
+-- u1
+report EXPR$0:Full, orders:Some
+7
+
+-- u2
+report EXPR$0:Full, orders:Some
+4
+
+-- u3
+report EXPR$0:Full, orders:Some
+2
+
+-- u3-in-o1
+report EXPR$0:Full, orders:Some
+2
+
+-- u4
+report EXPR$0:Full, orders:All
+7
+
+-- u5
+report EXPR$0:Full, orders:Some
+0
+
+-- u6
+report EXPR$0:Full, orders:Some
+4
+
+-- u6-two-orgs
+report EXPR$0:Full, orders:Some
+6
+
+-- u7
+report EXPR$0:Full, orders:Some
+0
+
+-- u8
+report EXPR$0:Full, orders:Some
+4
+
+-- u9
+report EXPR$0:Full, orders:Some
+6
+
+-- u10-in-a-region
+report EXPR$0:Full, orders:Some
+2
+
+-- u11-subject-in-a-region
+report EXPR$0:Full, orders:Some
+1
+
+-- u14-a-vendor
+report EXPR$0:Full, orders:Some
+3
+
+-- u15-a-vendor-and-an-org
+report EXPR$0:Full, orders:Some
+6
+

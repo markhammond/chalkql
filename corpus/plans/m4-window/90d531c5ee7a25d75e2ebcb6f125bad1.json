@@ -1,0 +1,243 @@
+{
+  "irVersion": 1,
+  "planDigest": "15637930763926371886",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "ts",
+        "type": {
+          "kind": "TYPE_KIND_TIMESTAMP",
+          "precision": 9
+        }
+      },
+      {
+        "name": "vwap",
+        "type": {
+          "kind": "TYPE_KIND_DECIMAL",
+          "nullable": true,
+          "precision": 28,
+          "scale": 10
+        }
+      },
+      {
+        "name": "previous_vwap",
+        "type": {
+          "kind": "TYPE_KIND_DECIMAL",
+          "nullable": true,
+          "precision": 28,
+          "scale": 10
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "ts",
+          "type": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          }
+        },
+        {
+          "name": "vwap",
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "nullable": true,
+            "precision": 28,
+            "scale": 10
+          }
+        },
+        {
+          "name": "previous_vwap",
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "nullable": true,
+            "precision": 28,
+            "scale": 10
+          }
+        }
+      ]
+    },
+    "estRowCount": 5000,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "window": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              }
+            },
+            {
+              "name": "vwap",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              }
+            }
+          ]
+        },
+        "estRowCount": 5000,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "indexLookup": {
+          "table": {
+            "sourceId": "mem",
+            "schema": "main",
+            "table": "bars_small"
+          },
+          "index": "ix_bars_small_symbol_ts",
+          "ranges": [
+            {
+              "lowerInclusive": true,
+              "upperInclusive": true
+            }
+          ],
+          "projection": [
+            0,
+            1,
+            7
+          ]
+        }
+      },
+      "partitionKeys": [
+        0
+      ],
+      "order": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_TIMESTAMP",
+              "precision": 9
+            },
+            "fieldRef": {
+              "index": 1
+            }
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ],
+      "frame": {
+        "mode": "FRAME_MODE_RANGE",
+        "lower": {
+          "kind": "FRAME_BOUND_KIND_UNBOUNDED_PRECEDING"
+        },
+        "upper": {
+          "kind": "FRAME_BOUND_KIND_CURRENT_ROW"
+        },
+        "exclusion": "FRAME_EXCLUSION_NO_OTHERS"
+      },
+      "calls": [
+        {
+          "windowFunction": "WINDOW_FUNCTION_ID_LAG",
+          "args": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              },
+              "fieldRef": {
+                "index": 2
+              }
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "literal": {
+                "i64Value": "1"
+              }
+            }
+          ],
+          "ignoreNulls": true,
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "nullable": true,
+            "precision": 28,
+            "scale": 10
+          }
+        }
+      ]
+    }
+  }
+}

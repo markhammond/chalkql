@@ -1,0 +1,130 @@
+{
+  "irVersion": 1,
+  "planDigest": "5561637445749382680",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "o_orderstatus",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "n",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "o_orderstatus",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "n",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 1500,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "o_orderstatus",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "n",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            }
+          ]
+        },
+        "estRowCount": 1500,
+        "hashAggregate": {
+          "aggregate": {
+            "input": {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "o_orderstatus",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 15000,
+              "read": {
+                "table": {
+                  "sourceId": "mem",
+                  "schema": "main",
+                  "table": "orders"
+                },
+                "projection": [
+                  2
+                ]
+              }
+            },
+            "groupings": [
+              {
+                "keys": [
+                  0
+                ]
+              }
+            ],
+            "measures": [
+              {
+                "function": "AGGREGATE_FUNCTION_ID_COUNT",
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_STRING"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,165 @@
+{
+  "irVersion": 1,
+  "planDigest": "9009046848481353928",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "ts",
+        "type": {
+          "kind": "TYPE_KIND_TIMESTAMP",
+          "precision": 9
+        }
+      },
+      {
+        "name": "n",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "ts",
+          "type": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          }
+        },
+        {
+          "name": "n",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 5000,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "window": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              }
+            }
+          ]
+        },
+        "estRowCount": 5000,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "read": {
+          "table": {
+            "sourceId": "mem",
+            "schema": "main",
+            "table": "bars_small"
+          },
+          "projection": [
+            0,
+            1
+          ]
+        }
+      },
+      "order": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_TIMESTAMP",
+              "precision": 9
+            },
+            "fieldRef": {
+              "index": 1
+            }
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ],
+      "frame": {
+        "mode": "FRAME_MODE_RANGE",
+        "lower": {
+          "kind": "FRAME_BOUND_KIND_UNBOUNDED_PRECEDING"
+        },
+        "upper": {
+          "kind": "FRAME_BOUND_KIND_UNBOUNDED_FOLLOWING"
+        },
+        "exclusion": "FRAME_EXCLUSION_NO_OTHERS"
+      },
+      "calls": [
+        {
+          "aggregate": "AGGREGATE_FUNCTION_ID_COUNT",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        }
+      ]
+    }
+  }
+}

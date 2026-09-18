@@ -1,0 +1,45 @@
+-- u1
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
+-- u2
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
+-- u3
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
+-- u3-in-o1
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
+-- u4
+id:int32, org_id:int32, first_name:utf8view, last_name:utf8view, national_id:utf8view?, postcode:utf8view
+
+-- u5
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
+-- u6
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
+-- u6-two-orgs
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
+-- u7
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
+-- u8
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
+-- u9
+POLICY
+
+-- u10-in-a-region
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
+-- u11-subject-in-a-region
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
+-- u14-a-vendor
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
+-- u15-a-vendor-and-an-org
+id:int32, org_id:int32, first_name:utf8view, last_name:utf8view, national_id:utf8view?, postcode:utf8view
+

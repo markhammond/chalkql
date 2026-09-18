@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Execution</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>Chalk execution engine. All types are internal; operator shapes will churn.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Apache.Arrow" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Chalk.Sources.Abstractions/Chalk.Sources.Abstractions.csproj" />
+    <ProjectReference Include="../Chalk.Catalog/Chalk.Catalog.csproj" />
+    <ProjectReference Include="../Chalk.Ir/Chalk.Ir.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Chalk.Client" />
+    <InternalsVisibleTo Include="Chalk.Execution.Tests" />
+    <InternalsVisibleTo Include="Chalk.Integration.Tests" />
+    <InternalsVisibleTo Include="Chalk.TestKit" />
+    <InternalsVisibleTo Include="Chalk.Benchmarks" />
+  </ItemGroup>
+
+  <!--
+    CHALK001 is the experimental id the Tier 2 kernel interface and the columnar views carry (D79).
+    The engine and the in-box sources are the code those types were extracted from, so they opt in
+    once here rather than at every use.
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CHALK001</NoWarn>
+  </PropertyGroup>
+
+</Project>

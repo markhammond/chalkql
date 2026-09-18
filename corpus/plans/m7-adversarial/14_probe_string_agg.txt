@@ -1,0 +1,55 @@
+-- u1
+report names:PerRow, members:Some
+A,Bo CANARY-FIRST-02,T,T,Tara CANARY-FIRST-01
+
+-- u2
+report names:Masked, members:Some
+B,T
+
+-- u3
+report names:Redacted, members:Some
+<null>
+
+-- u3-in-o1
+report names:Redacted, members:Some
+<null>
+
+-- u4
+report names:Full, members:All
+Ada CANARY-FIRST-04,Bo CANARY-FIRST-02,Kim CANARY-FIRST-05,Lea CANARY-FIRST-06,Tara CANARY-FIRST-01,Tara CANARY-FIRST-01,Tomas CANARY-FIRST-03
+
+-- u5
+F59 UnsupportedFeatureException: Unsupported in this build: LISTAGG with a non-constant separator.
+
+-- u6
+report names:Masked, members:Some
+6657767d30a1fb0444393493e42f5527,ed23bc5f944a7ec955ace055dba31f68
+
+-- u6-two-orgs
+report names:Masked, members:Some
+0b10f954b1c6bb233d8dd8d63a220460,13ef6532594dde74d242c703fa652ecb,6657767d30a1fb0444393493e42f5527,ed23bc5f944a7ec955ace055dba31f68,ed23bc5f944a7ec955ace055dba31f68
+
+-- u7
+F59 UnsupportedFeatureException: Unsupported in this build: LISTAGG with a non-constant separator.
+
+-- u8
+report names:Redacted, members:Some
+<null>
+
+-- u9
+report names:Redacted, members:Some
+<null>
+
+-- u10-in-a-region
+F59 UnsupportedFeatureException: Unsupported in this build: LISTAGG with a non-constant separator.
+
+-- u11-subject-in-a-region
+F59 UnsupportedFeatureException: Unsupported in this build: LISTAGG with a non-constant separator.
+
+-- u14-a-vendor
+F59 UnsupportedFeatureException: Unsupported in this build: LISTAGG with a non-constant separator.
+
+-- u15-a-vendor-and-an-org
+report names:Full, members:Some
+Bo CANARY-FIRST-02,Tara CANARY-FIRST-01
+

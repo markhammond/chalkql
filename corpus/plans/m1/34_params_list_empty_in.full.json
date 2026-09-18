@@ -1,0 +1,174 @@
+{
+  "irVersion": 1,
+  "planDigest": "98203185283489420",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "n",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "n",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 1,
+    "hashAggregate": {
+      "aggregate": {
+        "input": {
+          "rowType": {
+            "fields": [
+              {
+                "name": "symbol",
+                "type": {
+                  "kind": "TYPE_KIND_STRING"
+                }
+              },
+              {
+                "name": "ts",
+                "type": {
+                  "kind": "TYPE_KIND_TIMESTAMP",
+                  "precision": 9
+                }
+              }
+            ]
+          },
+          "estRowCount": 15120,
+          "collations": [
+            {
+              "fields": [
+                {
+                  "expr": {
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    },
+                    "fieldRef": {}
+                  },
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                },
+                {
+                  "expr": {
+                    "type": {
+                      "kind": "TYPE_KIND_TIMESTAMP",
+                      "precision": 9
+                    },
+                    "fieldRef": {
+                      "index": 1
+                    }
+                  },
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            },
+            {
+              "fields": [
+                {
+                  "expr": {
+                    "type": {
+                      "kind": "TYPE_KIND_TIMESTAMP",
+                      "precision": 9
+                    },
+                    "fieldRef": {
+                      "index": 1
+                    }
+                  },
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            },
+            {
+              "fields": [
+                {
+                  "expr": {
+                    "type": {
+                      "kind": "TYPE_KIND_TIMESTAMP",
+                      "precision": 9
+                    },
+                    "fieldRef": {
+                      "index": 1
+                    }
+                  },
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                },
+                {
+                  "expr": {
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    },
+                    "fieldRef": {}
+                  },
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "indexLookup": {
+            "table": {
+              "sourceId": "mem",
+              "schema": "main",
+              "table": "bars"
+            },
+            "index": "ix_bars_symbol_ts",
+            "ranges": [
+              {
+                "lower": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_STRING",
+                      "nullable": true
+                    },
+                    "param": {}
+                  }
+                ],
+                "lowerInclusive": true,
+                "upper": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_STRING",
+                      "nullable": true
+                    },
+                    "param": {}
+                  }
+                ],
+                "upperInclusive": true
+              }
+            ],
+            "projection": [
+              0,
+              1
+            ]
+          }
+        },
+        "groupings": [
+          {}
+        ],
+        "measures": [
+          {
+            "function": "AGGREGATE_FUNCTION_ID_COUNT",
+            "type": {
+              "kind": "TYPE_KIND_I64"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "parameterTypes": [
+    {
+      "kind": "TYPE_KIND_STRING",
+      "nullable": true
+    }
+  ]
+}

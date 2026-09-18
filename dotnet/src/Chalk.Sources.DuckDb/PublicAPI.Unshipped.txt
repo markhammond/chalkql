@@ -1,0 +1,17 @@
+#nullable enable
+Chalk.Sources.DuckDb.DuckDbArrowFetch
+Chalk.Sources.DuckDb.DuckDbArrowFetch.FetchAsync(Chalk.Sources.Ado.RemoteFetchRequest! request, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Sources.DuckDb.DuckDbArrowFetch.Name.get -> string!
+Chalk.Sources.DuckDb.DuckDbFetch
+Chalk.Sources.DuckDb.DuckDbFetch.FetchAsync(Chalk.Sources.Ado.RemoteFetchRequest! request, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Sources.DuckDb.DuckDbFetch.Name.get -> string!
+Chalk.Sources.DuckDb.DuckDbNativeException
+Chalk.Sources.DuckDb.DuckDbNativeException.DuckDbNativeException(string! message) -> void
+Chalk.Sources.DuckDb.DuckDbSources
+static Chalk.Sources.DuckDb.DuckDbArrowFetch.Instance.get -> Chalk.Sources.DuckDb.DuckDbArrowFetch!
+static Chalk.Sources.DuckDb.DuckDbFetch.Instance.get -> Chalk.Sources.DuckDb.DuckDbFetch!
+static Chalk.Sources.DuckDb.DuckDbSources.AddDuckDbSource(string! sourceId, System.Func<DuckDB.NET.Data.DuckDBConnection!>! connect, string! schemaName = "main") -> Chalk.Sources.Ado.AdoSourceBuilder!
+static Chalk.Sources.DuckDb.DuckDbSources.AddDuckDbSource(string! sourceId, string! connectionString, string! schemaName = "main") -> Chalk.Sources.Ado.AdoSourceBuilder!
+static Chalk.Sources.DuckDb.DuckDbSources.NativeReader.get -> Chalk.Sources.Ado.IRemoteFetch!
+static Chalk.Sources.DuckDb.DuckDbSources.UseArrowReader(this Chalk.Sources.Ado.AdoSourceBuilder! builder) -> Chalk.Sources.Ado.AdoSourceBuilder!
+static Chalk.Sources.DuckDb.DuckDbSources.UseNativeReader(this Chalk.Sources.Ado.AdoSourceBuilder! builder) -> Chalk.Sources.Ado.AdoSourceBuilder!

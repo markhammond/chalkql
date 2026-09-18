@@ -1,0 +1,8 @@
+-- FULL
+ChalkProject(u=['SOLUSDT':VARCHAR CHARACTER SET "UTF-8"], l=['solusdt':VARCHAR CHARACTER SET "UTF-8"], n=[7], pfx=['SOL':VARCHAR CHARACTER SET "UTF-8"], perp=['SOLUSDT-PERP':VARCHAR CHARACTER SET "UTF-8"])
+  ChalkIndexLookup(table=[[main, bars]], index=[ix_bars_symbol_ts], ranges=[[[['SOLUSDT':VARCHAR CHARACTER SET "UTF-8"], ['SOLUSDT':VARCHAR CHARACTER SET "UTF-8"]]]], projection=[[0, 1]])
+-- NONE
+ChalkProject(u=['SOLUSDT':VARCHAR CHARACTER SET "UTF-8"], l=['solusdt':VARCHAR CHARACTER SET "UTF-8"], n=[7], pfx=['SOL':VARCHAR CHARACTER SET "UTF-8"], perp=['SOLUSDT-PERP':VARCHAR CHARACTER SET "UTF-8"])
+  ChalkFilter(condition=[=($0, 'SOLUSDT')])
+    ChalkProject(symbol=[$0], ts=[$1])
+      ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])

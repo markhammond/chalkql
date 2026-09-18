@@ -1,0 +1,59 @@
+-- u1
+report org_id:Full, n:Full, total:PerRow, orders:Some, members:Some
+1|4|24614431
+2|2|<null>
+
+-- u2
+report org_id:Full, n:Full, total:PerRow, orders:Some, members:Some
+1|4|8427761
+
+-- u3
+report org_id:Full, n:Full, total:PerRow, orders:Some, members:Some
+2|1|8549939
+
+-- u3-in-o1
+report org_id:Full, n:Full, total:PerRow, orders:Some, members:Some
+
+-- u4
+report org_id:Full, n:Full, total:PerRow, orders:All, members:All
+1|4|<null>
+2|2|<null>
+3|1|<null>
+
+-- u5
+report org_id:Full, n:Full, total:PerRow, orders:Some, members:Some
+
+-- u6
+report org_id:Full, n:Full, total:Aggregate, orders:Some, members:Some
+1|4|33042192
+
+-- u6-two-orgs
+report org_id:Full, n:Full, total:Aggregate, orders:Some, members:Some
+1|4|33042192
+2|2|<null>
+
+-- u7
+report org_id:Full, n:Full, total:PerRow, orders:Some, members:Some
+
+-- u8
+report org_id:Full, n:Full, total:PerRow, orders:Some, members:Some
+1|4|<null>
+
+-- u9
+report org_id:Full, n:Full, total:PerRow, orders:Some, members:Some
+1|4|<null>
+2|2|<null>
+
+-- u10-in-a-region
+report org_id:Full, n:Full, total:Aggregate, orders:Some, members:Some
+
+-- u11-subject-in-a-region
+report org_id:Full, n:Full, total:PerRow, orders:Some, members:Some
+
+-- u14-a-vendor
+report org_id:Full, n:Full, total:PerRow, orders:Some, members:Some
+
+-- u15-a-vendor-and-an-org
+report org_id:Full, n:Full, total:PerRow, orders:Some, members:Some
+1|4|<null>
+

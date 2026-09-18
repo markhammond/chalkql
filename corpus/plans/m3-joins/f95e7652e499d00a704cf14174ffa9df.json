@@ -1,0 +1,302 @@
+{
+  "irVersion": 1,
+  "planDigest": "6159678932635571174",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "r_name",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "r_name",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        }
+      ]
+    },
+    "estRowCount": 7,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "topN": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "r_name",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            }
+          ]
+        },
+        "estRowCount": 25,
+        "nestedLoopJoin": {
+          "left": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "symbol",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                }
+              ]
+            },
+            "estRowCount": 5,
+            "collations": [
+              {
+                "fields": [
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {}
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  }
+                ]
+              }
+            ],
+            "project": {
+              "input": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "symbol",
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      }
+                    },
+                    {
+                      "name": "base",
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      }
+                    },
+                    {
+                      "name": "quote",
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      }
+                    },
+                    {
+                      "name": "tick_size",
+                      "type": {
+                        "kind": "TYPE_KIND_DECIMAL",
+                        "precision": 28,
+                        "scale": 10
+                      }
+                    },
+                    {
+                      "name": "tags",
+                      "type": {
+                        "kind": "TYPE_KIND_LIST",
+                        "nullable": true,
+                        "element": {
+                          "kind": "TYPE_KIND_STRING",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 5,
+                "collations": [
+                  {
+                    "fields": [
+                      {
+                        "expr": {
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          },
+                          "fieldRef": {}
+                        },
+                        "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                      }
+                    ]
+                  }
+                ],
+                "read": {
+                  "table": {
+                    "sourceId": "mem",
+                    "schema": "main",
+                    "table": "symbols"
+                  },
+                  "projection": [
+                    0,
+                    1,
+                    2,
+                    3,
+                    4
+                  ]
+                }
+              },
+              "exprs": [
+                {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {}
+                }
+              ]
+            }
+          },
+          "right": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "r_name",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                }
+              ]
+            },
+            "estRowCount": 5,
+            "project": {
+              "input": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "r_regionkey",
+                      "type": {
+                        "kind": "TYPE_KIND_I64"
+                      }
+                    },
+                    {
+                      "name": "r_name",
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      }
+                    },
+                    {
+                      "name": "r_comment",
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 5,
+                "collations": [
+                  {
+                    "fields": [
+                      {
+                        "expr": {
+                          "type": {
+                            "kind": "TYPE_KIND_I64"
+                          },
+                          "fieldRef": {}
+                        },
+                        "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                      }
+                    ]
+                  }
+                ],
+                "read": {
+                  "table": {
+                    "sourceId": "mem",
+                    "schema": "main",
+                    "table": "region"
+                  },
+                  "projection": [
+                    0,
+                    1,
+                    2
+                  ]
+                }
+              },
+              "exprs": [
+                {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                }
+              ]
+            }
+          },
+          "type": "JOIN_TYPE_INNER"
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_STRING"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        },
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_STRING"
+            },
+            "fieldRef": {
+              "index": 1
+            }
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ],
+      "count": "7"
+    }
+  }
+}

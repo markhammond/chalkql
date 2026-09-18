@@ -1,0 +1,178 @@
+// Chalk plan IR — the per-source dialect profile and the SQL vocabulary it shares with the
+// request options.
+//
+// SqlConformance and SqlLibrary live here rather than in planner.proto because two different things
+// name them: a *request* says which dialect its own SQL is written in and which function libraries
+// it may call, and a *source* says which SQL it accepts and which libraries it implements natively.
+// The vocabulary is one; the two uses are not.
+syntax = "proto3";
+
+package chalk.v1;
+
+option csharp_namespace = "Chalk.Ir";
+option java_multiple_files = true;
+option java_outer_classname = "DialectProto";
+option java_package = "chalk.ir.v1";
+
+// Everything the planner must know to generate SQL a source will accept and to decide what may be
+// pushed into it — Calcite's per-connection adapter properties, made per source.
+//
+// Every field is a claim the planner acts on, and an unset field is the conservative reading:
+// no quoting, case-sensitive matching, no null-ordering clause, binary collation absent, no
+// approximation permitted, no implicit coercion trusted.
+message DialectProfile {
+  // Preset name selecting the Calcite SqlDialect the converter generates with: "sqlite", "duckdb",
+  // "postgresql", "ansi". Empty means ANSI. The fields below override the preset.
+  string dialect = 1;
+
+  IdentifierQuoting quoting = 2;
+  IdentifierCasing quoted_casing = 3;
+  IdentifierCasing unquoted_casing = 4;
+  bool case_sensitive_identifiers = 5;
+
+  // What the SOURCE accepts — OFFSET/LIMIT order, `!=`, `%`, APPLY. Distinct from the request's
+  // conformance, which is about the SQL the host wrote.
+  SqlConformance conformance = 6;
+
+  // Libraries the source implements natively. Gates pushdown of the scalar calls and aggregates
+  // that belong to a library rather than to the standard operator table.
+  repeated SqlLibrary libraries = 7;
+
+  // The source's type system. Zero means "as Chalk's": DECIMAL(38), TIMESTAMP(9).
+  uint32 max_numeric_precision = 8;
+  uint32 max_timestamp_precision = 9;
+  bool has_boolean = 10;
+
+  // The zone the source assumes for zone-less timestamps. Empty means UTC.
+  string time_zone = 11;
+
+  // Where the source puts NULLs in ORDER BY without an explicit NULLS FIRST/LAST.
+  NullCollation default_null_collation = 12;
+
+  // Whether NULLS FIRST / NULLS LAST is accepted in ORDER BY at all. When it is not, a sort is
+  // pushed only if the source's default placement already matches what the plan asks for.
+  bool supports_null_ordering_clause = 13;
+
+  // How the source compares strings. Only BINARY lets a string predicate, a string ORDER BY or a
+  // DISTINCT / GROUP BY over strings be pushed — anything else can disagree with Chalk's own
+  // code-point ordering (A7) and produce a different answer, silently.
+  StringCollation string_collation = 14;
+
+  // Whether the source may answer approximately. Each gates exactly one shape.
+  bool approximate_decimal = 15;
+  bool approximate_distinct_count = 16;
+  bool approximate_top_n = 17;
+
+  // Whether the source's implicit coercions match the ones Chalk applied at validation. False —
+  // the default — makes the converter emit an explicit cast wherever a type changes.
+  bool implicit_coercion_matches = 18;
+
+  // How the source's driver spells a bound parameter. The planner always generates the positional
+  // `?` Calcite's writer emits; the adapter rewrites it into this style before binding, because a
+  // driver that wants `$name` cannot be handed `?` and a driver that wants `?` cannot be handed
+  // `$name`. Unspecified means `?`.
+  ParameterPlaceholder parameter_placeholder = 19;
+}
+
+// How a driver spells a bound parameter. Distinct from Chalk.Client's own ParameterStyle,
+// which is how a *host* writes parameters in the SQL it hands Chalk.
+enum ParameterPlaceholder {
+  PARAMETER_PLACEHOLDER_UNSPECIFIED = 0;
+  // Positional `?`, bound in order. What Calcite generates and what ODBC-shaped drivers take.
+  PARAMETER_PLACEHOLDER_QUESTION = 1;
+  // `@p0`, `@p1`, … — the .NET convention, and what SQL Server and Npgsql take.
+  PARAMETER_PLACEHOLDER_NAMED_AT = 2;
+  // `$p0`, `$p1`, … — what SQLite and DuckDB take.
+  PARAMETER_PLACEHOLDER_NAMED_DOLLAR = 3;
+  // `$1`, `$2`, … — PostgreSQL's own positional form.
+  PARAMETER_PLACEHOLDER_ORDINAL_DOLLAR = 4;
+}
+
+// How the source spells a quoted identifier.
+enum IdentifierQuoting {
+  IDENTIFIER_QUOTING_UNSPECIFIED = 0;
+  // Identifiers are never quoted in generated SQL.
+  IDENTIFIER_QUOTING_NONE = 1;
+  IDENTIFIER_QUOTING_DOUBLE_QUOTE = 2;
+  IDENTIFIER_QUOTING_BACK_TICK = 3;
+  IDENTIFIER_QUOTING_BRACKET = 4;
+}
+
+// What the source does to an identifier's case before matching it.
+enum IdentifierCasing {
+  IDENTIFIER_CASING_UNSPECIFIED = 0;
+  IDENTIFIER_CASING_UNCHANGED = 1;
+  IDENTIFIER_CASING_TO_UPPER = 2;
+  IDENTIFIER_CASING_TO_LOWER = 3;
+}
+
+// Where NULLs sort when nothing says otherwise. Mirrors Calcite's NullCollation.
+enum NullCollation {
+  NULL_COLLATION_UNSPECIFIED = 0;
+  // NULLs first in ASC, last in DESC.
+  NULL_COLLATION_LOW = 1;
+  // NULLs last in ASC, first in DESC. Chalk's own.
+  NULL_COLLATION_HIGH = 2;
+  NULL_COLLATION_FIRST = 3;
+  NULL_COLLATION_LAST = 4;
+}
+
+// How a source compares and orders strings.
+enum StringCollation {
+  STRING_COLLATION_UNSPECIFIED = 0;
+  // Code point by code point, which is Chalk's own (A7). The only collation string operations are
+  // pushed under.
+  STRING_COLLATION_BINARY = 1;
+  // Equality and LIKE ignore case.
+  STRING_COLLATION_CASE_INSENSITIVE = 2;
+  // A locale's collation: accents, contractions, culture-dependent ordering.
+  STRING_COLLATION_LOCALE = 3;
+}
+
+// One of Calcite's `SqlLibrary` operator tables, mirroring
+// the enum one for one. The standard operators are always available; naming a library adds that
+// dialect's functions — `STRING_AGG` and `ARRAY_AGG` from POSTGRESQL, `ARRAY_TO_STRING` from
+// BIG_QUERY, and so on. A library function the IR has no mapping for fails at planning as
+// UNSUPPORTED naming the function, never silently.
+enum SqlLibrary {
+  SQL_LIBRARY_UNSPECIFIED = 0;
+  SQL_LIBRARY_STANDARD = 1;
+  SQL_LIBRARY_BIG_QUERY = 2;
+  SQL_LIBRARY_CALCITE = 3;
+  SQL_LIBRARY_CLICKHOUSE = 4;
+  SQL_LIBRARY_HIVE = 5;
+  SQL_LIBRARY_MSSQL = 6;
+  SQL_LIBRARY_MYSQL = 7;
+  SQL_LIBRARY_ORACLE = 8;
+  SQL_LIBRARY_POSTGRESQL = 9;
+  SQL_LIBRARY_REDSHIFT = 10;
+  SQL_LIBRARY_SNOWFLAKE = 11;
+  SQL_LIBRARY_SPARK = 12;
+  SQL_LIBRARY_SPATIAL = 13;
+  // Every library at once. Calcite's own `ALL`.
+  SQL_LIBRARY_ALL = 14;
+}
+
+// A SQL dialect level, mirroring Calcite's SqlConformanceEnum one for one. A request uses it to say
+// which dialect its own SQL is written in; a DialectProfile uses it to say which SQL a source
+// will accept. DEFAULT is standard SQL: `!=`, `%`, GROUP BY on a SELECT alias, `OFFSET start LIMIT
+// count` and `LIMIT start, count` are rejected under it and accepted under LENIENT and BABEL.
+// Identifier quoting and case sensitivity are not part of this; for a request they are pinned
+// separately, and for a source they are the DialectProfile's own fields.
+enum SqlConformance {
+  SQL_CONFORMANCE_UNSPECIFIED = 0;
+  SQL_CONFORMANCE_DEFAULT = 1;
+  SQL_CONFORMANCE_LENIENT = 2;
+  SQL_CONFORMANCE_BABEL = 3;
+  SQL_CONFORMANCE_STRICT_92 = 4;
+  SQL_CONFORMANCE_STRICT_99 = 5;
+  SQL_CONFORMANCE_PRAGMATIC_99 = 6;
+  SQL_CONFORMANCE_STRICT_2003 = 7;
+  SQL_CONFORMANCE_PRAGMATIC_2003 = 8;
+  SQL_CONFORMANCE_MYSQL_5 = 9;
+  SQL_CONFORMANCE_ORACLE_10 = 10;
+  SQL_CONFORMANCE_ORACLE_12 = 11;
+  SQL_CONFORMANCE_SQL_SERVER_2008 = 12;
+  SQL_CONFORMANCE_PRESTO = 13;
+  SQL_CONFORMANCE_BIG_QUERY = 14;
+}

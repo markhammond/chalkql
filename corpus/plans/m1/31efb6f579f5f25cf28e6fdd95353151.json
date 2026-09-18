@@ -1,0 +1,63 @@
+{
+  "irVersion": 1,
+  "planDigest": "17103752537019350500",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        }
+      ]
+    },
+    "estRowCount": 5,
+    "hashAggregate": {
+      "aggregate": {
+        "input": {
+          "rowType": {
+            "fields": [
+              {
+                "name": "symbol",
+                "type": {
+                  "kind": "TYPE_KIND_STRING"
+                }
+              }
+            ]
+          },
+          "estRowCount": 100800,
+          "read": {
+            "table": {
+              "sourceId": "mem",
+              "schema": "main",
+              "table": "bars"
+            },
+            "projection": [
+              0
+            ]
+          }
+        },
+        "groupings": [
+          {
+            "keys": [
+              0
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

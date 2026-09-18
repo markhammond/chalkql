@@ -1,0 +1,121 @@
+{
+  "irVersion": 1,
+  "planDigest": "493648772644594186",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        }
+      ]
+    },
+    "estRowCount": 10000,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            }
+          ]
+        },
+        "estRowCount": 10000,
+        "setOp": {
+          "inputs": [
+            {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "symbol",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 5000,
+              "read": {
+                "table": {
+                  "sourceId": "mem",
+                  "schema": "main",
+                  "table": "bars_small"
+                },
+                "projection": [
+                  0
+                ]
+              }
+            },
+            {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "symbol",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 100800,
+              "read": {
+                "table": {
+                  "sourceId": "mem",
+                  "schema": "main",
+                  "table": "bars"
+                },
+                "projection": [
+                  0
+                ]
+              }
+            }
+          ],
+          "kind": "SET_OP_KIND_INTERSECT_ALL"
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_STRING"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

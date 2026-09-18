@@ -1,0 +1,169 @@
+{
+  "irVersion": 1,
+  "planDigest": "13381697483453848782",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "one",
+        "type": {
+          "kind": "TYPE_KIND_I32"
+        }
+      },
+      {
+        "name": "s",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "n",
+        "type": {
+          "kind": "TYPE_KIND_I64",
+          "nullable": true
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "one",
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          }
+        },
+        {
+          "name": "s",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "n",
+          "type": {
+            "kind": "TYPE_KIND_I64",
+            "nullable": true
+          }
+        }
+      ]
+    },
+    "estRowCount": 1,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 2
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      },
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 2
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      },
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 2
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "virtualTable": {
+      "rows": [
+        {
+          "values": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "literal": {
+                "i32Value": 1
+              }
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "literal": {
+                "stringValue": "x"
+              }
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_I64",
+                "nullable": true
+              },
+              "literal": {
+                "isNull": true
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

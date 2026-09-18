@@ -1,0 +1,956 @@
+{
+  "irVersion": 1,
+  "planDigest": "14606862830173754951",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "rng",
+        "type": {
+          "kind": "TYPE_KIND_FP64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "rng",
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 5000,
+    "project": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "rng",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              }
+            }
+          ]
+        },
+        "estRowCount": 5000,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  },
+                  "fieldRef": {
+                    "index": 2
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "project": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "symbol",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                },
+                {
+                  "name": "ts",
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  }
+                },
+                {
+                  "name": "high",
+                  "type": {
+                    "kind": "TYPE_KIND_FP64"
+                  }
+                },
+                {
+                  "name": "low",
+                  "type": {
+                    "kind": "TYPE_KIND_FP64"
+                  }
+                },
+                {
+                  "name": "$f0",
+                  "type": {
+                    "kind": "TYPE_KIND_FP64"
+                  }
+                },
+                {
+                  "name": "high0",
+                  "type": {
+                    "kind": "TYPE_KIND_FP64"
+                  }
+                },
+                {
+                  "name": "low0",
+                  "type": {
+                    "kind": "TYPE_KIND_FP64"
+                  }
+                }
+              ]
+            },
+            "estRowCount": 5000,
+            "collations": [
+              {
+                "fields": [
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {}
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  },
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_TIMESTAMP",
+                        "precision": 9
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  }
+                ]
+              }
+            ],
+            "hashJoin": {
+              "left": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "symbol",
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      }
+                    },
+                    {
+                      "name": "ts",
+                      "type": {
+                        "kind": "TYPE_KIND_TIMESTAMP",
+                        "precision": 9
+                      }
+                    },
+                    {
+                      "name": "high",
+                      "type": {
+                        "kind": "TYPE_KIND_FP64"
+                      }
+                    },
+                    {
+                      "name": "low",
+                      "type": {
+                        "kind": "TYPE_KIND_FP64"
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 5000,
+                "collations": [
+                  {
+                    "fields": [
+                      {
+                        "expr": {
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          },
+                          "fieldRef": {}
+                        },
+                        "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                      },
+                      {
+                        "expr": {
+                          "type": {
+                            "kind": "TYPE_KIND_TIMESTAMP",
+                            "precision": 9
+                          },
+                          "fieldRef": {
+                            "index": 1
+                          }
+                        },
+                        "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                      }
+                    ]
+                  }
+                ],
+                "sort": {
+                  "input": {
+                    "rowType": {
+                      "fields": [
+                        {
+                          "name": "symbol",
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          }
+                        },
+                        {
+                          "name": "ts",
+                          "type": {
+                            "kind": "TYPE_KIND_TIMESTAMP",
+                            "precision": 9
+                          }
+                        },
+                        {
+                          "name": "high",
+                          "type": {
+                            "kind": "TYPE_KIND_FP64"
+                          }
+                        },
+                        {
+                          "name": "low",
+                          "type": {
+                            "kind": "TYPE_KIND_FP64"
+                          }
+                        }
+                      ]
+                    },
+                    "estRowCount": 5000,
+                    "collations": [
+                      {
+                        "fields": [
+                          {
+                            "expr": {
+                              "type": {
+                                "kind": "TYPE_KIND_TIMESTAMP",
+                                "precision": 9
+                              },
+                              "fieldRef": {
+                                "index": 1
+                              }
+                            },
+                            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                          },
+                          {
+                            "expr": {
+                              "type": {
+                                "kind": "TYPE_KIND_STRING"
+                              },
+                              "fieldRef": {}
+                            },
+                            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                          }
+                        ]
+                      }
+                    ],
+                    "project": {
+                      "input": {
+                        "rowType": {
+                          "fields": [
+                            {
+                              "name": "symbol",
+                              "type": {
+                                "kind": "TYPE_KIND_STRING"
+                              }
+                            },
+                            {
+                              "name": "ts",
+                              "type": {
+                                "kind": "TYPE_KIND_TIMESTAMP",
+                                "precision": 9
+                              }
+                            },
+                            {
+                              "name": "open",
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              }
+                            },
+                            {
+                              "name": "high",
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              }
+                            },
+                            {
+                              "name": "low",
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              }
+                            },
+                            {
+                              "name": "close",
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              }
+                            },
+                            {
+                              "name": "volume",
+                              "type": {
+                                "kind": "TYPE_KIND_I64"
+                              }
+                            },
+                            {
+                              "name": "vwap",
+                              "type": {
+                                "kind": "TYPE_KIND_DECIMAL",
+                                "nullable": true,
+                                "precision": 28,
+                                "scale": 10
+                              }
+                            },
+                            {
+                              "name": "trade_count",
+                              "type": {
+                                "kind": "TYPE_KIND_I32",
+                                "nullable": true
+                              }
+                            }
+                          ]
+                        },
+                        "estRowCount": 5000,
+                        "collations": [
+                          {
+                            "fields": [
+                              {
+                                "expr": {
+                                  "type": {
+                                    "kind": "TYPE_KIND_TIMESTAMP",
+                                    "precision": 9
+                                  },
+                                  "fieldRef": {
+                                    "index": 1
+                                  }
+                                },
+                                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                              },
+                              {
+                                "expr": {
+                                  "type": {
+                                    "kind": "TYPE_KIND_STRING"
+                                  },
+                                  "fieldRef": {}
+                                },
+                                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                              }
+                            ]
+                          }
+                        ],
+                        "read": {
+                          "table": {
+                            "sourceId": "mem",
+                            "schema": "main",
+                            "table": "bars_small"
+                          },
+                          "projection": [
+                            0,
+                            1,
+                            2,
+                            3,
+                            4,
+                            5,
+                            6,
+                            7,
+                            8
+                          ]
+                        }
+                      },
+                      "exprs": [
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          },
+                          "fieldRef": {}
+                        },
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_TIMESTAMP",
+                            "precision": 9
+                          },
+                          "fieldRef": {
+                            "index": 1
+                          }
+                        },
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_FP64"
+                          },
+                          "fieldRef": {
+                            "index": 3
+                          }
+                        },
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_FP64"
+                          },
+                          "fieldRef": {
+                            "index": 4
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "fields": [
+                    {
+                      "expr": {
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        },
+                        "fieldRef": {}
+                      },
+                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                    },
+                    {
+                      "expr": {
+                        "type": {
+                          "kind": "TYPE_KIND_TIMESTAMP",
+                          "precision": 9
+                        },
+                        "fieldRef": {
+                          "index": 1
+                        }
+                      },
+                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                    }
+                  ]
+                }
+              },
+              "right": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "$f0",
+                      "type": {
+                        "kind": "TYPE_KIND_FP64"
+                      }
+                    },
+                    {
+                      "name": "high",
+                      "type": {
+                        "kind": "TYPE_KIND_FP64"
+                      }
+                    },
+                    {
+                      "name": "low",
+                      "type": {
+                        "kind": "TYPE_KIND_FP64"
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 250,
+                "project": {
+                  "input": {
+                    "rowType": {
+                      "fields": [
+                        {
+                          "name": "high",
+                          "type": {
+                            "kind": "TYPE_KIND_FP64"
+                          }
+                        },
+                        {
+                          "name": "low",
+                          "type": {
+                            "kind": "TYPE_KIND_FP64"
+                          }
+                        },
+                        {
+                          "name": "$f0",
+                          "type": {
+                            "kind": "TYPE_KIND_FP64"
+                          }
+                        },
+                        {
+                          "name": "ZERO",
+                          "type": {
+                            "kind": "TYPE_KIND_I32"
+                          }
+                        }
+                      ]
+                    },
+                    "estRowCount": 250,
+                    "nestedLoopJoin": {
+                      "left": {
+                        "rowType": {
+                          "fields": [
+                            {
+                              "name": "high",
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              }
+                            },
+                            {
+                              "name": "low",
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              }
+                            },
+                            {
+                              "name": "$f0",
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              }
+                            }
+                          ]
+                        },
+                        "estRowCount": 250,
+                        "project": {
+                          "input": {
+                            "rowType": {
+                              "fields": [
+                                {
+                                  "name": "high",
+                                  "type": {
+                                    "kind": "TYPE_KIND_FP64"
+                                  }
+                                },
+                                {
+                                  "name": "low",
+                                  "type": {
+                                    "kind": "TYPE_KIND_FP64"
+                                  }
+                                }
+                              ]
+                            },
+                            "estRowCount": 250,
+                            "filter": {
+                              "input": {
+                                "rowType": {
+                                  "fields": [
+                                    {
+                                      "name": "high",
+                                      "type": {
+                                        "kind": "TYPE_KIND_FP64"
+                                      }
+                                    },
+                                    {
+                                      "name": "low",
+                                      "type": {
+                                        "kind": "TYPE_KIND_FP64"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "estRowCount": 500,
+                                "hashAggregate": {
+                                  "aggregate": {
+                                    "input": {
+                                      "rowType": {
+                                        "fields": [
+                                          {
+                                            "name": "high",
+                                            "type": {
+                                              "kind": "TYPE_KIND_FP64"
+                                            }
+                                          },
+                                          {
+                                            "name": "low",
+                                            "type": {
+                                              "kind": "TYPE_KIND_FP64"
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      "estRowCount": 5000,
+                                      "project": {
+                                        "input": {
+                                          "rowType": {
+                                            "fields": [
+                                              {
+                                                "name": "symbol",
+                                                "type": {
+                                                  "kind": "TYPE_KIND_STRING"
+                                                }
+                                              },
+                                              {
+                                                "name": "ts",
+                                                "type": {
+                                                  "kind": "TYPE_KIND_TIMESTAMP",
+                                                  "precision": 9
+                                                }
+                                              },
+                                              {
+                                                "name": "open",
+                                                "type": {
+                                                  "kind": "TYPE_KIND_FP64"
+                                                }
+                                              },
+                                              {
+                                                "name": "high",
+                                                "type": {
+                                                  "kind": "TYPE_KIND_FP64"
+                                                }
+                                              },
+                                              {
+                                                "name": "low",
+                                                "type": {
+                                                  "kind": "TYPE_KIND_FP64"
+                                                }
+                                              },
+                                              {
+                                                "name": "close",
+                                                "type": {
+                                                  "kind": "TYPE_KIND_FP64"
+                                                }
+                                              },
+                                              {
+                                                "name": "volume",
+                                                "type": {
+                                                  "kind": "TYPE_KIND_I64"
+                                                }
+                                              },
+                                              {
+                                                "name": "vwap",
+                                                "type": {
+                                                  "kind": "TYPE_KIND_DECIMAL",
+                                                  "nullable": true,
+                                                  "precision": 28,
+                                                  "scale": 10
+                                                }
+                                              },
+                                              {
+                                                "name": "trade_count",
+                                                "type": {
+                                                  "kind": "TYPE_KIND_I32",
+                                                  "nullable": true
+                                                }
+                                              }
+                                            ]
+                                          },
+                                          "estRowCount": 5000,
+                                          "collations": [
+                                            {
+                                              "fields": [
+                                                {
+                                                  "expr": {
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_TIMESTAMP",
+                                                      "precision": 9
+                                                    },
+                                                    "fieldRef": {
+                                                      "index": 1
+                                                    }
+                                                  },
+                                                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                                },
+                                                {
+                                                  "expr": {
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_STRING"
+                                                    },
+                                                    "fieldRef": {}
+                                                  },
+                                                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                                }
+                                              ]
+                                            }
+                                          ],
+                                          "read": {
+                                            "table": {
+                                              "sourceId": "mem",
+                                              "schema": "main",
+                                              "table": "bars_small"
+                                            },
+                                            "projection": [
+                                              0,
+                                              1,
+                                              2,
+                                              3,
+                                              4,
+                                              5,
+                                              6,
+                                              7,
+                                              8
+                                            ]
+                                          }
+                                        },
+                                        "exprs": [
+                                          {
+                                            "type": {
+                                              "kind": "TYPE_KIND_FP64"
+                                            },
+                                            "fieldRef": {
+                                              "index": 3
+                                            }
+                                          },
+                                          {
+                                            "type": {
+                                              "kind": "TYPE_KIND_FP64"
+                                            },
+                                            "fieldRef": {
+                                              "index": 4
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "groupings": [
+                                      {
+                                        "keys": [
+                                          0,
+                                          1
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                }
+                              },
+                              "condition": {
+                                "type": {
+                                  "kind": "TYPE_KIND_BOOL"
+                                },
+                                "call": {
+                                  "function": "FUNCTION_ID_GT",
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "kind": "TYPE_KIND_FP64"
+                                      },
+                                      "call": {
+                                        "function": "FUNCTION_ID_SUBTRACT",
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "kind": "TYPE_KIND_FP64"
+                                            },
+                                            "fieldRef": {}
+                                          },
+                                          {
+                                            "type": {
+                                              "kind": "TYPE_KIND_FP64"
+                                            },
+                                            "fieldRef": {
+                                              "index": 1
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "kind": "TYPE_KIND_FP64"
+                                      },
+                                      "literal": {
+                                        "fp64Value": 1
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          },
+                          "exprs": [
+                            {
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              },
+                              "fieldRef": {}
+                            },
+                            {
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              },
+                              "fieldRef": {
+                                "index": 1
+                              }
+                            },
+                            {
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              },
+                              "call": {
+                                "function": "FUNCTION_ID_SUBTRACT",
+                                "args": [
+                                  {
+                                    "type": {
+                                      "kind": "TYPE_KIND_FP64"
+                                    },
+                                    "fieldRef": {}
+                                  },
+                                  {
+                                    "type": {
+                                      "kind": "TYPE_KIND_FP64"
+                                    },
+                                    "fieldRef": {
+                                      "index": 1
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "right": {
+                        "rowType": {
+                          "fields": [
+                            {
+                              "name": "ZERO",
+                              "type": {
+                                "kind": "TYPE_KIND_I32"
+                              }
+                            }
+                          ]
+                        },
+                        "estRowCount": 1,
+                        "collations": [
+                          {
+                            "fields": [
+                              {
+                                "expr": {
+                                  "type": {
+                                    "kind": "TYPE_KIND_I32"
+                                  },
+                                  "fieldRef": {}
+                                },
+                                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                              }
+                            ]
+                          }
+                        ],
+                        "virtualTable": {
+                          "rows": [
+                            {
+                              "values": [
+                                {
+                                  "type": {
+                                    "kind": "TYPE_KIND_I32"
+                                  },
+                                  "literal": {
+                                    "i32Value": 0
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "type": "JOIN_TYPE_INNER"
+                    }
+                  },
+                  "exprs": [
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_FP64"
+                      },
+                      "fieldRef": {
+                        "index": 2
+                      }
+                    },
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_FP64"
+                      },
+                      "fieldRef": {}
+                    },
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_FP64"
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    }
+                  ]
+                }
+              },
+              "leftKeys": [
+                2,
+                3
+              ],
+              "rightKeys": [
+                1,
+                2
+              ],
+              "type": "JOIN_TYPE_INNER"
+            }
+          },
+          "exprs": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldRef": {
+                "index": 4
+              }
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            }
+          ]
+        }
+      },
+      "exprs": [
+        {
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          },
+          "fieldRef": {}
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          },
+          "fieldRef": {
+            "index": 1
+          }
+        }
+      ]
+    }
+  }
+}

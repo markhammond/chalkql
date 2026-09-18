@@ -1,0 +1,9 @@
+-- FULL
+ChalkProject(total=[$0], with_vwap=[$1], sum_vwap=[CASE(=($1, 0), null:DECIMAL(38, 10), $2)])
+  ChalkHashAggregate(group=[{}], total=[COUNT()], with_vwap=[COUNT($0)], sum_vwap=[$SUM0($0)])
+    ChalkTableScan(table=[[main, bars]], projection=[[7]])
+-- NONE
+ChalkProject(total=[$0], with_vwap=[$1], sum_vwap=[CASE(=($1, 0), null:DECIMAL(38, 10), $2)])
+  ChalkHashAggregate(group=[{}], total=[COUNT()], with_vwap=[COUNT($0)], sum_vwap=[$SUM0($0)])
+    ChalkProject(vwap=[$7])
+      ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])

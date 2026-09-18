@@ -1,0 +1,78 @@
+{
+  "irVersion": 1,
+  "planDigest": "1545073288315056466",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "l_orderkey",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      },
+      {
+        "name": "l_linenumber",
+        "type": {
+          "kind": "TYPE_KIND_I32"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "l_orderkey",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        },
+        {
+          "name": "l_linenumber",
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          }
+        }
+      ]
+    },
+    "estRowCount": 60000,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "read": {
+      "table": {
+        "sourceId": "mem",
+        "schema": "main",
+        "table": "lineitem"
+      },
+      "projection": [
+        0,
+        1
+      ]
+    }
+  }
+}

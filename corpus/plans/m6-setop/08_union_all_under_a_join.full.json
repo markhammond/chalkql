@@ -1,0 +1,284 @@
+{
+  "irVersion": 1,
+  "planDigest": "15335189487941178949",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "quote",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "n",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "quote",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "n",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 260.5,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "quote",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "n",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            }
+          ]
+        },
+        "estRowCount": 260.5,
+        "hashAggregate": {
+          "aggregate": {
+            "input": {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "symbol",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  },
+                  {
+                    "name": "symbol0",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  },
+                  {
+                    "name": "quote",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 2605,
+              "hashJoin": {
+                "left": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "symbol",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 5210,
+                  "setOp": {
+                    "inputs": [
+                      {
+                        "rowType": {
+                          "fields": [
+                            {
+                              "name": "symbol",
+                              "type": {
+                                "kind": "TYPE_KIND_STRING"
+                              }
+                            }
+                          ]
+                        },
+                        "estRowCount": 5000,
+                        "read": {
+                          "table": {
+                            "sourceId": "mem",
+                            "schema": "main",
+                            "table": "bars_small"
+                          },
+                          "projection": [
+                            0
+                          ]
+                        }
+                      },
+                      {
+                        "rowType": {
+                          "fields": [
+                            {
+                              "name": "symbol",
+                              "type": {
+                                "kind": "TYPE_KIND_STRING"
+                              }
+                            }
+                          ]
+                        },
+                        "estRowCount": 210,
+                        "collations": [
+                          {
+                            "fields": [
+                              {
+                                "expr": {
+                                  "type": {
+                                    "kind": "TYPE_KIND_STRING"
+                                  },
+                                  "fieldRef": {}
+                                },
+                                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                              }
+                            ]
+                          }
+                        ],
+                        "read": {
+                          "table": {
+                            "sourceId": "mem",
+                            "schema": "main",
+                            "table": "funding"
+                          },
+                          "projection": [
+                            0
+                          ]
+                        }
+                      }
+                    ],
+                    "kind": "SET_OP_KIND_UNION_ALL"
+                  }
+                },
+                "right": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "symbol",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      },
+                      {
+                        "name": "quote",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 5,
+                  "collations": [
+                    {
+                      "fields": [
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "fieldRef": {}
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        }
+                      ]
+                    }
+                  ],
+                  "read": {
+                    "table": {
+                      "sourceId": "mem",
+                      "schema": "main",
+                      "table": "symbols"
+                    },
+                    "projection": [
+                      0,
+                      2
+                    ]
+                  }
+                },
+                "leftKeys": [
+                  0
+                ],
+                "rightKeys": [
+                  0
+                ],
+                "type": "JOIN_TYPE_INNER"
+              }
+            },
+            "groupings": [
+              {
+                "keys": [
+                  0,
+                  2
+                ]
+              }
+            ],
+            "measures": [
+              {
+                "function": "AGGREGATE_FUNCTION_ID_COUNT",
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_STRING"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

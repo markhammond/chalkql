@@ -1,0 +1,31 @@
+-- ledger-only
+report id:Full, order_id:Full, quantity:Full, ledger.order_items:Some
+10|1|2
+11|2|3
+
+-- archive-only
+report id:Full, order_id:Full, quantity:Full, ledger.order_items:None
+
+-- both
+report id:Full, order_id:Full, quantity:Full, ledger.order_items:Some
+10|1|2
+11|2|3
+
+-- global
+report id:Full, order_id:Full, quantity:Full, ledger.order_items:All
+10|1|2
+11|2|3
+12|3|4
+13|4|5
+
+-- owner
+report id:Full, order_id:Full, quantity:Full, ledger.order_items:None
+
+-- subject
+report id:Full, order_id:Full, quantity:Full, ledger.order_items:None
+
+-- auditor-in-ledger
+report id:Full, order_id:Full, quantity:Full, ledger.order_items:Some
+10|1|2
+11|2|3
+

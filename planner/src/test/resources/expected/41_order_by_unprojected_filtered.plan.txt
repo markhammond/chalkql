@@ -1,0 +1,12 @@
+-- FULL
+ChalkProject(symbol=[$0], ts=[$1])
+  ChalkProject(symbol=['BTCUSDT':VARCHAR CHARACTER SET "UTF-8"], ts=[$1], volume=[$2])
+    ChalkTopN(collation=[[2, 1]], fetch=[5])
+      ChalkIndexLookup(table=[[main, bars]], index=[ix_bars_symbol_ts], ranges=[[[['BTCUSDT':VARCHAR CHARACTER SET "UTF-8"], ['BTCUSDT':VARCHAR CHARACTER SET "UTF-8"]]]], projection=[[0, 1, 6]])
+-- NONE
+ChalkProject(symbol=[$0], ts=[$1])
+  ChalkProject(symbol=['BTCUSDT':VARCHAR CHARACTER SET "UTF-8"], ts=[$1], volume=[$2])
+    ChalkTopN(collation=[[2, 1]], fetch=[5])
+      ChalkFilter(condition=[=($0, 'BTCUSDT')])
+        ChalkProject(symbol=[$0], ts=[$1], volume=[$6])
+          ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])

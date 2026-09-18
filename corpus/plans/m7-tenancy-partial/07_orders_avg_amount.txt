@@ -1,0 +1,60 @@
+-- u1
+report a:PerRow, orders:Some
+8356387
+
+-- u2
+report a:PerRow, orders:Some
+8427761
+
+-- u3
+report a:PerRow, orders:Some
+8613858
+
+-- u3-in-o1
+report a:PerRow, orders:Some
+8613858
+
+-- u4
+report a:PerRow, orders:All
+<null>
+
+-- u5
+report a:PerRow, orders:Some
+<null>
+
+-- u6
+report a:Aggregate, orders:Some
+8260548
+
+-- u6-two-orgs
+report a:Aggregate, orders:Some
+8378318
+
+-- u7
+report a:PerRow, orders:Some
+<null>
+
+-- u8
+report a:PerRow, orders:Some
+<null>
+
+-- u9
+report a:PerRow, orders:Some
+<null>
+
+-- u10-in-a-region
+report a:Aggregate, orders:Some
+<null>
+
+-- u11-subject-in-a-region
+report a:PerRow, orders:Some
+<null>
+
+-- u14-a-vendor
+report a:PerRow, orders:Some
+<null>
+
+-- u15-a-vendor-and-an-org
+report a:PerRow, orders:Some
+<null>
+

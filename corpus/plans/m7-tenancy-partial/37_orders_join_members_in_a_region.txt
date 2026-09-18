@@ -1,0 +1,87 @@
+-- u1
+report oid:Full, region_id:Full, mid:Full, last_name:PerRow, orders:Some, members:Some
+1|1|1|Ng CANARY-LAST-01
+2|2|1|Ng CANARY-LAST-01
+3|1|2|Ito CANARY-LAST-02
+4|2|2|Ito CANARY-LAST-02
+5|1|3|E
+6|3|4|R
+
+-- u2
+report oid:Full, region_id:Full, mid:Full, last_name:PerRow, orders:Some, members:Some
+1|1|1|N
+2|2|1|N
+3|1|2|I
+4|2|2|I
+
+-- u3
+report oid:Full, region_id:Full, mid:Full, last_name:Redacted, orders:Some, members:Some
+5|1|3|<null>
+
+-- u3-in-o1
+report oid:Full, region_id:Full, mid:Full, last_name:Redacted, orders:Some, members:Some
+
+-- u4
+report oid:Full, region_id:Full, mid:Full, last_name:Full, orders:All, members:All
+1|1|1|Ng CANARY-LAST-01
+2|2|1|Ng CANARY-LAST-01
+3|1|2|Ito CANARY-LAST-02
+4|2|2|Ito CANARY-LAST-02
+5|1|3|Ek CANARY-LAST-03
+6|3|4|Roy CANARY-LAST-04
+7|3|5|Zhao CANARY-LAST-05
+
+-- u5
+report oid:Full, region_id:Full, mid:Full, last_name:Redacted, orders:Some, members:Some
+
+-- u6
+report oid:Full, region_id:Full, mid:Full, last_name:PerRow, orders:Some, members:Some
+1|1|1|4aa55aa1adad84f83baa113adc72c271
+2|2|1|4aa55aa1adad84f83baa113adc72c271
+3|1|2|226b5c1078fd4adfc38c6a0a8893c273
+4|2|2|226b5c1078fd4adfc38c6a0a8893c273
+
+-- u6-two-orgs
+report oid:Full, region_id:Full, mid:Full, last_name:PerRow, orders:Some, members:Some
+1|1|1|4aa55aa1adad84f83baa113adc72c271
+2|2|1|4aa55aa1adad84f83baa113adc72c271
+3|1|2|226b5c1078fd4adfc38c6a0a8893c273
+4|2|2|226b5c1078fd4adfc38c6a0a8893c273
+5|1|3|9b6490a31026458dc29933372e69d13c
+6|3|4|7b76faf77703783f8de65c735793cb05
+
+-- u7
+report oid:Full, region_id:Full, mid:Full, last_name:Redacted, orders:Some, members:Some
+
+-- u8
+report oid:Full, region_id:Full, mid:Full, last_name:Redacted, orders:Some, members:Some
+1|1|1|<null>
+2|2|1|<null>
+3|1|2|<null>
+4|2|2|<null>
+
+-- u9
+report oid:Full, region_id:Full, mid:Full, last_name:Redacted, orders:Some, members:Some
+1|1|1|<null>
+2|2|1|<null>
+3|1|2|<null>
+4|2|2|<null>
+5|1|3|<null>
+6|3|4|<null>
+
+-- u10-in-a-region
+report oid:Full, region_id:Full, mid:Full, last_name:Redacted, orders:Some, members:Some
+
+-- u11-subject-in-a-region
+report oid:Full, region_id:Full, mid:Full, last_name:Redacted, orders:Some, members:Some
+
+-- u14-a-vendor
+report oid:Full, region_id:Full, mid:Full, last_name:Redacted, orders:Some, members:Some
+
+-- u15-a-vendor-and-an-org
+report oid:Full, region_id:Full, mid:Full, last_name:PerRow, orders:Some, members:Some
+1|1|1|Ng CANARY-LAST-01
+2|2|1|Ng CANARY-LAST-01
+3|1|2|Ito CANARY-LAST-02
+4|2|2|Ito CANARY-LAST-02
+

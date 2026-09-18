@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Chalk.Sample.AkadeIndexedSet</RootNamespace>
+    <AssemblyName>Chalk.Sample.AkadeIndexedSet</AssemblyName>
+  </PropertyGroup>
+
+  <!--
+    A sample, never a package: no Chalk.* package depends on Akade.IndexedSet, and the only
+    things that reference this project are the test kit and the integration suite, which run the
+    corpus a second time with these indexes so the extension point is proven end to end rather than
+    by inspection.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Akade.IndexedSet" />
+    <ProjectReference Include="../../src/Chalk.Client/Chalk.Client.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.Poco/Chalk.Sources.Poco.csproj" />
+  </ItemGroup>
+
+</Project>

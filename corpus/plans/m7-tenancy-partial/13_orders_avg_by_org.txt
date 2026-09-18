@@ -1,0 +1,65 @@
+-- u1
+report org_id:PerRow, a:PerRow, orders:Some
+1|8204810
+2|<null>
+3|8811119
+
+-- u2
+report org_id:PerRow, a:PerRow, orders:Some
+1|8427761
+
+-- u3
+report org_id:PerRow, a:PerRow, orders:Some
+2|8613858
+
+-- u3-in-o1
+report org_id:PerRow, a:PerRow, orders:Some
+2|8613858
+
+-- u4
+report org_id:Full, a:PerRow, orders:All
+1|<null>
+2|<null>
+3|<null>
+
+-- u5
+report org_id:PerRow, a:PerRow, orders:Some
+
+-- u6
+report org_id:PerRow, a:Aggregate, orders:Some
+1|8260548
+
+-- u6-two-orgs
+report org_id:PerRow, a:Aggregate, orders:Some
+1|8260548
+2|<null>
+
+-- u7
+report org_id:PerRow, a:PerRow, orders:Some
+
+-- u8
+report org_id:PerRow, a:PerRow, orders:Some
+1|<null>
+
+-- u9
+report org_id:PerRow, a:PerRow, orders:Some
+1|<null>
+2|<null>
+
+-- u10-in-a-region
+report org_id:PerRow, a:Aggregate, orders:Some
+1|<null>
+
+-- u11-subject-in-a-region
+report org_id:PerRow, a:PerRow, orders:Some
+1|<null>
+
+-- u14-a-vendor
+report org_id:PerRow, a:PerRow, orders:Some
+<null>|<null>
+
+-- u15-a-vendor-and-an-org
+report org_id:PerRow, a:PerRow, orders:Some
+1|<null>
+<null>|<null>
+

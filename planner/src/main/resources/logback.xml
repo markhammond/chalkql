@@ -1,0 +1,15 @@
+<configuration>
+  <!-- Everything except the single "chalk-planner listening on host:port" line goes to stderr, so a
+       launcher can parse stdout without filtering (docs/design/03-planner.md §1). -->
+  <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+    <target>System.err</target>
+    <encoder>
+      <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%thread] %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+  <logger name="org.apache.calcite" level="WARN" />
+  <logger name="io.grpc" level="WARN" />
+  <root level="INFO">
+    <appender-ref ref="STDERR" />
+  </root>
+</configuration>

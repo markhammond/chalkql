@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Integration.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Chalk.Client/Chalk.Client.csproj" />
+    <ProjectReference Include="../../src/Chalk.Entitlements.Tenancy/Chalk.Entitlements.Tenancy.csproj" />
+    <ProjectReference Include="../Chalk.TestKit/Chalk.TestKit.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.Conformance/Chalk.Sources.Conformance.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.DuckDb/Chalk.Sources.DuckDb.csproj" />
+  </ItemGroup>
+
+  <!--
+    The third oracle (D28). Test-only, and only here: it ships a native library, so it must not reach
+    any shipped package. The tests skip themselves when that library cannot load.
+  -->
+  <ItemGroup>
+    <PackageReference Include="DuckDB.NET.Data.Full" />
+
+    <!--
+      The PostgreSQL driver, an ordinary reference since D133: the conformance kit's third dialect
+      runs on every push against a server `PostgresFixture` starts from binaries on the machine, so
+      the package is no longer opt-in and there is nothing left for reflection to find. Restoring it
+      costs nothing on a machine that has no PostgreSQL.
+    -->
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CHALK001</NoWarn>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,71 @@
+-- u1
+report id:Full, first_name:PerRow, national_id:Redacted, members:Some
+1|Tara CANARY-FIRST-01|<null>
+2|Bo CANARY-FIRST-02|<null>
+3|T|<null>
+4|A|<null>
+7|T|<null>
+
+-- u2
+report id:Full, first_name:Masked, national_id:Redacted, members:Some
+1|T|<null>
+2|B|<null>
+
+-- u3
+report id:Full, first_name:Redacted, national_id:Redacted, members:Some
+3|<null>|<null>
+
+-- u3-in-o1
+report id:Full, first_name:Redacted, national_id:Redacted, members:Some
+
+-- u4
+report id:Full, first_name:Full, national_id:Redacted, members:All
+1|Tara CANARY-FIRST-01|<null>
+2|Bo CANARY-FIRST-02|<null>
+3|Tomas CANARY-FIRST-03|<null>
+4|Ada CANARY-FIRST-04|<null>
+5|Kim CANARY-FIRST-05|<null>
+6|Lea CANARY-FIRST-06|<null>
+7|Tara CANARY-FIRST-01|<null>
+
+-- u5
+report id:Full, first_name:Redacted, national_id:Redacted, members:None
+
+-- u6
+report id:Full, first_name:Masked, national_id:Redacted, members:Some
+1|ed23bc5f944a7ec955ace055dba31f68|<null>
+2|6657767d30a1fb0444393493e42f5527|<null>
+
+-- u6-two-orgs
+report id:Full, first_name:Masked, national_id:Redacted, members:Some
+1|ed23bc5f944a7ec955ace055dba31f68|<null>
+2|6657767d30a1fb0444393493e42f5527|<null>
+3|0b10f954b1c6bb233d8dd8d63a220460|<null>
+4|13ef6532594dde74d242c703fa652ecb|<null>
+7|ed23bc5f944a7ec955ace055dba31f68|<null>
+
+-- u7
+report id:Full, first_name:Redacted, national_id:Redacted, members:None
+
+-- u8
+report id:Full, first_name:Redacted, national_id:Tested, members:Some
+1|<null>|<null>
+2|<null>|<null>
+
+-- u9
+POLICY Refused by the entitlements: main.members.national_id is population-only for this principal and a projection to the result is not one of the aggregates it permits.
+
+-- u10-in-a-region
+report id:Full, first_name:Redacted, national_id:Redacted, members:None
+
+-- u11-subject-in-a-region
+report id:Full, first_name:Redacted, national_id:Redacted, members:None
+
+-- u14-a-vendor
+report id:Full, first_name:Redacted, national_id:Redacted, members:None
+
+-- u15-a-vendor-and-an-org
+report id:Full, first_name:Full, national_id:Redacted, members:Some
+1|Tara CANARY-FIRST-01|<null>
+2|Bo CANARY-FIRST-02|<null>
+

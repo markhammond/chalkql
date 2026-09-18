@@ -1,0 +1,445 @@
+{
+  "irVersion": 1,
+  "planDigest": "14976309640919789596",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "l_orderkey",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      },
+      {
+        "name": "l_linenumber",
+        "type": {
+          "kind": "TYPE_KIND_I32"
+        }
+      },
+      {
+        "name": "l_partkey",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      },
+      {
+        "name": "l_suppkey",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      },
+      {
+        "name": "l_quantity",
+        "type": {
+          "kind": "TYPE_KIND_DECIMAL",
+          "precision": 15,
+          "scale": 2
+        }
+      },
+      {
+        "name": "l_extendedprice",
+        "type": {
+          "kind": "TYPE_KIND_DECIMAL",
+          "precision": 15,
+          "scale": 2
+        }
+      },
+      {
+        "name": "l_discount",
+        "type": {
+          "kind": "TYPE_KIND_DECIMAL",
+          "precision": 15,
+          "scale": 2
+        }
+      },
+      {
+        "name": "l_tax",
+        "type": {
+          "kind": "TYPE_KIND_DECIMAL",
+          "precision": 15,
+          "scale": 2
+        }
+      },
+      {
+        "name": "l_returnflag",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "l_linestatus",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "l_shipdate",
+        "type": {
+          "kind": "TYPE_KIND_DATE"
+        }
+      },
+      {
+        "name": "l_commitdate",
+        "type": {
+          "kind": "TYPE_KIND_DATE"
+        }
+      },
+      {
+        "name": "l_receiptdate",
+        "type": {
+          "kind": "TYPE_KIND_DATE"
+        }
+      },
+      {
+        "name": "l_shipinstruct",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "l_shipmode",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "l_comment",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "l_orderkey",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        },
+        {
+          "name": "l_linenumber",
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          }
+        },
+        {
+          "name": "l_partkey",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        },
+        {
+          "name": "l_suppkey",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        },
+        {
+          "name": "l_quantity",
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "precision": 15,
+            "scale": 2
+          }
+        },
+        {
+          "name": "l_extendedprice",
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "precision": 15,
+            "scale": 2
+          }
+        },
+        {
+          "name": "l_discount",
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "precision": 15,
+            "scale": 2
+          }
+        },
+        {
+          "name": "l_tax",
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "precision": 15,
+            "scale": 2
+          }
+        },
+        {
+          "name": "l_returnflag",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "l_linestatus",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "l_shipdate",
+          "type": {
+            "kind": "TYPE_KIND_DATE"
+          }
+        },
+        {
+          "name": "l_commitdate",
+          "type": {
+            "kind": "TYPE_KIND_DATE"
+          }
+        },
+        {
+          "name": "l_receiptdate",
+          "type": {
+            "kind": "TYPE_KIND_DATE"
+          }
+        },
+        {
+          "name": "l_shipinstruct",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "l_shipmode",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "l_comment",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        }
+      ]
+    },
+    "estRowCount": 9000,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "filter": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "l_orderkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            },
+            {
+              "name": "l_linenumber",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              }
+            },
+            {
+              "name": "l_partkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            },
+            {
+              "name": "l_suppkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            },
+            {
+              "name": "l_quantity",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              }
+            },
+            {
+              "name": "l_extendedprice",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              }
+            },
+            {
+              "name": "l_discount",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              }
+            },
+            {
+              "name": "l_tax",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              }
+            },
+            {
+              "name": "l_returnflag",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "l_linestatus",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "l_shipdate",
+              "type": {
+                "kind": "TYPE_KIND_DATE"
+              }
+            },
+            {
+              "name": "l_commitdate",
+              "type": {
+                "kind": "TYPE_KIND_DATE"
+              }
+            },
+            {
+              "name": "l_receiptdate",
+              "type": {
+                "kind": "TYPE_KIND_DATE"
+              }
+            },
+            {
+              "name": "l_shipinstruct",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "l_shipmode",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "l_comment",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            }
+          ]
+        },
+        "estRowCount": 60000,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_I64"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_I32"
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "read": {
+          "table": {
+            "sourceId": "mem",
+            "schema": "main",
+            "table": "lineitem"
+          },
+          "projection": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
+          ]
+        }
+      },
+      "condition": {
+        "type": {
+          "kind": "TYPE_KIND_BOOL",
+          "nullable": true
+        },
+        "call": {
+          "function": "FUNCTION_ID_EQ",
+          "args": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {}
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_I64",
+                "nullable": true
+              },
+              "param": {}
+            }
+          ]
+        }
+      }
+    }
+  },
+  "parameterTypes": [
+    {
+      "kind": "TYPE_KIND_I64",
+      "nullable": true
+    }
+  ]
+}

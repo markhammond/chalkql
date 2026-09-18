@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Sources.Ado.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Chalk.Sources.Ado/Chalk.Sources.Ado.csproj" />
+    <!-- D167 (25-coverage-graft.md §4): the type matrix runs against real drivers, and against
+         both native DuckDB readers as well as the provider's own. `.Full` here because the tests
+         have to run; the shipping package takes DuckDB.NET.Data alone (D148a). -->
+    <ProjectReference Include="../../src/Chalk.Sources.DuckDb/Chalk.Sources.DuckDb.csproj" />
+    <!-- PostgresFixture: the same ephemeral server the integration suite runs on (D133 §0b), so
+         the matrix's PostgreSQL leg runs here without a second way of starting one. -->
+    <ProjectReference Include="../Chalk.TestKit/Chalk.TestKit.csproj" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
+    <PackageReference Include="DuckDB.NET.Data.Full" />
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CHALK001</NoWarn>
+  </PropertyGroup>
+
+</Project>

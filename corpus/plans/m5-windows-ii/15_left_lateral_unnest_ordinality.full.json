@@ -1,0 +1,257 @@
+{
+  "irVersion": 1,
+  "planDigest": "6781937348866995304",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "tag",
+        "type": {
+          "kind": "TYPE_KIND_STRING",
+          "nullable": true
+        }
+      },
+      {
+        "name": "n",
+        "type": {
+          "kind": "TYPE_KIND_I32",
+          "nullable": true
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "tag",
+          "type": {
+            "kind": "TYPE_KIND_STRING",
+            "nullable": true
+          }
+        },
+        {
+          "name": "n",
+          "type": {
+            "kind": "TYPE_KIND_I32",
+            "nullable": true
+          }
+        }
+      ]
+    },
+    "estRowCount": 20,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 2
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "tag",
+              "type": {
+                "kind": "TYPE_KIND_STRING",
+                "nullable": true
+              }
+            },
+            {
+              "name": "n",
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              }
+            }
+          ]
+        },
+        "estRowCount": 20,
+        "project": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "symbol",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                },
+                {
+                  "name": "tags",
+                  "type": {
+                    "kind": "TYPE_KIND_LIST",
+                    "nullable": true,
+                    "element": {
+                      "kind": "TYPE_KIND_STRING",
+                      "nullable": true
+                    }
+                  }
+                },
+                {
+                  "name": "tags0",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING",
+                    "nullable": true
+                  }
+                },
+                {
+                  "name": "ORDINALITY",
+                  "type": {
+                    "kind": "TYPE_KIND_I32",
+                    "nullable": true
+                  }
+                }
+              ]
+            },
+            "estRowCount": 20,
+            "unnest": {
+              "input": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "symbol",
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      }
+                    },
+                    {
+                      "name": "tags",
+                      "type": {
+                        "kind": "TYPE_KIND_LIST",
+                        "nullable": true,
+                        "element": {
+                          "kind": "TYPE_KIND_STRING",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 5,
+                "collations": [
+                  {
+                    "fields": [
+                      {
+                        "expr": {
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          },
+                          "fieldRef": {}
+                        },
+                        "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                      }
+                    ]
+                  }
+                ],
+                "read": {
+                  "table": {
+                    "sourceId": "mem",
+                    "schema": "main",
+                    "table": "symbols"
+                  },
+                  "projection": [
+                    0,
+                    4
+                  ]
+                }
+              },
+              "listColumn": 1,
+              "withOrdinality": true,
+              "keepEmpty": true
+            }
+          },
+          "exprs": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 2
+              }
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 3
+              }
+            }
+          ]
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_STRING"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        },
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_I32",
+              "nullable": true
+            },
+            "fieldRef": {
+              "index": 2
+            }
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,58 @@
+-- u1
+report id:Full, first_name:Masked, members:Some
+3|T
+4|A
+7|T
+
+-- u2
+report id:Full, first_name:Masked, members:Some
+
+-- u3
+report id:Full, first_name:Redacted, members:Some
+3|<null>
+
+-- u3-in-o1
+report id:Full, first_name:Redacted, members:Some
+
+-- u4
+report id:Full, first_name:Full, members:All
+3|Tomas CANARY-FIRST-03
+4|Ada CANARY-FIRST-04
+7|Tara CANARY-FIRST-01
+
+-- u5
+report id:Full, first_name:Redacted, members:None
+
+-- u6
+report id:Full, first_name:Masked, members:Some
+
+-- u6-two-orgs
+report id:Full, first_name:Masked, members:Some
+3|0b10f954b1c6bb233d8dd8d63a220460
+4|13ef6532594dde74d242c703fa652ecb
+7|ed23bc5f944a7ec955ace055dba31f68
+
+-- u7
+report id:Full, first_name:Redacted, members:None
+
+-- u8
+report id:Full, first_name:Redacted, members:Some
+
+-- u9
+report id:Full, first_name:Redacted, members:Some
+3|<null>
+4|<null>
+7|<null>
+
+-- u10-in-a-region
+report id:Full, first_name:Redacted, members:None
+
+-- u11-subject-in-a-region
+report id:Full, first_name:Redacted, members:None
+
+-- u14-a-vendor
+report id:Full, first_name:Redacted, members:None
+
+-- u15-a-vendor-and-an-org
+report id:Full, first_name:Full, members:Some
+

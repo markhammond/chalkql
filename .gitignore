@@ -1,0 +1,52 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+artifacts/
+BenchmarkDotNet.Artifacts/
+TestResults/
+*.trx
+
+# Gradle / Java
+planner/.gradle/
+planner/build/
+.gradle/
+build/
+*.class
+
+# generated protobuf output (never checked in — D14)
+**/Generated/
+**/generated/
+
+# tooling
+.idea/
+.DS_Store
+*.swp
+node_modules/
+
+# A database a test fixture left behind. Fixtures write theirs under
+# Path.GetTempPath()/chalk-tests/ now (D133 §0c) and assert that before they open
+# one, so nothing here should ever match -- this is the net under the assertion,
+# widened after ":memory:chalk-<guid>" turned out to be a *file name* to
+# DuckDB.NET and slipped past the previous pattern. Twice, at the repository root
+# and under dotnet/, because a test process's working directory is its own bin/
+# and a tool's is wherever it was started.
+chalk-*.db*
+:memory:*
+*.duckdb
+/dotnet/:memory:*
+/dotnet/*.duckdb
+/dotnet/chalk-*.db*
+
+# ...and the one thing that pattern must not catch. On a case-insensitive file
+# system `*.duckdb` matches the directory `Chalk.Sources.DuckDb`, which is a
+# package and not a stray database.
+!/dotnet/src/Chalk.Sources.DuckDb/
+
+# Worktrees that parallel agents create under the repository; never content of the project
+.claude/worktrees/
+
+# NuGet packages written by scripts/pack.sh
+dist/

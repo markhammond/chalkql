@@ -1,0 +1,198 @@
+{
+  "irVersion": 1,
+  "planDigest": "15636152811733022831",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "region",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "region",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        }
+      ]
+    },
+    "estRowCount": 9.600000000000001,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "region",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            }
+          ]
+        },
+        "estRowCount": 9.600000000000001,
+        "setOp": {
+          "inputs": [
+            {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "region",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 6,
+              "read": {
+                "table": {
+                  "sourceId": "mem",
+                  "schema": "main",
+                  "table": "sales"
+                },
+                "projection": [
+                  1
+                ]
+              }
+            },
+            {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "region",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 4.800000000000001,
+              "project": {
+                "input": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "id",
+                        "type": {
+                          "kind": "TYPE_KIND_I32"
+                        }
+                      },
+                      {
+                        "name": "region",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 4.800000000000001,
+                  "filter": {
+                    "input": {
+                      "rowType": {
+                        "fields": [
+                          {
+                            "name": "id",
+                            "type": {
+                              "kind": "TYPE_KIND_I32"
+                            }
+                          },
+                          {
+                            "name": "region",
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            }
+                          }
+                        ]
+                      },
+                      "estRowCount": 6,
+                      "read": {
+                        "table": {
+                          "sourceId": "mem",
+                          "schema": "main",
+                          "table": "sales"
+                        },
+                        "projection": [
+                          0,
+                          1
+                        ]
+                      }
+                    },
+                    "condition": {
+                      "type": {
+                        "kind": "TYPE_KIND_BOOL"
+                      },
+                      "call": {
+                        "function": "FUNCTION_ID_LT",
+                        "args": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_I32"
+                            },
+                            "fieldRef": {}
+                          },
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_I32"
+                            },
+                            "literal": {
+                              "i32Value": 5
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "exprs": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    },
+                    "fieldRef": {
+                      "index": 1
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "kind": "SET_OP_KIND_INTERSECT_ALL"
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_STRING"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

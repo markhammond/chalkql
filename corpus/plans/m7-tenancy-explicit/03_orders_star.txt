@@ -1,0 +1,8 @@
+-- u1-explicit
+report id:Full, member_id:Full, org_id:Full, amount:PerRow, note:PerRow, created_by:Full, region_id:Full, orders:Some
+1|1|1|8100013|n1 CANARY-NOTE-01|1|1
+2|1|1|8203307|n2 CANARY-NOTE-02|1|2
+3|2|1|8311111|n3 CANARY-NOTE-03|1|1
+4|2|1|8427761|n4 CANARY-NOTE-04|2|2
+7|5|3|8811119|n7 CANARY-NOTE-07|1|3
+

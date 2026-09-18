@@ -1,0 +1,87 @@
+-- u1
+report id:Full, member_id:PerRow, org_id:PerRow, amount:PerRow, note:PerRow, created_by:Full, region_id:Full, orders:Some
+1|1|1|8100013|n1 CANARY-NOTE-01|1|1
+2|1|1|8203307|n2 CANARY-NOTE-02|1|2
+3|2|1|8311111|n3 CANARY-NOTE-03|1|1
+4|2|1|<null>|n4 CANARY-NOTE-04|2|2
+5|3|2|<null>|********|3|1
+6|4|2|<null>|********|3|3
+7|5|3|8811119|n7 CANARY-NOTE-07|1|3
+
+-- u2
+report id:Full, member_id:PerRow, org_id:PerRow, amount:PerRow, note:PerRow, created_by:Full, region_id:Full, orders:Some
+1|1|1|<null>|********|1|1
+2|1|1|<null>|********|1|2
+3|2|1|<null>|********|1|1
+4|2|1|8427761|n4 CANARY-NOTE-04|2|2
+
+-- u3
+report id:Full, member_id:PerRow, org_id:PerRow, amount:PerRow, note:PerRow, created_by:Full, region_id:Full, orders:Some
+5|3|2|8549939|n5 CANARY-NOTE-05|3|1
+6|4|2|8677777|n6 CANARY-NOTE-06|3|3
+
+-- u3-in-o1
+report id:Full, member_id:PerRow, org_id:PerRow, amount:PerRow, note:PerRow, created_by:Full, region_id:Full, orders:Some
+5|3|2|8549939|n5 CANARY-NOTE-05|3|1
+6|4|2|8677777|n6 CANARY-NOTE-06|3|3
+
+-- u4
+report id:Full, member_id:Full, org_id:Full, amount:PerRow, note:Full, created_by:Full, region_id:Full, orders:All
+1|1|1|<null>|n1 CANARY-NOTE-01|1|1
+2|1|1|<null>|n2 CANARY-NOTE-02|1|2
+3|2|1|<null>|n3 CANARY-NOTE-03|1|1
+4|2|1|<null>|n4 CANARY-NOTE-04|2|2
+5|3|2|<null>|n5 CANARY-NOTE-05|3|1
+6|4|2|<null>|n6 CANARY-NOTE-06|3|3
+7|5|3|<null>|n7 CANARY-NOTE-07|1|3
+
+-- u5
+report id:Full, member_id:PerRow, org_id:PerRow, amount:PerRow, note:PerRow, created_by:Full, region_id:Full, orders:Some
+
+-- u6
+POLICY Refused by the entitlements: main.orders.amount is population-only for this principal and a projection to the result is not one of the aggregates it permits.
+
+-- u6-two-orgs
+POLICY Refused by the entitlements: main.orders.amount is population-only for this principal and a projection to the result is not one of the aggregates it permits.
+
+-- u7
+report id:Full, member_id:PerRow, org_id:PerRow, amount:PerRow, note:PerRow, created_by:Full, region_id:Full, orders:Some
+
+-- u8
+report id:Full, member_id:PerRow, org_id:PerRow, amount:PerRow, note:PerRow, created_by:Full, region_id:Full, orders:Some
+1|1|1|<null>|<null>|1|1
+2|1|1|<null>|<null>|1|2
+3|2|1|<null>|<null>|1|1
+4|2|1|<null>|<null>|2|2
+
+-- u9
+report id:Full, member_id:PerRow, org_id:PerRow, amount:PerRow, note:PerRow, created_by:Full, region_id:Full, orders:Some
+1|1|1|<null>|<null>|1|1
+2|1|1|<null>|<null>|1|2
+3|2|1|<null>|<null>|1|1
+4|2|1|<null>|<null>|2|2
+5|3|2|<null>|<null>|3|1
+6|4|2|<null>|<null>|3|3
+
+-- u10-in-a-region
+POLICY Refused by the entitlements: main.orders.amount is population-only for this principal and a projection to the result is not one of the aggregates it permits.
+
+-- u11-subject-in-a-region
+report id:Full, member_id:PerRow, org_id:PerRow, amount:PerRow, note:PerRow, created_by:Full, region_id:Full, orders:Some
+1|1|1|<null>|n1 CANARY-NOTE-01|1|1
+
+-- u14-a-vendor
+report id:Full, member_id:PerRow, org_id:PerRow, amount:PerRow, note:PerRow, created_by:Full, region_id:Full, orders:Some
+1|<null>|<null>|<null>|<null>|1|1
+5|<null>|<null>|<null>|<null>|3|1
+7|<null>|<null>|<null>|<null>|1|3
+
+-- u15-a-vendor-and-an-org
+report id:Full, member_id:PerRow, org_id:PerRow, amount:PerRow, note:PerRow, created_by:Full, region_id:Full, orders:Some
+1|1|1|<null>|n1 CANARY-NOTE-01|1|1
+2|1|1|<null>|n2 CANARY-NOTE-02|1|2
+3|2|1|<null>|n3 CANARY-NOTE-03|1|1
+4|2|1|<null>|n4 CANARY-NOTE-04|2|2
+5|<null>|<null>|<null>|<null>|3|1
+7|<null>|<null>|<null>|<null>|1|3
+

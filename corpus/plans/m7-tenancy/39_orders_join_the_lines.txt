@@ -1,0 +1,83 @@
+-- u1
+report id:Full, id0:Full, quantity:Full, unit_price:PerRow, orders:Some, order_items:Some
+1|1|2|50
+1|2|4|30
+2|3|1|200
+5|4|3|70
+
+-- u2
+report id:Full, id0:Full, quantity:Full, unit_price:Full, orders:Some, order_items:Some
+1|1|2|50
+1|2|4|30
+2|3|1|200
+
+-- u3
+report id:Full, id0:Full, quantity:Full, unit_price:Full, orders:Some, order_items:Some
+5|4|3|70
+
+-- u3-in-o1
+report id:Full, id0:Full, quantity:Full, unit_price:Full, orders:Some, order_items:Some
+
+-- u4
+report id:Full, id0:Full, quantity:Full, unit_price:Full, orders:All, order_items:All
+1|1|2|50
+1|2|4|30
+2|3|1|200
+5|4|3|70
+7|5|1|90
+
+-- u5
+report id:Full, id0:Full, quantity:Full, unit_price:Redacted, orders:Some, order_items:None
+
+-- u6
+report id:Full, id0:Full, quantity:Full, unit_price:Full, orders:Some, order_items:Some
+1|1|2|50
+1|2|4|30
+2|3|1|200
+
+-- u6-two-orgs
+report id:Full, id0:Full, quantity:Full, unit_price:PerRow, orders:Some, order_items:Some
+1|1|2|50
+1|2|4|30
+2|3|1|200
+5|4|3|70
+
+-- u7
+report id:Full, id0:Full, quantity:Full, unit_price:Redacted, orders:Some, order_items:None
+
+-- u8
+report id:Full, id0:Full, quantity:Full, unit_price:Full, orders:Some, order_items:Some
+1|1|2|50
+1|2|4|30
+2|3|1|200
+
+-- u9
+report id:Full, id0:Full, quantity:Full, unit_price:PerRow, orders:Some, order_items:Some
+1|1|2|50
+1|2|4|30
+2|3|1|200
+5|4|3|70
+
+-- u10-in-a-region
+report id:Full, id0:Full, quantity:Full, unit_price:Full, orders:Some, order_items:Some
+2|3|1|200
+
+-- u11-subject-in-a-region
+report id:Full, id0:Full, quantity:Full, unit_price:Full, orders:Some, order_items:Some
+1|1|2|50
+1|2|4|30
+
+-- u14-a-vendor
+report id:Full, id0:Full, quantity:Full, unit_price:Redacted, orders:Some, order_items:Some
+1|1|2|<null>
+5|4|3|<null>
+7|5|1|<null>
+
+-- u15-a-vendor-and-an-org
+report id:Full, id0:Full, quantity:Full, unit_price:PerRow, orders:Some, order_items:Some
+1|1|2|50
+1|2|4|30
+2|3|1|200
+5|4|3|<null>
+7|5|1|<null>
+

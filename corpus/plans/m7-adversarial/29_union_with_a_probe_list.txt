@@ -1,0 +1,95 @@
+-- u1
+report n:PerRow, members:Some
+A
+B
+Bo CANARY-FIRST-02
+T
+Tara CANARY-FIRST-01
+
+-- u2
+report n:PerRow, members:Some
+B
+T
+
+-- u3
+report n:PerRow, members:Some
+B
+T
+<null>
+
+-- u3-in-o1
+report n:PerRow, members:Some
+B
+T
+
+-- u4
+report n:Full, members:All
+Ada CANARY-FIRST-04
+B
+Bo CANARY-FIRST-02
+Kim CANARY-FIRST-05
+Lea CANARY-FIRST-06
+T
+Tara CANARY-FIRST-01
+Tomas CANARY-FIRST-03
+
+-- u5
+report n:PerRow, members:None
+B
+T
+
+-- u6
+report n:PerRow, members:Some
+6657767d30a1fb0444393493e42f5527
+B
+T
+ed23bc5f944a7ec955ace055dba31f68
+
+-- u6-two-orgs
+report n:PerRow, members:Some
+0b10f954b1c6bb233d8dd8d63a220460
+13ef6532594dde74d242c703fa652ecb
+6657767d30a1fb0444393493e42f5527
+B
+T
+ed23bc5f944a7ec955ace055dba31f68
+
+-- u7
+report n:PerRow, members:None
+B
+T
+
+-- u8
+report n:PerRow, members:Some
+B
+T
+<null>
+
+-- u9
+report n:PerRow, members:Some
+B
+T
+<null>
+
+-- u10-in-a-region
+report n:PerRow, members:None
+B
+T
+
+-- u11-subject-in-a-region
+report n:PerRow, members:None
+B
+T
+
+-- u14-a-vendor
+report n:PerRow, members:None
+B
+T
+
+-- u15-a-vendor-and-an-org
+report n:Full, members:Some
+B
+Bo CANARY-FIRST-02
+T
+Tara CANARY-FIRST-01
+

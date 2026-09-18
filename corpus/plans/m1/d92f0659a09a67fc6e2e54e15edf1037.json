@@ -1,0 +1,317 @@
+{
+  "irVersion": 1,
+  "planDigest": "7332183305507912616",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "ts",
+        "type": {
+          "kind": "TYPE_KIND_TIMESTAMP",
+          "precision": 9
+        }
+      },
+      {
+        "name": "range_pct",
+        "type": {
+          "kind": "TYPE_KIND_FP64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "ts",
+          "type": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          }
+        },
+        {
+          "name": "range_pct",
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 50400,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "project": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              }
+            },
+            {
+              "name": "open",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              }
+            },
+            {
+              "name": "high",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              }
+            },
+            {
+              "name": "low",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              }
+            }
+          ]
+        },
+        "estRowCount": 50400,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "filter": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "symbol",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                },
+                {
+                  "name": "ts",
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  }
+                },
+                {
+                  "name": "open",
+                  "type": {
+                    "kind": "TYPE_KIND_FP64"
+                  }
+                },
+                {
+                  "name": "high",
+                  "type": {
+                    "kind": "TYPE_KIND_FP64"
+                  }
+                },
+                {
+                  "name": "low",
+                  "type": {
+                    "kind": "TYPE_KIND_FP64"
+                  }
+                }
+              ]
+            },
+            "estRowCount": 100800,
+            "collations": [
+              {
+                "fields": [
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_TIMESTAMP",
+                        "precision": 9
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  },
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {}
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  }
+                ]
+              }
+            ],
+            "read": {
+              "table": {
+                "sourceId": "mem",
+                "schema": "main",
+                "table": "bars"
+              },
+              "projection": [
+                0,
+                1,
+                2,
+                3,
+                4
+              ]
+            }
+          },
+          "condition": {
+            "type": {
+              "kind": "TYPE_KIND_BOOL"
+            },
+            "call": {
+              "function": "FUNCTION_ID_NE",
+              "args": [
+                {
+                  "type": {
+                    "kind": "TYPE_KIND_FP64"
+                  },
+                  "fieldRef": {
+                    "index": 2
+                  }
+                },
+                {
+                  "type": {
+                    "kind": "TYPE_KIND_FP64"
+                  },
+                  "literal": {
+                    "fp64Value": 0
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "exprs": [
+        {
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          },
+          "fieldRef": {}
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          },
+          "fieldRef": {
+            "index": 1
+          }
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          },
+          "call": {
+            "function": "FUNCTION_ID_DIVIDE",
+            "args": [
+              {
+                "type": {
+                  "kind": "TYPE_KIND_FP64"
+                },
+                "call": {
+                  "function": "FUNCTION_ID_SUBTRACT",
+                  "args": [
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_FP64"
+                      },
+                      "fieldRef": {
+                        "index": 3
+                      }
+                    },
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_FP64"
+                      },
+                      "fieldRef": {
+                        "index": 4
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "type": {
+                  "kind": "TYPE_KIND_FP64"
+                },
+                "fieldRef": {
+                  "index": 2
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

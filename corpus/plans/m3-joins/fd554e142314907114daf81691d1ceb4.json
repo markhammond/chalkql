@@ -1,0 +1,133 @@
+{
+  "irVersion": 1,
+  "planDigest": "10017651053974679658",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "o_orderkey",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      },
+      {
+        "name": "o_totalprice",
+        "type": {
+          "kind": "TYPE_KIND_DECIMAL",
+          "precision": 15,
+          "scale": 2
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "o_orderkey",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        },
+        {
+          "name": "o_totalprice",
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "precision": 15,
+            "scale": 2
+          }
+        }
+      ]
+    },
+    "estRowCount": 199.01326755117006,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "filter": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "o_orderkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            },
+            {
+              "name": "o_totalprice",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              }
+            }
+          ]
+        },
+        "estRowCount": 15000,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_I64"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "read": {
+          "table": {
+            "sourceId": "mem",
+            "schema": "main",
+            "table": "orders"
+          },
+          "projection": [
+            0,
+            3
+          ]
+        }
+      },
+      "condition": {
+        "type": {
+          "kind": "TYPE_KIND_BOOL"
+        },
+        "call": {
+          "function": "FUNCTION_ID_LT",
+          "args": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {}
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "literal": {
+                "i64Value": "200"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

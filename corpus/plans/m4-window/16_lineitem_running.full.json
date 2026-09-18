@@ -1,0 +1,261 @@
+{
+  "irVersion": 1,
+  "planDigest": "6294606114191428298",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "l_orderkey",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      },
+      {
+        "name": "l_linenumber",
+        "type": {
+          "kind": "TYPE_KIND_I32"
+        }
+      },
+      {
+        "name": "running_quantity",
+        "type": {
+          "kind": "TYPE_KIND_DECIMAL",
+          "precision": 38,
+          "scale": 2
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "l_orderkey",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        },
+        {
+          "name": "l_linenumber",
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          }
+        },
+        {
+          "name": "running_quantity",
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "precision": 38,
+            "scale": 2
+          }
+        }
+      ]
+    },
+    "estRowCount": 60000,
+    "project": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "l_orderkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            },
+            {
+              "name": "l_linenumber",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              }
+            },
+            {
+              "name": "l_quantity",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              }
+            },
+            {
+              "name": "running_quantity",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 38,
+                "scale": 2
+              }
+            }
+          ]
+        },
+        "estRowCount": 60000,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_I64"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_I32"
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "window": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "l_orderkey",
+                  "type": {
+                    "kind": "TYPE_KIND_I64"
+                  }
+                },
+                {
+                  "name": "l_linenumber",
+                  "type": {
+                    "kind": "TYPE_KIND_I32"
+                  }
+                },
+                {
+                  "name": "l_quantity",
+                  "type": {
+                    "kind": "TYPE_KIND_DECIMAL",
+                    "precision": 15,
+                    "scale": 2
+                  }
+                }
+              ]
+            },
+            "estRowCount": 60000,
+            "collations": [
+              {
+                "fields": [
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_I64"
+                      },
+                      "fieldRef": {}
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  },
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_I32"
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  }
+                ]
+              }
+            ],
+            "read": {
+              "table": {
+                "sourceId": "mem",
+                "schema": "main",
+                "table": "lineitem"
+              },
+              "projection": [
+                0,
+                1,
+                4
+              ]
+            }
+          },
+          "partitionKeys": [
+            0
+          ],
+          "order": [
+            {
+              "expr": {
+                "type": {
+                  "kind": "TYPE_KIND_I32"
+                },
+                "fieldRef": {
+                  "index": 1
+                }
+              },
+              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+            }
+          ],
+          "frame": {
+            "mode": "FRAME_MODE_RANGE",
+            "lower": {
+              "kind": "FRAME_BOUND_KIND_UNBOUNDED_PRECEDING"
+            },
+            "upper": {
+              "kind": "FRAME_BOUND_KIND_CURRENT_ROW"
+            },
+            "exclusion": "FRAME_EXCLUSION_NO_OTHERS"
+          },
+          "calls": [
+            {
+              "aggregate": "AGGREGATE_FUNCTION_ID_SUM",
+              "args": [
+                {
+                  "type": {
+                    "kind": "TYPE_KIND_DECIMAL",
+                    "precision": 15,
+                    "scale": 2
+                  },
+                  "fieldRef": {
+                    "index": 2
+                  }
+                }
+              ],
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 38,
+                "scale": 2
+              }
+            }
+          ]
+        }
+      },
+      "exprs": [
+        {
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          },
+          "fieldRef": {}
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          },
+          "fieldRef": {
+            "index": 1
+          }
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "precision": 38,
+            "scale": 2
+          },
+          "fieldRef": {
+            "index": 3
+          }
+        }
+      ]
+    }
+  }
+}

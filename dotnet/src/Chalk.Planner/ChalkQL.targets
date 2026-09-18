@@ -1,0 +1,14 @@
+<Project>
+  <!--
+    Imported into every project that references ChalkQL.Planner. The jar lands beside the host's
+    binaries as chalk-planner.jar — in the output directory on build and in the publish directory on
+    publish — which is where PlannerProcess looks when no path is configured.
+  -->
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../tools/chalk-planner.jar"
+          Link="chalk-planner.jar"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false" />
+  </ItemGroup>
+</Project>

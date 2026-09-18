@@ -1,0 +1,228 @@
+{
+  "irVersion": 1,
+  "planDigest": "14585057252869481305",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "o_orderstatus",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "n",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "o_orderstatus",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "n",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 1500,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "o_orderstatus",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "n",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            }
+          ]
+        },
+        "estRowCount": 1500,
+        "hashAggregate": {
+          "aggregate": {
+            "input": {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "o_orderstatus",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 15000,
+              "project": {
+                "input": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "o_orderkey",
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        }
+                      },
+                      {
+                        "name": "o_custkey",
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        }
+                      },
+                      {
+                        "name": "o_orderstatus",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      },
+                      {
+                        "name": "o_totalprice",
+                        "type": {
+                          "kind": "TYPE_KIND_DECIMAL",
+                          "precision": 15,
+                          "scale": 2
+                        }
+                      },
+                      {
+                        "name": "o_orderdate",
+                        "type": {
+                          "kind": "TYPE_KIND_DATE"
+                        }
+                      },
+                      {
+                        "name": "o_orderpriority",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      },
+                      {
+                        "name": "o_clerk",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      },
+                      {
+                        "name": "o_shippriority",
+                        "type": {
+                          "kind": "TYPE_KIND_I32"
+                        }
+                      },
+                      {
+                        "name": "o_comment",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 15000,
+                  "collations": [
+                    {
+                      "fields": [
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_I64"
+                            },
+                            "fieldRef": {}
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        }
+                      ]
+                    }
+                  ],
+                  "read": {
+                    "table": {
+                      "sourceId": "mem",
+                      "schema": "main",
+                      "table": "orders"
+                    },
+                    "projection": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6,
+                      7,
+                      8
+                    ]
+                  }
+                },
+                "exprs": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    },
+                    "fieldRef": {
+                      "index": 2
+                    }
+                  }
+                ]
+              }
+            },
+            "groupings": [
+              {
+                "keys": [
+                  0
+                ]
+              }
+            ],
+            "measures": [
+              {
+                "function": "AGGREGATE_FUNCTION_ID_COUNT",
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_STRING"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

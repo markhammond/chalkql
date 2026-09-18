@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The planner sidecar as a package: no assembly, one runnable jar. The jar is the shadow jar the
+    Gradle build produces (scripts/pack.sh builds it first); ChalkQL.targets copies it
+    beside a referencing host's binaries as chalk-planner.jar, on build and on publish, which is the
+    last place PlannerProcess looks when PlannerProcessOptions.JarPath and CHALK_PLANNER_JAR are unset.
+    A JDK 21 or newer on the host is the one thing this package does not carry.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Chalk.Planner</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>The ChalkQL planner sidecar: the Apache Calcite planner as one runnable jar, copied beside your binaries as chalk-planner.jar. Needs a JDK 21 or newer at run time.</Description>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);NU5128;CS2008</NoWarn>
+    <PlannerJarGlob>$(RepoRoot)planner/build/libs/chalk-planner-*-all.jar</PlannerJarGlob>
+  </PropertyGroup>
+  <ItemGroup>
+    <PlannerJar Include="$(PlannerJarGlob)" />
+    <None Include="@(PlannerJar)" Pack="true" PackagePath="tools/chalk-planner.jar" Visible="false" />
+    <!-- Beside the project, not under build/: the repository ignores build/ directories as Gradle output. -->
+    <None Include="ChalkQL.targets" Pack="true" PackagePath="build/" />
+    <None Include="THIRD-PARTY-NOTICES.txt" Pack="true" PackagePath="/" />
+  </ItemGroup>
+  <Target Name="RequireOnePlannerJar" BeforeTargets="GenerateNuspec">
+    <Error Condition="'@(PlannerJar->Count())' != '1'"
+           Text="ChalkQL.Planner packs exactly one planner jar and found @(PlannerJar->Count()) matching $(PlannerJarGlob); run scripts/pack.sh, which builds it first." />
+  </Target>
+</Project>

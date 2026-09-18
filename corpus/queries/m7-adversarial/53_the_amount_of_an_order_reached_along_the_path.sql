@@ -1,0 +1,14 @@
+-- D265 clause (h), design 38 §8, class 1. The column a vendor may not read, on the rows it reaches
+-- along the path. `amount` carries the auditor's population-only rule and the creator's, and a
+-- vendor is neither, so it falls to the placeholder — on order 7 as much as on order 1, which is
+-- the point: reaching a row through the rows that belong to it discloses the row's existence and
+-- whatever its rules say, never more.
+-- expect: principals(all)
+-- POLICY for the auditor roles, exactly as corpus 12 already is: `amount` is population-only for
+-- them whichever region their grant is confined to, and a projection of it to the result is not one
+-- of the aggregates it permits. The vendor principals are not auditors, so what they meet is the
+-- placeholder.
+-- expect: policy(u6)
+-- expect: policy(u6-two-orgs)
+-- expect: policy(u10-in-a-region)
+SELECT id, amount FROM orders ORDER BY id

@@ -1,0 +1,434 @@
+#nullable enable
+Chalk.ArrowUtf8Extensions
+Chalk.Sources.Accumulate<TState, TIn>
+Chalk.Sources.AdaptiveBranch
+Chalk.Sources.AdaptiveBranch.Local = 1 -> Chalk.Sources.AdaptiveBranch
+Chalk.Sources.AdaptiveBranch.Lookup = 0 -> Chalk.Sources.AdaptiveBranch
+Chalk.Sources.AdaptiveDecision
+Chalk.Sources.AdaptiveDecision.AdaptiveDecision() -> void
+Chalk.Sources.AdaptiveDecision.Branch.get -> Chalk.Sources.AdaptiveBranch
+Chalk.Sources.AdaptiveDecision.Branch.init -> void
+Chalk.Sources.AdaptiveDecision.DistinctKeys.get -> long
+Chalk.Sources.AdaptiveDecision.DistinctKeys.init -> void
+Chalk.Sources.AdaptiveDecision.MaxKeys.get -> long
+Chalk.Sources.AdaptiveDecision.MaxKeys.init -> void
+Chalk.Sources.AdaptiveDecision.OperatorPath.get -> string!
+Chalk.Sources.AdaptiveDecision.OperatorPath.init -> void
+Chalk.Sources.AdaptiveDecision.SmallRows.get -> long
+Chalk.Sources.AdaptiveDecision.SmallRows.init -> void
+Chalk.Sources.AggregateSpec<TState, TIn, TOut>
+Chalk.Sources.AggregateSpec<TState, TIn, TOut>.Add.get -> Chalk.Sources.Accumulate<TState, TIn>!
+Chalk.Sources.AggregateSpec<TState, TIn, TOut>.Add.init -> void
+Chalk.Sources.AggregateSpec<TState, TIn, TOut>.AggregateSpec() -> void
+Chalk.Sources.AggregateSpec<TState, TIn, TOut>.Finish.get -> System.Func<TState, TOut>!
+Chalk.Sources.AggregateSpec<TState, TIn, TOut>.Finish.init -> void
+Chalk.Sources.AggregateSpec<TState, TIn, TOut>.Init.get -> System.Func<TState>!
+Chalk.Sources.AggregateSpec<TState, TIn, TOut>.Init.init -> void
+Chalk.Sources.AggregateSpec<TState, TIn, TOut>.Merge.get -> System.Func<TState, TState, TState>?
+Chalk.Sources.AggregateSpec<TState, TIn, TOut>.Merge.init -> void
+Chalk.Sources.AggregateSpec<TState, TIn, TOut>.Remove.get -> Chalk.Sources.Accumulate<TState, TIn>?
+Chalk.Sources.AggregateSpec<TState, TIn, TOut>.Remove.init -> void
+Chalk.Sources.ArenaBudgetExceededException
+Chalk.Sources.ArenaBudgetExceededException.ArenaBudgetExceededException(long maxBytes, long requestedBytes, long outstandingBytes) -> void
+Chalk.Sources.ArenaBudgetExceededException.MaxBytes.get -> long
+Chalk.Sources.ArenaBudgetExceededException.OutstandingBytes.get -> long
+Chalk.Sources.ArenaBudgetExceededException.RequestedBytes.get -> long
+Chalk.Sources.ArenaOptions
+Chalk.Sources.ArenaOptions.ArenaOptions() -> void
+Chalk.Sources.ArenaOptions.MaxBytes.get -> long?
+Chalk.Sources.ArenaOptions.MaxBytes.init -> void
+Chalk.Sources.ArenaOptions.MaxPooledRental.get -> long?
+Chalk.Sources.ArenaOptions.MaxPooledRental.init -> void
+Chalk.Sources.ArenaOptions.RetainBytes.get -> long
+Chalk.Sources.ArenaOptions.RetainBytes.init -> void
+Chalk.Sources.ArrowTypeMapping
+Chalk.Sources.BatchLifetimeException
+Chalk.Sources.BatchLifetimeException.CapturedGeneration.get -> int
+Chalk.Sources.BatchLifetimeException.CurrentGeneration.get -> int
+Chalk.Sources.ExecutionArena
+Chalk.Sources.ExecutionArena.Allocator.get -> Apache.Arrow.Memory.MemoryAllocator!
+Chalk.Sources.ExecutionArena.BeginExecution(Chalk.Sources.ExecutionStats? stats = null) -> void
+Chalk.Sources.ExecutionArena.CreateBuffer(System.ReadOnlySpan<byte> content) -> Apache.Arrow.ArrowBuffer
+Chalk.Sources.ExecutionArena.Dispose() -> void
+Chalk.Sources.ExecutionArena.EndExecution() -> void
+Chalk.Sources.ExecutionArena.ExecutionArena(Chalk.Sources.ArenaOptions? options = null) -> void
+Chalk.Sources.ExecutionArena.HeapFallbackBytes.get -> long
+Chalk.Sources.ExecutionArena.HeapFallbacks.get -> long
+Chalk.Sources.ExecutionArena.IsRunning.get -> bool
+Chalk.Sources.ExecutionArena.Options.get -> Chalk.Sources.ArenaOptions!
+Chalk.Sources.ExecutionArena.OutstandingBytes.get -> long
+Chalk.Sources.ExecutionArena.PeakBytes.get -> long
+Chalk.Sources.ExecutionArena.Rent<T>(int minimumLength) -> T[]!
+Chalk.Sources.ExecutionArena.RentStrings(int minimumLength) -> string![]!
+Chalk.Sources.ExecutionArena.Rentals.get -> long
+Chalk.Sources.ExecutionArena.RentedBytes.get -> long
+Chalk.Sources.ExecutionArena.RetainedBytes.get -> long
+Chalk.Sources.ExecutionArena.Return<T>(T[]! array) -> void
+Chalk.Sources.ExecutionArena.ReturnStrings(string![]! array) -> void
+Chalk.Sources.ExecutionArena.Trim() -> void
+Chalk.Sources.ExecutionArena.TrimmedBytes.get -> long
+Chalk.Sources.ExecutionArena.UnpooledReturnBytes.get -> long
+Chalk.Sources.ExecutionException
+Chalk.Sources.ExecutionException.ExecutionException(ulong planDigest, string! operatorPath, string! detail, System.Exception? innerException = null) -> void
+Chalk.Sources.ExecutionException.OperatorPath.get -> string!
+Chalk.Sources.ExecutionException.PlanDigest.get -> ulong
+Chalk.Sources.ExecutionStats
+Chalk.Sources.ExecutionStats.AdaptiveDecisions.get -> System.Collections.Generic.IReadOnlyList<Chalk.Sources.AdaptiveDecision!>!
+Chalk.Sources.ExecutionStats.AddBatchesProduced(long count) -> void
+Chalk.Sources.ExecutionStats.AddBytesFetched(long count) -> void
+Chalk.Sources.ExecutionStats.AddRemoteCalls(long count) -> void
+Chalk.Sources.ExecutionStats.AddRowsFetched(long count) -> void
+Chalk.Sources.ExecutionStats.AddRowsProduced(long count) -> void
+Chalk.Sources.ExecutionStats.AddRowsScanned(long count) -> void
+Chalk.Sources.ExecutionStats.ArenaPoolName.get -> string?
+Chalk.Sources.ExecutionStats.BatchesProduced.get -> long
+Chalk.Sources.ExecutionStats.BytesFetched.get -> long
+Chalk.Sources.ExecutionStats.Elapsed.get -> System.TimeSpan
+Chalk.Sources.ExecutionStats.Elapsed.set -> void
+Chalk.Sources.ExecutionStats.ExecutionStats() -> void
+Chalk.Sources.ExecutionStats.ObservePooledBytes(long bytes) -> void
+Chalk.Sources.ExecutionStats.PeakPooledBytes.get -> long
+Chalk.Sources.ExecutionStats.RecordAdaptiveDecision(Chalk.Sources.AdaptiveDecision! decision) -> void
+Chalk.Sources.ExecutionStats.RecordArenaPool(string? name) -> void
+Chalk.Sources.ExecutionStats.RecordFetch(string! sourceId, long rows, System.DateTimeOffset at) -> void
+Chalk.Sources.ExecutionStats.RecordSortPath(Chalk.Sources.SortPath path, bool tieBroken) -> void
+Chalk.Sources.ExecutionStats.RecordSourcePath(string! sourceId, string! path) -> void
+Chalk.Sources.ExecutionStats.RecordWindowPath(Chalk.Sources.WindowPath path) -> void
+Chalk.Sources.ExecutionStats.RemoteCalls.get -> long
+Chalk.Sources.ExecutionStats.RowsFetched.get -> long
+Chalk.Sources.ExecutionStats.RowsProduced.get -> long
+Chalk.Sources.ExecutionStats.RowsScanned.get -> long
+Chalk.Sources.ExecutionStats.SortsCompared.get -> long
+Chalk.Sources.ExecutionStats.SortsEncoded128.get -> long
+Chalk.Sources.ExecutionStats.SortsEncoded64.get -> long
+Chalk.Sources.ExecutionStats.SortsTieBroken.get -> long
+Chalk.Sources.ExecutionStats.SourceFetches.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Chalk.Sources.SourceFetchStats!>!
+Chalk.Sources.ExecutionStats.SourcePaths.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+Chalk.Sources.ExecutionStats.WindowsBuffered.get -> long
+Chalk.Sources.ExecutionStats.WindowsStreamed.get -> long
+Chalk.Sources.IRefreshTarget
+Chalk.Sources.IRefreshTarget.Schema.get -> string!
+Chalk.Sources.IRefreshTarget.SourceId.get -> string!
+Chalk.Sources.IRefreshTarget.Table.get -> string!
+Chalk.Sources.IRefreshableSource
+Chalk.Sources.IRefreshableSource.PrepareRefreshAsync(System.Collections.Generic.IReadOnlyList<Chalk.Sources.SourceRefreshEntry!>! entries, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<Chalk.Sources.ISourceRefreshCommit!>
+Chalk.Sources.IRefreshableSource.ValidateRefresh(System.Collections.Generic.IReadOnlyList<Chalk.Sources.SourceRefreshEntry!>! entries) -> void
+Chalk.Sources.ISourceRefreshCommit
+Chalk.Sources.ISourceRefreshCommit.Commit() -> void
+Chalk.Sources.ISourceRuntime
+Chalk.Sources.ISourceRuntime.DescribeSchema() -> Chalk.Catalog.SchemaDescriptor!
+Chalk.Sources.ISourceRuntime.ExecuteQueryAsync(Chalk.Sources.RemoteQueryRequest! request, Chalk.Sources.ScanContext! context, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Sources.ISourceRuntime.IndexLookupAsync(Chalk.Sources.IndexLookupRequest! request, Chalk.Sources.ScanContext! context, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Sources.ISourceRuntime.NativeStringLayout.get -> Chalk.Sources.StringLayouts
+Chalk.Sources.ISourceRuntime.RefreshAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+Chalk.Sources.ISourceRuntime.RefreshTableAsync(string! table, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+Chalk.Sources.ISourceRuntime.ScanAsync(Chalk.Sources.ScanRequest! request, Chalk.Sources.ScanContext! context, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Sources.ISourceRuntime.SourceId.get -> string!
+Chalk.Sources.ITableTarget
+Chalk.Sources.ITableTarget.Runtime.get -> Chalk.Sources.ISourceRuntime!
+Chalk.Sources.ITableTarget<T>
+Chalk.Sources.IndexKeyRange
+Chalk.Sources.IndexKeyRange.BoundedColumns.get -> int
+Chalk.Sources.IndexKeyRange.Contains(System.Collections.Generic.IReadOnlyList<object?>! key, System.Collections.Generic.IReadOnlyList<Chalk.Ir.SortDirection>! directions) -> bool
+Chalk.Sources.IndexKeyRange.IndexKeyRange() -> void
+Chalk.Sources.IndexKeyRange.Lower.get -> System.Collections.Generic.IReadOnlyList<object?>!
+Chalk.Sources.IndexKeyRange.Lower.init -> void
+Chalk.Sources.IndexKeyRange.LowerInclusive.get -> bool
+Chalk.Sources.IndexKeyRange.LowerInclusive.init -> void
+Chalk.Sources.IndexKeyRange.Upper.get -> System.Collections.Generic.IReadOnlyList<object?>!
+Chalk.Sources.IndexKeyRange.Upper.init -> void
+Chalk.Sources.IndexKeyRange.UpperInclusive.get -> bool
+Chalk.Sources.IndexKeyRange.UpperInclusive.init -> void
+Chalk.Sources.IndexLookupRequest
+Chalk.Sources.IndexLookupRequest.BatchSize.get -> int
+Chalk.Sources.IndexLookupRequest.BatchSize.init -> void
+Chalk.Sources.IndexLookupRequest.Index.get -> string!
+Chalk.Sources.IndexLookupRequest.Index.init -> void
+Chalk.Sources.IndexLookupRequest.IndexLookupRequest() -> void
+Chalk.Sources.IndexLookupRequest.OutputSchema.get -> Apache.Arrow.Schema!
+Chalk.Sources.IndexLookupRequest.OutputSchema.init -> void
+Chalk.Sources.IndexLookupRequest.Projection.get -> System.Collections.Generic.IReadOnlyList<int>!
+Chalk.Sources.IndexLookupRequest.Projection.init -> void
+Chalk.Sources.IndexLookupRequest.Ranges.get -> System.Collections.Generic.IReadOnlyList<Chalk.Sources.IndexKeyRange!>!
+Chalk.Sources.IndexLookupRequest.Ranges.init -> void
+Chalk.Sources.IndexLookupRequest.Table.get -> string!
+Chalk.Sources.IndexLookupRequest.Table.init -> void
+Chalk.Sources.InvalidUtf8Exception
+Chalk.Sources.InvalidUtf8Exception.InvalidUtf8Exception(string! subject, long row) -> void
+Chalk.Sources.InvalidUtf8Exception.Row.get -> long
+Chalk.Sources.InvalidUtf8Exception.Subject.get -> string!
+Chalk.Sources.RefreshTarget
+Chalk.Sources.RemoteQueryRequest
+Chalk.Sources.RemoteQueryRequest.BatchSize.get -> int
+Chalk.Sources.RemoteQueryRequest.BatchSize.init -> void
+Chalk.Sources.RemoteQueryRequest.Dialect.get -> string!
+Chalk.Sources.RemoteQueryRequest.Dialect.init -> void
+Chalk.Sources.RemoteQueryRequest.OutputSchema.get -> Apache.Arrow.Schema!
+Chalk.Sources.RemoteQueryRequest.OutputSchema.init -> void
+Chalk.Sources.RemoteQueryRequest.ParameterTypes.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>!
+Chalk.Sources.RemoteQueryRequest.ParameterTypes.init -> void
+Chalk.Sources.RemoteQueryRequest.Parameters.get -> System.Collections.Generic.IReadOnlyList<object?>!
+Chalk.Sources.RemoteQueryRequest.Parameters.init -> void
+Chalk.Sources.RemoteQueryRequest.PushedPlan.get -> Chalk.Ir.Rel!
+Chalk.Sources.RemoteQueryRequest.PushedPlan.init -> void
+Chalk.Sources.RemoteQueryRequest.QueryText.get -> string!
+Chalk.Sources.RemoteQueryRequest.QueryText.init -> void
+Chalk.Sources.RemoteQueryRequest.RemoteQueryRequest() -> void
+Chalk.Sources.RemoteQueryRequest.Timeout.get -> System.TimeSpan?
+Chalk.Sources.RemoteQueryRequest.Timeout.init -> void
+Chalk.Sources.ScanContext
+Chalk.Sources.ScanContext.Allocator.get -> Apache.Arrow.Memory.MemoryAllocator!
+Chalk.Sources.ScanContext.Arena.get -> Chalk.Sources.ExecutionArena!
+Chalk.Sources.ScanContext.Arena.init -> void
+Chalk.Sources.ScanContext.Parameters.get -> System.Collections.Generic.IReadOnlyList<object?>!
+Chalk.Sources.ScanContext.Parameters.init -> void
+Chalk.Sources.ScanContext.ScanContext() -> void
+Chalk.Sources.ScanContext.Stats.get -> Chalk.Sources.ExecutionStats!
+Chalk.Sources.ScanContext.Stats.init -> void
+Chalk.Sources.ScanRequest
+Chalk.Sources.ScanRequest.BatchSize.get -> int
+Chalk.Sources.ScanRequest.BatchSize.init -> void
+Chalk.Sources.ScanRequest.OutputSchema.get -> Apache.Arrow.Schema!
+Chalk.Sources.ScanRequest.OutputSchema.init -> void
+Chalk.Sources.ScanRequest.Projection.get -> System.Collections.Generic.IReadOnlyList<int>!
+Chalk.Sources.ScanRequest.Projection.init -> void
+Chalk.Sources.ScanRequest.PushedFilter.get -> Chalk.Ir.Expr?
+Chalk.Sources.ScanRequest.PushedFilter.init -> void
+Chalk.Sources.ScanRequest.ScanRequest() -> void
+Chalk.Sources.ScanRequest.Table.get -> string!
+Chalk.Sources.ScanRequest.Table.init -> void
+Chalk.Sources.SortPath
+Chalk.Sources.SortPath.Comparer = 0 -> Chalk.Sources.SortPath
+Chalk.Sources.SortPath.Encoded128 = 2 -> Chalk.Sources.SortPath
+Chalk.Sources.SortPath.Encoded64 = 1 -> Chalk.Sources.SortPath
+Chalk.Sources.SourceContractException
+Chalk.Sources.SourceContractException.SourceContractException(string! sourceId, string! table, string! detail) -> void
+Chalk.Sources.SourceContractException.SourceId.get -> string!
+Chalk.Sources.SourceContractException.Table.get -> string!
+Chalk.Sources.SourceEncoding
+Chalk.Sources.SourceExecutionException
+Chalk.Sources.SourceExecutionException.SourceExecutionException(string! sourceId, string! subject, System.Exception? innerException = null) -> void
+Chalk.Sources.SourceExecutionException.SourceId.get -> string!
+Chalk.Sources.SourceExecutionException.Subject.get -> string!
+Chalk.Sources.SourceFetchStats
+Chalk.Sources.SourceFetchStats.Calls.get -> long
+Chalk.Sources.SourceFetchStats.Calls.init -> void
+Chalk.Sources.SourceFetchStats.FirstFetch.get -> System.DateTimeOffset
+Chalk.Sources.SourceFetchStats.FirstFetch.init -> void
+Chalk.Sources.SourceFetchStats.LastFetch.get -> System.DateTimeOffset
+Chalk.Sources.SourceFetchStats.LastFetch.init -> void
+Chalk.Sources.SourceFetchStats.Rows.get -> long
+Chalk.Sources.SourceFetchStats.Rows.init -> void
+Chalk.Sources.SourceFetchStats.SourceFetchStats() -> void
+Chalk.Sources.SourceFetchStats.SourceId.get -> string!
+Chalk.Sources.SourceFetchStats.SourceId.init -> void
+Chalk.Sources.SourceOptions
+Chalk.Sources.SourceOptions.MaxConcurrentQueries.get -> int
+Chalk.Sources.SourceOptions.MaxConcurrentQueries.init -> void
+Chalk.Sources.SourceOptions.QueryTimeout.get -> System.TimeSpan
+Chalk.Sources.SourceOptions.QueryTimeout.init -> void
+Chalk.Sources.SourceOptions.Retries.get -> int
+Chalk.Sources.SourceOptions.SourceOptions() -> void
+Chalk.Sources.SourceRefreshEntry
+Chalk.Sources.SourceRefreshEntry.Kind.get -> Chalk.Sources.SourceRefreshKind
+Chalk.Sources.SourceRefreshEntry.Kind.init -> void
+Chalk.Sources.SourceRefreshEntry.RowType.get -> System.Type!
+Chalk.Sources.SourceRefreshEntry.RowType.init -> void
+Chalk.Sources.SourceRefreshEntry.Rows.get -> object!
+Chalk.Sources.SourceRefreshEntry.Rows.init -> void
+Chalk.Sources.SourceRefreshEntry.SourceRefreshEntry() -> void
+Chalk.Sources.SourceRefreshEntry.Statistics.get -> Chalk.Sources.StatisticsRefresh
+Chalk.Sources.SourceRefreshEntry.Statistics.init -> void
+Chalk.Sources.SourceRefreshEntry.Table.get -> string!
+Chalk.Sources.SourceRefreshEntry.Table.init -> void
+Chalk.Sources.SourceRefreshKind
+Chalk.Sources.SourceRefreshKind.Append = 1 -> Chalk.Sources.SourceRefreshKind
+Chalk.Sources.SourceRefreshKind.Replace = 0 -> Chalk.Sources.SourceRefreshKind
+Chalk.Sources.SourceTimeoutException
+Chalk.Sources.SourceTimeoutException.SourceId.get -> string!
+Chalk.Sources.SourceTimeoutException.SourceTimeoutException(string! sourceId, string! subject, System.TimeSpan timeout, System.Exception? innerException = null) -> void
+Chalk.Sources.SourceTimeoutException.Subject.get -> string!
+Chalk.Sources.SourceTimeoutException.Timeout.get -> System.TimeSpan
+Chalk.Sources.SourceValueOrder
+Chalk.Sources.SourceValueOrder.ISourceValueComparer
+Chalk.Sources.SourceValueOrder.ISourceValueComparer.Compare(object? left, object? right) -> int
+Chalk.Sources.StalePlanException
+Chalk.Sources.StalePlanException.LiveContextId.get -> string!
+Chalk.Sources.StalePlanException.LiveEpoch.get -> long
+Chalk.Sources.StalePlanException.PlanContextId.get -> string!
+Chalk.Sources.StalePlanException.PlanEpoch.get -> long
+Chalk.Sources.StalePlanException.StalePlanException(string! planContextId, long planEpoch, string! liveContextId, long liveEpoch) -> void
+Chalk.Sources.StalePlanException.StalePlanException(string! planContextId, long planEpoch, string! liveContextId, long liveEpoch, string? table) -> void
+Chalk.Sources.StalePlanException.Table.get -> string?
+Chalk.Sources.StatisticsRefresh
+Chalk.Sources.StatisticsRefresh.Defer = 1 -> Chalk.Sources.StatisticsRefresh
+Chalk.Sources.StatisticsRefresh.Now = 0 -> Chalk.Sources.StatisticsRefresh
+Chalk.Sources.StringLayouts
+Chalk.Sources.StringLayouts.Any = Chalk.Sources.StringLayouts.Utf8 | Chalk.Sources.StringLayouts.Utf8View -> Chalk.Sources.StringLayouts
+Chalk.Sources.StringLayouts.Utf8 = 1 -> Chalk.Sources.StringLayouts
+Chalk.Sources.StringLayouts.Utf8View = 2 -> Chalk.Sources.StringLayouts
+Chalk.Sources.UnsupportedFeatureException
+Chalk.Sources.UnsupportedFeatureException.Feature.get -> string!
+Chalk.Sources.UnsupportedFeatureException.UnsupportedFeatureException(string! feature, string! detail) -> void
+Chalk.Sources.WindowPath
+Chalk.Sources.WindowPath.Buffered = 0 -> Chalk.Sources.WindowPath
+Chalk.Sources.WindowPath.Streaming = 1 -> Chalk.Sources.WindowPath
+Chalk.Utf8String
+Chalk.Utf8String.AsMemory() -> System.ReadOnlyMemory<byte>
+Chalk.Utf8String.AsSpan() -> System.ReadOnlySpan<byte>
+Chalk.Utf8String.CompareTo(Chalk.Utf8String other) -> int
+Chalk.Utf8String.Equals(Chalk.Utf8String other) -> bool
+Chalk.Utf8String.Equals(System.Collections.Immutable.ImmutableArray<byte> other) -> bool
+Chalk.Utf8String.Equals(System.ReadOnlySpan<byte> other) -> bool
+Chalk.Utf8String.Equals(byte[]! other) -> bool
+Chalk.Utf8String.Equals<T>(Chalk.Utf8String other, T comparer) -> bool
+Chalk.Utf8String.IsEmpty.get -> bool
+Chalk.Utf8String.IsValid() -> bool
+Chalk.Utf8String.Length.get -> int
+Chalk.Utf8String.TextEquals(string? other) -> bool
+Chalk.Utf8String.ToArray() -> byte[]!
+Chalk.Utf8String.Utf8String() -> void
+Chalk.Utf8String.Utf8String(System.ReadOnlyMemory<byte> bytes) -> void
+Chalk.Utf8StringExtensions
+[CHALK001]Chalk.Sources.ColumnView
+[CHALK001]Chalk.Sources.ColumnView.BitPacked.get -> bool
+[CHALK001]Chalk.Sources.ColumnView.BitPacked.init -> void
+[CHALK001]Chalk.Sources.ColumnView.BoolAt(int row) -> bool
+[CHALK001]Chalk.Sources.ColumnView.Child.get -> Chalk.Sources.ColumnView
+[CHALK001]Chalk.Sources.ColumnView.Children.get -> Chalk.Sources.ColumnView[]?
+[CHALK001]Chalk.Sources.ColumnView.Children.init -> void
+[CHALK001]Chalk.Sources.ColumnView.ColumnView() -> void
+[CHALK001]Chalk.Sources.ColumnView.Generation.get -> int
+[CHALK001]Chalk.Sources.ColumnView.Generation.init -> void
+[CHALK001]Chalk.Sources.ColumnView.IsUtf8View.get -> bool
+[CHALK001]Chalk.Sources.ColumnView.IsValid(int row) -> bool
+[CHALK001]Chalk.Sources.ColumnView.Lanes<T>() -> System.ReadOnlySpan<T>
+[CHALK001]Chalk.Sources.ColumnView.Length.get -> int
+[CHALK001]Chalk.Sources.ColumnView.Length.init -> void
+[CHALK001]Chalk.Sources.ColumnView.NullCount.get -> int
+[CHALK001]Chalk.Sources.ColumnView.NullCount.init -> void
+[CHALK001]Chalk.Sources.ColumnView.Offset.get -> int
+[CHALK001]Chalk.Sources.ColumnView.Offset.init -> void
+[CHALK001]Chalk.Sources.ColumnView.OffsetLanes() -> System.ReadOnlySpan<int>
+[CHALK001]Chalk.Sources.ColumnView.Offsets.get -> System.ReadOnlyMemory<byte>
+[CHALK001]Chalk.Sources.ColumnView.Offsets.init -> void
+[CHALK001]Chalk.Sources.ColumnView.RawLanes(int width) -> System.ReadOnlySpan<byte>
+[CHALK001]Chalk.Sources.ColumnView.Slice(int start, int length) -> Chalk.Sources.ColumnView
+[CHALK001]Chalk.Sources.ColumnView.Type.get -> Chalk.Catalog.ChalkType
+[CHALK001]Chalk.Sources.ColumnView.Type.init -> void
+[CHALK001]Chalk.Sources.ColumnView.Utf8(int row) -> Chalk.Utf8String
+[CHALK001]Chalk.Sources.ColumnView.Utf8View(int row) -> Chalk.Utf8String
+[CHALK001]Chalk.Sources.ColumnView.Utf8ViewBytes(int row) -> System.ReadOnlySpan<byte>
+[CHALK001]Chalk.Sources.ColumnView.Utf8ViewLanes() -> System.ReadOnlySpan<byte>
+[CHALK001]Chalk.Sources.ColumnView.Utf8ViewLength(int row) -> int
+[CHALK001]Chalk.Sources.ColumnView.Utf8ViewMemory(int row) -> System.ReadOnlyMemory<byte>
+[CHALK001]Chalk.Sources.ColumnView.Validity.get -> System.ReadOnlyMemory<byte>
+[CHALK001]Chalk.Sources.ColumnView.Validity.init -> void
+[CHALK001]Chalk.Sources.ColumnView.ValidityBits() -> System.ReadOnlySpan<byte>
+[CHALK001]Chalk.Sources.ColumnView.Values.get -> System.ReadOnlyMemory<byte>
+[CHALK001]Chalk.Sources.ColumnView.Values.init -> void
+[CHALK001]Chalk.Sources.ColumnView.VarData() -> System.ReadOnlySpan<byte>
+[CHALK001]Chalk.Sources.ColumnView.VarValue(int row) -> System.ReadOnlySpan<byte>
+[CHALK001]Chalk.Sources.ColumnView.VarValueMemory(int row) -> System.ReadOnlyMemory<byte>
+[CHALK001]Chalk.Sources.ColumnView.ViewBufferCount.get -> int
+[CHALK001]Chalk.Sources.ColumnView.ViewBufferCount.init -> void
+[CHALK001]Chalk.Sources.ColumnView.ViewBuffers.get -> System.ReadOnlyMemory<byte>[]?
+[CHALK001]Chalk.Sources.ColumnView.ViewBuffers.init -> void
+[CHALK001]Chalk.Sources.ColumnWriter
+[CHALK001]Chalk.Sources.ColumnWriter.AppendNull() -> void
+[CHALK001]Chalk.Sources.ColumnWriter.AppendValue(System.ReadOnlySpan<byte> bytes) -> void
+[CHALK001]Chalk.Sources.ColumnWriter.BeginValidity(int length) -> System.Span<byte>
+[CHALK001]Chalk.Sources.ColumnWriter.BeginVarLength(int length, bool nullable) -> void
+[CHALK001]Chalk.Sources.ColumnWriter.NoValidity() -> void
+[CHALK001]Chalk.Sources.ColumnWriter.Type.get -> Chalk.Catalog.ChalkType
+[CHALK001]Chalk.Sources.ColumnWriter.Values<T>(int length) -> System.Span<T>
+[CHALK001]Chalk.Sources.FunctionContext
+[CHALK001]Chalk.Sources.FunctionContext.Arena.get -> Chalk.Sources.ExecutionArena?
+[CHALK001]Chalk.Sources.FunctionContext.Arena.init -> void
+[CHALK001]Chalk.Sources.FunctionContext.FunctionContext() -> void
+[CHALK001]Chalk.Sources.FunctionContext.Now.get -> System.DateTimeOffset
+[CHALK001]Chalk.Sources.FunctionContext.Now.init -> void
+[CHALK001]Chalk.Sources.FunctionContext.RowCount.get -> int
+[CHALK001]Chalk.Sources.FunctionContext.RowCount.init -> void
+[CHALK001]Chalk.Sources.FunctionSignature
+[CHALK001]Chalk.Sources.FunctionSignature.FunctionSignature() -> void
+[CHALK001]Chalk.Sources.FunctionSignature.Name.get -> string!
+[CHALK001]Chalk.Sources.FunctionSignature.Name.init -> void
+[CHALK001]Chalk.Sources.FunctionSignature.Parameters.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>!
+[CHALK001]Chalk.Sources.FunctionSignature.Parameters.init -> void
+[CHALK001]Chalk.Sources.FunctionSignature.ReturnType.get -> Chalk.Catalog.ChalkType
+[CHALK001]Chalk.Sources.FunctionSignature.ReturnType.init -> void
+[CHALK001]Chalk.Sources.IVectorFunction
+[CHALK001]Chalk.Sources.IVectorFunction.Invoke(System.ReadOnlySpan<Chalk.Sources.ColumnView> args, Chalk.Sources.ColumnWriter! result, in Chalk.Sources.FunctionContext context) -> void
+[CHALK001]Chalk.Sources.IVectorFunction.Signature.get -> Chalk.Sources.FunctionSignature!
+[CHALK001]static Chalk.Sources.ColumnView.Empty(Chalk.Catalog.ChalkType type) -> Chalk.Sources.ColumnView
+const Chalk.Sources.ArrowTypeMapping.ListElementName = "item" -> string!
+override Chalk.Sources.AdaptiveDecision.ToString() -> string!
+override Chalk.Sources.ExecutionStats.ToString() -> string!
+override Chalk.Sources.IndexKeyRange.ToString() -> string!
+override Chalk.Sources.SourceFetchStats.ToString() -> string!
+override Chalk.Utf8String.Equals(object? obj) -> bool
+override Chalk.Utf8String.GetHashCode() -> int
+override Chalk.Utf8String.ToString() -> string!
+static Chalk.ArrowUtf8Extensions.GetUtf8(this Apache.Arrow.StringArray! array, int index) -> Chalk.Utf8String
+static Chalk.ArrowUtf8Extensions.GetUtf8(this Apache.Arrow.StringViewArray! array, int index) -> Chalk.Utf8String
+static Chalk.Sources.ArrowTypeMapping.AreEquivalent(Apache.Arrow.Field! left, Apache.Arrow.Field! right) -> bool
+static Chalk.Sources.ArrowTypeMapping.AreEquivalent(Apache.Arrow.Schema! left, Apache.Arrow.Schema! right) -> bool
+static Chalk.Sources.ArrowTypeMapping.AreEquivalent(Apache.Arrow.Types.IArrowType! left, Apache.Arrow.Types.IArrowType! right) -> bool
+static Chalk.Sources.ArrowTypeMapping.DescribeArrow(Apache.Arrow.Schema! schema) -> string!
+static Chalk.Sources.ArrowTypeMapping.DescribeArrow(Apache.Arrow.Types.IArrowType! type) -> string!
+static Chalk.Sources.ArrowTypeMapping.FromArrow(Apache.Arrow.Schema! schema) -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ColumnDescriptor!>!
+static Chalk.Sources.ArrowTypeMapping.FromArrow(Apache.Arrow.Types.IArrowType! type, bool nullable) -> Chalk.Catalog.ChalkType
+static Chalk.Sources.ArrowTypeMapping.TimestampUnit(int precision) -> Apache.Arrow.Types.TimeUnit
+static Chalk.Sources.ArrowTypeMapping.ToArrow(Chalk.Catalog.ChalkType type) -> Apache.Arrow.Types.IArrowType!
+static Chalk.Sources.ArrowTypeMapping.ToArrow(Chalk.Catalog.ChalkType type, Chalk.Sources.StringLayouts strings) -> Apache.Arrow.Types.IArrowType!
+static Chalk.Sources.ArrowTypeMapping.ToArrowField(string! name, Chalk.Catalog.ChalkType type) -> Apache.Arrow.Field!
+static Chalk.Sources.ArrowTypeMapping.ToArrowField(string! name, Chalk.Catalog.ChalkType type, Chalk.Sources.StringLayouts strings) -> Apache.Arrow.Field!
+static Chalk.Sources.ArrowTypeMapping.ToArrowSchema(Chalk.Catalog.TableDescriptor! table, System.Collections.Generic.IReadOnlyList<int>! projection) -> Apache.Arrow.Schema!
+static Chalk.Sources.ArrowTypeMapping.ToArrowSchema(Chalk.Ir.RowType! rowType) -> Apache.Arrow.Schema!
+static Chalk.Sources.ArrowTypeMapping.ToArrowSchema(Chalk.Ir.RowType! rowType, System.Collections.Generic.IReadOnlyList<Chalk.Sources.StringLayouts>! strings) -> Apache.Arrow.Schema!
+static Chalk.Sources.ArrowTypeMapping.ToArrowSchema(System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ColumnDescriptor!>! columns) -> Apache.Arrow.Schema!
+static Chalk.Sources.ArrowTypeMapping.UnitsPerSecond(Apache.Arrow.Types.TimeUnit unit) -> long
+static Chalk.Sources.IndexKeyRange.All.get -> Chalk.Sources.IndexKeyRange!
+static Chalk.Sources.IndexKeyRange.Equality(params object?[]! key) -> Chalk.Sources.IndexKeyRange!
+static Chalk.Sources.RefreshTarget.Source(string! sourceId) -> Chalk.Sources.IRefreshTarget!
+static Chalk.Sources.RefreshTarget.Table(string! schema, string! table) -> Chalk.Sources.IRefreshTarget!
+static Chalk.Sources.SourceEncoding.WriteDecimal(decimal value, int precision, int scale, System.Span<byte> destination, string! sourceId, string! table, string! column) -> void
+static Chalk.Sources.SourceEncoding.WriteUuid(System.Guid value, System.Span<byte> destination) -> void
+static Chalk.Sources.SourceOptions.Default.get -> Chalk.Sources.SourceOptions!
+static Chalk.Sources.SourceValueOrder.Compare(object? left, object? right, Chalk.Ir.SortDirection direction) -> int
+static Chalk.Sources.SourceValueOrder.CompareValues(object! left, object! right) -> int
+static Chalk.Sources.SourceValueOrder.CreateComparer(object! value, Chalk.Ir.SortDirection direction) -> Chalk.Sources.SourceValueOrder.ISourceValueComparer!
+static Chalk.Sources.SourceValueOrder.CreateUntypedComparer(Chalk.Ir.SortDirection direction) -> Chalk.Sources.SourceValueOrder.ISourceValueComparer!
+static Chalk.Utf8String.Copy(System.ReadOnlySpan<byte> bytes) -> Chalk.Utf8String
+static Chalk.Utf8String.Empty.get -> Chalk.Utf8String
+static Chalk.Utf8String.FromAsciiString(string? value) -> Chalk.Utf8String
+static Chalk.Utf8String.FromBytes(System.ReadOnlyMemory<byte> bytes) -> Chalk.Utf8String
+static Chalk.Utf8String.FromBytes(byte[]? bytes) -> Chalk.Utf8String
+static Chalk.Utf8String.FromString(string? value) -> Chalk.Utf8String
+static Chalk.Utf8String.Hash(System.ReadOnlySpan<byte> bytes) -> int
+static Chalk.Utf8String.IsValidUtf8(System.ReadOnlySpan<byte> bytes) -> bool
+static Chalk.Utf8String.implicit operator Chalk.Utf8String(System.ReadOnlyMemory<byte> bytes) -> Chalk.Utf8String
+static Chalk.Utf8String.implicit operator Chalk.Utf8String(byte[]? bytes) -> Chalk.Utf8String
+static Chalk.Utf8String.operator !=(Chalk.Utf8String left, Chalk.Utf8String right) -> bool
+static Chalk.Utf8String.operator !=(Chalk.Utf8String left, System.ReadOnlySpan<byte> right) -> bool
+static Chalk.Utf8String.operator !=(Chalk.Utf8String left, string? right) -> bool
+static Chalk.Utf8String.operator !=(System.ReadOnlySpan<byte> left, Chalk.Utf8String right) -> bool
+static Chalk.Utf8String.operator !=(string? left, Chalk.Utf8String right) -> bool
+static Chalk.Utf8String.operator <(Chalk.Utf8String left, Chalk.Utf8String right) -> bool
+static Chalk.Utf8String.operator <=(Chalk.Utf8String left, Chalk.Utf8String right) -> bool
+static Chalk.Utf8String.operator ==(Chalk.Utf8String left, Chalk.Utf8String right) -> bool
+static Chalk.Utf8String.operator ==(Chalk.Utf8String left, System.ReadOnlySpan<byte> right) -> bool
+static Chalk.Utf8String.operator ==(Chalk.Utf8String left, string? right) -> bool
+static Chalk.Utf8String.operator ==(System.ReadOnlySpan<byte> left, Chalk.Utf8String right) -> bool
+static Chalk.Utf8String.operator ==(string? left, Chalk.Utf8String right) -> bool
+static Chalk.Utf8String.operator >(Chalk.Utf8String left, Chalk.Utf8String right) -> bool
+static Chalk.Utf8String.operator >=(Chalk.Utf8String left, Chalk.Utf8String right) -> bool
+static Chalk.Utf8StringExtensions.ToUtf8String(this System.ReadOnlyMemory<byte> value) -> Chalk.Utf8String
+static Chalk.Utf8StringExtensions.ToUtf8String(this System.ReadOnlySpan<byte> value) -> Chalk.Utf8String
+static Chalk.Utf8StringExtensions.ToUtf8String(this byte[]? value) -> Chalk.Utf8String
+static Chalk.Utf8StringExtensions.ToUtf8String(this object? value) -> Chalk.Utf8String
+static Chalk.Utf8StringExtensions.TryGetUtf8String(System.ReadOnlyMemory<byte> value, out Chalk.Utf8String text) -> bool
+static Chalk.Utf8StringExtensions.TryGetUtf8String(System.ReadOnlySpan<byte> value, out Chalk.Utf8String text) -> bool
+static Chalk.Utf8StringExtensions.TryGetUtf8String(byte[]? value, out Chalk.Utf8String text) -> bool
+virtual Chalk.Sources.Accumulate<TState, TIn>.Invoke(ref TState state, TIn value) -> void

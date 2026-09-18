@@ -1,0 +1,53 @@
+-- u1
+report national_id:Redacted, n:Full, members:Some
+<null>|5
+
+-- u2
+report national_id:Redacted, n:Full, members:Some
+<null>|2
+
+-- u3
+report national_id:Redacted, n:Full, members:Some
+<null>|1
+
+-- u3-in-o1
+report national_id:Redacted, n:Full, members:Some
+
+-- u4
+report national_id:Redacted, n:Full, members:All
+<null>|7
+
+-- u5
+report national_id:Redacted, n:Full, members:None
+
+-- u6
+report national_id:Redacted, n:Full, members:Some
+<null>|2
+
+-- u6-two-orgs
+report national_id:Redacted, n:Full, members:Some
+<null>|5
+
+-- u7
+report national_id:Redacted, n:Full, members:None
+
+-- u8
+report national_id:Tested, n:Full, members:Some
+<null>|2
+
+-- u9
+POLICY Refused by the entitlements: main.members.national_id is population-only for this principal and a grouping key is not one of the aggregates it permits.
+
+-- u10-in-a-region
+report national_id:Redacted, n:Full, members:None
+
+-- u11-subject-in-a-region
+report national_id:Redacted, n:Full, members:None
+
+-- u14-a-vendor
+report national_id:Redacted, n:Full, members:None
+
+-- u15-a-vendor-and-an-org
+report national_id:Redacted, n:Full, members:Some
+<null>|2
+

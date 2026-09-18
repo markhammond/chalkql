@@ -1,0 +1,549 @@
+{
+  "irVersion": 1,
+  "planDigest": "9353595561730063561",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "ts",
+        "type": {
+          "kind": "TYPE_KIND_TIMESTAMP",
+          "precision": 9
+        }
+      },
+      {
+        "name": "close",
+        "type": {
+          "kind": "TYPE_KIND_FP64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "ts",
+          "type": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          }
+        },
+        {
+          "name": "close",
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 750,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "project": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              }
+            },
+            {
+              "name": "close",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              }
+            },
+            {
+              "name": "rn",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            }
+          ]
+        },
+        "estRowCount": 750,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_DESC_NULLS_FIRST"
+              }
+            ]
+          }
+        ],
+        "filter": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "symbol",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                },
+                {
+                  "name": "ts",
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  }
+                },
+                {
+                  "name": "close",
+                  "type": {
+                    "kind": "TYPE_KIND_FP64"
+                  }
+                },
+                {
+                  "name": "rn",
+                  "type": {
+                    "kind": "TYPE_KIND_I64"
+                  }
+                }
+              ]
+            },
+            "estRowCount": 5000,
+            "collations": [
+              {
+                "fields": [
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {}
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  },
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_TIMESTAMP",
+                        "precision": 9
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    },
+                    "direction": "SORT_DIRECTION_DESC_NULLS_FIRST"
+                  }
+                ]
+              }
+            ],
+            "window": {
+              "input": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "symbol",
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      }
+                    },
+                    {
+                      "name": "ts",
+                      "type": {
+                        "kind": "TYPE_KIND_TIMESTAMP",
+                        "precision": 9
+                      }
+                    },
+                    {
+                      "name": "close",
+                      "type": {
+                        "kind": "TYPE_KIND_FP64"
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 5000,
+                "collations": [
+                  {
+                    "fields": [
+                      {
+                        "expr": {
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          },
+                          "fieldRef": {}
+                        },
+                        "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                      },
+                      {
+                        "expr": {
+                          "type": {
+                            "kind": "TYPE_KIND_TIMESTAMP",
+                            "precision": 9
+                          },
+                          "fieldRef": {
+                            "index": 1
+                          }
+                        },
+                        "direction": "SORT_DIRECTION_DESC_NULLS_FIRST"
+                      }
+                    ]
+                  }
+                ],
+                "sort": {
+                  "input": {
+                    "rowType": {
+                      "fields": [
+                        {
+                          "name": "symbol",
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          }
+                        },
+                        {
+                          "name": "ts",
+                          "type": {
+                            "kind": "TYPE_KIND_TIMESTAMP",
+                            "precision": 9
+                          }
+                        },
+                        {
+                          "name": "close",
+                          "type": {
+                            "kind": "TYPE_KIND_FP64"
+                          }
+                        }
+                      ]
+                    },
+                    "estRowCount": 5000,
+                    "collations": [
+                      {
+                        "fields": [
+                          {
+                            "expr": {
+                              "type": {
+                                "kind": "TYPE_KIND_TIMESTAMP",
+                                "precision": 9
+                              },
+                              "fieldRef": {
+                                "index": 1
+                              }
+                            },
+                            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                          },
+                          {
+                            "expr": {
+                              "type": {
+                                "kind": "TYPE_KIND_STRING"
+                              },
+                              "fieldRef": {}
+                            },
+                            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                          }
+                        ]
+                      }
+                    ],
+                    "project": {
+                      "input": {
+                        "rowType": {
+                          "fields": [
+                            {
+                              "name": "symbol",
+                              "type": {
+                                "kind": "TYPE_KIND_STRING"
+                              }
+                            },
+                            {
+                              "name": "ts",
+                              "type": {
+                                "kind": "TYPE_KIND_TIMESTAMP",
+                                "precision": 9
+                              }
+                            },
+                            {
+                              "name": "open",
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              }
+                            },
+                            {
+                              "name": "high",
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              }
+                            },
+                            {
+                              "name": "low",
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              }
+                            },
+                            {
+                              "name": "close",
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              }
+                            },
+                            {
+                              "name": "volume",
+                              "type": {
+                                "kind": "TYPE_KIND_I64"
+                              }
+                            },
+                            {
+                              "name": "vwap",
+                              "type": {
+                                "kind": "TYPE_KIND_DECIMAL",
+                                "nullable": true,
+                                "precision": 28,
+                                "scale": 10
+                              }
+                            },
+                            {
+                              "name": "trade_count",
+                              "type": {
+                                "kind": "TYPE_KIND_I32",
+                                "nullable": true
+                              }
+                            }
+                          ]
+                        },
+                        "estRowCount": 5000,
+                        "collations": [
+                          {
+                            "fields": [
+                              {
+                                "expr": {
+                                  "type": {
+                                    "kind": "TYPE_KIND_TIMESTAMP",
+                                    "precision": 9
+                                  },
+                                  "fieldRef": {
+                                    "index": 1
+                                  }
+                                },
+                                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                              },
+                              {
+                                "expr": {
+                                  "type": {
+                                    "kind": "TYPE_KIND_STRING"
+                                  },
+                                  "fieldRef": {}
+                                },
+                                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                              }
+                            ]
+                          }
+                        ],
+                        "read": {
+                          "table": {
+                            "sourceId": "mem",
+                            "schema": "main",
+                            "table": "bars_small"
+                          },
+                          "projection": [
+                            0,
+                            1,
+                            2,
+                            3,
+                            4,
+                            5,
+                            6,
+                            7,
+                            8
+                          ]
+                        }
+                      },
+                      "exprs": [
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          },
+                          "fieldRef": {}
+                        },
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_TIMESTAMP",
+                            "precision": 9
+                          },
+                          "fieldRef": {
+                            "index": 1
+                          }
+                        },
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_FP64"
+                          },
+                          "fieldRef": {
+                            "index": 5
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "fields": [
+                    {
+                      "expr": {
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        },
+                        "fieldRef": {}
+                      },
+                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                    },
+                    {
+                      "expr": {
+                        "type": {
+                          "kind": "TYPE_KIND_TIMESTAMP",
+                          "precision": 9
+                        },
+                        "fieldRef": {
+                          "index": 1
+                        }
+                      },
+                      "direction": "SORT_DIRECTION_DESC_NULLS_FIRST"
+                    }
+                  ]
+                }
+              },
+              "partitionKeys": [
+                0
+              ],
+              "order": [
+                {
+                  "expr": {
+                    "type": {
+                      "kind": "TYPE_KIND_TIMESTAMP",
+                      "precision": 9
+                    },
+                    "fieldRef": {
+                      "index": 1
+                    }
+                  },
+                  "direction": "SORT_DIRECTION_DESC_NULLS_FIRST"
+                }
+              ],
+              "frame": {
+                "mode": "FRAME_MODE_ROWS",
+                "lower": {
+                  "kind": "FRAME_BOUND_KIND_UNBOUNDED_PRECEDING"
+                },
+                "upper": {
+                  "kind": "FRAME_BOUND_KIND_CURRENT_ROW"
+                },
+                "exclusion": "FRAME_EXCLUSION_NO_OTHERS"
+              },
+              "calls": [
+                {
+                  "windowFunction": "WINDOW_FUNCTION_ID_ROW_NUMBER",
+                  "type": {
+                    "kind": "TYPE_KIND_I64"
+                  }
+                }
+              ]
+            }
+          },
+          "condition": {
+            "type": {
+              "kind": "TYPE_KIND_BOOL"
+            },
+            "call": {
+              "function": "FUNCTION_ID_EQ",
+              "args": [
+                {
+                  "type": {
+                    "kind": "TYPE_KIND_I64"
+                  },
+                  "fieldRef": {
+                    "index": 3
+                  }
+                },
+                {
+                  "type": {
+                    "kind": "TYPE_KIND_I64"
+                  },
+                  "literal": {
+                    "i64Value": "1"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "exprs": [
+        {
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          },
+          "fieldRef": {}
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          },
+          "fieldRef": {
+            "index": 1
+          }
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          },
+          "fieldRef": {
+            "index": 2
+          }
+        }
+      ]
+    }
+  }
+}

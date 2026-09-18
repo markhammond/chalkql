@@ -1,0 +1,4 @@
+-- FULL
+ChalkValues(tuples=[[{ 1, 'x', null }]])
+-- NONE
+ChalkValues(tuples=[[{ 1, 'x', null }]])

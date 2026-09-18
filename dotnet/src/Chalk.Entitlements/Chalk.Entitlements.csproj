@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Entitlements</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>Chalk entitlements: the decorator that attaches a policy to an engine, the report, the explanation and the audit.</Description>
+  </PropertyGroup>
+
+  <!--
+    The entitlement wrapper (step 26c, docs/design/29-entitlements-as-a-wrapper.md, D213). Everything
+    entitlement-specific on the client side lives here, so a host that does not reference this
+    assembly never sees an entitlement word: no member of ChalkEngine, PrepareOptions or
+    PreparedQuery names one. What it uses of Chalk.Client is the extension bag, the request's bound
+    values and the prepared query it wraps.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../Chalk.Client/Chalk.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Apache.Arrow" />
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!--
+    entitlements.proto belongs to this assembly and to no other: a core client cannot construct an
+    EntitlementsOptions, which is what makes step 26's zero-cost property structural rather than only
+    tested (D212, §5).
+  -->
+  <ItemGroup>
+    <Protobuf Include="$(ProtoRootDir)/chalk/v1/entitlements.proto" ProtoRoot="$(ProtoRootDir)"
+              GrpcServices="None" Access="Public" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Chalk.Entitlements.Tests" />
+    <InternalsVisibleTo Include="Chalk.Integration.Tests" />
+    <InternalsVisibleTo Include="Chalk.TestKit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <!-- Generated protobuf carries no nullable annotations; see Chalk.Client.csproj for the reasoning. -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);RS0041</NoWarn>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The meta-package: one reference brings the client, the three sources, the entitlements layer with
+    its tenancy package, and the planner sidecar. Nothing of its own ships; the project exists so the
+    package's dependencies are the solution's own projects at the solution's own version.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <Description>ChalkQL: a federated SQL query engine for .NET with row- and column-level entitlements. Plans with Apache Calcite in a JVM sidecar, executes in-process over Apache Arrow across POCO collections, ADO.NET databases and DuckDB. This package references everything; a JDK 21 or newer is the only run-time requirement beyond .NET.</Description>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);NU5128;CS2008</NoWarn>
+    <RootNamespace>ChalkQL</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Chalk.Client/Chalk.Client.csproj" />
+    <ProjectReference Include="../Chalk.Sources.Poco/Chalk.Sources.Poco.csproj" />
+    <ProjectReference Include="../Chalk.Sources.Ado/Chalk.Sources.Ado.csproj" />
+    <ProjectReference Include="../Chalk.Sources.DuckDb/Chalk.Sources.DuckDb.csproj" />
+    <ProjectReference Include="../Chalk.Entitlements/Chalk.Entitlements.csproj" />
+    <ProjectReference Include="../Chalk.Entitlements.Tenancy/Chalk.Entitlements.Tenancy.csproj" />
+    <!-- PrivateAssets="none": the planner package's build assets (the jar copy) must reach a host that references only this package. -->
+    <ProjectReference Include="../Chalk.Planner/Chalk.Planner.csproj" PrivateAssets="none" />
+  </ItemGroup>
+</Project>

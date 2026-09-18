@@ -1,0 +1,56 @@
+Chalk
+Copyright 2026 The Chalk Authors
+
+This product depends at build and run time on software licensed under the Apache
+License 2.0 (Apache Calcite, Apache Arrow, gRPC, Protocol Buffers) and other
+permissive licences; those dependencies are obtained from their own
+distributions and are not redistributed here.
+
+--------------------------------------------------------------------------------
+
+This product includes test material derived from calcite-dotnet
+(https://github.com/ikvmnet/calcite-dotnet), licensed under the Apache License
+2.0:
+
+    Copyright 2025 Jerome Haltom (and others)
+
+Derived from that project, and each carrying a provenance line at its head:
+
+    corpus/queries/edge/                       queries and the two fixture
+    dotnet/tests/Chalk.TestKit/Fixtures.cs      tables `sales` and `sorted`
+    dotnet/tests/Chalk.Execution.Tests/           join and window query shapes
+        JoinOperatorTests.cs, WindowOperatorTests.cs
+          <- src/Apache.Calcite.Tests/ClrEnumerableDifferentialTests.cs
+          <- src/Apache.Calcite.Tests/ClrEnumerableRelTests.cs
+
+    dotnet/tests/Chalk.Execution.Tests/           the collation and
+        ComparisonKernelTests.cs                  projection-position
+          <- src/Apache.Calcite.Tests/            IS DISTINCT FROM shapes
+             ClrEnumerableRelTests.cs
+
+    dotnet/tests/Chalk.Execution.Tests/           the decimal boundary value
+        ArithmeticKernelTests.cs,                 list (not the BigDecimal
+        CastKernelTests.cs                        interop mechanism)
+          <- src/Apache.Calcite.Tests/Interop/JavaDecimalsTests.cs
+
+    dotnet/tests/Chalk.Sources.Ado.Tests/         the reader type-coverage
+        AdoTypeMatrixTests.cs                     checklist
+          <- src/Apache.Calcite.Data.Tests/CalciteTypeCoverageTests.cs
+          <- src/Apache.Calcite.Adapter.AdoNet.Tests/AdoReaderUtilTests.cs
+
+    corpus/queries/m7-pushdown/                   the operator-substitution
+        14_duck_operator_substitution.sql,        expression shapes
+        15_sqlite_operator_substitution.sql
+          <- src/Apache.Calcite.Tests/SqlServerModuloTests.cs
+          <- src/Apache.Calcite.Tests/SqlServerConcatenationTests.cs
+
+    dotnet/src/Chalk.Sources.Conformance/         two probe subjects, from
+        DialectProbes.cs                          findings that project
+          <- TODO.md, "Smaller items"             measured on other dialects
+
+Only the queries, the shapes and the checklists are derived. No expected value
+is, and no SQL text of that project's own dialects is:
+calcite-dotnet treats Apache Calcite's enumerable engine as its specification and
+reproduces Calcite's defects deliberately, whereas Chalk's specification is SQL
+and every answer here is derived from Chalk's own reference executor and from
+DuckDB.

@@ -1,0 +1,482 @@
+{
+  "irVersion": 1,
+  "planDigest": "14326762526508324352",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        }
+      ]
+    },
+    "estRowCount": 1625,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            }
+          ]
+        },
+        "estRowCount": 1625,
+        "setOp": {
+          "inputs": [
+            {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "symbol",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 1000,
+              "project": {
+                "input": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "symbol",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      },
+                      {
+                        "name": "ts",
+                        "type": {
+                          "kind": "TYPE_KIND_TIMESTAMP",
+                          "precision": 9
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 1000,
+                  "collations": [
+                    {
+                      "fields": [
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "fieldRef": {}
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        },
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_TIMESTAMP",
+                              "precision": 9
+                            },
+                            "fieldRef": {
+                              "index": 1
+                            }
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        }
+                      ]
+                    },
+                    {
+                      "fields": [
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_TIMESTAMP",
+                              "precision": 9
+                            },
+                            "fieldRef": {
+                              "index": 1
+                            }
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        }
+                      ]
+                    },
+                    {
+                      "fields": [
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_TIMESTAMP",
+                              "precision": 9
+                            },
+                            "fieldRef": {
+                              "index": 1
+                            }
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        },
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "fieldRef": {}
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        }
+                      ]
+                    }
+                  ],
+                  "indexLookup": {
+                    "table": {
+                      "sourceId": "mem",
+                      "schema": "main",
+                      "table": "bars_small"
+                    },
+                    "index": "ix_bars_small_symbol_ts",
+                    "ranges": [
+                      {
+                        "lower": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "literal": {
+                              "stringValue": "BTCUSDT"
+                            }
+                          }
+                        ],
+                        "lowerInclusive": true,
+                        "upper": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "literal": {
+                              "stringValue": "BTCUSDT"
+                            }
+                          }
+                        ],
+                        "upperInclusive": true
+                      }
+                    ],
+                    "projection": [
+                      0,
+                      1
+                    ]
+                  }
+                },
+                "exprs": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    },
+                    "literal": {
+                      "stringValue": "BTCUSDT"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "symbol",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 1000,
+              "project": {
+                "input": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "symbol",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      },
+                      {
+                        "name": "ts",
+                        "type": {
+                          "kind": "TYPE_KIND_TIMESTAMP",
+                          "precision": 9
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 1000,
+                  "collations": [
+                    {
+                      "fields": [
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "fieldRef": {}
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        },
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_TIMESTAMP",
+                              "precision": 9
+                            },
+                            "fieldRef": {
+                              "index": 1
+                            }
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        }
+                      ]
+                    },
+                    {
+                      "fields": [
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_TIMESTAMP",
+                              "precision": 9
+                            },
+                            "fieldRef": {
+                              "index": 1
+                            }
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        }
+                      ]
+                    },
+                    {
+                      "fields": [
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_TIMESTAMP",
+                              "precision": 9
+                            },
+                            "fieldRef": {
+                              "index": 1
+                            }
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        },
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "fieldRef": {}
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        }
+                      ]
+                    }
+                  ],
+                  "indexLookup": {
+                    "table": {
+                      "sourceId": "mem",
+                      "schema": "main",
+                      "table": "bars_small"
+                    },
+                    "index": "ix_bars_small_symbol_ts",
+                    "ranges": [
+                      {
+                        "lower": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "literal": {
+                              "stringValue": "ETHUSDT"
+                            }
+                          }
+                        ],
+                        "lowerInclusive": true,
+                        "upper": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "literal": {
+                              "stringValue": "ETHUSDT"
+                            }
+                          }
+                        ],
+                        "upperInclusive": true
+                      }
+                    ],
+                    "projection": [
+                      0,
+                      1
+                    ]
+                  }
+                },
+                "exprs": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    },
+                    "literal": {
+                      "stringValue": "ETHUSDT"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "symbol",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 1250,
+              "project": {
+                "input": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "symbol",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      },
+                      {
+                        "name": "ts",
+                        "type": {
+                          "kind": "TYPE_KIND_TIMESTAMP",
+                          "precision": 9
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 1250,
+                  "indexLookup": {
+                    "table": {
+                      "sourceId": "mem",
+                      "schema": "main",
+                      "table": "bars_small"
+                    },
+                    "index": "ix_bars_small_symbol_ts",
+                    "ranges": [
+                      {
+                        "lower": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "literal": {
+                              "stringValue": "BTCUSDT"
+                            }
+                          }
+                        ],
+                        "lowerInclusive": true,
+                        "upper": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "literal": {
+                              "stringValue": "BTCUSDT"
+                            }
+                          }
+                        ],
+                        "upperInclusive": true
+                      },
+                      {
+                        "lower": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "literal": {
+                              "stringValue": "SOLUSDT"
+                            }
+                          }
+                        ],
+                        "lowerInclusive": true,
+                        "upper": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "literal": {
+                              "stringValue": "SOLUSDT"
+                            }
+                          }
+                        ],
+                        "upperInclusive": true
+                      }
+                    ],
+                    "projection": [
+                      0,
+                      1
+                    ]
+                  }
+                },
+                "exprs": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    },
+                    "fieldRef": {}
+                  }
+                ]
+              }
+            }
+          ],
+          "kind": "SET_OP_KIND_UNION_DISTINCT"
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_STRING"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,76 @@
+-- u1
+report id:Full, seen:PerRow, members:Some
+1|Tara CANARY-FIRST-01
+2|Bo CANARY-FIRST-02
+3|T
+4|A
+7|T
+
+-- u2
+report id:Full, seen:Masked, members:Some
+1|T
+2|B
+
+-- u3
+report id:Full, seen:Redacted, members:Some
+3|<null>
+
+-- u3-in-o1
+report id:Full, seen:Redacted, members:Some
+
+-- u4
+report id:Full, seen:Full, members:All
+1|Tara CANARY-FIRST-01
+2|Bo CANARY-FIRST-02
+3|Tomas CANARY-FIRST-03
+4|Ada CANARY-FIRST-04
+5|Kim CANARY-FIRST-05
+6|Lea CANARY-FIRST-06
+7|Tara CANARY-FIRST-01
+
+-- u5
+report id:Full, seen:Redacted, members:None
+
+-- u6
+report id:Full, seen:Masked, members:Some
+1|ed23bc5f944a7ec955ace055dba31f68
+2|6657767d30a1fb0444393493e42f5527
+
+-- u6-two-orgs
+report id:Full, seen:Masked, members:Some
+1|ed23bc5f944a7ec955ace055dba31f68
+2|6657767d30a1fb0444393493e42f5527
+3|0b10f954b1c6bb233d8dd8d63a220460
+4|13ef6532594dde74d242c703fa652ecb
+7|ed23bc5f944a7ec955ace055dba31f68
+
+-- u7
+report id:Full, seen:Redacted, members:None
+
+-- u8
+report id:Full, seen:Redacted, members:Some
+1|<null>
+2|<null>
+
+-- u9
+report id:Full, seen:Redacted, members:Some
+1|<null>
+2|<null>
+3|<null>
+4|<null>
+7|<null>
+
+-- u10-in-a-region
+report id:Full, seen:Redacted, members:None
+
+-- u11-subject-in-a-region
+report id:Full, seen:Redacted, members:None
+
+-- u14-a-vendor
+report id:Full, seen:Redacted, members:None
+
+-- u15-a-vendor-and-an-org
+report id:Full, seen:Full, members:Some
+1|Tara CANARY-FIRST-01
+2|Bo CANARY-FIRST-02
+

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Ir</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>Chalk plan IR: generated protobuf contract plus validator, walker, printer and digest.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="$(ProtoRootDir)/chalk/v1/types.proto;$(ProtoRootDir)/chalk/v1/dialect.proto;$(ProtoRootDir)/chalk/v1/expr.proto;$(ProtoRootDir)/chalk/v1/plan.proto;$(ProtoRootDir)/chalk/v1/catalog.proto"
+              ProtoRoot="$(ProtoRootDir)" GrpcServices="None" Access="Public" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Chalk.Ir.Tests" />
+  </ItemGroup>
+
+</Project>

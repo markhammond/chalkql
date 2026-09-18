@@ -1,0 +1,11 @@
+-- §3.4. Arithmetic is a value use of a population-only column, and `amount + 0` is the identity
+-- written so that a classifier looking for a bare reference would miss it. For the auditor, who
+-- holds it AGGREGATE_ONLY, the whole statement is a POLICY refusal; for a principal whose rules
+-- disclose it in full it is ordinary data.
+-- expect: principals(all)
+-- expect: policy(u6)
+-- expect: policy(u6-two-orgs)
+-- D266: the regional auditor holds the same auditor role, confined to one region, so
+-- `amount` is population-only for it too and the statement is refused the same way.
+-- expect: policy(u10-in-a-region)
+SELECT id, amount + 0 AS a FROM orders ORDER BY id

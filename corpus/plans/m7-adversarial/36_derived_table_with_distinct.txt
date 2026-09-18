@@ -1,0 +1,68 @@
+-- u1
+report first_name:PerRow, members:Some
+A
+Bo CANARY-FIRST-02
+T
+Tara CANARY-FIRST-01
+
+-- u2
+report first_name:Masked, members:Some
+B
+T
+
+-- u3
+report first_name:Redacted, members:Some
+<null>
+
+-- u3-in-o1
+report first_name:Redacted, members:Some
+
+-- u4
+report first_name:Full, members:All
+Ada CANARY-FIRST-04
+Bo CANARY-FIRST-02
+Kim CANARY-FIRST-05
+Lea CANARY-FIRST-06
+Tara CANARY-FIRST-01
+Tomas CANARY-FIRST-03
+
+-- u5
+report first_name:Redacted, members:None
+
+-- u6
+report first_name:Masked, members:Some
+6657767d30a1fb0444393493e42f5527
+ed23bc5f944a7ec955ace055dba31f68
+
+-- u6-two-orgs
+report first_name:Masked, members:Some
+0b10f954b1c6bb233d8dd8d63a220460
+13ef6532594dde74d242c703fa652ecb
+6657767d30a1fb0444393493e42f5527
+ed23bc5f944a7ec955ace055dba31f68
+
+-- u7
+report first_name:Redacted, members:None
+
+-- u8
+report first_name:Redacted, members:Some
+<null>
+
+-- u9
+report first_name:Redacted, members:Some
+<null>
+
+-- u10-in-a-region
+report first_name:Redacted, members:None
+
+-- u11-subject-in-a-region
+report first_name:Redacted, members:None
+
+-- u14-a-vendor
+report first_name:Redacted, members:None
+
+-- u15-a-vendor-and-an-org
+report first_name:Full, members:Some
+Bo CANARY-FIRST-02
+Tara CANARY-FIRST-01
+

@@ -1,0 +1,71 @@
+-- u1
+report id:Full, org_id:Full, first_name:PerRow, last_name:PerRow, national_id:Redacted, postcode:Full, members:Some
+1|1|Tara CANARY-FIRST-01|Ng CANARY-LAST-01|<null>|2000
+2|1|Bo CANARY-FIRST-02|Ito CANARY-LAST-02|<null>|2001
+3|2|T|E|<null>|3000
+4|2|A|R|<null>|3001
+7|2|T|V|<null>|3002
+
+-- u2
+report id:Full, org_id:Full, first_name:PerRow, last_name:PerRow, national_id:Redacted, postcode:Full, members:Some
+1|1|T|N|<null>|2000
+2|1|B|I|<null>|2001
+
+-- u3
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:Some
+3|2|<null>|<null>|<null>|3000
+
+-- u3-in-o1
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:Some
+
+-- u4
+report id:Full, org_id:Full, first_name:Full, last_name:Full, national_id:Redacted, postcode:Full, members:All
+1|1|Tara CANARY-FIRST-01|Ng CANARY-LAST-01|<null>|2000
+2|1|Bo CANARY-FIRST-02|Ito CANARY-LAST-02|<null>|2001
+3|2|Tomas CANARY-FIRST-03|Ek CANARY-LAST-03|<null>|3000
+4|2|Ada CANARY-FIRST-04|Roy CANARY-LAST-04|<null>|3001
+5|3|Kim CANARY-FIRST-05|Zhao CANARY-LAST-05|<null>|4000
+6|3|Lea CANARY-FIRST-06|Fox CANARY-LAST-06|<null>|4001
+7|2|Tara CANARY-FIRST-01|Vo CANARY-LAST-07|<null>|3002
+
+-- u5
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:Some
+
+-- u6
+report id:Full, org_id:Full, first_name:PerRow, last_name:PerRow, national_id:Redacted, postcode:Full, members:Some
+1|1|ed23bc5f944a7ec955ace055dba31f68|4aa55aa1adad84f83baa113adc72c271|<null>|2000
+2|1|6657767d30a1fb0444393493e42f5527|226b5c1078fd4adfc38c6a0a8893c273|<null>|2001
+
+-- u6-two-orgs
+report id:Full, org_id:Full, first_name:PerRow, last_name:PerRow, national_id:Redacted, postcode:Full, members:Some
+1|1|ed23bc5f944a7ec955ace055dba31f68|4aa55aa1adad84f83baa113adc72c271|<null>|2000
+2|1|6657767d30a1fb0444393493e42f5527|226b5c1078fd4adfc38c6a0a8893c273|<null>|2001
+3|2|0b10f954b1c6bb233d8dd8d63a220460|9b6490a31026458dc29933372e69d13c|<null>|3000
+4|2|13ef6532594dde74d242c703fa652ecb|7b76faf77703783f8de65c735793cb05|<null>|3001
+7|2|ed23bc5f944a7ec955ace055dba31f68|97f77e6bd7d3a38bda43a49773c4dd25|<null>|3002
+
+-- u7
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:Some
+
+-- u8
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Tested, postcode:Full, members:Some
+1|1|<null>|<null>|<null>|2000
+2|1|<null>|<null>|<null>|2001
+
+-- u9
+POLICY Refused by the entitlements: main.members.national_id is population-only for this principal and a projection to the result is not one of the aggregates it permits.
+
+-- u10-in-a-region
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:Some
+
+-- u11-subject-in-a-region
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:Some
+
+-- u14-a-vendor
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:Some
+
+-- u15-a-vendor-and-an-org
+report id:Full, org_id:Full, first_name:PerRow, last_name:PerRow, national_id:Redacted, postcode:Full, members:Some
+1|1|Tara CANARY-FIRST-01|Ng CANARY-LAST-01|<null>|2000
+2|1|Bo CANARY-FIRST-02|Ito CANARY-LAST-02|<null>|2001
+

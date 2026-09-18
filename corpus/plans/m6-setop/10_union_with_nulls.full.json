@@ -1,0 +1,277 @@
+{
+  "irVersion": 1,
+  "planDigest": "7325328408430534574",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "vwap",
+        "type": {
+          "kind": "TYPE_KIND_DECIMAL",
+          "nullable": true,
+          "precision": 28,
+          "scale": 10
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "vwap",
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "nullable": true,
+            "precision": 28,
+            "scale": 10
+          }
+        }
+      ]
+    },
+    "estRowCount": 5.505005005005005,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "vwap",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              }
+            }
+          ]
+        },
+        "estRowCount": 5.505005005005005,
+        "setOp": {
+          "inputs": [
+            {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "vwap",
+                    "type": {
+                      "kind": "TYPE_KIND_DECIMAL",
+                      "nullable": true,
+                      "precision": 28,
+                      "scale": 10
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 10.01001001001001,
+              "project": {
+                "input": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "symbol",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      },
+                      {
+                        "name": "ts",
+                        "type": {
+                          "kind": "TYPE_KIND_TIMESTAMP",
+                          "precision": 9
+                        }
+                      },
+                      {
+                        "name": "vwap",
+                        "type": {
+                          "kind": "TYPE_KIND_DECIMAL",
+                          "nullable": true,
+                          "precision": 28,
+                          "scale": 10
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 10.01001001001001,
+                  "collations": [
+                    {
+                      "fields": [
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "fieldRef": {}
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        },
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_TIMESTAMP",
+                              "precision": 9
+                            },
+                            "fieldRef": {
+                              "index": 1
+                            }
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        }
+                      ]
+                    }
+                  ],
+                  "indexLookup": {
+                    "table": {
+                      "sourceId": "mem",
+                      "schema": "main",
+                      "table": "bars_small"
+                    },
+                    "index": "ix_bars_small_symbol_ts",
+                    "ranges": [
+                      {
+                        "lower": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "literal": {
+                              "stringValue": "BTCUSDT"
+                            }
+                          }
+                        ],
+                        "lowerInclusive": true,
+                        "upper": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            },
+                            "literal": {
+                              "stringValue": "BTCUSDT"
+                            }
+                          },
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_TIMESTAMP",
+                              "precision": 9
+                            },
+                            "literal": {
+                              "timestampValue": "1767226200000000000"
+                            }
+                          }
+                        ]
+                      }
+                    ],
+                    "projection": [
+                      0,
+                      1,
+                      7
+                    ]
+                  }
+                },
+                "exprs": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_DECIMAL",
+                      "nullable": true,
+                      "precision": 28,
+                      "scale": 10
+                    },
+                    "fieldRef": {
+                      "index": 2
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "vwap",
+                    "type": {
+                      "kind": "TYPE_KIND_DECIMAL",
+                      "nullable": true,
+                      "precision": 28,
+                      "scale": 10
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 1,
+              "collations": [
+                {
+                  "fields": [
+                    {
+                      "expr": {
+                        "type": {
+                          "kind": "TYPE_KIND_DECIMAL",
+                          "nullable": true,
+                          "precision": 28,
+                          "scale": 10
+                        },
+                        "fieldRef": {}
+                      },
+                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                    }
+                  ]
+                }
+              ],
+              "virtualTable": {
+                "rows": [
+                  {
+                    "values": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_DECIMAL",
+                          "nullable": true,
+                          "precision": 28,
+                          "scale": 10
+                        },
+                        "literal": {
+                          "isNull": true
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "kind": "SET_OP_KIND_UNION_DISTINCT"
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_DECIMAL",
+              "nullable": true,
+              "precision": 28,
+              "scale": 10
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

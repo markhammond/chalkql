@@ -1,0 +1,68 @@
+// Chalk plan IR — logical types.
+// The vocabulary mirrors Substrait's simple types;
+// the physical (Arrow) and planner (Calcite) mappings are fixed in the design docs, not here.
+syntax = "proto3";
+
+package chalk.v1;
+
+option csharp_namespace = "Chalk.Ir";
+option java_multiple_files = true;
+option java_outer_classname = "TypesProto";
+option java_package = "chalk.ir.v1";
+
+enum TypeKind {
+  TYPE_KIND_UNSPECIFIED = 0;
+  TYPE_KIND_BOOL = 1;
+  TYPE_KIND_I8 = 2;
+  TYPE_KIND_I16 = 3;
+  TYPE_KIND_I32 = 4;
+  TYPE_KIND_I64 = 5;
+  TYPE_KIND_FP32 = 6;
+  TYPE_KIND_FP64 = 7;
+  // UTF-8. Ordering and equality are by Unicode code point (= UTF-8 byte order). No padding semantics.
+  TYPE_KIND_STRING = 8;
+  TYPE_KIND_BINARY = 9;
+  // Days since 1970-01-01.
+  TYPE_KIND_DATE = 10;
+  // Microseconds since midnight. `precision` is informational (0..6).
+  TYPE_KIND_TIME = 11;
+  // Zone-less. Integer count of units since 1970-01-01T00:00:00; unit from `precision`:
+  // 0-3 -> milliseconds, 4-6 -> microseconds, 7-9 -> nanoseconds.
+  TYPE_KIND_TIMESTAMP = 12;
+  // An instant. Same encoding as TIMESTAMP, always UTC.
+  TYPE_KIND_TIMESTAMP_TZ = 13;
+  // precision 1..38, scale 0..precision. Values are 128-bit two's-complement unscaled integers.
+  TYPE_KIND_DECIMAL = 14;
+  // 16 bytes, RFC 4122 byte order.
+  TYPE_KIND_UUID = 15;
+  // Day-time interval as a signed microsecond count (int64).
+  TYPE_KIND_INTERVAL_DAY = 16;
+  // Year-month interval as a signed month count (int32).
+  TYPE_KIND_INTERVAL_YEAR = 17;
+  // An ordered sequence of `Type.element` values, one level deep. Arrow: List<element> with
+  // 32-bit offsets. A list may be NULL, may be empty, and may contain NULLs when its element type is
+  // nullable. Comparison, grouping and sorting on a LIST are not supported in v1.
+  TYPE_KIND_LIST = 18;
+}
+
+message Type {
+  TypeKind kind = 1;
+  // The only nullability channel in the IR. Every Expr and every RowType field carries it.
+  bool nullable = 2;
+  // DECIMAL: total digits. TIMESTAMP / TIMESTAMP_TZ / TIME: fractional-second digits. Zero for all other kinds.
+  uint32 precision = 3;
+  // DECIMAL only.
+  uint32 scale = 4;
+  // LIST only, and REQUIRED there: the element type. The element is itself never a LIST — v1 lists
+  // are exactly one level deep.
+  Type element = 5;
+}
+
+message Field {
+  string name = 1;
+  Type type = 2;
+}
+
+message RowType {
+  repeated Field fields = 1;
+}

@@ -1,0 +1,71 @@
+-- u1
+report id:Full, cast_id:Redacted, filled:Redacted, hit:PerRow, members:Some
+1|<null>|absent|0
+2|<null>|absent|0
+3|<null>|absent|1
+4|<null>|absent|0
+7|<null>|absent|1
+
+-- u2
+report id:Full, cast_id:Redacted, filled:Redacted, hit:Masked, members:Some
+1|<null>|absent|1
+2|<null>|absent|0
+
+-- u3
+report id:Full, cast_id:Redacted, filled:Redacted, hit:Redacted, members:Some
+3|<null>|absent|0
+
+-- u3-in-o1
+report id:Full, cast_id:Redacted, filled:Redacted, hit:Redacted, members:Some
+
+-- u4
+report id:Full, cast_id:Redacted, filled:Redacted, hit:Full, members:All
+1|<null>|absent|0
+2|<null>|absent|0
+3|<null>|absent|0
+4|<null>|absent|0
+5|<null>|absent|0
+6|<null>|absent|0
+7|<null>|absent|0
+
+-- u5
+report id:Full, cast_id:Redacted, filled:Redacted, hit:Redacted, members:None
+
+-- u6
+report id:Full, cast_id:Redacted, filled:Redacted, hit:Masked, members:Some
+1|<null>|absent|0
+2|<null>|absent|0
+
+-- u6-two-orgs
+report id:Full, cast_id:Redacted, filled:Redacted, hit:Masked, members:Some
+1|<null>|absent|0
+2|<null>|absent|0
+3|<null>|absent|0
+4|<null>|absent|0
+7|<null>|absent|0
+
+-- u7
+report id:Full, cast_id:Redacted, filled:Redacted, hit:Redacted, members:None
+
+-- u8
+report id:Full, cast_id:Tested, filled:Tested, hit:Redacted, members:Some
+1|<null>|absent|0
+2|<null>|absent|0
+
+-- u9
+POLICY Refused by the entitlements: main.members.national_id is population-only for this principal and a value use (CASE(IS NOT NULL($4), CAST($4):VARCHAR CHARACTER SET "UTF-8" NOT NULL, 'absent':VARCHAR CHARACTER SET "UTF-8")) is not one of the aggregates it permits.
+
+-- u10-in-a-region
+report id:Full, cast_id:Redacted, filled:Redacted, hit:Redacted, members:None
+
+-- u11-subject-in-a-region
+report id:Full, cast_id:Redacted, filled:Redacted, hit:Redacted, members:None
+
+-- u14-a-vendor
+report id:Full, cast_id:Redacted, filled:Redacted, hit:Redacted, members:None
+
+-- u15-a-vendor-and-an-org
+report id:Full, cast_id:Redacted, filled:Redacted, hit:Full, members:Some
+1|<null>|absent|0
+2|<null>|absent|0
+

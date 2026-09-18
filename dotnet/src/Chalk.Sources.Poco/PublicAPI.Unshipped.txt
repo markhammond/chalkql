@@ -1,0 +1,137 @@
+#nullable enable
+Chalk.Sources.Poco.ChalkColumnAttribute
+Chalk.Sources.Poco.ChalkColumnAttribute.AsInteger.get -> bool
+Chalk.Sources.Poco.ChalkColumnAttribute.AsInteger.set -> void
+Chalk.Sources.Poco.ChalkColumnAttribute.ChalkColumnAttribute() -> void
+Chalk.Sources.Poco.ChalkColumnAttribute.Ignore.get -> bool
+Chalk.Sources.Poco.ChalkColumnAttribute.Ignore.set -> void
+Chalk.Sources.Poco.ChalkColumnAttribute.Name.get -> string?
+Chalk.Sources.Poco.ChalkColumnAttribute.Name.set -> void
+Chalk.Sources.Poco.ChalkColumnAttribute.Precision.get -> int
+Chalk.Sources.Poco.ChalkColumnAttribute.Precision.set -> void
+Chalk.Sources.Poco.ChalkColumnAttribute.Scale.get -> int
+Chalk.Sources.Poco.ChalkColumnAttribute.Scale.set -> void
+Chalk.Sources.Poco.ChalkIgnoreAttribute
+Chalk.Sources.Poco.ChalkIgnoreAttribute.ChalkIgnoreAttribute() -> void
+Chalk.Sources.Poco.ClusteredIndex<T>
+Chalk.Sources.Poco.ClusteredIndex<T>.BytesPerRow.get -> long
+Chalk.Sources.Poco.ClusteredIndex<T>.CopyBytes.get -> long
+Chalk.Sources.Poco.ClusteredIndex<T>.Covering.get -> System.Collections.Generic.IReadOnlyList<int>!
+Chalk.Sources.Poco.ClusteredIndex<T>.Descriptor.get -> Chalk.Catalog.IndexDescriptor!
+Chalk.Sources.Poco.ClusteredIndex<T>.DistinctCount(int keyPositions) -> long?
+Chalk.Sources.Poco.ClusteredIndex<T>.GetPosition(int ordinal) -> int
+Chalk.Sources.Poco.ClusteredIndex<T>.GetWindow(Chalk.Sources.IndexKeyRange! range, out int from, out int to) -> void
+Chalk.Sources.Poco.ClusteredIndex<T>.Lookup(Chalk.Sources.IndexKeyRange! range) -> System.Collections.Generic.IEnumerable<T>!
+Chalk.Sources.Poco.ClusteredIndex<T>.LookupPositions(Chalk.Sources.IndexKeyRange! range) -> System.Collections.Generic.IEnumerable<int>!
+Chalk.Sources.Poco.IPocoIndex<T>
+Chalk.Sources.Poco.IPocoIndex<T>.BytesPerRow.get -> long
+Chalk.Sources.Poco.IPocoIndex<T>.Descriptor.get -> Chalk.Catalog.IndexDescriptor!
+Chalk.Sources.Poco.IPocoIndex<T>.DistinctCount(int keyPositions) -> long?
+Chalk.Sources.Poco.IPocoIndex<T>.Lookup(Chalk.Sources.IndexKeyRange! range) -> System.Collections.Generic.IEnumerable<T>!
+Chalk.Sources.Poco.IPositionalPocoIndex<T>
+Chalk.Sources.Poco.IPositionalPocoIndex<T>.GetPosition(int ordinal) -> int
+Chalk.Sources.Poco.IPositionalPocoIndex<T>.GetWindow(Chalk.Sources.IndexKeyRange! range, out int from, out int to) -> void
+Chalk.Sources.Poco.IPositionalPocoIndex<T>.LookupPositions(Chalk.Sources.IndexKeyRange! range) -> System.Collections.Generic.IEnumerable<int>!
+Chalk.Sources.Poco.PermutationIndex<T>
+Chalk.Sources.Poco.PermutationIndex<T>.BytesPerRow.get -> long
+Chalk.Sources.Poco.PermutationIndex<T>.Descriptor.get -> Chalk.Catalog.IndexDescriptor!
+Chalk.Sources.Poco.PermutationIndex<T>.DistinctCount(int keyPositions) -> long?
+Chalk.Sources.Poco.PermutationIndex<T>.GetPosition(int ordinal) -> int
+Chalk.Sources.Poco.PermutationIndex<T>.GetWindow(Chalk.Sources.IndexKeyRange! range, out int from, out int to) -> void
+Chalk.Sources.Poco.PermutationIndex<T>.IsCollationBacked.get -> bool
+Chalk.Sources.Poco.PermutationIndex<T>.Lookup(Chalk.Sources.IndexKeyRange! range) -> System.Collections.Generic.IEnumerable<T>!
+Chalk.Sources.Poco.PermutationIndex<T>.LookupPositions(Chalk.Sources.IndexKeyRange! range) -> System.Collections.Generic.IEnumerable<int>!
+Chalk.Sources.Poco.PocoForeignKeyBuilder<T>
+Chalk.Sources.Poco.PocoForeignKeyBuilder<T>.References(string! table, System.Collections.Generic.IReadOnlyList<string!>! parentColumns, bool verify) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoForeignKeyBuilder<T>.References(string! table, string! parentColumn, bool verify) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoForeignKeyBuilder<T>.References<TParent>(System.Linq.Expressions.Expression<System.Func<TParent, object?>!>! parentColumn, bool verify) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoForeignKeyBuilder<T>.References<TParent>(string! table, System.Linq.Expressions.Expression<System.Func<TParent, object?>!>! parentColumn, bool verify) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoForeignKeyBuilder<T>.References<TParent>(string? table, System.Collections.Generic.IReadOnlyList<System.Linq.Expressions.Expression<System.Func<TParent, object?>!>!>! parentColumns, bool verify) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoNamingPolicy
+Chalk.Sources.Poco.PocoNamingPolicy.AsIs = 0 -> Chalk.Sources.Poco.PocoNamingPolicy
+Chalk.Sources.Poco.PocoNamingPolicy.SnakeCase = 1 -> Chalk.Sources.Poco.PocoNamingPolicy
+Chalk.Sources.Poco.PocoSnapshotRelease
+Chalk.Sources.Poco.PocoSnapshotRelease.Collection.get -> object!
+Chalk.Sources.Poco.PocoSnapshotRelease.Collection.init -> void
+Chalk.Sources.Poco.PocoSnapshotRelease.PocoSnapshotRelease() -> void
+Chalk.Sources.Poco.PocoSnapshotRelease.Table.get -> string!
+Chalk.Sources.Poco.PocoSnapshotRelease.Table.init -> void
+Chalk.Sources.Poco.PocoSource
+Chalk.Sources.Poco.PocoSource.DescribeSchema() -> Chalk.Catalog.SchemaDescriptor!
+Chalk.Sources.Poco.PocoSource.FindIndex<T>(string! table, string! index) -> Chalk.Sources.Poco.IPocoIndex<T>?
+Chalk.Sources.Poco.PocoSource.IndexBytesPerRow() -> System.Collections.Generic.IReadOnlyDictionary<string!, long>!
+Chalk.Sources.Poco.PocoSource.IndexLookupAsync(Chalk.Sources.IndexLookupRequest! request, Chalk.Sources.ScanContext! context, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Sources.Poco.PocoSource.PrepareRefreshAsync(System.Collections.Generic.IReadOnlyList<Chalk.Sources.SourceRefreshEntry!>! entries, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<Chalk.Sources.ISourceRefreshCommit!>
+Chalk.Sources.Poco.PocoSource.RefreshAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Chalk.Sources.Poco.PocoSource.RefreshTableAsync(string! table, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+Chalk.Sources.Poco.PocoSource.ScanAsync(Chalk.Sources.ScanRequest! request, Chalk.Sources.ScanContext! context, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Sources.Poco.PocoSource.SchemaName.get -> string!
+Chalk.Sources.Poco.PocoSource.SnapshotReleased -> System.Action<Chalk.Sources.Poco.PocoSnapshotRelease!>?
+Chalk.Sources.Poco.PocoSource.SourceId.get -> string!
+Chalk.Sources.Poco.PocoSource.Table<T>(string! name) -> Chalk.Sources.Poco.PocoTable<T>
+Chalk.Sources.Poco.PocoSource.ValidateRefresh(System.Collections.Generic.IReadOnlyList<Chalk.Sources.SourceRefreshEntry!>! entries) -> void
+Chalk.Sources.Poco.PocoSourceBuilder
+Chalk.Sources.Poco.PocoSourceBuilder.AddFunction(string! name, System.Action<Chalk.Catalog.FunctionBuilder!>! configure) -> Chalk.Sources.Poco.PocoSourceBuilder!
+Chalk.Sources.Poco.PocoSourceBuilder.AddTable<T>(string! name, System.Collections.Generic.IReadOnlyCollection<T>! rows, System.Action<Chalk.Sources.Poco.PocoTableBuilder<T>!>? configure = null) -> Chalk.Sources.Poco.PocoSourceBuilder!
+Chalk.Sources.Poco.PocoSourceBuilder.AddTable<T>(string! name, System.Collections.Generic.IReadOnlyCollection<T>! rows, out Chalk.Sources.Poco.PocoTable<T> table, System.Action<Chalk.Sources.Poco.PocoTableBuilder<T>!>? configure = null) -> Chalk.Sources.Poco.PocoSourceBuilder!
+Chalk.Sources.Poco.PocoSourceBuilder.AddTable<T>(string! name, System.Collections.Generic.IReadOnlyList<T>! rows, System.Action<Chalk.Sources.Poco.PocoTableBuilder<T>!>? configure = null) -> Chalk.Sources.Poco.PocoSourceBuilder!
+Chalk.Sources.Poco.PocoSourceBuilder.AddTable<T>(string! name, System.Collections.Generic.IReadOnlyList<T>! rows, out Chalk.Sources.Poco.PocoTable<T> table, System.Action<Chalk.Sources.Poco.PocoTableBuilder<T>!>? configure = null) -> Chalk.Sources.Poco.PocoSourceBuilder!
+Chalk.Sources.Poco.PocoSourceBuilder.AddTable<T>(string! name, System.Func<System.Collections.Generic.IReadOnlyCollection<T>!>! rows, System.Action<Chalk.Sources.Poco.PocoTableBuilder<T>!>? configure = null) -> Chalk.Sources.Poco.PocoSourceBuilder!
+Chalk.Sources.Poco.PocoSourceBuilder.AddTable<T>(string! name, System.Func<System.Collections.Generic.IReadOnlyCollection<T>!>! rows, out Chalk.Sources.Poco.PocoTable<T> table, System.Action<Chalk.Sources.Poco.PocoTableBuilder<T>!>? configure = null) -> Chalk.Sources.Poco.PocoSourceBuilder!
+Chalk.Sources.Poco.PocoSourceBuilder.AddTable<T>(string! name, System.Func<System.Collections.Generic.IReadOnlyList<T>!>! rows, System.Action<Chalk.Sources.Poco.PocoTableBuilder<T>!>? configure = null) -> Chalk.Sources.Poco.PocoSourceBuilder!
+Chalk.Sources.Poco.PocoSourceBuilder.AddTable<T>(string! name, System.Func<System.Collections.Generic.IReadOnlyList<T>!>! rows, out Chalk.Sources.Poco.PocoTable<T> table, System.Action<Chalk.Sources.Poco.PocoTableBuilder<T>!>? configure = null) -> Chalk.Sources.Poco.PocoSourceBuilder!
+Chalk.Sources.Poco.PocoSourceBuilder.Build() -> Chalk.Sources.Poco.PocoSource!
+Chalk.Sources.Poco.PocoSourceBuilder.DefaultDecimalScale(int scale) -> Chalk.Sources.Poco.PocoSourceBuilder!
+Chalk.Sources.Poco.PocoSourceBuilder.NamingPolicy(Chalk.Sources.Poco.PocoNamingPolicy policy) -> Chalk.Sources.Poco.PocoSourceBuilder!
+Chalk.Sources.Poco.PocoSourceBuilder.PocoSourceBuilder(string! sourceId, string! schemaName = "main") -> void
+Chalk.Sources.Poco.PocoTable<T>
+Chalk.Sources.Poco.PocoTable<T>.Equals(Chalk.Sources.Poco.PocoTable<T> other) -> bool
+Chalk.Sources.Poco.PocoTable<T>.Name.get -> string!
+Chalk.Sources.Poco.PocoTable<T>.PocoTable() -> void
+Chalk.Sources.Poco.PocoTable<T>.Runtime.get -> Chalk.Sources.ISourceRuntime!
+Chalk.Sources.Poco.PocoTable<T>.Schema.get -> string!
+Chalk.Sources.Poco.PocoTable<T>.SourceId.get -> string!
+Chalk.Sources.Poco.PocoTableBuilder<T>
+Chalk.Sources.Poco.PocoTableBuilder<T>.ClusteredIndex(params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.ClusteredIndex(string? name, bool unique, System.Collections.Generic.IReadOnlyList<Chalk.Ir.SortDirection>! directions, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.ClusteredIndex(string? name, bool unique, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Column<TOut>(string! name, System.Linq.Expressions.Expression<System.Func<T, TOut>!>! projection, Chalk.Catalog.ChalkType? type = null) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Column<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>!>! member, string? name = null, Chalk.Catalog.ChalkType? type = null) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Covering(params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! columns) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Entitlement(Chalk.Entitlements.TableEntitlementDescriptor! entitlement) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.ForeignKey(System.Collections.Generic.IReadOnlyList<System.Linq.Expressions.Expression<System.Func<T, object?>!>!>! columns, string! to, System.Collections.Generic.IReadOnlyList<string!>! parentColumns, bool verify) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.ForeignKey(System.Linq.Expressions.Expression<System.Func<T, object?>!>! column) -> Chalk.Sources.Poco.PocoForeignKeyBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.ForeignKey(System.Linq.Expressions.Expression<System.Func<T, object?>!>! column, string! to, string! parentColumn, bool verify) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.ForeignKey(params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! columns) -> Chalk.Sources.Poco.PocoForeignKeyBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.ForeignKey<TParent>(System.Linq.Expressions.Expression<System.Func<T, object?>!>! column, string! to, System.Linq.Expressions.Expression<System.Func<TParent, object?>!>! parentColumn, bool verify) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Ignore<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>!>! member) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Index(Chalk.Catalog.IndexDescriptor! descriptor, System.Func<System.Collections.Generic.IReadOnlyCollection<T>!, Chalk.Sources.Poco.IPocoIndex<T>!>! index) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Index(Chalk.Sources.Poco.IPocoIndex<T>! index) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Index(params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Index(string? name, Chalk.Ir.IndexKind kind, bool unique, System.Collections.Generic.IReadOnlyList<Chalk.Ir.SortDirection>! directions, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Index(string? name, Chalk.Ir.IndexKind kind, bool unique, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.OrderedBy<TKey>(System.Linq.Expressions.Expression<System.Func<T, TKey>!>! key, Chalk.Ir.SortDirection direction = Chalk.Ir.SortDirection.AscNullsLast) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Statistics(Chalk.Ir.StatisticsLevel level) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Statistics(Chalk.Ir.StatisticsLevel level, double refreshWhenGrownBy) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Statistics(Chalk.Ir.StatisticsLevel level, int buckets) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Statistics(Chalk.Ir.StatisticsLevel level, int buckets, double refreshWhenGrownBy) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Statistics(System.Func<Chalk.Sources.Poco.TableStatistics!>! statistics) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Statistics<TProp>(System.Linq.Expressions.Expression<System.Func<T, TProp>!>! column, Chalk.Catalog.ColumnStatistics! statistics) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.ThenBy<TKey>(System.Linq.Expressions.Expression<System.Func<T, TKey>!>! key, Chalk.Ir.SortDirection direction = Chalk.Ir.SortDirection.AscNullsLast) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.UniqueClusteredIndex(params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.UniqueIndex(params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.UniqueKey(params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Verify(bool verify) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.TableStatistics
+Chalk.Sources.Poco.TableStatistics.Columns.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Chalk.Catalog.ColumnStatistics!>!
+Chalk.Sources.Poco.TableStatistics.Columns.init -> void
+Chalk.Sources.Poco.TableStatistics.RowCount.get -> long
+Chalk.Sources.Poco.TableStatistics.RowCount.init -> void
+Chalk.Sources.Poco.TableStatistics.RowCountKind.get -> Chalk.Ir.RowCountKind
+Chalk.Sources.Poco.TableStatistics.RowCountKind.init -> void
+Chalk.Sources.Poco.TableStatistics.TableStatistics() -> void
+override Chalk.Sources.Poco.PocoTable<T>.GetHashCode() -> int
+override Chalk.Sources.Poco.PocoTable<T>.ToString() -> string!
+static Chalk.Sources.Poco.PocoTable<T>.operator !=(Chalk.Sources.Poco.PocoTable<T> left, Chalk.Sources.Poco.PocoTable<T> right) -> bool
+static Chalk.Sources.Poco.PocoTable<T>.operator ==(Chalk.Sources.Poco.PocoTable<T> left, Chalk.Sources.Poco.PocoTable<T> right) -> bool
+~override Chalk.Sources.Poco.PocoTable<T>.Equals(object obj) -> bool

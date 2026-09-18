@@ -1,0 +1,49 @@
+-- u1
+report id:Full, members:Some
+1
+
+-- u2
+report id:Full, members:Some
+1
+
+-- u3
+report id:Full, members:Some
+
+-- u3-in-o1
+report id:Full, members:Some
+
+-- u4
+report id:Full, members:All
+1
+
+-- u5
+report id:Full, members:None
+
+-- u6
+report id:Full, members:Some
+
+-- u6-two-orgs
+report id:Full, members:Some
+
+-- u7
+report id:Full, members:None
+
+-- u8
+report id:Full, members:Some
+
+-- u9
+report id:Full, members:Some
+
+-- u10-in-a-region
+report id:Full, members:None
+
+-- u11-subject-in-a-region
+report id:Full, members:None
+
+-- u14-a-vendor
+report id:Full, members:None
+
+-- u15-a-vendor-and-an-org
+report id:Full, members:Some
+1
+

@@ -1,0 +1,5 @@
+-- FULL
+ChalkTableScan(table=[[main, lineitem]], projection=[[0, 1]])
+-- NONE
+ChalkProject(l_orderkey=[$0], l_linenumber=[$1])
+  ChalkTableScan(table=[[main, lineitem]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]])

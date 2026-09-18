@@ -1,0 +1,70 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Optional stock source implementations. The source abstraction itself stays in ChalkQL:
+    a host implementing ISourceRuntime should not need this package.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <PackageId>ChalkQL.Sources</PackageId>
+    <PackageTags>
+      sql;federated-sql;query-engine;ado.net;duckdb;poco;apache-arrow
+    </PackageTags>
+    <Description>Stock Chalk sources for POCO collections, ADO.NET and DuckDB, plus source conformance tooling.</Description>
+
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS2008</NoWarn>
+
+    <RepoRoot Condition="'$(RepoRoot)' == ''">$(MSBuildThisFileDirectory)../../../</RepoRoot>
+    <PackageTfm>net10.0</PackageTfm>
+  </PropertyGroup>
+
+  <!--
+    Exact-version coupling is intentional: ChalkQL and ChalkQL.Sources are one release train.
+    pack.sh packs ChalkQL first and adds the output directory as an additional restore source
+    before restoring/packing this project.
+  -->
+  <ItemGroup>
+    <PackageReference Include="ChalkQL" Version="[$(PackageVersion)]" />
+  </ItemGroup>
+
+  <!-- Direct third-party dependencies of Ado/Conformance/DuckDb/Poco. -->
+  <Import Project="../generated/ChalkQL.Sources.Dependencies.props"
+          Condition="Exists('../generated/ChalkQL.Sources.Dependencies.props')" />
+  
+  <ItemGroup>
+    <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Sources.Ado/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Ado.dll" />
+    <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Sources.Conformance/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Conformance.dll" />
+    <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Sources.DuckDb/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.DuckDb.dll" />
+    <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Sources.Poco/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Poco.dll" />
+
+    <None Include="@(_ManagedAssembly)"
+          Pack="true"
+          PackagePath="lib/$(PackageTfm)/" />
+
+    <None Include="$(RepoRoot)dotnet/src/Chalk.Sources.Ado/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Ado.xml"
+          Pack="true" PackagePath="lib/$(PackageTfm)/"
+          Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Sources.Ado/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Ado.xml')" />
+    <None Include="$(RepoRoot)dotnet/src/Chalk.Sources.Conformance/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Conformance.xml"
+          Pack="true" PackagePath="lib/$(PackageTfm)/"
+          Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Sources.Conformance/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Conformance.xml')" />
+    <None Include="$(RepoRoot)dotnet/src/Chalk.Sources.DuckDb/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.DuckDb.xml"
+          Pack="true" PackagePath="lib/$(PackageTfm)/"
+          Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Sources.DuckDb/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.DuckDb.xml')" />
+    <None Include="$(RepoRoot)dotnet/src/Chalk.Sources.Poco/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Poco.xml"
+          Pack="true" PackagePath="lib/$(PackageTfm)/"
+          Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Sources.Poco/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Poco.xml')" />
+  </ItemGroup>
+
+  <Target Name="ValidateChalkQLSourcesPackageInputs" BeforeTargets="GenerateNuspec">
+    <Error Condition="!Exists('../generated/ChalkQL.Sources.Dependencies.props')"
+           Text="Missing generated/ChalkQL.Sources.Dependencies.props. Run scripts/nuget-package-dependencies.py (pack.sh does this)." />
+    
+    <Error Condition="!Exists('%(_ManagedAssembly.Identity)')"
+           Text="Missing ChalkQL.Sources package input: %(_ManagedAssembly.Identity). Build dotnet/Chalk.slnx first." />
+  </Target>
+</Project>

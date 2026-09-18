@@ -1,0 +1,60 @@
+-- u1
+report total:PerRow, without_o2:PerRow, orders:Some
+33425550|33425550
+
+-- u2
+report total:PerRow, without_o2:PerRow, orders:Some
+8427761|8427761
+
+-- u3
+report total:PerRow, without_o2:PerRow, orders:Some
+17227716|<null>
+
+-- u3-in-o1
+report total:PerRow, without_o2:PerRow, orders:Some
+17227716|<null>
+
+-- u4
+report total:PerRow, without_o2:PerRow, orders:All
+<null>|<null>
+
+-- u5
+report total:Full, without_o2:Full, orders:Some
+<null>|<null>
+
+-- u6
+report total:Aggregate, without_o2:Aggregate, orders:Some
+33042192|33042192
+
+-- u6-two-orgs
+report total:Aggregate, without_o2:Aggregate, orders:Some
+50269908|33042192
+
+-- u7
+report total:Full, without_o2:Full, orders:Some
+<null>|<null>
+
+-- u8
+report total:PerRow, without_o2:PerRow, orders:Some
+<null>|<null>
+
+-- u9
+report total:PerRow, without_o2:PerRow, orders:Some
+<null>|<null>
+
+-- u10-in-a-region
+report total:Aggregate, without_o2:Aggregate, orders:Some
+<null>|<null>
+
+-- u11-subject-in-a-region
+report total:PerRow, without_o2:PerRow, orders:Some
+<null>|<null>
+
+-- u14-a-vendor
+report total:PerRow, without_o2:PerRow, orders:Some
+<null>|<null>
+
+-- u15-a-vendor-and-an-org
+report total:PerRow, without_o2:PerRow, orders:Some
+<null>|<null>
+

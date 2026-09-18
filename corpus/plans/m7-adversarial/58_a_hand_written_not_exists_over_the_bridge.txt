@@ -1,0 +1,70 @@
+-- u1
+report id:Full, orders:Some, order_items:Some
+3
+4
+6
+7
+
+-- u2
+report id:Full, orders:Some, order_items:Some
+3
+4
+
+-- u3
+report id:Full, orders:Some, order_items:Some
+6
+
+-- u3-in-o1
+report id:Full, orders:Some, order_items:Some
+5
+6
+
+-- u4
+report id:Full, orders:All, order_items:All
+3
+4
+6
+
+-- u5
+report id:Full, orders:Some, order_items:None
+
+-- u6
+report id:Full, orders:Some, order_items:Some
+3
+4
+
+-- u6-two-orgs
+report id:Full, orders:Some, order_items:Some
+3
+4
+6
+
+-- u7
+report id:Full, orders:Some, order_items:None
+
+-- u8
+report id:Full, orders:Some, order_items:Some
+3
+4
+
+-- u9
+report id:Full, orders:Some, order_items:Some
+3
+4
+6
+
+-- u10-in-a-region
+report id:Full, orders:Some, order_items:Some
+4
+
+-- u11-subject-in-a-region
+report id:Full, orders:Some, order_items:Some
+
+-- u14-a-vendor
+report id:Full, orders:Some, order_items:Some
+
+-- u15-a-vendor-and-an-org
+report id:Full, orders:Some, order_items:Some
+3
+4
+

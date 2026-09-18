@@ -1,0 +1,555 @@
+#nullable enable
+Chalk.Entitlements.ChalkEngineEntitlements
+Chalk.Entitlements.EntitledColumn
+Chalk.Entitlements.EntitledColumn.Disclosure.get -> Chalk.Entitlements.ReportedDisclosure
+Chalk.Entitlements.EntitledColumn.Disclosure.init -> void
+Chalk.Entitlements.EntitledColumn.EntitledColumn() -> void
+Chalk.Entitlements.EntitledColumn.Name.get -> string!
+Chalk.Entitlements.EntitledColumn.Name.init -> void
+Chalk.Entitlements.EntitledEngine
+Chalk.Entitlements.EntitledEngine.Engine.get -> Chalk.Client.ChalkEngine!
+Chalk.Entitlements.EntitledEngine.ExplainAsync(string! sql, Chalk.Client.RequestContext? context = null, Chalk.Client.PrepareOptions? options = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Entitlements.EntitlementsExplanation!>
+Chalk.Entitlements.EntitledEngine.Options.get -> Chalk.Entitlements.EntitlementsOptions!
+Chalk.Entitlements.EntitledEngine.PrepareAsync(string! sql, Chalk.Client.RequestContext? context = null, Chalk.Client.PrepareOptions? options = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Entitlements.EntitledQuery!>
+Chalk.Entitlements.EntitledQuery
+Chalk.Entitlements.EntitledQuery.Columns.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.EntitledColumn!>!
+Chalk.Entitlements.EntitledQuery.Entitlements.get -> Chalk.Entitlements.EntitlementsReport!
+Chalk.Entitlements.EntitledQuery.ExplainAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Entitlements.EntitlementsExplanation!>
+Chalk.Entitlements.EntitledQuery.NarrowAsync(Chalk.Client.RequestContext! more, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Entitlements.EntitledQuery!>
+Chalk.Entitlements.EntitledQuery.OutputSchema.get -> Apache.Arrow.Schema!
+Chalk.Entitlements.EntitledQuery.Plan.get -> Chalk.Ir.Plan!
+Chalk.Entitlements.EntitledQuery.PlanDigest.get -> ulong
+Chalk.Entitlements.EntitledQuery.Query.get -> Chalk.Client.PreparedQuery!
+Chalk.Entitlements.EntitledQuery.ToPreparedQuery() -> Chalk.Client.PreparedQuery!
+Chalk.Entitlements.EntitledTableReport
+Chalk.Entitlements.EntitledTableReport.Contradiction.get -> bool
+Chalk.Entitlements.EntitledTableReport.Contradiction.init -> void
+Chalk.Entitlements.EntitledTableReport.ContradictionColumn.get -> string!
+Chalk.Entitlements.EntitledTableReport.ContradictionColumn.init -> void
+Chalk.Entitlements.EntitledTableReport.DescriptorHash.get -> string!
+Chalk.Entitlements.EntitledTableReport.DescriptorHash.init -> void
+Chalk.Entitlements.EntitledTableReport.EntitledTableReport() -> void
+Chalk.Entitlements.EntitledTableReport.RowPredicatePushed.get -> bool
+Chalk.Entitlements.EntitledTableReport.RowPredicatePushed.init -> void
+Chalk.Entitlements.EntitledTableReport.Schema.get -> string!
+Chalk.Entitlements.EntitledTableReport.Schema.init -> void
+Chalk.Entitlements.EntitledTableReport.Table.get -> string!
+Chalk.Entitlements.EntitledTableReport.Table.init -> void
+Chalk.Entitlements.EntitledTableReport.Tested.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.TestedColumnReport!>!
+Chalk.Entitlements.EntitledTableReport.Tested.init -> void
+Chalk.Entitlements.EntitledTableReport.Visibility.get -> Chalk.Entitlements.TableVisibility
+Chalk.Entitlements.EntitledTableReport.Visibility.init -> void
+Chalk.Entitlements.EntitlementsAuditEvent
+Chalk.Entitlements.EntitlementsAuditEvent.Actor.get -> string!
+Chalk.Entitlements.EntitlementsAuditEvent.Actor.init -> void
+Chalk.Entitlements.EntitlementsAuditEvent.ContextListRowCounts.get -> System.Collections.Generic.IReadOnlyDictionary<string!, int>!
+Chalk.Entitlements.EntitlementsAuditEvent.ContextListRowCounts.init -> void
+Chalk.Entitlements.EntitlementsAuditEvent.DescriptorHashes.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Entitlements.EntitlementsAuditEvent.DescriptorHashes.init -> void
+Chalk.Entitlements.EntitlementsAuditEvent.EntitlementsAuditEvent() -> void
+Chalk.Entitlements.EntitlementsAuditEvent.PlanDigest.get -> ulong
+Chalk.Entitlements.EntitlementsAuditEvent.PlanDigest.init -> void
+Chalk.Entitlements.EntitlementsAuditEvent.Purpose.get -> string!
+Chalk.Entitlements.EntitlementsAuditEvent.Purpose.init -> void
+Chalk.Entitlements.EntitlementsAuditEvent.Tables.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.EntitledTableReport!>!
+Chalk.Entitlements.EntitlementsAuditEvent.Tables.init -> void
+Chalk.Entitlements.EntitlementsExplanation
+Chalk.Entitlements.EntitlementsExplanation.EntitlementsExplanation() -> void
+Chalk.Entitlements.EntitlementsExplanation.Tables.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.ExplainedTable!>!
+Chalk.Entitlements.EntitlementsExplanation.Tables.init -> void
+Chalk.Entitlements.EntitlementsOptions
+Chalk.Entitlements.EntitlementsOptions.DefaultMinGroupSize.get -> int
+Chalk.Entitlements.EntitlementsOptions.DefaultMinGroupSize.init -> void
+Chalk.Entitlements.EntitlementsOptions.DisclosureColumnSuffix.get -> string!
+Chalk.Entitlements.EntitlementsOptions.DisclosureColumnSuffix.init -> void
+Chalk.Entitlements.EntitlementsOptions.EntitlementsOptions() -> void
+Chalk.Entitlements.EntitlementsOptions.Explain.get -> bool
+Chalk.Entitlements.EntitlementsOptions.Explain.init -> void
+Chalk.Entitlements.EntitlementsOptions.IncludeDisclosureColumns.get -> bool
+Chalk.Entitlements.EntitlementsOptions.IncludeDisclosureColumns.init -> void
+Chalk.Entitlements.EntitlementsOptions.PlaceholderPolicy.get -> Chalk.Entitlements.PlaceholderPolicy
+Chalk.Entitlements.EntitlementsOptions.PlaceholderPolicy.init -> void
+Chalk.Entitlements.EntitlementsOptions.Redaction.get -> Chalk.Entitlements.RedactionPolicy!
+Chalk.Entitlements.EntitlementsOptions.Redaction.init -> void
+Chalk.Entitlements.EntitlementsOptions.RefuseWhenNoVisibleRows.get -> bool
+Chalk.Entitlements.EntitlementsOptions.RefuseWhenNoVisibleRows.init -> void
+Chalk.Entitlements.EntitlementsOptions.StarPolicy.get -> Chalk.Entitlements.StarPolicy
+Chalk.Entitlements.EntitlementsOptions.StarPolicy.init -> void
+Chalk.Entitlements.EntitlementsReport
+Chalk.Entitlements.EntitlementsReport.Columns.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.EntitledColumn!>!
+Chalk.Entitlements.EntitlementsReport.Columns.init -> void
+Chalk.Entitlements.EntitlementsReport.DescriptorHashes.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Entitlements.EntitlementsReport.DescriptorHashes.init -> void
+Chalk.Entitlements.EntitlementsReport.EntitlementsReport() -> void
+Chalk.Entitlements.EntitlementsReport.OmitDegradedToPlaceholder.get -> bool
+Chalk.Entitlements.EntitlementsReport.OmitDegradedToPlaceholder.init -> void
+Chalk.Entitlements.EntitlementsReport.RequiredRelations.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Entitlements.EntitlementsReport.RequiredRelations.init -> void
+Chalk.Entitlements.EntitlementsReport.RequiredScalars.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Entitlements.EntitlementsReport.RequiredScalars.init -> void
+Chalk.Entitlements.EntitlementsReport.Tables.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.EntitledTableReport!>!
+Chalk.Entitlements.EntitlementsReport.Tables.init -> void
+Chalk.Entitlements.ExplainedColumn
+Chalk.Entitlements.ExplainedColumn.Column.get -> string!
+Chalk.Entitlements.ExplainedColumn.Column.init -> void
+Chalk.Entitlements.ExplainedColumn.Disclosure.get -> string!
+Chalk.Entitlements.ExplainedColumn.Disclosure.init -> void
+Chalk.Entitlements.ExplainedColumn.ExplainedColumn() -> void
+Chalk.Entitlements.ExplainedColumn.Mask.get -> string!
+Chalk.Entitlements.ExplainedColumn.Mask.init -> void
+Chalk.Entitlements.ExplainedColumn.MinGroupSize.get -> int
+Chalk.Entitlements.ExplainedColumn.MinGroupSize.init -> void
+Chalk.Entitlements.ExplainedColumn.Placeholder.get -> string!
+Chalk.Entitlements.ExplainedColumn.Placeholder.init -> void
+Chalk.Entitlements.ExplainedParent
+Chalk.Entitlements.ExplainedParent.Column.get -> string!
+Chalk.Entitlements.ExplainedParent.Column.init -> void
+Chalk.Entitlements.ExplainedParent.Elided.get -> bool
+Chalk.Entitlements.ExplainedParent.Elided.init -> void
+Chalk.Entitlements.ExplainedParent.ExplainedParent() -> void
+Chalk.Entitlements.ExplainedParent.KeyDisclosure.get -> string!
+Chalk.Entitlements.ExplainedParent.KeyDisclosure.init -> void
+Chalk.Entitlements.ExplainedParent.ParentColumn.get -> string!
+Chalk.Entitlements.ExplainedParent.ParentColumn.init -> void
+Chalk.Entitlements.ExplainedParent.Schema.get -> string!
+Chalk.Entitlements.ExplainedParent.Schema.init -> void
+Chalk.Entitlements.ExplainedParent.Table.get -> string!
+Chalk.Entitlements.ExplainedParent.Table.init -> void
+Chalk.Entitlements.ExplainedPath
+Chalk.Entitlements.ExplainedPath.Dropped.get -> bool
+Chalk.Entitlements.ExplainedPath.Dropped.init -> void
+Chalk.Entitlements.ExplainedPath.Elided.get -> bool
+Chalk.Entitlements.ExplainedPath.Elided.init -> void
+Chalk.Entitlements.ExplainedPath.EndpointPredicate.get -> string!
+Chalk.Entitlements.ExplainedPath.EndpointPredicate.init -> void
+Chalk.Entitlements.ExplainedPath.EndpointSchema.get -> string!
+Chalk.Entitlements.ExplainedPath.EndpointSchema.init -> void
+Chalk.Entitlements.ExplainedPath.EndpointTable.get -> string!
+Chalk.Entitlements.ExplainedPath.EndpointTable.init -> void
+Chalk.Entitlements.ExplainedPath.ExplainedPath() -> void
+Chalk.Entitlements.ExplainedPath.KeyDisclosure.get -> string!
+Chalk.Entitlements.ExplainedPath.KeyDisclosure.init -> void
+Chalk.Entitlements.ExplainedPath.Kind.get -> string!
+Chalk.Entitlements.ExplainedPath.Kind.init -> void
+Chalk.Entitlements.ExplainedPath.Steps.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.ExplainedStep!>!
+Chalk.Entitlements.ExplainedPath.Steps.init -> void
+Chalk.Entitlements.ExplainedStep
+Chalk.Entitlements.ExplainedStep.ExplainedStep() -> void
+Chalk.Entitlements.ExplainedStep.FromColumn.get -> string!
+Chalk.Entitlements.ExplainedStep.FromColumn.init -> void
+Chalk.Entitlements.ExplainedStep.Schema.get -> string!
+Chalk.Entitlements.ExplainedStep.Schema.init -> void
+Chalk.Entitlements.ExplainedStep.Table.get -> string!
+Chalk.Entitlements.ExplainedStep.Table.init -> void
+Chalk.Entitlements.ExplainedStep.ToChild.get -> bool
+Chalk.Entitlements.ExplainedStep.ToChild.init -> void
+Chalk.Entitlements.ExplainedStep.ToColumn.get -> string!
+Chalk.Entitlements.ExplainedStep.ToColumn.init -> void
+Chalk.Entitlements.ExplainedTable
+Chalk.Entitlements.ExplainedTable.Columns.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.ExplainedColumn!>!
+Chalk.Entitlements.ExplainedTable.Columns.init -> void
+Chalk.Entitlements.ExplainedTable.ExplainedTable() -> void
+Chalk.Entitlements.ExplainedTable.Parents.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.ExplainedParent!>!
+Chalk.Entitlements.ExplainedTable.Parents.init -> void
+Chalk.Entitlements.ExplainedTable.Paths.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.ExplainedPath!>!
+Chalk.Entitlements.ExplainedTable.Paths.init -> void
+Chalk.Entitlements.ExplainedTable.Residual.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Entitlements.ExplainedTable.Residual.init -> void
+Chalk.Entitlements.ExplainedTable.RowPredicate.get -> string!
+Chalk.Entitlements.ExplainedTable.RowPredicate.init -> void
+Chalk.Entitlements.ExplainedTable.RowPredicatePushed.get -> bool
+Chalk.Entitlements.ExplainedTable.RowPredicatePushed.init -> void
+Chalk.Entitlements.ExplainedTable.Schema.get -> string!
+Chalk.Entitlements.ExplainedTable.Schema.init -> void
+Chalk.Entitlements.ExplainedTable.Table.get -> string!
+Chalk.Entitlements.ExplainedTable.Table.init -> void
+Chalk.Entitlements.IEntitlementsAudit
+Chalk.Entitlements.IEntitlementsAudit.Executed(Chalk.Entitlements.EntitlementsAuditEvent! audited) -> void
+Chalk.Entitlements.NamedColumns
+Chalk.Entitlements.NamedColumns.Placeholder = 1 -> Chalk.Entitlements.NamedColumns
+Chalk.Entitlements.NamedColumns.Refuse = 2 -> Chalk.Entitlements.NamedColumns
+Chalk.Entitlements.RedactionPolicy
+Chalk.Entitlements.RedactionPolicy.NamedColumns.get -> Chalk.Entitlements.NamedColumns
+Chalk.Entitlements.RedactionPolicy.NamedColumns.init -> void
+Chalk.Entitlements.RedactionPolicy.RedactionPolicy() -> void
+Chalk.Entitlements.RedactionPolicy.StarExpansion.get -> Chalk.Entitlements.StarExpansion
+Chalk.Entitlements.RedactionPolicy.StarExpansion.init -> void
+Chalk.Entitlements.ReportedDisclosure
+Chalk.Entitlements.ReportedDisclosure.Aggregate = 5 -> Chalk.Entitlements.ReportedDisclosure
+Chalk.Entitlements.ReportedDisclosure.Full = 1 -> Chalk.Entitlements.ReportedDisclosure
+Chalk.Entitlements.ReportedDisclosure.Masked = 2 -> Chalk.Entitlements.ReportedDisclosure
+Chalk.Entitlements.ReportedDisclosure.PerRow = 4 -> Chalk.Entitlements.ReportedDisclosure
+Chalk.Entitlements.ReportedDisclosure.Redacted = 3 -> Chalk.Entitlements.ReportedDisclosure
+Chalk.Entitlements.ReportedDisclosure.Tested = 6 -> Chalk.Entitlements.ReportedDisclosure
+Chalk.Entitlements.Rpc.EntitledTable
+Chalk.Entitlements.Rpc.EntitledTable.CalculateSize() -> int
+Chalk.Entitlements.Rpc.EntitledTable.Contradiction.get -> bool
+Chalk.Entitlements.Rpc.EntitledTable.Contradiction.set -> void
+Chalk.Entitlements.Rpc.EntitledTable.EntitledTable() -> void
+Chalk.Entitlements.Rpc.EntitledTable.RowPredicatePushed.get -> bool
+Chalk.Entitlements.Rpc.EntitledTable.RowPredicatePushed.set -> void
+Chalk.Entitlements.Rpc.EntitledTable.Visibility.get -> Chalk.Entitlements.Rpc.Visibility
+Chalk.Entitlements.Rpc.EntitledTable.Visibility.set -> void
+Chalk.Entitlements.Rpc.EntitlementsExplain
+Chalk.Entitlements.Rpc.EntitlementsExplain.CalculateSize() -> int
+Chalk.Entitlements.Rpc.EntitlementsExplain.EntitlementsExplain() -> void
+Chalk.Entitlements.Rpc.EntitlementsOptions
+Chalk.Entitlements.Rpc.EntitlementsOptions.CalculateSize() -> int
+Chalk.Entitlements.Rpc.EntitlementsOptions.DefaultMinGroupSize.get -> uint
+Chalk.Entitlements.Rpc.EntitlementsOptions.DefaultMinGroupSize.set -> void
+Chalk.Entitlements.Rpc.EntitlementsOptions.EntitlementsOptions() -> void
+Chalk.Entitlements.Rpc.EntitlementsOptions.Explain.get -> bool
+Chalk.Entitlements.Rpc.EntitlementsOptions.Explain.set -> void
+Chalk.Entitlements.Rpc.EntitlementsOptions.IncludeDisclosureColumns.get -> bool
+Chalk.Entitlements.Rpc.EntitlementsOptions.IncludeDisclosureColumns.set -> void
+Chalk.Entitlements.Rpc.EntitlementsOptions.PlaceholderPolicy.get -> Chalk.Entitlements.Rpc.PlaceholderPolicy
+Chalk.Entitlements.Rpc.EntitlementsOptions.PlaceholderPolicy.set -> void
+Chalk.Entitlements.Rpc.EntitlementsOptions.RefuseWhenNoVisibleRows.get -> bool
+Chalk.Entitlements.Rpc.EntitlementsOptions.RefuseWhenNoVisibleRows.set -> void
+Chalk.Entitlements.Rpc.EntitlementsOptions.StarPolicy.get -> Chalk.Entitlements.Rpc.StarPolicy
+Chalk.Entitlements.Rpc.EntitlementsOptions.StarPolicy.set -> void
+Chalk.Entitlements.Rpc.EntitlementsReflection
+Chalk.Entitlements.Rpc.EntitlementsReport
+Chalk.Entitlements.Rpc.EntitlementsReport.CalculateSize() -> int
+Chalk.Entitlements.Rpc.EntitlementsReport.EntitlementsReport() -> void
+Chalk.Entitlements.Rpc.EntitlementsReport.OmitDegradedToPlaceholder.get -> bool
+Chalk.Entitlements.Rpc.EntitlementsReport.OmitDegradedToPlaceholder.set -> void
+Chalk.Entitlements.Rpc.ExplainedColumn
+Chalk.Entitlements.Rpc.ExplainedColumn.CalculateSize() -> int
+Chalk.Entitlements.Rpc.ExplainedColumn.ExplainedColumn() -> void
+Chalk.Entitlements.Rpc.ExplainedColumn.MinGroupSize.get -> uint
+Chalk.Entitlements.Rpc.ExplainedColumn.MinGroupSize.set -> void
+Chalk.Entitlements.Rpc.ExplainedParent
+Chalk.Entitlements.Rpc.ExplainedParent.CalculateSize() -> int
+Chalk.Entitlements.Rpc.ExplainedParent.Elided.get -> bool
+Chalk.Entitlements.Rpc.ExplainedParent.Elided.set -> void
+Chalk.Entitlements.Rpc.ExplainedParent.ExplainedParent() -> void
+Chalk.Entitlements.Rpc.ExplainedPath
+Chalk.Entitlements.Rpc.ExplainedPath.CalculateSize() -> int
+Chalk.Entitlements.Rpc.ExplainedPath.Dropped.get -> bool
+Chalk.Entitlements.Rpc.ExplainedPath.Dropped.set -> void
+Chalk.Entitlements.Rpc.ExplainedPath.Elided.get -> bool
+Chalk.Entitlements.Rpc.ExplainedPath.Elided.set -> void
+Chalk.Entitlements.Rpc.ExplainedPath.ExplainedPath() -> void
+Chalk.Entitlements.Rpc.ExplainedStep
+Chalk.Entitlements.Rpc.ExplainedStep.CalculateSize() -> int
+Chalk.Entitlements.Rpc.ExplainedStep.ExplainedStep() -> void
+Chalk.Entitlements.Rpc.ExplainedStep.ToChild.get -> bool
+Chalk.Entitlements.Rpc.ExplainedStep.ToChild.set -> void
+Chalk.Entitlements.Rpc.ExplainedTable
+Chalk.Entitlements.Rpc.ExplainedTable.CalculateSize() -> int
+Chalk.Entitlements.Rpc.ExplainedTable.ExplainedTable() -> void
+Chalk.Entitlements.Rpc.ExplainedTable.RowPredicatePushed.get -> bool
+Chalk.Entitlements.Rpc.ExplainedTable.RowPredicatePushed.set -> void
+Chalk.Entitlements.Rpc.NamedColumns
+Chalk.Entitlements.Rpc.NamedColumns.Placeholder = 1 -> Chalk.Entitlements.Rpc.NamedColumns
+Chalk.Entitlements.Rpc.NamedColumns.Refuse = 2 -> Chalk.Entitlements.Rpc.NamedColumns
+Chalk.Entitlements.Rpc.NamedColumns.Unspecified = 0 -> Chalk.Entitlements.Rpc.NamedColumns
+Chalk.Entitlements.Rpc.PlaceholderPolicy
+Chalk.Entitlements.Rpc.PlaceholderPolicy.AsEmpty = 2 -> Chalk.Entitlements.Rpc.PlaceholderPolicy
+Chalk.Entitlements.Rpc.PlaceholderPolicy.AsNull = 1 -> Chalk.Entitlements.Rpc.PlaceholderPolicy
+Chalk.Entitlements.Rpc.PlaceholderPolicy.Unspecified = 0 -> Chalk.Entitlements.Rpc.PlaceholderPolicy
+Chalk.Entitlements.Rpc.Redaction
+Chalk.Entitlements.Rpc.Redaction.CalculateSize() -> int
+Chalk.Entitlements.Rpc.Redaction.NamedColumns.get -> Chalk.Entitlements.Rpc.NamedColumns
+Chalk.Entitlements.Rpc.Redaction.NamedColumns.set -> void
+Chalk.Entitlements.Rpc.Redaction.Redaction() -> void
+Chalk.Entitlements.Rpc.Redaction.StarExpansion.get -> Chalk.Entitlements.Rpc.StarExpansion
+Chalk.Entitlements.Rpc.Redaction.StarExpansion.set -> void
+Chalk.Entitlements.Rpc.ReportedDisclosure
+Chalk.Entitlements.Rpc.ReportedDisclosure.Aggregate = 5 -> Chalk.Entitlements.Rpc.ReportedDisclosure
+Chalk.Entitlements.Rpc.ReportedDisclosure.Full = 1 -> Chalk.Entitlements.Rpc.ReportedDisclosure
+Chalk.Entitlements.Rpc.ReportedDisclosure.Masked = 2 -> Chalk.Entitlements.Rpc.ReportedDisclosure
+Chalk.Entitlements.Rpc.ReportedDisclosure.PerRow = 4 -> Chalk.Entitlements.Rpc.ReportedDisclosure
+Chalk.Entitlements.Rpc.ReportedDisclosure.Redacted = 3 -> Chalk.Entitlements.Rpc.ReportedDisclosure
+Chalk.Entitlements.Rpc.ReportedDisclosure.Tested = 6 -> Chalk.Entitlements.Rpc.ReportedDisclosure
+Chalk.Entitlements.Rpc.ReportedDisclosure.Unspecified = 0 -> Chalk.Entitlements.Rpc.ReportedDisclosure
+Chalk.Entitlements.Rpc.StarExpansion
+Chalk.Entitlements.Rpc.StarExpansion.Omit = 2 -> Chalk.Entitlements.Rpc.StarExpansion
+Chalk.Entitlements.Rpc.StarExpansion.Placeholder = 1 -> Chalk.Entitlements.Rpc.StarExpansion
+Chalk.Entitlements.Rpc.StarExpansion.Refuse = 3 -> Chalk.Entitlements.Rpc.StarExpansion
+Chalk.Entitlements.Rpc.StarExpansion.Unspecified = 0 -> Chalk.Entitlements.Rpc.StarExpansion
+Chalk.Entitlements.Rpc.StarPolicy
+Chalk.Entitlements.Rpc.StarPolicy.Allow = 1 -> Chalk.Entitlements.Rpc.StarPolicy
+Chalk.Entitlements.Rpc.StarPolicy.RefuseOverEntitled = 2 -> Chalk.Entitlements.Rpc.StarPolicy
+Chalk.Entitlements.Rpc.StarPolicy.RefuseWhenEntitled = 3 -> Chalk.Entitlements.Rpc.StarPolicy
+Chalk.Entitlements.Rpc.StarPolicy.Unspecified = 0 -> Chalk.Entitlements.Rpc.StarPolicy
+Chalk.Entitlements.Rpc.TestedColumn
+Chalk.Entitlements.Rpc.TestedColumn.CalculateSize() -> int
+Chalk.Entitlements.Rpc.TestedColumn.TestedColumn() -> void
+Chalk.Entitlements.Rpc.Visibility
+Chalk.Entitlements.Rpc.Visibility.All = 3 -> Chalk.Entitlements.Rpc.Visibility
+Chalk.Entitlements.Rpc.Visibility.None = 1 -> Chalk.Entitlements.Rpc.Visibility
+Chalk.Entitlements.Rpc.Visibility.Some = 2 -> Chalk.Entitlements.Rpc.Visibility
+Chalk.Entitlements.Rpc.Visibility.Unspecified = 0 -> Chalk.Entitlements.Rpc.Visibility
+Chalk.Entitlements.StarExpansion
+Chalk.Entitlements.StarExpansion.Omit = 2 -> Chalk.Entitlements.StarExpansion
+Chalk.Entitlements.StarExpansion.Placeholder = 1 -> Chalk.Entitlements.StarExpansion
+Chalk.Entitlements.StarExpansion.Refuse = 3 -> Chalk.Entitlements.StarExpansion
+Chalk.Entitlements.StarPolicy
+Chalk.Entitlements.StarPolicy.Allow = 1 -> Chalk.Entitlements.StarPolicy
+Chalk.Entitlements.StarPolicy.RefuseOverEntitled = 2 -> Chalk.Entitlements.StarPolicy
+Chalk.Entitlements.StarPolicy.RefuseWhenEntitled = 3 -> Chalk.Entitlements.StarPolicy
+Chalk.Entitlements.TableVisibility
+Chalk.Entitlements.TableVisibility.All = 3 -> Chalk.Entitlements.TableVisibility
+Chalk.Entitlements.TableVisibility.None = 1 -> Chalk.Entitlements.TableVisibility
+Chalk.Entitlements.TableVisibility.Some = 2 -> Chalk.Entitlements.TableVisibility
+Chalk.Entitlements.TestedColumnReport
+Chalk.Entitlements.TestedColumnReport.Column.get -> string!
+Chalk.Entitlements.TestedColumnReport.Column.init -> void
+Chalk.Entitlements.TestedColumnReport.Shapes.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Entitlements.TestedColumnReport.Shapes.init -> void
+Chalk.Entitlements.TestedColumnReport.TestedColumnReport() -> void
+const Chalk.Entitlements.Rpc.EntitledTable.ContradictionColumnFieldNumber = 7 -> int
+const Chalk.Entitlements.Rpc.EntitledTable.ContradictionFieldNumber = 6 -> int
+const Chalk.Entitlements.Rpc.EntitledTable.DescriptorHashFieldNumber = 3 -> int
+const Chalk.Entitlements.Rpc.EntitledTable.RowPredicatePushedFieldNumber = 4 -> int
+const Chalk.Entitlements.Rpc.EntitledTable.SchemaFieldNumber = 1 -> int
+const Chalk.Entitlements.Rpc.EntitledTable.TableFieldNumber = 2 -> int
+const Chalk.Entitlements.Rpc.EntitledTable.TestedFieldNumber = 8 -> int
+const Chalk.Entitlements.Rpc.EntitledTable.VisibilityFieldNumber = 5 -> int
+const Chalk.Entitlements.Rpc.EntitlementsExplain.TablesFieldNumber = 1 -> int
+const Chalk.Entitlements.Rpc.EntitlementsOptions.DefaultMinGroupSizeFieldNumber = 4 -> int
+const Chalk.Entitlements.Rpc.EntitlementsOptions.DisclosureColumnSuffixFieldNumber = 8 -> int
+const Chalk.Entitlements.Rpc.EntitlementsOptions.ExplainFieldNumber = 6 -> int
+const Chalk.Entitlements.Rpc.EntitlementsOptions.IncludeDisclosureColumnsFieldNumber = 7 -> int
+const Chalk.Entitlements.Rpc.EntitlementsOptions.PlaceholderPolicyFieldNumber = 3 -> int
+const Chalk.Entitlements.Rpc.EntitlementsOptions.RedactionFieldNumber = 10 -> int
+const Chalk.Entitlements.Rpc.EntitlementsOptions.RefuseWhenNoVisibleRowsFieldNumber = 5 -> int
+const Chalk.Entitlements.Rpc.EntitlementsOptions.StarPolicyFieldNumber = 1 -> int
+const Chalk.Entitlements.Rpc.EntitlementsReport.ColumnsFieldNumber = 3 -> int
+const Chalk.Entitlements.Rpc.EntitlementsReport.DescriptorHashesFieldNumber = 4 -> int
+const Chalk.Entitlements.Rpc.EntitlementsReport.OmitDegradedToPlaceholderFieldNumber = 5 -> int
+const Chalk.Entitlements.Rpc.EntitlementsReport.RequiredRelationsFieldNumber = 2 -> int
+const Chalk.Entitlements.Rpc.EntitlementsReport.RequiredScalarsFieldNumber = 1 -> int
+const Chalk.Entitlements.Rpc.EntitlementsReport.TablesFieldNumber = 6 -> int
+const Chalk.Entitlements.Rpc.ExplainedColumn.ColumnFieldNumber = 1 -> int
+const Chalk.Entitlements.Rpc.ExplainedColumn.DisclosureFieldNumber = 2 -> int
+const Chalk.Entitlements.Rpc.ExplainedColumn.MaskFieldNumber = 3 -> int
+const Chalk.Entitlements.Rpc.ExplainedColumn.MinGroupSizeFieldNumber = 5 -> int
+const Chalk.Entitlements.Rpc.ExplainedColumn.PlaceholderFieldNumber = 4 -> int
+const Chalk.Entitlements.Rpc.ExplainedParent.ColumnFieldNumber = 3 -> int
+const Chalk.Entitlements.Rpc.ExplainedParent.ElidedFieldNumber = 5 -> int
+const Chalk.Entitlements.Rpc.ExplainedParent.KeyDisclosureFieldNumber = 6 -> int
+const Chalk.Entitlements.Rpc.ExplainedParent.ParentColumnFieldNumber = 4 -> int
+const Chalk.Entitlements.Rpc.ExplainedParent.SchemaFieldNumber = 1 -> int
+const Chalk.Entitlements.Rpc.ExplainedParent.TableFieldNumber = 2 -> int
+const Chalk.Entitlements.Rpc.ExplainedPath.DroppedFieldNumber = 6 -> int
+const Chalk.Entitlements.Rpc.ExplainedPath.ElidedFieldNumber = 5 -> int
+const Chalk.Entitlements.Rpc.ExplainedPath.EndpointPredicateFieldNumber = 7 -> int
+const Chalk.Entitlements.Rpc.ExplainedPath.EndpointSchemaFieldNumber = 3 -> int
+const Chalk.Entitlements.Rpc.ExplainedPath.EndpointTableFieldNumber = 4 -> int
+const Chalk.Entitlements.Rpc.ExplainedPath.KeyDisclosureFieldNumber = 8 -> int
+const Chalk.Entitlements.Rpc.ExplainedPath.KindFieldNumber = 1 -> int
+const Chalk.Entitlements.Rpc.ExplainedPath.StepsFieldNumber = 2 -> int
+const Chalk.Entitlements.Rpc.ExplainedStep.FromColumnFieldNumber = 3 -> int
+const Chalk.Entitlements.Rpc.ExplainedStep.SchemaFieldNumber = 1 -> int
+const Chalk.Entitlements.Rpc.ExplainedStep.TableFieldNumber = 2 -> int
+const Chalk.Entitlements.Rpc.ExplainedStep.ToChildFieldNumber = 5 -> int
+const Chalk.Entitlements.Rpc.ExplainedStep.ToColumnFieldNumber = 4 -> int
+const Chalk.Entitlements.Rpc.ExplainedTable.ColumnsFieldNumber = 6 -> int
+const Chalk.Entitlements.Rpc.ExplainedTable.ParentsFieldNumber = 7 -> int
+const Chalk.Entitlements.Rpc.ExplainedTable.PathsFieldNumber = 8 -> int
+const Chalk.Entitlements.Rpc.ExplainedTable.ResidualFieldNumber = 5 -> int
+const Chalk.Entitlements.Rpc.ExplainedTable.RowPredicateFieldNumber = 3 -> int
+const Chalk.Entitlements.Rpc.ExplainedTable.RowPredicatePushedFieldNumber = 4 -> int
+const Chalk.Entitlements.Rpc.ExplainedTable.SchemaFieldNumber = 1 -> int
+const Chalk.Entitlements.Rpc.ExplainedTable.TableFieldNumber = 2 -> int
+const Chalk.Entitlements.Rpc.Redaction.NamedColumnsFieldNumber = 2 -> int
+const Chalk.Entitlements.Rpc.Redaction.StarExpansionFieldNumber = 1 -> int
+const Chalk.Entitlements.Rpc.TestedColumn.ColumnFieldNumber = 1 -> int
+const Chalk.Entitlements.Rpc.TestedColumn.ShapesFieldNumber = 2 -> int
+override Chalk.Entitlements.Rpc.EntitledTable.GetHashCode() -> int
+override Chalk.Entitlements.Rpc.EntitlementsExplain.GetHashCode() -> int
+override Chalk.Entitlements.Rpc.EntitlementsOptions.GetHashCode() -> int
+override Chalk.Entitlements.Rpc.EntitlementsReport.GetHashCode() -> int
+override Chalk.Entitlements.Rpc.ExplainedColumn.GetHashCode() -> int
+override Chalk.Entitlements.Rpc.ExplainedParent.GetHashCode() -> int
+override Chalk.Entitlements.Rpc.ExplainedPath.GetHashCode() -> int
+override Chalk.Entitlements.Rpc.ExplainedStep.GetHashCode() -> int
+override Chalk.Entitlements.Rpc.ExplainedTable.GetHashCode() -> int
+override Chalk.Entitlements.Rpc.Redaction.GetHashCode() -> int
+override Chalk.Entitlements.Rpc.TestedColumn.GetHashCode() -> int
+static Chalk.Entitlements.ChalkEngineEntitlements.WithEntitlements(this Chalk.Client.ChalkEngine! engine, Chalk.Entitlements.EntitlementsOptions? options = null, Chalk.Entitlements.IEntitlementsAudit? audit = null) -> Chalk.Entitlements.EntitledEngine!
+static Chalk.Entitlements.EntitledQuery.implicit operator Chalk.Client.PreparedQuery!(Chalk.Entitlements.EntitledQuery! entitled) -> Chalk.Client.PreparedQuery!
+static Chalk.Entitlements.EntitlementsReport.Empty.get -> Chalk.Entitlements.EntitlementsReport!
+~Chalk.Entitlements.Rpc.EntitledTable.Clone() -> Chalk.Entitlements.Rpc.EntitledTable
+~Chalk.Entitlements.Rpc.EntitledTable.ContradictionColumn.get -> string
+~Chalk.Entitlements.Rpc.EntitledTable.ContradictionColumn.set -> void
+~Chalk.Entitlements.Rpc.EntitledTable.DescriptorHash.get -> string
+~Chalk.Entitlements.Rpc.EntitledTable.DescriptorHash.set -> void
+~Chalk.Entitlements.Rpc.EntitledTable.EntitledTable(Chalk.Entitlements.Rpc.EntitledTable other) -> void
+~Chalk.Entitlements.Rpc.EntitledTable.Equals(Chalk.Entitlements.Rpc.EntitledTable other) -> bool
+~Chalk.Entitlements.Rpc.EntitledTable.MergeFrom(Chalk.Entitlements.Rpc.EntitledTable other) -> void
+~Chalk.Entitlements.Rpc.EntitledTable.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Entitlements.Rpc.EntitledTable.Schema.get -> string
+~Chalk.Entitlements.Rpc.EntitledTable.Schema.set -> void
+~Chalk.Entitlements.Rpc.EntitledTable.Table.get -> string
+~Chalk.Entitlements.Rpc.EntitledTable.Table.set -> void
+~Chalk.Entitlements.Rpc.EntitledTable.Tested.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Entitlements.Rpc.TestedColumn>
+~Chalk.Entitlements.Rpc.EntitledTable.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Entitlements.Rpc.EntitlementsExplain.Clone() -> Chalk.Entitlements.Rpc.EntitlementsExplain
+~Chalk.Entitlements.Rpc.EntitlementsExplain.EntitlementsExplain(Chalk.Entitlements.Rpc.EntitlementsExplain other) -> void
+~Chalk.Entitlements.Rpc.EntitlementsExplain.Equals(Chalk.Entitlements.Rpc.EntitlementsExplain other) -> bool
+~Chalk.Entitlements.Rpc.EntitlementsExplain.MergeFrom(Chalk.Entitlements.Rpc.EntitlementsExplain other) -> void
+~Chalk.Entitlements.Rpc.EntitlementsExplain.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Entitlements.Rpc.EntitlementsExplain.Tables.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Entitlements.Rpc.ExplainedTable>
+~Chalk.Entitlements.Rpc.EntitlementsExplain.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Entitlements.Rpc.EntitlementsOptions.Clone() -> Chalk.Entitlements.Rpc.EntitlementsOptions
+~Chalk.Entitlements.Rpc.EntitlementsOptions.DisclosureColumnSuffix.get -> string
+~Chalk.Entitlements.Rpc.EntitlementsOptions.DisclosureColumnSuffix.set -> void
+~Chalk.Entitlements.Rpc.EntitlementsOptions.EntitlementsOptions(Chalk.Entitlements.Rpc.EntitlementsOptions other) -> void
+~Chalk.Entitlements.Rpc.EntitlementsOptions.Equals(Chalk.Entitlements.Rpc.EntitlementsOptions other) -> bool
+~Chalk.Entitlements.Rpc.EntitlementsOptions.MergeFrom(Chalk.Entitlements.Rpc.EntitlementsOptions other) -> void
+~Chalk.Entitlements.Rpc.EntitlementsOptions.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Entitlements.Rpc.EntitlementsOptions.Redaction.get -> Chalk.Entitlements.Rpc.Redaction
+~Chalk.Entitlements.Rpc.EntitlementsOptions.Redaction.set -> void
+~Chalk.Entitlements.Rpc.EntitlementsOptions.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Entitlements.Rpc.EntitlementsReport.Clone() -> Chalk.Entitlements.Rpc.EntitlementsReport
+~Chalk.Entitlements.Rpc.EntitlementsReport.Columns.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Entitlements.Rpc.ReportedDisclosure>
+~Chalk.Entitlements.Rpc.EntitlementsReport.DescriptorHashes.get -> Google.Protobuf.Collections.RepeatedField<string>
+~Chalk.Entitlements.Rpc.EntitlementsReport.EntitlementsReport(Chalk.Entitlements.Rpc.EntitlementsReport other) -> void
+~Chalk.Entitlements.Rpc.EntitlementsReport.Equals(Chalk.Entitlements.Rpc.EntitlementsReport other) -> bool
+~Chalk.Entitlements.Rpc.EntitlementsReport.MergeFrom(Chalk.Entitlements.Rpc.EntitlementsReport other) -> void
+~Chalk.Entitlements.Rpc.EntitlementsReport.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Entitlements.Rpc.EntitlementsReport.RequiredRelations.get -> Google.Protobuf.Collections.RepeatedField<string>
+~Chalk.Entitlements.Rpc.EntitlementsReport.RequiredScalars.get -> Google.Protobuf.Collections.RepeatedField<string>
+~Chalk.Entitlements.Rpc.EntitlementsReport.Tables.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Entitlements.Rpc.EntitledTable>
+~Chalk.Entitlements.Rpc.EntitlementsReport.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Entitlements.Rpc.ExplainedColumn.Clone() -> Chalk.Entitlements.Rpc.ExplainedColumn
+~Chalk.Entitlements.Rpc.ExplainedColumn.Column.get -> string
+~Chalk.Entitlements.Rpc.ExplainedColumn.Column.set -> void
+~Chalk.Entitlements.Rpc.ExplainedColumn.Disclosure.get -> string
+~Chalk.Entitlements.Rpc.ExplainedColumn.Disclosure.set -> void
+~Chalk.Entitlements.Rpc.ExplainedColumn.Equals(Chalk.Entitlements.Rpc.ExplainedColumn other) -> bool
+~Chalk.Entitlements.Rpc.ExplainedColumn.ExplainedColumn(Chalk.Entitlements.Rpc.ExplainedColumn other) -> void
+~Chalk.Entitlements.Rpc.ExplainedColumn.Mask.get -> string
+~Chalk.Entitlements.Rpc.ExplainedColumn.Mask.set -> void
+~Chalk.Entitlements.Rpc.ExplainedColumn.MergeFrom(Chalk.Entitlements.Rpc.ExplainedColumn other) -> void
+~Chalk.Entitlements.Rpc.ExplainedColumn.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Entitlements.Rpc.ExplainedColumn.Placeholder.get -> string
+~Chalk.Entitlements.Rpc.ExplainedColumn.Placeholder.set -> void
+~Chalk.Entitlements.Rpc.ExplainedColumn.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Entitlements.Rpc.ExplainedParent.Clone() -> Chalk.Entitlements.Rpc.ExplainedParent
+~Chalk.Entitlements.Rpc.ExplainedParent.Column.get -> string
+~Chalk.Entitlements.Rpc.ExplainedParent.Column.set -> void
+~Chalk.Entitlements.Rpc.ExplainedParent.Equals(Chalk.Entitlements.Rpc.ExplainedParent other) -> bool
+~Chalk.Entitlements.Rpc.ExplainedParent.ExplainedParent(Chalk.Entitlements.Rpc.ExplainedParent other) -> void
+~Chalk.Entitlements.Rpc.ExplainedParent.KeyDisclosure.get -> string
+~Chalk.Entitlements.Rpc.ExplainedParent.KeyDisclosure.set -> void
+~Chalk.Entitlements.Rpc.ExplainedParent.MergeFrom(Chalk.Entitlements.Rpc.ExplainedParent other) -> void
+~Chalk.Entitlements.Rpc.ExplainedParent.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Entitlements.Rpc.ExplainedParent.ParentColumn.get -> string
+~Chalk.Entitlements.Rpc.ExplainedParent.ParentColumn.set -> void
+~Chalk.Entitlements.Rpc.ExplainedParent.Schema.get -> string
+~Chalk.Entitlements.Rpc.ExplainedParent.Schema.set -> void
+~Chalk.Entitlements.Rpc.ExplainedParent.Table.get -> string
+~Chalk.Entitlements.Rpc.ExplainedParent.Table.set -> void
+~Chalk.Entitlements.Rpc.ExplainedParent.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Entitlements.Rpc.ExplainedPath.Clone() -> Chalk.Entitlements.Rpc.ExplainedPath
+~Chalk.Entitlements.Rpc.ExplainedPath.EndpointPredicate.get -> string
+~Chalk.Entitlements.Rpc.ExplainedPath.EndpointPredicate.set -> void
+~Chalk.Entitlements.Rpc.ExplainedPath.EndpointSchema.get -> string
+~Chalk.Entitlements.Rpc.ExplainedPath.EndpointSchema.set -> void
+~Chalk.Entitlements.Rpc.ExplainedPath.EndpointTable.get -> string
+~Chalk.Entitlements.Rpc.ExplainedPath.EndpointTable.set -> void
+~Chalk.Entitlements.Rpc.ExplainedPath.Equals(Chalk.Entitlements.Rpc.ExplainedPath other) -> bool
+~Chalk.Entitlements.Rpc.ExplainedPath.ExplainedPath(Chalk.Entitlements.Rpc.ExplainedPath other) -> void
+~Chalk.Entitlements.Rpc.ExplainedPath.KeyDisclosure.get -> string
+~Chalk.Entitlements.Rpc.ExplainedPath.KeyDisclosure.set -> void
+~Chalk.Entitlements.Rpc.ExplainedPath.Kind.get -> string
+~Chalk.Entitlements.Rpc.ExplainedPath.Kind.set -> void
+~Chalk.Entitlements.Rpc.ExplainedPath.MergeFrom(Chalk.Entitlements.Rpc.ExplainedPath other) -> void
+~Chalk.Entitlements.Rpc.ExplainedPath.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Entitlements.Rpc.ExplainedPath.Steps.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Entitlements.Rpc.ExplainedStep>
+~Chalk.Entitlements.Rpc.ExplainedPath.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Entitlements.Rpc.ExplainedStep.Clone() -> Chalk.Entitlements.Rpc.ExplainedStep
+~Chalk.Entitlements.Rpc.ExplainedStep.Equals(Chalk.Entitlements.Rpc.ExplainedStep other) -> bool
+~Chalk.Entitlements.Rpc.ExplainedStep.ExplainedStep(Chalk.Entitlements.Rpc.ExplainedStep other) -> void
+~Chalk.Entitlements.Rpc.ExplainedStep.FromColumn.get -> string
+~Chalk.Entitlements.Rpc.ExplainedStep.FromColumn.set -> void
+~Chalk.Entitlements.Rpc.ExplainedStep.MergeFrom(Chalk.Entitlements.Rpc.ExplainedStep other) -> void
+~Chalk.Entitlements.Rpc.ExplainedStep.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Entitlements.Rpc.ExplainedStep.Schema.get -> string
+~Chalk.Entitlements.Rpc.ExplainedStep.Schema.set -> void
+~Chalk.Entitlements.Rpc.ExplainedStep.Table.get -> string
+~Chalk.Entitlements.Rpc.ExplainedStep.Table.set -> void
+~Chalk.Entitlements.Rpc.ExplainedStep.ToColumn.get -> string
+~Chalk.Entitlements.Rpc.ExplainedStep.ToColumn.set -> void
+~Chalk.Entitlements.Rpc.ExplainedStep.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Entitlements.Rpc.ExplainedTable.Clone() -> Chalk.Entitlements.Rpc.ExplainedTable
+~Chalk.Entitlements.Rpc.ExplainedTable.Columns.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Entitlements.Rpc.ExplainedColumn>
+~Chalk.Entitlements.Rpc.ExplainedTable.Equals(Chalk.Entitlements.Rpc.ExplainedTable other) -> bool
+~Chalk.Entitlements.Rpc.ExplainedTable.ExplainedTable(Chalk.Entitlements.Rpc.ExplainedTable other) -> void
+~Chalk.Entitlements.Rpc.ExplainedTable.MergeFrom(Chalk.Entitlements.Rpc.ExplainedTable other) -> void
+~Chalk.Entitlements.Rpc.ExplainedTable.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Entitlements.Rpc.ExplainedTable.Parents.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Entitlements.Rpc.ExplainedParent>
+~Chalk.Entitlements.Rpc.ExplainedTable.Paths.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Entitlements.Rpc.ExplainedPath>
+~Chalk.Entitlements.Rpc.ExplainedTable.Residual.get -> Google.Protobuf.Collections.RepeatedField<string>
+~Chalk.Entitlements.Rpc.ExplainedTable.RowPredicate.get -> string
+~Chalk.Entitlements.Rpc.ExplainedTable.RowPredicate.set -> void
+~Chalk.Entitlements.Rpc.ExplainedTable.Schema.get -> string
+~Chalk.Entitlements.Rpc.ExplainedTable.Schema.set -> void
+~Chalk.Entitlements.Rpc.ExplainedTable.Table.get -> string
+~Chalk.Entitlements.Rpc.ExplainedTable.Table.set -> void
+~Chalk.Entitlements.Rpc.ExplainedTable.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Entitlements.Rpc.Redaction.Clone() -> Chalk.Entitlements.Rpc.Redaction
+~Chalk.Entitlements.Rpc.Redaction.Equals(Chalk.Entitlements.Rpc.Redaction other) -> bool
+~Chalk.Entitlements.Rpc.Redaction.MergeFrom(Chalk.Entitlements.Rpc.Redaction other) -> void
+~Chalk.Entitlements.Rpc.Redaction.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Entitlements.Rpc.Redaction.Redaction(Chalk.Entitlements.Rpc.Redaction other) -> void
+~Chalk.Entitlements.Rpc.Redaction.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Entitlements.Rpc.TestedColumn.Clone() -> Chalk.Entitlements.Rpc.TestedColumn
+~Chalk.Entitlements.Rpc.TestedColumn.Column.get -> string
+~Chalk.Entitlements.Rpc.TestedColumn.Column.set -> void
+~Chalk.Entitlements.Rpc.TestedColumn.Equals(Chalk.Entitlements.Rpc.TestedColumn other) -> bool
+~Chalk.Entitlements.Rpc.TestedColumn.MergeFrom(Chalk.Entitlements.Rpc.TestedColumn other) -> void
+~Chalk.Entitlements.Rpc.TestedColumn.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Entitlements.Rpc.TestedColumn.Shapes.get -> Google.Protobuf.Collections.RepeatedField<string>
+~Chalk.Entitlements.Rpc.TestedColumn.TestedColumn(Chalk.Entitlements.Rpc.TestedColumn other) -> void
+~Chalk.Entitlements.Rpc.TestedColumn.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~override Chalk.Entitlements.Rpc.EntitledTable.Equals(object other) -> bool
+~override Chalk.Entitlements.Rpc.EntitledTable.ToString() -> string
+~override Chalk.Entitlements.Rpc.EntitlementsExplain.Equals(object other) -> bool
+~override Chalk.Entitlements.Rpc.EntitlementsExplain.ToString() -> string
+~override Chalk.Entitlements.Rpc.EntitlementsOptions.Equals(object other) -> bool
+~override Chalk.Entitlements.Rpc.EntitlementsOptions.ToString() -> string
+~override Chalk.Entitlements.Rpc.EntitlementsReport.Equals(object other) -> bool
+~override Chalk.Entitlements.Rpc.EntitlementsReport.ToString() -> string
+~override Chalk.Entitlements.Rpc.ExplainedColumn.Equals(object other) -> bool
+~override Chalk.Entitlements.Rpc.ExplainedColumn.ToString() -> string
+~override Chalk.Entitlements.Rpc.ExplainedParent.Equals(object other) -> bool
+~override Chalk.Entitlements.Rpc.ExplainedParent.ToString() -> string
+~override Chalk.Entitlements.Rpc.ExplainedPath.Equals(object other) -> bool
+~override Chalk.Entitlements.Rpc.ExplainedPath.ToString() -> string
+~override Chalk.Entitlements.Rpc.ExplainedStep.Equals(object other) -> bool
+~override Chalk.Entitlements.Rpc.ExplainedStep.ToString() -> string
+~override Chalk.Entitlements.Rpc.ExplainedTable.Equals(object other) -> bool
+~override Chalk.Entitlements.Rpc.ExplainedTable.ToString() -> string
+~override Chalk.Entitlements.Rpc.Redaction.Equals(object other) -> bool
+~override Chalk.Entitlements.Rpc.Redaction.ToString() -> string
+~override Chalk.Entitlements.Rpc.TestedColumn.Equals(object other) -> bool
+~override Chalk.Entitlements.Rpc.TestedColumn.ToString() -> string
+~static Chalk.Entitlements.Rpc.EntitledTable.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Entitlements.Rpc.EntitledTable.Parser.get -> Google.Protobuf.MessageParser<Chalk.Entitlements.Rpc.EntitledTable>
+~static Chalk.Entitlements.Rpc.EntitlementsExplain.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Entitlements.Rpc.EntitlementsExplain.Parser.get -> Google.Protobuf.MessageParser<Chalk.Entitlements.Rpc.EntitlementsExplain>
+~static Chalk.Entitlements.Rpc.EntitlementsOptions.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Entitlements.Rpc.EntitlementsOptions.Parser.get -> Google.Protobuf.MessageParser<Chalk.Entitlements.Rpc.EntitlementsOptions>
+~static Chalk.Entitlements.Rpc.EntitlementsReflection.Descriptor.get -> Google.Protobuf.Reflection.FileDescriptor
+~static Chalk.Entitlements.Rpc.EntitlementsReport.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Entitlements.Rpc.EntitlementsReport.Parser.get -> Google.Protobuf.MessageParser<Chalk.Entitlements.Rpc.EntitlementsReport>
+~static Chalk.Entitlements.Rpc.ExplainedColumn.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Entitlements.Rpc.ExplainedColumn.Parser.get -> Google.Protobuf.MessageParser<Chalk.Entitlements.Rpc.ExplainedColumn>
+~static Chalk.Entitlements.Rpc.ExplainedParent.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Entitlements.Rpc.ExplainedParent.Parser.get -> Google.Protobuf.MessageParser<Chalk.Entitlements.Rpc.ExplainedParent>
+~static Chalk.Entitlements.Rpc.ExplainedPath.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Entitlements.Rpc.ExplainedPath.Parser.get -> Google.Protobuf.MessageParser<Chalk.Entitlements.Rpc.ExplainedPath>
+~static Chalk.Entitlements.Rpc.ExplainedStep.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Entitlements.Rpc.ExplainedStep.Parser.get -> Google.Protobuf.MessageParser<Chalk.Entitlements.Rpc.ExplainedStep>
+~static Chalk.Entitlements.Rpc.ExplainedTable.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Entitlements.Rpc.ExplainedTable.Parser.get -> Google.Protobuf.MessageParser<Chalk.Entitlements.Rpc.ExplainedTable>
+~static Chalk.Entitlements.Rpc.Redaction.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Entitlements.Rpc.Redaction.Parser.get -> Google.Protobuf.MessageParser<Chalk.Entitlements.Rpc.Redaction>
+~static Chalk.Entitlements.Rpc.TestedColumn.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Entitlements.Rpc.TestedColumn.Parser.get -> Google.Protobuf.MessageParser<Chalk.Entitlements.Rpc.TestedColumn>

@@ -1,0 +1,336 @@
+// Chalk plan IR — scalar expressions and function identifiers.
+syntax = "proto3";
+
+package chalk.v1;
+
+import "chalk/v1/types.proto";
+
+option csharp_namespace = "Chalk.Ir";
+option java_multiple_files = true;
+option java_outer_classname = "ExprProto";
+option java_package = "chalk.ir.v1";
+
+message Expr {
+  // Result type. REQUIRED on every node except EnumArg. Executors never infer types.
+  Type type = 1;
+  oneof kind {
+    FieldRef field_ref = 2;
+    Literal literal = 3;
+    ScalarCall call = 4;
+    DynamicParam param = 5;
+    Cast cast = 6;
+    IfThen if_then = 7;
+    InList in_list = 8;
+    EnumArg enum_arg = 9;
+    KeySetParam key_set = 10;
+    KeySetMatch key_set_match = 11;
+  }
+}
+
+// A set of key values bound once per lookup call. Appears only inside a LookupJoin's
+// `lookup` subtree — as the single option of an InList in the pushed predicate, and as one entry of
+// the enclosing RemoteQuery's `parameters` — and is bound only by the executor, never by a caller.
+// Expr.type is the key column's type: every value in the set has it.
+message KeySetParam {
+  // Which key set, when a subtree ever carries more than one. Always 0 in v1.
+  uint32 slot = 1;
+}
+
+// The composite twin of `InList(column, [KeySetParam])`: the tuple `(a, b, …)` is one of the
+// key *rows* this lookup call carries. Appears in exactly the two places a single-column key set
+// does — in the pushed predicate, and as the one entry of the enclosing RemoteQuery's `parameters`
+// that marks where the key rows go — and is bound only by the executor.
+//
+// A node of its own rather than a wider InList because the value being matched is a tuple and the
+// IR has no tuple: each column carries its own type here, which is also what tells the executor
+// how to bind each position of a row. For a SQL source it is one placeholder in `query_text`,
+// written `(a, b) IN (?)` and expanded into `(?, ?), (?, ?), …`, which the source's
+// `supports_row_value_in_list` says it accepts.
+//
+// Expr.type is BOOL.
+message KeySetMatch {
+  // The key columns, in the order each bound row carries its values. Two or more: one column is
+  // the InList spelling, which every consumer already understands.
+  repeated Expr columns = 1;
+  // Which key set. Always 0 in v1, as KeySetParam's is.
+  KeySetParam key_set = 2;
+}
+
+// A field of the enclosing relation's input row. For binary relations (joins) the input
+// row is the left row's fields followed by the right row's fields.
+message FieldRef {
+  uint32 index = 1;
+}
+
+message Literal {
+  oneof value {
+    // A typed NULL. The type is Expr.type. Always true when set.
+    bool is_null = 1;
+    bool bool_value = 2;
+    int32 i8_value = 3;
+    int32 i16_value = 4;
+    int32 i32_value = 5;
+    int64 i64_value = 6;
+    float fp32_value = 7;
+    double fp64_value = 8;
+    string string_value = 9;
+    bytes binary_value = 10;
+    // Days since 1970-01-01.
+    int32 date_value = 11;
+    // Microseconds since midnight.
+    int64 time_value = 12;
+    // Units per Expr.type.precision since 1970-01-01T00:00:00, zone-less.
+    int64 timestamp_value = 13;
+    // Units per Expr.type.precision since the epoch, UTC.
+    int64 timestamp_tz_value = 14;
+    DecimalValue decimal_value = 15;
+    // Exactly 16 bytes.
+    bytes uuid_value = 16;
+    // Microseconds.
+    int64 interval_day_value = 17;
+    // Months.
+    int32 interval_year_value = 18;
+    // A LIST value. Elements are in list order and carry their own types; Expr.type is the
+    // LIST type and Expr.type.element is the element type.
+    ListValue list_value = 19;
+  }
+}
+
+// The elements of a LIST literal, in order. An empty message is the empty list; a NULL list is a
+// typed NULL (`is_null`), not an empty ListValue.
+message ListValue {
+  repeated Literal elements = 1;
+}
+
+// Unscaled 128-bit two's-complement integer, little-endian, exactly 16 bytes.
+// Precision and scale come from Expr.type.
+message DecimalValue {
+  bytes unscaled = 1;
+}
+
+// Exactly one of `function` and `user_function` identifies the callee: a built-in by its stable id,
+// or a client-bodied user function by its schema-qualified name. A SQL body has
+// already been inlined by the planner and a native body has been pushed into its source, so neither
+// ever reaches here.
+message ScalarCall {
+  FunctionId function = 1;
+  repeated Expr args = 2;
+  // `schema.name`, resolved against the live catalog by the validator.
+  string user_function = 3;
+}
+
+// Zero-based. Expr.type equals Plan.parameter_types[index].
+message DynamicParam {
+  uint32 index = 1;
+  // Set instead of `index`: this parameter is one of the request's named bound scalars,
+  // bound by the executor from the
+  // ExecutionContext rather than by the caller from the statement's parameters, and `index` is then
+  // meaningless. A named bound value is a general facility; today only the entitlement rewrite
+  // produces one, and only under execute-time binding — prepare-time binding folds the value into a
+  // literal before the plan is built.
+  string bound_key = 2;
+}
+
+// Target type is Expr.type.
+message Cast {
+  Expr input = 1;
+  CastFailure on_failure = 2;
+}
+
+enum CastFailure {
+  CAST_FAILURE_UNSPECIFIED = 0;
+  // Raise an execution error (SQL CAST).
+  CAST_FAILURE_ERROR = 1;
+  // Produce NULL (TRY_CAST / SAFE_CAST).
+  CAST_FAILURE_NULL = 2;
+}
+
+// CASE WHEN c1 THEN r1 WHEN c2 THEN r2 ... ELSE e END.
+// Clauses are evaluated in order; a NULL condition is treated as false.
+// else_branch is always present: the planner emits a typed NULL literal when SQL omits ELSE.
+message IfThen {
+  repeated IfClause clauses = 1;
+  Expr else_branch = 2;
+}
+
+message IfClause {
+  Expr condition = 1;
+  Expr result = 2;
+}
+
+// value IN (options...). Three-valued: NULL when value is NULL, or when no option is equal
+// and at least one option is NULL. Options are literals or dynamic parameters of value's type.
+message InList {
+  Expr value = 1;
+  repeated Expr options = 2;
+}
+
+// A symbolic function argument (e.g. the unit of EXTRACT). Not a value: Expr.type is unset,
+// and an EnumArg may only appear directly as a ScalarCall argument.
+message EnumArg {
+  string value = 1;
+}
+
+// Stable numeric function identifiers. Each id is cross-referenced to Substrait's
+// functions_*.yaml where one exists.
+// Ids are never reused. Unless stated otherwise: arguments are non-EnumArg expressions,
+// comparison and arithmetic operands have identical TypeKind (the planner inserts Casts),
+// and any NULL argument yields NULL.
+enum FunctionId {
+  FUNCTION_ID_UNSPECIFIED = 0;
+
+  // ---- comparison: (T, T) -> BOOL ----
+  FUNCTION_ID_EQ = 1;
+  FUNCTION_ID_NE = 2;
+  FUNCTION_ID_LT = 3;
+  FUNCTION_ID_LE = 4;
+  FUNCTION_ID_GT = 5;
+  FUNCTION_ID_GE = 6;
+  // Null-safe: never NULL.
+  FUNCTION_ID_IS_DISTINCT_FROM = 7;
+  FUNCTION_ID_IS_NOT_DISTINCT_FROM = 8;
+
+  // ---- boolean ----
+  // n-ary (>= 2), Kleene three-valued logic.
+  FUNCTION_ID_AND = 10;
+  FUNCTION_ID_OR = 11;
+  FUNCTION_ID_NOT = 12;
+  // Predicates on any type; never NULL.
+  FUNCTION_ID_IS_NULL = 13;
+  FUNCTION_ID_IS_NOT_NULL = 14;
+  FUNCTION_ID_IS_TRUE = 15;
+  FUNCTION_ID_IS_NOT_TRUE = 16;
+  FUNCTION_ID_IS_FALSE = 17;
+  FUNCTION_ID_IS_NOT_FALSE = 18;
+
+  // ---- arithmetic: numeric (I8..FP64, DECIMAL); result type is Expr.type ----
+  FUNCTION_ID_ADD = 20;
+  FUNCTION_ID_SUBTRACT = 21;
+  FUNCTION_ID_MULTIPLY = 22;
+  // Integer and DECIMAL division by zero is an error; FP32/FP64 follow IEEE 754.
+  FUNCTION_ID_DIVIDE = 23;
+  FUNCTION_ID_MODULUS = 24;
+  FUNCTION_ID_NEGATE = 25;
+  FUNCTION_ID_ABS = 26;
+  FUNCTION_ID_FLOOR = 27;
+  FUNCTION_ID_CEIL = 28;
+  // (x) or (x, I32 digits).
+  FUNCTION_ID_ROUND = 29;
+  FUNCTION_ID_POWER = 30;
+  FUNCTION_ID_SQRT = 31;
+  FUNCTION_ID_LN = 32;
+  FUNCTION_ID_LOG10 = 33;
+  FUNCTION_ID_EXP = 34;
+  FUNCTION_ID_SIGN = 35;
+
+  // ---- string ----
+  // n-ary (>= 2).
+  FUNCTION_ID_CONCAT = 40;
+  // Unicode simple case mapping, culture-invariant.
+  FUNCTION_ID_UPPER = 41;
+  FUNCTION_ID_LOWER = 42;
+  // (value, pattern) or (value, pattern, escape). '%' any sequence, '_' any single code point. Case-sensitive.
+  FUNCTION_ID_LIKE = 43;
+  // (value, I32 start) or (value, I32 start, I32 length). 1-based start in code points, SQL semantics.
+  FUNCTION_ID_SUBSTRING = 44;
+  // Length in code points.
+  FUNCTION_ID_CHAR_LENGTH = 45;
+  // (value) trims ASCII space both sides; (EnumArg BOTH|LEADING|TRAILING, chars, value) is the SQL form.
+  FUNCTION_ID_TRIM = 46;
+  FUNCTION_ID_LTRIM = 47;
+  FUNCTION_ID_RTRIM = 48;
+  // (needle, haystack) -> I32, 1-based code point position, 0 if absent.
+  FUNCTION_ID_POSITION = 49;
+  // (value, search, replacement).
+  FUNCTION_ID_REPLACE = 50;
+  FUNCTION_ID_STARTS_WITH = 51;
+  FUNCTION_ID_ENDS_WITH = 52;
+
+  // ---- null handling ----
+  // n-ary (>= 1): first non-NULL argument, else NULL.
+  FUNCTION_ID_COALESCE = 60;
+  // (a, b): NULL if a = b, else a.
+  FUNCTION_ID_NULLIF = 61;
+
+  // ---- temporal ----
+  // (EnumArg unit, temporal) -> I64. Units: YEAR QUARTER MONTH WEEK DAY DOW DOY HOUR MINUTE SECOND MILLISECOND MICROSECOND EPOCH.
+  FUNCTION_ID_EXTRACT = 70;
+  // (temporal, EnumArg unit) -> same type; truncates down to the unit. Units: YEAR QUARTER MONTH WEEK DAY HOUR MINUTE SECOND.
+  FUNCTION_ID_FLOOR_TEMPORAL = 71;
+  // (temporal, EnumArg unit) -> same type; rounds up to the unit.
+  FUNCTION_ID_CEIL_TEMPORAL = 72;
+  // No arguments. Evaluated once per query execution.
+  FUNCTION_ID_CURRENT_TIMESTAMP = 73;
+  FUNCTION_ID_CURRENT_DATE = 74;
+  // (EnumArg unit, from, to) -> I64 whole units between the two temporals.
+  FUNCTION_ID_TIMESTAMP_DIFF = 75;
+  // (EnumArg unit, I64 count, temporal) -> temporal.
+  FUNCTION_ID_TIMESTAMP_ADD = 76;
+  // (INTERVAL_DAY size, DATE | TIMESTAMP | TIMESTAMP_TZ value [, same-kind origin]) -> value's kind.
+  // The start of the bucket of width `size` that contains `value`, with buckets aligned to `origin`
+  // (default 1970-01-01T00:00:00). PostgreSQL `date_bin` semantics: `size` must be positive, and the
+  // bucket start is floored, so a value before the origin lands on an earlier boundary rather than
+  // being truncated towards it.
+  FUNCTION_ID_TIME_BUCKET = 77;
+
+  // ---- lists ----
+  // (LIST) -> I32. The number of elements; NULL for a NULL list, 0 for an empty one.
+  FUNCTION_ID_CARDINALITY = 78;
+  // (LIST, I32 index) -> the list's element type, nullable. SQL `arr[i]`: 1-based, NULL when the
+  // list is NULL, when the index is NULL, or when the index is outside 1..CARDINALITY.
+  FUNCTION_ID_ITEM = 79;
+  // (LIST<STRING>, STRING separator) -> STRING. The elements joined by the separator, NULL elements
+  // skipped; NULL for a NULL list or a NULL separator; the empty string for an empty list.
+  FUNCTION_ID_ARRAY_TO_STRING = 80;
+
+  // ---- the entitlement layer's two kernels ----
+  // (STRING value, STRING key) -> STRING. HMAC-SHA-256 over the value's UTF-8 bytes keyed with the
+  // key's, the first 16 bytes rendered as 32 lower-case hex characters. NULL in, NULL out, for
+  // either argument. A stable pseudonym: equal values fingerprint equally under one key, so masked
+  // rows join across tables without either value being disclosed. It is not a source function in any
+  // dialect, so it never pushes.
+  FUNCTION_ID_FINGERPRINT = 81;
+  // (any value) -> BOOL NOT NULL. Whether there is a value at all: not NULL, and for a string not
+  // empty. What a consumer of a masked column asks when the mask hides whether a value exists.
+  FUNCTION_ID_PRESENT = 82;
+}
+
+// Aggregate functions. Argument and result types are on the Measure.
+enum AggregateFunctionId {
+  AGGREGATE_FUNCTION_ID_UNSPECIFIED = 0;
+  // Zero args: COUNT(*). One arg: count of non-NULL values. Never NULL.
+  AGGREGATE_FUNCTION_ID_COUNT = 1;
+  // NULL over an empty or all-NULL group. Exact integers use checked arithmetic (overflow is an error).
+  AGGREGATE_FUNCTION_ID_SUM = 2;
+  // Like SUM but zero over an empty or all-NULL group (Calcite $SUM0; produced by AVG reduction).
+  AGGREGATE_FUNCTION_ID_SUM0 = 3;
+  AGGREGATE_FUNCTION_ID_MIN = 4;
+  AGGREGATE_FUNCTION_ID_MAX = 5;
+  // Reserved. The reference planner reduces AVG to SUM0/COUNT; executors may reject it.
+  AGGREGATE_FUNCTION_ID_AVG = 6;
+  AGGREGATE_FUNCTION_ID_ANY_VALUE = 7;
+  AGGREGATE_FUNCTION_ID_BOOL_AND = 8;
+  AGGREGATE_FUNCTION_ID_BOOL_OR = 9;
+
+  // ---- holistic ----
+  // All of them ignore NULL values and are NULL over an empty or all-NULL group.
+  //
+  // PERCENTILE_CONT and PERCENTILE_DISC take (fraction, value): the fraction is a constant in
+  // [0, 1], and `Measure.order_by` carries the WITHIN GROUP ordering. CONT interpolates linearly
+  // between the two neighbouring values and is always FP64; DISC takes the first value whose
+  // cumulative distribution reaches the fraction and has the value's type.
+  AGGREGATE_FUNCTION_ID_PERCENTILE_CONT = 10;
+  AGGREGATE_FUNCTION_ID_PERCENTILE_DISC = 11;
+  // (value STRING, separator STRING) -> STRING, concatenated in `order_by` order.
+  AGGREGATE_FUNCTION_ID_LISTAGG = 12;
+  // PostgreSQL's spelling of LISTAGG. Reserved: Calcite maps STRING_AGG onto LISTAGG when it
+  // validates a GROUP BY, and the planner maps the window spelling the same way, so no plan this
+  // planner emits carries it.
+  AGGREGATE_FUNCTION_ID_STRING_AGG = 13;
+  // (value) -> LIST<value>, in `order_by` order, NULL elements kept.
+  AGGREGATE_FUNCTION_ID_ARRAY_AGG = 14;
+  // (value) -> value. The most frequent non-NULL value; ties go to the smallest.
+  AGGREGATE_FUNCTION_ID_MODE = 15;
+
+  AGGREGATE_FUNCTION_ID_APPROX_COUNT_DISTINCT = 20;
+}

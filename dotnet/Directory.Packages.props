@@ -1,0 +1,60 @@
+<Project>
+
+  <!--
+    Central package management: every version lives here and nowhere else
+    (01-repo-and-toolchain.md §2, §7). Pins re-verified 2026-09-07 against nuget.org.
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="Apache.Arrow" Version="23.0.0" />
+    <PackageVersion Include="System.IO.Hashing" Version="10.0.12" />
+    <PackageVersion Include="Google.Protobuf" Version="3.36.1" />
+    <PackageVersion Include="Grpc.Net.Client" Version="2.83.0" />
+    <PackageVersion Include="Grpc.Core.Api" Version="2.83.0" />
+    <PackageVersion Include="Grpc.AspNetCore.Server" Version="2.83.0" />
+    <PackageVersion Include="Grpc.Tools" Version="2.83.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="5.6.0" />
+    <!-- D148a (25-coverage-graft.md §0a): the shipping DuckDB source references DuckDB.NET.Data,
+         which is the provider and its Arrow export and nothing else. The `.Full` suffix adds the
+         native libduckdb runtime packages, so the native library is the host's choice; a host picks
+         DuckDB.NET.Bindings.Full at *this* version or supplies its own build of the same DuckDB
+         release. The test kit and the integration tests keep `.Full` below, because they have to
+         run. Both packages carry the same DuckDB.NET.Data.dll, so the two versions must match. -->
+    <PackageVersion Include="DuckDB.NET.Data" Version="1.5.5" />
+  </ItemGroup>
+
+  <!-- test-only -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+    <PackageVersion Include="xunit.v3.assert" Version="3.2.2" />
+    <PackageVersion Include="xunit.v3.extensibility.core" Version="3.2.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="DuckDB.NET.Data.Full" Version="1.5.5" />
+    <!-- M4 (D85). The in-box ADO.NET source references System.Data.Common and nothing else; these
+         are the drivers the *tests* point it at, so pushdown meets real dialects from the first
+         commit. Npgsql is opt-in: the tests that use it are skipped unless CHALK_TEST_POSTGRES
+         names a connection string. -->
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <!-- Microsoft.Data.Sqlite pulls SQLitePCLRaw 2.1.11, whose bundled e_sqlite3 has
+         GHSA-2m69-gcr7-jv3q. The projects that use SQLite reference the 3.0.5 bundle directly,
+         which brings the whole SQLitePCLRaw family to one version with a patched SQLite (3.53.4)
+         rather than a 2.1.11 provider over a pinned newer library. -->
+    <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <PackageVersion Include="Npgsql" Version="10.0.1" />
+    <!-- Sample only, and MIT-licensed: samples/Chalk.Sample.AkadeIndexedSet wraps it as an
+         IPocoIndex<T> to prove D35's extension point. No Chalk.* package references it. -->
+    <PackageVersion Include="Akade.IndexedSet" Version="1.5.0" />
+  </ItemGroup>
+
+  <!-- bench-only -->
+  <ItemGroup>
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+  </ItemGroup>
+
+</Project>

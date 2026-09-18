@@ -1,0 +1,353 @@
+{
+  "irVersion": 1,
+  "planDigest": "3164201137126663965",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "id",
+        "type": {
+          "kind": "TYPE_KIND_I32"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          }
+        }
+      ]
+    },
+    "estRowCount": 1.5,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              }
+            }
+          ]
+        },
+        "estRowCount": 1.5,
+        "project": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "id",
+                  "type": {
+                    "kind": "TYPE_KIND_I32"
+                  }
+                },
+                {
+                  "name": "amount",
+                  "type": {
+                    "kind": "TYPE_KIND_I32",
+                    "nullable": true
+                  }
+                },
+                {
+                  "name": "amount0",
+                  "type": {
+                    "kind": "TYPE_KIND_I32",
+                    "nullable": true
+                  }
+                },
+                {
+                  "name": "$f1",
+                  "type": {
+                    "kind": "TYPE_KIND_BOOL",
+                    "nullable": true
+                  }
+                }
+              ]
+            },
+            "estRowCount": 1.5,
+            "filter": {
+              "input": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "id",
+                      "type": {
+                        "kind": "TYPE_KIND_I32"
+                      }
+                    },
+                    {
+                      "name": "amount",
+                      "type": {
+                        "kind": "TYPE_KIND_I32",
+                        "nullable": true
+                      }
+                    },
+                    {
+                      "name": "amount0",
+                      "type": {
+                        "kind": "TYPE_KIND_I32",
+                        "nullable": true
+                      }
+                    },
+                    {
+                      "name": "$f1",
+                      "type": {
+                        "kind": "TYPE_KIND_BOOL",
+                        "nullable": true
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 6,
+                "nestedLoopJoin": {
+                  "left": {
+                    "rowType": {
+                      "fields": [
+                        {
+                          "name": "id",
+                          "type": {
+                            "kind": "TYPE_KIND_I32"
+                          }
+                        },
+                        {
+                          "name": "amount",
+                          "type": {
+                            "kind": "TYPE_KIND_I32",
+                            "nullable": true
+                          }
+                        }
+                      ]
+                    },
+                    "estRowCount": 6,
+                    "read": {
+                      "table": {
+                        "sourceId": "mem",
+                        "schema": "main",
+                        "table": "sales"
+                      },
+                      "projection": [
+                        0,
+                        2
+                      ]
+                    }
+                  },
+                  "right": {
+                    "rowType": {
+                      "fields": [
+                        {
+                          "name": "amount",
+                          "type": {
+                            "kind": "TYPE_KIND_I32",
+                            "nullable": true
+                          }
+                        },
+                        {
+                          "name": "$f1",
+                          "type": {
+                            "kind": "TYPE_KIND_BOOL"
+                          }
+                        }
+                      ]
+                    },
+                    "estRowCount": 1,
+                    "project": {
+                      "input": {
+                        "rowType": {
+                          "fields": [
+                            {
+                              "name": "amount",
+                              "type": {
+                                "kind": "TYPE_KIND_I32",
+                                "nullable": true
+                              }
+                            }
+                          ]
+                        },
+                        "estRowCount": 1,
+                        "hashAggregate": {
+                          "aggregate": {
+                            "input": {
+                              "rowType": {
+                                "fields": [
+                                  {
+                                    "name": "amount",
+                                    "type": {
+                                      "kind": "TYPE_KIND_I32",
+                                      "nullable": true
+                                    }
+                                  }
+                                ]
+                              },
+                              "estRowCount": 5,
+                              "filter": {
+                                "input": {
+                                  "rowType": {
+                                    "fields": [
+                                      {
+                                        "name": "amount",
+                                        "type": {
+                                          "kind": "TYPE_KIND_I32",
+                                          "nullable": true
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  "estRowCount": 6,
+                                  "read": {
+                                    "table": {
+                                      "sourceId": "mem",
+                                      "schema": "main",
+                                      "table": "sales"
+                                    },
+                                    "projection": [
+                                      2
+                                    ]
+                                  }
+                                },
+                                "condition": {
+                                  "type": {
+                                    "kind": "TYPE_KIND_BOOL"
+                                  },
+                                  "call": {
+                                    "function": "FUNCTION_ID_IS_NOT_NULL",
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "kind": "TYPE_KIND_I32",
+                                          "nullable": true
+                                        },
+                                        "fieldRef": {}
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            },
+                            "groupings": [
+                              {
+                                "keys": [
+                                  0
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "exprs": [
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_I32",
+                            "nullable": true
+                          },
+                          "fieldRef": {}
+                        },
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_BOOL"
+                          },
+                          "literal": {
+                            "boolValue": true
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "condition": {
+                    "type": {
+                      "kind": "TYPE_KIND_BOOL",
+                      "nullable": true
+                    },
+                    "call": {
+                      "function": "FUNCTION_ID_EQ",
+                      "args": [
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_I32",
+                            "nullable": true
+                          },
+                          "fieldRef": {
+                            "index": 1
+                          }
+                        },
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_I32",
+                            "nullable": true
+                          },
+                          "fieldRef": {
+                            "index": 2
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "type": "JOIN_TYPE_LEFT"
+                }
+              },
+              "condition": {
+                "type": {
+                  "kind": "TYPE_KIND_BOOL"
+                },
+                "call": {
+                  "function": "FUNCTION_ID_IS_NULL",
+                  "args": [
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_BOOL",
+                        "nullable": true
+                      },
+                      "fieldRef": {
+                        "index": 3
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "exprs": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {}
+            }
+          ]
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_I32"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,46 @@
+-- u1
+report id:Full, members:Some
+
+-- u2
+report id:Full, members:Some
+
+-- u3
+report id:Full, members:Some
+
+-- u3-in-o1
+report id:Full, members:Some
+
+-- u4
+report id:Full, members:All
+
+-- u5
+report id:Full, members:Some
+
+-- u6
+report id:Full, members:Some
+
+-- u6-two-orgs
+report id:Full, members:Some
+
+-- u7
+report id:Full, members:Some
+
+-- u8
+report id:Full, members:Some
+2
+
+-- u9
+POLICY Refused by the entitlements: main.members.national_id is population-only for this principal and a predicate is not one of the aggregates it permits.
+
+-- u10-in-a-region
+report id:Full, members:Some
+
+-- u11-subject-in-a-region
+report id:Full, members:Some
+
+-- u14-a-vendor
+report id:Full, members:Some
+
+-- u15-a-vendor-and-an-org
+report id:Full, members:Some
+

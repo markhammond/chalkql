@@ -1,0 +1,45 @@
+-- u1
+F64 InvalidPlanException: Invalid plan at root/Sort/SetOp.inputs[0]: every SetOp input has the output row type up to nullability, but field 0 is STRING? against an output field of STRING (violates I-IR-4, docs/design/02-ir.md §8)
+
+-- u2
+F64 InvalidPlanException: Invalid plan at root/Sort/SetOp.inputs[0]: every SetOp input has the output row type up to nullability, but field 0 is STRING? against an output field of STRING (violates I-IR-4, docs/design/02-ir.md §8)
+
+-- u3
+F64 InvalidPlanException: Invalid plan at root/Sort/SetOp.inputs[0]: every SetOp input has the output row type up to nullability, but field 0 is STRING? against an output field of STRING (violates I-IR-4, docs/design/02-ir.md §8)
+
+-- u3-in-o1
+F64 InvalidPlanException: Invalid plan at root/Sort/SetOp.inputs[0]: every SetOp input has the output row type up to nullability, but field 0 is STRING? against an output field of STRING (violates I-IR-4, docs/design/02-ir.md §8)
+
+-- u4
+report n:Full, members:All
+
+-- u5
+report n:PerRow, members:None
+
+-- u6
+F64 InvalidPlanException: Invalid plan at root/Sort/SetOp.inputs[0]: every SetOp input has the output row type up to nullability, but field 0 is STRING? against an output field of STRING (violates I-IR-4, docs/design/02-ir.md §8)
+
+-- u6-two-orgs
+F64 InvalidPlanException: Invalid plan at root/Sort/SetOp.inputs[0]: every SetOp input has the output row type up to nullability, but field 0 is STRING? against an output field of STRING (violates I-IR-4, docs/design/02-ir.md §8)
+
+-- u7
+report n:PerRow, members:None
+
+-- u8
+F64 InvalidPlanException: Invalid plan at root/Sort/SetOp.inputs[0]: every SetOp input has the output row type up to nullability, but field 0 is STRING? against an output field of STRING (violates I-IR-4, docs/design/02-ir.md §8)
+
+-- u9
+F64 InvalidPlanException: Invalid plan at root/Sort/SetOp.inputs[0]: every SetOp input has the output row type up to nullability, but field 0 is STRING? against an output field of STRING (violates I-IR-4, docs/design/02-ir.md §8)
+
+-- u10-in-a-region
+report n:PerRow, members:None
+
+-- u11-subject-in-a-region
+report n:PerRow, members:None
+
+-- u14-a-vendor
+report n:PerRow, members:None
+
+-- u15-a-vendor-and-an-org
+report n:Full, members:Some
+

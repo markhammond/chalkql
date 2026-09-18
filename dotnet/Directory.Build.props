@@ -1,0 +1,41 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <Deterministic>true</Deterministic>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);NU1900</NoWarn>
+    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../'))</RepoRoot>
+    <ProtoRootDir>$(RepoRoot)proto</ProtoRootDir>
+    <CorpusDir>$(RepoRoot)corpus</CorpusDir>
+    <Version>0.1.0</Version>
+    <Authors>The Chalk Authors</Authors>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/markhammond/chalkql</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
+    <PackageTags>sql;federated-query;query-engine;calcite;arrow;entitlements;duckdb;postgresql;sqlite</PackageTags>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    Apple Silicon caveat (01-repo-and-toolchain.md §2): Grpc.Tools 2.83.0 ships
+    protoc/grpc_csharp_plugin for macosx_x64 only, and without Rosetta 2 the build
+    fails with "Bad CPU type in executable". Use the Homebrew binaries
+    (scripts/install-tools.sh) when we are on an arm64 Mac and they exist.
+  -->
+  <PropertyGroup Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64' AND $([MSBuild]::IsOSPlatform('OSX'))">
+    <HomebrewPrefix Condition="Exists('/opt/homebrew/bin')">/opt/homebrew/bin</HomebrewPrefix>
+    <HomebrewPrefix Condition="'$(HomebrewPrefix)' == '' AND Exists('/usr/local/bin')">/usr/local/bin</HomebrewPrefix>
+    <Protobuf_ProtocFullPath Condition="Exists('$(HomebrewPrefix)/protoc')">$(HomebrewPrefix)/protoc</Protobuf_ProtocFullPath>
+    <gRPC_PluginFullPath Condition="Exists('$(HomebrewPrefix)/grpc_csharp_plugin')">$(HomebrewPrefix)/grpc_csharp_plugin</gRPC_PluginFullPath>
+  </PropertyGroup>
+
+</Project>

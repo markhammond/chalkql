@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Sources</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>Chalk source extension point: ISourceRuntime, scan requests, execution stats, Arrow type mapping.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Apache.Arrow" />
+    <PackageReference Include="System.IO.Hashing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Chalk.Ir/Chalk.Ir.csproj" />
+    <ProjectReference Include="../Chalk.Catalog/Chalk.Catalog.csproj" />
+  </ItemGroup>
+
+  <!--
+    The columnar views of step 20 are internal on purpose: the public source contract stays Arrow
+    (15-zero-allocation-execution.md §1), and these are what the engine and the in-box sources use
+    between themselves.
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Chalk.Execution" />
+    <InternalsVisibleTo Include="Chalk.Sources.Poco" />
+    <InternalsVisibleTo Include="Chalk.Client" />
+    <InternalsVisibleTo Include="Chalk.Execution.Tests" />
+    <InternalsVisibleTo Include="Chalk.Sources.Poco.Tests" />
+    <InternalsVisibleTo Include="Chalk.Integration.Tests" />
+    <InternalsVisibleTo Include="Chalk.TestKit" />
+    <InternalsVisibleTo Include="Chalk.Benchmarks" />
+  </ItemGroup>
+
+  <!--
+    The public surface is reviewed rather than discovered (F7). PublicAPI.Shipped.txt is empty until
+    the first tagged release; everything this package exposes is listed in PublicAPI.Unshipped.txt,
+    so adding, removing or changing a public symbol shows up as a diff on that file.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <!--
+    CHALK001 is the experimental id the Tier 2 kernel interface and the columnar views carry (D79).
+    This package is where they live, so it opts in once rather than at every use.
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CHALK001</NoWarn>
+  </PropertyGroup>
+
+</Project>

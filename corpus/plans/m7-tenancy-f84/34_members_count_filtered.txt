@@ -1,0 +1,60 @@
+-- u1
+report n:Redacted, members:Some
+0
+
+-- u2
+report n:Redacted, members:Some
+0
+
+-- u3
+report n:Redacted, members:Some
+0
+
+-- u3-in-o1
+report n:Redacted, members:Some
+0
+
+-- u4
+report n:Redacted, members:All
+0
+
+-- u5
+report n:Redacted, members:None
+0
+
+-- u6
+report n:Redacted, members:Some
+0
+
+-- u6-two-orgs
+report n:Redacted, members:Some
+0
+
+-- u7
+report n:Redacted, members:None
+0
+
+-- u8
+report n:Tested, members:Some
+0
+
+-- u9
+report n:Aggregate, members:Some
+1
+
+-- u10-in-a-region
+report n:Redacted, members:None
+0
+
+-- u11-subject-in-a-region
+report n:Redacted, members:None
+0
+
+-- u14-a-vendor
+report n:Redacted, members:None
+0
+
+-- u15-a-vendor-and-an-org
+report n:Redacted, members:Some
+0
+

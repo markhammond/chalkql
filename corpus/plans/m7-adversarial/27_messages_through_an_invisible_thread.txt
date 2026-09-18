@@ -1,0 +1,46 @@
+-- u1
+F63 EntitlementException: Refused by the entitlements: the visibility of main.messages derives through main.threads, and the join that establishes it — on column 1 against the parent's column 0 — is not in the finished plan, so rows whose parent this principal cannot see could reach the result.
+
+-- u2
+F63 EntitlementException: Refused by the entitlements: the visibility of main.messages derives through main.threads, and the join that establishes it — on column 1 against the parent's column 0 — is not in the finished plan, so rows whose parent this principal cannot see could reach the result.
+
+-- u3
+F63 EntitlementException: Refused by the entitlements: the visibility of main.messages derives through main.threads, and the join that establishes it — on column 1 against the parent's column 0 — is not in the finished plan, so rows whose parent this principal cannot see could reach the result.
+
+-- u3-in-o1
+F63 EntitlementException: Refused by the entitlements: the visibility of main.messages derives through main.threads, and the join that establishes it — on column 1 against the parent's column 0 — is not in the finished plan, so rows whose parent this principal cannot see could reach the result.
+
+-- u4
+report id:Full, content:Full, messages:All
+5|eastward opening CANARY-CONTENT-05
+
+-- u5
+report id:Full, content:Redacted, messages:None, threads:None
+
+-- u6
+F63 EntitlementException: Refused by the entitlements: the visibility of main.messages derives through main.threads, and the join that establishes it — on column 1 against the parent's column 0 — is not in the finished plan, so rows whose parent this principal cannot see could reach the result.
+
+-- u6-two-orgs
+F63 EntitlementException: Refused by the entitlements: the visibility of main.messages derives through main.threads, and the join that establishes it — on column 1 against the parent's column 0 — is not in the finished plan, so rows whose parent this principal cannot see could reach the result.
+
+-- u7
+report id:Full, content:Redacted, messages:None, threads:None
+
+-- u8
+F63 EntitlementException: Refused by the entitlements: the visibility of main.messages derives through main.threads, and the join that establishes it — on column 1 against the parent's column 0 — is not in the finished plan, so rows whose parent this principal cannot see could reach the result.
+
+-- u9
+F63 EntitlementException: Refused by the entitlements: the visibility of main.messages derives through main.threads, and the join that establishes it — on column 1 against the parent's column 0 — is not in the finished plan, so rows whose parent this principal cannot see could reach the result.
+
+-- u10-in-a-region
+report id:Full, content:Redacted, messages:None, threads:None
+
+-- u11-subject-in-a-region
+report id:Full, content:Redacted, messages:None, threads:None
+
+-- u14-a-vendor
+report id:Full, content:Redacted, messages:None, threads:None
+
+-- u15-a-vendor-and-an-org
+F63 EntitlementException: Refused by the entitlements: the visibility of main.messages derives through main.threads, and the join that establishes it — on column 1 against the parent's column 0 — is not in the finished plan, so rows whose parent this principal cannot see could reach the result.
+

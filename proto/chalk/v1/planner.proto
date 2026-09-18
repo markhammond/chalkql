@@ -1,0 +1,623 @@
+// Chalk planner RPC.
+// Generated into Chalk.Client (C#) and chalk.planner.rpc.v1 (Java); the IR messages it imports live in Chalk.Ir.
+syntax = "proto3";
+
+package chalk.v1;
+
+import "chalk/v1/catalog.proto";
+import "chalk/v1/dialect.proto";
+import "chalk/v1/expr.proto";
+import "chalk/v1/plan.proto";
+import "chalk/v1/types.proto";
+import "google/protobuf/any.proto";
+
+option csharp_namespace = "Chalk.Client.Rpc";
+option java_multiple_files = true;
+option java_outer_classname = "PlannerProto";
+option java_package = "chalk.planner.rpc.v1";
+
+service PlannerService {
+  rpc GetInfo(GetInfoRequest) returns (GetInfoResponse);
+  // Installs one *shape version* of one engine instance's catalog. Idempotent:
+  // a version already held is a no-op. Sent only when the engine has minted a version this
+  // connection has not registered, or when a Plan reported one unknown — never per plan.
+  rpc RegisterCatalog(RegisterCatalogRequest) returns (RegisterCatalogResponse);
+  // Installs one *statistics version* of one engine instance: row counts,
+  // their kind and column statistics, for the tables whose numbers moved. Separate from the shape so
+  // a data-only refresh — an append of a micro-batch — publishes those tables and nothing else.
+  // The planner joins the shape a plan names with the newest statistics it holds for the instance.
+  rpc RegisterStatistics(RegisterStatisticsRequest) returns (RegisterStatisticsResponse);
+  // Fails with FAILED_PRECONDITION (PlanError.UNKNOWN_CATALOG_VERSION) if the
+  // (instance_id, shape_version) the request names is not one this planner holds — which is memory
+  // policy and never correctness: the client registers that version and retries once.
+  rpc Plan(PlanRequest) returns (PlanResponse);
+  // Asks an in-flight Plan call to stop searching and return the best complete plan it has
+  //. Cooperative and separate, so Plan itself stays unary: the request names the
+  // in-flight call by the `request_id` its `PlanningOptions` carried. Never fails a planning —
+  // a stop before any complete plan exists arms "stop at the first one".
+  rpc StopPlanning(StopPlanningRequest) returns (StopPlanningResponse);
+  // Redacts a statement's literals so the text can be logged. For text that was
+  // never prepared — above all text that does not parse, which is where a host most wants a
+  // loggable form. Parses with the named conformance and falls back to the parser's token stream,
+  // which keeps nothing. Reads no catalog and holds no state.
+  rpc RedactSql(RedactSqlRequest) returns (RedactSqlResponse);
+}
+
+message GetInfoRequest {}
+
+message GetInfoResponse {
+  uint32 min_ir_version = 1;
+  uint32 max_ir_version = 2;
+  string planner_version = 3;
+  string calcite_version = 4;
+  // Hash of the rule set, cost model version, Calcite version and IR version. Part of the client's plan-cache key.
+  uint32 planner_config_hash = 5;
+  // What this sidecar accepts as a source's DialectProfile.dialect.
+  repeated DialectInfo dialects = 6;
+  // Every level this sidecar's parser accepts, for a source's DialectProfile.conformance or a
+  // request's PlannerOptions.conformance.
+  repeated SqlConformance conformances = 7;
+  // Every library this sidecar can load, for a source's DialectProfile.libraries or a request's
+  // PlannerOptions.libraries.
+  repeated SqlLibrary libraries = 8;
+  // The planning scheduler's worker count in force: the sidecar's --planning-workers and
+  // --planning-load-factor arguments, resolved, or every available processor when neither was
+  // given. Part of the client's planner identity, like the rest of this message.
+  uint32 planning_workers = 9;
+}
+
+// One preset a DialectProfile.dialect (or PlannerOptions/DialectProfile's SQL vocabulary) may name,
+// as this sidecar's build of Calcite knows it.
+message DialectInfo {
+  // The preset a DialectProfile.dialect accepts, lower case: "sqlite", "duckdb", "postgresql",
+  // "ansi", "oracle", "big_query", …
+  string name = 1;
+  // Calcite's SqlDialect.DatabaseProduct enum name, e.g. "POSTGRESQL"; empty for "ansi".
+  string database_product = 2;
+  // True for the four presets Chalk ships a conformance-kit run for: "ansi", "sqlite", "duckdb"
+  // and "postgresql". False for every other DatabaseProduct, which SourceDialects.of builds from
+  // Calcite's own stock dialect class rather than one of Chalk's — untuned, because nothing here
+  // has run the conformance kit against it; that is the host's job.
+  bool tuned = 3;
+  // Other spellings the sidecar accepts for the same preset, e.g. "postgres" for "postgresql".
+  repeated string aliases = 4;
+}
+
+message RegisterCatalogRequest {
+  // The catalog's *shape*: every table's row count, its kind and every column's
+  // statistics are struck out here and travel in RegisterStatistics instead. A registration that
+  // still carries them is accepted and read — the fields are the descriptor's own — but the
+  // statistics version is what a data-only refresh moves, and this message is what a shape change
+  // moves.
+  //
+  // Under `base_shape_version` this is a **delta**: the schemas whose tables changed, each carrying
+  // its own properties whole and only the changed tables. The catalog's own properties — the context
+  // id, the epoch, the join policy, the associations — travel whole either way, because they are
+  // small and because a delta that could leave one of them behind would be a second thing to reason
+  // about. A schema the delta names replaces that schema's properties and the tables it names; a
+  // schema it does not name is the base's, untouched.
+  CatalogContext catalog = 1;
+  // The engine instance this catalog belongs to: a ULID minted once per ChalkEngine,
+  // unique across engines and across one engine's restarts, so a sidecar shared by several engines
+  // never confuses two. Empty falls back to `catalog.context_id`, which is what an older
+  // client sends.
+  string instance_id = 2;
+  // The version this registration installs: a ULID the engine minted when some table's shape
+  // changed. Empty falls back to `catalog.epoch` rendered as a string, so an older client
+  // still installs something addressable — and a plan of such a client names no version and is
+  // served the newest.
+  string shape_version = 3;
+  // A **delta**: the version `catalog`'s changed tables are applied *to*,
+  // producing `shape_version` atomically. Empty — the default — is a full registration, which is
+  // also what a client falls back to when a delta is refused. A delta whose base this planner no
+  // longer holds is refused with UNKNOWN_CATALOG_VERSION naming the base.
+  string base_shape_version = 4;
+  // Tables the delta removes, as `schema.table`. Meaningless without `base_shape_version`.
+  repeated string removed_tables = 5;
+}
+
+message RegisterCatalogResponse {}
+
+// One engine instance's statistics at one version. **Merged** over whatever
+// statistics that instance holds: a table named here replaces its own numbers, and a table absent
+// keeps the ones it had — from an earlier statistics version, or from its own descriptor when none
+// was ever published for it. A refresh therefore sends the tables whose numbers moved and nothing
+// else, and a refresh that moved nothing sends no message at all.
+message RegisterStatisticsRequest {
+  string instance_id = 1;
+  // The version this message installs: a ULID the engine minted when a refresh moved any table's
+  // statistics. A planner that already holds a version at or after this one keeps what it has.
+  string statistics_version = 2;
+  repeated TableStatistics tables = 3;
+}
+
+message RegisterStatisticsResponse {}
+
+// What one table's numbers are, at one statistics version. The shape stays in the table descriptor;
+// this is everything a data-only refresh can move.
+message TableStatistics {
+  // The schema's federation-level name, as `Schema.name` spells it.
+  string schema = 1;
+  string table = 2;
+  // Exact or estimated. Negative = unknown, exactly as `Table.row_count`.
+  int64 row_count = 3;
+  RowCountKind row_count_kind = 4;
+  repeated ColumnStatisticsEntry columns = 5;
+}
+
+// One column's statistics, addressed by name rather than by position so a shape change that adds or
+// reorders columns cannot silently attach one column's numbers to another.
+message ColumnStatisticsEntry {
+  string column = 1;
+  ColumnStatistics statistics = 2;
+}
+
+message PlanRequest {
+  string sql = 1;
+  // The engine instance, and the catalog's own name inside it. These are the same string
+  // for an engine whose host named its catalog, and the instance ULID for one that did not.
+  string context_id = 2;
+  // The engine's local refresh counter, carried for diagnostics and for the plan's own
+  // `Plan.catalog_epoch`. **No longer checked**: the shape version below is what a plan is keyed to
+  //, and EPOCH_MISMATCH retires from this path.
+  int64 catalog_epoch = 3;
+  // Superseded by `statistics_version`. Never set by a client that sends one.
+  int64 stats_epoch = 4;
+  uint32 client_ir_version = 5;
+  // Optional. When empty the planner infers parameter types and reports them in Plan.parameter_types.
+  repeated Type parameter_types = 6;
+  PlannerOptions options = 7;
+  // The named values this statement is planned with. A core
+  // facility: any statement may say `org_id IN (@ctx.my_orgs)`, a named list parameter beside the
+  // positional ones, and this is where the host binds it. Present under prepare-time binding, which
+  // is the primary mode: the planner folds every scalar and every small relation into constants, so
+  // the plan is the one this caller gets and the digest differs from another caller's. Absent under
+  // execute-time binding, where one plan is shared and the values are bound per execution instead.
+  RequestContext context = 8;
+  // The extensions this request carries, each a message addressed by its type URL.
+  // The only extension slot on the request side: the sidecar's registry routes each to the one
+  // handler registered for its type, and an extension with no handler is refused with
+  // INVALID_REQUEST naming the type URL rather than ignored. A core client that attaches none sends
+  // no bytes here at all — zero cost by construction.
+  repeated google.protobuf.Any extensions = 9;
+  // Incremental narrowing: the digest of the plan this request's context is the *union* of,
+  // as a **hint** and nothing more. `context` already carries the whole union, so this field cannot
+  // change the plan — it only tells the sidecar which plan's post-conversion tree it may start from,
+  // and a sidecar that no longer holds one plans from SQL and produces the very same plan. Zero
+  // means "plan from SQL", which is what every request that is not a narrowing sends.
+  //
+  // When the hint is used the stage list says `narrowed from <digest>` in place of the parse,
+  // validation and conversion stages it skipped.
+  uint64 narrow_from = 10;
+  // What may end this request's optimiser search before it has run to completion, and the
+  // id a StopPlanning call addresses it by. Absent — which is every request that sets none — is
+  // today's behaviour exactly: the search runs to completion, no governor is installed and no cost
+  // is sampled.
+  PlanningOptions planning_options = 11;
+  // Redact this statement's literals and return the result in PlanResponse.redacted_sql.
+  // **Opt-in, and absent is the default**: a request that sends no redaction message
+  // asks for nothing, and the sidecar runs no visitor, derives no seed and carries no extra bytes
+  // back. The salt travels because the pseudonym must be the same whichever side computes it; the
+  // sidecar never logs it.
+  RedactionOptions redaction = 12;
+  // The engine instance this statement is planned for. Empty falls back to `context_id`.
+  string instance_id = 13;
+  // **Required**: the shape version this statement is planned against. A plan is made
+  // against one definite version and never a range, because the plan's digest, every entitled read's
+  // descriptor hash and staleness are all keyed to it. A version this planner does not hold
+  // is answered with UNKNOWN_CATALOG_VERSION naming it; the client registers it and retries once.
+  //
+  // Empty resolves to the newest shape this planner holds for the instance, which is what an older
+  // client needs: such a client registers the whole catalog before every plan, so the
+  // newest is the one it meant.
+  string shape_version = 14;
+  // **Advisory**: the statistics version the client knows it has published. Stale
+  // statistics change costs and never answers, so a plan naming an older version than the planner
+  // holds is planned with the newest the planner holds, and one naming a version it has never seen
+  // is planned with the newest too — there is nothing to fail about.
+  string statistics_version = 15;
+}
+
+// How a statement's literals are turned into pseudonyms. The salt is the
+// host's secret and the seed is derived from it and from the statement's structural hash, so equal
+// values in equal shapes correlate and equal values in different shapes do not.
+message RedactionOptions {
+  // The host's salt. Empty is refused here rather than defaulted: the client is what decides that
+  // an absent salt means a random per-engine one, and a sidecar that invented its own would make
+  // two engines' pseudonyms differ for the same host secret.
+  bytes salt = 1;
+  // Which literals become pseudonyms. UNSPECIFIED reads as ALL.
+  RedactionScope scope = 2;
+  // Keep the literals that are positions rather than data — LIMIT, FETCH, OFFSET, an integer window
+  // frame bound, an ordinal in GROUP BY or ORDER BY — so a redacted statement still reads as the
+  // shape it is. Never honoured by the token fallback, which has no positions to trust.
+  bool keep_structural = 3;
+}
+
+// Which literals a redaction replaces. The structural hash is over *every* literal whatever
+// this says, so turning the scope down never changes a pseudonym a host has already logged.
+enum RedactionScope {
+  REDACTION_SCOPE_UNSPECIFIED = 0;
+  // Character and binary strings only; numbers, booleans, NULL and temporal literals stay as written.
+  REDACTION_SCOPE_STRINGS = 1;
+  // Every literal. The default.
+  REDACTION_SCOPE_ALL = 2;
+}
+
+// One statement to redact, outside any planning.
+message RedactSqlRequest {
+  string sql = 1;
+  // Which dialect to parse it as, so the token fallback lexes it with the same grammar a prepare
+  // would. UNSPECIFIED means DEFAULT.
+  SqlConformance conformance = 2;
+  // Required: a request that carries none is refused, because a redaction with no salt is not a
+  // redaction this service may invent a key for.
+  RedactionOptions redaction = 3;
+}
+
+message RedactSqlResponse {
+  string redacted_sql = 1;
+  // SHA-256 of the statement's structural form — the canonical unparse with every literal replaced
+  // by its type marker. Stable across processes, machines and host builds; the one boundary is the
+  // planner build, since a change to Calcite's unparse could move it.
+  bytes structural_hash = 2;
+  // False when the text did not parse and the token fallback served it, which is the case where
+  // nothing structural is kept.
+  bool parsed = 3;
+}
+
+// A budget for one planning. Every field defaults to
+// "no limit", so an absent or empty message is a full run.
+message PlanningOptions {
+  // Wall-clock budget for the optimiser. 0 = unbounded. The only non-deterministic control here,
+  // and opt-in for that reason: two runs under a budget may stop at different points.
+  uint64 time_budget_ms = 1;
+  // How many consecutive samples must show no improvement before the search is called converged.
+  // 0 = never stop on convergence.
+  uint32 convergence_patience = 2;
+  // How close to 1.0 a sample's `divideBy` against the previous sample must be to count as "no
+  // improvement". 0 = the planner's default (0.001).
+  double convergence_range_threshold = 3;
+  // How many rule evaluations there are between samples. A count and never a duration, so that a
+  // convergence-terminated plan is the same plan on every machine. 0 = the planner's
+  // default (500).
+  uint32 convergence_evaluation_interval = 4;
+  // Names this planning so a StopPlanning call can address it. Empty means this planning
+  // cannot be stopped by id; a cancelled call still stops it.
+  string request_id = 5;
+  // The host had already asked to stop before this request was sent: end at the first complete plan.
+  // A StopPlanning call cannot express this, because it can only address a planning that is already
+  // in flight; a host whose stop token was cancelled before the prepare began would otherwise have
+  // its stop silently lost to the race.
+  bool stop_at_first_plan = 6;
+  // Wall-clock cadence for a "look": the sidecar's timer
+  // thread sets a look-now flag on this cadence and the governor honours it at the top of the next
+  // rule evaluation, so a look costs one volatile read per evaluation. 0 = the planner's default
+  // (20 ms). Ignored when convergence_evaluation_interval is set: the count then governs instead,
+  // because it is the reproducible mode.
+  uint64 convergence_sample_period_ms = 7;
+  // This planning's priority once its first slice is over. Every planning is served in
+  // the high queue for its first slice regardless of this value, so a simple query is never held up
+  // behind a complex one; after that it moves to the queue this names. UNSPECIFIED reads as normal,
+  // so a request that supplies none is normal.
+  PlanningPriority priority = 8;
+  // Names a planning session: a partition of the sidecar's workers a cooperating host
+  // declares inline, identified by this name and not by the gRPC channel — two channels naming the
+  // same session share one cap. Empty runs uncapped and outside every session. Advisory
+  // quality-of-service, never tenant isolation: any caller that names a session may affect
+  // it, so it is a tool for a host's own cooperating callers, not a security boundary.
+  string session_name = 9;
+  // The session's concurrency cap: at most this many of the session's plannings hold
+  // a worker at once, whatever queue they are in. There is no lifecycle RPC — the first request
+  // naming a session creates it with the cap it carries; a later request naming the same session
+  // with a different non-zero cap replaces it; 0 leaves an existing session's registered cap
+  // unchanged, and is the cap itself only the first time the name is ever seen, meaning a session
+  // named with no cap ever given runs uncapped. A cap at or above the sidecar's worker count is no
+  // cap. Ignored when session_name is empty.
+  uint32 session_max_concurrency = 10;
+}
+
+// A planning's priority once its first slice is over. Three FIFO queues served in the ratio
+// 16 : 4 : 1 of every 21 permits granted, a queue's share passing to the others while it is empty.
+enum PlanningPriority {
+  PLANNING_PRIORITY_UNSPECIFIED = 0;
+  PLANNING_PRIORITY_HIGH = 1;
+  PLANNING_PRIORITY_NORMAL = 2;
+  PLANNING_PRIORITY_LOW = 3;
+}
+
+// Stop the in-flight planning named by `request_id`: return the best complete plan it has,
+// or the first one it finds if it has none yet.
+message StopPlanningRequest {
+  string request_id = 1;
+}
+
+message StopPlanningResponse {
+  // False for an id no planning is in flight under, which a client reads as "already finished".
+  bool found = 1;
+  // The governor's evaluation count for that id: the live one for a planning still in flight, and
+  // the final one for a planning this sidecar remembers having finished. Zero for an id it has no
+  // record of. A diagnostic — this is how a host, or a test, sees that a planning it cancelled is
+  // no longer running.
+  uint64 evaluation_count = 2;
+}
+
+// The named values a host binds for one statement: scalars, lists, relations, the fold ceiling, and
+// the audit metadata `purpose` and `actor`. It
+// is the core's own facility and exists without entitlements — a statement that says
+// `org_id IN (@ctx.my_orgs)` binds one and nothing entitlement-shaped is involved. The entitlement
+// pass merely *consumes* it: what it adds is an EntitlementsOptions extension, not this message.
+//
+// Under prepare-time binding the folded values *are* in the plan and therefore in the plan text and
+// the digest: that is what makes two bindings two plans, and what the plan cache keys on.
+// What they are never in is the statistics, the audit event or an error message. Plan
+// text carries the caller's own bound values and is the host's to log or not.
+message RequestContext {
+  repeated ContextScalar scalars = 1;
+  repeated ContextRelationValue relations = 2;
+  // Relations of at most this many rows are folded into IN lists and constants; a larger one stays a
+  // BoundTable the executor materialises. 0 = the planner's default (64).
+  uint32 fold_max_rows = 3;
+  // Execute-time binding: this context carries names, kinds and types and no
+  // values at all. A `ContextScalar` then holds an `Expr` with a type and no literal, and a
+  // `ContextRelationValue` a `row_type` and no rows. The flag is explicit rather than inferred
+  // because the absence is ambiguous — an empty list is a legitimate binding under prepare-time
+  // binding, and it folds a membership test to FALSE.
+  //
+  // The planner then folds nothing: every scalar becomes a DynamicParam carrying `bound_key`, every
+  // list and relation a BoundTable, and each column's sanitiser stays a per-row CASE. Two principals
+  // whose contexts have the same shape get one plan and one digest, and execution binds the values.
+  //
+  // Partial binding is the same thing per entry: `ContextScalar.shape` and
+  // `ContextRelationValue.shape` say it of one binding, and this flag says it of every one of them
+  // at once. Both spellings are read, so a host that sets this need set neither of the others.
+  bool shape_only = 4;
+}
+
+message ContextScalar {
+  string name = 1;
+  // A Literal expression. Its type is the scalar's. Under `shape` it carries the type and no
+  // literal, because a shape is what the planner types the parameter it plans in the value's place.
+  Expr value = 2;
+  // Partial binding: this one entry is a *shape* — a name and a type, no value. It becomes a
+  // DynamicParam carrying `bound_key`, exactly as every entry does under `RequestContext.shape_only`,
+  // and execution binds it. A context may carry values for some names and shapes for others: what
+  // folds is in the plan and in the digest, what does not is bound per execution.
+  bool shape = 3;
+}
+
+// A relation's rows as bound, in the host's order. `columns` names them; every row has one value per
+// column, as a Literal expression of that column's type.
+message ContextRelationValue {
+  string name = 1;
+  RowType row_type = 2;
+  repeated VirtualRow rows = 3;
+  // What the host says the relation holds when it is too large to send whole. Negative = unknown.
+  // Rows are still required: a relation the planner cannot fold, it plans as a BoundTable, and the
+  // executor materialises the host's own binding at execution.
+  int64 est_row_count = 4;
+  // Which of the two kinds this is. A LIST is used only inside an IN list and is NOT NULL — a NULL
+  // member is refused at bind; a RELATION stands in a FROM. Declared rather than inferred so the
+  // planner can refuse a list in a FROM and a relation in an IN with a message that names the
+  // mistake. UNSPECIFIED reads as LIST, which is what every context of the shipped package binds.
+  ContextRelationKind kind = 5;
+  // Partial binding: this one entry is a *shape* — a name, a kind and a row type, no rows. It
+  // becomes a BoundTable with the membership markers, exactly as every entry does under
+  // `RequestContext.shape_only`, and execution binds the rows.
+  //
+  // Explicit rather than inferred from `rows` being empty, for V96's reason: an empty list is a
+  // legitimate binding — it is what makes a membership test FALSE for a principal who holds no grant
+  // of that kind — and a shape and an empty binding must not read the same.
+  bool shape = 6;
+}
+
+// What a bound relation is for. The distinction is the host's to declare: the same rows read as
+// a membership set and as a table are different things to the planner.
+enum ContextRelationKind {
+  CONTEXT_RELATION_KIND_UNSPECIFIED = 0;
+  // A membership set: `org_id IN (@ctx.manager_orgs)`, `(member_id, org_id) IN (@ctx.subject_pairs)`.
+  // NOT NULL in every column.
+  CONTEXT_RELATION_KIND_LIST = 1;
+  // A table in a FROM: `EXISTS (SELECT 1 FROM @ctx.windows w WHERE …)`.
+  CONTEXT_RELATION_KIND_RELATION = 2;
+}
+
+message PlannerOptions {
+  PushdownLevel pushdown = 1;
+  // Populate PlanResponse.plan_text (RelOptUtil.toString of the logical and physical plans).
+  bool include_plan_text = 2;
+  // Plan as if no index existed.
+  bool disable_index_lookup = 3;
+  // Which SQL dialect this statement is written in. UNSPECIFIED means DEFAULT.
+  // A request option like `pushdown`, so it is not part of GetInfoResponse.planner_config_hash.
+  SqlConformance conformance = 4;
+  // Which of Calcite's dialect function libraries this statement may call. STANDARD is always
+  // present and need not be listed. A request option like `conformance`, so it is not part of
+  // GetInfoResponse.planner_config_hash — but it does belong in a client's plan-cache key.
+  repeated SqlLibrary libraries = 5;
+  // Capabilities to plan as if no source had declared them, whatever their descriptors say.
+  // The capability property test turns each off in turn and the
+  // conformance kit compares a source with and without each one; results must not move.
+  repeated DisabledCapability disabled_capabilities = 6;
+  // Per-request cross-source join policy, merged over the catalog's: a field this
+  // message sets wins, a field it leaves at zero inherits, and its `pairs` are consulted before the
+  // catalog's. A request option like `pushdown`, so it is not part of
+  // GetInfoResponse.planner_config_hash — but it does belong in a client's plan-cache key.
+  CrossSourceJoinPolicy join_policy = 7;
+  // Moved to `chalk.v1.EntitlementsOptions` in entitlements.proto, carried in
+  // `PlanRequest.extensions`: the core options message names no entitlement type.
+  reserved 8;
+  reserved "entitlements";
+}
+
+// One switch of the capability model, for `PlannerOptions.disabled_capabilities`. Each names a
+// group of SourceCapabilities fields rather than a single field, because what a test wants to turn
+// off is a kind of pushdown.
+enum DisabledCapability {
+  DISABLED_CAPABILITY_UNSPECIFIED = 0;
+  DISABLED_CAPABILITY_FILTER = 1;
+  DISABLED_CAPABILITY_PROJECT = 2;
+  DISABLED_CAPABILITY_AGGREGATE = 3;
+  DISABLED_CAPABILITY_SORT = 4;
+  DISABLED_CAPABILITY_LIMIT = 5;
+  DISABLED_CAPABILITY_JOIN = 6;
+  DISABLED_CAPABILITY_DISTINCT = 7;
+  DISABLED_CAPABILITY_IN_LIST = 8;
+  DISABLED_CAPABILITY_PARAMETERS = 9;
+}
+
+// How much work may be handed to sources. NONE is the reference (I4) configuration:
+// every Read has a full projection and no filter, and no IndexLookup / RemoteQuery is emitted.
+enum PushdownLevel {
+  PUSHDOWN_LEVEL_UNSPECIFIED = 0;
+  PUSHDOWN_LEVEL_FULL = 1;
+  PUSHDOWN_LEVEL_FILTERS_ONLY = 2;
+  PUSHDOWN_LEVEL_PROJECTION_ONLY = 3;
+  PUSHDOWN_LEVEL_NONE = 4;
+}
+
+message PlanResponse {
+  Plan plan = 1;
+  string plan_text = 2;
+  PlanningStats stats = 3;
+  // What the extensions this request ran had to say, each a message addressed by its type URL.
+  // The only extension slot on the response side. A handler writes here only when it
+  // ran: the entitlement pass puts a `chalk.v1.EntitlementsReport` — and, when asked, a
+  // `chalk.v1.EntitlementsExplain` — in it for a plan that touched an entitled table, and nothing at
+  // all for one that did not.
+  repeated google.protobuf.Any extensions = 6;
+  // How this planning ended, and what it cost. Always populated, whether or not the request
+  // carried options: a request that set none gets CONVERGED with its elapsed times and its
+  // evaluation count, and the costs only when a governor was installed to sample them.
+  PlanningState planning_state = 7;
+  // This statement's literals as keyed pseudonyms, for a host that logs statement text.
+  // Empty unless the request carried a `redaction` message, which is what makes the sidecar run the
+  // visitor at all.
+  string redacted_sql = 8;
+  // Moved into `PlanResponse.extensions` as `chalk.v1.EntitlementsReport` and
+  // `chalk.v1.EntitlementsExplain`.
+  reserved 4, 5;
+  reserved "entitlements", "explain";
+}
+
+// What the optimiser did, and how it stopped doing it.
+message PlanningState {
+  PlanningTerminationReason termination_reason = 1;
+  // This request's whole planning, sidecar side.
+  uint64 elapsed_us = 2;
+  // The Volcano share of it.
+  uint64 optimiser_elapsed_us = 3;
+  // Rule firings seen by the governor — one rule match fired, the same event `rules_fired` counts
+  //. Zero when no governor was installed, which is every request that set no option able to
+  // end a search early.
+  uint64 evaluation_count = 4;
+  // The root's best cost at the first sample that saw a complete plan, and at the last sample.
+  // Absent when no governor was installed, and absent for `first_cost` when no sample ever saw one.
+  PlanningCost first_cost = 5;
+  PlanningCost best_cost = 6;
+  // Looks taken: a period-mode sample or a count-mode interval boundary, whichever governed.
+  uint64 looks = 7;
+  // The evaluation interval in force, but only when convergence_evaluation_interval governed the
+  // look cadence; 0 in the (default) period mode, where the interval is not a count.
+  uint32 evaluation_interval = 8;
+  // Time this planning actually spent holding a worker, summed across every slice.
+  // time_budget_ms is charged against this, never against elapsed_us: contention around a query
+  // must never be why its own budget runs out.
+  uint64 running_elapsed_us = 9;
+  // Time this planning spent waiting for a worker, summed across every wait. elapsed_us is
+  // running_elapsed_us + queued_elapsed_us to the microsecond, modulo rounding.
+  uint64 queued_elapsed_us = 10;
+  // Slices this planning ran in: one to begin with, one more for every look that did
+  // not end the search. 1 for a planning that never yielded, whether or not a scheduler owned it.
+  uint64 slices = 11;
+  // The planning session this request named, or empty for a request that named none.
+  // queued_elapsed_us is a session's queued_for: the scheduler's accounting already
+  // separates queued time from running time, so a session's own share of it needs nothing new.
+  string session = 12;
+}
+
+// Calcite's three cost components, as `VolcanoCost` carries them.
+message PlanningCost {
+  double rows = 1;
+  double cpu = 2;
+  double io = 3;
+}
+
+enum PlanningTerminationReason {
+  PLANNING_TERMINATION_REASON_UNSPECIFIED = 0;
+  // The search finished, or the governor called it converged. Both are "the optimiser has nothing
+  // more worth doing"; the evaluation count and the costs say which.
+  PLANNING_TERMINATION_REASON_CONVERGED = 1;
+  PLANNING_TERMINATION_REASON_BUDGET_EXHAUSTED = 2;
+  PLANNING_TERMINATION_REASON_STOPPED_BY_HOST = 3;
+  PLANNING_TERMINATION_REASON_CANCELLED_BY_HOST = 4;
+  // The search was ended before the root held any complete plan, so there is no plan to return.
+  // Travels in the error, never in a response.
+  PLANNING_TERMINATION_REASON_ABORTED = 5;
+}
+
+message PlanningStats {
+  int64 total_micros = 1;
+  int64 parse_micros = 2;
+  int64 validate_micros = 3;
+  int64 optimize_micros = 4;
+  int64 convert_micros = 5;
+  // Populated when PlannerOptions.include_plan_text is set (now unconditional).
+  repeated string rules_fired = 6;
+  // The pipeline's stages, in the order they ran. Always populated: it costs a handful of constant
+  // strings and it is how a caller sees that the entitlement pass is installed only for a catalog
+  // that carries an entitlement — its absence from this
+  // list is the zero-cost property, asserted rather than assumed.
+  repeated string stages = 7;
+}
+
+// Carried in the gRPC trailer `chalk-plan-error-bin` on every failed Plan/RegisterCatalog call.
+message PlanError {
+  PlanErrorKind kind = 1;
+  string message = 2;
+  // 1-based SQL position when known; zero otherwise.
+  int32 line = 3;
+  int32 column = 4;
+  int32 end_line = 5;
+  int32 end_column = 6;
+  // Set on a PLANNING_ABORTED failure: what the governor had measured when it ended a search
+  // that had no complete plan to return. Absent on every other kind.
+  PlanningState planning_state = 7;
+}
+
+enum PlanErrorKind {
+  PLAN_ERROR_KIND_UNSPECIFIED = 0;
+  PLAN_ERROR_KIND_PARSE = 1;
+  PLAN_ERROR_KIND_VALIDATION = 2;
+  // Valid SQL the planner cannot express in the IR, or cannot physically plan.
+  PLAN_ERROR_KIND_UNSUPPORTED = 3;
+  // Retired from the request path and **reserved**: the number is never reused and the
+  // name stays readable, so a client of either vintage reads an older sidecar's answer. What
+  // replaces both is UNKNOWN_CATALOG_VERSION, which a client recovers from rather than reports.
+  PLAN_ERROR_KIND_UNKNOWN_CONTEXT = 4;
+  PLAN_ERROR_KIND_EPOCH_MISMATCH = 5;
+  PLAN_ERROR_KIND_IR_VERSION = 6;
+  PLAN_ERROR_KIND_INVALID_CATALOG = 7;
+  PLAN_ERROR_KIND_INTERNAL = 8;
+  // Valid SQL the entitlements refuse: a use of a column no disclosure could ever permit, a star
+  // under a refusing StarPolicy, or a redacted column under REDACTED_COLUMNS_REFUSE.
+  // Distinct from VALIDATION because the SQL is well formed and from UNSUPPORTED because the
+  // planner could express it perfectly well and is declining to.
+  PLAN_ERROR_KIND_POLICY = 9;
+  // A request the planner will not act on as written: today, a `PlanRequest.extensions` entry whose
+  // type URL no handler is registered for. Never ignored — ignoring an extension a
+  // host attached is the one unsafe direction, since a policy silently dropped is a policy not
+  // enforced. The message names the type URL.
+  PLAN_ERROR_KIND_INVALID_REQUEST = 10;
+  // A search this request's own options ended before the optimiser had a complete plan.
+  // Nothing is wrong with the statement and nothing is unsupported: the host asked for a budget and
+  // the budget was spent. `PlanError.planning_state` says what had been measured.
+  PLAN_ERROR_KIND_PLANNING_ABORTED = 11;
+  // The (instance_id, shape_version) a request names is not one this planner holds, or a delta's
+  // base is not. **Memory policy, never correctness**: the planner evicts on its own
+  // schedule and may have restarted, and every eviction is recoverable — the client registers the
+  // version the message names and retries once, with no host involvement. The message names the
+  // version, so a client can tell "register the shape I was planning against" from "register the
+  // base my delta was built on".
+  PLAN_ERROR_KIND_UNKNOWN_CATALOG_VERSION = 12;
+}

@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Entitlements.Tenancy</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>Chalk tenancy policy: dimensions, roles, realms and grants, compiled to entitlement descriptors.</Description>
+  </PropertyGroup>
+
+  <!--
+    Layer B (docs/design/16-entitlements.md §5). It is a *compiler* to layer A's vocabulary and
+    knows nothing of the planner or the executor: what it needs is the catalog model it emits into,
+    the entitlement wrapper it declares a policy for, and the two client types a policy has to name —
+    RequestContext, which a principal's grants are bound as, and PreparedQuery, which Reconcile is
+    handed. Nothing else of Chalk.Client is used (step 26c, D213).
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../Chalk.Client/Chalk.Client.csproj" />
+    <ProjectReference Include="../Chalk.Entitlements/Chalk.Entitlements.csproj" />
+  </ItemGroup>
+
+  <!--
+    The package's own unit tests assert on the model a policy compiles into — the dimensions, the
+    restrictions, the resolved paths — which D270 made internal along with the rest of the
+    declaration's representation. The same arrangement Chalk.Ir has with its tests.
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Chalk.Entitlements.Tenancy.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+</Project>

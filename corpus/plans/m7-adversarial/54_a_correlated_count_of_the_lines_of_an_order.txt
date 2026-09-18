@@ -1,0 +1,99 @@
+-- u1
+report id:Full, lines:Full, orders:Some, order_items:Some
+1|2
+2|1
+3|0
+4|0
+5|1
+6|0
+7|0
+
+-- u2
+report id:Full, lines:Full, orders:Some, order_items:Some
+1|2
+2|1
+3|0
+4|0
+
+-- u3
+report id:Full, lines:Full, orders:Some, order_items:Some
+5|1
+6|0
+
+-- u3-in-o1
+report id:Full, lines:Full, orders:Some, order_items:Some
+5|0
+6|0
+
+-- u4
+report id:Full, lines:Full, orders:All, order_items:All
+1|2
+2|1
+3|0
+4|0
+5|1
+6|0
+7|1
+
+-- u5
+report id:Full, lines:Full, orders:Some, order_items:None
+
+-- u6
+report id:Full, lines:Full, orders:Some, order_items:Some
+1|2
+2|1
+3|0
+4|0
+
+-- u6-two-orgs
+report id:Full, lines:Full, orders:Some, order_items:Some
+1|2
+2|1
+3|0
+4|0
+5|1
+6|0
+
+-- u7
+report id:Full, lines:Full, orders:Some, order_items:None
+
+-- u8
+report id:Full, lines:Full, orders:Some, order_items:Some
+1|2
+2|1
+3|0
+4|0
+
+-- u9
+report id:Full, lines:Full, orders:Some, order_items:Some
+1|2
+2|1
+3|0
+4|0
+5|1
+6|0
+
+-- u10-in-a-region
+report id:Full, lines:Full, orders:Some, order_items:Some
+2|1
+4|0
+
+-- u11-subject-in-a-region
+report id:Full, lines:Full, orders:Some, order_items:Some
+1|2
+
+-- u14-a-vendor
+report id:Full, lines:Full, orders:Some, order_items:Some
+1|1
+5|1
+7|1
+
+-- u15-a-vendor-and-an-org
+report id:Full, lines:Full, orders:Some, order_items:Some
+1|2
+2|1
+3|0
+4|0
+5|1
+7|1
+

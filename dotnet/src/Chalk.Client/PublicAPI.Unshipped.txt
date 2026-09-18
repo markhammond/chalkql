@@ -1,0 +1,1469 @@
+#nullable enable
+Chalk.Arrow.RecordBatchExtensions
+Chalk.Client.ArenaPool
+Chalk.Client.ArenaPool.ArenaPool(Chalk.Sources.ArenaOptions! options, int capacity, string? name = null) -> void
+Chalk.Client.ArenaPool.Capacity.get -> int
+Chalk.Client.ArenaPool.Dispose() -> void
+Chalk.Client.ArenaPool.IdleCount.get -> int
+Chalk.Client.ArenaPool.Name.get -> string?
+Chalk.Client.ArenaPool.Options.get -> Chalk.Sources.ArenaOptions!
+Chalk.Client.ArenaPool.RetainedBytes.get -> long
+Chalk.Client.ArenaPool.WorstCaseBytes.get -> long
+Chalk.Client.CatalogRegistration
+Chalk.Client.CatalogRegistration.BaseShapeVersion.get -> string!
+Chalk.Client.CatalogRegistration.BaseShapeVersion.init -> void
+Chalk.Client.CatalogRegistration.Catalog.get -> Chalk.Catalog.CatalogContext!
+Chalk.Client.CatalogRegistration.Catalog.init -> void
+Chalk.Client.CatalogRegistration.CatalogRegistration() -> void
+Chalk.Client.CatalogRegistration.InstanceId.get -> string!
+Chalk.Client.CatalogRegistration.InstanceId.init -> void
+Chalk.Client.CatalogRegistration.RemovedTables.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Client.CatalogRegistration.RemovedTables.init -> void
+Chalk.Client.CatalogRegistration.ShapeVersion.get -> string!
+Chalk.Client.CatalogRegistration.ShapeVersion.init -> void
+Chalk.Client.ChalkEngine
+Chalk.Client.ChalkEngine.Arenas.get -> Chalk.Client.ArenaPool!
+Chalk.Client.ChalkEngine.Catalog.get -> Chalk.Catalog.CatalogContext!
+Chalk.Client.ChalkEngine.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Chalk.Client.ChalkEngine.ExecuteAsync(Chalk.Client.PreparedQuery! query, Chalk.Client.RequestContext! context, System.Collections.Generic.IReadOnlyList<object?>? parameters = null, Chalk.Sources.ExecutionArena? arena = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.QueryExecution!>
+Chalk.Client.ChalkEngine.ExecuteAsync(Chalk.Client.PreparedQuery! query, Chalk.Client.RequestContext! context, System.Collections.Generic.IReadOnlyList<object?>? parameters, Chalk.Client.ArenaPool! pool, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.QueryExecution!>
+Chalk.Client.ChalkEngine.ExecuteAsync(Chalk.Client.PreparedQuery! query, System.Collections.Generic.IReadOnlyDictionary<string!, object?>! parameters, Chalk.Client.ArenaPool! pool, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.QueryExecution!>
+Chalk.Client.ChalkEngine.ExecuteAsync(Chalk.Client.PreparedQuery! query, System.Collections.Generic.IReadOnlyDictionary<string!, object?>! parameters, Chalk.Sources.ExecutionArena? arena = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.QueryExecution!>
+Chalk.Client.ChalkEngine.ExecuteAsync(Chalk.Client.PreparedQuery! query, System.Collections.Generic.IReadOnlyList<object?>? parameters = null, Chalk.Sources.ExecutionArena? arena = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.QueryExecution!>
+Chalk.Client.ChalkEngine.ExecuteAsync(Chalk.Client.PreparedQuery! query, System.Collections.Generic.IReadOnlyList<object?>? parameters, Chalk.Client.ArenaPool! pool, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.QueryExecution!>
+Chalk.Client.ChalkEngine.ExecuteAsync(Chalk.Client.PreparedQuery! query, object! parameters, Chalk.Client.ArenaPool! pool, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.QueryExecution!>
+Chalk.Client.ChalkEngine.ExecuteAsync(Chalk.Client.PreparedQuery! query, object! parameters, Chalk.Sources.ExecutionArena? arena = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.QueryExecution!>
+Chalk.Client.ChalkEngine.PlanExtensionsAsync(string! sql, Chalk.Client.RequestContext? context = null, Chalk.Client.PrepareOptions? options = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<Google.Protobuf.WellKnownTypes.Any!>!>
+Chalk.Client.ChalkEngine.PlannerInfo.get -> Chalk.Client.PlannerInfo!
+Chalk.Client.ChalkEngine.PrepareAsync(string! sql, Chalk.Client.PrepareOptions? options = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PreparedQuery!>
+Chalk.Client.ChalkEngine.PrepareAsync(string! sql, Chalk.Client.RequestContext? context, Chalk.Client.PrepareOptions? options = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PreparedQuery!>
+Chalk.Client.ChalkEngine.QueryAsync(string! sql, System.Collections.Generic.IReadOnlyDictionary<string!, object?>! parameters, Chalk.Client.ArenaPool! pool, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Client.ChalkEngine.QueryAsync(string! sql, System.Collections.Generic.IReadOnlyDictionary<string!, object?>! parameters, Chalk.Sources.ExecutionArena? arena = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Client.ChalkEngine.QueryAsync(string! sql, System.Collections.Generic.IReadOnlyList<object?>? parameters = null, Chalk.Sources.ExecutionArena? arena = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Client.ChalkEngine.QueryAsync(string! sql, System.Collections.Generic.IReadOnlyList<object?>? parameters, Chalk.Client.ArenaPool! pool, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Client.ChalkEngine.QueryAsync(string! sql, object! parameters, Chalk.Client.ArenaPool! pool, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Client.ChalkEngine.QueryAsync(string! sql, object! parameters, Chalk.Sources.ExecutionArena? arena = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Client.ChalkEngine.RedactSqlAsync(string! sql, Chalk.Client.SqlConformance conformance, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.RedactedSql!>
+Chalk.Client.ChalkEngine.RedactSqlAsync(string! sql, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.RedactedSql!>
+Chalk.Client.ChalkEngine.RefreshAsync(System.Action<Chalk.Client.RefreshBuilder!>! plan, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<long>
+Chalk.Client.ChalkEngine.RefreshAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<long>
+Chalk.Client.ChalkEngine.RefreshCatalogAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<long>
+Chalk.Client.ChalkEngine.ShapeEpoch.get -> long
+Chalk.Client.ChalkEngineOptions
+Chalk.Client.ChalkEngineOptions.Associations.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.AssociationDescriptor!>!
+Chalk.Client.ChalkEngineOptions.Associations.init -> void
+Chalk.Client.ChalkEngineOptions.ChalkEngineOptions() -> void
+Chalk.Client.ChalkEngineOptions.ContextId.get -> string?
+Chalk.Client.ChalkEngineOptions.ContextId.init -> void
+Chalk.Client.ChalkEngineOptions.Execution.get -> Chalk.Client.ExecutionOptions!
+Chalk.Client.ChalkEngineOptions.Execution.init -> void
+Chalk.Client.ChalkEngineOptions.Functions.get -> System.Action<Chalk.Client.IFunctionRegistry!>?
+Chalk.Client.ChalkEngineOptions.Functions.init -> void
+Chalk.Client.ChalkEngineOptions.JoinPolicy.get -> Chalk.Catalog.ICrossSourceJoinPolicy?
+Chalk.Client.ChalkEngineOptions.JoinPolicy.init -> void
+Chalk.Client.ChalkEngineOptions.LoggerFactory.get -> Microsoft.Extensions.Logging.ILoggerFactory?
+Chalk.Client.ChalkEngineOptions.LoggerFactory.init -> void
+Chalk.Client.ChalkEngineOptions.Output.get -> Chalk.Client.OutputOptions!
+Chalk.Client.ChalkEngineOptions.Output.init -> void
+Chalk.Client.ChalkEngineOptions.Planner.get -> Chalk.Client.IQueryPlanner!
+Chalk.Client.ChalkEngineOptions.Planner.init -> void
+Chalk.Client.ChalkEngineOptions.Planning.get -> Chalk.Client.PlanningOptions!
+Chalk.Client.ChalkEngineOptions.Planning.init -> void
+Chalk.Client.ChalkEngineOptions.Redaction.get -> Chalk.Client.RedactionOptions!
+Chalk.Client.ChalkEngineOptions.Redaction.init -> void
+Chalk.Client.ChalkEngineOptions.Sources.get -> System.Collections.Generic.IReadOnlyList<Chalk.Sources.ISourceRuntime!>!
+Chalk.Client.ChalkEngineOptions.Sources.init -> void
+Chalk.Client.ColumnStatisticsUpdate
+Chalk.Client.ColumnStatisticsUpdate.Column.get -> string!
+Chalk.Client.ColumnStatisticsUpdate.Column.init -> void
+Chalk.Client.ColumnStatisticsUpdate.ColumnStatisticsUpdate() -> void
+Chalk.Client.ColumnStatisticsUpdate.Statistics.get -> Chalk.Ir.ColumnStatistics!
+Chalk.Client.ColumnStatisticsUpdate.Statistics.init -> void
+Chalk.Client.ContextRelation
+Chalk.Client.ContextRelation.ColumnTypes.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>?
+Chalk.Client.ContextRelation.ColumnTypes.init -> void
+Chalk.Client.ContextRelation.Columns.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Client.ContextRelation.Columns.init -> void
+Chalk.Client.ContextRelation.ContextRelation() -> void
+Chalk.Client.ContextRelation.EstimatedRowCount.get -> long
+Chalk.Client.ContextRelation.EstimatedRowCount.init -> void
+Chalk.Client.ContextRelation.IsShape.get -> bool
+Chalk.Client.ContextRelation.IsShape.init -> void
+Chalk.Client.ContextRelation.Rows.get -> System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<object?>!>!
+Chalk.Client.ContextRelation.Rows.init -> void
+Chalk.Client.ContextRequiredException
+Chalk.Client.ContextRequiredException.ContextRequiredException(System.Collections.Generic.IReadOnlyList<string!>! names) -> void
+Chalk.Client.ContextRequiredException.Names.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Client.DialectInfo
+Chalk.Client.DialectInfo.Aliases.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Client.DialectInfo.Aliases.init -> void
+Chalk.Client.DialectInfo.DatabaseProduct.get -> string!
+Chalk.Client.DialectInfo.DatabaseProduct.init -> void
+Chalk.Client.DialectInfo.DialectInfo() -> void
+Chalk.Client.DialectInfo.Name.get -> string!
+Chalk.Client.DialectInfo.Name.init -> void
+Chalk.Client.DialectInfo.Tuned.get -> bool
+Chalk.Client.DialectInfo.Tuned.init -> void
+Chalk.Client.DisabledCapability
+Chalk.Client.DisabledCapability.Aggregate = 3 -> Chalk.Client.DisabledCapability
+Chalk.Client.DisabledCapability.Distinct = 7 -> Chalk.Client.DisabledCapability
+Chalk.Client.DisabledCapability.Filter = 1 -> Chalk.Client.DisabledCapability
+Chalk.Client.DisabledCapability.InList = 8 -> Chalk.Client.DisabledCapability
+Chalk.Client.DisabledCapability.Join = 6 -> Chalk.Client.DisabledCapability
+Chalk.Client.DisabledCapability.Limit = 5 -> Chalk.Client.DisabledCapability
+Chalk.Client.DisabledCapability.Parameters = 9 -> Chalk.Client.DisabledCapability
+Chalk.Client.DisabledCapability.Project = 2 -> Chalk.Client.DisabledCapability
+Chalk.Client.DisabledCapability.Sort = 4 -> Chalk.Client.DisabledCapability
+Chalk.Client.DisabledCapability.Unspecified = 0 -> Chalk.Client.DisabledCapability
+Chalk.Client.ExecutionEngine
+Chalk.Client.ExecutionEngine.Reference = 1 -> Chalk.Client.ExecutionEngine
+Chalk.Client.ExecutionEngine.Vectorised = 0 -> Chalk.Client.ExecutionEngine
+Chalk.Client.ExecutionOptions
+Chalk.Client.ExecutionOptions.Arena.get -> Chalk.Sources.ArenaOptions!
+Chalk.Client.ExecutionOptions.Arena.init -> void
+Chalk.Client.ExecutionOptions.ArenaPoolSize.get -> int
+Chalk.Client.ExecutionOptions.ArenaPoolSize.init -> void
+Chalk.Client.ExecutionOptions.BatchSize.get -> int
+Chalk.Client.ExecutionOptions.BatchSize.init -> void
+Chalk.Client.ExecutionOptions.CancellationGracePeriod.get -> System.TimeSpan
+Chalk.Client.ExecutionOptions.CancellationGracePeriod.init -> void
+Chalk.Client.ExecutionOptions.CatalogRefreshInterval.get -> System.TimeSpan?
+Chalk.Client.ExecutionOptions.CatalogRefreshInterval.init -> void
+Chalk.Client.ExecutionOptions.Engine.get -> Chalk.Client.ExecutionEngine
+Chalk.Client.ExecutionOptions.Engine.init -> void
+Chalk.Client.ExecutionOptions.ExecutionOptions() -> void
+Chalk.Client.ExecutionOptions.MaxRemoteConcurrency.get -> int
+Chalk.Client.ExecutionOptions.MaxRemoteConcurrency.init -> void
+Chalk.Client.ExecutionOptions.OutputMemory.get -> Chalk.Client.OutputMemory
+Chalk.Client.ExecutionOptions.OutputMemory.init -> void
+Chalk.Client.ExecutionOptions.RemotePrefetchDepth.get -> int
+Chalk.Client.ExecutionOptions.RemotePrefetchDepth.init -> void
+Chalk.Client.ExecutionOptions.SelectionCompactionThreshold.get -> double
+Chalk.Client.ExecutionOptions.SelectionCompactionThreshold.init -> void
+Chalk.Client.ExecutionOptions.SourceOptions.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Chalk.Sources.SourceOptions!>!
+Chalk.Client.ExecutionOptions.SourceOptions.init -> void
+Chalk.Client.ExecutionOptions.TimeProvider.get -> System.TimeProvider!
+Chalk.Client.ExecutionOptions.TimeProvider.init -> void
+Chalk.Client.ExecutionOptions.ValidateBatchLifetimes.get -> bool
+Chalk.Client.ExecutionOptions.ValidateBatchLifetimes.init -> void
+Chalk.Client.ExecutionOptions.WindowExecution.get -> Chalk.Client.WindowExecution
+Chalk.Client.ExecutionOptions.WindowExecution.init -> void
+Chalk.Client.FunctionRegistry
+Chalk.Client.FunctionRegistry.AddAggregate<TState, TIn, TOut>(string! name, Chalk.Sources.AggregateSpec<TState, TIn, TOut>! spec) -> void
+Chalk.Client.FunctionRegistry.AddScalar<T1, T2, T3, T4, T5, T6, TResult>(string! name, System.Func<T1, T2, T3, T4, T5, T6, TResult>! f) -> void
+Chalk.Client.FunctionRegistry.AddScalar<T1, T2, T3, T4, T5, TResult>(string! name, System.Func<T1, T2, T3, T4, T5, TResult>! f) -> void
+Chalk.Client.FunctionRegistry.AddScalar<T1, T2, T3, T4, TResult>(string! name, System.Func<T1, T2, T3, T4, TResult>! f) -> void
+Chalk.Client.FunctionRegistry.AddScalar<T1, T2, T3, TResult>(string! name, System.Func<T1, T2, T3, TResult>! f) -> void
+Chalk.Client.FunctionRegistry.AddScalar<T1, T2, TResult>(string! name, System.Func<T1, T2, TResult>! f) -> void
+Chalk.Client.FunctionRegistry.AddScalar<T1, TResult>(string! name, System.Func<T1, TResult>! f) -> void
+Chalk.Client.FunctionRegistry.AddScalar<TResult>(string! name, System.Func<TResult>! f) -> void
+Chalk.Client.FunctionRegistry.AddTable<TRow>(string! name, System.Delegate! producer) -> void
+Chalk.Client.FunctionRegistry.Contains(string! name) -> bool
+Chalk.Client.FunctionRegistry.FunctionRegistry() -> void
+Chalk.Client.FunctionRegistry.Names.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Chalk.Client.GrpcPlannerOptions
+Chalk.Client.GrpcPlannerOptions.Address.get -> System.Uri!
+Chalk.Client.GrpcPlannerOptions.Address.init -> void
+Chalk.Client.GrpcPlannerOptions.Deadline.get -> System.TimeSpan
+Chalk.Client.GrpcPlannerOptions.Deadline.init -> void
+Chalk.Client.GrpcPlannerOptions.GrpcPlannerOptions() -> void
+Chalk.Client.GrpcPlannerOptions.LoggerFactory.get -> Microsoft.Extensions.Logging.ILoggerFactory?
+Chalk.Client.GrpcPlannerOptions.LoggerFactory.init -> void
+Chalk.Client.GrpcPlannerOptions.MaxReceiveMessageSizeMb.get -> int
+Chalk.Client.GrpcPlannerOptions.MaxReceiveMessageSizeMb.init -> void
+Chalk.Client.GrpcPlannerOptions.PlanNestingLimit.get -> int
+Chalk.Client.GrpcPlannerOptions.PlanNestingLimit.init -> void
+Chalk.Client.GrpcQueryPlanner
+Chalk.Client.GrpcQueryPlanner.Address.get -> System.Uri!
+Chalk.Client.GrpcQueryPlanner.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Chalk.Client.GrpcQueryPlanner.GetInfoAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PlannerInfo!>
+Chalk.Client.GrpcQueryPlanner.GrpcQueryPlanner(Chalk.Client.GrpcPlannerOptions! options) -> void
+Chalk.Client.GrpcQueryPlanner.PlanAsync(Chalk.Client.PlanRequest! request, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PlanResult!>
+Chalk.Client.GrpcQueryPlanner.RedactSqlAsync(Chalk.Client.RedactSqlRequest! request, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.RedactedSql!>
+Chalk.Client.GrpcQueryPlanner.RegisterCatalogAsync(Chalk.Client.CatalogRegistration! registration, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Chalk.Client.GrpcQueryPlanner.RegisterStatisticsAsync(Chalk.Client.StatisticsRegistration! statistics, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Chalk.Client.GrpcQueryPlanner.StopPlanningAsync(string! requestId, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<bool>
+Chalk.Client.IFunctionRegistry
+Chalk.Client.IFunctionRegistry.AddAggregate<TState, TIn, TOut>(string! name, Chalk.Sources.AggregateSpec<TState, TIn, TOut>! spec) -> void
+Chalk.Client.IFunctionRegistry.AddScalar<T1, T2, T3, T4, T5, T6, TResult>(string! name, System.Func<T1, T2, T3, T4, T5, T6, TResult>! f) -> void
+Chalk.Client.IFunctionRegistry.AddScalar<T1, T2, T3, T4, T5, TResult>(string! name, System.Func<T1, T2, T3, T4, T5, TResult>! f) -> void
+Chalk.Client.IFunctionRegistry.AddScalar<T1, T2, T3, T4, TResult>(string! name, System.Func<T1, T2, T3, T4, TResult>! f) -> void
+Chalk.Client.IFunctionRegistry.AddScalar<T1, T2, T3, TResult>(string! name, System.Func<T1, T2, T3, TResult>! f) -> void
+Chalk.Client.IFunctionRegistry.AddScalar<T1, T2, TResult>(string! name, System.Func<T1, T2, TResult>! f) -> void
+Chalk.Client.IFunctionRegistry.AddScalar<T1, TResult>(string! name, System.Func<T1, TResult>! f) -> void
+Chalk.Client.IFunctionRegistry.AddScalar<TResult>(string! name, System.Func<TResult>! f) -> void
+Chalk.Client.IFunctionRegistry.AddTable<TRow>(string! name, System.Delegate! producer) -> void
+Chalk.Client.IQueryPlanner
+Chalk.Client.IQueryPlanner.AcceptsCatalogDeltas.get -> bool
+Chalk.Client.IQueryPlanner.GetInfoAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PlannerInfo!>
+Chalk.Client.IQueryPlanner.PlanAsync(Chalk.Client.PlanRequest! request, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PlanResult!>
+Chalk.Client.IQueryPlanner.RedactSqlAsync(Chalk.Client.RedactSqlRequest! request, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.RedactedSql!>
+Chalk.Client.IQueryPlanner.RegisterCatalogAsync(Chalk.Catalog.CatalogContext! catalog, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Chalk.Client.IQueryPlanner.RegisterCatalogAsync(Chalk.Client.CatalogRegistration! registration, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Chalk.Client.IQueryPlanner.RegisterStatisticsAsync(Chalk.Client.StatisticsRegistration! statistics, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Chalk.Client.IQueryPlanner.StopPlanningAsync(string! requestId, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<bool>
+Chalk.Client.OutputMemory
+Chalk.Client.OutputMemory.Managed = 0 -> Chalk.Client.OutputMemory
+Chalk.Client.OutputMemory.Pooled = 1 -> Chalk.Client.OutputMemory
+Chalk.Client.OutputOptions
+Chalk.Client.OutputOptions.OutputOptions() -> void
+Chalk.Client.OutputOptions.Strings.get -> Chalk.Sources.StringLayouts
+Chalk.Client.OutputOptions.Strings.init -> void
+Chalk.Client.ParameterDescriptor
+Chalk.Client.ParameterDescriptor.AcceptsList.get -> bool
+Chalk.Client.ParameterDescriptor.AcceptsList.init -> void
+Chalk.Client.ParameterDescriptor.Name.get -> string?
+Chalk.Client.ParameterDescriptor.Name.init -> void
+Chalk.Client.ParameterDescriptor.Occurrences.get -> System.Collections.Generic.IReadOnlyList<int>!
+Chalk.Client.ParameterDescriptor.Occurrences.init -> void
+Chalk.Client.ParameterDescriptor.Ordinal.get -> int
+Chalk.Client.ParameterDescriptor.Ordinal.init -> void
+Chalk.Client.ParameterDescriptor.ParameterDescriptor() -> void
+Chalk.Client.ParameterDescriptor.Type.get -> Chalk.Catalog.ChalkType
+Chalk.Client.ParameterStyle
+Chalk.Client.ParameterStyle.Named = 3 -> Chalk.Client.ParameterStyle
+Chalk.Client.ParameterStyle.None = 0 -> Chalk.Client.ParameterStyle
+Chalk.Client.ParameterStyle.Ordinal = 2 -> Chalk.Client.ParameterStyle
+Chalk.Client.ParameterStyle.Positional = 1 -> Chalk.Client.ParameterStyle
+Chalk.Client.PlannerArtifact
+Chalk.Client.PlannerProcessOptions.ArtifactCacheDirectory.get -> string?
+Chalk.Client.PlannerProcessOptions.ArtifactCacheDirectory.init -> void
+Chalk.Client.PlanRequest
+Chalk.Client.PlanRequest.CatalogEpoch.get -> long
+Chalk.Client.PlanRequest.CatalogEpoch.init -> void
+Chalk.Client.PlanRequest.ClientIrVersion.get -> uint
+Chalk.Client.PlanRequest.ClientIrVersion.init -> void
+Chalk.Client.PlanRequest.Context.get -> Chalk.Client.RequestContext?
+Chalk.Client.PlanRequest.Context.init -> void
+Chalk.Client.PlanRequest.ContextId.get -> string!
+Chalk.Client.PlanRequest.ContextId.init -> void
+Chalk.Client.PlanRequest.InstanceId.get -> string!
+Chalk.Client.PlanRequest.InstanceId.init -> void
+Chalk.Client.PlanRequest.NarrowFrom.get -> ulong
+Chalk.Client.PlanRequest.NarrowFrom.init -> void
+Chalk.Client.PlanRequest.Options.get -> Chalk.Client.PlannerOptions!
+Chalk.Client.PlanRequest.Options.init -> void
+Chalk.Client.PlanRequest.ParameterTypes.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>!
+Chalk.Client.PlanRequest.ParameterTypes.init -> void
+Chalk.Client.PlanRequest.PlanRequest() -> void
+Chalk.Client.PlanRequest.Planning.get -> Chalk.Client.PlanningOptions?
+Chalk.Client.PlanRequest.Planning.init -> void
+Chalk.Client.PlanRequest.PlanningRequestId.get -> string!
+Chalk.Client.PlanRequest.PlanningRequestId.init -> void
+Chalk.Client.PlanRequest.Redaction.get -> Chalk.Client.RedactionRequest?
+Chalk.Client.PlanRequest.Redaction.init -> void
+Chalk.Client.PlanRequest.ShapeVersion.get -> string!
+Chalk.Client.PlanRequest.ShapeVersion.init -> void
+Chalk.Client.PlanRequest.Sql.get -> string!
+Chalk.Client.PlanRequest.Sql.init -> void
+Chalk.Client.PlanRequest.StatisticsVersion.get -> string!
+Chalk.Client.PlanRequest.StatisticsVersion.init -> void
+Chalk.Client.PlanRequest.StatsEpoch.get -> long
+Chalk.Client.PlanRequest.StatsEpoch.init -> void
+Chalk.Client.PlanResult
+Chalk.Client.PlanResult.Extensions.get -> System.Collections.Generic.IReadOnlyList<Google.Protobuf.WellKnownTypes.Any!>!
+Chalk.Client.PlanResult.Extensions.init -> void
+Chalk.Client.PlanResult.Plan.get -> Chalk.Ir.Plan!
+Chalk.Client.PlanResult.Plan.init -> void
+Chalk.Client.PlanResult.PlanDigest.get -> ulong
+Chalk.Client.PlanResult.PlanResult() -> void
+Chalk.Client.PlanResult.PlanText.get -> string?
+Chalk.Client.PlanResult.PlanText.init -> void
+Chalk.Client.PlanResult.PlanningState.get -> Chalk.Client.PlanningState!
+Chalk.Client.PlanResult.PlanningState.init -> void
+Chalk.Client.PlanResult.RedactedSql.get -> string?
+Chalk.Client.PlanResult.RedactedSql.init -> void
+Chalk.Client.PlanResult.Stats.get -> Chalk.Client.Rpc.PlanningStats!
+Chalk.Client.PlanResult.Stats.init -> void
+Chalk.Client.PlannerInfo
+Chalk.Client.PlannerInfo.CalciteVersion.get -> string!
+Chalk.Client.PlannerInfo.CalciteVersion.init -> void
+Chalk.Client.PlannerInfo.Conformances.get -> System.Collections.Generic.IReadOnlyList<Chalk.Client.SqlConformance>!
+Chalk.Client.PlannerInfo.Conformances.init -> void
+Chalk.Client.PlannerInfo.Dialects.get -> System.Collections.Generic.IReadOnlyList<Chalk.Client.DialectInfo!>!
+Chalk.Client.PlannerInfo.Dialects.init -> void
+Chalk.Client.PlannerInfo.Libraries.get -> System.Collections.Generic.IReadOnlyList<Chalk.Client.SqlLibrary>!
+Chalk.Client.PlannerInfo.Libraries.init -> void
+Chalk.Client.PlannerInfo.MaxIrVersion.get -> uint
+Chalk.Client.PlannerInfo.MaxIrVersion.init -> void
+Chalk.Client.PlannerInfo.MinIrVersion.get -> uint
+Chalk.Client.PlannerInfo.MinIrVersion.init -> void
+Chalk.Client.PlannerInfo.PlannerConfigHash.get -> uint
+Chalk.Client.PlannerInfo.PlannerConfigHash.init -> void
+Chalk.Client.PlannerInfo.PlannerInfo() -> void
+Chalk.Client.PlannerInfo.PlannerVersion.get -> string!
+Chalk.Client.PlannerInfo.PlannerVersion.init -> void
+Chalk.Client.PlannerInfo.PlanningWorkers.get -> uint
+Chalk.Client.PlannerInfo.PlanningWorkers.init -> void
+Chalk.Client.PlannerInfo.Serves(uint clientIrVersion) -> bool
+Chalk.Client.PlannerOptions
+Chalk.Client.PlannerOptions.Conformance.get -> Chalk.Client.SqlConformance
+Chalk.Client.PlannerOptions.Conformance.init -> void
+Chalk.Client.PlannerOptions.DisableIndexLookup.get -> bool
+Chalk.Client.PlannerOptions.DisableIndexLookup.init -> void
+Chalk.Client.PlannerOptions.DisabledCapabilities.get -> System.Collections.Generic.IReadOnlyList<Chalk.Client.DisabledCapability>!
+Chalk.Client.PlannerOptions.DisabledCapabilities.init -> void
+Chalk.Client.PlannerOptions.Extensions.get -> System.Collections.Generic.IReadOnlyList<Google.Protobuf.IMessage!>!
+Chalk.Client.PlannerOptions.Extensions.init -> void
+Chalk.Client.PlannerOptions.IncludePlanText.get -> bool
+Chalk.Client.PlannerOptions.IncludePlanText.init -> void
+Chalk.Client.PlannerOptions.JoinPolicy.get -> Chalk.Catalog.CrossSourceJoinPolicy?
+Chalk.Client.PlannerOptions.JoinPolicy.init -> void
+Chalk.Client.PlannerOptions.Libraries.get -> System.Collections.Generic.IReadOnlyList<Chalk.Client.SqlLibrary>!
+Chalk.Client.PlannerOptions.Libraries.init -> void
+Chalk.Client.PlannerOptions.PlannerOptions() -> void
+Chalk.Client.PlannerOptions.Pushdown.get -> Chalk.Client.PushdownLevel
+Chalk.Client.PlannerOptions.Pushdown.init -> void
+Chalk.Client.PlannerProcess
+Chalk.Client.PlannerProcess.Address.get -> System.Uri!
+Chalk.Client.PlannerProcess.CreatePlanner(Chalk.Client.GrpcPlannerOptions? overrides = null) -> Chalk.Client.IQueryPlanner!
+Chalk.Client.PlannerProcess.Diagnostics() -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Client.PlannerProcess.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Chalk.Client.PlannerProcess.ProcessId.get -> int
+Chalk.Client.PlannerProcessOptions
+Chalk.Client.PlannerProcessOptions.CatalogVersions.get -> int?
+Chalk.Client.PlannerProcessOptions.CatalogVersions.init -> void
+Chalk.Client.PlannerProcessOptions.JarPath.get -> string?
+Chalk.Client.PlannerProcessOptions.JarPath.init -> void
+const Chalk.Client.PlannerArtifact.CacheEnvironmentVariable = "CHALK_PLANNER_CACHE" -> string!
+const Chalk.Client.PlannerProcessOptions.JarEnvironmentVariable = "CHALK_PLANNER_JAR" -> string!
+Chalk.Client.PlannerProcessOptions.JavaHome.get -> string?
+Chalk.Client.PlannerProcessOptions.JavaHome.init -> void
+Chalk.Client.PlannerProcessOptions.JvmArguments.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Client.PlannerProcessOptions.JvmArguments.init -> void
+Chalk.Client.PlannerProcessOptions.LoadFactor.get -> double?
+Chalk.Client.PlannerProcessOptions.LoadFactor.init -> void
+Chalk.Client.PlannerProcessOptions.LoggerFactory.get -> Microsoft.Extensions.Logging.ILoggerFactory?
+Chalk.Client.PlannerProcessOptions.LoggerFactory.init -> void
+Chalk.Client.PlannerProcessOptions.PlannerProcessOptions() -> void
+Chalk.Client.PlannerProcessOptions.SocketPath.get -> string?
+Chalk.Client.PlannerProcessOptions.SocketPath.init -> void
+Chalk.Client.PlannerProcessOptions.StartTimeout.get -> System.TimeSpan
+Chalk.Client.PlannerProcessOptions.StartTimeout.init -> void
+Chalk.Client.PlannerProcessOptions.Transport.get -> Chalk.Client.PlannerTransport
+Chalk.Client.PlannerProcessOptions.Transport.init -> void
+Chalk.Client.PlannerProcessOptions.Workers.get -> int?
+Chalk.Client.PlannerProcessOptions.Workers.init -> void
+Chalk.Client.PlannerTransport
+Chalk.Client.PlannerTransport.Default = 0 -> Chalk.Client.PlannerTransport
+Chalk.Client.PlannerTransport.Tcp = 2 -> Chalk.Client.PlannerTransport
+Chalk.Client.PlannerTransport.UnixSocket = 1 -> Chalk.Client.PlannerTransport
+Chalk.Client.PlannerUnavailableException
+Chalk.Client.PlannerUnavailableException.Address.get -> string!
+Chalk.Client.PlannerUnavailableException.PlannerUnavailableException(string! address, string! detail, System.Exception? innerException = null) -> void
+Chalk.Client.PlanningCancelledException
+Chalk.Client.PlanningCancelledException.PlanningCancelledException(Chalk.Client.PlanningState! planningState, System.Threading.CancellationToken token, System.Exception? innerException = null) -> void
+Chalk.Client.PlanningCancelledException.PlanningState.get -> Chalk.Client.PlanningState!
+Chalk.Client.PlanningCost
+Chalk.Client.PlanningCost.Cpu.get -> double
+Chalk.Client.PlanningCost.Cpu.init -> void
+Chalk.Client.PlanningCost.Io.get -> double
+Chalk.Client.PlanningCost.Io.init -> void
+Chalk.Client.PlanningCost.PlanningCost() -> void
+Chalk.Client.PlanningCost.Rows.get -> double
+Chalk.Client.PlanningCost.Rows.init -> void
+Chalk.Client.PlanningException
+Chalk.Client.PlanningException.Kind.get -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.PlanningException.PlanningException(Chalk.Client.Rpc.PlanErrorKind kind, string! message, Chalk.Client.SqlPosition? position, Chalk.Client.PlanningState? planningState, System.Exception? innerException = null) -> void
+Chalk.Client.PlanningException.PlanningException(Chalk.Client.Rpc.PlanErrorKind kind, string! message, Chalk.Client.SqlPosition? position, System.Exception? innerException = null) -> void
+Chalk.Client.PlanningException.PlanningState.get -> Chalk.Client.PlanningState?
+Chalk.Client.PlanningException.Position.get -> Chalk.Client.SqlPosition?
+Chalk.Client.PlanningOptions
+Chalk.Client.PlanningOptions.ConvergenceEvaluationInterval.get -> int?
+Chalk.Client.PlanningOptions.ConvergenceEvaluationInterval.init -> void
+Chalk.Client.PlanningOptions.ConvergencePatience.get -> int
+Chalk.Client.PlanningOptions.ConvergencePatience.init -> void
+Chalk.Client.PlanningOptions.ConvergenceRangeThreshold.get -> double
+Chalk.Client.PlanningOptions.ConvergenceRangeThreshold.init -> void
+Chalk.Client.PlanningOptions.ConvergenceSamplePeriod.get -> System.TimeSpan?
+Chalk.Client.PlanningOptions.ConvergenceSamplePeriod.init -> void
+Chalk.Client.PlanningOptions.PlanningOptions() -> void
+Chalk.Client.PlanningOptions.Priority.get -> Chalk.Client.PlanningPriority
+Chalk.Client.PlanningOptions.Priority.init -> void
+Chalk.Client.PlanningOptions.Session.get -> Chalk.Client.PlanningSession?
+Chalk.Client.PlanningOptions.Session.init -> void
+Chalk.Client.PlanningOptions.StopToken.get -> System.Threading.CancellationToken
+Chalk.Client.PlanningOptions.StopToken.init -> void
+Chalk.Client.PlanningOptions.TimeBudget.get -> System.TimeSpan?
+Chalk.Client.PlanningOptions.TimeBudget.init -> void
+Chalk.Client.PlanningPriority
+Chalk.Client.PlanningPriority.High = 1 -> Chalk.Client.PlanningPriority
+Chalk.Client.PlanningPriority.Low = 3 -> Chalk.Client.PlanningPriority
+Chalk.Client.PlanningPriority.Normal = 2 -> Chalk.Client.PlanningPriority
+Chalk.Client.PlanningSession
+Chalk.Client.PlanningSession.MaxConcurrency.get -> int
+Chalk.Client.PlanningSession.MaxConcurrency.init -> void
+Chalk.Client.PlanningSession.Name.get -> string!
+Chalk.Client.PlanningSession.Name.init -> void
+Chalk.Client.PlanningSession.PlanningSession() -> void
+Chalk.Client.PlanningState
+Chalk.Client.PlanningState.BestCost.get -> Chalk.Client.PlanningCost?
+Chalk.Client.PlanningState.BestCost.init -> void
+Chalk.Client.PlanningState.CostRatio.get -> double?
+Chalk.Client.PlanningState.Elapsed.get -> System.TimeSpan
+Chalk.Client.PlanningState.Elapsed.init -> void
+Chalk.Client.PlanningState.EvaluationCount.get -> long
+Chalk.Client.PlanningState.EvaluationCount.init -> void
+Chalk.Client.PlanningState.EvaluationInterval.get -> int?
+Chalk.Client.PlanningState.EvaluationInterval.init -> void
+Chalk.Client.PlanningState.FirstCost.get -> Chalk.Client.PlanningCost?
+Chalk.Client.PlanningState.FirstCost.init -> void
+Chalk.Client.PlanningState.Looks.get -> long
+Chalk.Client.PlanningState.Looks.init -> void
+Chalk.Client.PlanningState.OptimiserElapsed.get -> System.TimeSpan
+Chalk.Client.PlanningState.OptimiserElapsed.init -> void
+Chalk.Client.PlanningState.PlanningState() -> void
+Chalk.Client.PlanningState.QueuedElapsed.get -> System.TimeSpan
+Chalk.Client.PlanningState.QueuedElapsed.init -> void
+Chalk.Client.PlanningState.RunningElapsed.get -> System.TimeSpan
+Chalk.Client.PlanningState.RunningElapsed.init -> void
+Chalk.Client.PlanningState.Session.get -> string?
+Chalk.Client.PlanningState.Session.init -> void
+Chalk.Client.PlanningState.Slices.get -> long
+Chalk.Client.PlanningState.Slices.init -> void
+Chalk.Client.PlanningState.TerminationReason.get -> Chalk.Client.PlanningTerminationReason
+Chalk.Client.PlanningState.TerminationReason.init -> void
+Chalk.Client.PlanningTerminationReason
+Chalk.Client.PlanningTerminationReason.Aborted = 5 -> Chalk.Client.PlanningTerminationReason
+Chalk.Client.PlanningTerminationReason.BudgetExhausted = 2 -> Chalk.Client.PlanningTerminationReason
+Chalk.Client.PlanningTerminationReason.CancelledByHost = 4 -> Chalk.Client.PlanningTerminationReason
+Chalk.Client.PlanningTerminationReason.Converged = 1 -> Chalk.Client.PlanningTerminationReason
+Chalk.Client.PlanningTerminationReason.StoppedByHost = 3 -> Chalk.Client.PlanningTerminationReason
+Chalk.Client.PrepareOptions
+Chalk.Client.PrepareOptions.Conformance.get -> Chalk.Client.SqlConformance
+Chalk.Client.PrepareOptions.Conformance.init -> void
+Chalk.Client.PrepareOptions.DisabledCapabilities.get -> System.Collections.Generic.IReadOnlyList<Chalk.Client.DisabledCapability>!
+Chalk.Client.PrepareOptions.DisabledCapabilities.init -> void
+Chalk.Client.PrepareOptions.Extensions.get -> System.Collections.Generic.IReadOnlyList<Google.Protobuf.IMessage!>!
+Chalk.Client.PrepareOptions.Extensions.init -> void
+Chalk.Client.PrepareOptions.IncludePlanText.get -> bool
+Chalk.Client.PrepareOptions.IncludePlanText.init -> void
+Chalk.Client.PrepareOptions.IncludeRedactedSql.get -> bool?
+Chalk.Client.PrepareOptions.IncludeRedactedSql.init -> void
+Chalk.Client.PrepareOptions.JoinPolicy.get -> Chalk.Catalog.CrossSourceJoinPolicy?
+Chalk.Client.PrepareOptions.JoinPolicy.init -> void
+Chalk.Client.PrepareOptions.Libraries.get -> System.Collections.Generic.IReadOnlyList<Chalk.Client.SqlLibrary>!
+Chalk.Client.PrepareOptions.Libraries.init -> void
+Chalk.Client.PrepareOptions.ParameterTypes.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>?
+Chalk.Client.PrepareOptions.ParameterTypes.init -> void
+Chalk.Client.PrepareOptions.Planning.get -> Chalk.Client.PlanningOptions?
+Chalk.Client.PrepareOptions.Planning.init -> void
+Chalk.Client.PrepareOptions.PrepareOptions() -> void
+Chalk.Client.PrepareOptions.Pushdown.get -> Chalk.Client.PushdownLevel
+Chalk.Client.PrepareOptions.Pushdown.init -> void
+Chalk.Client.PrepareOptions.RequireCurrentCatalog.get -> bool
+Chalk.Client.PrepareOptions.RequireCurrentCatalog.init -> void
+Chalk.Client.PreparedColumn
+Chalk.Client.PreparedColumn.Name.get -> string!
+Chalk.Client.PreparedColumn.Name.init -> void
+Chalk.Client.PreparedColumn.PreparedColumn() -> void
+Chalk.Client.PreparedQuery
+Chalk.Client.PreparedQuery.Columns.get -> System.Collections.Generic.IReadOnlyList<Chalk.Client.PreparedColumn!>!
+Chalk.Client.PreparedQuery.Context.get -> Chalk.Client.RequestContext?
+Chalk.Client.PreparedQuery.Extension<T>() -> T?
+Chalk.Client.PreparedQuery.Extensions.get -> System.Collections.Generic.IReadOnlyList<Google.Protobuf.WellKnownTypes.Any!>!
+Chalk.Client.PreparedQuery.FoldedContext.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Client.PreparedQuery.IsStale.get -> bool
+Chalk.Client.PreparedQuery.NarrowAsync(Chalk.Client.RequestContext! more, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PreparedQuery!>
+Chalk.Client.PreparedQuery.NarrowedFrom.get -> ulong?
+Chalk.Client.PreparedQuery.OutputSchema.get -> Apache.Arrow.Schema!
+Chalk.Client.PreparedQuery.ParameterStyle.get -> Chalk.Client.ParameterStyle
+Chalk.Client.PreparedQuery.ParameterTypes.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>!
+Chalk.Client.PreparedQuery.Parameters.get -> System.Collections.Generic.IReadOnlyList<Chalk.Client.ParameterDescriptor!>!
+Chalk.Client.PreparedQuery.Plan.get -> Chalk.Ir.Plan!
+Chalk.Client.PreparedQuery.PlanDigest.get -> ulong
+Chalk.Client.PreparedQuery.PlanText.get -> string?
+Chalk.Client.PreparedQuery.PlannerSql.get -> string!
+Chalk.Client.PreparedQuery.PlanningState.get -> Chalk.Client.PlanningState!
+Chalk.Client.PreparedQuery.PlanningStats.get -> Chalk.Client.Rpc.PlanningStats!
+Chalk.Client.PreparedQuery.RedactedSql.get -> string?
+Chalk.Client.PreparedQuery.RequiredContext.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Client.PreparedQuery.Sql.get -> string!
+Chalk.Client.PushdownLevel
+Chalk.Client.PushdownLevel.FiltersOnly = 2 -> Chalk.Client.PushdownLevel
+Chalk.Client.PushdownLevel.Full = 1 -> Chalk.Client.PushdownLevel
+Chalk.Client.PushdownLevel.None = 4 -> Chalk.Client.PushdownLevel
+Chalk.Client.PushdownLevel.ProjectionOnly = 3 -> Chalk.Client.PushdownLevel
+Chalk.Client.QueryExecution
+Chalk.Client.QueryExecution.Batches.get -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Client.QueryExecution.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Chalk.Client.QueryExecution.Plan.get -> Chalk.Ir.Plan!
+Chalk.Client.QueryExecution.Schema.get -> Apache.Arrow.Schema!
+Chalk.Client.QueryExecution.Stats.get -> Chalk.Sources.ExecutionStats!
+Chalk.Client.RecordedPlanMissingException
+Chalk.Client.RecordedPlanMissingException.Key.get -> string!
+Chalk.Client.RecordedPlanMissingException.Pushdown.get -> Chalk.Client.PushdownLevel
+Chalk.Client.RecordedPlanMissingException.RecordedPlanMissingException(string! sql, Chalk.Client.PushdownLevel pushdown, string! key, string! directory) -> void
+Chalk.Client.RecordedPlanMissingException.Sql.get -> string!
+Chalk.Client.RecordedPlanner
+Chalk.Client.RecordedPlanner.AcceptsCatalogDeltas.get -> bool
+Chalk.Client.RecordedPlanner.Directory.get -> string!
+Chalk.Client.RecordedPlanner.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Chalk.Client.RecordedPlanner.GetInfoAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PlannerInfo!>
+Chalk.Client.RecordedPlanner.PlanAsync(Chalk.Client.PlanRequest! request, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PlanResult!>
+Chalk.Client.RecordedPlanner.RecordedPlanner(string! directory) -> void
+Chalk.Client.RecordedPlanner.RegisterCatalogAsync(Chalk.Client.CatalogRegistration! registration, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Chalk.Client.RecordingPlanner
+Chalk.Client.RecordingPlanner.AcceptsCatalogDeltas.get -> bool
+Chalk.Client.RecordingPlanner.ContextId.get -> string!
+Chalk.Client.RecordingPlanner.Count.get -> int
+Chalk.Client.RecordingPlanner.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Chalk.Client.RecordingPlanner.GetInfoAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PlannerInfo!>
+Chalk.Client.RecordingPlanner.NextName.get -> string?
+Chalk.Client.RecordingPlanner.NextName.set -> void
+Chalk.Client.RecordingPlanner.PlanAsync(Chalk.Client.PlanRequest! request, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PlanResult!>
+Chalk.Client.RecordingPlanner.RecordingPlanner(Chalk.Client.IQueryPlanner! inner, string! directory) -> void
+Chalk.Client.RecordingPlanner.RedactSqlAsync(Chalk.Client.RedactSqlRequest! request, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.RedactedSql!>
+Chalk.Client.RecordingPlanner.RegisterCatalogAsync(Chalk.Client.CatalogRegistration! registration, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Chalk.Client.RecordingPlanner.RegisterStatisticsAsync(Chalk.Client.StatisticsRegistration! statistics, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Chalk.Client.RedactSqlRequest
+Chalk.Client.RedactSqlRequest.Conformance.get -> Chalk.Client.SqlConformance
+Chalk.Client.RedactSqlRequest.Conformance.init -> void
+Chalk.Client.RedactSqlRequest.RedactSqlRequest() -> void
+Chalk.Client.RedactSqlRequest.Redaction.get -> Chalk.Client.RedactionRequest!
+Chalk.Client.RedactSqlRequest.Redaction.init -> void
+Chalk.Client.RedactSqlRequest.Sql.get -> string!
+Chalk.Client.RedactSqlRequest.Sql.init -> void
+Chalk.Client.RedactedSql
+Chalk.Client.RedactedSql.Parsed.get -> bool
+Chalk.Client.RedactedSql.Parsed.init -> void
+Chalk.Client.RedactedSql.RedactedSql() -> void
+Chalk.Client.RedactedSql.Sql.get -> string!
+Chalk.Client.RedactedSql.Sql.init -> void
+Chalk.Client.RedactedSql.StructuralHash.get -> string!
+Chalk.Client.RedactedSql.StructuralHash.init -> void
+Chalk.Client.RedactionOptions
+Chalk.Client.RedactionOptions.IncludeRedactedSql.get -> bool
+Chalk.Client.RedactionOptions.IncludeRedactedSql.init -> void
+Chalk.Client.RedactionOptions.KeepStructural.get -> bool
+Chalk.Client.RedactionOptions.KeepStructural.init -> void
+Chalk.Client.RedactionOptions.RedactionOptions() -> void
+Chalk.Client.RedactionOptions.Salt.get -> System.ReadOnlyMemory<byte>
+Chalk.Client.RedactionOptions.Salt.init -> void
+Chalk.Client.RedactionOptions.Scope.get -> Chalk.Client.RedactionScope
+Chalk.Client.RedactionOptions.Scope.init -> void
+Chalk.Client.RedactionRequest
+Chalk.Client.RedactionRequest.KeepStructural.get -> bool
+Chalk.Client.RedactionRequest.KeepStructural.init -> void
+Chalk.Client.RedactionRequest.RedactionRequest() -> void
+Chalk.Client.RedactionRequest.Salt.get -> System.ReadOnlyMemory<byte>
+Chalk.Client.RedactionRequest.Salt.init -> void
+Chalk.Client.RedactionRequest.Scope.get -> Chalk.Client.RedactionScope
+Chalk.Client.RedactionRequest.Scope.init -> void
+Chalk.Client.RedactionScope
+Chalk.Client.RedactionScope.All = 2 -> Chalk.Client.RedactionScope
+Chalk.Client.RedactionScope.Strings = 1 -> Chalk.Client.RedactionScope
+Chalk.Client.RefreshBuilder
+Chalk.Client.RefreshBuilder.Append<T>(Chalk.Sources.ISourceRuntime! source, string! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Append<T>(Chalk.Sources.ISourceRuntime! source, string! table, System.Collections.Generic.IReadOnlyList<T>! rows, Chalk.Sources.StatisticsRefresh statistics) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Append<T>(Chalk.Sources.ITableTarget<T>! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Append<T>(Chalk.Sources.ITableTarget<T>! table, System.Collections.Generic.IReadOnlyList<T>! rows, Chalk.Sources.StatisticsRefresh statistics) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Refresh(Chalk.Sources.IRefreshTarget! target) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Replace<T>(Chalk.Sources.ISourceRuntime! source, string! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Replace<T>(Chalk.Sources.ITableTarget<T>! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RequestContext
+Chalk.Client.RequestContext.Actor.get -> string!
+Chalk.Client.RequestContext.Actor.init -> void
+Chalk.Client.RequestContext.CanonicalHash.get -> string!
+Chalk.Client.RequestContext.FoldMaxRows.get -> int
+Chalk.Client.RequestContext.FoldMaxRows.init -> void
+Chalk.Client.RequestContext.IsEmpty.get -> bool
+Chalk.Client.RequestContext.IsShape(string! name) -> bool
+Chalk.Client.RequestContext.Lists.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Chalk.Client.ContextRelation!>!
+Chalk.Client.RequestContext.Lists.init -> void
+Chalk.Client.RequestContext.Narrow(Chalk.Client.RequestContext! more) -> Chalk.Client.RequestContext!
+Chalk.Client.RequestContext.Purpose.get -> string!
+Chalk.Client.RequestContext.Purpose.init -> void
+Chalk.Client.RequestContext.Relations.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Chalk.Client.ContextRelation!>!
+Chalk.Client.RequestContext.Relations.init -> void
+Chalk.Client.RequestContext.RequestContext() -> void
+Chalk.Client.RequestContext.ScalarTypes.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Chalk.Catalog.ChalkType>!
+Chalk.Client.RequestContext.ScalarTypes.init -> void
+Chalk.Client.RequestContext.Scalars.get -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
+Chalk.Client.RequestContext.Scalars.init -> void
+Chalk.Client.RequestContext.Shape() -> Chalk.Client.RequestContext!
+Chalk.Client.RequestContext.Shape(System.Collections.Generic.IReadOnlyCollection<string!>! names) -> Chalk.Client.RequestContext!
+Chalk.Client.RequestContext.ShapeNames.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Client.RequestContext.ShapeOnly.get -> bool
+Chalk.Client.RequestContext.ShapeOnly.init -> void
+Chalk.Client.RequestContext.ShapeSignature.get -> string!
+Chalk.Client.RequestContext.With(string! name, object? value) -> Chalk.Client.RequestContext!
+Chalk.Client.RequestContext.WithRows(string! name, Chalk.Client.ContextRelation! rows) -> Chalk.Client.RequestContext!
+Chalk.Client.Rpc.ColumnStatisticsEntry
+Chalk.Client.Rpc.ColumnStatisticsEntry.CalculateSize() -> int
+Chalk.Client.Rpc.ColumnStatisticsEntry.ColumnStatisticsEntry() -> void
+Chalk.Client.Rpc.ContextRelationKind
+Chalk.Client.Rpc.ContextRelationKind.List = 1 -> Chalk.Client.Rpc.ContextRelationKind
+Chalk.Client.Rpc.ContextRelationKind.Relation = 2 -> Chalk.Client.Rpc.ContextRelationKind
+Chalk.Client.Rpc.ContextRelationKind.Unspecified = 0 -> Chalk.Client.Rpc.ContextRelationKind
+Chalk.Client.Rpc.ContextRelationValue
+Chalk.Client.Rpc.ContextRelationValue.CalculateSize() -> int
+Chalk.Client.Rpc.ContextRelationValue.ContextRelationValue() -> void
+Chalk.Client.Rpc.ContextRelationValue.EstRowCount.get -> long
+Chalk.Client.Rpc.ContextRelationValue.EstRowCount.set -> void
+Chalk.Client.Rpc.ContextRelationValue.Kind.get -> Chalk.Client.Rpc.ContextRelationKind
+Chalk.Client.Rpc.ContextRelationValue.Kind.set -> void
+Chalk.Client.Rpc.ContextRelationValue.Shape.get -> bool
+Chalk.Client.Rpc.ContextRelationValue.Shape.set -> void
+Chalk.Client.Rpc.ContextScalar
+Chalk.Client.Rpc.ContextScalar.CalculateSize() -> int
+Chalk.Client.Rpc.ContextScalar.ContextScalar() -> void
+Chalk.Client.Rpc.ContextScalar.Shape.get -> bool
+Chalk.Client.Rpc.ContextScalar.Shape.set -> void
+Chalk.Client.Rpc.DialectInfo
+Chalk.Client.Rpc.DialectInfo.CalculateSize() -> int
+Chalk.Client.Rpc.DialectInfo.DialectInfo() -> void
+Chalk.Client.Rpc.DialectInfo.Tuned.get -> bool
+Chalk.Client.Rpc.DialectInfo.Tuned.set -> void
+Chalk.Client.Rpc.DisabledCapability
+Chalk.Client.Rpc.DisabledCapability.Aggregate = 3 -> Chalk.Client.Rpc.DisabledCapability
+Chalk.Client.Rpc.DisabledCapability.Distinct = 7 -> Chalk.Client.Rpc.DisabledCapability
+Chalk.Client.Rpc.DisabledCapability.Filter = 1 -> Chalk.Client.Rpc.DisabledCapability
+Chalk.Client.Rpc.DisabledCapability.InList = 8 -> Chalk.Client.Rpc.DisabledCapability
+Chalk.Client.Rpc.DisabledCapability.Join = 6 -> Chalk.Client.Rpc.DisabledCapability
+Chalk.Client.Rpc.DisabledCapability.Limit = 5 -> Chalk.Client.Rpc.DisabledCapability
+Chalk.Client.Rpc.DisabledCapability.Parameters = 9 -> Chalk.Client.Rpc.DisabledCapability
+Chalk.Client.Rpc.DisabledCapability.Project = 2 -> Chalk.Client.Rpc.DisabledCapability
+Chalk.Client.Rpc.DisabledCapability.Sort = 4 -> Chalk.Client.Rpc.DisabledCapability
+Chalk.Client.Rpc.DisabledCapability.Unspecified = 0 -> Chalk.Client.Rpc.DisabledCapability
+Chalk.Client.Rpc.GetInfoRequest
+Chalk.Client.Rpc.GetInfoRequest.CalculateSize() -> int
+Chalk.Client.Rpc.GetInfoRequest.GetInfoRequest() -> void
+Chalk.Client.Rpc.GetInfoResponse
+Chalk.Client.Rpc.GetInfoResponse.CalculateSize() -> int
+Chalk.Client.Rpc.GetInfoResponse.GetInfoResponse() -> void
+Chalk.Client.Rpc.GetInfoResponse.MaxIrVersion.get -> uint
+Chalk.Client.Rpc.GetInfoResponse.MaxIrVersion.set -> void
+Chalk.Client.Rpc.GetInfoResponse.MinIrVersion.get -> uint
+Chalk.Client.Rpc.GetInfoResponse.MinIrVersion.set -> void
+Chalk.Client.Rpc.GetInfoResponse.PlannerConfigHash.get -> uint
+Chalk.Client.Rpc.GetInfoResponse.PlannerConfigHash.set -> void
+Chalk.Client.Rpc.GetInfoResponse.PlanningWorkers.get -> uint
+Chalk.Client.Rpc.GetInfoResponse.PlanningWorkers.set -> void
+Chalk.Client.Rpc.PlanError
+Chalk.Client.Rpc.PlanError.CalculateSize() -> int
+Chalk.Client.Rpc.PlanError.Column.get -> int
+Chalk.Client.Rpc.PlanError.Column.set -> void
+Chalk.Client.Rpc.PlanError.EndColumn.get -> int
+Chalk.Client.Rpc.PlanError.EndColumn.set -> void
+Chalk.Client.Rpc.PlanError.EndLine.get -> int
+Chalk.Client.Rpc.PlanError.EndLine.set -> void
+Chalk.Client.Rpc.PlanError.Kind.get -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanError.Kind.set -> void
+Chalk.Client.Rpc.PlanError.Line.get -> int
+Chalk.Client.Rpc.PlanError.Line.set -> void
+Chalk.Client.Rpc.PlanError.PlanError() -> void
+Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanErrorKind.EpochMismatch = 5 -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanErrorKind.Internal = 8 -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanErrorKind.InvalidCatalog = 7 -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanErrorKind.InvalidRequest = 10 -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanErrorKind.IrVersion = 6 -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanErrorKind.Parse = 1 -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanErrorKind.PlanningAborted = 11 -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanErrorKind.Policy = 9 -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanErrorKind.UnknownCatalogVersion = 12 -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanErrorKind.UnknownContext = 4 -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanErrorKind.Unspecified = 0 -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanErrorKind.Unsupported = 3 -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanErrorKind.Validation = 2 -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Client.Rpc.PlanRequest
+Chalk.Client.Rpc.PlanRequest.CalculateSize() -> int
+Chalk.Client.Rpc.PlanRequest.CatalogEpoch.get -> long
+Chalk.Client.Rpc.PlanRequest.CatalogEpoch.set -> void
+Chalk.Client.Rpc.PlanRequest.ClientIrVersion.get -> uint
+Chalk.Client.Rpc.PlanRequest.ClientIrVersion.set -> void
+Chalk.Client.Rpc.PlanRequest.NarrowFrom.get -> ulong
+Chalk.Client.Rpc.PlanRequest.NarrowFrom.set -> void
+Chalk.Client.Rpc.PlanRequest.PlanRequest() -> void
+Chalk.Client.Rpc.PlanRequest.StatsEpoch.get -> long
+Chalk.Client.Rpc.PlanRequest.StatsEpoch.set -> void
+Chalk.Client.Rpc.PlanResponse
+Chalk.Client.Rpc.PlanResponse.CalculateSize() -> int
+Chalk.Client.Rpc.PlanResponse.PlanResponse() -> void
+Chalk.Client.Rpc.PlannerOptions
+Chalk.Client.Rpc.PlannerOptions.CalculateSize() -> int
+Chalk.Client.Rpc.PlannerOptions.Conformance.get -> Chalk.Ir.SqlConformance
+Chalk.Client.Rpc.PlannerOptions.Conformance.set -> void
+Chalk.Client.Rpc.PlannerOptions.DisableIndexLookup.get -> bool
+Chalk.Client.Rpc.PlannerOptions.DisableIndexLookup.set -> void
+Chalk.Client.Rpc.PlannerOptions.IncludePlanText.get -> bool
+Chalk.Client.Rpc.PlannerOptions.IncludePlanText.set -> void
+Chalk.Client.Rpc.PlannerOptions.PlannerOptions() -> void
+Chalk.Client.Rpc.PlannerOptions.Pushdown.get -> Chalk.Client.Rpc.PushdownLevel
+Chalk.Client.Rpc.PlannerOptions.Pushdown.set -> void
+Chalk.Client.Rpc.PlannerReflection
+Chalk.Client.Rpc.PlannerService
+Chalk.Client.Rpc.PlannerService.PlannerServiceClient
+Chalk.Client.Rpc.PlannerService.PlannerServiceClient.PlannerServiceClient() -> void
+Chalk.Client.Rpc.PlanningCost
+Chalk.Client.Rpc.PlanningCost.CalculateSize() -> int
+Chalk.Client.Rpc.PlanningCost.Cpu.get -> double
+Chalk.Client.Rpc.PlanningCost.Cpu.set -> void
+Chalk.Client.Rpc.PlanningCost.Io.get -> double
+Chalk.Client.Rpc.PlanningCost.Io.set -> void
+Chalk.Client.Rpc.PlanningCost.PlanningCost() -> void
+Chalk.Client.Rpc.PlanningCost.Rows.get -> double
+Chalk.Client.Rpc.PlanningCost.Rows.set -> void
+Chalk.Client.Rpc.PlanningOptions
+Chalk.Client.Rpc.PlanningOptions.CalculateSize() -> int
+Chalk.Client.Rpc.PlanningOptions.ConvergenceEvaluationInterval.get -> uint
+Chalk.Client.Rpc.PlanningOptions.ConvergenceEvaluationInterval.set -> void
+Chalk.Client.Rpc.PlanningOptions.ConvergencePatience.get -> uint
+Chalk.Client.Rpc.PlanningOptions.ConvergencePatience.set -> void
+Chalk.Client.Rpc.PlanningOptions.ConvergenceRangeThreshold.get -> double
+Chalk.Client.Rpc.PlanningOptions.ConvergenceRangeThreshold.set -> void
+Chalk.Client.Rpc.PlanningOptions.ConvergenceSamplePeriodMs.get -> ulong
+Chalk.Client.Rpc.PlanningOptions.ConvergenceSamplePeriodMs.set -> void
+Chalk.Client.Rpc.PlanningOptions.PlanningOptions() -> void
+Chalk.Client.Rpc.PlanningOptions.Priority.get -> Chalk.Client.Rpc.PlanningPriority
+Chalk.Client.Rpc.PlanningOptions.Priority.set -> void
+Chalk.Client.Rpc.PlanningOptions.SessionMaxConcurrency.get -> uint
+Chalk.Client.Rpc.PlanningOptions.SessionMaxConcurrency.set -> void
+Chalk.Client.Rpc.PlanningOptions.StopAtFirstPlan.get -> bool
+Chalk.Client.Rpc.PlanningOptions.StopAtFirstPlan.set -> void
+Chalk.Client.Rpc.PlanningOptions.TimeBudgetMs.get -> ulong
+Chalk.Client.Rpc.PlanningOptions.TimeBudgetMs.set -> void
+Chalk.Client.Rpc.PlanningPriority
+Chalk.Client.Rpc.PlanningPriority.High = 1 -> Chalk.Client.Rpc.PlanningPriority
+Chalk.Client.Rpc.PlanningPriority.Low = 3 -> Chalk.Client.Rpc.PlanningPriority
+Chalk.Client.Rpc.PlanningPriority.Normal = 2 -> Chalk.Client.Rpc.PlanningPriority
+Chalk.Client.Rpc.PlanningPriority.Unspecified = 0 -> Chalk.Client.Rpc.PlanningPriority
+Chalk.Client.Rpc.PlanningState
+Chalk.Client.Rpc.PlanningState.CalculateSize() -> int
+Chalk.Client.Rpc.PlanningState.ElapsedUs.get -> ulong
+Chalk.Client.Rpc.PlanningState.ElapsedUs.set -> void
+Chalk.Client.Rpc.PlanningState.EvaluationCount.get -> ulong
+Chalk.Client.Rpc.PlanningState.EvaluationCount.set -> void
+Chalk.Client.Rpc.PlanningState.EvaluationInterval.get -> uint
+Chalk.Client.Rpc.PlanningState.EvaluationInterval.set -> void
+Chalk.Client.Rpc.PlanningState.Looks.get -> ulong
+Chalk.Client.Rpc.PlanningState.Looks.set -> void
+Chalk.Client.Rpc.PlanningState.OptimiserElapsedUs.get -> ulong
+Chalk.Client.Rpc.PlanningState.OptimiserElapsedUs.set -> void
+Chalk.Client.Rpc.PlanningState.PlanningState() -> void
+Chalk.Client.Rpc.PlanningState.QueuedElapsedUs.get -> ulong
+Chalk.Client.Rpc.PlanningState.QueuedElapsedUs.set -> void
+Chalk.Client.Rpc.PlanningState.RunningElapsedUs.get -> ulong
+Chalk.Client.Rpc.PlanningState.RunningElapsedUs.set -> void
+Chalk.Client.Rpc.PlanningState.Slices.get -> ulong
+Chalk.Client.Rpc.PlanningState.Slices.set -> void
+Chalk.Client.Rpc.PlanningState.TerminationReason.get -> Chalk.Client.Rpc.PlanningTerminationReason
+Chalk.Client.Rpc.PlanningState.TerminationReason.set -> void
+Chalk.Client.Rpc.PlanningStats
+Chalk.Client.Rpc.PlanningStats.CalculateSize() -> int
+Chalk.Client.Rpc.PlanningStats.ConvertMicros.get -> long
+Chalk.Client.Rpc.PlanningStats.ConvertMicros.set -> void
+Chalk.Client.Rpc.PlanningStats.OptimizeMicros.get -> long
+Chalk.Client.Rpc.PlanningStats.OptimizeMicros.set -> void
+Chalk.Client.Rpc.PlanningStats.ParseMicros.get -> long
+Chalk.Client.Rpc.PlanningStats.ParseMicros.set -> void
+Chalk.Client.Rpc.PlanningStats.PlanningStats() -> void
+Chalk.Client.Rpc.PlanningStats.TotalMicros.get -> long
+Chalk.Client.Rpc.PlanningStats.TotalMicros.set -> void
+Chalk.Client.Rpc.PlanningStats.ValidateMicros.get -> long
+Chalk.Client.Rpc.PlanningStats.ValidateMicros.set -> void
+Chalk.Client.Rpc.PlanningTerminationReason
+Chalk.Client.Rpc.PlanningTerminationReason.Aborted = 5 -> Chalk.Client.Rpc.PlanningTerminationReason
+Chalk.Client.Rpc.PlanningTerminationReason.BudgetExhausted = 2 -> Chalk.Client.Rpc.PlanningTerminationReason
+Chalk.Client.Rpc.PlanningTerminationReason.CancelledByHost = 4 -> Chalk.Client.Rpc.PlanningTerminationReason
+Chalk.Client.Rpc.PlanningTerminationReason.Converged = 1 -> Chalk.Client.Rpc.PlanningTerminationReason
+Chalk.Client.Rpc.PlanningTerminationReason.StoppedByHost = 3 -> Chalk.Client.Rpc.PlanningTerminationReason
+Chalk.Client.Rpc.PlanningTerminationReason.Unspecified = 0 -> Chalk.Client.Rpc.PlanningTerminationReason
+Chalk.Client.Rpc.PushdownLevel
+Chalk.Client.Rpc.PushdownLevel.FiltersOnly = 2 -> Chalk.Client.Rpc.PushdownLevel
+Chalk.Client.Rpc.PushdownLevel.Full = 1 -> Chalk.Client.Rpc.PushdownLevel
+Chalk.Client.Rpc.PushdownLevel.None = 4 -> Chalk.Client.Rpc.PushdownLevel
+Chalk.Client.Rpc.PushdownLevel.ProjectionOnly = 3 -> Chalk.Client.Rpc.PushdownLevel
+Chalk.Client.Rpc.PushdownLevel.Unspecified = 0 -> Chalk.Client.Rpc.PushdownLevel
+Chalk.Client.Rpc.RedactSqlRequest
+Chalk.Client.Rpc.RedactSqlRequest.CalculateSize() -> int
+Chalk.Client.Rpc.RedactSqlRequest.Conformance.get -> Chalk.Ir.SqlConformance
+Chalk.Client.Rpc.RedactSqlRequest.Conformance.set -> void
+Chalk.Client.Rpc.RedactSqlRequest.RedactSqlRequest() -> void
+Chalk.Client.Rpc.RedactSqlResponse
+Chalk.Client.Rpc.RedactSqlResponse.CalculateSize() -> int
+Chalk.Client.Rpc.RedactSqlResponse.Parsed.get -> bool
+Chalk.Client.Rpc.RedactSqlResponse.Parsed.set -> void
+Chalk.Client.Rpc.RedactSqlResponse.RedactSqlResponse() -> void
+Chalk.Client.Rpc.RedactionOptions
+Chalk.Client.Rpc.RedactionOptions.CalculateSize() -> int
+Chalk.Client.Rpc.RedactionOptions.KeepStructural.get -> bool
+Chalk.Client.Rpc.RedactionOptions.KeepStructural.set -> void
+Chalk.Client.Rpc.RedactionOptions.RedactionOptions() -> void
+Chalk.Client.Rpc.RedactionOptions.Scope.get -> Chalk.Client.Rpc.RedactionScope
+Chalk.Client.Rpc.RedactionOptions.Scope.set -> void
+Chalk.Client.Rpc.RedactionScope
+Chalk.Client.Rpc.RedactionScope.All = 2 -> Chalk.Client.Rpc.RedactionScope
+Chalk.Client.Rpc.RedactionScope.Strings = 1 -> Chalk.Client.Rpc.RedactionScope
+Chalk.Client.Rpc.RedactionScope.Unspecified = 0 -> Chalk.Client.Rpc.RedactionScope
+Chalk.Client.Rpc.RegisterCatalogRequest
+Chalk.Client.Rpc.RegisterCatalogRequest.CalculateSize() -> int
+Chalk.Client.Rpc.RegisterCatalogRequest.RegisterCatalogRequest() -> void
+Chalk.Client.Rpc.RegisterCatalogResponse
+Chalk.Client.Rpc.RegisterCatalogResponse.CalculateSize() -> int
+Chalk.Client.Rpc.RegisterCatalogResponse.RegisterCatalogResponse() -> void
+Chalk.Client.Rpc.RegisterStatisticsRequest
+Chalk.Client.Rpc.RegisterStatisticsRequest.CalculateSize() -> int
+Chalk.Client.Rpc.RegisterStatisticsRequest.RegisterStatisticsRequest() -> void
+Chalk.Client.Rpc.RegisterStatisticsResponse
+Chalk.Client.Rpc.RegisterStatisticsResponse.CalculateSize() -> int
+Chalk.Client.Rpc.RegisterStatisticsResponse.RegisterStatisticsResponse() -> void
+Chalk.Client.Rpc.RequestContext
+Chalk.Client.Rpc.RequestContext.CalculateSize() -> int
+Chalk.Client.Rpc.RequestContext.FoldMaxRows.get -> uint
+Chalk.Client.Rpc.RequestContext.FoldMaxRows.set -> void
+Chalk.Client.Rpc.RequestContext.RequestContext() -> void
+Chalk.Client.Rpc.RequestContext.ShapeOnly.get -> bool
+Chalk.Client.Rpc.RequestContext.ShapeOnly.set -> void
+Chalk.Client.Rpc.StopPlanningRequest
+Chalk.Client.Rpc.StopPlanningRequest.CalculateSize() -> int
+Chalk.Client.Rpc.StopPlanningRequest.StopPlanningRequest() -> void
+Chalk.Client.Rpc.StopPlanningResponse
+Chalk.Client.Rpc.StopPlanningResponse.CalculateSize() -> int
+Chalk.Client.Rpc.StopPlanningResponse.EvaluationCount.get -> ulong
+Chalk.Client.Rpc.StopPlanningResponse.EvaluationCount.set -> void
+Chalk.Client.Rpc.StopPlanningResponse.Found.get -> bool
+Chalk.Client.Rpc.StopPlanningResponse.Found.set -> void
+Chalk.Client.Rpc.StopPlanningResponse.StopPlanningResponse() -> void
+Chalk.Client.Rpc.TableStatistics
+Chalk.Client.Rpc.TableStatistics.CalculateSize() -> int
+Chalk.Client.Rpc.TableStatistics.RowCount.get -> long
+Chalk.Client.Rpc.TableStatistics.RowCount.set -> void
+Chalk.Client.Rpc.TableStatistics.RowCountKind.get -> Chalk.Ir.RowCountKind
+Chalk.Client.Rpc.TableStatistics.RowCountKind.set -> void
+Chalk.Client.Rpc.TableStatistics.TableStatistics() -> void
+Chalk.Client.SqlConformance
+Chalk.Client.SqlConformance.Babel = 3 -> Chalk.Client.SqlConformance
+Chalk.Client.SqlConformance.BigQuery = 14 -> Chalk.Client.SqlConformance
+Chalk.Client.SqlConformance.Default = 1 -> Chalk.Client.SqlConformance
+Chalk.Client.SqlConformance.Lenient = 2 -> Chalk.Client.SqlConformance
+Chalk.Client.SqlConformance.MySql5 = 9 -> Chalk.Client.SqlConformance
+Chalk.Client.SqlConformance.Oracle10 = 10 -> Chalk.Client.SqlConformance
+Chalk.Client.SqlConformance.Oracle12 = 11 -> Chalk.Client.SqlConformance
+Chalk.Client.SqlConformance.Pragmatic2003 = 8 -> Chalk.Client.SqlConformance
+Chalk.Client.SqlConformance.Pragmatic99 = 6 -> Chalk.Client.SqlConformance
+Chalk.Client.SqlConformance.Presto = 13 -> Chalk.Client.SqlConformance
+Chalk.Client.SqlConformance.SqlServer2008 = 12 -> Chalk.Client.SqlConformance
+Chalk.Client.SqlConformance.Strict2003 = 7 -> Chalk.Client.SqlConformance
+Chalk.Client.SqlConformance.Strict92 = 4 -> Chalk.Client.SqlConformance
+Chalk.Client.SqlConformance.Strict99 = 5 -> Chalk.Client.SqlConformance
+Chalk.Client.SqlLibrary
+Chalk.Client.SqlLibrary.All = 14 -> Chalk.Client.SqlLibrary
+Chalk.Client.SqlLibrary.BigQuery = 2 -> Chalk.Client.SqlLibrary
+Chalk.Client.SqlLibrary.Calcite = 3 -> Chalk.Client.SqlLibrary
+Chalk.Client.SqlLibrary.Clickhouse = 4 -> Chalk.Client.SqlLibrary
+Chalk.Client.SqlLibrary.Hive = 5 -> Chalk.Client.SqlLibrary
+Chalk.Client.SqlLibrary.Mssql = 6 -> Chalk.Client.SqlLibrary
+Chalk.Client.SqlLibrary.Mysql = 7 -> Chalk.Client.SqlLibrary
+Chalk.Client.SqlLibrary.Oracle = 8 -> Chalk.Client.SqlLibrary
+Chalk.Client.SqlLibrary.Postgresql = 9 -> Chalk.Client.SqlLibrary
+Chalk.Client.SqlLibrary.Redshift = 10 -> Chalk.Client.SqlLibrary
+Chalk.Client.SqlLibrary.Snowflake = 11 -> Chalk.Client.SqlLibrary
+Chalk.Client.SqlLibrary.Spark = 12 -> Chalk.Client.SqlLibrary
+Chalk.Client.SqlLibrary.Spatial = 13 -> Chalk.Client.SqlLibrary
+Chalk.Client.SqlLibrary.Standard = 1 -> Chalk.Client.SqlLibrary
+Chalk.Client.SqlPosition
+Chalk.Client.SqlPosition.Column.get -> int
+Chalk.Client.SqlPosition.Column.init -> void
+Chalk.Client.SqlPosition.Deconstruct(out int Line, out int Column, out int EndLine, out int EndColumn) -> void
+Chalk.Client.SqlPosition.EndColumn.get -> int
+Chalk.Client.SqlPosition.EndColumn.init -> void
+Chalk.Client.SqlPosition.EndLine.get -> int
+Chalk.Client.SqlPosition.EndLine.init -> void
+Chalk.Client.SqlPosition.Equals(Chalk.Client.SqlPosition other) -> bool
+Chalk.Client.SqlPosition.Line.get -> int
+Chalk.Client.SqlPosition.Line.init -> void
+Chalk.Client.SqlPosition.SqlPosition() -> void
+Chalk.Client.SqlPosition.SqlPosition(int Line, int Column, int EndLine, int EndColumn) -> void
+Chalk.Client.StatisticsRegistration
+Chalk.Client.StatisticsRegistration.InstanceId.get -> string!
+Chalk.Client.StatisticsRegistration.InstanceId.init -> void
+Chalk.Client.StatisticsRegistration.StatisticsRegistration() -> void
+Chalk.Client.StatisticsRegistration.StatisticsVersion.get -> string!
+Chalk.Client.StatisticsRegistration.StatisticsVersion.init -> void
+Chalk.Client.StatisticsRegistration.Tables.get -> System.Collections.Generic.IReadOnlyList<Chalk.Client.TableStatisticsUpdate!>!
+Chalk.Client.StatisticsRegistration.Tables.init -> void
+Chalk.Client.TableStatisticsUpdate
+Chalk.Client.TableStatisticsUpdate.Columns.get -> System.Collections.Generic.IReadOnlyList<Chalk.Client.ColumnStatisticsUpdate!>!
+Chalk.Client.TableStatisticsUpdate.Columns.init -> void
+Chalk.Client.TableStatisticsUpdate.RowCount.get -> long
+Chalk.Client.TableStatisticsUpdate.RowCount.init -> void
+Chalk.Client.TableStatisticsUpdate.RowCountKind.get -> Chalk.Ir.RowCountKind
+Chalk.Client.TableStatisticsUpdate.RowCountKind.init -> void
+Chalk.Client.TableStatisticsUpdate.Schema.get -> string!
+Chalk.Client.TableStatisticsUpdate.Schema.init -> void
+Chalk.Client.TableStatisticsUpdate.Table.get -> string!
+Chalk.Client.TableStatisticsUpdate.Table.init -> void
+Chalk.Client.TableStatisticsUpdate.TableStatisticsUpdate() -> void
+Chalk.Client.WindowExecution
+Chalk.Client.WindowExecution.Automatic = 0 -> Chalk.Client.WindowExecution
+Chalk.Client.WindowExecution.Buffered = 1 -> Chalk.Client.WindowExecution
+Chalk.Entitlements.EntitlementException
+Chalk.Entitlements.EntitlementException.EntitlementException(string! message, Chalk.Client.SqlPosition? position, System.Exception? innerException = null) -> void
+Chalk.Entitlements.EntitlementException.Kind.get -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Entitlements.EntitlementException.Position.get -> Chalk.Client.SqlPosition?
+static Chalk.Client.PlannerArtifact.CopyToAsync(System.IO.Stream! destination, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+static Chalk.Client.PlannerArtifact.Open() -> System.IO.Stream!
+static Chalk.Client.PlannerArtifact.Sha256Async(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<string!>
+static Chalk.Client.PlannerProcess.StartAsync() -> System.Threading.Tasks.ValueTask<Chalk.Client.PlannerProcess!>
+[CHALK001]Chalk.Client.FunctionRegistry.AddKernel(string! name, Chalk.Sources.IVectorFunction! kernel) -> void
+[CHALK001]Chalk.Client.IFunctionRegistry.AddKernel(string! name, Chalk.Sources.IVectorFunction! kernel) -> void
+const Chalk.Client.RequestContext.DefaultFoldMaxRows = 64 -> int
+const Chalk.Client.Rpc.ColumnStatisticsEntry.ColumnFieldNumber = 1 -> int
+const Chalk.Client.Rpc.ColumnStatisticsEntry.StatisticsFieldNumber = 2 -> int
+const Chalk.Client.Rpc.ContextRelationValue.EstRowCountFieldNumber = 4 -> int
+const Chalk.Client.Rpc.ContextRelationValue.KindFieldNumber = 5 -> int
+const Chalk.Client.Rpc.ContextRelationValue.NameFieldNumber = 1 -> int
+const Chalk.Client.Rpc.ContextRelationValue.RowTypeFieldNumber = 2 -> int
+const Chalk.Client.Rpc.ContextRelationValue.RowsFieldNumber = 3 -> int
+const Chalk.Client.Rpc.ContextRelationValue.ShapeFieldNumber = 6 -> int
+const Chalk.Client.Rpc.ContextScalar.NameFieldNumber = 1 -> int
+const Chalk.Client.Rpc.ContextScalar.ShapeFieldNumber = 3 -> int
+const Chalk.Client.Rpc.ContextScalar.ValueFieldNumber = 2 -> int
+const Chalk.Client.Rpc.DialectInfo.AliasesFieldNumber = 4 -> int
+const Chalk.Client.Rpc.DialectInfo.DatabaseProductFieldNumber = 2 -> int
+const Chalk.Client.Rpc.DialectInfo.NameFieldNumber = 1 -> int
+const Chalk.Client.Rpc.DialectInfo.TunedFieldNumber = 3 -> int
+const Chalk.Client.Rpc.GetInfoResponse.CalciteVersionFieldNumber = 4 -> int
+const Chalk.Client.Rpc.GetInfoResponse.ConformancesFieldNumber = 7 -> int
+const Chalk.Client.Rpc.GetInfoResponse.DialectsFieldNumber = 6 -> int
+const Chalk.Client.Rpc.GetInfoResponse.LibrariesFieldNumber = 8 -> int
+const Chalk.Client.Rpc.GetInfoResponse.MaxIrVersionFieldNumber = 2 -> int
+const Chalk.Client.Rpc.GetInfoResponse.MinIrVersionFieldNumber = 1 -> int
+const Chalk.Client.Rpc.GetInfoResponse.PlannerConfigHashFieldNumber = 5 -> int
+const Chalk.Client.Rpc.GetInfoResponse.PlannerVersionFieldNumber = 3 -> int
+const Chalk.Client.Rpc.GetInfoResponse.PlanningWorkersFieldNumber = 9 -> int
+const Chalk.Client.Rpc.PlanError.ColumnFieldNumber = 4 -> int
+const Chalk.Client.Rpc.PlanError.EndColumnFieldNumber = 6 -> int
+const Chalk.Client.Rpc.PlanError.EndLineFieldNumber = 5 -> int
+const Chalk.Client.Rpc.PlanError.KindFieldNumber = 1 -> int
+const Chalk.Client.Rpc.PlanError.LineFieldNumber = 3 -> int
+const Chalk.Client.Rpc.PlanError.MessageFieldNumber = 2 -> int
+const Chalk.Client.Rpc.PlanError.PlanningStateFieldNumber = 7 -> int
+const Chalk.Client.Rpc.PlanRequest.CatalogEpochFieldNumber = 3 -> int
+const Chalk.Client.Rpc.PlanRequest.ClientIrVersionFieldNumber = 5 -> int
+const Chalk.Client.Rpc.PlanRequest.ContextFieldNumber = 8 -> int
+const Chalk.Client.Rpc.PlanRequest.ContextIdFieldNumber = 2 -> int
+const Chalk.Client.Rpc.PlanRequest.ExtensionsFieldNumber = 9 -> int
+const Chalk.Client.Rpc.PlanRequest.InstanceIdFieldNumber = 13 -> int
+const Chalk.Client.Rpc.PlanRequest.NarrowFromFieldNumber = 10 -> int
+const Chalk.Client.Rpc.PlanRequest.OptionsFieldNumber = 7 -> int
+const Chalk.Client.Rpc.PlanRequest.ParameterTypesFieldNumber = 6 -> int
+const Chalk.Client.Rpc.PlanRequest.PlanningOptionsFieldNumber = 11 -> int
+const Chalk.Client.Rpc.PlanRequest.RedactionFieldNumber = 12 -> int
+const Chalk.Client.Rpc.PlanRequest.ShapeVersionFieldNumber = 14 -> int
+const Chalk.Client.Rpc.PlanRequest.SqlFieldNumber = 1 -> int
+const Chalk.Client.Rpc.PlanRequest.StatisticsVersionFieldNumber = 15 -> int
+const Chalk.Client.Rpc.PlanRequest.StatsEpochFieldNumber = 4 -> int
+const Chalk.Client.Rpc.PlanResponse.ExtensionsFieldNumber = 6 -> int
+const Chalk.Client.Rpc.PlanResponse.PlanFieldNumber = 1 -> int
+const Chalk.Client.Rpc.PlanResponse.PlanTextFieldNumber = 2 -> int
+const Chalk.Client.Rpc.PlanResponse.PlanningStateFieldNumber = 7 -> int
+const Chalk.Client.Rpc.PlanResponse.RedactedSqlFieldNumber = 8 -> int
+const Chalk.Client.Rpc.PlanResponse.StatsFieldNumber = 3 -> int
+const Chalk.Client.Rpc.PlannerOptions.ConformanceFieldNumber = 4 -> int
+const Chalk.Client.Rpc.PlannerOptions.DisableIndexLookupFieldNumber = 3 -> int
+const Chalk.Client.Rpc.PlannerOptions.DisabledCapabilitiesFieldNumber = 6 -> int
+const Chalk.Client.Rpc.PlannerOptions.IncludePlanTextFieldNumber = 2 -> int
+const Chalk.Client.Rpc.PlannerOptions.JoinPolicyFieldNumber = 7 -> int
+const Chalk.Client.Rpc.PlannerOptions.LibrariesFieldNumber = 5 -> int
+const Chalk.Client.Rpc.PlannerOptions.PushdownFieldNumber = 1 -> int
+const Chalk.Client.Rpc.PlanningCost.CpuFieldNumber = 2 -> int
+const Chalk.Client.Rpc.PlanningCost.IoFieldNumber = 3 -> int
+const Chalk.Client.Rpc.PlanningCost.RowsFieldNumber = 1 -> int
+const Chalk.Client.Rpc.PlanningOptions.ConvergenceEvaluationIntervalFieldNumber = 4 -> int
+const Chalk.Client.Rpc.PlanningOptions.ConvergencePatienceFieldNumber = 2 -> int
+const Chalk.Client.Rpc.PlanningOptions.ConvergenceRangeThresholdFieldNumber = 3 -> int
+const Chalk.Client.Rpc.PlanningOptions.ConvergenceSamplePeriodMsFieldNumber = 7 -> int
+const Chalk.Client.Rpc.PlanningOptions.PriorityFieldNumber = 8 -> int
+const Chalk.Client.Rpc.PlanningOptions.RequestIdFieldNumber = 5 -> int
+const Chalk.Client.Rpc.PlanningOptions.SessionMaxConcurrencyFieldNumber = 10 -> int
+const Chalk.Client.Rpc.PlanningOptions.SessionNameFieldNumber = 9 -> int
+const Chalk.Client.Rpc.PlanningOptions.StopAtFirstPlanFieldNumber = 6 -> int
+const Chalk.Client.Rpc.PlanningOptions.TimeBudgetMsFieldNumber = 1 -> int
+const Chalk.Client.Rpc.PlanningState.BestCostFieldNumber = 6 -> int
+const Chalk.Client.Rpc.PlanningState.ElapsedUsFieldNumber = 2 -> int
+const Chalk.Client.Rpc.PlanningState.EvaluationCountFieldNumber = 4 -> int
+const Chalk.Client.Rpc.PlanningState.EvaluationIntervalFieldNumber = 8 -> int
+const Chalk.Client.Rpc.PlanningState.FirstCostFieldNumber = 5 -> int
+const Chalk.Client.Rpc.PlanningState.LooksFieldNumber = 7 -> int
+const Chalk.Client.Rpc.PlanningState.OptimiserElapsedUsFieldNumber = 3 -> int
+const Chalk.Client.Rpc.PlanningState.QueuedElapsedUsFieldNumber = 10 -> int
+const Chalk.Client.Rpc.PlanningState.RunningElapsedUsFieldNumber = 9 -> int
+const Chalk.Client.Rpc.PlanningState.SessionFieldNumber = 12 -> int
+const Chalk.Client.Rpc.PlanningState.SlicesFieldNumber = 11 -> int
+const Chalk.Client.Rpc.PlanningState.TerminationReasonFieldNumber = 1 -> int
+const Chalk.Client.Rpc.PlanningStats.ConvertMicrosFieldNumber = 5 -> int
+const Chalk.Client.Rpc.PlanningStats.OptimizeMicrosFieldNumber = 4 -> int
+const Chalk.Client.Rpc.PlanningStats.ParseMicrosFieldNumber = 2 -> int
+const Chalk.Client.Rpc.PlanningStats.RulesFiredFieldNumber = 6 -> int
+const Chalk.Client.Rpc.PlanningStats.StagesFieldNumber = 7 -> int
+const Chalk.Client.Rpc.PlanningStats.TotalMicrosFieldNumber = 1 -> int
+const Chalk.Client.Rpc.PlanningStats.ValidateMicrosFieldNumber = 3 -> int
+const Chalk.Client.Rpc.RedactSqlRequest.ConformanceFieldNumber = 2 -> int
+const Chalk.Client.Rpc.RedactSqlRequest.RedactionFieldNumber = 3 -> int
+const Chalk.Client.Rpc.RedactSqlRequest.SqlFieldNumber = 1 -> int
+const Chalk.Client.Rpc.RedactSqlResponse.ParsedFieldNumber = 3 -> int
+const Chalk.Client.Rpc.RedactSqlResponse.RedactedSqlFieldNumber = 1 -> int
+const Chalk.Client.Rpc.RedactSqlResponse.StructuralHashFieldNumber = 2 -> int
+const Chalk.Client.Rpc.RedactionOptions.KeepStructuralFieldNumber = 3 -> int
+const Chalk.Client.Rpc.RedactionOptions.SaltFieldNumber = 1 -> int
+const Chalk.Client.Rpc.RedactionOptions.ScopeFieldNumber = 2 -> int
+const Chalk.Client.Rpc.RegisterCatalogRequest.BaseShapeVersionFieldNumber = 4 -> int
+const Chalk.Client.Rpc.RegisterCatalogRequest.CatalogFieldNumber = 1 -> int
+const Chalk.Client.Rpc.RegisterCatalogRequest.InstanceIdFieldNumber = 2 -> int
+const Chalk.Client.Rpc.RegisterCatalogRequest.RemovedTablesFieldNumber = 5 -> int
+const Chalk.Client.Rpc.RegisterCatalogRequest.ShapeVersionFieldNumber = 3 -> int
+const Chalk.Client.Rpc.RegisterStatisticsRequest.InstanceIdFieldNumber = 1 -> int
+const Chalk.Client.Rpc.RegisterStatisticsRequest.StatisticsVersionFieldNumber = 2 -> int
+const Chalk.Client.Rpc.RegisterStatisticsRequest.TablesFieldNumber = 3 -> int
+const Chalk.Client.Rpc.RequestContext.FoldMaxRowsFieldNumber = 3 -> int
+const Chalk.Client.Rpc.RequestContext.RelationsFieldNumber = 2 -> int
+const Chalk.Client.Rpc.RequestContext.ScalarsFieldNumber = 1 -> int
+const Chalk.Client.Rpc.RequestContext.ShapeOnlyFieldNumber = 4 -> int
+const Chalk.Client.Rpc.StopPlanningRequest.RequestIdFieldNumber = 1 -> int
+const Chalk.Client.Rpc.StopPlanningResponse.EvaluationCountFieldNumber = 2 -> int
+const Chalk.Client.Rpc.StopPlanningResponse.FoundFieldNumber = 1 -> int
+const Chalk.Client.Rpc.TableStatistics.ColumnsFieldNumber = 5 -> int
+const Chalk.Client.Rpc.TableStatistics.RowCountFieldNumber = 3 -> int
+const Chalk.Client.Rpc.TableStatistics.RowCountKindFieldNumber = 4 -> int
+const Chalk.Client.Rpc.TableStatistics.SchemaFieldNumber = 1 -> int
+const Chalk.Client.Rpc.TableStatistics.TableFieldNumber = 2 -> int
+override Chalk.Client.ParameterDescriptor.ToString() -> string!
+override Chalk.Client.PlanningCost.ToString() -> string!
+override Chalk.Client.PlanningState.ToString() -> string!
+override Chalk.Client.Rpc.ColumnStatisticsEntry.GetHashCode() -> int
+override Chalk.Client.Rpc.ContextRelationValue.GetHashCode() -> int
+override Chalk.Client.Rpc.ContextScalar.GetHashCode() -> int
+override Chalk.Client.Rpc.DialectInfo.GetHashCode() -> int
+override Chalk.Client.Rpc.GetInfoRequest.GetHashCode() -> int
+override Chalk.Client.Rpc.GetInfoResponse.GetHashCode() -> int
+override Chalk.Client.Rpc.PlanError.GetHashCode() -> int
+override Chalk.Client.Rpc.PlanRequest.GetHashCode() -> int
+override Chalk.Client.Rpc.PlanResponse.GetHashCode() -> int
+override Chalk.Client.Rpc.PlannerOptions.GetHashCode() -> int
+override Chalk.Client.Rpc.PlanningCost.GetHashCode() -> int
+override Chalk.Client.Rpc.PlanningOptions.GetHashCode() -> int
+override Chalk.Client.Rpc.PlanningState.GetHashCode() -> int
+override Chalk.Client.Rpc.PlanningStats.GetHashCode() -> int
+override Chalk.Client.Rpc.RedactSqlRequest.GetHashCode() -> int
+override Chalk.Client.Rpc.RedactSqlResponse.GetHashCode() -> int
+override Chalk.Client.Rpc.RedactionOptions.GetHashCode() -> int
+override Chalk.Client.Rpc.RegisterCatalogRequest.GetHashCode() -> int
+override Chalk.Client.Rpc.RegisterCatalogResponse.GetHashCode() -> int
+override Chalk.Client.Rpc.RegisterStatisticsRequest.GetHashCode() -> int
+override Chalk.Client.Rpc.RegisterStatisticsResponse.GetHashCode() -> int
+override Chalk.Client.Rpc.RequestContext.GetHashCode() -> int
+override Chalk.Client.Rpc.StopPlanningRequest.GetHashCode() -> int
+override Chalk.Client.Rpc.StopPlanningResponse.GetHashCode() -> int
+override Chalk.Client.Rpc.TableStatistics.GetHashCode() -> int
+override Chalk.Client.SqlPosition.GetHashCode() -> int
+override Chalk.Client.SqlPosition.ToString() -> string!
+static Chalk.Arrow.RecordBatchExtensions.GetUtf8(this Apache.Arrow.IArrowArray! array, int index) -> System.ReadOnlySpan<byte>
+static Chalk.Arrow.RecordBatchExtensions.GetUtf8String(this Apache.Arrow.IArrowArray! array, int index) -> string?
+static Chalk.Arrow.RecordBatchExtensions.IsNullAt(this Apache.Arrow.IArrowArray! array, int index) -> bool
+static Chalk.Arrow.RecordBatchExtensions.ToRows(this Apache.Arrow.RecordBatch! batch) -> System.Collections.Generic.List<object?[]!>!
+static Chalk.Arrow.RecordBatchExtensions.ToRows(this System.Collections.Generic.IEnumerable<Apache.Arrow.RecordBatch!>! batches) -> System.Collections.Generic.List<object?[]!>!
+static Chalk.Arrow.RecordBatchExtensions.ValueAt(Apache.Arrow.IArrowArray! array, int index) -> object?
+static Chalk.Client.ChalkEngine.CreateAsync(Chalk.Client.ChalkEngineOptions! options, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.ChalkEngine!>
+static Chalk.Client.ContextRelation.Of(System.Collections.Generic.IReadOnlyList<string!>! columns, params object?[]![]! rows) -> Chalk.Client.ContextRelation!
+static Chalk.Client.ContextRelation.Of(string! column, params object?[]! values) -> Chalk.Client.ContextRelation!
+static Chalk.Client.ContextRelation.Shape(System.Collections.Generic.IReadOnlyList<string!>! columns, System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>! columnTypes) -> Chalk.Client.ContextRelation!
+static Chalk.Client.PlannerProcess.StartAsync(Chalk.Client.PlannerProcessOptions! options, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PlannerProcess!>
+static Chalk.Client.PlanningCost.DivideBy(Chalk.Client.PlanningCost! cost, Chalk.Client.PlanningCost! other) -> double
+static Chalk.Client.RecordedPlanner.KeyFor(string! sql, Chalk.Client.PushdownLevel pushdown, Chalk.Client.SqlConformance conformance, System.Collections.Generic.IReadOnlyList<Chalk.Client.SqlLibrary>! libraries, string! contextId, System.Collections.Generic.IReadOnlyList<Chalk.Client.DisabledCapability>? disabledCapabilities = null, Chalk.Client.PlanningOptions? planning = null) -> string!
+static Chalk.Client.RequestContext.Empty.get -> Chalk.Client.RequestContext!
+static Chalk.Client.SqlPosition.operator !=(Chalk.Client.SqlPosition left, Chalk.Client.SqlPosition right) -> bool
+static Chalk.Client.SqlPosition.operator ==(Chalk.Client.SqlPosition left, Chalk.Client.SqlPosition right) -> bool
+static readonly Chalk.Client.PlanningOptions.None -> Chalk.Client.PlanningOptions!
+~Chalk.Client.Rpc.ColumnStatisticsEntry.Clone() -> Chalk.Client.Rpc.ColumnStatisticsEntry
+~Chalk.Client.Rpc.ColumnStatisticsEntry.Column.get -> string
+~Chalk.Client.Rpc.ColumnStatisticsEntry.Column.set -> void
+~Chalk.Client.Rpc.ColumnStatisticsEntry.ColumnStatisticsEntry(Chalk.Client.Rpc.ColumnStatisticsEntry other) -> void
+~Chalk.Client.Rpc.ColumnStatisticsEntry.Equals(Chalk.Client.Rpc.ColumnStatisticsEntry other) -> bool
+~Chalk.Client.Rpc.ColumnStatisticsEntry.MergeFrom(Chalk.Client.Rpc.ColumnStatisticsEntry other) -> void
+~Chalk.Client.Rpc.ColumnStatisticsEntry.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.ColumnStatisticsEntry.Statistics.get -> Chalk.Ir.ColumnStatistics
+~Chalk.Client.Rpc.ColumnStatisticsEntry.Statistics.set -> void
+~Chalk.Client.Rpc.ColumnStatisticsEntry.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.ContextRelationValue.Clone() -> Chalk.Client.Rpc.ContextRelationValue
+~Chalk.Client.Rpc.ContextRelationValue.ContextRelationValue(Chalk.Client.Rpc.ContextRelationValue other) -> void
+~Chalk.Client.Rpc.ContextRelationValue.Equals(Chalk.Client.Rpc.ContextRelationValue other) -> bool
+~Chalk.Client.Rpc.ContextRelationValue.MergeFrom(Chalk.Client.Rpc.ContextRelationValue other) -> void
+~Chalk.Client.Rpc.ContextRelationValue.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.ContextRelationValue.Name.get -> string
+~Chalk.Client.Rpc.ContextRelationValue.Name.set -> void
+~Chalk.Client.Rpc.ContextRelationValue.RowType.get -> Chalk.Ir.RowType
+~Chalk.Client.Rpc.ContextRelationValue.RowType.set -> void
+~Chalk.Client.Rpc.ContextRelationValue.Rows.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Ir.VirtualRow>
+~Chalk.Client.Rpc.ContextRelationValue.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.ContextScalar.Clone() -> Chalk.Client.Rpc.ContextScalar
+~Chalk.Client.Rpc.ContextScalar.ContextScalar(Chalk.Client.Rpc.ContextScalar other) -> void
+~Chalk.Client.Rpc.ContextScalar.Equals(Chalk.Client.Rpc.ContextScalar other) -> bool
+~Chalk.Client.Rpc.ContextScalar.MergeFrom(Chalk.Client.Rpc.ContextScalar other) -> void
+~Chalk.Client.Rpc.ContextScalar.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.ContextScalar.Name.get -> string
+~Chalk.Client.Rpc.ContextScalar.Name.set -> void
+~Chalk.Client.Rpc.ContextScalar.Value.get -> Chalk.Ir.Expr
+~Chalk.Client.Rpc.ContextScalar.Value.set -> void
+~Chalk.Client.Rpc.ContextScalar.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.DialectInfo.Aliases.get -> Google.Protobuf.Collections.RepeatedField<string>
+~Chalk.Client.Rpc.DialectInfo.Clone() -> Chalk.Client.Rpc.DialectInfo
+~Chalk.Client.Rpc.DialectInfo.DatabaseProduct.get -> string
+~Chalk.Client.Rpc.DialectInfo.DatabaseProduct.set -> void
+~Chalk.Client.Rpc.DialectInfo.DialectInfo(Chalk.Client.Rpc.DialectInfo other) -> void
+~Chalk.Client.Rpc.DialectInfo.Equals(Chalk.Client.Rpc.DialectInfo other) -> bool
+~Chalk.Client.Rpc.DialectInfo.MergeFrom(Chalk.Client.Rpc.DialectInfo other) -> void
+~Chalk.Client.Rpc.DialectInfo.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.DialectInfo.Name.get -> string
+~Chalk.Client.Rpc.DialectInfo.Name.set -> void
+~Chalk.Client.Rpc.DialectInfo.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.GetInfoRequest.Clone() -> Chalk.Client.Rpc.GetInfoRequest
+~Chalk.Client.Rpc.GetInfoRequest.Equals(Chalk.Client.Rpc.GetInfoRequest other) -> bool
+~Chalk.Client.Rpc.GetInfoRequest.GetInfoRequest(Chalk.Client.Rpc.GetInfoRequest other) -> void
+~Chalk.Client.Rpc.GetInfoRequest.MergeFrom(Chalk.Client.Rpc.GetInfoRequest other) -> void
+~Chalk.Client.Rpc.GetInfoRequest.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.GetInfoRequest.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.GetInfoResponse.CalciteVersion.get -> string
+~Chalk.Client.Rpc.GetInfoResponse.CalciteVersion.set -> void
+~Chalk.Client.Rpc.GetInfoResponse.Clone() -> Chalk.Client.Rpc.GetInfoResponse
+~Chalk.Client.Rpc.GetInfoResponse.Conformances.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Ir.SqlConformance>
+~Chalk.Client.Rpc.GetInfoResponse.Dialects.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Client.Rpc.DialectInfo>
+~Chalk.Client.Rpc.GetInfoResponse.Equals(Chalk.Client.Rpc.GetInfoResponse other) -> bool
+~Chalk.Client.Rpc.GetInfoResponse.GetInfoResponse(Chalk.Client.Rpc.GetInfoResponse other) -> void
+~Chalk.Client.Rpc.GetInfoResponse.Libraries.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Ir.SqlLibrary>
+~Chalk.Client.Rpc.GetInfoResponse.MergeFrom(Chalk.Client.Rpc.GetInfoResponse other) -> void
+~Chalk.Client.Rpc.GetInfoResponse.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.GetInfoResponse.PlannerVersion.get -> string
+~Chalk.Client.Rpc.GetInfoResponse.PlannerVersion.set -> void
+~Chalk.Client.Rpc.GetInfoResponse.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.PlanError.Clone() -> Chalk.Client.Rpc.PlanError
+~Chalk.Client.Rpc.PlanError.Equals(Chalk.Client.Rpc.PlanError other) -> bool
+~Chalk.Client.Rpc.PlanError.MergeFrom(Chalk.Client.Rpc.PlanError other) -> void
+~Chalk.Client.Rpc.PlanError.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.PlanError.Message.get -> string
+~Chalk.Client.Rpc.PlanError.Message.set -> void
+~Chalk.Client.Rpc.PlanError.PlanError(Chalk.Client.Rpc.PlanError other) -> void
+~Chalk.Client.Rpc.PlanError.PlanningState.get -> Chalk.Client.Rpc.PlanningState
+~Chalk.Client.Rpc.PlanError.PlanningState.set -> void
+~Chalk.Client.Rpc.PlanError.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.PlanRequest.Clone() -> Chalk.Client.Rpc.PlanRequest
+~Chalk.Client.Rpc.PlanRequest.Context.get -> Chalk.Client.Rpc.RequestContext
+~Chalk.Client.Rpc.PlanRequest.Context.set -> void
+~Chalk.Client.Rpc.PlanRequest.ContextId.get -> string
+~Chalk.Client.Rpc.PlanRequest.ContextId.set -> void
+~Chalk.Client.Rpc.PlanRequest.Equals(Chalk.Client.Rpc.PlanRequest other) -> bool
+~Chalk.Client.Rpc.PlanRequest.Extensions.get -> Google.Protobuf.Collections.RepeatedField<Google.Protobuf.WellKnownTypes.Any>
+~Chalk.Client.Rpc.PlanRequest.InstanceId.get -> string
+~Chalk.Client.Rpc.PlanRequest.InstanceId.set -> void
+~Chalk.Client.Rpc.PlanRequest.MergeFrom(Chalk.Client.Rpc.PlanRequest other) -> void
+~Chalk.Client.Rpc.PlanRequest.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.PlanRequest.Options.get -> Chalk.Client.Rpc.PlannerOptions
+~Chalk.Client.Rpc.PlanRequest.Options.set -> void
+~Chalk.Client.Rpc.PlanRequest.ParameterTypes.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Ir.Type>
+~Chalk.Client.Rpc.PlanRequest.PlanRequest(Chalk.Client.Rpc.PlanRequest other) -> void
+~Chalk.Client.Rpc.PlanRequest.PlanningOptions.get -> Chalk.Client.Rpc.PlanningOptions
+~Chalk.Client.Rpc.PlanRequest.PlanningOptions.set -> void
+~Chalk.Client.Rpc.PlanRequest.Redaction.get -> Chalk.Client.Rpc.RedactionOptions
+~Chalk.Client.Rpc.PlanRequest.Redaction.set -> void
+~Chalk.Client.Rpc.PlanRequest.ShapeVersion.get -> string
+~Chalk.Client.Rpc.PlanRequest.ShapeVersion.set -> void
+~Chalk.Client.Rpc.PlanRequest.Sql.get -> string
+~Chalk.Client.Rpc.PlanRequest.Sql.set -> void
+~Chalk.Client.Rpc.PlanRequest.StatisticsVersion.get -> string
+~Chalk.Client.Rpc.PlanRequest.StatisticsVersion.set -> void
+~Chalk.Client.Rpc.PlanRequest.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.PlanResponse.Clone() -> Chalk.Client.Rpc.PlanResponse
+~Chalk.Client.Rpc.PlanResponse.Equals(Chalk.Client.Rpc.PlanResponse other) -> bool
+~Chalk.Client.Rpc.PlanResponse.Extensions.get -> Google.Protobuf.Collections.RepeatedField<Google.Protobuf.WellKnownTypes.Any>
+~Chalk.Client.Rpc.PlanResponse.MergeFrom(Chalk.Client.Rpc.PlanResponse other) -> void
+~Chalk.Client.Rpc.PlanResponse.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.PlanResponse.Plan.get -> Chalk.Ir.Plan
+~Chalk.Client.Rpc.PlanResponse.Plan.set -> void
+~Chalk.Client.Rpc.PlanResponse.PlanResponse(Chalk.Client.Rpc.PlanResponse other) -> void
+~Chalk.Client.Rpc.PlanResponse.PlanText.get -> string
+~Chalk.Client.Rpc.PlanResponse.PlanText.set -> void
+~Chalk.Client.Rpc.PlanResponse.PlanningState.get -> Chalk.Client.Rpc.PlanningState
+~Chalk.Client.Rpc.PlanResponse.PlanningState.set -> void
+~Chalk.Client.Rpc.PlanResponse.RedactedSql.get -> string
+~Chalk.Client.Rpc.PlanResponse.RedactedSql.set -> void
+~Chalk.Client.Rpc.PlanResponse.Stats.get -> Chalk.Client.Rpc.PlanningStats
+~Chalk.Client.Rpc.PlanResponse.Stats.set -> void
+~Chalk.Client.Rpc.PlanResponse.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.PlannerOptions.Clone() -> Chalk.Client.Rpc.PlannerOptions
+~Chalk.Client.Rpc.PlannerOptions.DisabledCapabilities.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Client.Rpc.DisabledCapability>
+~Chalk.Client.Rpc.PlannerOptions.Equals(Chalk.Client.Rpc.PlannerOptions other) -> bool
+~Chalk.Client.Rpc.PlannerOptions.JoinPolicy.get -> Chalk.Ir.CrossSourceJoinPolicy
+~Chalk.Client.Rpc.PlannerOptions.JoinPolicy.set -> void
+~Chalk.Client.Rpc.PlannerOptions.Libraries.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Ir.SqlLibrary>
+~Chalk.Client.Rpc.PlannerOptions.MergeFrom(Chalk.Client.Rpc.PlannerOptions other) -> void
+~Chalk.Client.Rpc.PlannerOptions.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.PlannerOptions.PlannerOptions(Chalk.Client.Rpc.PlannerOptions other) -> void
+~Chalk.Client.Rpc.PlannerOptions.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.PlannerService.PlannerServiceClient.PlannerServiceClient(Grpc.Core.CallInvoker callInvoker) -> void
+~Chalk.Client.Rpc.PlannerService.PlannerServiceClient.PlannerServiceClient(Grpc.Core.ChannelBase channel) -> void
+~Chalk.Client.Rpc.PlannerService.PlannerServiceClient.PlannerServiceClient(Grpc.Core.ClientBase.ClientBaseConfiguration configuration) -> void
+~Chalk.Client.Rpc.PlanningCost.Clone() -> Chalk.Client.Rpc.PlanningCost
+~Chalk.Client.Rpc.PlanningCost.Equals(Chalk.Client.Rpc.PlanningCost other) -> bool
+~Chalk.Client.Rpc.PlanningCost.MergeFrom(Chalk.Client.Rpc.PlanningCost other) -> void
+~Chalk.Client.Rpc.PlanningCost.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.PlanningCost.PlanningCost(Chalk.Client.Rpc.PlanningCost other) -> void
+~Chalk.Client.Rpc.PlanningCost.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.PlanningOptions.Clone() -> Chalk.Client.Rpc.PlanningOptions
+~Chalk.Client.Rpc.PlanningOptions.Equals(Chalk.Client.Rpc.PlanningOptions other) -> bool
+~Chalk.Client.Rpc.PlanningOptions.MergeFrom(Chalk.Client.Rpc.PlanningOptions other) -> void
+~Chalk.Client.Rpc.PlanningOptions.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.PlanningOptions.PlanningOptions(Chalk.Client.Rpc.PlanningOptions other) -> void
+~Chalk.Client.Rpc.PlanningOptions.RequestId.get -> string
+~Chalk.Client.Rpc.PlanningOptions.RequestId.set -> void
+~Chalk.Client.Rpc.PlanningOptions.SessionName.get -> string
+~Chalk.Client.Rpc.PlanningOptions.SessionName.set -> void
+~Chalk.Client.Rpc.PlanningOptions.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.PlanningState.BestCost.get -> Chalk.Client.Rpc.PlanningCost
+~Chalk.Client.Rpc.PlanningState.BestCost.set -> void
+~Chalk.Client.Rpc.PlanningState.Clone() -> Chalk.Client.Rpc.PlanningState
+~Chalk.Client.Rpc.PlanningState.Equals(Chalk.Client.Rpc.PlanningState other) -> bool
+~Chalk.Client.Rpc.PlanningState.FirstCost.get -> Chalk.Client.Rpc.PlanningCost
+~Chalk.Client.Rpc.PlanningState.FirstCost.set -> void
+~Chalk.Client.Rpc.PlanningState.MergeFrom(Chalk.Client.Rpc.PlanningState other) -> void
+~Chalk.Client.Rpc.PlanningState.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.PlanningState.PlanningState(Chalk.Client.Rpc.PlanningState other) -> void
+~Chalk.Client.Rpc.PlanningState.Session.get -> string
+~Chalk.Client.Rpc.PlanningState.Session.set -> void
+~Chalk.Client.Rpc.PlanningState.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.PlanningStats.Clone() -> Chalk.Client.Rpc.PlanningStats
+~Chalk.Client.Rpc.PlanningStats.Equals(Chalk.Client.Rpc.PlanningStats other) -> bool
+~Chalk.Client.Rpc.PlanningStats.MergeFrom(Chalk.Client.Rpc.PlanningStats other) -> void
+~Chalk.Client.Rpc.PlanningStats.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.PlanningStats.PlanningStats(Chalk.Client.Rpc.PlanningStats other) -> void
+~Chalk.Client.Rpc.PlanningStats.RulesFired.get -> Google.Protobuf.Collections.RepeatedField<string>
+~Chalk.Client.Rpc.PlanningStats.Stages.get -> Google.Protobuf.Collections.RepeatedField<string>
+~Chalk.Client.Rpc.PlanningStats.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.RedactSqlRequest.Clone() -> Chalk.Client.Rpc.RedactSqlRequest
+~Chalk.Client.Rpc.RedactSqlRequest.Equals(Chalk.Client.Rpc.RedactSqlRequest other) -> bool
+~Chalk.Client.Rpc.RedactSqlRequest.MergeFrom(Chalk.Client.Rpc.RedactSqlRequest other) -> void
+~Chalk.Client.Rpc.RedactSqlRequest.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.RedactSqlRequest.RedactSqlRequest(Chalk.Client.Rpc.RedactSqlRequest other) -> void
+~Chalk.Client.Rpc.RedactSqlRequest.Redaction.get -> Chalk.Client.Rpc.RedactionOptions
+~Chalk.Client.Rpc.RedactSqlRequest.Redaction.set -> void
+~Chalk.Client.Rpc.RedactSqlRequest.Sql.get -> string
+~Chalk.Client.Rpc.RedactSqlRequest.Sql.set -> void
+~Chalk.Client.Rpc.RedactSqlRequest.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.RedactSqlResponse.Clone() -> Chalk.Client.Rpc.RedactSqlResponse
+~Chalk.Client.Rpc.RedactSqlResponse.Equals(Chalk.Client.Rpc.RedactSqlResponse other) -> bool
+~Chalk.Client.Rpc.RedactSqlResponse.MergeFrom(Chalk.Client.Rpc.RedactSqlResponse other) -> void
+~Chalk.Client.Rpc.RedactSqlResponse.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.RedactSqlResponse.RedactSqlResponse(Chalk.Client.Rpc.RedactSqlResponse other) -> void
+~Chalk.Client.Rpc.RedactSqlResponse.RedactedSql.get -> string
+~Chalk.Client.Rpc.RedactSqlResponse.RedactedSql.set -> void
+~Chalk.Client.Rpc.RedactSqlResponse.StructuralHash.get -> Google.Protobuf.ByteString
+~Chalk.Client.Rpc.RedactSqlResponse.StructuralHash.set -> void
+~Chalk.Client.Rpc.RedactSqlResponse.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.RedactionOptions.Clone() -> Chalk.Client.Rpc.RedactionOptions
+~Chalk.Client.Rpc.RedactionOptions.Equals(Chalk.Client.Rpc.RedactionOptions other) -> bool
+~Chalk.Client.Rpc.RedactionOptions.MergeFrom(Chalk.Client.Rpc.RedactionOptions other) -> void
+~Chalk.Client.Rpc.RedactionOptions.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.RedactionOptions.RedactionOptions(Chalk.Client.Rpc.RedactionOptions other) -> void
+~Chalk.Client.Rpc.RedactionOptions.Salt.get -> Google.Protobuf.ByteString
+~Chalk.Client.Rpc.RedactionOptions.Salt.set -> void
+~Chalk.Client.Rpc.RedactionOptions.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.RegisterCatalogRequest.BaseShapeVersion.get -> string
+~Chalk.Client.Rpc.RegisterCatalogRequest.BaseShapeVersion.set -> void
+~Chalk.Client.Rpc.RegisterCatalogRequest.Catalog.get -> Chalk.Ir.CatalogContext
+~Chalk.Client.Rpc.RegisterCatalogRequest.Catalog.set -> void
+~Chalk.Client.Rpc.RegisterCatalogRequest.Clone() -> Chalk.Client.Rpc.RegisterCatalogRequest
+~Chalk.Client.Rpc.RegisterCatalogRequest.Equals(Chalk.Client.Rpc.RegisterCatalogRequest other) -> bool
+~Chalk.Client.Rpc.RegisterCatalogRequest.InstanceId.get -> string
+~Chalk.Client.Rpc.RegisterCatalogRequest.InstanceId.set -> void
+~Chalk.Client.Rpc.RegisterCatalogRequest.MergeFrom(Chalk.Client.Rpc.RegisterCatalogRequest other) -> void
+~Chalk.Client.Rpc.RegisterCatalogRequest.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.RegisterCatalogRequest.RegisterCatalogRequest(Chalk.Client.Rpc.RegisterCatalogRequest other) -> void
+~Chalk.Client.Rpc.RegisterCatalogRequest.RemovedTables.get -> Google.Protobuf.Collections.RepeatedField<string>
+~Chalk.Client.Rpc.RegisterCatalogRequest.ShapeVersion.get -> string
+~Chalk.Client.Rpc.RegisterCatalogRequest.ShapeVersion.set -> void
+~Chalk.Client.Rpc.RegisterCatalogRequest.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.RegisterCatalogResponse.Clone() -> Chalk.Client.Rpc.RegisterCatalogResponse
+~Chalk.Client.Rpc.RegisterCatalogResponse.Equals(Chalk.Client.Rpc.RegisterCatalogResponse other) -> bool
+~Chalk.Client.Rpc.RegisterCatalogResponse.MergeFrom(Chalk.Client.Rpc.RegisterCatalogResponse other) -> void
+~Chalk.Client.Rpc.RegisterCatalogResponse.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.RegisterCatalogResponse.RegisterCatalogResponse(Chalk.Client.Rpc.RegisterCatalogResponse other) -> void
+~Chalk.Client.Rpc.RegisterCatalogResponse.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.RegisterStatisticsRequest.Clone() -> Chalk.Client.Rpc.RegisterStatisticsRequest
+~Chalk.Client.Rpc.RegisterStatisticsRequest.Equals(Chalk.Client.Rpc.RegisterStatisticsRequest other) -> bool
+~Chalk.Client.Rpc.RegisterStatisticsRequest.InstanceId.get -> string
+~Chalk.Client.Rpc.RegisterStatisticsRequest.InstanceId.set -> void
+~Chalk.Client.Rpc.RegisterStatisticsRequest.MergeFrom(Chalk.Client.Rpc.RegisterStatisticsRequest other) -> void
+~Chalk.Client.Rpc.RegisterStatisticsRequest.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.RegisterStatisticsRequest.RegisterStatisticsRequest(Chalk.Client.Rpc.RegisterStatisticsRequest other) -> void
+~Chalk.Client.Rpc.RegisterStatisticsRequest.StatisticsVersion.get -> string
+~Chalk.Client.Rpc.RegisterStatisticsRequest.StatisticsVersion.set -> void
+~Chalk.Client.Rpc.RegisterStatisticsRequest.Tables.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Client.Rpc.TableStatistics>
+~Chalk.Client.Rpc.RegisterStatisticsRequest.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.RegisterStatisticsResponse.Clone() -> Chalk.Client.Rpc.RegisterStatisticsResponse
+~Chalk.Client.Rpc.RegisterStatisticsResponse.Equals(Chalk.Client.Rpc.RegisterStatisticsResponse other) -> bool
+~Chalk.Client.Rpc.RegisterStatisticsResponse.MergeFrom(Chalk.Client.Rpc.RegisterStatisticsResponse other) -> void
+~Chalk.Client.Rpc.RegisterStatisticsResponse.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.RegisterStatisticsResponse.RegisterStatisticsResponse(Chalk.Client.Rpc.RegisterStatisticsResponse other) -> void
+~Chalk.Client.Rpc.RegisterStatisticsResponse.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.RequestContext.Clone() -> Chalk.Client.Rpc.RequestContext
+~Chalk.Client.Rpc.RequestContext.Equals(Chalk.Client.Rpc.RequestContext other) -> bool
+~Chalk.Client.Rpc.RequestContext.MergeFrom(Chalk.Client.Rpc.RequestContext other) -> void
+~Chalk.Client.Rpc.RequestContext.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.RequestContext.Relations.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Client.Rpc.ContextRelationValue>
+~Chalk.Client.Rpc.RequestContext.RequestContext(Chalk.Client.Rpc.RequestContext other) -> void
+~Chalk.Client.Rpc.RequestContext.Scalars.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Client.Rpc.ContextScalar>
+~Chalk.Client.Rpc.RequestContext.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.StopPlanningRequest.Clone() -> Chalk.Client.Rpc.StopPlanningRequest
+~Chalk.Client.Rpc.StopPlanningRequest.Equals(Chalk.Client.Rpc.StopPlanningRequest other) -> bool
+~Chalk.Client.Rpc.StopPlanningRequest.MergeFrom(Chalk.Client.Rpc.StopPlanningRequest other) -> void
+~Chalk.Client.Rpc.StopPlanningRequest.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.StopPlanningRequest.RequestId.get -> string
+~Chalk.Client.Rpc.StopPlanningRequest.RequestId.set -> void
+~Chalk.Client.Rpc.StopPlanningRequest.StopPlanningRequest(Chalk.Client.Rpc.StopPlanningRequest other) -> void
+~Chalk.Client.Rpc.StopPlanningRequest.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.StopPlanningResponse.Clone() -> Chalk.Client.Rpc.StopPlanningResponse
+~Chalk.Client.Rpc.StopPlanningResponse.Equals(Chalk.Client.Rpc.StopPlanningResponse other) -> bool
+~Chalk.Client.Rpc.StopPlanningResponse.MergeFrom(Chalk.Client.Rpc.StopPlanningResponse other) -> void
+~Chalk.Client.Rpc.StopPlanningResponse.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.StopPlanningResponse.StopPlanningResponse(Chalk.Client.Rpc.StopPlanningResponse other) -> void
+~Chalk.Client.Rpc.StopPlanningResponse.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.TableStatistics.Clone() -> Chalk.Client.Rpc.TableStatistics
+~Chalk.Client.Rpc.TableStatistics.Columns.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Client.Rpc.ColumnStatisticsEntry>
+~Chalk.Client.Rpc.TableStatistics.Equals(Chalk.Client.Rpc.TableStatistics other) -> bool
+~Chalk.Client.Rpc.TableStatistics.MergeFrom(Chalk.Client.Rpc.TableStatistics other) -> void
+~Chalk.Client.Rpc.TableStatistics.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.TableStatistics.Schema.get -> string
+~Chalk.Client.Rpc.TableStatistics.Schema.set -> void
+~Chalk.Client.Rpc.TableStatistics.Table.get -> string
+~Chalk.Client.Rpc.TableStatistics.Table.set -> void
+~Chalk.Client.Rpc.TableStatistics.TableStatistics(Chalk.Client.Rpc.TableStatistics other) -> void
+~Chalk.Client.Rpc.TableStatistics.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~override Chalk.Client.Rpc.ColumnStatisticsEntry.Equals(object other) -> bool
+~override Chalk.Client.Rpc.ColumnStatisticsEntry.ToString() -> string
+~override Chalk.Client.Rpc.ContextRelationValue.Equals(object other) -> bool
+~override Chalk.Client.Rpc.ContextRelationValue.ToString() -> string
+~override Chalk.Client.Rpc.ContextScalar.Equals(object other) -> bool
+~override Chalk.Client.Rpc.ContextScalar.ToString() -> string
+~override Chalk.Client.Rpc.DialectInfo.Equals(object other) -> bool
+~override Chalk.Client.Rpc.DialectInfo.ToString() -> string
+~override Chalk.Client.Rpc.GetInfoRequest.Equals(object other) -> bool
+~override Chalk.Client.Rpc.GetInfoRequest.ToString() -> string
+~override Chalk.Client.Rpc.GetInfoResponse.Equals(object other) -> bool
+~override Chalk.Client.Rpc.GetInfoResponse.ToString() -> string
+~override Chalk.Client.Rpc.PlanError.Equals(object other) -> bool
+~override Chalk.Client.Rpc.PlanError.ToString() -> string
+~override Chalk.Client.Rpc.PlanRequest.Equals(object other) -> bool
+~override Chalk.Client.Rpc.PlanRequest.ToString() -> string
+~override Chalk.Client.Rpc.PlanResponse.Equals(object other) -> bool
+~override Chalk.Client.Rpc.PlanResponse.ToString() -> string
+~override Chalk.Client.Rpc.PlannerOptions.Equals(object other) -> bool
+~override Chalk.Client.Rpc.PlannerOptions.ToString() -> string
+~override Chalk.Client.Rpc.PlannerService.PlannerServiceClient.NewInstance(Grpc.Core.ClientBase.ClientBaseConfiguration configuration) -> Chalk.Client.Rpc.PlannerService.PlannerServiceClient
+~override Chalk.Client.Rpc.PlanningCost.Equals(object other) -> bool
+~override Chalk.Client.Rpc.PlanningCost.ToString() -> string
+~override Chalk.Client.Rpc.PlanningOptions.Equals(object other) -> bool
+~override Chalk.Client.Rpc.PlanningOptions.ToString() -> string
+~override Chalk.Client.Rpc.PlanningState.Equals(object other) -> bool
+~override Chalk.Client.Rpc.PlanningState.ToString() -> string
+~override Chalk.Client.Rpc.PlanningStats.Equals(object other) -> bool
+~override Chalk.Client.Rpc.PlanningStats.ToString() -> string
+~override Chalk.Client.Rpc.RedactSqlRequest.Equals(object other) -> bool
+~override Chalk.Client.Rpc.RedactSqlRequest.ToString() -> string
+~override Chalk.Client.Rpc.RedactSqlResponse.Equals(object other) -> bool
+~override Chalk.Client.Rpc.RedactSqlResponse.ToString() -> string
+~override Chalk.Client.Rpc.RedactionOptions.Equals(object other) -> bool
+~override Chalk.Client.Rpc.RedactionOptions.ToString() -> string
+~override Chalk.Client.Rpc.RegisterCatalogRequest.Equals(object other) -> bool
+~override Chalk.Client.Rpc.RegisterCatalogRequest.ToString() -> string
+~override Chalk.Client.Rpc.RegisterCatalogResponse.Equals(object other) -> bool
+~override Chalk.Client.Rpc.RegisterCatalogResponse.ToString() -> string
+~override Chalk.Client.Rpc.RegisterStatisticsRequest.Equals(object other) -> bool
+~override Chalk.Client.Rpc.RegisterStatisticsRequest.ToString() -> string
+~override Chalk.Client.Rpc.RegisterStatisticsResponse.Equals(object other) -> bool
+~override Chalk.Client.Rpc.RegisterStatisticsResponse.ToString() -> string
+~override Chalk.Client.Rpc.RequestContext.Equals(object other) -> bool
+~override Chalk.Client.Rpc.RequestContext.ToString() -> string
+~override Chalk.Client.Rpc.StopPlanningRequest.Equals(object other) -> bool
+~override Chalk.Client.Rpc.StopPlanningRequest.ToString() -> string
+~override Chalk.Client.Rpc.StopPlanningResponse.Equals(object other) -> bool
+~override Chalk.Client.Rpc.StopPlanningResponse.ToString() -> string
+~override Chalk.Client.Rpc.TableStatistics.Equals(object other) -> bool
+~override Chalk.Client.Rpc.TableStatistics.ToString() -> string
+~override Chalk.Client.SqlPosition.Equals(object obj) -> bool
+~static Chalk.Client.Rpc.ColumnStatisticsEntry.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.ColumnStatisticsEntry.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.ColumnStatisticsEntry>
+~static Chalk.Client.Rpc.ContextRelationValue.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.ContextRelationValue.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.ContextRelationValue>
+~static Chalk.Client.Rpc.ContextScalar.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.ContextScalar.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.ContextScalar>
+~static Chalk.Client.Rpc.DialectInfo.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.DialectInfo.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.DialectInfo>
+~static Chalk.Client.Rpc.GetInfoRequest.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.GetInfoRequest.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.GetInfoRequest>
+~static Chalk.Client.Rpc.GetInfoResponse.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.GetInfoResponse.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.GetInfoResponse>
+~static Chalk.Client.Rpc.PlanError.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.PlanError.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.PlanError>
+~static Chalk.Client.Rpc.PlanRequest.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.PlanRequest.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.PlanRequest>
+~static Chalk.Client.Rpc.PlanResponse.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.PlanResponse.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.PlanResponse>
+~static Chalk.Client.Rpc.PlannerOptions.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.PlannerOptions.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.PlannerOptions>
+~static Chalk.Client.Rpc.PlannerReflection.Descriptor.get -> Google.Protobuf.Reflection.FileDescriptor
+~static Chalk.Client.Rpc.PlannerService.Descriptor.get -> Google.Protobuf.Reflection.ServiceDescriptor
+~static Chalk.Client.Rpc.PlanningCost.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.PlanningCost.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.PlanningCost>
+~static Chalk.Client.Rpc.PlanningOptions.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.PlanningOptions.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.PlanningOptions>
+~static Chalk.Client.Rpc.PlanningState.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.PlanningState.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.PlanningState>
+~static Chalk.Client.Rpc.PlanningStats.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.PlanningStats.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.PlanningStats>
+~static Chalk.Client.Rpc.RedactSqlRequest.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.RedactSqlRequest.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.RedactSqlRequest>
+~static Chalk.Client.Rpc.RedactSqlResponse.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.RedactSqlResponse.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.RedactSqlResponse>
+~static Chalk.Client.Rpc.RedactionOptions.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.RedactionOptions.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.RedactionOptions>
+~static Chalk.Client.Rpc.RegisterCatalogRequest.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.RegisterCatalogRequest.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.RegisterCatalogRequest>
+~static Chalk.Client.Rpc.RegisterCatalogResponse.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.RegisterCatalogResponse.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.RegisterCatalogResponse>
+~static Chalk.Client.Rpc.RegisterStatisticsRequest.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.RegisterStatisticsRequest.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.RegisterStatisticsRequest>
+~static Chalk.Client.Rpc.RegisterStatisticsResponse.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.RegisterStatisticsResponse.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.RegisterStatisticsResponse>
+~static Chalk.Client.Rpc.RequestContext.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.RequestContext.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.RequestContext>
+~static Chalk.Client.Rpc.StopPlanningRequest.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.StopPlanningRequest.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.StopPlanningRequest>
+~static Chalk.Client.Rpc.StopPlanningResponse.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.StopPlanningResponse.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.StopPlanningResponse>
+~static Chalk.Client.Rpc.TableStatistics.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.TableStatistics.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.TableStatistics>
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.GetInfo(Chalk.Client.Rpc.GetInfoRequest request, Grpc.Core.CallOptions options) -> Chalk.Client.Rpc.GetInfoResponse
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.GetInfo(Chalk.Client.Rpc.GetInfoRequest request, Grpc.Core.Metadata headers = null, System.DateTime? deadline = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Chalk.Client.Rpc.GetInfoResponse
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.GetInfoAsync(Chalk.Client.Rpc.GetInfoRequest request, Grpc.Core.CallOptions options) -> Grpc.Core.AsyncUnaryCall<Chalk.Client.Rpc.GetInfoResponse>
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.GetInfoAsync(Chalk.Client.Rpc.GetInfoRequest request, Grpc.Core.Metadata headers = null, System.DateTime? deadline = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Grpc.Core.AsyncUnaryCall<Chalk.Client.Rpc.GetInfoResponse>
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.Plan(Chalk.Client.Rpc.PlanRequest request, Grpc.Core.CallOptions options) -> Chalk.Client.Rpc.PlanResponse
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.Plan(Chalk.Client.Rpc.PlanRequest request, Grpc.Core.Metadata headers = null, System.DateTime? deadline = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Chalk.Client.Rpc.PlanResponse
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.PlanAsync(Chalk.Client.Rpc.PlanRequest request, Grpc.Core.CallOptions options) -> Grpc.Core.AsyncUnaryCall<Chalk.Client.Rpc.PlanResponse>
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.PlanAsync(Chalk.Client.Rpc.PlanRequest request, Grpc.Core.Metadata headers = null, System.DateTime? deadline = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Grpc.Core.AsyncUnaryCall<Chalk.Client.Rpc.PlanResponse>
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.RedactSql(Chalk.Client.Rpc.RedactSqlRequest request, Grpc.Core.CallOptions options) -> Chalk.Client.Rpc.RedactSqlResponse
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.RedactSql(Chalk.Client.Rpc.RedactSqlRequest request, Grpc.Core.Metadata headers = null, System.DateTime? deadline = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Chalk.Client.Rpc.RedactSqlResponse
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.RedactSqlAsync(Chalk.Client.Rpc.RedactSqlRequest request, Grpc.Core.CallOptions options) -> Grpc.Core.AsyncUnaryCall<Chalk.Client.Rpc.RedactSqlResponse>
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.RedactSqlAsync(Chalk.Client.Rpc.RedactSqlRequest request, Grpc.Core.Metadata headers = null, System.DateTime? deadline = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Grpc.Core.AsyncUnaryCall<Chalk.Client.Rpc.RedactSqlResponse>
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.RegisterCatalog(Chalk.Client.Rpc.RegisterCatalogRequest request, Grpc.Core.CallOptions options) -> Chalk.Client.Rpc.RegisterCatalogResponse
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.RegisterCatalog(Chalk.Client.Rpc.RegisterCatalogRequest request, Grpc.Core.Metadata headers = null, System.DateTime? deadline = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Chalk.Client.Rpc.RegisterCatalogResponse
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.RegisterCatalogAsync(Chalk.Client.Rpc.RegisterCatalogRequest request, Grpc.Core.CallOptions options) -> Grpc.Core.AsyncUnaryCall<Chalk.Client.Rpc.RegisterCatalogResponse>
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.RegisterCatalogAsync(Chalk.Client.Rpc.RegisterCatalogRequest request, Grpc.Core.Metadata headers = null, System.DateTime? deadline = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Grpc.Core.AsyncUnaryCall<Chalk.Client.Rpc.RegisterCatalogResponse>
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.RegisterStatistics(Chalk.Client.Rpc.RegisterStatisticsRequest request, Grpc.Core.CallOptions options) -> Chalk.Client.Rpc.RegisterStatisticsResponse
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.RegisterStatistics(Chalk.Client.Rpc.RegisterStatisticsRequest request, Grpc.Core.Metadata headers = null, System.DateTime? deadline = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Chalk.Client.Rpc.RegisterStatisticsResponse
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.RegisterStatisticsAsync(Chalk.Client.Rpc.RegisterStatisticsRequest request, Grpc.Core.CallOptions options) -> Grpc.Core.AsyncUnaryCall<Chalk.Client.Rpc.RegisterStatisticsResponse>
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.RegisterStatisticsAsync(Chalk.Client.Rpc.RegisterStatisticsRequest request, Grpc.Core.Metadata headers = null, System.DateTime? deadline = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Grpc.Core.AsyncUnaryCall<Chalk.Client.Rpc.RegisterStatisticsResponse>
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.StopPlanning(Chalk.Client.Rpc.StopPlanningRequest request, Grpc.Core.CallOptions options) -> Chalk.Client.Rpc.StopPlanningResponse
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.StopPlanning(Chalk.Client.Rpc.StopPlanningRequest request, Grpc.Core.Metadata headers = null, System.DateTime? deadline = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Chalk.Client.Rpc.StopPlanningResponse
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.StopPlanningAsync(Chalk.Client.Rpc.StopPlanningRequest request, Grpc.Core.CallOptions options) -> Grpc.Core.AsyncUnaryCall<Chalk.Client.Rpc.StopPlanningResponse>
+~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.StopPlanningAsync(Chalk.Client.Rpc.StopPlanningRequest request, Grpc.Core.Metadata headers = null, System.DateTime? deadline = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Grpc.Core.AsyncUnaryCall<Chalk.Client.Rpc.StopPlanningResponse>

@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Sources.Ado</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>Chalk ADO.NET source: register any DbProviderFactory's tables as Chalk tables, with capability-driven pushdown.</Description>
+  </PropertyGroup>
+
+  <!--
+    System.Data.Common only (D85). No provider package is referenced here: the host supplies a
+    DbProviderFactory or a connection factory, and the dialect presets are data. That is what keeps
+    one in-box adapter usable against SQLite, DuckDB, PostgreSQL and anything else with a driver.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Apache.Arrow" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Chalk.Sources.Abstractions/Chalk.Sources.Abstractions.csproj" />
+    <ProjectReference Include="../Chalk.Catalog/Chalk.Catalog.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Chalk.Sources.Ado.Tests" />
+    <InternalsVisibleTo Include="Chalk.Sources.Conformance" />
+    <InternalsVisibleTo Include="Chalk.Integration.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <!--
+    RS0026 ("do not add multiple overloads with optional parameters") fires on the two
+    AdoSourceBuilder constructors: one takes a DbProviderFactory and a connection string, the other a
+    connection factory, and both end in the optional schema name. Reported rather than enforced, for
+    the same reason the POCO package suppresses it (ADR 0014): the shape is the design.
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);RS0026</NoWarn>
+  </PropertyGroup>
+
+  <!--
+    CHALK001 is the experimental id the Tier 2 kernel interface and the columnar views carry (D79).
+    The engine and the in-box sources are the code those types were extracted from, so they opt in
+    once here rather than at every use.
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CHALK001</NoWarn>
+  </PropertyGroup>
+
+</Project>

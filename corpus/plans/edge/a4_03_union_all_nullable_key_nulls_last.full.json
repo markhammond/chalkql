@@ -1,0 +1,228 @@
+{
+  "irVersion": 1,
+  "planDigest": "10572377383780823428",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "id",
+        "type": {
+          "kind": "TYPE_KIND_I32"
+        }
+      },
+      {
+        "name": "amount",
+        "type": {
+          "kind": "TYPE_KIND_I32",
+          "nullable": true
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          }
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "TYPE_KIND_I32",
+            "nullable": true
+          }
+        }
+      ]
+    },
+    "estRowCount": 9.6,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_DESC_NULLS_FIRST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              }
+            },
+            {
+              "name": "amount",
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              }
+            }
+          ]
+        },
+        "estRowCount": 9.6,
+        "setOp": {
+          "inputs": [
+            {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "id",
+                    "type": {
+                      "kind": "TYPE_KIND_I32"
+                    }
+                  },
+                  {
+                    "name": "amount",
+                    "type": {
+                      "kind": "TYPE_KIND_I32",
+                      "nullable": true
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 6,
+              "read": {
+                "table": {
+                  "sourceId": "mem",
+                  "schema": "main",
+                  "table": "sales"
+                },
+                "projection": [
+                  0,
+                  2
+                ]
+              }
+            },
+            {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "id",
+                    "type": {
+                      "kind": "TYPE_KIND_I32"
+                    }
+                  },
+                  {
+                    "name": "amount",
+                    "type": {
+                      "kind": "TYPE_KIND_I32",
+                      "nullable": true
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 3.5999999999999996,
+              "filter": {
+                "input": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "id",
+                        "type": {
+                          "kind": "TYPE_KIND_I32"
+                        }
+                      },
+                      {
+                        "name": "amount",
+                        "type": {
+                          "kind": "TYPE_KIND_I32",
+                          "nullable": true
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 6,
+                  "read": {
+                    "table": {
+                      "sourceId": "mem",
+                      "schema": "main",
+                      "table": "sales"
+                    },
+                    "projection": [
+                      0,
+                      2
+                    ]
+                  }
+                },
+                "condition": {
+                  "type": {
+                    "kind": "TYPE_KIND_BOOL"
+                  },
+                  "call": {
+                    "function": "FUNCTION_ID_LT",
+                    "args": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_I32"
+                        },
+                        "fieldRef": {}
+                      },
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_I32"
+                        },
+                        "literal": {
+                          "i32Value": 4
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "kind": "SET_OP_KIND_UNION_ALL"
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_I32",
+              "nullable": true
+            },
+            "fieldRef": {
+              "index": 1
+            }
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        },
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_I32"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_DESC_NULLS_FIRST"
+        }
+      ]
+    }
+  }
+}

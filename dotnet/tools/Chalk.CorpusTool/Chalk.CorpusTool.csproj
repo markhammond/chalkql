@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Chalk.CorpusTool</RootNamespace>
+    <AssemblyName>Chalk.CorpusTool</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Chalk.Client/Chalk.Client.csproj" />
+    <ProjectReference Include="../../tests/Chalk.TestKit/Chalk.TestKit.csproj" />
+  </ItemGroup>
+
+</Project>

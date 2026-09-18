@@ -1,0 +1,129 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Public ChalkQL package.
+
+    This is deliberately a packaging project only: ChalkQL keeps its internal assembly/project
+    boundaries, while the public NuGet surface exposes one core package plus ChalkQL.Sources.
+
+    scripts/pack.sh builds the real projects first, generates the direct third-party
+    PackageReference union, then packs this project.
+
+    The Calcite planner sidecar is embedded as a resource in Chalk.Client.dll. It is materialised
+    lazily by PlannerProcess only when a local sidecar is started; it is therefore not carried as
+    a separate NuGet content/tool asset.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+
+    <IsPackable>true</IsPackable>
+    <PackageId>ChalkQL</PackageId>
+    <PackageTags>
+      sql;federated-sql;poco;query-engine;planner;optimizer;apache-calcite;calcite;arrow;
+      access-control;authorization;entitlements;multi-tenant
+    </PackageTags>
+    <Description>Federated SQL query planning and execution for .NET, powered by Apache Calcite.</Description>
+
+    <!--
+      Packaging projects deliberately opt out of Central Package Management. They synthesise the
+      dependency manifest for several constituent assemblies.
+    -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS2008</NoWarn>
+
+    <!-- May be overridden by the packing script. -->
+    <RepoRoot Condition="'$(RepoRoot)' == ''">$(MSBuildThisFileDirectory)../../../</RepoRoot>
+    <PackageTfm>net10.0</PackageTfm>
+  </PropertyGroup>
+
+  <!-- Generated from the direct PackageReferences of the constituent projects. -->
+  <Import Project="../generated/ChalkQL.Dependencies.props"
+          Condition="Exists('../generated/ChalkQL.Dependencies.props')" />
+
+  <ItemGroup>
+    <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk/bin/$(Configuration)/$(PackageTfm)/Chalk.dll" />
+    <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Catalog/bin/$(Configuration)/$(PackageTfm)/Chalk.Catalog.dll" />
+    <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Client/bin/$(Configuration)/$(PackageTfm)/Chalk.Client.dll" />
+    <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Entitlements/bin/$(Configuration)/$(PackageTfm)/Chalk.Entitlements.dll" />
+    <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Entitlements.Tenancy/bin/$(Configuration)/$(PackageTfm)/Chalk.Entitlements.Tenancy.dll" />
+    <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Execution/bin/$(Configuration)/$(PackageTfm)/Chalk.Execution.dll" />
+    <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Ir/bin/$(Configuration)/$(PackageTfm)/Chalk.Ir.dll" />
+    <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Sources.Abstractions/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Abstractions.dll" />
+
+    <None Include="@(_ManagedAssembly)"
+          Pack="true"
+          PackagePath="lib/$(PackageTfm)/" />
+  </ItemGroup>
+
+  <!-- XML API documentation, when emitted by the constituent project. -->
+  <ItemGroup>
+    <None Include="$(RepoRoot)dotnet/src/Chalk/bin/$(Configuration)/$(PackageTfm)/Chalk.xml"
+          Pack="true"
+          PackagePath="lib/$(PackageTfm)/"
+          Condition="Exists('$(RepoRoot)dotnet/src/Chalk/bin/$(Configuration)/$(PackageTfm)/Chalk.xml')" />
+
+    <None Include="$(RepoRoot)dotnet/src/Chalk.Catalog/bin/$(Configuration)/$(PackageTfm)/Chalk.Catalog.xml"
+          Pack="true"
+          PackagePath="lib/$(PackageTfm)/"
+          Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Catalog/bin/$(Configuration)/$(PackageTfm)/Chalk.Catalog.xml')" />
+
+    <None Include="$(RepoRoot)dotnet/src/Chalk.Client/bin/$(Configuration)/$(PackageTfm)/Chalk.Client.xml"
+          Pack="true"
+          PackagePath="lib/$(PackageTfm)/"
+          Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Client/bin/$(Configuration)/$(PackageTfm)/Chalk.Client.xml')" />
+
+    <None Include="$(RepoRoot)dotnet/src/Chalk.Entitlements/bin/$(Configuration)/$(PackageTfm)/Chalk.Entitlements.xml"
+          Pack="true"
+          PackagePath="lib/$(PackageTfm)/"
+          Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Entitlements/bin/$(Configuration)/$(PackageTfm)/Chalk.Entitlements.xml')" />
+
+    <None Include="$(RepoRoot)dotnet/src/Chalk.Entitlements.Tenancy/bin/$(Configuration)/$(PackageTfm)/Chalk.Entitlements.Tenancy.xml"
+          Pack="true"
+          PackagePath="lib/$(PackageTfm)/"
+          Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Entitlements.Tenancy/bin/$(Configuration)/$(PackageTfm)/Chalk.Entitlements.Tenancy.xml')" />
+
+    <None Include="$(RepoRoot)dotnet/src/Chalk.Execution/bin/$(Configuration)/$(PackageTfm)/Chalk.Execution.xml"
+          Pack="true"
+          PackagePath="lib/$(PackageTfm)/"
+          Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Execution/bin/$(Configuration)/$(PackageTfm)/Chalk.Execution.xml')" />
+
+    <None Include="$(RepoRoot)dotnet/src/Chalk.Ir/bin/$(Configuration)/$(PackageTfm)/Chalk.Ir.xml"
+          Pack="true"
+          PackagePath="lib/$(PackageTfm)/"
+          Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Ir/bin/$(Configuration)/$(PackageTfm)/Chalk.Ir.xml')" />
+
+    <None Include="$(RepoRoot)dotnet/src/Chalk.Sources.Abstractions/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Abstractions.xml"
+          Pack="true"
+          PackagePath="lib/$(PackageTfm)/"
+          Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Sources.Abstractions/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Abstractions.xml')" />
+  </ItemGroup>
+
+  <!--
+    This describes the JVM dependencies shaded into the planner JAR embedded in Chalk.Client.dll.
+    It remains package-level legal/documentation metadata even though the JAR itself is no longer
+    a separately packaged file.
+  -->
+  <ItemGroup>
+    <None Include="THIRD-PARTY-NOTICES.txt"
+          Pack="true"
+          PackagePath="/"
+          Visible="false" />
+  </ItemGroup>
+
+  <Target Name="ValidateChalkQLPackageInputs"
+          BeforeTargets="GenerateNuspec">
+
+    <Error Condition="!Exists('../generated/ChalkQL.Dependencies.props')"
+           Text="Missing generated/ChalkQL.Dependencies.props. Run scripts/nuget-package-dependencies.py (pack.sh does this)." />
+
+    <!-- Referencing item metadata batches this Error once per assembly. -->
+    <Error Condition="!Exists('%(_ManagedAssembly.Identity)')"
+           Text="Missing ChalkQL package input: %(_ManagedAssembly.Identity). Build dotnet/Chalk.slnx first." />
+
+    <Error Condition="!Exists('THIRD-PARTY-NOTICES.txt')"
+           Text="Missing generated THIRD-PARTY-NOTICES.txt. Run scripts/third-party-notices.py." />
+  </Target>
+</Project>

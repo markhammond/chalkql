@@ -1,0 +1,540 @@
+{
+  "irVersion": 1,
+  "planDigest": "5939430387170662984",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "ts",
+        "type": {
+          "kind": "TYPE_KIND_TIMESTAMP",
+          "precision": 9
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "ts",
+          "type": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          }
+        }
+      ]
+    },
+    "estRowCount": 12.500620070440004,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "project": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              }
+            },
+            {
+              "name": "symbol0",
+              "type": {
+                "kind": "TYPE_KIND_STRING",
+                "nullable": true
+              }
+            },
+            {
+              "name": "$f1",
+              "type": {
+                "kind": "TYPE_KIND_BOOL",
+                "nullable": true
+              }
+            }
+          ]
+        },
+        "estRowCount": 12.500620070440004,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "filter": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "symbol",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                },
+                {
+                  "name": "ts",
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  }
+                },
+                {
+                  "name": "symbol0",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING",
+                    "nullable": true
+                  }
+                },
+                {
+                  "name": "$f1",
+                  "type": {
+                    "kind": "TYPE_KIND_BOOL",
+                    "nullable": true
+                  }
+                }
+              ]
+            },
+            "estRowCount": 50.002480281760015,
+            "collations": [
+              {
+                "fields": [
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_TIMESTAMP",
+                        "precision": 9
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  },
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {}
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  }
+                ]
+              }
+            ],
+            "nestedLoopJoin": {
+              "left": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "symbol",
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      }
+                    },
+                    {
+                      "name": "ts",
+                      "type": {
+                        "kind": "TYPE_KIND_TIMESTAMP",
+                        "precision": 9
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 50.002480281760015,
+                "collations": [
+                  {
+                    "fields": [
+                      {
+                        "expr": {
+                          "type": {
+                            "kind": "TYPE_KIND_TIMESTAMP",
+                            "precision": 9
+                          },
+                          "fieldRef": {
+                            "index": 1
+                          }
+                        },
+                        "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                      },
+                      {
+                        "expr": {
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          },
+                          "fieldRef": {}
+                        },
+                        "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                      }
+                    ]
+                  }
+                ],
+                "indexLookup": {
+                  "table": {
+                    "sourceId": "mem",
+                    "schema": "main",
+                    "table": "bars"
+                  },
+                  "index": "ix_bars_ts_symbol",
+                  "ranges": [
+                    {
+                      "lowerInclusive": true,
+                      "upper": [
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_TIMESTAMP",
+                            "precision": 9
+                          },
+                          "literal": {
+                            "timestampValue": "1767226200000000000"
+                          }
+                        }
+                      ]
+                    }
+                  ],
+                  "projection": [
+                    0,
+                    1
+                  ]
+                }
+              },
+              "right": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "symbol",
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      }
+                    },
+                    {
+                      "name": "$f1",
+                      "type": {
+                        "kind": "TYPE_KIND_BOOL"
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 1,
+                "project": {
+                  "input": {
+                    "rowType": {
+                      "fields": [
+                        {
+                          "name": "symbol",
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          }
+                        }
+                      ]
+                    },
+                    "estRowCount": 1,
+                    "hashAggregate": {
+                      "aggregate": {
+                        "input": {
+                          "rowType": {
+                            "fields": [
+                              {
+                                "name": "symbol",
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                }
+                              }
+                            ]
+                          },
+                          "estRowCount": 3,
+                          "project": {
+                            "input": {
+                              "rowType": {
+                                "fields": [
+                                  {
+                                    "name": "id",
+                                    "type": {
+                                      "kind": "TYPE_KIND_I32"
+                                    }
+                                  },
+                                  {
+                                    "name": "symbol",
+                                    "type": {
+                                      "kind": "TYPE_KIND_STRING"
+                                    }
+                                  },
+                                  {
+                                    "name": "kind",
+                                    "type": {
+                                      "kind": "TYPE_KIND_STRING"
+                                    }
+                                  }
+                                ]
+                              },
+                              "estRowCount": 3,
+                              "collations": [
+                                {
+                                  "fields": [
+                                    {
+                                      "expr": {
+                                        "type": {
+                                          "kind": "TYPE_KIND_I32"
+                                        },
+                                        "fieldRef": {}
+                                      },
+                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                    }
+                                  ]
+                                }
+                              ],
+                              "filter": {
+                                "input": {
+                                  "rowType": {
+                                    "fields": [
+                                      {
+                                        "name": "id",
+                                        "type": {
+                                          "kind": "TYPE_KIND_I32"
+                                        }
+                                      },
+                                      {
+                                        "name": "symbol",
+                                        "type": {
+                                          "kind": "TYPE_KIND_STRING"
+                                        }
+                                      },
+                                      {
+                                        "name": "kind",
+                                        "type": {
+                                          "kind": "TYPE_KIND_STRING"
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  "estRowCount": 20,
+                                  "collations": [
+                                    {
+                                      "fields": [
+                                        {
+                                          "expr": {
+                                            "type": {
+                                              "kind": "TYPE_KIND_I32"
+                                            },
+                                            "fieldRef": {}
+                                          },
+                                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "read": {
+                                    "table": {
+                                      "sourceId": "mem",
+                                      "schema": "main",
+                                      "table": "events"
+                                    },
+                                    "projection": [
+                                      0,
+                                      1,
+                                      4
+                                    ]
+                                  }
+                                },
+                                "condition": {
+                                  "type": {
+                                    "kind": "TYPE_KIND_BOOL"
+                                  },
+                                  "call": {
+                                    "function": "FUNCTION_ID_EQ",
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "kind": "TYPE_KIND_STRING"
+                                        },
+                                        "fieldRef": {
+                                          "index": 2
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "kind": "TYPE_KIND_STRING"
+                                        },
+                                        "literal": {
+                                          "stringValue": "listing"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            },
+                            "exprs": [
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                },
+                                "fieldRef": {
+                                  "index": 1
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "groupings": [
+                          {
+                            "keys": [
+                              0
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "exprs": [
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {}
+                    },
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_BOOL"
+                      },
+                      "literal": {
+                        "boolValue": true
+                      }
+                    }
+                  ]
+                }
+              },
+              "condition": {
+                "type": {
+                  "kind": "TYPE_KIND_BOOL"
+                },
+                "call": {
+                  "function": "FUNCTION_ID_EQ",
+                  "args": [
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {}
+                    },
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {
+                        "index": 2
+                      }
+                    }
+                  ]
+                }
+              },
+              "type": "JOIN_TYPE_LEFT"
+            }
+          },
+          "condition": {
+            "type": {
+              "kind": "TYPE_KIND_BOOL"
+            },
+            "call": {
+              "function": "FUNCTION_ID_IS_NULL",
+              "args": [
+                {
+                  "type": {
+                    "kind": "TYPE_KIND_BOOL",
+                    "nullable": true
+                  },
+                  "fieldRef": {
+                    "index": 3
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "exprs": [
+        {
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          },
+          "fieldRef": {}
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          },
+          "fieldRef": {
+            "index": 1
+          }
+        }
+      ]
+    }
+  }
+}

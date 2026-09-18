@@ -1,0 +1,120 @@
+{
+  "irVersion": 1,
+  "planDigest": "1975983051912678641",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "EXPR$0",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "EXPR$0",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 1,
+    "hashAggregate": {
+      "aggregate": {
+        "input": {
+          "rowType": {
+            "fields": [
+              {
+                "name": "symbol",
+                "type": {
+                  "kind": "TYPE_KIND_STRING"
+                }
+              },
+              {
+                "name": "ts",
+                "type": {
+                  "kind": "TYPE_KIND_TIMESTAMP",
+                  "precision": 9
+                }
+              }
+            ]
+          },
+          "estRowCount": 7195.356912545268,
+          "collations": [
+            {
+              "fields": [
+                {
+                  "expr": {
+                    "type": {
+                      "kind": "TYPE_KIND_TIMESTAMP",
+                      "precision": 9
+                    },
+                    "fieldRef": {
+                      "index": 1
+                    }
+                  },
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                },
+                {
+                  "expr": {
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    },
+                    "fieldRef": {}
+                  },
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "indexLookup": {
+            "table": {
+              "sourceId": "mem",
+              "schema": "main",
+              "table": "bars"
+            },
+            "index": "ix_bars_ts_symbol",
+            "ranges": [
+              {
+                "lower": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_TIMESTAMP",
+                      "precision": 9
+                    },
+                    "literal": {
+                      "timestampValue": "1768348800000000000"
+                    }
+                  }
+                ],
+                "lowerInclusive": true,
+                "upperInclusive": true
+              }
+            ],
+            "projection": [
+              0,
+              1
+            ]
+          }
+        },
+        "groupings": [
+          {}
+        ],
+        "measures": [
+          {
+            "function": "AGGREGATE_FUNCTION_ID_COUNT",
+            "type": {
+              "kind": "TYPE_KIND_I64"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

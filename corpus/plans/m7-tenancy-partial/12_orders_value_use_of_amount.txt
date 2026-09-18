@@ -1,0 +1,87 @@
+-- u1
+report id:Full, amount:PerRow, orders:Some
+1|8100013
+2|8203307
+3|8311111
+4|<null>
+5|<null>
+6|<null>
+7|8811119
+
+-- u2
+report id:Full, amount:PerRow, orders:Some
+1|<null>
+2|<null>
+3|<null>
+4|8427761
+
+-- u3
+report id:Full, amount:PerRow, orders:Some
+5|8549939
+6|8677777
+
+-- u3-in-o1
+report id:Full, amount:PerRow, orders:Some
+5|8549939
+6|8677777
+
+-- u4
+report id:Full, amount:PerRow, orders:All
+1|<null>
+2|<null>
+3|<null>
+4|<null>
+5|<null>
+6|<null>
+7|<null>
+
+-- u5
+report id:Full, amount:PerRow, orders:Some
+
+-- u6
+POLICY Refused by the entitlements: main.orders.amount is population-only for this principal and a projection to the result is not one of the aggregates it permits.
+
+-- u6-two-orgs
+POLICY Refused by the entitlements: main.orders.amount is population-only for this principal and a projection to the result is not one of the aggregates it permits.
+
+-- u7
+report id:Full, amount:PerRow, orders:Some
+
+-- u8
+report id:Full, amount:PerRow, orders:Some
+1|<null>
+2|<null>
+3|<null>
+4|<null>
+
+-- u9
+report id:Full, amount:PerRow, orders:Some
+1|<null>
+2|<null>
+3|<null>
+4|<null>
+5|<null>
+6|<null>
+
+-- u10-in-a-region
+POLICY Refused by the entitlements: main.orders.amount is population-only for this principal and a projection to the result is not one of the aggregates it permits.
+
+-- u11-subject-in-a-region
+report id:Full, amount:PerRow, orders:Some
+1|<null>
+
+-- u14-a-vendor
+report id:Full, amount:PerRow, orders:Some
+1|<null>
+5|<null>
+7|<null>
+
+-- u15-a-vendor-and-an-org
+report id:Full, amount:PerRow, orders:Some
+1|<null>
+2|<null>
+3|<null>
+4|<null>
+5|<null>
+7|<null>
+

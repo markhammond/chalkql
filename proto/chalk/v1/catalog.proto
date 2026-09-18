@@ -1,0 +1,763 @@
+// Chalk plan IR — catalog descriptors pushed from the client to the planner.
+syntax = "proto3";
+
+package chalk.v1;
+
+import "chalk/v1/dialect.proto";
+import "chalk/v1/expr.proto";
+import "chalk/v1/plan.proto";
+import "chalk/v1/types.proto";
+
+option csharp_namespace = "Chalk.Ir";
+option java_multiple_files = true;
+option java_outer_classname = "CatalogProto";
+option java_package = "chalk.ir.v1";
+
+// The named registry a host assembles and pushes to the planner. Immutable for a given epoch.
+message CatalogContext {
+  string context_id = 1;
+  int64 epoch = 2;
+  repeated Schema schemas = 3;
+  // How a join whose two sides live in different sources is planned. Produced by the
+  // host's ICrossSourceJoinPolicy at engine creation and on every catalog refresh, and merged under
+  // any PlannerOptions.join_policy the request carries. Unset means the shipped default.
+  CrossSourceJoinPolicy join_policy = 4;
+  // Associations between columns of two tables that no foreign key can state, because the two
+  // tables are in two schemas. Additive; a catalog that
+  // declares none is byte-identical to what it was.
+  repeated Association associations = 5;
+}
+
+// A declared association from `from_schema`.`from_table`.`from_column` to
+// `to_schema`.`to_table`.`to_column`, which a tenancy path's step may resolve through exactly as
+// through a ForeignKey.
+//
+// A foreign key is one source's claim about a table of its *own* schema, so it lives on the table
+// and names a parent in the same schema; an association's two ends are in two schemas and neither
+// source owns it, which is why it hangs off the catalog. It is **declared, not verified**: nothing
+// reads either source to check it, exactly as `Table.foreign_keys` is the source's own assertion
+// ("verified" is read as "declared"), and across two sources there is no transaction in
+// which more could be promised. The referenced column must be a declared unique key of its table
+// and the two columns' types must agree, both checked at registration.
+message Association {
+  // A name for diagnostics. May be empty.
+  string name = 1;
+  string from_schema = 2;
+  string from_table = 3;
+  string from_column = 4;
+  string to_schema = 5;
+  string to_table = 6;
+  string to_column = 7;
+}
+
+// The cross-source join policy as data the planner reads.
+// `ICrossSourceJoinPolicy` survives as the object a
+// host implements; what it produces is this.
+message CrossSourceJoinPolicy {
+  // What to do for a pair no `pairs` rule names. UNSPECIFIED is read as ADAPTIVE.
+  JoinStrategy default_strategy = 1;
+  // The most rows a BROADCAST may ship into a source's query. 0 = the planner's default (10 000).
+  int64 broadcast_max_rows = 2;
+  // An adaptive join takes its lookup branch only if the small side's distinct keys fit in this many
+  // IN-list calls. 0 = the planner's default (64).
+  int32 lookup_max_calls = 3;
+  // A plan that would fetch more than this into a local join fails at planning with UNSUPPORTED
+  // naming the join and the estimate. 0 = unlimited.
+  int64 local_join_max_rows = 4;
+  // What an unknown remote cardinality is taken to be. 0 = the planner's default (1 000 000).
+  int64 unknown_row_count_assumption = 5;
+  // Per (left source, right source). The first rule whose pair matches wins; a rule with an empty
+  // source id matches any source on that side.
+  repeated SourcePairRule pairs = 6;
+}
+
+// Which strategies are allowed for one ordered pair of sources, and which is preferred.
+message SourcePairRule {
+  string left_source = 1;
+  string right_source = 2;
+  // Empty means every strategy is allowed.
+  repeated JoinStrategy allowed = 3;
+  // UNSPECIFIED means "cost decides among `allowed`".
+  JoinStrategy preferred = 4;
+  // Overrides CrossSourceJoinPolicy.broadcast_max_rows for this pair. 0 = inherit.
+  int64 broadcast_max_rows = 5;
+}
+
+// How a cross-source join is executed. Names follow rev 3.
+enum JoinStrategy {
+  JOIN_STRATEGY_UNSPECIFIED = 0;
+  // Fetch both sides through their boundaries and join locally. The fallback that always exists.
+  JOIN_STRATEGY_LOCAL = 1;
+  // Stream the driving side; run the other side's query once per batch of distinct keys.
+  JOIN_STRATEGY_LOOKUP = 2;
+  // Ship the small side's rows into the other source's query as a VALUES join.
+  JOIN_STRATEGY_BROADCAST = 3;
+  // Plan both LOOKUP and LOCAL; decide at execution from the small side's measured distinct keys.
+  JOIN_STRATEGY_ADAPTIVE = 4;
+}
+
+message Schema {
+  // Identifies the ISourceRuntime that serves this schema.
+  string source_id = 1;
+  // SQL schema name. Tables are addressed as schema.table; the first schema is the default.
+  string name = 2;
+  SourceKind kind = 3;
+  // SQL dialect for RemoteQuery generation. Empty for LOCAL sources.
+  string dialect = 4;
+  // Consulted by the planner's pushdown rules.
+  SourceCapabilities capabilities = 5;
+  repeated Table tables = 6;
+  // Costs for every table in this schema unless the table overrides them. Unset = planner defaults.
+  CostProfile cost_profile = 7;
+  // How this source spells and evaluates SQL. Unset means the ANSI preset with every
+  // conservative default, which is what a source that pushes nothing needs.
+  DialectProfile dialect_profile = 8;
+  // Functions this schema declares. Resolved like a table: `schema.name`, or bare in
+  // the default schema. A clash with a Calcite built-in or with a library the request asked for is a
+  // registration error rather than a shadowing.
+  repeated FunctionDescriptor functions = 9;
+  // This source enforces its own row-level security and its rows are taken as already filtered, so
+  // no entitlement predicate is injected over its tables. False — every source is
+  // enforced — is the default and what a host gets until it says otherwise. Column disclosures are
+  // unaffected: masking and the query-field rule are Chalk's, whatever the source filters.
+  bool trust_source_row_security = 10;
+}
+
+// One user-defined function, with the PostgreSQL `CREATE FUNCTION` properties that have a counterpart
+// in a federated engine. `SECURITY`, `PARALLEL`,
+// `TRANSFORM`, `SET` and `SUPPORT` have none: execution is in the client under the caller's context
+// and parallelism is Chalk's.
+message FunctionDescriptor {
+  // Unqualified. The schema it is declared on qualifies it.
+  string name = 1;
+  FunctionKind kind = 2;
+  // Named, in call order. An optional parameter carries a default; Calcite accepts both positional
+  // and `name => value` calls.
+  repeated Parameter parameters = 3;
+  // FUNCTION_KIND_SCALAR and FUNCTION_KIND_AGGREGATE.
+  Type return_type = 4;
+  // FUNCTION_KIND_TABLE.
+  RowType returns_table = 5;
+  Volatility volatility = 6;
+  // RETURNS NULL ON NULL INPUT: the result is nullable when any argument is, and the executor skips
+  // the NULL lanes rather than calling the implementation on them.
+  bool strict = 7;
+  // Reserved for the security step: may appear in a predicate over a protected column and in a mask.
+  bool leakproof = 8;
+  // Per parameter, parallel to `parameters` when present; an empty list means NONE for every one.
+  // Lets a declared ordering pass through the call.
+  repeated Monotonicity monotonicity = 9;
+  // Per-row evaluation cost in cost-profile units. 0 = the planner's default for the kind.
+  double cost = 10;
+  // FUNCTION_KIND_TABLE: estimated output rows. 0 = the planner's default.
+  int64 rows = 11;
+  // FUNCTION_KIND_AGGREGATE: usable over a frame (Calcite `allowsFraming`).
+  bool window = 12;
+  // FUNCTION_KIND_AGGREGATE: takes WITHIN GROUP (ORDER BY …) (Calcite `requiresOrder`).
+  bool ordered = 13;
+  // FUNCTION_KIND_AGGREGATE: accepts IGNORE NULLS | RESPECT NULLS (Calcite `allowsNullTreatment`).
+  bool null_treatment = 14;
+
+  oneof implementation {
+    // Inlined by the planner, so the call disappears from the plan and is pushable wherever its
+    // constituents are.
+    SqlBody sql = 20;
+    // Implemented in the host process. Never pushed and never folded.
+    ClientBody client = 21;
+    // Implemented by the declaring schema's source. Pushed there, executable nowhere else.
+    NativeBody native = 22;
+  }
+}
+
+enum FunctionKind {
+  FUNCTION_KIND_UNSPECIFIED = 0;
+  FUNCTION_KIND_SCALAR = 1;
+  FUNCTION_KIND_AGGREGATE = 2;
+  FUNCTION_KIND_TABLE = 3;
+}
+
+// PostgreSQL's three volatility classes, with the meanings the planner acts on.
+enum Volatility {
+  VOLATILITY_UNSPECIFIED = 0;
+  // Foldable, cacheable, and a candidate for common-sub-expression elimination.
+  VOLATILITY_IMMUTABLE = 1;
+  // One value per execution: evaluated once when the arguments are constant.
+  VOLATILITY_STABLE = 2;
+  // Evaluated per lane, never folded and never de-duplicated.
+  VOLATILITY_VOLATILE = 3;
+}
+
+// How a function's result moves with one of its arguments, which is what lets a collation survive it.
+enum Monotonicity {
+  MONOTONICITY_UNSPECIFIED = 0;
+  MONOTONICITY_NONE = 1;
+  MONOTONICITY_INCREASING = 2;
+  MONOTONICITY_DECREASING = 3;
+  MONOTONICITY_STRICTLY_INCREASING = 4;
+  MONOTONICITY_STRICTLY_DECREASING = 5;
+}
+
+message Parameter {
+  string name = 1;
+  Type type = 2;
+  bool optional = 3;
+  // Required when `optional`; a Literal expression of `type`.
+  Expr default_value = 4;
+}
+
+// SCALAR: an expression over the parameter names. AGGREGATE: an expression over built-in aggregates
+// of the parameters, e.g. `SUM(x * w) / SUM(w)`. TABLE: a SELECT over the schema with the parameter
+// names as ordinary identifiers.
+message SqlBody {
+  string text = 1;
+}
+
+// The key the host registered the implementation under. Empty means the function's own name.
+message ClientBody {
+  string registration = 1;
+}
+
+// How the declaring source spells the function in generated SQL. Empty means the function's own name.
+message NativeBody {
+  string dialect_name = 1;
+}
+
+enum SourceKind {
+  SOURCE_KIND_UNSPECIFIED = 0;
+  // The client scans it (Read / IndexLookup). E.g. POCO collections.
+  SOURCE_KIND_LOCAL = 1;
+  // Accepts native queries (RemoteQuery). E.g. ADO.NET.
+  SOURCE_KIND_REMOTE = 2;
+}
+
+message Table {
+  string name = 1;
+  repeated Column columns = 2;
+  // Exact or estimated. Negative = unknown.
+  int64 row_count = 3;
+  repeated UniqueKey unique_keys = 4;
+  // Orderings the table's scan order satisfies. Directions are explicit, including null direction.
+  repeated TableCollation collations = 5;
+  repeated Index indexes = 6;
+  // Costs for this table, overriding the schema's and the planner's defaults. Unset = inherit.
+  CostProfile cost_profile = 7;
+  // How much `row_count` is worth. UNSPECIFIED is read as ESTIMATE when row_count >= 0.
+  RowCountKind row_count_kind = 8;
+  // Declared referential constraints: every non-NULL value of `columns` occurs in the parent's
+  // `parent_columns`. Additive; a table that declares none is unchanged.
+  repeated ForeignKey foreign_keys = 9;
+
+  // Which of this table's rows and columns the caller may see. Absent = every row
+  // and every column, which is what every table has until a host says otherwise, and what makes the
+  // whole layer free when unused: an absent message adds no bytes and installs no planner pass.
+  TableEntitlement entitlement = 10;
+
+  // The table's rows live in several physical tables, keyed by one column. A scan of a
+  // partitioned table expands into a UNION ALL of per-partition scans, each in its partition's
+  // source convention, after pruning by any predicate on the partition column. Unset = one table.
+  Partitioning partitioning = 11;
+}
+
+// Row and column disclosure for one table. The whole
+// vocabulary the core knows: one row predicate, per-column disclosures, one enforcement locus and
+// one default. Everything open-ended — which rows, which masks, which aggregates — is an expression
+// or a list, because the rewrite has to know what each field *means*.
+//
+// A policy model (the shipped tenancy package, or a host's own) is a compiler down to this message
+// and nothing of its vocabulary reaches here.
+message TableEntitlement {
+  // SQL boolean in Chalk's own dialect over this table's columns, `@ctx.<scalar>`, and IN / EXISTS
+  // over `@ctx.<relation>`. Empty means every row. Validated and type-checked at registration.
+  string row_predicate = 1;
+  // A column not listed takes `default_disclosure`.
+  repeated ColumnEntitlement columns = 2;
+  // Content hash of the compiled descriptor, computed by the client over the canonical form. In the
+  // plan digest for every plan that touches the table, so a changed policy is a new plan by
+  // construction and a cache can never serve a stale one (the plan cache keys on it).
+  string descriptor_hash = 3;
+  // PUSHDOWN (the default) lets the predicate travel to a source that can take it; LOCAL fetches
+  // rows and filters in-process, so the tenant set never appears in a remote query's text.
+  Enforcement enforcement = 4;
+  // What a column not named in `columns` gets: FULL (the default) or NONE, which is deny-by-default
+  // for a table whose columns may grow.
+  Disclosure default_disclosure = 5;
+  // Whether this table's masks may be pushed into its source, and only where the source declares
+  // `SourceCapabilities.supports_mask_pushdown`. Off by default: a mask evaluated remotely puts the
+  // raw value and the mask key in query text.
+  bool push_masks = 6;
+
+  // Visibility derived through a parent: a row of this table is visible when the
+  // parent row it names is visible to the same principal. A chat message reached through its
+  // thread, a line item through its order, a comment through its post — a table that carries no
+  // tenancy column of its own.
+  //
+  // Several entries are OR-ed, as every restriction is: any path grants, and "all paths required"
+  // is not in the algebra. The same parent through two columns is two entries. `row_predicate` may
+  // be set beside them and is OR-ed in too, and it keeps the same vocabulary — this table's columns,
+  // context scalars, lists and relations, never another catalog table — so a sub-query over the
+  // parent is refused at registration naming `through` as the way: an explicit relationship is the
+  // only way visibility derives from another table.
+  repeated ParentVisibility through = 7;
+
+  // Visibility along a declared path. One entry
+  // per `Inherited` or `Related` restriction the policy declared, flattened: the steps from this
+  // table outward, and at the far end the predicate that says which of the endpoint's rows this
+  // principal holds the kind in.
+  //
+  // `through` carries every perspective of a parent **down** one foreign key. This carries one named
+  // perspective along a route that may begin by going **up** — a row is related to a tenancy because
+  // some rows that belong to it are — and it never consults another table's entitlement: the
+  // compiler resolved the whole route and put the endpoint's own predicate here, so the pass joins
+  // along the steps and folds one predicate.
+  //
+  // Several entries are OR-ed, with `row_predicate` and with `through`, as every restriction is: any
+  // path grants. A target's column rules for a path's perspective may name the endpoint's columns as
+  // `<endpoint_table>.<column>`, exactly as a child's rules may name a parent's.
+  repeated InheritedVisibility inherited = 8;
+}
+
+// One declared path by which a table's rows hold a tenancy.
+//
+// Registration refuses a step to a table the catalog does not hold, a step whose direction the
+// declared foreign keys do not support, a shape the path model does not admit, an endpoint that does not hold
+// the kind, a bridge whose two key columns carry any rule, a bridge or endpoint that is the target
+// itself, a rule condition naming a table other than the declared endpoint, and a cycle in the
+// visibility-dependency graph.
+message InheritedVisibility {
+  // The tenancy kind this path carries — the policy's own name for the perspective. Carried for the
+  // report and for explain; the pass reads the steps and the predicate.
+  string kind = 1;
+  // The steps from this table outward, in order. Empty is refused: a path with no step is a
+  // `Direct` dimension written the long way round.
+  repeated VisibilityStep steps = 2;
+  // SQL boolean in Chalk's own dialect over the **endpoint's** columns and `@ctx.<scalar>` /
+  // `@ctx.<relation>`, in the context vocabulary — the same shape a `Direct` dimension compiles to. Folded
+  // for the principal at the far end of the chain: FALSE drops the joins, TRUE drops the predicate.
+  string endpoint_predicate = 3;
+  // The endpoint's schema. Empty means this table's own. Redundant with the last step and carried so
+  // that a reader — explain, the report, the registration check on a rule condition — needs no walk.
+  string endpoint_schema = 4;
+  string endpoint_table = 5;
+}
+
+// One step of an `InheritedVisibility` path: from the table the previous step arrived at (the
+// entitled table itself, for the first) to `table`, joining one column of each.
+message VisibilityStep {
+  // The step's schema. Empty means the entitled table's own.
+  string schema = 1;
+  string table = 2;
+  // Index into the columns of the table this step starts from.
+  uint32 from_column = 3;
+  // Index into `table`'s columns.
+  uint32 to_column = 4;
+  StepDirection direction = 5;
+}
+
+// Which way a step goes over the declared foreign key.
+enum StepDirection {
+  STEP_DIRECTION_UNSPECIFIED = 0;
+  // Down: the table the step starts from holds the foreign key, and `to_column` is the parent's
+  // declared unique key. An `Inherited` path is these alone.
+  STEP_DIRECTION_TO_PARENT = 1;
+  // Up: `table` holds the foreign key and `from_column` is our declared unique key. Exactly one, and
+  // first, on a `Related` path — the bridge, which contributes existence and nothing else.
+  STEP_DIRECTION_TO_CHILD = 2;
+}
+
+// One parent a table's visibility derives through.
+//
+// The relationship is explicit rather than a sub-query in `row_predicate`, because the planner has
+// to compile it into a join and read the parent's own verdict off the parent's cardinality,
+// which it could not do from arbitrary SQL. Registration checks that the parent exists, is
+// entitled and is itself restricted (through an unrestricted parent restricts nothing), that
+// `parent_column` is a declared unique key of the parent, that `column` has the parent key's type
+// kind, and that no chain of parents returns to a table; a diamond is fine.
+message ParentVisibility {
+  // Index into this table's `columns`: the correlation key, read raw beneath the child's sanitiser.
+  uint32 column = 1;
+  // The parent's schema. Empty means this table's own.
+  string parent_schema = 2;
+  string parent_table = 3;
+  // Index into the parent's `columns`, and a declared unique key of it, so no join multiplies rows.
+  uint32 parent_column = 4;
+}
+
+// What one column discloses, per row: an ordered list of rules with a default. First match
+// wins. A constant disclosure is no rules and an `otherwise`; the names a column can take are read
+// off this message without parsing anything, which is what lets the pass decide a refusal on the
+// *folded* rules rather than on SQL text.
+message ColumnEntitlement {
+  // Index into the table's `columns`.
+  uint32 column = 1;
+  // Was `string disclosure` — one SQL expression yielding a disclosure name per row. Replaced by
+  // `rules` on ratification; the number is never reused.
+  reserved 2;
+  // SQL scalar expression of the column's type: the mask, unless a matching rule states its own.
+  // Required where MASKED is reachable.
+  string mask = 3;
+  // When the disclosure can be AGGREGATE_ONLY: the aggregates permitted over the column, which must
+  // be population aggregates. A use that is not one of them is a POLICY error.
+  repeated string aggregate_only_functions = 4;
+  // The group-size floor for those aggregates. 0 = inherit the default the host gives at
+  // planning (`EntitlementsOptions.default_min_group_size`), which is itself 0 when the host says
+  // nothing; 1 = no guard for this column whatever that default; 2 or more is the floor. An
+  // effective floor of one or less emits no guard at all. The guard is query-set-size control, not
+  // differential privacy.
+  uint32 min_group_size = 5;
+  // What stands in for this column where it is undisclosed: a SQL scalar expression of the column's
+  // type. Set, it wins over either `PlaceholderPolicy`, so a host names a stand-in only for the
+  // columns where the policy's own value would mislead. A matching rule's own `placeholder`
+  // wins over this one.
+  string placeholder = 6;
+  // First match wins. Empty means the column's disclosure is the constant `otherwise`.
+  repeated DisclosureRule rules = 7;
+  // What no rule matched gets. UNSPECIFIED reads as NONE, so a column whose rules run out discloses
+  // nothing; on a table with a non-empty `row_predicate` it must be NONE.
+  Disclosure otherwise = 8;
+  // The host accepts query-set-size control as this column's guarantee: under MASKED or
+  // AGGREGATE_ONLY the raw value may additionally reach predicates and grouping keys in a statement
+  // whose every output column is an aggregate or a group key, with group suppression and no
+  // individual pinning. Declared and validated for shape here; enforced by the client's own check.
+  bool statistical = 9;
+}
+
+// One rule of a column's disclosure: a condition, the name it yields, and optionally the mask
+// that name uses. "Agents see the initial, auditors see the token" is two rules.
+message DisclosureRule {
+  // SQL boolean over the table's columns and the context vocabulary.
+  string when = 1;
+  // What this rule discloses when `when` holds.
+  Disclosure then = 2;
+  // Optional: the mask under this rule, over `ColumnEntitlement.mask`. Only meaningful with MASKED.
+  string mask = 3;
+  // Optional: what stands in for the value where *this* rule redacts it — a SQL scalar expression of
+  // the column's type, over `ColumnEntitlement.placeholder` and over either `PlaceholderPolicy`
+  //. Only meaningful with NONE, and refused at registration with any other `then`: a rule
+  // that discloses a value has nothing to stand in for it. It may not read the column itself, which
+  // would disclose the very value it stands in place of; the outcome stays REDACTED and the raw
+  // value reaches no use — a predicate over the column compares the stand-in — which is what tells
+  // this from a MASKED rule with a constant mask.
+  string placeholder = 4;
+  // The comparison shapes this rule permits over the column.
+  // Read under TEST, which is nothing but these shapes, and under AGGREGATE_ONLY, where they permit
+  // a test as the FILTER of a permitted aggregate. Empty under TEST is refused at registration: a
+  // rule that discloses neither the value nor any comparison of it says nothing at all.
+  repeated TestShape tests = 5;
+}
+
+// One comparison a TEST rule permits over the column. The other operand must be a dynamic
+// parameter, a literal or a context reference bound per request — never another column, which is
+// what keeps a VALUES list from turning one probe into a thousand.
+enum TestShape {
+  TEST_SHAPE_UNSPECIFIED = 0;
+  TEST_SHAPE_EQUALS = 1;
+  TEST_SHAPE_NOT_EQUALS = 2;
+  // `col IN (a, b, …)`, every element of the list an operand of the permitted kinds. A sub-query is
+  // not this shape.
+  TEST_SHAPE_IN = 3;
+}
+
+// What a principal may see of one column in one row. The vocabulary is closed on purpose: the
+// rewrite has to know what each of them means.
+enum Disclosure {
+  DISCLOSURE_UNSPECIFIED = 0;
+  // The value, as it is.
+  DISCLOSURE_FULL = 1;
+  // The column's `mask` expression in place of the value.
+  DISCLOSURE_MASKED = 2;
+  // No value use; the listed aggregates only, guarded by the group-size floor.
+  DISCLOSURE_AGGREGATE_ONLY = 3;
+  // Nothing: a placeholder in a projection. What leaf sanitisation guarantees is
+  // that the *raw* value reaches no use at all — the column is replaced at the leaf, so a
+  // predicate the statement writes over it compares the stand-in and matches what the stand-in
+  // matches, rather than being refused. Battery case 189 records exactly that: an agent's
+  // `WHERE first_name = 'Tara'` finds nothing where a manager reading the same statement finds
+  // member 1.
+  DISCLOSURE_NONE = 4;
+  // The value is NONE to every use but one: a comparison of a shape the rule's `tests` names, whose
+  // other operands are parameters, literals or context references, is computed in the leaf over the
+  // raw value and disclosed as one boolean. Every other use
+  // — a comparison with a column, a function of the column, LIKE, BETWEEN, IS NULL, a sort or
+  // grouping key, a join key, a sub-query operand — sees the placeholder, exactly as under NONE.
+  DISCLOSURE_TEST = 5;
+}
+
+// Where a table's row predicate is evaluated.
+enum Enforcement {
+  ENFORCEMENT_UNSPECIFIED = 0;
+  // The predicate travels to a source that can take it, under the pushdown rules.
+  ENFORCEMENT_PUSHDOWN = 1;
+  // Rows are fetched and filtered in-process. The tenant set never leaves the process, which is what
+  // a shared or query-logging source wants.
+  ENFORCEMENT_LOCAL = 2;
+  // PUSHDOWN, and a plan in which a *remote* table's row predicate would be evaluated locally is
+  // refused with POLICY naming the table and the conjunct or shape the source cannot take.
+  // For a source holding every tenancy's rows, a silent full fetch is the worse failure.
+  ENFORCEMENT_PUSHDOWN_REQUIRED = 3;
+}
+
+// How a logical table's rows are spread over physical tables, possibly in different sources
+//. Every partition has the logical table's row type.
+message Partitioning {
+  // The partition column, as an index into this table's `columns`.
+  uint32 partition_column = 1;
+  repeated Partition partitions = 2;
+}
+
+// One physical table holding the rows whose partition column matches `value` or falls in `range`.
+message Partition {
+  oneof match {
+    // A single value: this partition holds exactly the rows whose partition column equals it.
+    Expr value = 1;
+    // A half-open range [lower, upper).
+    PartitionRange range = 2;
+  }
+  // The source and table the rows actually live in. The schema is the source's own.
+  string source_id = 3;
+  string table = 4;
+  // Exact or estimated rows in this partition. Negative = unknown. The logical table's row count is
+  // the sum of its partitions' when every one of them is known.
+  int64 row_count = 5;
+}
+
+// `lower <= partition column < upper`. An unset bound is unbounded on that side. Both are Literals
+// of the partition column's type.
+message PartitionRange {
+  Expr lower = 1;
+  Expr upper = 2;
+}
+
+// A referential constraint from this table's `columns` to `parent_table`.`parent_columns`, which the
+// planner reads both as a Calcite RelReferentialConstraint and as a join-cardinality bound.
+message ForeignKey {
+  string name = 1;
+  // Column indexes in this table, in key order.
+  repeated uint32 columns = 2;
+  // The parent's table name, in the same schema.
+  string parent_table = 3;
+  // Column indexes in the parent, parallel to `columns`.
+  repeated uint32 parent_columns = 4;
+}
+
+message Column {
+  string name = 1;
+  Type type = 2;
+  // What the source knows about this column's values. Every field may say "unknown".
+  ColumnStatistics statistics = 3;
+}
+
+// How much confidence a row count carries. UNKNOWN also covers a negative `Table.row_count`.
+enum RowCountKind {
+  ROW_COUNT_KIND_UNSPECIFIED = 0;
+  ROW_COUNT_KIND_UNKNOWN = 1;
+  ROW_COUNT_KIND_ESTIMATE = 2;
+  ROW_COUNT_KIND_EXACT = 3;
+}
+
+// How much of a column's statistics is populated. A source that cannot estimate says UNKNOWN,
+// which is a legitimate answer: the planner then uses Calcite's defaults and marks the guess.
+enum StatisticsLevel {
+  // "unknown" is this enum's real zero state, not an unset one: a source that says nothing about a
+  // column is saying something, and these three numbers are fixed by design.
+  // buf:lint:ignore ENUM_ZERO_VALUE_SUFFIX
+  STATISTICS_LEVEL_UNKNOWN = 0;
+  // distinct_count / null_count / min / max, whichever of them the source knows.
+  STATISTICS_LEVEL_BASIC = 1;
+  // BASIC plus an equi-height histogram and a most-common-value list.
+  STATISTICS_LEVEL_HISTOGRAM = 2;
+}
+
+// Per-column statistics. Every field is optional; -1 means "unknown" for the counts and an unset
+// message means "unknown" for the rest.
+message ColumnStatistics {
+  StatisticsLevel level = 1;
+  // Distinct non-null values. -1 unknown.
+  int64 distinct_count = 2;
+  // Rows whose value is NULL. -1 unknown.
+  int64 null_count = 3;
+  // Smallest and largest non-null values, as literals of the column's type. Unset = unknown.
+  Literal min = 4;
+  Literal max = 5;
+  // Equi-height. Unset = unknown.
+  Histogram histogram = 6;
+  // Most common values, most frequent first. May be empty.
+  repeated FrequentValue frequent_values = 7;
+}
+
+message Histogram {
+  repeated HistogramBucket buckets = 1;
+}
+
+// Rows whose value is <= `upper` and > the previous bucket's `upper`.
+message HistogramBucket {
+  Literal upper = 1;
+  int64 count = 2;
+  int64 distinct_count = 3;
+}
+
+message FrequentValue {
+  Literal value = 1;
+  int64 count = 2;
+}
+
+// What the planner charges for the work a source does, per schema and per table; a table's
+// value overrides its schema's, which overrides the planner's defaults. Zero = "use the next level".
+// Profiles travel in the catalog, so a change to one bumps the catalog epoch, not the config hash.
+message CostProfile {
+  // Reading one row by scan. Planner default 1.0.
+  double scan_row_cost = 1;
+  // One index range seek. Planner default 17.0 (≈ log2 of a 100k-row table).
+  double lookup_seek_cost = 2;
+  // One row fetched by index — the random-access penalty. Planner default 4.0.
+  double lookup_row_cost = 3;
+  // One round trip to a remote source. Planner default 1000.0.
+  double remote_call_cost = 4;
+  // One row fetched from a remote source. Planner default 2.0.
+  double remote_row_cost = 5;
+}
+
+message UniqueKey {
+  repeated uint32 columns = 1;
+}
+
+message TableCollation {
+  repeated KeyOrder keys = 1;
+}
+
+message KeyOrder {
+  uint32 column = 1;
+  SortDirection direction = 2;
+}
+
+message Index {
+  string name = 1;
+  IndexKind kind = 2;
+  // Table column indexes, in key order.
+  repeated uint32 columns = 3;
+  bool unique = 4;
+  // Key directions, parallel to `columns`. Empty means every key is ASC NULLS LAST.
+  // Meaningless for INDEX_KIND_HASH, which answers equality only.
+  repeated SortDirection directions = 5;
+  // Table column indexes the index holds its own copy of, in the index's key order
+  //. Ascending, no duplicates, and always a superset
+  // of `columns`, because a range seek binary-searches the key. Empty means every column, which is
+  // what a clustered index that declared no covering set carries. Only INDEX_KIND_CLUSTERED may set
+  // it; for the other kinds there is no copy to describe. A lookup whose projection lies inside this
+  // set is served sequentially from the copy and is priced as a scan.
+  repeated int32 covering = 6;
+}
+
+enum IndexKind {
+  INDEX_KIND_UNSPECIFIED = 0;
+  // Equality lookups only.
+  INDEX_KIND_HASH = 1;
+  // Equality and range lookups on a key prefix; yields rows in key order.
+  INDEX_KIND_ORDERED = 2;
+  // Ordered, and the source holds a second copy of `covering` materialised in the index's key order
+  //. Every rule the ordered kind matches, this one matches too; what differs is the price of
+  // a covered lookup, which is the price of a scan. A sidecar older than this value sees an
+  // unrecognised kind and a client older than it never declares one.
+  INDEX_KIND_CLUSTERED = 3;
+}
+
+// What a source can execute itself. All-false / empty = nothing is pushed, which is the safe
+// default and what every source gets until it says otherwise. Nothing undeclared is ever pushed,
+// and the semantics-drift rules refuse some things even when they are declared.
+message SourceCapabilities {
+  // Whether the source takes a query at all, and in which language. NONE means it can only be
+  // scanned, which is the default behaviour of every source.
+  QueryLanguage query_language = 11;
+
+  // Predicate shapes the source evaluates with Chalk's semantics.
+  repeated PredicateShape pushable_predicates = 1;
+
+  // Scalar functions the source implements with Chalk's semantics. The primary list: a function
+  // that is not named here is not pushed. `unsupported_functions` stays as an exclusion, so a
+  // source may declare a library through the dialect profile and then subtract from it.
+  repeated FunctionId pushable_functions = 12;
+
+  repeated AggregateFunctionId pushable_aggregates = 2;
+
+  // Names of the host's own functions this source runs natively.
+  repeated string native_functions = 13;
+
+  bool supports_project = 3;
+  bool supports_sort = 4;
+  bool supports_limit = 5;
+  bool supports_offset = 14;
+  bool supports_distinct = 15;
+  bool supports_group_by = 16;
+  bool supports_having = 17;
+  bool supports_inner_join = 6;
+  bool supports_outer_join = 7;
+  bool supports_semi_anti_join = 18;
+
+  // Do not push a subtree whose estimated output exceeds this. 0 = unlimited.
+  int64 max_pushdown_rows = 8;
+
+  // The longest IN list the source accepts. 0 = it accepts none, so an IN list is never pushed.
+  int32 max_in_list = 19;
+
+  // Whether a pushed query may carry dynamic parameters. When false the converter inlines the
+  // bound values as literals instead, which means a different query text per parameter value.
+  bool supports_parameters = 20;
+
+  // Whether the source can join a pushed query against inline rows — a `VALUES` list in a SQL
+  // source, an inline VirtualTable in an IR one. What makes JOIN_STRATEGY_BROADCAST
+  // possible: the small side's rows are shipped into the source's own query and it does the join.
+  bool supports_values_join = 21;
+
+  // Whether a mask expression may be evaluated by this source. False everywhere
+  // until a host says otherwise, and even then a table must opt in through
+  // `TableEntitlement.push_masks`: a pushed mask puts the raw value and the mask key in query text,
+  // which is the thing masking exists to prevent.
+  bool supports_mask_pushdown = 22;
+
+  // Whether the source evaluates a conditional — a SQL `CASE`, or the IR's `IfThen` in a pushed
+  // plan. **Absent means true**, which is why the field carries explicit presence: a
+  // `CASE` whose operands all push is SQL-92 and every dialect spells it the same way, so this is
+  // an opt-out for a source that cannot take one rather than an opt-in (owner, 2026-09-17). A
+  // catalog written before this field existed therefore pushes a `CASE`; a source that cannot
+  // render or interpret a conditional sets it to false explicitly. What the conditional is made of
+  // is judged as ever: every operand must be pushable in its own right, so a `CASE` over a function
+  // the source did not declare, or over a string under a collation that is not Chalk's, still stays
+  // where it was.
+  optional bool supports_case = 24;
+
+  // Whether the source accepts a row-constructor IN list — `(a, b) IN ((?, ?), (?, ?))`.
+  // What lets a lookup join carry a multi-column key set, so a bound list of tuples above the fold
+  // ceiling reaches the source as key rows rather than fetching the table whole. Measured on
+  // 2026-09-11: DuckDB 1.5.1 and PostgreSQL 16 both accept it, with `?` placeholders bound
+  // positionally; a source that does not declare it gets the single-column key set or a local join.
+  bool supports_row_value_in_list = 23;
+
+  repeated FunctionId unsupported_functions = 9;
+}
+
+// How a source is asked for rows beyond a plain scan.
+enum QueryLanguage {
+  QUERY_LANGUAGE_UNSPECIFIED = 0;
+  // Scan only. The source is read through ScanAsync and everything runs locally.
+  QUERY_LANGUAGE_NONE = 1;
+  // The source takes SQL, in the dialect its DialectProfile describes: RemoteQuery.query_text.
+  QUERY_LANGUAGE_SQL = 2;
+  // The source interprets the pushed subtree itself: RemoteQuery.pushed_plan.
+  QUERY_LANGUAGE_IR = 3;
+}
+
+enum PredicateShape {
+  PREDICATE_SHAPE_UNSPECIFIED = 0;
+  PREDICATE_SHAPE_EQ = 1;
+  PREDICATE_SHAPE_RANGE = 2;
+  PREDICATE_SHAPE_IN = 3;
+  PREDICATE_SHAPE_LIKE_PREFIX = 4;
+  PREDICATE_SHAPE_IS_NULL = 5;
+  // A LIKE with a pattern that is not a plain prefix — `%` or `_` anywhere but the end.
+  PREDICATE_SHAPE_LIKE = 6;
+  // Negation of a pushable shape.
+  PREDICATE_SHAPE_NOT = 7;
+  // Conjunction and disjunction of pushable shapes. Without AND, only a single-conjunct predicate
+  // is ever pushed.
+  PREDICATE_SHAPE_AND = 8;
+  PREDICATE_SHAPE_OR = 9;
+}

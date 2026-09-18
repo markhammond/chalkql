@@ -1,0 +1,295 @@
+{
+  "irVersion": 1,
+  "planDigest": "17440540590047658465",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "tc_plus",
+        "type": {
+          "kind": "TYPE_KIND_I32",
+          "nullable": true
+        }
+      },
+      {
+        "name": "vwap_doubled",
+        "type": {
+          "kind": "TYPE_KIND_DECIMAL",
+          "nullable": true,
+          "precision": 38,
+          "scale": 10
+        }
+      },
+      {
+        "name": "busy",
+        "type": {
+          "kind": "TYPE_KIND_BOOL",
+          "nullable": true
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "tc_plus",
+          "type": {
+            "kind": "TYPE_KIND_I32",
+            "nullable": true
+          }
+        },
+        {
+          "name": "vwap_doubled",
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "nullable": true,
+            "precision": 38,
+            "scale": 10
+          }
+        },
+        {
+          "name": "busy",
+          "type": {
+            "kind": "TYPE_KIND_BOOL",
+            "nullable": true
+          }
+        }
+      ]
+    },
+    "estRowCount": 100800,
+    "project": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              }
+            },
+            {
+              "name": "open",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              }
+            },
+            {
+              "name": "high",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              }
+            },
+            {
+              "name": "low",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              }
+            },
+            {
+              "name": "close",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              }
+            },
+            {
+              "name": "volume",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            },
+            {
+              "name": "vwap",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              }
+            },
+            {
+              "name": "trade_count",
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              }
+            }
+          ]
+        },
+        "estRowCount": 100800,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "read": {
+          "table": {
+            "sourceId": "mem",
+            "schema": "main",
+            "table": "bars"
+          },
+          "projection": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8
+          ]
+        }
+      },
+      "exprs": [
+        {
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          },
+          "fieldRef": {}
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_I32",
+            "nullable": true
+          },
+          "call": {
+            "function": "FUNCTION_ID_ADD",
+            "args": [
+              {
+                "type": {
+                  "kind": "TYPE_KIND_I32",
+                  "nullable": true
+                },
+                "fieldRef": {
+                  "index": 8
+                }
+              },
+              {
+                "type": {
+                  "kind": "TYPE_KIND_I32"
+                },
+                "literal": {
+                  "i32Value": 1
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "nullable": true,
+            "precision": 38,
+            "scale": 10
+          },
+          "call": {
+            "function": "FUNCTION_ID_MULTIPLY",
+            "args": [
+              {
+                "type": {
+                  "kind": "TYPE_KIND_DECIMAL",
+                  "nullable": true,
+                  "precision": 28,
+                  "scale": 10
+                },
+                "fieldRef": {
+                  "index": 7
+                }
+              },
+              {
+                "type": {
+                  "kind": "TYPE_KIND_DECIMAL",
+                  "nullable": true,
+                  "precision": 28,
+                  "scale": 10
+                },
+                "cast": {
+                  "input": {
+                    "type": {
+                      "kind": "TYPE_KIND_I32"
+                    },
+                    "literal": {
+                      "i32Value": 2
+                    }
+                  },
+                  "onFailure": "CAST_FAILURE_ERROR"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_BOOL",
+            "nullable": true
+          },
+          "call": {
+            "function": "FUNCTION_ID_GT",
+            "args": [
+              {
+                "type": {
+                  "kind": "TYPE_KIND_I32",
+                  "nullable": true
+                },
+                "fieldRef": {
+                  "index": 8
+                }
+              },
+              {
+                "type": {
+                  "kind": "TYPE_KIND_I32"
+                },
+                "literal": {
+                  "i32Value": 100
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Architecture.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Chalk.Client/Chalk.Client.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.Poco/Chalk.Sources.Poco.csproj" />
+    <!-- D264: the friend-list guard reads Chalk.Sources.Ado's own InternalsVisibleTo attributes. -->
+    <ProjectReference Include="../../src/Chalk.Sources.Ado/Chalk.Sources.Ado.csproj" />
+    <ProjectReference Include="../Chalk.TestKit/Chalk.TestKit.csproj" />
+  </ItemGroup>
+
+</Project>

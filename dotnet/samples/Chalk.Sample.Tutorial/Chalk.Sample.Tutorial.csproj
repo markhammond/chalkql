@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Chalk.Sample.Tutorial</RootNamespace>
+    <AssemblyName>Chalk.Sample.Tutorial</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Chalk.Client/Chalk.Client.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.Poco/Chalk.Sources.Poco.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.Ado/Chalk.Sources.Ado.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.DuckDb/Chalk.Sources.DuckDb.csproj" />
+
+    <!-- Chapter 10: the entitlement decorator, and the tenancy package that compiles to it. -->
+    <ProjectReference Include="../../src/Chalk.Entitlements/Chalk.Entitlements.csproj" />
+    <ProjectReference Include="../../src/Chalk.Entitlements.Tenancy/Chalk.Entitlements.Tenancy.csproj" />
+  </ItemGroup>
+
+  <!--
+    `Chalk.Sources.DuckDb` references `DuckDB.NET.Data`, which is the provider and nothing else: the
+    native library is the host's choice (README, "DuckDB"). This sample is a host, so it picks one —
+    `DuckDB.NET.Data.Full` at the same version, because both packages carry the same
+    `DuckDB.NET.Data.dll` and the two must match.
+  -->
+  <ItemGroup>
+    <PackageReference Include="DuckDB.NET.Data.Full" />
+  </ItemGroup>
+
+  <!--
+    The reference half of the marketplace lives in SQLite, and the provider is the
+    host's choice exactly as DuckDB's is. The SQLitePCLRaw bundle is referenced directly so the
+    whole family resolves to one patched version rather than the 2.1.11 provider the driver would
+    otherwise bring (Directory.Packages.props).
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
+  </ItemGroup>
+
+</Project>

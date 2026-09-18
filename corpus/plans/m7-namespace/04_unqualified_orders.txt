@@ -1,0 +1,31 @@
+-- ledger-only
+report id:Full, amount:PerRow, ledger.orders:Some
+1|1001
+2|1002
+
+-- archive-only
+report id:Full, amount:Full, ledger.orders:Some
+
+-- both
+report id:Full, amount:PerRow, ledger.orders:Some
+1|1001
+2|1002
+
+-- global
+report id:Full, amount:Full, ledger.orders:All
+1|1001
+2|1002
+3|1003
+4|1004
+
+-- owner
+report id:Full, amount:Full, ledger.orders:Some
+1|1001
+
+-- subject
+report id:Full, amount:PerRow, ledger.orders:Some
+1|<null>
+
+-- auditor-in-ledger
+POLICY Refused by the entitlements: ledger.orders.amount is population-only for this principal and a projection to the result is not one of the aggregates it permits.
+

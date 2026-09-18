@@ -1,0 +1,12 @@
+-- FULL
+ChalkSort(sort0=[$0], dir0=[ASC])
+  ChalkProject(h=[$0], c=[/($1, $2)])
+    ChalkHashAggregate(group=[{0}], agg#0=[$SUM0($1)], agg#1=[COUNT()])
+      ChalkProject(h=[EXTRACT(FLAG(HOUR), $1)], close=[$5])
+        ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])
+-- NONE
+ChalkSort(sort0=[$0], dir0=[ASC])
+  ChalkProject(h=[$0], c=[/($1, $2)])
+    ChalkHashAggregate(group=[{0}], agg#0=[$SUM0($1)], agg#1=[COUNT()])
+      ChalkProject(h=[EXTRACT(FLAG(HOUR), $1)], close=[$5])
+        ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])

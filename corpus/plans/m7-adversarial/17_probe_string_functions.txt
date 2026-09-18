@@ -1,0 +1,76 @@
+-- u1
+report id:Full, part:PerRow, len:PerRow, upper_last:PerRow, members:Some
+1|Tar|20|NG CANARY-LAST-01
+2|Bo |18|ITO CANARY-LAST-02
+3|T|1|E
+4|A|1|R
+7|T|1|V
+
+-- u2
+report id:Full, part:Masked, len:Masked, upper_last:Masked, members:Some
+1|T|1|N
+2|B|1|I
+
+-- u3
+report id:Full, part:Redacted, len:Redacted, upper_last:Redacted, members:Some
+3|<null>|<null>|<null>
+
+-- u3-in-o1
+report id:Full, part:Redacted, len:Redacted, upper_last:Redacted, members:Some
+
+-- u4
+report id:Full, part:Full, len:Full, upper_last:Full, members:All
+1|Tar|20|NG CANARY-LAST-01
+2|Bo |18|ITO CANARY-LAST-02
+3|Tom|21|EK CANARY-LAST-03
+4|Ada|19|ROY CANARY-LAST-04
+5|Kim|19|ZHAO CANARY-LAST-05
+6|Lea|19|FOX CANARY-LAST-06
+7|Tar|20|VO CANARY-LAST-07
+
+-- u5
+report id:Full, part:Redacted, len:Redacted, upper_last:Redacted, members:None
+
+-- u6
+report id:Full, part:Masked, len:Masked, upper_last:Masked, members:Some
+1|ed2|32|4AA55AA1ADAD84F83BAA113ADC72C271
+2|665|32|226B5C1078FD4ADFC38C6A0A8893C273
+
+-- u6-two-orgs
+report id:Full, part:Masked, len:Masked, upper_last:Masked, members:Some
+1|ed2|32|4AA55AA1ADAD84F83BAA113ADC72C271
+2|665|32|226B5C1078FD4ADFC38C6A0A8893C273
+3|0b1|32|9B6490A31026458DC29933372E69D13C
+4|13e|32|7B76FAF77703783F8DE65C735793CB05
+7|ed2|32|97F77E6BD7D3A38BDA43A49773C4DD25
+
+-- u7
+report id:Full, part:Redacted, len:Redacted, upper_last:Redacted, members:None
+
+-- u8
+report id:Full, part:Redacted, len:Redacted, upper_last:Redacted, members:Some
+1|<null>|<null>|<null>
+2|<null>|<null>|<null>
+
+-- u9
+report id:Full, part:Redacted, len:Redacted, upper_last:Redacted, members:Some
+1|<null>|<null>|<null>
+2|<null>|<null>|<null>
+3|<null>|<null>|<null>
+4|<null>|<null>|<null>
+7|<null>|<null>|<null>
+
+-- u10-in-a-region
+report id:Full, part:Redacted, len:Redacted, upper_last:Redacted, members:None
+
+-- u11-subject-in-a-region
+report id:Full, part:Redacted, len:Redacted, upper_last:Redacted, members:None
+
+-- u14-a-vendor
+report id:Full, part:Redacted, len:Redacted, upper_last:Redacted, members:None
+
+-- u15-a-vendor-and-an-org
+report id:Full, part:Full, len:Full, upper_last:Full, members:Some
+1|Tar|20|NG CANARY-LAST-01
+2|Bo |18|ITO CANARY-LAST-02
+

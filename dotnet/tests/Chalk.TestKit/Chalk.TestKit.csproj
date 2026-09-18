@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.TestKit</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3.assert" />
+    <PackageReference Include="xunit.v3.extensibility.core" />
+
+    <!--
+      The two drivers the M4 corpus points the in-box ADO.NET source. Test-only, and
+      referenced here rather than in Chalk.Sources.Ado on purpose: the source itself depends on
+      System.Data.Common and nothing else.
+    -->
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
+    <PackageReference Include="DuckDB.NET.Data.Full" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Chalk.Ir/Chalk.Ir.csproj" />
+    <ProjectReference Include="../../src/Chalk.Catalog/Chalk.Catalog.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.Abstractions/Chalk.Sources.Abstractions.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.Poco/Chalk.Sources.Poco.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.Ado/Chalk.Sources.Ado.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.DuckDb/Chalk.Sources.DuckDb.csproj" />
+    <ProjectReference Include="../../src/Chalk.Execution/Chalk.Execution.csproj" />
+    <ProjectReference Include="../../src/Chalk.Client/Chalk.Client.csproj" />
+    <ProjectReference Include="../../src/Chalk.Entitlements.Tenancy/Chalk.Entitlements.Tenancy.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.Conformance/Chalk.Sources.Conformance.csproj" />
+
+    <!--
+      The Akade sample, so the `bars-akade` fixture can supply bars' indexes through it.
+      A test project depending on a sample is the right direction: the sample never depends on a test,
+      and no Chalk.* package depends on either.
+    -->
+    <ProjectReference Include="../../samples/Chalk.Sample.AkadeIndexedSet/Chalk.Sample.AkadeIndexedSet.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CHALK001</NoWarn>
+  </PropertyGroup>
+
+</Project>

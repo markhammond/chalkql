@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Sources.Poco</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>Chalk in-process POCO source: register IReadOnlyList&lt;T&gt; collections as first-class SQL tables.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Apache.Arrow" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Chalk.Sources.Abstractions/Chalk.Sources.Abstractions.csproj" />
+    <ProjectReference Include="../Chalk.Catalog/Chalk.Catalog.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Chalk.Sources.Poco.Tests" />
+  </ItemGroup>
+
+  <!--
+    The public surface is reviewed rather than discovered (F7). PublicAPI.Shipped.txt is empty until
+    the first tagged release; everything this package exposes is listed in PublicAPI.Unshipped.txt,
+    so adding, removing or changing a public symbol shows up as a diff on that file.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <!--
+    RS0026 ("do not add multiple overloads with optional parameters") fires on AddTable<T> and on
+    the two Column<T> overloads — a member override and a computed column, which take different
+    arguments and both end in an optional one. Reported rather than enforced: the shape is the
+    design (04-client.md §6), and ADR 0014 notes it for the owner to settle before the first release.
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);RS0026</NoWarn>
+  </PropertyGroup>
+
+  <!--
+    CHALK001 is the experimental id the Tier 2 kernel interface and the columnar views carry (D79).
+    The engine and the in-box sources are the code those types were extracted from, so they opt in
+    once here rather than at every use.
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CHALK001</NoWarn>
+  </PropertyGroup>
+
+</Project>

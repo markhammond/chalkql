@@ -1,0 +1,311 @@
+{
+  "irVersion": 1,
+  "planDigest": "8806916740901301612",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "id",
+        "type": {
+          "kind": "TYPE_KIND_I32"
+        }
+      },
+      {
+        "name": "d_null",
+        "type": {
+          "kind": "TYPE_KIND_BOOL"
+        }
+      },
+      {
+        "name": "nd_null",
+        "type": {
+          "kind": "TYPE_KIND_BOOL"
+        }
+      },
+      {
+        "name": "d_twenty",
+        "type": {
+          "kind": "TYPE_KIND_BOOL"
+        }
+      },
+      {
+        "name": "nd_twenty",
+        "type": {
+          "kind": "TYPE_KIND_BOOL"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          }
+        },
+        {
+          "name": "d_null",
+          "type": {
+            "kind": "TYPE_KIND_BOOL"
+          }
+        },
+        {
+          "name": "nd_null",
+          "type": {
+            "kind": "TYPE_KIND_BOOL"
+          }
+        },
+        {
+          "name": "d_twenty",
+          "type": {
+            "kind": "TYPE_KIND_BOOL"
+          }
+        },
+        {
+          "name": "nd_twenty",
+          "type": {
+            "kind": "TYPE_KIND_BOOL"
+          }
+        }
+      ]
+    },
+    "estRowCount": 6,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              }
+            },
+            {
+              "name": "d_null",
+              "type": {
+                "kind": "TYPE_KIND_BOOL"
+              }
+            },
+            {
+              "name": "nd_null",
+              "type": {
+                "kind": "TYPE_KIND_BOOL"
+              }
+            },
+            {
+              "name": "d_twenty",
+              "type": {
+                "kind": "TYPE_KIND_BOOL"
+              }
+            },
+            {
+              "name": "nd_twenty",
+              "type": {
+                "kind": "TYPE_KIND_BOOL"
+              }
+            }
+          ]
+        },
+        "estRowCount": 6,
+        "project": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "id",
+                  "type": {
+                    "kind": "TYPE_KIND_I32"
+                  }
+                },
+                {
+                  "name": "region",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                },
+                {
+                  "name": "amount",
+                  "type": {
+                    "kind": "TYPE_KIND_I32",
+                    "nullable": true
+                  }
+                },
+                {
+                  "name": "label",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                }
+              ]
+            },
+            "estRowCount": 6,
+            "read": {
+              "table": {
+                "sourceId": "mem",
+                "schema": "main",
+                "table": "sales"
+              },
+              "projection": [
+                0,
+                1,
+                2,
+                3
+              ]
+            }
+          },
+          "exprs": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {}
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_BOOL"
+              },
+              "call": {
+                "function": "FUNCTION_ID_IS_NOT_NULL",
+                "args": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_I32",
+                      "nullable": true
+                    },
+                    "fieldRef": {
+                      "index": 2
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_BOOL"
+              },
+              "call": {
+                "function": "FUNCTION_ID_IS_NULL",
+                "args": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_I32",
+                      "nullable": true
+                    },
+                    "fieldRef": {
+                      "index": 2
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_BOOL"
+              },
+              "call": {
+                "function": "FUNCTION_ID_IS_NOT_TRUE",
+                "args": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_BOOL",
+                      "nullable": true
+                    },
+                    "call": {
+                      "function": "FUNCTION_ID_EQ",
+                      "args": [
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_I32",
+                            "nullable": true
+                          },
+                          "fieldRef": {
+                            "index": 2
+                          }
+                        },
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_I32"
+                          },
+                          "literal": {
+                            "i32Value": 20
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_BOOL"
+              },
+              "call": {
+                "function": "FUNCTION_ID_IS_TRUE",
+                "args": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_BOOL",
+                      "nullable": true
+                    },
+                    "call": {
+                      "function": "FUNCTION_ID_EQ",
+                      "args": [
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_I32",
+                            "nullable": true
+                          },
+                          "fieldRef": {
+                            "index": 2
+                          }
+                        },
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_I32"
+                          },
+                          "literal": {
+                            "i32Value": 20
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_I32"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

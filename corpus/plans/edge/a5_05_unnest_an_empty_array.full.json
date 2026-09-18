@@ -1,0 +1,261 @@
+{
+  "irVersion": 1,
+  "planDigest": "11466595731825128584",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "tag",
+        "type": {
+          "kind": "TYPE_KIND_STRING",
+          "nullable": true
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "tag",
+          "type": {
+            "kind": "TYPE_KIND_STRING",
+            "nullable": true
+          }
+        }
+      ]
+    },
+    "estRowCount": 4,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "project": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "tags",
+              "type": {
+                "kind": "TYPE_KIND_LIST",
+                "nullable": true,
+                "element": {
+                  "kind": "TYPE_KIND_STRING",
+                  "nullable": true
+                }
+              }
+            },
+            {
+              "name": "tags0",
+              "type": {
+                "kind": "TYPE_KIND_STRING",
+                "nullable": true
+              }
+            }
+          ]
+        },
+        "estRowCount": 4,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "unnest": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "symbol",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                },
+                {
+                  "name": "tags",
+                  "type": {
+                    "kind": "TYPE_KIND_LIST",
+                    "nullable": true,
+                    "element": {
+                      "kind": "TYPE_KIND_STRING",
+                      "nullable": true
+                    }
+                  }
+                }
+              ]
+            },
+            "estRowCount": 1,
+            "collations": [
+              {
+                "fields": [
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {}
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  }
+                ]
+              }
+            ],
+            "filter": {
+              "input": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "symbol",
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      }
+                    },
+                    {
+                      "name": "tags",
+                      "type": {
+                        "kind": "TYPE_KIND_LIST",
+                        "nullable": true,
+                        "element": {
+                          "kind": "TYPE_KIND_STRING",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 5,
+                "collations": [
+                  {
+                    "fields": [
+                      {
+                        "expr": {
+                          "type": {
+                            "kind": "TYPE_KIND_STRING"
+                          },
+                          "fieldRef": {}
+                        },
+                        "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                      }
+                    ]
+                  }
+                ],
+                "read": {
+                  "table": {
+                    "sourceId": "mem",
+                    "schema": "main",
+                    "table": "symbols"
+                  },
+                  "projection": [
+                    0,
+                    4
+                  ]
+                }
+              },
+              "condition": {
+                "type": {
+                  "kind": "TYPE_KIND_BOOL",
+                  "nullable": true
+                },
+                "call": {
+                  "function": "FUNCTION_ID_EQ",
+                  "args": [
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_I32",
+                        "nullable": true
+                      },
+                      "call": {
+                        "function": "FUNCTION_ID_CARDINALITY",
+                        "args": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_LIST",
+                              "nullable": true,
+                              "element": {
+                                "kind": "TYPE_KIND_STRING",
+                                "nullable": true
+                              }
+                            },
+                            "fieldRef": {
+                              "index": 1
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_I32"
+                      },
+                      "literal": {
+                        "i32Value": 0
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "listColumn": 1,
+          "keepEmpty": true
+        }
+      },
+      "exprs": [
+        {
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          },
+          "fieldRef": {}
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_STRING",
+            "nullable": true
+          },
+          "fieldRef": {
+            "index": 2
+          }
+        }
+      ]
+    }
+  }
+}

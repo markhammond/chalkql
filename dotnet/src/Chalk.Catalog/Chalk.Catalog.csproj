@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Catalog</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>Chalk catalog model: CatalogContext, schema/table/column descriptors and their proto mapping.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Chalk.Ir/Chalk.Ir.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Chalk.Catalog.Tests" />
+    <InternalsVisibleTo Include="Chalk.Client" />
+    <InternalsVisibleTo Include="Chalk.CorpusTool" />
+    <InternalsVisibleTo Include="Chalk.TestKit" />
+  </ItemGroup>
+
+  <!--
+    The public surface is reviewed rather than discovered (F7). PublicAPI.Shipped.txt is empty until
+    the first tagged release; everything this package exposes is listed in PublicAPI.Unshipped.txt,
+    so adding, removing or changing a public symbol shows up as a diff on that file.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+</Project>

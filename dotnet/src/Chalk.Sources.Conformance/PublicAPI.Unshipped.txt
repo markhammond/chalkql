@@ -1,0 +1,188 @@
+#nullable enable
+Chalk.Sources.Conformance.BatteryCase
+Chalk.Sources.Conformance.BatteryCase.BatteryCase() -> void
+Chalk.Sources.Conformance.BatteryCase.Binding.get -> string!
+Chalk.Sources.Conformance.BatteryCase.Binding.init -> void
+Chalk.Sources.Conformance.BatteryCase.Catalog.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+Chalk.Sources.Conformance.BatteryCase.Catalog.init -> void
+Chalk.Sources.Conformance.BatteryCase.Compare.get -> string!
+Chalk.Sources.Conformance.BatteryCase.Compare.init -> void
+Chalk.Sources.Conformance.BatteryCase.Expect.get -> Chalk.Sources.Conformance.BatteryExpectation!
+Chalk.Sources.Conformance.BatteryCase.Expect.init -> void
+Chalk.Sources.Conformance.BatteryCase.File.get -> string!
+Chalk.Sources.Conformance.BatteryCase.File.init -> void
+Chalk.Sources.Conformance.BatteryCase.Group.get -> string!
+Chalk.Sources.Conformance.BatteryCase.Group.init -> void
+Chalk.Sources.Conformance.BatteryCase.Id.get -> string!
+Chalk.Sources.Conformance.BatteryCase.Id.init -> void
+Chalk.Sources.Conformance.BatteryCase.Notes.get -> string!
+Chalk.Sources.Conformance.BatteryCase.Notes.init -> void
+Chalk.Sources.Conformance.BatteryCase.Options.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+Chalk.Sources.Conformance.BatteryCase.Options.init -> void
+Chalk.Sources.Conformance.BatteryCase.Phase.get -> string!
+Chalk.Sources.Conformance.BatteryCase.Phase.init -> void
+Chalk.Sources.Conformance.BatteryCase.Principal.get -> string!
+Chalk.Sources.Conformance.BatteryCase.Principal.init -> void
+Chalk.Sources.Conformance.BatteryCase.Source.get -> string!
+Chalk.Sources.Conformance.BatteryCase.Source.init -> void
+Chalk.Sources.Conformance.BatteryCase.Sql.get -> string!
+Chalk.Sources.Conformance.BatteryCase.Sql.init -> void
+Chalk.Sources.Conformance.BatteryError
+Chalk.Sources.Conformance.BatteryError.BatteryError() -> void
+Chalk.Sources.Conformance.BatteryError.Column.get -> string!
+Chalk.Sources.Conformance.BatteryError.Column.init -> void
+Chalk.Sources.Conformance.BatteryError.Detail.get -> string!
+Chalk.Sources.Conformance.BatteryError.Detail.init -> void
+Chalk.Sources.Conformance.BatteryError.Kind.get -> string!
+Chalk.Sources.Conformance.BatteryError.Kind.init -> void
+Chalk.Sources.Conformance.BatteryError.Table.get -> string!
+Chalk.Sources.Conformance.BatteryError.Table.init -> void
+Chalk.Sources.Conformance.BatteryError.Use.get -> string!
+Chalk.Sources.Conformance.BatteryError.Use.init -> void
+Chalk.Sources.Conformance.BatteryExpectation
+Chalk.Sources.Conformance.BatteryExpectation.Asserts.get -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyList<string!>!>!
+Chalk.Sources.Conformance.BatteryExpectation.Asserts.init -> void
+Chalk.Sources.Conformance.BatteryExpectation.BatteryExpectation() -> void
+Chalk.Sources.Conformance.BatteryExpectation.Columns.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+Chalk.Sources.Conformance.BatteryExpectation.Columns.init -> void
+Chalk.Sources.Conformance.BatteryExpectation.Error.get -> Chalk.Sources.Conformance.BatteryError?
+Chalk.Sources.Conformance.BatteryExpectation.Error.init -> void
+Chalk.Sources.Conformance.BatteryExpectation.Report.get -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyDictionary<string!, string!>!>!
+Chalk.Sources.Conformance.BatteryExpectation.Report.init -> void
+Chalk.Sources.Conformance.BatteryExpectation.Rows.get -> System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<object?>!>?
+Chalk.Sources.Conformance.BatteryExpectation.Rows.init -> void
+Chalk.Sources.Conformance.BatteryRun
+Chalk.Sources.Conformance.BatteryRun.BatteryRun() -> void
+Chalk.Sources.Conformance.BatteryRun.Columns.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Sources.Conformance.BatteryRun.Columns.init -> void
+Chalk.Sources.Conformance.BatteryRun.Disclosures.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Sources.Conformance.BatteryRun.Disclosures.init -> void
+Chalk.Sources.Conformance.BatteryRun.PlanFacts.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+Chalk.Sources.Conformance.BatteryRun.PlanFacts.init -> void
+Chalk.Sources.Conformance.BatteryRun.Refusal.get -> string!
+Chalk.Sources.Conformance.BatteryRun.Refusal.init -> void
+Chalk.Sources.Conformance.BatteryRun.RefusalKind.get -> string!
+Chalk.Sources.Conformance.BatteryRun.RefusalKind.init -> void
+Chalk.Sources.Conformance.BatteryRun.RemoteQueries.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Sources.Conformance.BatteryRun.RemoteQueries.init -> void
+Chalk.Sources.Conformance.BatteryRun.Report.get -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyDictionary<string!, string!>!>!
+Chalk.Sources.Conformance.BatteryRun.Report.init -> void
+Chalk.Sources.Conformance.BatteryRun.Rows.get -> System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<object?>!>!
+Chalk.Sources.Conformance.BatteryRun.Rows.init -> void
+Chalk.Sources.Conformance.ConformanceChecks
+Chalk.Sources.Conformance.ConformanceChecks.All = Chalk.Sources.Conformance.ConformanceChecks.Capabilities | Chalk.Sources.Conformance.ConformanceChecks.Dialect | Chalk.Sources.Conformance.ConformanceChecks.Uniqueness -> Chalk.Sources.Conformance.ConformanceChecks
+Chalk.Sources.Conformance.ConformanceChecks.Capabilities = 1 -> Chalk.Sources.Conformance.ConformanceChecks
+Chalk.Sources.Conformance.ConformanceChecks.Dialect = 2 -> Chalk.Sources.Conformance.ConformanceChecks
+Chalk.Sources.Conformance.ConformanceChecks.None = 0 -> Chalk.Sources.Conformance.ConformanceChecks
+Chalk.Sources.Conformance.ConformanceChecks.Uniqueness = 4 -> Chalk.Sources.Conformance.ConformanceChecks
+Chalk.Sources.Conformance.ConformanceDataset
+Chalk.Sources.Conformance.ConformanceException
+Chalk.Sources.Conformance.ConformanceException.ConformanceException(Chalk.Sources.Conformance.ConformanceReport! report) -> void
+Chalk.Sources.Conformance.ConformanceException.Report.get -> Chalk.Sources.Conformance.ConformanceReport!
+Chalk.Sources.Conformance.ConformanceFinding
+Chalk.Sources.Conformance.ConformanceFinding.Advice.get -> string!
+Chalk.Sources.Conformance.ConformanceFinding.Advice.init -> void
+Chalk.Sources.Conformance.ConformanceFinding.ConformanceFinding() -> void
+Chalk.Sources.Conformance.ConformanceFinding.Declared.get -> string!
+Chalk.Sources.Conformance.ConformanceFinding.Declared.init -> void
+Chalk.Sources.Conformance.ConformanceFinding.Observed.get -> string!
+Chalk.Sources.Conformance.ConformanceFinding.Observed.init -> void
+Chalk.Sources.Conformance.ConformanceFinding.Outcome.get -> Chalk.Sources.Conformance.ConformanceOutcome
+Chalk.Sources.Conformance.ConformanceFinding.Outcome.init -> void
+Chalk.Sources.Conformance.ConformanceFinding.Subject.get -> string!
+Chalk.Sources.Conformance.ConformanceFinding.Subject.init -> void
+Chalk.Sources.Conformance.ConformanceOptions
+Chalk.Sources.Conformance.ConformanceOptions.BatchSize.get -> int
+Chalk.Sources.Conformance.ConformanceOptions.BatchSize.init -> void
+Chalk.Sources.Conformance.ConformanceOptions.Checks.get -> Chalk.Sources.Conformance.ConformanceChecks
+Chalk.Sources.Conformance.ConformanceOptions.Checks.init -> void
+Chalk.Sources.Conformance.ConformanceOptions.ConformanceOptions() -> void
+Chalk.Sources.Conformance.ConformanceOptions.Seed.get -> System.Func<Chalk.Sources.Conformance.ConformanceSeed!, System.Threading.CancellationToken, System.Threading.Tasks.Task!>?
+Chalk.Sources.Conformance.ConformanceOptions.Seed.init -> void
+Chalk.Sources.Conformance.ConformanceOptions.Server.get -> string!
+Chalk.Sources.Conformance.ConformanceOptions.Server.init -> void
+Chalk.Sources.Conformance.ConformanceOptions.Table.get -> string!
+Chalk.Sources.Conformance.ConformanceOptions.Table.init -> void
+Chalk.Sources.Conformance.ConformanceOutcome
+Chalk.Sources.Conformance.ConformanceOutcome.Fail = 1 -> Chalk.Sources.Conformance.ConformanceOutcome
+Chalk.Sources.Conformance.ConformanceOutcome.Pass = 0 -> Chalk.Sources.Conformance.ConformanceOutcome
+Chalk.Sources.Conformance.ConformanceOutcome.Skipped = 2 -> Chalk.Sources.Conformance.ConformanceOutcome
+Chalk.Sources.Conformance.ConformanceReport
+Chalk.Sources.Conformance.ConformanceReport.ConformanceReport() -> void
+Chalk.Sources.Conformance.ConformanceReport.Failures.get -> int
+Chalk.Sources.Conformance.ConformanceReport.Findings.get -> System.Collections.Generic.IReadOnlyList<Chalk.Sources.Conformance.ConformanceFinding!>!
+Chalk.Sources.Conformance.ConformanceReport.Findings.init -> void
+Chalk.Sources.Conformance.ConformanceReport.Passed.get -> bool
+Chalk.Sources.Conformance.ConformanceReport.Server.get -> string!
+Chalk.Sources.Conformance.ConformanceReport.Server.init -> void
+Chalk.Sources.Conformance.ConformanceReport.Skipped.get -> int
+Chalk.Sources.Conformance.ConformanceReport.SourceId.get -> string!
+Chalk.Sources.Conformance.ConformanceReport.SourceId.init -> void
+Chalk.Sources.Conformance.ConformanceSeed
+Chalk.Sources.Conformance.ConformanceSeed.Batch.get -> Apache.Arrow.RecordBatch!
+Chalk.Sources.Conformance.ConformanceSeed.Batch.init -> void
+Chalk.Sources.Conformance.ConformanceSeed.ConformanceSeed() -> void
+Chalk.Sources.Conformance.ConformanceSeed.CreateTable.get -> string!
+Chalk.Sources.Conformance.ConformanceSeed.CreateTable.init -> void
+Chalk.Sources.Conformance.ConformanceSeed.Inserts.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Sources.Conformance.ConformanceSeed.Inserts.init -> void
+Chalk.Sources.Conformance.ConformanceSeed.Source.get -> Chalk.Sources.ISourceRuntime!
+Chalk.Sources.Conformance.ConformanceSeed.Source.init -> void
+Chalk.Sources.Conformance.ConformanceSeed.Table.get -> string!
+Chalk.Sources.Conformance.ConformanceSeed.Table.init -> void
+Chalk.Sources.Conformance.PolicyBattery
+Chalk.Sources.Conformance.PolicyCase
+Chalk.Sources.Conformance.PolicyCase.Columns.get -> System.Collections.Generic.IReadOnlyList<Chalk.Sources.Conformance.PolicyColumn!>!
+Chalk.Sources.Conformance.PolicyCase.Columns.init -> void
+Chalk.Sources.Conformance.PolicyCase.DisclosedRows.get -> System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<object?>!>?
+Chalk.Sources.Conformance.PolicyCase.DisclosedRows.init -> void
+Chalk.Sources.Conformance.PolicyCase.Name.get -> string!
+Chalk.Sources.Conformance.PolicyCase.Name.init -> void
+Chalk.Sources.Conformance.PolicyCase.PolicyCase() -> void
+Chalk.Sources.Conformance.PolicyCase.Principal.get -> string!
+Chalk.Sources.Conformance.PolicyCase.Principal.init -> void
+Chalk.Sources.Conformance.PolicyCase.Rows.get -> System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<object?>!>!
+Chalk.Sources.Conformance.PolicyCase.Rows.init -> void
+Chalk.Sources.Conformance.PolicyCase.SingleTableScan.get -> bool
+Chalk.Sources.Conformance.PolicyCase.SingleTableScan.init -> void
+Chalk.Sources.Conformance.PolicyCase.Tables.get -> System.Collections.Generic.IReadOnlyList<Chalk.Sources.Conformance.PolicyTable!>!
+Chalk.Sources.Conformance.PolicyCase.Tables.init -> void
+Chalk.Sources.Conformance.PolicyColumn
+Chalk.Sources.Conformance.PolicyColumn.ArrowMetadata.get -> string?
+Chalk.Sources.Conformance.PolicyColumn.ArrowMetadata.init -> void
+Chalk.Sources.Conformance.PolicyColumn.Name.get -> string!
+Chalk.Sources.Conformance.PolicyColumn.Name.init -> void
+Chalk.Sources.Conformance.PolicyColumn.PolicyColumn() -> void
+Chalk.Sources.Conformance.PolicyColumn.Reported.get -> string!
+Chalk.Sources.Conformance.PolicyColumn.Reported.init -> void
+Chalk.Sources.Conformance.PolicyConformance
+Chalk.Sources.Conformance.PolicyTable
+Chalk.Sources.Conformance.PolicyTable.PolicyTable() -> void
+Chalk.Sources.Conformance.PolicyTable.RemoteQueryText.get -> string?
+Chalk.Sources.Conformance.PolicyTable.RemoteQueryText.init -> void
+Chalk.Sources.Conformance.PolicyTable.RowPredicatePushed.get -> bool
+Chalk.Sources.Conformance.PolicyTable.RowPredicatePushed.init -> void
+Chalk.Sources.Conformance.PolicyTable.ScopeLiterals.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Sources.Conformance.PolicyTable.ScopeLiterals.init -> void
+Chalk.Sources.Conformance.PolicyTable.Table.get -> string!
+Chalk.Sources.Conformance.PolicyTable.Table.init -> void
+Chalk.Sources.Conformance.PolicyTable.UnfilteredRowCount.get -> int?
+Chalk.Sources.Conformance.PolicyTable.UnfilteredRowCount.init -> void
+Chalk.Sources.Conformance.PolicyTable.Visibility.get -> string!
+Chalk.Sources.Conformance.PolicyTable.Visibility.init -> void
+Chalk.Sources.Conformance.SourceConformance
+const Chalk.Sources.Conformance.ConformanceDataset.DefaultTable = "chalk_conformance" -> string!
+override Chalk.Sources.Conformance.BatteryCase.ToString() -> string!
+override Chalk.Sources.Conformance.ConformanceFinding.ToString() -> string!
+override Chalk.Sources.Conformance.ConformanceReport.ToString() -> string!
+static Chalk.Sources.Conformance.ConformanceDataset.Columns.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ColumnDescriptor!>!
+static Chalk.Sources.Conformance.ConformanceDataset.CreateTableStatement(Chalk.Catalog.DialectProfileDescriptor! profile, string! table = "chalk_conformance") -> string!
+static Chalk.Sources.Conformance.ConformanceDataset.InsertStatements(Chalk.Catalog.DialectProfileDescriptor! profile, string! table = "chalk_conformance") -> System.Collections.Generic.IReadOnlyList<string!>!
+static Chalk.Sources.Conformance.ConformanceDataset.Rows.get -> System.Collections.Generic.IReadOnlyList<object?[]!>!
+static Chalk.Sources.Conformance.ConformanceDataset.Schema.get -> Apache.Arrow.Schema!
+static Chalk.Sources.Conformance.ConformanceDataset.ToBatch() -> Apache.Arrow.RecordBatch!
+static Chalk.Sources.Conformance.ConformanceOptions.Default.get -> Chalk.Sources.Conformance.ConformanceOptions!
+static Chalk.Sources.Conformance.PolicyBattery.Check(Chalk.Sources.Conformance.BatteryCase! expected, Chalk.Sources.Conformance.BatteryRun! run) -> System.Collections.Generic.IReadOnlyList<Chalk.Sources.Conformance.ConformanceFinding!>!
+static Chalk.Sources.Conformance.PolicyConformance.Check(Chalk.Sources.Conformance.PolicyCase! claims) -> System.Collections.Generic.IReadOnlyList<Chalk.Sources.Conformance.ConformanceFinding!>!
+static Chalk.Sources.Conformance.SourceConformance.RunAsync(Chalk.Sources.ISourceRuntime! source, Chalk.Sources.Conformance.ConformanceOptions? options = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Chalk.Sources.Conformance.ConformanceReport!>!
+static Chalk.Sources.Conformance.SourceConformance.VerifyAsync(Chalk.Sources.ISourceRuntime! source, Chalk.Sources.Conformance.ConformanceOptions? options = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Chalk.Sources.Conformance.ConformanceReport!>!

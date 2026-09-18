@@ -1,0 +1,17 @@
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+  except:
+    # planner.proto deliberately generates into a different C# namespace and Java
+    # package from the IR files it shares the `chalk.v1` package with: the IR
+    # messages live in Chalk.Ir / chalk.ir.v1 and the RPC surface in
+    # Chalk.Client.Rpc / chalk.planner.rpc.v1. These two rules
+    # exist to catch accidental divergence; here it is the design.
+    - PACKAGE_SAME_CSHARP_NAMESPACE
+    - PACKAGE_SAME_JAVA_PACKAGE
+breaking:
+  use:
+    - FILE

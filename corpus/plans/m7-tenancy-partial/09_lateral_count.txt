@@ -1,0 +1,76 @@
+-- u1
+report id:Full, n:Full, members:Some, orders:Some
+1|2
+2|2
+3|1
+4|1
+7|0
+
+-- u2
+report id:Full, n:Full, members:Some, orders:Some
+1|2
+2|2
+
+-- u3
+report id:Full, n:Full, members:Some, orders:Some
+3|1
+
+-- u3-in-o1
+report id:Full, n:Full, members:Some, orders:Some
+
+-- u4
+report id:Full, n:Full, members:All, orders:All
+1|2
+2|2
+3|1
+4|1
+5|1
+6|0
+7|0
+
+-- u5
+report id:Full, n:Full, members:Some, orders:Some
+
+-- u6
+report id:Full, n:Full, members:Some, orders:Some
+1|2
+2|2
+
+-- u6-two-orgs
+report id:Full, n:Full, members:Some, orders:Some
+1|2
+2|2
+3|1
+4|1
+7|0
+
+-- u7
+report id:Full, n:Full, members:Some, orders:Some
+
+-- u8
+report id:Full, n:Full, members:Some, orders:Some
+1|2
+2|2
+
+-- u9
+report id:Full, n:Full, members:Some, orders:Some
+1|2
+2|2
+3|1
+4|1
+7|0
+
+-- u10-in-a-region
+report id:Full, n:Full, members:Some, orders:Some
+
+-- u11-subject-in-a-region
+report id:Full, n:Full, members:Some, orders:Some
+
+-- u14-a-vendor
+report id:Full, n:Full, members:Some, orders:Some
+
+-- u15-a-vendor-and-an-org
+report id:Full, n:Full, members:Some, orders:Some
+1|2
+2|2
+

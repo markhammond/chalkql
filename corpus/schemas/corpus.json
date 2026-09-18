@@ -1,0 +1,2496 @@
+{
+  "contextId": "corpus",
+  "epoch": "1",
+  "schemas": [
+    {
+      "sourceId": "mem",
+      "name": "main",
+      "kind": "SOURCE_KIND_LOCAL",
+      "capabilities": {
+        "queryLanguage": "QUERY_LANGUAGE_NONE",
+        "supportsCase": true
+      },
+      "tables": [
+        {
+          "name": "bars",
+          "columns": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "5",
+                "min": {
+                  "stringValue": "ADAUSDT"
+                },
+                "max": {
+                  "stringValue": "XRPUSDT"
+                }
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "20160",
+                "min": {
+                  "timestampValue": "1767225600000000000"
+                },
+                "max": {
+                  "timestampValue": "1768435140000000000"
+                }
+              }
+            },
+            {
+              "name": "open",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "fp64Value": 7.8591978090407695
+                },
+                "max": {
+                  "fp64Value": 148751.68403847393
+                }
+              }
+            },
+            {
+              "name": "high",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "fp64Value": 7.867602767626729
+                },
+                "max": {
+                  "fp64Value": 149029.03726643938
+                }
+              }
+            },
+            {
+              "name": "low",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "fp64Value": 7.842518157811051
+                },
+                "max": {
+                  "fp64Value": 148428.81177169655
+                }
+              }
+            },
+            {
+              "name": "close",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "fp64Value": 7.850923116397011
+                },
+                "max": {
+                  "fp64Value": 148700.2694325369
+                }
+              }
+            },
+            {
+              "name": "volume",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "i64Value": "1000"
+                },
+                "max": {
+                  "i64Value": "9999"
+                }
+              }
+            },
+            {
+              "name": "vwap",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "nullCount": "2024",
+                "min": {
+                  "decimalValue": {
+                    "unscaled": "oasoSRIAAAAAAAAAAAAAAA=="
+                  }
+                },
+                "max": {
+                  "decimalValue": {
+                    "unscaled": "bAnzxIlIBQAAAAAAAAAAAA=="
+                  }
+                }
+              }
+            },
+            {
+              "name": "trade_count",
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "nullCount": "5110",
+                "min": {
+                  "i32Value": 1
+                },
+                "max": {
+                  "i32Value": 499
+                }
+              }
+            }
+          ],
+          "rowCount": "100800",
+          "uniqueKeys": [
+            {
+              "columns": [
+                1,
+                0
+              ]
+            }
+          ],
+          "collations": [
+            {
+              "keys": [
+                {
+                  "column": 1,
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                },
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "indexes": [
+            {
+              "name": "ix_bars_symbol_ts",
+              "kind": "INDEX_KIND_ORDERED",
+              "columns": [
+                0,
+                1
+              ],
+              "unique": true
+            },
+            {
+              "name": "ix_bars_ts_symbol",
+              "kind": "INDEX_KIND_ORDERED",
+              "columns": [
+                1,
+                0
+              ]
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT",
+          "foreignKeys": [
+            {
+              "name": "fk_bars_symbols_0",
+              "columns": [
+                0
+              ],
+              "parentTable": "symbols",
+              "parentColumns": [
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "name": "bars_small",
+          "columns": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "5",
+                "min": {
+                  "stringValue": "ADAUSDT"
+                },
+                "max": {
+                  "stringValue": "XRPUSDT"
+                }
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "1000",
+                "min": {
+                  "timestampValue": "1767225600000000000"
+                },
+                "max": {
+                  "timestampValue": "1767285540000000000"
+                }
+              }
+            },
+            {
+              "name": "open",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "fp64Value": 9.428954749190435
+                },
+                "max": {
+                  "fp64Value": 101274.43247876498
+                }
+              }
+            },
+            {
+              "name": "high",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "fp64Value": 9.43516396238656
+                },
+                "max": {
+                  "fp64Value": 101385.36117371646
+                }
+              }
+            },
+            {
+              "name": "low",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "fp64Value": 9.41775492491661
+                },
+                "max": {
+                  "fp64Value": 101165.99737671427
+                }
+              }
+            },
+            {
+              "name": "close",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "fp64Value": 9.428954749190435
+                },
+                "max": {
+                  "fp64Value": 101274.43247876498
+                }
+              }
+            },
+            {
+              "name": "volume",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "i64Value": "1003"
+                },
+                "max": {
+                  "i64Value": "9999"
+                }
+              }
+            },
+            {
+              "name": "vwap",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "nullCount": "88",
+                "min": {
+                  "decimalValue": {
+                    "unscaled": "qsOI9hUAAAAAAAAAAAAAAA=="
+                  }
+                },
+                "max": {
+                  "decimalValue": {
+                    "unscaled": "ADqg0J+YAwAAAAAAAAAAAA=="
+                  }
+                }
+              }
+            },
+            {
+              "name": "trade_count",
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "nullCount": "253",
+                "min": {
+                  "i32Value": 1
+                },
+                "max": {
+                  "i32Value": 499
+                }
+              }
+            }
+          ],
+          "rowCount": "5000",
+          "uniqueKeys": [
+            {
+              "columns": [
+                1,
+                0
+              ]
+            }
+          ],
+          "collations": [
+            {
+              "keys": [
+                {
+                  "column": 1,
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                },
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "indexes": [
+            {
+              "name": "ix_bars_small_symbol_ts",
+              "kind": "INDEX_KIND_ORDERED",
+              "columns": [
+                0,
+                1
+              ],
+              "unique": true
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT",
+          "foreignKeys": [
+            {
+              "name": "fk_bars_small_symbols_0",
+              "columns": [
+                0
+              ],
+              "parentTable": "symbols",
+              "parentColumns": [
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "name": "bars_clustered",
+          "columns": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "5",
+                "min": {
+                  "stringValue": "ADAUSDT"
+                },
+                "max": {
+                  "stringValue": "XRPUSDT"
+                }
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "1000",
+                "min": {
+                  "timestampValue": "1767225600000000000"
+                },
+                "max": {
+                  "timestampValue": "1767285540000000000"
+                }
+              }
+            },
+            {
+              "name": "open",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "fp64Value": 9.428954749190435
+                },
+                "max": {
+                  "fp64Value": 101274.43247876498
+                }
+              }
+            },
+            {
+              "name": "high",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "fp64Value": 9.43516396238656
+                },
+                "max": {
+                  "fp64Value": 101385.36117371646
+                }
+              }
+            },
+            {
+              "name": "low",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "fp64Value": 9.41775492491661
+                },
+                "max": {
+                  "fp64Value": 101165.99737671427
+                }
+              }
+            },
+            {
+              "name": "close",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "fp64Value": 9.428954749190435
+                },
+                "max": {
+                  "fp64Value": 101274.43247876498
+                }
+              }
+            },
+            {
+              "name": "volume",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "i64Value": "1003"
+                },
+                "max": {
+                  "i64Value": "9999"
+                }
+              }
+            },
+            {
+              "name": "vwap",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 28,
+                "scale": 10
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "nullCount": "88",
+                "min": {
+                  "decimalValue": {
+                    "unscaled": "qsOI9hUAAAAAAAAAAAAAAA=="
+                  }
+                },
+                "max": {
+                  "decimalValue": {
+                    "unscaled": "ADqg0J+YAwAAAAAAAAAAAA=="
+                  }
+                }
+              }
+            },
+            {
+              "name": "trade_count",
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "nullCount": "253",
+                "min": {
+                  "i32Value": 1
+                },
+                "max": {
+                  "i32Value": 499
+                }
+              }
+            }
+          ],
+          "rowCount": "5000",
+          "uniqueKeys": [
+            {
+              "columns": [
+                1,
+                0
+              ]
+            }
+          ],
+          "collations": [
+            {
+              "keys": [
+                {
+                  "column": 1,
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                },
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "indexes": [
+            {
+              "name": "ix_bars_clustered_symbol_ts",
+              "kind": "INDEX_KIND_CLUSTERED",
+              "columns": [
+                0,
+                1
+              ],
+              "unique": true,
+              "covering": [
+                0,
+                1,
+                5
+              ]
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT",
+          "foreignKeys": [
+            {
+              "name": "fk_bars_clustered_symbols_0",
+              "columns": [
+                0
+              ],
+              "parentTable": "symbols",
+              "parentColumns": [
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "name": "symbols",
+          "columns": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "5",
+                "min": {
+                  "stringValue": "ADAUSDT"
+                },
+                "max": {
+                  "stringValue": "XRPUSDT"
+                }
+              }
+            },
+            {
+              "name": "base",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "ADA"
+                },
+                "max": {
+                  "stringValue": "XRP"
+                }
+              }
+            },
+            {
+              "name": "quote",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "USDT"
+                },
+                "max": {
+                  "stringValue": "USDT"
+                }
+              }
+            },
+            {
+              "name": "tick_size",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 28,
+                "scale": 10
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "decimalValue": {
+                    "unscaled": "QEIPAAAAAAAAAAAAAAAAAA=="
+                  }
+                },
+                "max": {
+                  "decimalValue": {
+                    "unscaled": "AOH1BQAAAAAAAAAAAAAAAA=="
+                  }
+                }
+              }
+            },
+            {
+              "name": "tags",
+              "type": {
+                "kind": "TYPE_KIND_LIST",
+                "nullable": true,
+                "element": {
+                  "kind": "TYPE_KIND_STRING",
+                  "nullable": true
+                }
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "nullCount": "1"
+              }
+            }
+          ],
+          "rowCount": "5",
+          "uniqueKeys": [
+            {
+              "columns": [
+                0
+              ]
+            }
+          ],
+          "collations": [
+            {
+              "keys": [
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT"
+        },
+        {
+          "name": "trades_sparse",
+          "columns": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "5",
+                "min": {
+                  "stringValue": "ADAUSDT"
+                },
+                "max": {
+                  "stringValue": "XRPUSDT"
+                }
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "nullable": true,
+                "precision": 9
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "2844",
+                "nullCount": "10",
+                "min": {
+                  "timestampValue": "1767225660000000000"
+                },
+                "max": {
+                  "timestampValue": "1768767660000000000"
+                }
+              }
+            },
+            {
+              "name": "price",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "fp64Value": 9.557029
+                },
+                "max": {
+                  "fp64Value": 99509.853518
+                }
+              }
+            },
+            {
+              "name": "size",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "i64Value": "1"
+                },
+                "max": {
+                  "i64Value": "500"
+                }
+              }
+            }
+          ],
+          "rowCount": "3010",
+          "collations": [
+            {
+              "keys": [
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                },
+                {
+                  "column": 1,
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT"
+        },
+        {
+          "name": "lineitem",
+          "columns": [
+            {
+              "name": "l_orderkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "14986",
+                "min": {
+                  "i64Value": "1"
+                },
+                "max": {
+                  "i64Value": "14986"
+                }
+              }
+            },
+            {
+              "name": "l_linenumber",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "7",
+                "min": {
+                  "i32Value": 1
+                },
+                "max": {
+                  "i32Value": 7
+                }
+              }
+            },
+            {
+              "name": "l_partkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "i64Value": "3"
+                },
+                "max": {
+                  "i64Value": "199997"
+                }
+              }
+            },
+            {
+              "name": "l_suppkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "i64Value": "1"
+                },
+                "max": {
+                  "i64Value": "10000"
+                }
+              }
+            },
+            {
+              "name": "l_quantity",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "decimalValue": {
+                    "unscaled": "ZAAAAAAAAAAAAAAAAAAAAA=="
+                  }
+                },
+                "max": {
+                  "decimalValue": {
+                    "unscaled": "hxMAAAAAAAAAAAAAAAAAAA=="
+                  }
+                }
+              }
+            },
+            {
+              "name": "l_extendedprice",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "decimalValue": {
+                    "unscaled": "s18BAAAAAAAAAAAAAAAAAA=="
+                  }
+                },
+                "max": {
+                  "decimalValue": {
+                    "unscaled": "4n+QAAAAAAAAAAAAAAAAAA=="
+                  }
+                }
+              }
+            },
+            {
+              "name": "l_discount",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "decimalValue": {
+                    "unscaled": "AAAAAAAAAAAAAAAAAAAAAA=="
+                  }
+                },
+                "max": {
+                  "decimalValue": {
+                    "unscaled": "CgAAAAAAAAAAAAAAAAAAAA=="
+                  }
+                }
+              }
+            },
+            {
+              "name": "l_tax",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "decimalValue": {
+                    "unscaled": "AAAAAAAAAAAAAAAAAAAAAA=="
+                  }
+                },
+                "max": {
+                  "decimalValue": {
+                    "unscaled": "CAAAAAAAAAAAAAAAAAAAAA=="
+                  }
+                }
+              }
+            },
+            {
+              "name": "l_returnflag",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "A"
+                },
+                "max": {
+                  "stringValue": "R"
+                }
+              }
+            },
+            {
+              "name": "l_linestatus",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "F"
+                },
+                "max": {
+                  "stringValue": "O"
+                }
+              }
+            },
+            {
+              "name": "l_shipdate",
+              "type": {
+                "kind": "TYPE_KIND_DATE"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "2557",
+                "min": {
+                  "dateValue": 8035
+                },
+                "max": {
+                  "dateValue": 10591
+                }
+              }
+            },
+            {
+              "name": "l_commitdate",
+              "type": {
+                "kind": "TYPE_KIND_DATE"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "dateValue": 8068
+                },
+                "max": {
+                  "dateValue": 10679
+                }
+              }
+            },
+            {
+              "name": "l_receiptdate",
+              "type": {
+                "kind": "TYPE_KIND_DATE"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "dateValue": 8036
+                },
+                "max": {
+                  "dateValue": 10619
+                }
+              }
+            },
+            {
+              "name": "l_shipinstruct",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "COLLECT COD"
+                },
+                "max": {
+                  "stringValue": "TAKE BACK RETURN"
+                }
+              }
+            },
+            {
+              "name": "l_shipmode",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "AIR"
+                },
+                "max": {
+                  "stringValue": "TRUCK"
+                }
+              }
+            },
+            {
+              "name": "l_comment",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "comment 100009"
+                },
+                "max": {
+                  "stringValue": "comment 999951"
+                }
+              }
+            }
+          ],
+          "rowCount": "60000",
+          "uniqueKeys": [
+            {
+              "columns": [
+                0,
+                1
+              ]
+            }
+          ],
+          "collations": [
+            {
+              "keys": [
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                },
+                {
+                  "column": 1,
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "indexes": [
+            {
+              "name": "ix_lineitem_l_orderkey",
+              "kind": "INDEX_KIND_ORDERED",
+              "columns": [
+                0
+              ]
+            },
+            {
+              "name": "ix_lineitem_l_shipdate",
+              "kind": "INDEX_KIND_ORDERED",
+              "columns": [
+                10
+              ]
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT",
+          "foreignKeys": [
+            {
+              "name": "fk_lineitem_orders_0",
+              "columns": [
+                0
+              ],
+              "parentTable": "orders",
+              "parentColumns": [
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "name": "funding",
+          "columns": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "5",
+                "min": {
+                  "stringValue": "ADAUSDT"
+                },
+                "max": {
+                  "stringValue": "XRPUSDT"
+                }
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "nullable": true,
+                "precision": 9
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "42",
+                "nullCount": "2",
+                "min": {
+                  "timestampValue": "1767225600000000000"
+                },
+                "max": {
+                  "timestampValue": "1768406400000000000"
+                }
+              }
+            },
+            {
+              "name": "rate",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 10,
+                "scale": 8
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "decimalValue": {
+                    "unscaled": "Ovj//////////////////w=="
+                  }
+                },
+                "max": {
+                  "decimalValue": {
+                    "unscaled": "tgcAAAAAAAAAAAAAAAAAAA=="
+                  }
+                }
+              }
+            }
+          ],
+          "rowCount": "210",
+          "uniqueKeys": [
+            {
+              "columns": [
+                0,
+                1
+              ]
+            }
+          ],
+          "collations": [
+            {
+              "keys": [
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                },
+                {
+                  "column": 1,
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT",
+          "foreignKeys": [
+            {
+              "name": "fk_funding_symbols_0",
+              "columns": [
+                0
+              ],
+              "parentTable": "symbols",
+              "parentColumns": [
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "name": "events",
+          "columns": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "20",
+                "min": {
+                  "i32Value": 1
+                },
+                "max": {
+                  "i32Value": 20
+                }
+              }
+            },
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "ADAUSDT"
+                },
+                "max": {
+                  "stringValue": "XRPUSDT"
+                }
+              }
+            },
+            {
+              "name": "start_ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "timestampValue": "1767225600000000000"
+                },
+                "max": {
+                  "timestampValue": "1767463200000000000"
+                }
+              }
+            },
+            {
+              "name": "end_ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "timestampValue": "1767243600000000000"
+                },
+                "max": {
+                  "timestampValue": "1767481200000000000"
+                }
+              }
+            },
+            {
+              "name": "kind",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "halt"
+                },
+                "max": {
+                  "stringValue": "spike"
+                }
+              }
+            }
+          ],
+          "rowCount": "20",
+          "uniqueKeys": [
+            {
+              "columns": [
+                0
+              ]
+            }
+          ],
+          "collations": [
+            {
+              "keys": [
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT"
+        },
+        {
+          "name": "customer",
+          "columns": [
+            {
+              "name": "c_custkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "1500",
+                "min": {
+                  "i64Value": "1"
+                },
+                "max": {
+                  "i64Value": "1500"
+                }
+              }
+            },
+            {
+              "name": "c_name",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "Customer#000001"
+                },
+                "max": {
+                  "stringValue": "Customer#001500"
+                }
+              }
+            },
+            {
+              "name": "c_address",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "address 100287"
+                },
+                "max": {
+                  "stringValue": "address 999879"
+                }
+              }
+            },
+            {
+              "name": "c_nationkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "25",
+                "min": {
+                  "i64Value": "0"
+                },
+                "max": {
+                  "i64Value": "24"
+                }
+              }
+            },
+            {
+              "name": "c_phone",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "phone-100039"
+                },
+                "max": {
+                  "stringValue": "phone-99988"
+                }
+              }
+            },
+            {
+              "name": "c_acctbal",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "decimalValue": {
+                    "unscaled": "dHr+/////////////////w=="
+                  }
+                },
+                "max": {
+                  "decimalValue": {
+                    "unscaled": "j0EPAAAAAAAAAAAAAAAAAA=="
+                  }
+                }
+              }
+            },
+            {
+              "name": "c_mktsegment",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "AUTOMOBILE"
+                },
+                "max": {
+                  "stringValue": "MACHINERY"
+                }
+              }
+            },
+            {
+              "name": "c_comment",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "customer comment 100564"
+                },
+                "max": {
+                  "stringValue": "customer comment 999824"
+                }
+              }
+            }
+          ],
+          "rowCount": "1500",
+          "uniqueKeys": [
+            {
+              "columns": [
+                0
+              ]
+            }
+          ],
+          "collations": [
+            {
+              "keys": [
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "indexes": [
+            {
+              "name": "ix_customer_c_nationkey",
+              "kind": "INDEX_KIND_ORDERED",
+              "columns": [
+                3
+              ]
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT",
+          "foreignKeys": [
+            {
+              "name": "fk_customer_nation_0",
+              "columns": [
+                3
+              ],
+              "parentTable": "nation",
+              "parentColumns": [
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "name": "orders",
+          "columns": [
+            {
+              "name": "o_orderkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "15000",
+                "min": {
+                  "i64Value": "1"
+                },
+                "max": {
+                  "i64Value": "15000"
+                }
+              }
+            },
+            {
+              "name": "o_custkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "1500",
+                "min": {
+                  "i64Value": "1"
+                },
+                "max": {
+                  "i64Value": "1500"
+                }
+              }
+            },
+            {
+              "name": "o_orderstatus",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "F"
+                },
+                "max": {
+                  "stringValue": "P"
+                }
+              }
+            },
+            {
+              "name": "o_totalprice",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "decimalValue": {
+                    "unscaled": "yDIAAAAAAAAAAAAAAAAAAA=="
+                  }
+                },
+                "max": {
+                  "decimalValue": {
+                    "unscaled": "FOn6AgAAAAAAAAAAAAAAAA=="
+                  }
+                }
+              }
+            },
+            {
+              "name": "o_orderdate",
+              "type": {
+                "kind": "TYPE_KIND_DATE"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "dateValue": 8035
+                },
+                "max": {
+                  "dateValue": 10591
+                }
+              }
+            },
+            {
+              "name": "o_orderpriority",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "1-URGENT"
+                },
+                "max": {
+                  "stringValue": "5-LOW"
+                }
+              }
+            },
+            {
+              "name": "o_clerk",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "Clerk#0000"
+                },
+                "max": {
+                  "stringValue": "Clerk#0999"
+                }
+              }
+            },
+            {
+              "name": "o_shippriority",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "i32Value": 0
+                },
+                "max": {
+                  "i32Value": 1
+                }
+              }
+            },
+            {
+              "name": "o_comment",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "order comment 100059"
+                },
+                "max": {
+                  "stringValue": "order comment 999935"
+                }
+              }
+            }
+          ],
+          "rowCount": "15000",
+          "uniqueKeys": [
+            {
+              "columns": [
+                0
+              ]
+            }
+          ],
+          "collations": [
+            {
+              "keys": [
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "indexes": [
+            {
+              "name": "ix_orders_o_custkey",
+              "kind": "INDEX_KIND_ORDERED",
+              "columns": [
+                1
+              ]
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT",
+          "foreignKeys": [
+            {
+              "name": "fk_orders_customer_0",
+              "columns": [
+                1
+              ],
+              "parentTable": "customer",
+              "parentColumns": [
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "name": "nation",
+          "columns": [
+            {
+              "name": "n_nationkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "25",
+                "min": {
+                  "i64Value": "0"
+                },
+                "max": {
+                  "i64Value": "24"
+                }
+              }
+            },
+            {
+              "name": "n_name",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "ALGERIA"
+                },
+                "max": {
+                  "stringValue": "VIETNAM"
+                }
+              }
+            },
+            {
+              "name": "n_regionkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "i64Value": "0"
+                },
+                "max": {
+                  "i64Value": "4"
+                }
+              }
+            },
+            {
+              "name": "n_comment",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "nation 0"
+                },
+                "max": {
+                  "stringValue": "nation 9"
+                }
+              }
+            }
+          ],
+          "rowCount": "25",
+          "uniqueKeys": [
+            {
+              "columns": [
+                0
+              ]
+            }
+          ],
+          "collations": [
+            {
+              "keys": [
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT",
+          "foreignKeys": [
+            {
+              "name": "fk_nation_region_0",
+              "columns": [
+                2
+              ],
+              "parentTable": "region",
+              "parentColumns": [
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "name": "region",
+          "columns": [
+            {
+              "name": "r_regionkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "5",
+                "min": {
+                  "i64Value": "0"
+                },
+                "max": {
+                  "i64Value": "4"
+                }
+              }
+            },
+            {
+              "name": "r_name",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "AFRICA"
+                },
+                "max": {
+                  "stringValue": "MIDDLE EAST"
+                }
+              }
+            },
+            {
+              "name": "r_comment",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "region 0"
+                },
+                "max": {
+                  "stringValue": "region 4"
+                }
+              }
+            }
+          ],
+          "rowCount": "5",
+          "uniqueKeys": [
+            {
+              "columns": [
+                0
+              ]
+            }
+          ],
+          "collations": [
+            {
+              "keys": [
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT"
+        },
+        {
+          "name": "supplier",
+          "columns": [
+            {
+              "name": "s_suppkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "100",
+                "min": {
+                  "i64Value": "1"
+                },
+                "max": {
+                  "i64Value": "100"
+                }
+              }
+            },
+            {
+              "name": "s_name",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "Supplier#000001"
+                },
+                "max": {
+                  "stringValue": "Supplier#000100"
+                }
+              }
+            },
+            {
+              "name": "s_address",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "address 110146"
+                },
+                "max": {
+                  "stringValue": "address 992747"
+                }
+              }
+            },
+            {
+              "name": "s_nationkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "25",
+                "min": {
+                  "i64Value": "0"
+                },
+                "max": {
+                  "i64Value": "24"
+                }
+              }
+            },
+            {
+              "name": "s_phone",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "phone-118691"
+                },
+                "max": {
+                  "stringValue": "phone-99988"
+                }
+              }
+            },
+            {
+              "name": "s_acctbal",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "decimalValue": {
+                    "unscaled": "cZP+/////////////////w=="
+                  }
+                },
+                "max": {
+                  "decimalValue": {
+                    "unscaled": "m/IOAAAAAAAAAAAAAAAAAA=="
+                  }
+                }
+              }
+            },
+            {
+              "name": "s_comment",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "supplier comment 105968"
+                },
+                "max": {
+                  "stringValue": "supplier comment 993365"
+                }
+              }
+            }
+          ],
+          "rowCount": "100",
+          "uniqueKeys": [
+            {
+              "columns": [
+                0
+              ]
+            }
+          ],
+          "collations": [
+            {
+              "keys": [
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "indexes": [
+            {
+              "name": "ix_supplier_s_nationkey",
+              "kind": "INDEX_KIND_ORDERED",
+              "columns": [
+                3
+              ]
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT",
+          "foreignKeys": [
+            {
+              "name": "fk_supplier_nation_0",
+              "columns": [
+                3
+              ],
+              "parentTable": "nation",
+              "parentColumns": [
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "name": "sales",
+          "columns": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "i32Value": 1
+                },
+                "max": {
+                  "i32Value": 6
+                }
+              }
+            },
+            {
+              "name": "region",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "EAST"
+                },
+                "max": {
+                  "stringValue": "WEST"
+                }
+              }
+            },
+            {
+              "name": "amount",
+              "type": {
+                "kind": "TYPE_KIND_I32",
+                "nullable": true
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "nullCount": "1",
+                "min": {
+                  "i32Value": 5
+                },
+                "max": {
+                  "i32Value": 30
+                }
+              }
+            },
+            {
+              "name": "label",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "A"
+                },
+                "max": {
+                  "stringValue": "F"
+                }
+              }
+            }
+          ],
+          "rowCount": "6",
+          "rowCountKind": "ROW_COUNT_KIND_EXACT"
+        },
+        {
+          "name": "sorted",
+          "columns": [
+            {
+              "name": "k",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "3",
+                "min": {
+                  "i32Value": 1
+                },
+                "max": {
+                  "i32Value": 4
+                }
+              }
+            },
+            {
+              "name": "v",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "A"
+                },
+                "max": {
+                  "stringValue": "D"
+                }
+              }
+            }
+          ],
+          "rowCount": "4",
+          "collations": [
+            {
+              "keys": [
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT"
+        }
+      ],
+      "dialectProfile": {},
+      "functions": [
+        {
+          "name": "pct_change",
+          "kind": "FUNCTION_KIND_SCALAR",
+          "parameters": [
+            {
+              "name": "a",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              }
+            },
+            {
+              "name": "b",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "TYPE_KIND_FP64"
+          },
+          "volatility": "VOLATILITY_IMMUTABLE",
+          "strict": true,
+          "sql": {
+            "text": "(b - a) / a"
+          }
+        },
+        {
+          "name": "wavg",
+          "kind": "FUNCTION_KIND_AGGREGATE",
+          "parameters": [
+            {
+              "name": "x",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              }
+            },
+            {
+              "name": "w",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "TYPE_KIND_FP64",
+            "nullable": true
+          },
+          "volatility": "VOLATILITY_IMMUTABLE",
+          "sql": {
+            "text": "SUM(x * w) / SUM(w)"
+          }
+        },
+        {
+          "name": "bars_for",
+          "kind": "FUNCTION_KIND_TABLE",
+          "parameters": [
+            {
+              "name": "sym",
+              "type": {
+                "kind": "TYPE_KIND_STRING",
+                "nullable": true
+              }
+            }
+          ],
+          "returnsTable": {
+            "fields": [
+              {
+                "name": "symbol",
+                "type": {
+                  "kind": "TYPE_KIND_STRING"
+                }
+              },
+              {
+                "name": "ts",
+                "type": {
+                  "kind": "TYPE_KIND_TIMESTAMP",
+                  "precision": 9
+                }
+              },
+              {
+                "name": "close",
+                "type": {
+                  "kind": "TYPE_KIND_FP64"
+                }
+              }
+            ]
+          },
+          "volatility": "VOLATILITY_IMMUTABLE",
+          "sql": {
+            "text": "SELECT symbol, ts, \"close\" FROM bars WHERE symbol = sym"
+          }
+        },
+        {
+          "name": "bucket_price",
+          "kind": "FUNCTION_KIND_SCALAR",
+          "parameters": [
+            {
+              "name": "price",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              }
+            },
+            {
+              "name": "width",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              }
+            },
+            {
+              "name": "off",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              },
+              "optional": true,
+              "defaultValue": {
+                "type": {
+                  "kind": "TYPE_KIND_FP64",
+                  "nullable": true
+                },
+                "literal": {
+                  "fp64Value": 0
+                }
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "TYPE_KIND_FP64"
+          },
+          "volatility": "VOLATILITY_IMMUTABLE",
+          "strict": true,
+          "client": {}
+        },
+        {
+          "name": "geo_mean",
+          "kind": "FUNCTION_KIND_AGGREGATE",
+          "parameters": [
+            {
+              "name": "x",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "TYPE_KIND_FP64",
+            "nullable": true
+          },
+          "volatility": "VOLATILITY_IMMUTABLE",
+          "client": {}
+        },
+        {
+          "name": "wsum",
+          "kind": "FUNCTION_KIND_AGGREGATE",
+          "parameters": [
+            {
+              "name": "x",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              }
+            },
+            {
+              "name": "w",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "TYPE_KIND_FP64",
+            "nullable": true
+          },
+          "volatility": "VOLATILITY_IMMUTABLE",
+          "window": true,
+          "client": {}
+        },
+        {
+          "name": "generate_series",
+          "kind": "FUNCTION_KIND_TABLE",
+          "parameters": [
+            {
+              "name": "start",
+              "type": {
+                "kind": "TYPE_KIND_I64",
+                "nullable": true
+              }
+            },
+            {
+              "name": "stop",
+              "type": {
+                "kind": "TYPE_KIND_I64",
+                "nullable": true
+              }
+            },
+            {
+              "name": "step",
+              "type": {
+                "kind": "TYPE_KIND_I64",
+                "nullable": true
+              }
+            }
+          ],
+          "returnsTable": {
+            "fields": [
+              {
+                "name": "value",
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                }
+              }
+            ]
+          },
+          "volatility": "VOLATILITY_IMMUTABLE",
+          "client": {}
+        },
+        {
+          "name": "fast_hash",
+          "kind": "FUNCTION_KIND_SCALAR",
+          "parameters": [
+            {
+              "name": "s",
+              "type": {
+                "kind": "TYPE_KIND_STRING",
+                "nullable": true
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "TYPE_KIND_I64"
+          },
+          "volatility": "VOLATILITY_IMMUTABLE",
+          "strict": true,
+          "client": {}
+        },
+        {
+          "name": "next_seq",
+          "kind": "FUNCTION_KIND_SCALAR",
+          "returnType": {
+            "kind": "TYPE_KIND_I64"
+          },
+          "volatility": "VOLATILITY_VOLATILE",
+          "client": {}
+        },
+        {
+          "name": "as_of",
+          "kind": "FUNCTION_KIND_SCALAR",
+          "returnType": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          },
+          "volatility": "VOLATILITY_STABLE",
+          "client": {}
+        },
+        {
+          "name": "minute_of",
+          "kind": "FUNCTION_KIND_SCALAR",
+          "parameters": [
+            {
+              "name": "t",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "nullable": true,
+                "precision": 9
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "TYPE_KIND_I64"
+          },
+          "volatility": "VOLATILITY_IMMUTABLE",
+          "strict": true,
+          "monotonicity": [
+            "MONOTONICITY_INCREASING"
+          ],
+          "client": {}
+        }
+      ]
+    }
+  ],
+  "joinPolicy": {}
+}

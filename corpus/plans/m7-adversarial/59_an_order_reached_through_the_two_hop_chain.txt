@@ -1,0 +1,56 @@
+-- u1
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:Some, orders:Some
+
+-- u2
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:Some, orders:Some
+
+-- u3
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:Some, orders:Some
+
+-- u3-in-o1
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:Some, orders:Some
+
+-- u4
+report name:Full, id:Full, org_id:Full, vendors:All, items:All, order_items:All, orders:All
+Acme|1|1
+Acme|5|2
+Acme|7|3
+Borealis|1|1
+Borealis|2|1
+
+-- u5
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:None, orders:Some
+
+-- u6
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:Some, orders:Some
+
+-- u6-two-orgs
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:Some, orders:Some
+
+-- u7
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:None, orders:Some
+
+-- u8
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:Some, orders:Some
+
+-- u9
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:Some, orders:Some
+
+-- u10-in-a-region
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:Some, orders:Some
+
+-- u11-subject-in-a-region
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:Some, orders:Some
+
+-- u14-a-vendor
+report name:Full, id:Full, org_id:PerRow, vendors:Some, items:Some, order_items:Some, orders:Some
+Acme|1|<null>
+Acme|5|<null>
+Acme|7|<null>
+
+-- u15-a-vendor-and-an-org
+report name:Full, id:Full, org_id:PerRow, vendors:Some, items:Some, order_items:Some, orders:Some
+Acme|1|1
+Acme|5|<null>
+Acme|7|<null>
+

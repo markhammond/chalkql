@@ -1,0 +1,9 @@
+-- FULL
+ChalkProject(symbol=[$0], ts=[$1])
+  ChalkFilter(condition=[OR(IS NULL($2), AND(<($1, ?2), >=($1, ?3)))])
+    ChalkIndexLookup(table=[[main, bars]], index=[ix_bars_symbol_ts], ranges=[[[[?1, ?0], [?1]]]], projection=[[0, 1, 8]])
+-- NONE
+ChalkProject(symbol=[$0], ts=[$1])
+  ChalkFilter(condition=[AND(>=($1, ?0), =($0, ?1), OR(IS NULL($2), AND(<($1, ?2), >=($1, ?3))))])
+    ChalkProject(symbol=[$0], ts=[$1], trade_count=[$8])
+      ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])

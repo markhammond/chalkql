@@ -1,0 +1,1794 @@
+{
+  "irVersion": 1,
+  "planDigest": "6801941563892496571",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "n_name",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "revenue",
+        "type": {
+          "kind": "TYPE_KIND_DECIMAL",
+          "precision": 38,
+          "scale": 4
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "n_name",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "revenue",
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "precision": 38,
+            "scale": 4
+          }
+        }
+      ]
+    },
+    "estRowCount": 171.52158916397087,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 38,
+                "scale": 4
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_DESC_NULLS_FIRST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "n_name",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "revenue",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 38,
+                "scale": 4
+              }
+            }
+          ]
+        },
+        "estRowCount": 171.52158916397087,
+        "hashAggregate": {
+          "aggregate": {
+            "input": {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "n_name",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  },
+                  {
+                    "name": "n_regionkey",
+                    "type": {
+                      "kind": "TYPE_KIND_I64"
+                    }
+                  },
+                  {
+                    "name": "$f1",
+                    "type": {
+                      "kind": "TYPE_KIND_DECIMAL",
+                      "precision": 31,
+                      "scale": 4
+                    }
+                  },
+                  {
+                    "name": "r_regionkey",
+                    "type": {
+                      "kind": "TYPE_KIND_I64"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 1715.2158916397088,
+              "nestedLoopJoin": {
+                "left": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "n_name",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      },
+                      {
+                        "name": "n_regionkey",
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        }
+                      },
+                      {
+                        "name": "$f1",
+                        "type": {
+                          "kind": "TYPE_KIND_DECIMAL",
+                          "precision": 31,
+                          "scale": 4
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 8576.079458198545,
+                  "project": {
+                    "input": {
+                      "rowType": {
+                        "fields": [
+                          {
+                            "name": "s_nationkey",
+                            "type": {
+                              "kind": "TYPE_KIND_I64"
+                            }
+                          },
+                          {
+                            "name": "$f1",
+                            "type": {
+                              "kind": "TYPE_KIND_DECIMAL",
+                              "precision": 31,
+                              "scale": 4
+                            }
+                          },
+                          {
+                            "name": "n_nationkey",
+                            "type": {
+                              "kind": "TYPE_KIND_I64"
+                            }
+                          },
+                          {
+                            "name": "n_name",
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            }
+                          },
+                          {
+                            "name": "n_regionkey",
+                            "type": {
+                              "kind": "TYPE_KIND_I64"
+                            }
+                          }
+                        ]
+                      },
+                      "estRowCount": 8576.079458198545,
+                      "hashJoin": {
+                        "left": {
+                          "rowType": {
+                            "fields": [
+                              {
+                                "name": "s_nationkey",
+                                "type": {
+                                  "kind": "TYPE_KIND_I64"
+                                }
+                              },
+                              {
+                                "name": "$f1",
+                                "type": {
+                                  "kind": "TYPE_KIND_DECIMAL",
+                                  "precision": 31,
+                                  "scale": 4
+                                }
+                              }
+                            ]
+                          },
+                          "estRowCount": 8576.079458198545,
+                          "project": {
+                            "input": {
+                              "rowType": {
+                                "fields": [
+                                  {
+                                    "name": "c_nationkey",
+                                    "type": {
+                                      "kind": "TYPE_KIND_I64"
+                                    }
+                                  },
+                                  {
+                                    "name": "l_suppkey",
+                                    "type": {
+                                      "kind": "TYPE_KIND_I64"
+                                    }
+                                  },
+                                  {
+                                    "name": "$f1",
+                                    "type": {
+                                      "kind": "TYPE_KIND_DECIMAL",
+                                      "precision": 31,
+                                      "scale": 4
+                                    }
+                                  },
+                                  {
+                                    "name": "s_suppkey",
+                                    "type": {
+                                      "kind": "TYPE_KIND_I64"
+                                    }
+                                  },
+                                  {
+                                    "name": "s_nationkey",
+                                    "type": {
+                                      "kind": "TYPE_KIND_I64"
+                                    }
+                                  }
+                                ]
+                              },
+                              "estRowCount": 8576.079458198545,
+                              "hashJoin": {
+                                "left": {
+                                  "rowType": {
+                                    "fields": [
+                                      {
+                                        "name": "c_nationkey",
+                                        "type": {
+                                          "kind": "TYPE_KIND_I64"
+                                        }
+                                      },
+                                      {
+                                        "name": "l_suppkey",
+                                        "type": {
+                                          "kind": "TYPE_KIND_I64"
+                                        }
+                                      },
+                                      {
+                                        "name": "$f1",
+                                        "type": {
+                                          "kind": "TYPE_KIND_DECIMAL",
+                                          "precision": 31,
+                                          "scale": 4
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  "estRowCount": 8576.079458198545,
+                                  "project": {
+                                    "input": {
+                                      "rowType": {
+                                        "fields": [
+                                          {
+                                            "name": "c_nationkey",
+                                            "type": {
+                                              "kind": "TYPE_KIND_I64"
+                                            }
+                                          },
+                                          {
+                                            "name": "o_orderkey",
+                                            "type": {
+                                              "kind": "TYPE_KIND_I64"
+                                            }
+                                          },
+                                          {
+                                            "name": "l_orderkey",
+                                            "type": {
+                                              "kind": "TYPE_KIND_I64"
+                                            }
+                                          },
+                                          {
+                                            "name": "l_suppkey",
+                                            "type": {
+                                              "kind": "TYPE_KIND_I64"
+                                            }
+                                          },
+                                          {
+                                            "name": "$f1",
+                                            "type": {
+                                              "kind": "TYPE_KIND_DECIMAL",
+                                              "precision": 31,
+                                              "scale": 4
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      "estRowCount": 8576.079458198545,
+                                      "hashJoin": {
+                                        "left": {
+                                          "rowType": {
+                                            "fields": [
+                                              {
+                                                "name": "c_nationkey",
+                                                "type": {
+                                                  "kind": "TYPE_KIND_I64"
+                                                }
+                                              },
+                                              {
+                                                "name": "o_orderkey",
+                                                "type": {
+                                                  "kind": "TYPE_KIND_I64"
+                                                }
+                                              }
+                                            ]
+                                          },
+                                          "estRowCount": 2142.018779342723,
+                                          "project": {
+                                            "input": {
+                                              "rowType": {
+                                                "fields": [
+                                                  {
+                                                    "name": "o_orderkey",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_I64"
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "o_custkey",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_I64"
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "c_custkey",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_I64"
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "c_nationkey",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_I64"
+                                                    }
+                                                  }
+                                                ]
+                                              },
+                                              "estRowCount": 2142.018779342723,
+                                              "hashJoin": {
+                                                "left": {
+                                                  "rowType": {
+                                                    "fields": [
+                                                      {
+                                                        "name": "o_orderkey",
+                                                        "type": {
+                                                          "kind": "TYPE_KIND_I64"
+                                                        }
+                                                      },
+                                                      {
+                                                        "name": "o_custkey",
+                                                        "type": {
+                                                          "kind": "TYPE_KIND_I64"
+                                                        }
+                                                      }
+                                                    ]
+                                                  },
+                                                  "estRowCount": 2142.018779342723,
+                                                  "collations": [
+                                                    {
+                                                      "fields": [
+                                                        {
+                                                          "expr": {
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_I64"
+                                                            },
+                                                            "fieldRef": {}
+                                                          },
+                                                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                                        }
+                                                      ]
+                                                    }
+                                                  ],
+                                                  "project": {
+                                                    "input": {
+                                                      "rowType": {
+                                                        "fields": [
+                                                          {
+                                                            "name": "o_orderkey",
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_I64"
+                                                            }
+                                                          },
+                                                          {
+                                                            "name": "o_custkey",
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_I64"
+                                                            }
+                                                          },
+                                                          {
+                                                            "name": "o_orderdate",
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_DATE"
+                                                            }
+                                                          }
+                                                        ]
+                                                      },
+                                                      "estRowCount": 2142.018779342723,
+                                                      "collations": [
+                                                        {
+                                                          "fields": [
+                                                            {
+                                                              "expr": {
+                                                                "type": {
+                                                                  "kind": "TYPE_KIND_I64"
+                                                                },
+                                                                "fieldRef": {}
+                                                              },
+                                                              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                                            }
+                                                          ]
+                                                        }
+                                                      ],
+                                                      "filter": {
+                                                        "input": {
+                                                          "rowType": {
+                                                            "fields": [
+                                                              {
+                                                                "name": "o_orderkey",
+                                                                "type": {
+                                                                  "kind": "TYPE_KIND_I64"
+                                                                }
+                                                              },
+                                                              {
+                                                                "name": "o_custkey",
+                                                                "type": {
+                                                                  "kind": "TYPE_KIND_I64"
+                                                                }
+                                                              },
+                                                              {
+                                                                "name": "o_orderdate",
+                                                                "type": {
+                                                                  "kind": "TYPE_KIND_DATE"
+                                                                }
+                                                              }
+                                                            ]
+                                                          },
+                                                          "estRowCount": 15000,
+                                                          "collations": [
+                                                            {
+                                                              "fields": [
+                                                                {
+                                                                  "expr": {
+                                                                    "type": {
+                                                                      "kind": "TYPE_KIND_I64"
+                                                                    },
+                                                                    "fieldRef": {}
+                                                                  },
+                                                                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                                                }
+                                                              ]
+                                                            }
+                                                          ],
+                                                          "project": {
+                                                            "input": {
+                                                              "rowType": {
+                                                                "fields": [
+                                                                  {
+                                                                    "name": "o_orderkey",
+                                                                    "type": {
+                                                                      "kind": "TYPE_KIND_I64"
+                                                                    }
+                                                                  },
+                                                                  {
+                                                                    "name": "o_custkey",
+                                                                    "type": {
+                                                                      "kind": "TYPE_KIND_I64"
+                                                                    }
+                                                                  },
+                                                                  {
+                                                                    "name": "o_orderstatus",
+                                                                    "type": {
+                                                                      "kind": "TYPE_KIND_STRING"
+                                                                    }
+                                                                  },
+                                                                  {
+                                                                    "name": "o_totalprice",
+                                                                    "type": {
+                                                                      "kind": "TYPE_KIND_DECIMAL",
+                                                                      "precision": 15,
+                                                                      "scale": 2
+                                                                    }
+                                                                  },
+                                                                  {
+                                                                    "name": "o_orderdate",
+                                                                    "type": {
+                                                                      "kind": "TYPE_KIND_DATE"
+                                                                    }
+                                                                  },
+                                                                  {
+                                                                    "name": "o_orderpriority",
+                                                                    "type": {
+                                                                      "kind": "TYPE_KIND_STRING"
+                                                                    }
+                                                                  },
+                                                                  {
+                                                                    "name": "o_clerk",
+                                                                    "type": {
+                                                                      "kind": "TYPE_KIND_STRING"
+                                                                    }
+                                                                  },
+                                                                  {
+                                                                    "name": "o_shippriority",
+                                                                    "type": {
+                                                                      "kind": "TYPE_KIND_I32"
+                                                                    }
+                                                                  },
+                                                                  {
+                                                                    "name": "o_comment",
+                                                                    "type": {
+                                                                      "kind": "TYPE_KIND_STRING"
+                                                                    }
+                                                                  }
+                                                                ]
+                                                              },
+                                                              "estRowCount": 15000,
+                                                              "collations": [
+                                                                {
+                                                                  "fields": [
+                                                                    {
+                                                                      "expr": {
+                                                                        "type": {
+                                                                          "kind": "TYPE_KIND_I64"
+                                                                        },
+                                                                        "fieldRef": {}
+                                                                      },
+                                                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                                                    }
+                                                                  ]
+                                                                }
+                                                              ],
+                                                              "read": {
+                                                                "table": {
+                                                                  "sourceId": "mem",
+                                                                  "schema": "main",
+                                                                  "table": "orders"
+                                                                },
+                                                                "projection": [
+                                                                  0,
+                                                                  1,
+                                                                  2,
+                                                                  3,
+                                                                  4,
+                                                                  5,
+                                                                  6,
+                                                                  7,
+                                                                  8
+                                                                ]
+                                                              }
+                                                            },
+                                                            "exprs": [
+                                                              {
+                                                                "type": {
+                                                                  "kind": "TYPE_KIND_I64"
+                                                                },
+                                                                "fieldRef": {}
+                                                              },
+                                                              {
+                                                                "type": {
+                                                                  "kind": "TYPE_KIND_I64"
+                                                                },
+                                                                "fieldRef": {
+                                                                  "index": 1
+                                                                }
+                                                              },
+                                                              {
+                                                                "type": {
+                                                                  "kind": "TYPE_KIND_DATE"
+                                                                },
+                                                                "fieldRef": {
+                                                                  "index": 4
+                                                                }
+                                                              }
+                                                            ]
+                                                          }
+                                                        },
+                                                        "condition": {
+                                                          "type": {
+                                                            "kind": "TYPE_KIND_BOOL"
+                                                          },
+                                                          "call": {
+                                                            "function": "FUNCTION_ID_AND",
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "kind": "TYPE_KIND_BOOL"
+                                                                },
+                                                                "call": {
+                                                                  "function": "FUNCTION_ID_GE",
+                                                                  "args": [
+                                                                    {
+                                                                      "type": {
+                                                                        "kind": "TYPE_KIND_DATE"
+                                                                      },
+                                                                      "fieldRef": {
+                                                                        "index": 2
+                                                                      }
+                                                                    },
+                                                                    {
+                                                                      "type": {
+                                                                        "kind": "TYPE_KIND_DATE"
+                                                                      },
+                                                                      "literal": {
+                                                                        "dateValue": 8766
+                                                                      }
+                                                                    }
+                                                                  ]
+                                                                }
+                                                              },
+                                                              {
+                                                                "type": {
+                                                                  "kind": "TYPE_KIND_BOOL"
+                                                                },
+                                                                "call": {
+                                                                  "function": "FUNCTION_ID_LT",
+                                                                  "args": [
+                                                                    {
+                                                                      "type": {
+                                                                        "kind": "TYPE_KIND_DATE"
+                                                                      },
+                                                                      "fieldRef": {
+                                                                        "index": 2
+                                                                      }
+                                                                    },
+                                                                    {
+                                                                      "type": {
+                                                                        "kind": "TYPE_KIND_DATE"
+                                                                      },
+                                                                      "literal": {
+                                                                        "dateValue": 9131
+                                                                      }
+                                                                    }
+                                                                  ]
+                                                                }
+                                                              }
+                                                            ]
+                                                          }
+                                                        }
+                                                      }
+                                                    },
+                                                    "exprs": [
+                                                      {
+                                                        "type": {
+                                                          "kind": "TYPE_KIND_I64"
+                                                        },
+                                                        "fieldRef": {}
+                                                      },
+                                                      {
+                                                        "type": {
+                                                          "kind": "TYPE_KIND_I64"
+                                                        },
+                                                        "fieldRef": {
+                                                          "index": 1
+                                                        }
+                                                      }
+                                                    ]
+                                                  }
+                                                },
+                                                "right": {
+                                                  "rowType": {
+                                                    "fields": [
+                                                      {
+                                                        "name": "c_custkey",
+                                                        "type": {
+                                                          "kind": "TYPE_KIND_I64"
+                                                        }
+                                                      },
+                                                      {
+                                                        "name": "c_nationkey",
+                                                        "type": {
+                                                          "kind": "TYPE_KIND_I64"
+                                                        }
+                                                      }
+                                                    ]
+                                                  },
+                                                  "estRowCount": 1500,
+                                                  "collations": [
+                                                    {
+                                                      "fields": [
+                                                        {
+                                                          "expr": {
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_I64"
+                                                            },
+                                                            "fieldRef": {}
+                                                          },
+                                                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                                        }
+                                                      ]
+                                                    }
+                                                  ],
+                                                  "project": {
+                                                    "input": {
+                                                      "rowType": {
+                                                        "fields": [
+                                                          {
+                                                            "name": "c_custkey",
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_I64"
+                                                            }
+                                                          },
+                                                          {
+                                                            "name": "c_name",
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_STRING"
+                                                            }
+                                                          },
+                                                          {
+                                                            "name": "c_address",
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_STRING"
+                                                            }
+                                                          },
+                                                          {
+                                                            "name": "c_nationkey",
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_I64"
+                                                            }
+                                                          },
+                                                          {
+                                                            "name": "c_phone",
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_STRING"
+                                                            }
+                                                          },
+                                                          {
+                                                            "name": "c_acctbal",
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_DECIMAL",
+                                                              "precision": 15,
+                                                              "scale": 2
+                                                            }
+                                                          },
+                                                          {
+                                                            "name": "c_mktsegment",
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_STRING"
+                                                            }
+                                                          },
+                                                          {
+                                                            "name": "c_comment",
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_STRING"
+                                                            }
+                                                          }
+                                                        ]
+                                                      },
+                                                      "estRowCount": 1500,
+                                                      "collations": [
+                                                        {
+                                                          "fields": [
+                                                            {
+                                                              "expr": {
+                                                                "type": {
+                                                                  "kind": "TYPE_KIND_I64"
+                                                                },
+                                                                "fieldRef": {}
+                                                              },
+                                                              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                                            }
+                                                          ]
+                                                        }
+                                                      ],
+                                                      "read": {
+                                                        "table": {
+                                                          "sourceId": "mem",
+                                                          "schema": "main",
+                                                          "table": "customer"
+                                                        },
+                                                        "projection": [
+                                                          0,
+                                                          1,
+                                                          2,
+                                                          3,
+                                                          4,
+                                                          5,
+                                                          6,
+                                                          7
+                                                        ]
+                                                      }
+                                                    },
+                                                    "exprs": [
+                                                      {
+                                                        "type": {
+                                                          "kind": "TYPE_KIND_I64"
+                                                        },
+                                                        "fieldRef": {}
+                                                      },
+                                                      {
+                                                        "type": {
+                                                          "kind": "TYPE_KIND_I64"
+                                                        },
+                                                        "fieldRef": {
+                                                          "index": 3
+                                                        }
+                                                      }
+                                                    ]
+                                                  }
+                                                },
+                                                "leftKeys": [
+                                                  1
+                                                ],
+                                                "rightKeys": [
+                                                  0
+                                                ],
+                                                "type": "JOIN_TYPE_INNER"
+                                              }
+                                            },
+                                            "exprs": [
+                                              {
+                                                "type": {
+                                                  "kind": "TYPE_KIND_I64"
+                                                },
+                                                "fieldRef": {
+                                                  "index": 3
+                                                }
+                                              },
+                                              {
+                                                "type": {
+                                                  "kind": "TYPE_KIND_I64"
+                                                },
+                                                "fieldRef": {}
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "right": {
+                                          "rowType": {
+                                            "fields": [
+                                              {
+                                                "name": "l_orderkey",
+                                                "type": {
+                                                  "kind": "TYPE_KIND_I64"
+                                                }
+                                              },
+                                              {
+                                                "name": "l_suppkey",
+                                                "type": {
+                                                  "kind": "TYPE_KIND_I64"
+                                                }
+                                              },
+                                              {
+                                                "name": "$f1",
+                                                "type": {
+                                                  "kind": "TYPE_KIND_DECIMAL",
+                                                  "precision": 31,
+                                                  "scale": 4
+                                                }
+                                              }
+                                            ]
+                                          },
+                                          "estRowCount": 60000,
+                                          "project": {
+                                            "input": {
+                                              "rowType": {
+                                                "fields": [
+                                                  {
+                                                    "name": "l_orderkey",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_I64"
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_linenumber",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_I32"
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_partkey",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_I64"
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_suppkey",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_I64"
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_quantity",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_DECIMAL",
+                                                      "precision": 15,
+                                                      "scale": 2
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_extendedprice",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_DECIMAL",
+                                                      "precision": 15,
+                                                      "scale": 2
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_discount",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_DECIMAL",
+                                                      "precision": 15,
+                                                      "scale": 2
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_tax",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_DECIMAL",
+                                                      "precision": 15,
+                                                      "scale": 2
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_returnflag",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_STRING"
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_linestatus",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_STRING"
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_shipdate",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_DATE"
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_commitdate",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_DATE"
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_receiptdate",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_DATE"
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_shipinstruct",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_STRING"
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_shipmode",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_STRING"
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "l_comment",
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_STRING"
+                                                    }
+                                                  }
+                                                ]
+                                              },
+                                              "estRowCount": 60000,
+                                              "collations": [
+                                                {
+                                                  "fields": [
+                                                    {
+                                                      "expr": {
+                                                        "type": {
+                                                          "kind": "TYPE_KIND_I64"
+                                                        },
+                                                        "fieldRef": {}
+                                                      },
+                                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                                    },
+                                                    {
+                                                      "expr": {
+                                                        "type": {
+                                                          "kind": "TYPE_KIND_I32"
+                                                        },
+                                                        "fieldRef": {
+                                                          "index": 1
+                                                        }
+                                                      },
+                                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                                    }
+                                                  ]
+                                                }
+                                              ],
+                                              "read": {
+                                                "table": {
+                                                  "sourceId": "mem",
+                                                  "schema": "main",
+                                                  "table": "lineitem"
+                                                },
+                                                "projection": [
+                                                  0,
+                                                  1,
+                                                  2,
+                                                  3,
+                                                  4,
+                                                  5,
+                                                  6,
+                                                  7,
+                                                  8,
+                                                  9,
+                                                  10,
+                                                  11,
+                                                  12,
+                                                  13,
+                                                  14,
+                                                  15
+                                                ]
+                                              }
+                                            },
+                                            "exprs": [
+                                              {
+                                                "type": {
+                                                  "kind": "TYPE_KIND_I64"
+                                                },
+                                                "fieldRef": {}
+                                              },
+                                              {
+                                                "type": {
+                                                  "kind": "TYPE_KIND_I64"
+                                                },
+                                                "fieldRef": {
+                                                  "index": 3
+                                                }
+                                              },
+                                              {
+                                                "type": {
+                                                  "kind": "TYPE_KIND_DECIMAL",
+                                                  "precision": 31,
+                                                  "scale": 4
+                                                },
+                                                "call": {
+                                                  "function": "FUNCTION_ID_MULTIPLY",
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "kind": "TYPE_KIND_DECIMAL",
+                                                        "precision": 16,
+                                                        "scale": 2
+                                                      },
+                                                      "cast": {
+                                                        "input": {
+                                                          "type": {
+                                                            "kind": "TYPE_KIND_DECIMAL",
+                                                            "precision": 15,
+                                                            "scale": 2
+                                                          },
+                                                          "fieldRef": {
+                                                            "index": 5
+                                                          }
+                                                        },
+                                                        "onFailure": "CAST_FAILURE_ERROR"
+                                                      }
+                                                    },
+                                                    {
+                                                      "type": {
+                                                        "kind": "TYPE_KIND_DECIMAL",
+                                                        "precision": 16,
+                                                        "scale": 2
+                                                      },
+                                                      "call": {
+                                                        "function": "FUNCTION_ID_SUBTRACT",
+                                                        "args": [
+                                                          {
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_DECIMAL",
+                                                              "precision": 15,
+                                                              "scale": 2
+                                                            },
+                                                            "cast": {
+                                                              "input": {
+                                                                "type": {
+                                                                  "kind": "TYPE_KIND_I32"
+                                                                },
+                                                                "literal": {
+                                                                  "i32Value": 1
+                                                                }
+                                                              },
+                                                              "onFailure": "CAST_FAILURE_ERROR"
+                                                            }
+                                                          },
+                                                          {
+                                                            "type": {
+                                                              "kind": "TYPE_KIND_DECIMAL",
+                                                              "precision": 15,
+                                                              "scale": 2
+                                                            },
+                                                            "fieldRef": {
+                                                              "index": 6
+                                                            }
+                                                          }
+                                                        ]
+                                                      }
+                                                    }
+                                                  ]
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "leftKeys": [
+                                          1
+                                        ],
+                                        "rightKeys": [
+                                          0
+                                        ],
+                                        "type": "JOIN_TYPE_INNER"
+                                      }
+                                    },
+                                    "exprs": [
+                                      {
+                                        "type": {
+                                          "kind": "TYPE_KIND_I64"
+                                        },
+                                        "fieldRef": {}
+                                      },
+                                      {
+                                        "type": {
+                                          "kind": "TYPE_KIND_I64"
+                                        },
+                                        "fieldRef": {
+                                          "index": 3
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "kind": "TYPE_KIND_DECIMAL",
+                                          "precision": 31,
+                                          "scale": 4
+                                        },
+                                        "fieldRef": {
+                                          "index": 4
+                                        }
+                                      }
+                                    ]
+                                  }
+                                },
+                                "right": {
+                                  "rowType": {
+                                    "fields": [
+                                      {
+                                        "name": "s_suppkey",
+                                        "type": {
+                                          "kind": "TYPE_KIND_I64"
+                                        }
+                                      },
+                                      {
+                                        "name": "s_nationkey",
+                                        "type": {
+                                          "kind": "TYPE_KIND_I64"
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  "estRowCount": 100,
+                                  "collations": [
+                                    {
+                                      "fields": [
+                                        {
+                                          "expr": {
+                                            "type": {
+                                              "kind": "TYPE_KIND_I64"
+                                            },
+                                            "fieldRef": {}
+                                          },
+                                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                        }
+                                      ]
+                                    }
+                                  ],
+                                  "project": {
+                                    "input": {
+                                      "rowType": {
+                                        "fields": [
+                                          {
+                                            "name": "s_suppkey",
+                                            "type": {
+                                              "kind": "TYPE_KIND_I64"
+                                            }
+                                          },
+                                          {
+                                            "name": "s_name",
+                                            "type": {
+                                              "kind": "TYPE_KIND_STRING"
+                                            }
+                                          },
+                                          {
+                                            "name": "s_address",
+                                            "type": {
+                                              "kind": "TYPE_KIND_STRING"
+                                            }
+                                          },
+                                          {
+                                            "name": "s_nationkey",
+                                            "type": {
+                                              "kind": "TYPE_KIND_I64"
+                                            }
+                                          },
+                                          {
+                                            "name": "s_phone",
+                                            "type": {
+                                              "kind": "TYPE_KIND_STRING"
+                                            }
+                                          },
+                                          {
+                                            "name": "s_acctbal",
+                                            "type": {
+                                              "kind": "TYPE_KIND_DECIMAL",
+                                              "precision": 15,
+                                              "scale": 2
+                                            }
+                                          },
+                                          {
+                                            "name": "s_comment",
+                                            "type": {
+                                              "kind": "TYPE_KIND_STRING"
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      "estRowCount": 100,
+                                      "collations": [
+                                        {
+                                          "fields": [
+                                            {
+                                              "expr": {
+                                                "type": {
+                                                  "kind": "TYPE_KIND_I64"
+                                                },
+                                                "fieldRef": {}
+                                              },
+                                              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                            }
+                                          ]
+                                        }
+                                      ],
+                                      "read": {
+                                        "table": {
+                                          "sourceId": "mem",
+                                          "schema": "main",
+                                          "table": "supplier"
+                                        },
+                                        "projection": [
+                                          0,
+                                          1,
+                                          2,
+                                          3,
+                                          4,
+                                          5,
+                                          6
+                                        ]
+                                      }
+                                    },
+                                    "exprs": [
+                                      {
+                                        "type": {
+                                          "kind": "TYPE_KIND_I64"
+                                        },
+                                        "fieldRef": {}
+                                      },
+                                      {
+                                        "type": {
+                                          "kind": "TYPE_KIND_I64"
+                                        },
+                                        "fieldRef": {
+                                          "index": 3
+                                        }
+                                      }
+                                    ]
+                                  }
+                                },
+                                "leftKeys": [
+                                  1,
+                                  0
+                                ],
+                                "rightKeys": [
+                                  0,
+                                  1
+                                ],
+                                "type": "JOIN_TYPE_INNER"
+                              }
+                            },
+                            "exprs": [
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_I64"
+                                },
+                                "fieldRef": {
+                                  "index": 4
+                                }
+                              },
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_DECIMAL",
+                                  "precision": 31,
+                                  "scale": 4
+                                },
+                                "fieldRef": {
+                                  "index": 2
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "right": {
+                          "rowType": {
+                            "fields": [
+                              {
+                                "name": "n_nationkey",
+                                "type": {
+                                  "kind": "TYPE_KIND_I64"
+                                }
+                              },
+                              {
+                                "name": "n_name",
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                }
+                              },
+                              {
+                                "name": "n_regionkey",
+                                "type": {
+                                  "kind": "TYPE_KIND_I64"
+                                }
+                              }
+                            ]
+                          },
+                          "estRowCount": 25,
+                          "collations": [
+                            {
+                              "fields": [
+                                {
+                                  "expr": {
+                                    "type": {
+                                      "kind": "TYPE_KIND_I64"
+                                    },
+                                    "fieldRef": {}
+                                  },
+                                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                }
+                              ]
+                            }
+                          ],
+                          "project": {
+                            "input": {
+                              "rowType": {
+                                "fields": [
+                                  {
+                                    "name": "n_nationkey",
+                                    "type": {
+                                      "kind": "TYPE_KIND_I64"
+                                    }
+                                  },
+                                  {
+                                    "name": "n_name",
+                                    "type": {
+                                      "kind": "TYPE_KIND_STRING"
+                                    }
+                                  },
+                                  {
+                                    "name": "n_regionkey",
+                                    "type": {
+                                      "kind": "TYPE_KIND_I64"
+                                    }
+                                  },
+                                  {
+                                    "name": "n_comment",
+                                    "type": {
+                                      "kind": "TYPE_KIND_STRING"
+                                    }
+                                  }
+                                ]
+                              },
+                              "estRowCount": 25,
+                              "collations": [
+                                {
+                                  "fields": [
+                                    {
+                                      "expr": {
+                                        "type": {
+                                          "kind": "TYPE_KIND_I64"
+                                        },
+                                        "fieldRef": {}
+                                      },
+                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                    }
+                                  ]
+                                }
+                              ],
+                              "read": {
+                                "table": {
+                                  "sourceId": "mem",
+                                  "schema": "main",
+                                  "table": "nation"
+                                },
+                                "projection": [
+                                  0,
+                                  1,
+                                  2,
+                                  3
+                                ]
+                              }
+                            },
+                            "exprs": [
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_I64"
+                                },
+                                "fieldRef": {}
+                              },
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                },
+                                "fieldRef": {
+                                  "index": 1
+                                }
+                              },
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_I64"
+                                },
+                                "fieldRef": {
+                                  "index": 2
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "leftKeys": [
+                          0
+                        ],
+                        "rightKeys": [
+                          0
+                        ],
+                        "type": "JOIN_TYPE_INNER"
+                      }
+                    },
+                    "exprs": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        },
+                        "fieldRef": {
+                          "index": 3
+                        }
+                      },
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        },
+                        "fieldRef": {
+                          "index": 4
+                        }
+                      },
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_DECIMAL",
+                          "precision": 31,
+                          "scale": 4
+                        },
+                        "fieldRef": {
+                          "index": 1
+                        }
+                      }
+                    ]
+                  }
+                },
+                "right": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "r_regionkey",
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 1,
+                  "collations": [
+                    {
+                      "fields": [
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_I64"
+                            },
+                            "fieldRef": {}
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        }
+                      ]
+                    }
+                  ],
+                  "project": {
+                    "input": {
+                      "rowType": {
+                        "fields": [
+                          {
+                            "name": "r_regionkey",
+                            "type": {
+                              "kind": "TYPE_KIND_I64"
+                            }
+                          },
+                          {
+                            "name": "r_name",
+                            "type": {
+                              "kind": "TYPE_KIND_STRING"
+                            }
+                          }
+                        ]
+                      },
+                      "estRowCount": 1,
+                      "collations": [
+                        {
+                          "fields": [
+                            {
+                              "expr": {
+                                "type": {
+                                  "kind": "TYPE_KIND_I64"
+                                },
+                                "fieldRef": {}
+                              },
+                              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                            }
+                          ]
+                        }
+                      ],
+                      "filter": {
+                        "input": {
+                          "rowType": {
+                            "fields": [
+                              {
+                                "name": "r_regionkey",
+                                "type": {
+                                  "kind": "TYPE_KIND_I64"
+                                }
+                              },
+                              {
+                                "name": "r_name",
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                }
+                              }
+                            ]
+                          },
+                          "estRowCount": 5,
+                          "collations": [
+                            {
+                              "fields": [
+                                {
+                                  "expr": {
+                                    "type": {
+                                      "kind": "TYPE_KIND_I64"
+                                    },
+                                    "fieldRef": {}
+                                  },
+                                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                }
+                              ]
+                            }
+                          ],
+                          "project": {
+                            "input": {
+                              "rowType": {
+                                "fields": [
+                                  {
+                                    "name": "r_regionkey",
+                                    "type": {
+                                      "kind": "TYPE_KIND_I64"
+                                    }
+                                  },
+                                  {
+                                    "name": "r_name",
+                                    "type": {
+                                      "kind": "TYPE_KIND_STRING"
+                                    }
+                                  },
+                                  {
+                                    "name": "r_comment",
+                                    "type": {
+                                      "kind": "TYPE_KIND_STRING"
+                                    }
+                                  }
+                                ]
+                              },
+                              "estRowCount": 5,
+                              "collations": [
+                                {
+                                  "fields": [
+                                    {
+                                      "expr": {
+                                        "type": {
+                                          "kind": "TYPE_KIND_I64"
+                                        },
+                                        "fieldRef": {}
+                                      },
+                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                    }
+                                  ]
+                                }
+                              ],
+                              "read": {
+                                "table": {
+                                  "sourceId": "mem",
+                                  "schema": "main",
+                                  "table": "region"
+                                },
+                                "projection": [
+                                  0,
+                                  1,
+                                  2
+                                ]
+                              }
+                            },
+                            "exprs": [
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_I64"
+                                },
+                                "fieldRef": {}
+                              },
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                },
+                                "fieldRef": {
+                                  "index": 1
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "condition": {
+                          "type": {
+                            "kind": "TYPE_KIND_BOOL"
+                          },
+                          "call": {
+                            "function": "FUNCTION_ID_EQ",
+                            "args": [
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                },
+                                "fieldRef": {
+                                  "index": 1
+                                }
+                              },
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                },
+                                "literal": {
+                                  "stringValue": "ASIA"
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "exprs": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        },
+                        "fieldRef": {}
+                      }
+                    ]
+                  }
+                },
+                "condition": {
+                  "type": {
+                    "kind": "TYPE_KIND_BOOL"
+                  },
+                  "call": {
+                    "function": "FUNCTION_ID_EQ",
+                    "args": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        },
+                        "fieldRef": {
+                          "index": 1
+                        }
+                      },
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        },
+                        "fieldRef": {
+                          "index": 3
+                        }
+                      }
+                    ]
+                  }
+                },
+                "type": "JOIN_TYPE_INNER"
+              }
+            },
+            "groupings": [
+              {
+                "keys": [
+                  0
+                ]
+              }
+            ],
+            "measures": [
+              {
+                "function": "AGGREGATE_FUNCTION_ID_SUM0",
+                "args": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_DECIMAL",
+                      "precision": 31,
+                      "scale": 4
+                    },
+                    "fieldRef": {
+                      "index": 2
+                    }
+                  }
+                ],
+                "type": {
+                  "kind": "TYPE_KIND_DECIMAL",
+                  "precision": 38,
+                  "scale": 4
+                }
+              }
+            ]
+          }
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_DECIMAL",
+              "precision": 38,
+              "scale": 4
+            },
+            "fieldRef": {
+              "index": 1
+            }
+          },
+          "direction": "SORT_DIRECTION_DESC_NULLS_FIRST"
+        },
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_STRING"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

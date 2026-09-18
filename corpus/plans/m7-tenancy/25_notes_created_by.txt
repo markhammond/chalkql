@@ -1,0 +1,57 @@
+-- u1
+report id:Full, org_id:Full, created_by:Full, body:PerRow, notes:Some
+1|1|5|first CANARY-BODY-01
+2|1|5|second CANARY-BODY-02
+3|2|1|third CANARY-BODY-03
+
+-- u2
+report id:Full, org_id:Full, created_by:Full, body:PerRow, notes:Some
+1|1|5|<null>
+2|1|5|<null>
+
+-- u3
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+
+-- u3-in-o1
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+
+-- u4
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:All
+1|1|5|first CANARY-BODY-01
+2|1|5|second CANARY-BODY-02
+3|2|1|third CANARY-BODY-03
+
+-- u5
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+1|1|5|first CANARY-BODY-01
+2|1|5|second CANARY-BODY-02
+
+-- u6
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+
+-- u6-two-orgs
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+
+-- u7
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+
+-- u8
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+
+-- u9
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+
+-- u10-in-a-region
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+
+-- u11-subject-in-a-region
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+
+-- u14-a-vendor
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+
+-- u15-a-vendor-and-an-org
+report id:Full, org_id:Full, created_by:Full, body:PerRow, notes:Some
+1|1|5|first CANARY-BODY-01
+2|1|5|second CANARY-BODY-02
+

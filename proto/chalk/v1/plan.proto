@@ -1,0 +1,699 @@
+// Chalk plan IR — relations.
+// Logical nodes (10-19) mirror Substrait naming and
+// semantics; physical nodes (30+) are Chalk's own.
+syntax = "proto3";
+
+package chalk.v1;
+
+import "chalk/v1/expr.proto";
+import "chalk/v1/types.proto";
+
+option csharp_namespace = "Chalk.Ir";
+option java_multiple_files = true;
+option java_outer_classname = "PlanProto";
+option java_package = "chalk.ir.v1";
+
+message Plan {
+  uint32 ir_version = 1;
+  // Digest of the canonical form. Zero in the canonical form.
+  uint64 plan_digest = 2;
+  // Identity of the catalog the plan was made against. Executors refuse to run a plan whose
+  // (context_id, catalog_epoch) differ from the live catalog.
+  string context_id = 3;
+  int64 catalog_epoch = 4;
+  // Equals root.row_type; duplicated so a consumer can build the output schema without walking the tree.
+  RowType output_type = 5;
+  Rel root = 6;
+  // Types of the dynamic parameters, by DynamicParam.index.
+  repeated Type parameter_types = 7;
+}
+
+message Rel {
+  // Output row type of this node. REQUIRED on every node.
+  RowType row_type = 1;
+  // Planner's estimate of output rows (>= 0). Excluded from plan_digest.
+  double est_row_count = 2;
+  // Every ordering the output is guaranteed to satisfy. May be empty. Executors MAY rely on these;
+  // planners MUST NOT claim an ordering the physical implementation does not deliver.
+  repeated Collation collations = 3;
+
+  // This node was put here by the entitlement rewrite rather than by the query.
+  // It carries no semantics an executor acts on — the node is an
+  // ordinary Filter or Project — and exists so plan text, an audit log and the taint check can tell
+  // policy from query. Excluded from plan_digest for no reason: it *is* in the digest, because a
+  // plan that filters and one that does not are different plans.
+  //
+  // Stays typed on the plan while the request's options travel as an extension:
+  // this is the *plan's own record of what was done to it*, read by the client-side invariant that
+  // re-derives the taint check from the host's catalog. Pushing it through an `Any` would give a
+  // verifier ceremony and nothing else. `Read.disclosures` is the same thing per column.
+  bool policy_injected = 4;
+
+  oneof kind {
+    // ---- logical: Substrait-shaped ----
+    Read read = 10;
+    Filter filter = 11;
+    Project project = 12;
+    Aggregate aggregate = 13;
+    Sort sort = 14;
+    Fetch fetch = 15;
+    Join join = 16;
+    SetOp set_op = 17;
+    Window window = 18;
+    VirtualTable virtual_table = 19;
+    BoundTable bound_table = 20;
+
+    // ---- physical: Chalk's own ----
+    IndexLookup index_lookup = 30;
+    RemoteQuery remote_query = 31;
+    HashJoin hash_join = 32;
+    MergeJoin merge_join = 33;
+    NestedLoopJoin nested_loop_join = 34;
+    HashAggregate hash_aggregate = 35;
+    StreamAggregate stream_aggregate = 36;
+    TopN top_n = 37;
+    AsOfJoin as_of_join = 38;
+    Hop hop = 39;
+    Session session = 40;
+    Unnest unnest = 41;
+    TableFunctionScan table_function_scan = 42;
+
+    // ---- physical: federation ----
+    LookupJoin lookup_join = 44;
+    AdaptiveJoin adaptive_join = 45;
+    MaterialisedInput materialised_input = 46;
+    PartitionedScan partitioned_scan = 47;
+  }
+}
+
+message Collation {
+  repeated SortField fields = 1;
+}
+
+// In Sort/TopN/Collation contexts `expr` is always a FieldRef into the node's own output row
+// (Collation) or its input row (Sort, TopN).
+message SortField {
+  Expr expr = 1;
+  SortDirection direction = 2;
+}
+
+enum SortDirection {
+  SORT_DIRECTION_UNSPECIFIED = 0;
+  SORT_DIRECTION_ASC_NULLS_FIRST = 1;
+  SORT_DIRECTION_ASC_NULLS_LAST = 2;
+  SORT_DIRECTION_DESC_NULLS_FIRST = 3;
+  SORT_DIRECTION_DESC_NULLS_LAST = 4;
+}
+
+message TableRef {
+  string source_id = 1;
+  string schema = 2;
+  string table = 3;
+}
+
+// Scan of a table by the client through its ISourceRuntime.
+message Read {
+  TableRef table = 1;
+  // Table column indexes, in output order. Never empty (a Read always outputs at least one column).
+  repeated uint32 projection = 2;
+  // Predicate the source applies itself, over the *table's* row (not the projected row).
+  // Unset unless the source declared a matching capability.
+  Expr filter = 3;
+  // The entitlement rewrite's breadcrumbs: the
+  // planner's verdict for every column of this occurrence, in the *table's* own ordinal numbering
+  // rather than this Read's projection, because that is the numbering the host's catalog uses and no
+  // constraint identifier then has to be minted.
+  //
+  // An entitled read carries exactly one entry per column of the table, in ordinal order, FULL
+  // included; a read of a table with no entitlement carries none, and an empty repeated field emits
+  // no bytes, so an unentitled plan is byte-identical to one from before this step. Nothing an
+  // executor acts on: the host holds the verdict per column and can reconcile it against its own
+  // policy, and the client's own validator re-establishes the taint check from its own catalog
+  // (I-IR-E). Like `Rel.policy_injected`, and for the same reason, it stays typed on the
+  // plan rather than moving into an extension.
+  repeated ColumnDisclosure disclosures = 6;
+  // The content hash of the descriptor this read was compiled under. Set on an entitled
+  // read and empty on every other, so an unentitled plan is byte-identical to one from before this
+  // step and the zero-cost property is untouched.
+  //
+  // It is what makes "the planner puts it in the plan digest of every plan that touches the
+  // table" true by construction rather than by the folded literals happening to differ: the digest
+  // covers the whole plan, so a changed policy is a different plan whatever the fold came to.
+  // `PlanDigest.Compute` and I-IR-9 are unchanged. The client's I-IR-E checks it against the
+  // descriptor hash the report gave for the same table.
+  string descriptor_hash = 7;
+  // This read is the entitlement mechanism's own, along a declared path:
+  // the bridge or an endpoint of a key set, read
+  // raw for a correlation and never for the statement.
+  //
+  // It carries no `disclosures` and no `descriptor_hash`, because nothing of it is disclosed: what
+  // leaves the chain is a key that joins back to the target's own key, a match marker and the
+  // verdict ordinals. `Rel.policy_injected` is set, as it is on every node the rewrite put there.
+  // The client's own validator reads this the way the planner's clause 1 does — an entitled table
+  // read without breadcrumbs is refused unless it says it is this — and holds the mechanism's
+  // occurrence to being unreachable from the statement's own columns. A statement's own occurrence
+  // of the same table is entitled as that table's policy says, quite separately. False on every
+  // other read, so an unentitled plan is byte-identical to one from before this step.
+  bool correlation = 8;
+  // Superseded by `disclosures`: two ordinal lists (withheld, tainted) that could not say FULL
+  // apart from "not mentioned".
+  reserved 4, 5;
+  reserved "withheld_columns", "tainted_columns";
+}
+
+// What the entitlement pass concluded about one column of one leaf occurrence, once the principal's
+// context had been folded in. The names are the disclosure map's
+// codomain: what the *pass* concluded, as against `chalk.v1.Disclosure`, which is what one *rule*
+// may say about one row.
+enum DisclosureOutcome {
+  DISCLOSURE_OUTCOME_UNSPECIFIED = 0;
+  // The column, unchanged.
+  DISCLOSURE_OUTCOME_FULL = 1;
+  // The column's mask, for every row.
+  DISCLOSURE_OUTCOME_MASKED = 2;
+  // Raw and tainted on purpose: only an allow-listed population aggregate may consume it.
+  DISCLOSURE_OUTCOME_AGGREGATE = 3;
+  // A placeholder, for every row.
+  DISCLOSURE_OUTCOME_REDACTED = 4;
+  // Decided per row: a rule condition the fold could not settle.
+  DISCLOSURE_OUTCOME_PER_ROW = 5;
+  // A placeholder to every use but a permitted comparison, which the leaf computed over the raw
+  // value and disclosed as one boolean. The raw value leaves the leaf
+  // only inside that comparison, so a reference to the column itself is a placeholder exactly as
+  // under REDACTED, and the derived boolean is a value of the leaf's own making.
+  DISCLOSURE_OUTCOME_TESTED = 6;
+}
+
+message ColumnDisclosure {
+  // The table's own column ordinal, not this Read's projected position.
+  uint32 column = 1;
+  DisclosureOutcome outcome = 2;
+  // The comparison shapes this column's rules permit over it:
+  // EQUALS, NOT_EQUALS or IN, upper-cased as every string form of a disclosure is. Empty for
+  // every column no rule permits a test of, which is every column until a host grants one.
+  //
+  // What reads them is the client's own invariant walk (I-IR-E): a population-only column
+  // may stand inside a comparison of one of these shapes whose other operands read no column of the
+  // row, because that comparison is the leaf's own and discloses the one bit the policy named — and
+  // the client has to be able to tell that expression from every other one without believing the
+  // planner. Strings rather than the enum, because plan.proto states the IR and catalog.proto the
+  // policy vocabulary, and the IR does not import it.
+  repeated string test_shapes = 4;
+  // The column left the leaf raw under the `statistical` opt-in rather than because a rule
+  // said AGGREGATE_ONLY. Its outcome is AGGREGATE either way — raw, and guarded by the group-size
+  // floor — but the positions it may stand in are wider: a predicate, a join condition, an
+  // aggregate's FILTER and a grouping key, which the client's own invariant has to admit.
+  bool statistical = 3;
+}
+
+message Filter {
+  Rel input = 1;
+  // Over the input row. Rows where the condition is NULL are dropped.
+  Expr condition = 2;
+}
+
+// Output row = exprs, in order (Calcite semantics, which diverge from Substrait here).
+message Project {
+  Rel input = 1;
+  repeated Expr exprs = 2;
+}
+
+// Output row = grouping keys (in order) followed by measures (in order).
+message Aggregate {
+  Rel input = 1;
+  // v1 executors accept exactly one grouping. Multiple groupings (grouping sets) are reserved.
+  repeated Grouping groupings = 2;
+  repeated Measure measures = 3;
+}
+
+message Grouping {
+  // Input field indexes. NULLs group together.
+  repeated uint32 keys = 1;
+}
+
+// Exactly one of `function` and `user_function` identifies the aggregate: a built-in by its stable
+// id, or a client-bodied user aggregate by its schema-qualified name. A SQL-bodied
+// aggregate has been expanded into the built-ins it is written over and never reaches here.
+message Measure {
+  AggregateFunctionId function = 1;
+  repeated Expr args = 2;
+  bool distinct = 3;
+  // Optional FILTER (WHERE ...) predicate over the input row.
+  Expr filter = 4;
+  // Result type.
+  Type type = 5;
+  // The WITHIN GROUP (ORDER BY ...) or ARRAY_AGG(... ORDER BY ...) ordering, over the *input* row
+  //. Every expr is a FieldRef. Set only for the holistic aggregates that take one; empty means
+  // the aggregate does not depend on an order, or the query gave none.
+  repeated SortField order_by = 6;
+  // `schema.name` of a client-bodied user aggregate. Mutually exclusive with `function`.
+  string user_function = 7;
+}
+
+message Sort {
+  Rel input = 1;
+  repeated SortField fields = 2;
+}
+
+message Fetch {
+  Rel input = 1;
+  int64 offset = 2;
+  // Unset = no limit.
+  optional int64 count = 3;
+}
+
+message Join {
+  Rel left = 1;
+  Rel right = 2;
+  // Over left fields followed by right fields. Unset = cross join.
+  Expr condition = 3;
+  JoinType type = 4;
+}
+
+enum JoinType {
+  JOIN_TYPE_UNSPECIFIED = 0;
+  JOIN_TYPE_INNER = 1;
+  JOIN_TYPE_LEFT = 2;
+  JOIN_TYPE_RIGHT = 3;
+  JOIN_TYPE_FULL = 4;
+  // Output = left row only.
+  JOIN_TYPE_SEMI = 5;
+  JOIN_TYPE_ANTI = 6;
+}
+
+message SetOp {
+  repeated Rel inputs = 1;
+  SetOpKind kind = 2;
+}
+
+enum SetOpKind {
+  SET_OP_KIND_UNSPECIFIED = 0;
+  SET_OP_KIND_UNION_ALL = 1;
+  SET_OP_KIND_UNION_DISTINCT = 2;
+  SET_OP_KIND_INTERSECT_ALL = 3;
+  SET_OP_KIND_INTERSECT_DISTINCT = 4;
+  SET_OP_KIND_EXCEPT_ALL = 5;
+  SET_OP_KIND_EXCEPT_DISTINCT = 6;
+}
+
+// SQL:2011 window functions over one partition-and-order.
+// Shaped like Substrait's ConsistentPartitionWindowRel: a Calcite `Window` with several groups
+// becomes a *stack* of these, one per group, in Calcite's group order, so the output column order is
+// Calcite's.
+//
+// Output row = the input's fields followed by one column per call, in `calls` order. The output's
+// ordering is the input's, which is (partition_keys, order); the planner claims it in `collations`.
+message Window {
+  Rel input = 1;
+  // Input field indexes. NULLs partition together. May be empty: the whole input is one partition.
+  repeated uint32 partition_keys = 2;
+  // The ordering within the partition, over the input row. Every expr is a FieldRef.
+  repeated SortField order = 3;
+  // Shared by the calls that use frames. Always explicit: the planner resolves SQL's defaults
+  // (ORDER BY present -> RANGE UNBOUNDED PRECEDING .. CURRENT ROW; absent -> the whole partition).
+  WindowFrame frame = 4;
+  repeated WindowCall calls = 5;
+}
+
+message WindowFrame {
+  FrameMode mode = 1;
+  FrameBound lower = 2;
+  FrameBound upper = 3;
+  FrameExclusion exclusion = 4;
+}
+
+// `offset` is set only for PRECEDING and FOLLOWING: a Literal or a DynamicParam, of kind I64 for
+// ROWS and GROUPS, and for RANGE either the order key's own kind (numeric) or INTERVAL_DAY (a
+// temporal key).
+message FrameBound {
+  FrameBoundKind kind = 1;
+  Expr offset = 2;
+}
+
+enum FrameMode {
+  FRAME_MODE_UNSPECIFIED = 0;
+  // Physical rows.
+  FRAME_MODE_ROWS = 1;
+  // The single order key compared against `current +/- offset`; peers included at CURRENT ROW.
+  FRAME_MODE_RANGE = 2;
+  // Peer groups. Reserved: Calcite 1.42's parser does not accept GROUPS.
+  FRAME_MODE_GROUPS = 3;
+}
+
+enum FrameBoundKind {
+  FRAME_BOUND_KIND_UNSPECIFIED = 0;
+  FRAME_BOUND_KIND_UNBOUNDED_PRECEDING = 1;
+  FRAME_BOUND_KIND_PRECEDING = 2;
+  FRAME_BOUND_KIND_CURRENT_ROW = 3;
+  FRAME_BOUND_KIND_FOLLOWING = 4;
+  FRAME_BOUND_KIND_UNBOUNDED_FOLLOWING = 5;
+}
+
+enum FrameExclusion {
+  FRAME_EXCLUSION_UNSPECIFIED = 0;
+  FRAME_EXCLUSION_NO_OTHERS = 1;
+  FRAME_EXCLUSION_CURRENT_ROW = 2;
+  FRAME_EXCLUSION_GROUP = 3;
+  FRAME_EXCLUSION_TIES = 4;
+}
+
+// One window function call. Ranking and navigation functions operate on the partition and ignore the
+// frame; FIRST_VALUE, LAST_VALUE, NTH_VALUE and the aggregates respect it.
+message WindowCall {
+  oneof function {
+    AggregateFunctionId aggregate = 1;
+    WindowFunctionId window_function = 2;
+  }
+  // Over the input row. The value argument is a FieldRef; NTILE(n), LAG(x, offset, default) and
+  // NTH_VALUE(x, n) carry their extra arguments here as Literals or DynamicParams, already
+  // expressed in the type they are read at.
+  repeated Expr args = 3;
+  // Aggregate calls only. Executed through a counted multiset.
+  bool distinct = 4;
+  // IGNORE NULLS on a navigation function. RESPECT NULLS is the default.
+  bool ignore_nulls = 5;
+  Type type = 6;
+  // As Measure.order_by: the WITHIN GROUP ordering of a holistic aggregate, over the input row.
+  repeated SortField order_by = 7;
+  // `schema.name` of a client-bodied user aggregate over this window. Set instead of
+  // `function`, which is why it sits outside the oneof: a proto3 oneof of two enums and a string
+  // cannot express "an aggregate id or a name" without making the enum optional.
+  string user_function = 8;
+}
+
+enum WindowFunctionId {
+  WINDOW_FUNCTION_ID_UNSPECIFIED = 0;
+  WINDOW_FUNCTION_ID_ROW_NUMBER = 1;
+  WINDOW_FUNCTION_ID_RANK = 2;
+  WINDOW_FUNCTION_ID_DENSE_RANK = 3;
+  WINDOW_FUNCTION_ID_NTILE = 4;
+  WINDOW_FUNCTION_ID_PERCENT_RANK = 5;
+  WINDOW_FUNCTION_ID_CUME_DIST = 6;
+  WINDOW_FUNCTION_ID_LAG = 7;
+  WINDOW_FUNCTION_ID_LEAD = 8;
+  WINDOW_FUNCTION_ID_FIRST_VALUE = 9;
+  WINDOW_FUNCTION_ID_LAST_VALUE = 10;
+  WINDOW_FUNCTION_ID_NTH_VALUE = 11;
+}
+
+// Inline rows (SQL VALUES, `SELECT 1`). All values are Literals.
+message VirtualTable {
+  repeated VirtualRow rows = 1;
+}
+
+// One of the execution context's named relations, materialised by the executor at execution start
+//. The rows are never
+// in the plan: they are the host's, they are not part of the digest, the statistics or the logs, and
+// only their count is ever recorded. `Rel.row_type` is the relation's declared row type.
+//
+// A bound relation is a general facility — any statement may stand one in a FROM — and is named as
+// one. Today only the entitlement rewrite produces the node, and only for a relation too large to
+// fold into an IN list at prepare time; a small one becomes literals and never reaches the executor
+// as a relation.
+message BoundTable {
+  // The name the host bound the relation under. `ExecutionContext.Relations[name]`.
+  string name = 1;
+}
+
+message VirtualRow {
+  repeated Expr values = 1;
+}
+
+// Hopping windows. Output row = the input's fields followed
+// by `window_start` and `window_end`, both of the time column's type and nullable only if it is.
+//
+// A row at time t belongs to every window [s, s + size) whose start s is a multiple of `slide`
+// counted from the epoch and which contains t. Its copies are emitted together, in ascending
+// `window_start`, so the input's ordering is preserved and the node claims it. A row whose time is
+// NULL belongs to no window and is dropped, and so is a row that falls in no window at all — which
+// happens exactly when `size < slide`.
+message Hop {
+  Rel input = 1;
+  // An input field of DATE, TIMESTAMP or TIMESTAMP_TZ kind.
+  uint32 time_column = 2;
+  // Positive INTERVAL_DAY constants: a Literal or a DynamicParam.
+  Expr slide = 3;
+  Expr size = 4;
+}
+
+// Session windows. Output row is shaped exactly like Hop's, one output row per input row.
+//
+// Rows are grouped by `partition_keys` and, within a partition, a new session starts when the gap
+// from the previous non-NULL time reaches `gap` (Calcite's rule: the previous session's end is its
+// last time plus `gap`, and a row at or after that end starts a new one). `window_start` is the
+// session's first time and `window_end` its last time plus `gap`. A row whose time is NULL gets NULL
+// bounds and belongs to no session.
+//
+// The input must be ordered by (partition_keys, time_column); the planner requires it as a trait, so
+// the operator is a single pass and the node claims the same ordering for its output.
+message Session {
+  Rel input = 1;
+  repeated uint32 partition_keys = 2;
+  uint32 time_column = 3;
+  // A positive INTERVAL_DAY constant: a Literal or a DynamicParam.
+  Expr gap = 4;
+}
+
+// Flattens a LIST column. Output row = the input's fields, then the element (the list's
+// element type, made nullable when `keep_empty` pads with one), then — when `with_ordinality` — the
+// element's 1-based position within its list.
+//
+// Elements come out in list order and a row's elements are adjacent, so the input's ordering is
+// preserved and the node claims it.
+message Unnest {
+  Rel input = 1;
+  // An input field of LIST kind.
+  uint32 list_column = 2;
+  // Append the 1-based position of the element within its list, as I32 — which is the type Calcite's
+  // own WITH ORDINALITY column has. Nullable exactly when `keep_empty` is set.
+  bool with_ordinality = 3;
+  // LEFT JOIN LATERAL semantics: a NULL or empty list yields one row with a NULL element (and a NULL
+  // ordinality). False is CROSS semantics: such a row produces nothing.
+  bool keep_empty = 4;
+}
+
+// ---- physical ----
+
+// Range lookup on a declared index. Output row = `projection` of the table's columns, in that
+// order; rows come out in the index's key order. Several ranges are a union, and the executor
+// de-duplicates rows when there is more than one.
+//
+// `residual` is over the *emitted* row. The planner never sets it today — it emits Filter(IndexLookup)
+// instead — but the field stays so a later planner can fuse the two without an IR change.
+message IndexLookup {
+  TableRef table = 1;
+  string index = 2;
+  repeated IndexRange ranges = 3;
+  repeated uint32 projection = 4;
+  Expr residual = 5;
+}
+
+// Bounds over a prefix of the index's key columns. `lower` and `upper` are Literals or
+// DynamicParams, already cast to the key column's type (I-IR-2). All but the last bound column are
+// equalities (the same expression on both sides, both inclusive); only the last may be open, and an
+// empty list on a side means unbounded there. A DynamicParam bound to NULL yields an empty range.
+message IndexRange {
+  repeated Expr lower = 1;
+  bool lower_inclusive = 2;
+  repeated Expr upper = 3;
+  bool upper_inclusive = 4;
+}
+
+// Opaque native query executed by an ISourceRuntime. Output row type is Rel.row_type.
+// A subtree the source runs itself. Both flavours travel: `query_text` for a SQL source
+// and `pushed_plan` for an IR one — and a SQL source carries both, so the algebra a query
+// text was generated from is never lost.
+message RemoteQuery {
+  string source_id = 1;
+  string dialect = 2;
+  // The generated SQL, in `dialect`. Empty for a source whose query language is IR.
+  string query_text = 3;
+  // Parameters `query_text` (or `pushed_plan`) refers to, in placeholder order.
+  repeated Expr parameters = 4;
+  // The pushed subtree as IR: a `Read` with its filter and projection, and whatever `Fetch`,
+  // `Sort` or `Aggregate` was pushed above it. Set for every RemoteQuery. The executor
+  // hands it to an IR-language source verbatim, and reads it for diagnostics otherwise.
+  Rel pushed_plan = 5;
+}
+
+// Equi-join on key columns with an optional residual over the joined row.
+message HashJoin {
+  Rel left = 1;
+  Rel right = 2;
+  repeated uint32 left_keys = 3;
+  repeated uint32 right_keys = 4;
+  Expr post_join_filter = 5;
+  JoinType type = 6;
+}
+
+// As HashJoin; both inputs are sorted on their keys (guaranteed by their collations).
+message MergeJoin {
+  Rel left = 1;
+  Rel right = 2;
+  repeated uint32 left_keys = 3;
+  repeated uint32 right_keys = 4;
+  Expr post_join_filter = 5;
+  JoinType type = 6;
+}
+
+message NestedLoopJoin {
+  Rel left = 1;
+  Rel right = 2;
+  Expr condition = 3;
+  JoinType type = 4;
+}
+
+// For each left row, the right row whose time is closest to the left row's under `match`, among the
+// right rows whose `right_keys` equal the left row's `left_keys`. Chalk's own node — Substrait has
+// no ASOF relation — matching Calcite 1.42's
+// `left [LEFT] ASOF JOIN right MATCH_CONDITION left.t <op> right.t ON <equalities>`.
+//
+// A NULL on either side of the match condition never matches, and neither does a NULL equality key.
+// Ties — several right rows at the same closest time — are broken by the right input's order, first
+// wins. `JOIN_TYPE_INNER` drops unmatched left rows; `JOIN_TYPE_LEFT` null-pads them. No other
+// type is legal. Output row = left fields then right fields, and rows come out in left-input order.
+message AsOfJoin {
+  Rel left = 1;
+  Rel right = 2;
+  // Equality keys, pairwise of the same kind. May be empty, which makes the whole right input one
+  // partition.
+  repeated uint32 left_keys = 3;
+  repeated uint32 right_keys = 4;
+  // The MATCH_CONDITION operands: a column of each input, of the same temporal or numeric kind.
+  uint32 left_time = 5;
+  uint32 right_time = 6;
+  // The comparison, read as `left_time <op> right_time`.
+  AsOfMatch match = 7;
+  // JOIN_TYPE_INNER or JOIN_TYPE_LEFT only.
+  JoinType type = 8;
+}
+
+enum AsOfMatch {
+  AS_OF_MATCH_UNSPECIFIED = 0;
+  AS_OF_MATCH_LT = 1;
+  AS_OF_MATCH_LE = 2;
+  AS_OF_MATCH_GT = 3;
+  AS_OF_MATCH_GE = 4;
+}
+
+message HashAggregate {
+  Aggregate aggregate = 1;
+}
+
+// Input is sorted on the grouping keys (guaranteed by the input's collations).
+message StreamAggregate {
+  Aggregate aggregate = 1;
+}
+
+// A client-bodied table function. The host's implementation is called once per
+// execution with the argument values and produces the rows of `row_type`; a SQL-bodied table function
+// is a Calcite macro and has already become an ordinary subtree by the time a plan is built.
+//
+// Arguments are constants or dynamic parameters over no input row: a table function scan is a leaf.
+message TableFunctionScan {
+  // `schema.name`, resolved against the live catalog by the validator.
+  string function = 1;
+  repeated Expr args = 2;
+}
+
+// ---- federation ----
+
+// A cross-source equi-join executed by asking the lookup side for the driving side's keys
+// (JOIN_STRATEGY_LOOKUP). The driving side streams; for every batch of at most
+// `max_keys_per_call` distinct non-NULL keys the executor binds them into the lookup subtree's
+// KeySetParam, runs that subtree's query, and hash-joins the rows that come back against the
+// buffered driving rows.
+//
+// Output row = driving fields then lookup fields, except for SEMI and ANTI, which output the
+// driving fields only. A NULL key never matches, which for INNER and SEMI drops the row and for
+// LEFT and ANTI keeps it. Rows come out in driving-input order within a key batch; the order of the
+// batches is the driving input's, so the node claims the driving input's collation only when the
+// join cannot fan a driving row out to several lookup rows (it does not claim one in v1).
+message LookupJoin {
+  // Streamed. In a different source from `lookup`, or local.
+  Rel driving = 1;
+  // A RemoteQuery subtree containing exactly one key set, in its predicate and in its pushed_plan:
+  // a KeySetParam for a single key column, a KeySetMatch for several. For a SQL source it is one
+  // placeholder in `query_text`, which the executor expands into as many as the call has keys.
+  Rel lookup = 2;
+  // Parallel equality keys, into the driving row and the lookup row. One pair where the key set is
+  // a KeySetParam; as many as the KeySetMatch has columns, in the same order, where it is one
+  //. More than one pair requires the lookup source to declare
+  // `supports_row_value_in_list`: `(a, b) IN ((?, ?), …)` is not a spelling every dialect accepts.
+  repeated uint32 driving_keys = 3;
+  repeated uint32 lookup_keys = 4;
+  // INNER, LEFT, SEMI or ANTI. No other type is legal: RIGHT and FULL need the whole lookup side.
+  JoinType type = 5;
+  // The most distinct keys one call may carry — the lookup source's `max_in_list`, or less.
+  int32 max_keys_per_call = 6;
+  // Over the joined row (driving fields then lookup fields), as HashJoin.post_join_filter.
+  Expr post_join_filter = 7;
+  // How the key set is spelled in `lookup`'s query, and therefore how the executor expands its one
+  // placeholder into a call's worth of them: false is an IN list (`?, ?, …`), true is VALUES rows
+  // (`(?), (?), …`), which is what JOIN_STRATEGY_BROADCAST ships. Added here
+  // because the two spellings are the only thing that distinguishes the two strategies at
+  // execution, and a plan that did not say which would need the executor to parse SQL.
+  bool key_set_rows = 8;
+}
+
+// A cross-source join whose branch is chosen at execution (JOIN_STRATEGY_ADAPTIVE): the
+// executor materialises `small`, counts its distinct join keys, and takes `lookup` when the count
+// fits in `max_keys` and `local` otherwise. Both branches are in the plan and the digest covers
+// both, so a plan is deterministic; the branch taken is recorded in
+// QueryExecution.Stats.AdaptiveDecisions and never in the plan.
+//
+// `lookup.driving` and one input of `local` are a MaterialisedInput of `slot`, which replays the
+// batches `small` produced.
+message AdaptiveJoin {
+  // Materialised first, into the arena.
+  Rel small = 1;
+  LookupJoin lookup = 2;
+  // The LOCAL alternative: a HashJoin over the materialisation and the other side's full fetch.
+  Rel local = 3;
+  // The threshold applied to `small`'s distinct keys: `max_in_list` x `lookup_max_calls`.
+  int32 max_keys = 4;
+  // Which materialisation `lookup.driving` and `local`'s MaterialisedInput replay.
+  uint32 slot = 5;
+  // The distinct-key column, as an index into `small`'s row. The same column `lookup.driving_keys`
+  // names, stated here so the operator need not look inside the branch it has not chosen.
+  uint32 key = 6;
+}
+
+// Replays a batch set the enclosing AdaptiveJoin materialised. A leaf; its row type is the
+// materialised input's.
+message MaterialisedInput {
+  uint32 slot = 1;
+}
+
+// A scan of a partitioned table whose surviving partitions may be narrowed again at
+// execution when a key set is bound on the partition column. Output = the union of `partitions`,
+// in no particular order: the node never claims a collation.
+//
+// The planner prunes by predicate first and puts only the survivors here. A scan with nothing left
+// to prune at execution is emitted as a plain SetOp UNION_ALL instead, so this node means
+// "there is a key set that can still prune".
+message PartitionedScan {
+  // One subtree per surviving partition, in the catalog's partition order. Each has this node's row
+  // type; each is a Read, a RemoteQuery or a subtree over one.
+  repeated Rel partitions = 1;
+  // The partition-column values each entry in `partitions` holds, parallel to it. A partition whose
+  // match is a range has an unset `value` and is never pruned at execution.
+  repeated PartitionMatch matches = 2;
+  // The key set the executor prunes with, when one is bound in this node's scope. Unset means the
+  // node fans out over every partition.
+  Expr key_set = 3;
+}
+
+// What one entry of PartitionedScan.partitions holds, for execution-time pruning.
+message PartitionMatch {
+  // A Literal of the partition column's type, or unset for a range partition (never pruned).
+  Expr value = 1;
+}
+
+// Sort + Fetch fused. Output ordering = fields.
+message TopN {
+  Rel input = 1;
+  repeated SortField fields = 2;
+  int64 offset = 3;
+  int64 count = 4;
+}

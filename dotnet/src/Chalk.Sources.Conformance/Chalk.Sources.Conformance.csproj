@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Sources.Conformance</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>Chalk source conformance kit: prove an ISourceRuntime's declared capabilities and dialect profile against its own data.</Description>
+  </PropertyGroup>
+
+  <!--
+    A shipped package an adapter author references from their tests (D88), so it depends on the
+    source contract and the catalog model, plus Chalk.Sources.Ado since D263 (ADR 0046 §3): the one
+    ADO-specific finding — the text strategy D263 asks the kit to report — reads AdoSource's own
+    probe, over an AdoSource, so a host can declare next time what today gets measured. Every other
+    check still runs against the bare ISourceRuntime contract; a source that is not an AdoSource
+    reports nothing extra. In particular the kit does not depend on the planner or on any test
+    framework: it runs anywhere, reports findings as data, and the author decides what to do with
+    them.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Apache.Arrow" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Chalk.Sources.Abstractions/Chalk.Sources.Abstractions.csproj" />
+    <ProjectReference Include="../Chalk.Catalog/Chalk.Catalog.csproj" />
+    <ProjectReference Include="../Chalk.Sources.Ado/Chalk.Sources.Ado.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <!--
+    CHALK001 is the experimental id the Tier 2 kernel interface and the columnar views carry (D79).
+    The engine and the in-box sources are the code those types were extracted from, so they opt in
+    once here rather than at every use.
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CHALK001</NoWarn>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,82 @@
+{
+  "irVersion": 1,
+  "planDigest": "14754490690848687278",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "id",
+        "type": {
+          "kind": "TYPE_KIND_I32"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          }
+        }
+      ]
+    },
+    "estRowCount": 4,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_DESC_NULLS_FIRST"
+          }
+        ]
+      }
+    ],
+    "topN": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              }
+            }
+          ]
+        },
+        "estRowCount": 6,
+        "read": {
+          "table": {
+            "sourceId": "mem",
+            "schema": "main",
+            "table": "sales"
+          },
+          "projection": [
+            0
+          ]
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_I32"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_DESC_NULLS_FIRST"
+        }
+      ],
+      "offset": "1",
+      "count": "3"
+    }
+  }
+}

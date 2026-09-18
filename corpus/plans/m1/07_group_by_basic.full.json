@@ -1,0 +1,188 @@
+{
+  "irVersion": 1,
+  "planDigest": "11659986966572297396",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "n",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      },
+      {
+        "name": "vol",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      },
+      {
+        "name": "lo",
+        "type": {
+          "kind": "TYPE_KIND_FP64"
+        }
+      },
+      {
+        "name": "hi",
+        "type": {
+          "kind": "TYPE_KIND_FP64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "n",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        },
+        {
+          "name": "vol",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        },
+        {
+          "name": "lo",
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          }
+        },
+        {
+          "name": "hi",
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 5,
+    "hashAggregate": {
+      "aggregate": {
+        "input": {
+          "rowType": {
+            "fields": [
+              {
+                "name": "symbol",
+                "type": {
+                  "kind": "TYPE_KIND_STRING"
+                }
+              },
+              {
+                "name": "high",
+                "type": {
+                  "kind": "TYPE_KIND_FP64"
+                }
+              },
+              {
+                "name": "low",
+                "type": {
+                  "kind": "TYPE_KIND_FP64"
+                }
+              },
+              {
+                "name": "volume",
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                }
+              }
+            ]
+          },
+          "estRowCount": 100800,
+          "read": {
+            "table": {
+              "sourceId": "mem",
+              "schema": "main",
+              "table": "bars"
+            },
+            "projection": [
+              0,
+              3,
+              4,
+              6
+            ]
+          }
+        },
+        "groupings": [
+          {
+            "keys": [
+              0
+            ]
+          }
+        ],
+        "measures": [
+          {
+            "function": "AGGREGATE_FUNCTION_ID_COUNT",
+            "type": {
+              "kind": "TYPE_KIND_I64"
+            }
+          },
+          {
+            "function": "AGGREGATE_FUNCTION_ID_SUM0",
+            "args": [
+              {
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                },
+                "fieldRef": {
+                  "index": 3
+                }
+              }
+            ],
+            "type": {
+              "kind": "TYPE_KIND_I64"
+            }
+          },
+          {
+            "function": "AGGREGATE_FUNCTION_ID_MIN",
+            "args": [
+              {
+                "type": {
+                  "kind": "TYPE_KIND_FP64"
+                },
+                "fieldRef": {
+                  "index": 2
+                }
+              }
+            ],
+            "type": {
+              "kind": "TYPE_KIND_FP64"
+            }
+          },
+          {
+            "function": "AGGREGATE_FUNCTION_ID_MAX",
+            "args": [
+              {
+                "type": {
+                  "kind": "TYPE_KIND_FP64"
+                },
+                "fieldRef": {
+                  "index": 1
+                }
+              }
+            ],
+            "type": {
+              "kind": "TYPE_KIND_FP64"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,325 @@
+// The entitlement extension.
+//
+// Nothing in the core contract — planner.proto, plan.proto, expr.proto, catalog.proto — imports this
+// file. `EntitlementsOptions` travels in `PlanRequest.extensions` and `EntitlementsReport` /
+// `EntitlementsExplain` in `PlanResponse.extensions`, each a `google.protobuf.Any` addressed by its
+// type URL, and the sidecar's extension registry routes them to the one handler that knows them. A
+// request built by a client without the entitlements assembly cannot carry these bytes, which is
+// what makes zero-cost a property by construction rather than only a tested one.
+//
+// Versioning is by type URL: `buf breaking` no longer sees inside an `Any`, so these messages keep
+// their own history in their own file, and a type URL is a stable name that changes only with a new
+// message. The plan digest is unaffected — it covers the plan, never the request.
+syntax = "proto3";
+
+package chalk.v1;
+
+option csharp_namespace = "Chalk.Entitlements.Rpc";
+option java_multiple_files = true;
+option java_outer_classname = "EntitlementsProto";
+option java_package = "chalk.planner.rpc.v1";
+
+// The client's choices for one prepare. None of them
+// changes what the rewrite guarantees; each is about what the caller is handed. Its presence in
+// `PlanRequest.extensions` is what installs the entitlement pass's handler for this request.
+message EntitlementsOptions {
+  reserved 2, 9;
+  reserved "redacted_columns", "named_redacted_columns";
+
+  StarPolicy star_policy = 1;
+  PlaceholderPolicy placeholder_policy = 3;
+  // The group-size floor every column that declares `min_group_size = 0` inherits. There is
+  // no shipped floor: 0 — the default — means no guard, so a catalog with population-only columns
+  // and no small-cell rule pays nothing for them.
+  uint32 default_min_group_size = 4;
+  // Turn `visibility = NONE` — the principal holds no grant on a table the statement reads — into a
+  // POLICY error at prepare, for a host that prefers an exception to an empty result. Off by
+  // default: zero rows is the honest answer and reveals nothing.
+  bool refuse_when_no_visible_rows = 5;
+  // Answer with an `EntitlementsExplain` in the response's extension slot: what the policy resolved
+  // to for this principal, table by table and column by column, without executing anything.
+  // The oracle a host reads when it wants to know why a row is missing, and what the conformance kit
+  // compares between two executors. The request-side flag lives here rather than on the core options
+  // message, so the core carries no entitlement field at all.
+  bool explain = 6;
+  // Beside each output column with at least one entitled origin, a sibling STRING column holding the
+  // disclosure name per row — `FULL`, `MASKED`, `AGGREGATE`, `REDACTED`. The sibling is
+  // emitted even where the disclosure is constant, so a consumer has one code path; a column of an
+  // unentitled table has none, and the per-column report already says Full for it.
+  bool include_disclosure_columns = 7;
+  // What the sibling's name is the column's name plus. Empty = `__disclosure`: the double underscore
+  // is the convention consumers associate with a system-supplied column, and unlike `$` it survives
+  // as a C# property name, a Dapper mapping and a wire-endpoint identifier. A suffixed name already
+  // among the statement's output names is refused at prepare naming the column and the suffix, never
+  // uniquified: a consumer looks the sibling up by name, and a silent rename would be a silent
+  // failure.
+  string disclosure_column_suffix = 8;
+  // What happens to a column no disclosure permits, in the two places the question arises.
+  // One option rather than two flat fields, because the two answers are
+  // one policy read together: what a star's expansion surfaces, and what the statement named.
+  Redaction redaction = 10;
+}
+
+// The redaction policy: what a column no disclosure permits becomes, in the two places the question
+// arises.
+//
+// They are two members and not one because the questions differ. A star's width is the host's
+// business, so its expansion may drop a column it could not disclose; a column the statement named
+// is the statement's business, and dropping it silently would be a silent failure — so the second
+// member has no OMIT. An absent message is both defaults, which is a placeholder either way.
+message Redaction {
+  // The columns a `SELECT *` or `t.*` surfaced and no disclosure permits.
+  StarExpansion star_expansion = 1;
+  // A redacted column the statement **named**, which is answered separately: a POLICY error when
+  // no disclosure could ever permit it, and otherwise a placeholder.
+  NamedColumns named_columns = 2;
+}
+
+// Whether `SELECT *` may name an entitled table. Review discipline, not a safety mechanism: a star
+// is expanded and resolved before the rewrite either way, so each column is entitled individually
+//. `default_disclosure = NONE` is what actually closes the schema-evolution gap.
+enum StarPolicy {
+  STAR_POLICY_UNSPECIFIED = 0;
+  // The default.
+  STAR_POLICY_ALLOW = 1;
+  // A `*` or `t.*` whose expansion touches an entitled table is a POLICY error naming the table.
+  STAR_POLICY_REFUSE_OVER_ENTITLED = 2;
+  // Any star in any query is refused while the catalog carries entitlements.
+  STAR_POLICY_REFUSE_WHEN_ENTITLED = 3;
+}
+
+// What happens to a column a star's expansion surfaced and no disclosure permits.
+enum StarExpansion {
+  STAR_EXPANSION_UNSPECIFIED = 0;
+  // The default: the column stays in the result as a placeholder, so the row shape is the same for
+  // every principal, and its disclosure is reported Redacted.
+  STAR_EXPANSION_PLACEHOLDER = 1;
+  // Dropped from the projection, for a client that renders what it gets. Needs a constant NONE for
+  // the whole query — which prepare-time binding gives — and degrades to PLACEHOLDER otherwise. A
+  // column the query named explicitly is never omitted.
+  STAR_EXPANSION_OMIT = 2;
+  // A POLICY error naming the column, for a client that wants to be told. Over the columns a star
+  // surfaced, which is what this member is about; `named_columns` is the answer for a column the
+  // statement named.
+  STAR_EXPANSION_REFUSE = 3;
+}
+
+// What happens to a redacted column the statement **named**.
+enum NamedColumns {
+  NAMED_COLUMNS_UNSPECIFIED = 0;
+  // The default: a placeholder, unless no disclosure could ever permit the
+  // column, which is a POLICY error whatever this says.
+  NAMED_COLUMNS_PLACEHOLDER = 1;
+  // A POLICY error naming the column, for a host that would rather be told than handed a stand-in.
+  NAMED_COLUMNS_REFUSE = 2;
+}
+
+// What a placeholder holds. A matching rule's `placeholder` wins over the column's, and the
+// column's over either of these.
+enum PlaceholderPolicy {
+  PLACEHOLDER_POLICY_UNSPECIFIED = 0;
+  // The default: a typed NULL, the output type widened to nullable even where the base column is NOT
+  // NULL — a value that looks like data is not an acknowledgement.
+  PLACEHOLDER_POLICY_AS_NULL = 1;
+  // Calcite's own empty value where the planner defines one, and a typed NULL where it does not
+  //. "You know what you are doing."
+  //
+  // Calcite defines one for: STRING (''), BINARY (empty bytes), BOOL (false), every integer width,
+  // FP32, FP64 and DECIMAL (0), DATE, TIME and TIMESTAMP (the epoch) and TIMESTAMP_TZ (year one, not
+  // the epoch). It defines none for UUID, LIST and the two interval types, which therefore take a
+  // typed NULL with the output widened to nullable exactly as under AS_NULL — never an error. Where
+  // Calcite has a value the declared nullability is kept, which is the point of the policy.
+  PLACEHOLDER_POLICY_AS_EMPTY = 2;
+}
+
+// The rewrite's report: what the plan still needs bound, and what each output column discloses.
+// Written to `PlanResponse.extensions` only when the pass ran, which is what "no bytes when unused"
+// means on this side of the call.
+message EntitlementsReport {
+  // Context scalars this plan reads at execution. Empty under prepare-time binding, where every one
+  // of them was folded into a literal.
+  repeated string required_scalars = 1;
+  // Bound relations this plan materialises at execution: the names of its BoundTables.
+  repeated string required_relations = 2;
+  // One per output column of the plan, in order.
+  repeated ReportedDisclosure columns = 3;
+  // The descriptor hashes of every entitled table this plan touches, in the order it touches them.
+  // In the plan digest; here so a caller and an audit observer can see them without walking the plan.
+  repeated string descriptor_hashes = 4;
+  // Set when REDACTED_COLUMNS_OMIT was asked for and could not be given — a row-dependent
+  // disclosure, or execute-time binding — so the caller is told it got placeholders instead.
+  bool omit_degraded_to_placeholder = 5;
+  // One per entitled table this plan touches, in the order it touches them. The hashes are
+  // `descriptor_hashes` above, kept for the caller that only wants those.
+  repeated EntitledTable tables = 6;
+}
+
+// What the rewrite did to one entitled table.
+message EntitledTable {
+  string schema = 1;
+  string table = 2;
+  // The descriptor this plan was built against.
+  string descriptor_hash = 3;
+  // Whether the folded row predicate reached the source. Honestly false for a LOCAL table, a source
+  // with `trust_source_row_security`, a shape the source did not declare, PUSHDOWN_LEVEL_NONE — and
+  // for a local table, which has no source to push into.
+  bool row_predicate_pushed = 4;
+  // How much of the table this principal can see, computed from the context and the statement alone
+  // and never from hidden rows.
+  Visibility visibility = 5;
+  // The statement's own predicate on this table and this principal's scope are disjoint: `WHERE
+  // org_id = 3` against a scope of {1, 2}. The result is empty, and to a caller that reads the same
+  // as an empty table — so the report says which it was. Like `visibility`, it is computed from the
+  // context and the statement alone and never from a hidden row: what makes it true is that
+  // the statement *alone* is satisfiable and the statement with the policy is not.
+  bool contradiction = 6;
+  // The column both sides speak about — the one a caller has to change. Empty unless
+  // `contradiction`.
+  string contradiction_column = 7;
+  // The columns of this table the statement tested, and by which shapes.
+  // Empty for every statement that tests none, which is every statement
+  // until a host grants a TEST verdict. Enumeration by repeated probes is inherent to any
+  // comparison oracle and is not defended by the planner: this is what the audit observer receives
+  // so that the host, where identity and quotas live, can see what was asked.
+  repeated TestedColumn tested = 8;
+}
+
+// One column a statement tested without reading. The shapes are the ones this statement
+// actually used, not the ones the policy permits: an audit log records what was asked.
+message TestedColumn {
+  string column = 1;
+  // EQUALS, NOT_EQUALS or IN, upper-cased as every string form of a disclosure is.
+  repeated string shapes = 2;
+}
+
+// How much of an entitled table's rows a principal holds any grant on. Never a count.
+enum Visibility {
+  VISIBILITY_UNSPECIFIED = 0;
+  // The folded row predicate is FALSE: the principal holds no grant on the table.
+  VISIBILITY_NONE = 1;
+  // Neither constant: some rows, decided per row.
+  VISIBILITY_SOME = 2;
+  // The folded row predicate is TRUE: every row.
+  VISIBILITY_ALL = 3;
+}
+
+// What one output column discloses, for a typed consumer that must tell a redacted value from a
+// NULL without inspecting values. Also on every batch as the Arrow field metadata key
+// `chalk.disclosure`, upper-cased as every string form of a disclosure is.
+enum ReportedDisclosure {
+  REPORTED_DISCLOSURE_UNSPECIFIED = 0;
+  // The value, as it is. Every column of an unentitled table.
+  REPORTED_DISCLOSURE_FULL = 1;
+  // The column's mask, for every row.
+  REPORTED_DISCLOSURE_MASKED = 2;
+  // A placeholder, for every row: NULL, the type's zero, or the column's own stand-in.
+  REPORTED_DISCLOSURE_REDACTED = 3;
+  // Mixed across rows, which is what execute-time binding or a row-dependent disclosure gives.
+  REPORTED_DISCLOSURE_PER_ROW = 4;
+  // A population aggregate under the group-size guard: the value is real, and a NULL is a
+  // group below the floor rather than "no rows". A grid that reads it as data would be wrong twice.
+  REPORTED_DISCLOSURE_AGGREGATE = 5;
+  // The column the principal may test and not read: this output is the
+  // result of a comparison the policy permits, computed in the leaf over the raw value. One bit,
+  // three-valued — a NULL raw value compares to NULL — and never the value itself.
+  REPORTED_DISCLOSURE_TESTED = 6;
+}
+
+// The oracle: what this principal's policy folded to for this statement, in the policy's
+// own terms rather than the plan's. Computed by the same pass that enforces it, so it cannot drift
+// from what runs — which is the whole of its value.
+message EntitlementsExplain {
+  repeated ExplainedTable tables = 1;
+}
+
+message ExplainedTable {
+  string schema = 1;
+  string table = 2;
+  // The folded row predicate as SQL text, or empty where it folded away and every row is visible.
+  string row_predicate = 3;
+  // Whether it reached the source.
+  bool row_predicate_pushed = 4;
+  // The conjuncts of that predicate this plan evaluates locally, as text. Empty where it pushed
+  // whole, and the whole predicate where nothing pushed at all.
+  repeated string residual = 5;
+  repeated ExplainedColumn columns = 6;
+  // The parents this table's visibility derives through. Empty for a table that
+  // carries its own tenancy, which is every table until a host declares a `through`.
+  repeated ExplainedParent parents = 7;
+  // The declared paths this table holds a tenancy along. Empty for a table that holds
+  // every perspective directly, which is every table until a host declares an `Inherited` or a
+  // `Related`.
+  repeated ExplainedPath paths = 8;
+}
+
+// One declared path, as the policy resolved and folded it for this principal. What a host
+// asking "why is this row missing" needs is which perspective answered for it, the route it took,
+// whether the chain was built at all, and whether the key it joins on is one this principal can see.
+message ExplainedPath {
+  // The tenancy kind this path carries — the policy's own name for the perspective.
+  string kind = 1;
+  // The steps from this table outward, in order.
+  repeated ExplainedStep steps = 2;
+  string endpoint_schema = 3;
+  string endpoint_table = 4;
+  // The chain was left out of the plan: the endpoint predicate folded to TRUE over a route every row
+  // of this table follows, or this table's own predicate already granted every row, so the marker
+  // could not change the answer.
+  bool elided = 5;
+  // The endpoint predicate folded to FALSE, so nothing is reached this way and the joins went with
+  // it. Distinct from `elided`, which is the other extreme.
+  bool dropped = 6;
+  // The endpoint predicate as SQL text, folded for this principal, or empty where it folded away.
+  string endpoint_predicate = 7;
+  // What this principal sees of the column this table joins on: FULL, MASKED, REDACTED, AGGREGATE
+  // or PER_ROW. The mechanism never needs it disclosed — the key set's join reads it raw beneath
+  // this table's sanitiser — but the *statement's* own join does, so a role for which it is not
+  // FULL is a role that cannot correlate, and that is shown here rather than refused.
+  string key_disclosure = 8;
+}
+
+// One step of an `ExplainedPath`, by the names the policy wrote rather than by ordinal.
+message ExplainedStep {
+  string schema = 1;
+  string table = 2;
+  // The column of the table this step starts from, and the column of `table` it joins.
+  string from_column = 3;
+  string to_column = 4;
+  // Up, to a table holding a foreign key to ours — the bridge, which contributes existence and
+  // nothing else. False is a step down to a parent.
+  bool to_child = 5;
+}
+
+// One parent a table's visibility derived through, as the policy resolved it for this principal
+//. What a host asking "why is this row missing" needs is which relationship answered
+// for it, on which key, and whether the key it joins on is one this principal can see at all.
+message ExplainedParent {
+  string schema = 1;
+  string table = 2;
+  // The correlation key on this table.
+  string column = 3;
+  // The parent's key, which is a declared unique key of it.
+  string parent_column = 4;
+  // The parent's own predicate folded to TRUE over a key every row of this table carries, so every
+  // row has a visible parent and the join was left out of the plan altogether.
+  bool elided = 5;
+  // What this principal sees of the correlation key: FULL, MASKED, REDACTED, AGGREGATE or PER_ROW.
+  // The mechanism never needs it disclosed — the planner's own join reads it raw beneath the
+  // child's sanitiser — but the *statement's* own join does, so a role for which it is not FULL is
+  // a role that cannot correlate, and that is shown here rather than refused.
+  string key_disclosure = 6;
+}
+
+message ExplainedColumn {
+  string column = 1;
+  // The folded disclosure: one of FULL, MASKED, AGGREGATE, REDACTED where it is constant for every
+  // row this principal can see, and otherwise the folded rule conditions in order, as text.
+  string disclosure = 2;
+  // The mask in place of the value, as text, where one is reachable.
+  string mask = 3;
+  // The stand-in for a redacted value, as text, where the descriptor declares one.
+  string placeholder = 4;
+  // The group-size floor this column's population aggregates take, after the host's default has
+  // been applied. 0 means no guard.
+  uint32 min_group_size = 5;
+}

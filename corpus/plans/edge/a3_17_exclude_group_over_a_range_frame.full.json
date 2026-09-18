@@ -1,0 +1,280 @@
+{
+  "irVersion": 1,
+  "planDigest": "15408282373836109405",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "id",
+        "type": {
+          "kind": "TYPE_KIND_I32"
+        }
+      },
+      {
+        "name": "n",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          }
+        },
+        {
+          "name": "n",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 6,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              }
+            },
+            {
+              "name": "n",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            }
+          ]
+        },
+        "estRowCount": 6,
+        "project": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "id",
+                  "type": {
+                    "kind": "TYPE_KIND_I32"
+                  }
+                },
+                {
+                  "name": "amount",
+                  "type": {
+                    "kind": "TYPE_KIND_I32",
+                    "nullable": true
+                  }
+                },
+                {
+                  "name": "n",
+                  "type": {
+                    "kind": "TYPE_KIND_I64"
+                  }
+                }
+              ]
+            },
+            "estRowCount": 6,
+            "collations": [
+              {
+                "fields": [
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_I32",
+                        "nullable": true
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  }
+                ]
+              }
+            ],
+            "window": {
+              "input": {
+                "rowType": {
+                  "fields": [
+                    {
+                      "name": "id",
+                      "type": {
+                        "kind": "TYPE_KIND_I32"
+                      }
+                    },
+                    {
+                      "name": "amount",
+                      "type": {
+                        "kind": "TYPE_KIND_I32",
+                        "nullable": true
+                      }
+                    }
+                  ]
+                },
+                "estRowCount": 6,
+                "collations": [
+                  {
+                    "fields": [
+                      {
+                        "expr": {
+                          "type": {
+                            "kind": "TYPE_KIND_I32",
+                            "nullable": true
+                          },
+                          "fieldRef": {
+                            "index": 1
+                          }
+                        },
+                        "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                      }
+                    ]
+                  }
+                ],
+                "sort": {
+                  "input": {
+                    "rowType": {
+                      "fields": [
+                        {
+                          "name": "id",
+                          "type": {
+                            "kind": "TYPE_KIND_I32"
+                          }
+                        },
+                        {
+                          "name": "amount",
+                          "type": {
+                            "kind": "TYPE_KIND_I32",
+                            "nullable": true
+                          }
+                        }
+                      ]
+                    },
+                    "estRowCount": 6,
+                    "read": {
+                      "table": {
+                        "sourceId": "mem",
+                        "schema": "main",
+                        "table": "sales"
+                      },
+                      "projection": [
+                        0,
+                        2
+                      ]
+                    }
+                  },
+                  "fields": [
+                    {
+                      "expr": {
+                        "type": {
+                          "kind": "TYPE_KIND_I32",
+                          "nullable": true
+                        },
+                        "fieldRef": {
+                          "index": 1
+                        }
+                      },
+                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                    }
+                  ]
+                }
+              },
+              "order": [
+                {
+                  "expr": {
+                    "type": {
+                      "kind": "TYPE_KIND_I32",
+                      "nullable": true
+                    },
+                    "fieldRef": {
+                      "index": 1
+                    }
+                  },
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ],
+              "frame": {
+                "mode": "FRAME_MODE_RANGE",
+                "lower": {
+                  "kind": "FRAME_BOUND_KIND_UNBOUNDED_PRECEDING"
+                },
+                "upper": {
+                  "kind": "FRAME_BOUND_KIND_CURRENT_ROW"
+                },
+                "exclusion": "FRAME_EXCLUSION_GROUP"
+              },
+              "calls": [
+                {
+                  "aggregate": "AGGREGATE_FUNCTION_ID_COUNT",
+                  "args": [
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_I32",
+                        "nullable": true
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    }
+                  ],
+                  "type": {
+                    "kind": "TYPE_KIND_I64"
+                  }
+                }
+              ]
+            }
+          },
+          "exprs": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {}
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {
+                "index": 2
+              }
+            }
+          ]
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_I32"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,317 @@
+#nullable enable
+Chalk.Entitlements.Tenancy.AccessRule
+Chalk.Entitlements.Tenancy.AccessRule.AccessRule() -> void
+Chalk.Entitlements.Tenancy.AccessRule.Aggregates.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.Tenancy.Aggregate>!
+Chalk.Entitlements.Tenancy.AccessRule.Aggregates.init -> void
+Chalk.Entitlements.Tenancy.AccessRule.Column.get -> Chalk.Entitlements.Tenancy.Column?
+Chalk.Entitlements.Tenancy.AccessRule.Column.init -> void
+Chalk.Entitlements.Tenancy.AccessRule.Grants.get -> Chalk.Entitlements.Tenancy.Verdict
+Chalk.Entitlements.Tenancy.AccessRule.Grants.init -> void
+Chalk.Entitlements.Tenancy.AccessRule.Mask.get -> Chalk.Entitlements.Tenancy.Sql?
+Chalk.Entitlements.Tenancy.AccessRule.Mask.init -> void
+Chalk.Entitlements.Tenancy.AccessRule.MinGroupSize.get -> int
+Chalk.Entitlements.Tenancy.AccessRule.MinGroupSize.init -> void
+Chalk.Entitlements.Tenancy.AccessRule.Placeholder.get -> Chalk.Entitlements.Tenancy.Sql?
+Chalk.Entitlements.Tenancy.AccessRule.Placeholder.init -> void
+Chalk.Entitlements.Tenancy.AccessRule.Realm.get -> Chalk.Entitlements.Tenancy.Realm?
+Chalk.Entitlements.Tenancy.AccessRule.Realm.init -> void
+Chalk.Entitlements.Tenancy.AccessRule.Roles.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.Tenancy.Role>!
+Chalk.Entitlements.Tenancy.AccessRule.Roles.init -> void
+Chalk.Entitlements.Tenancy.AccessRule.StopOnMatch.get -> bool
+Chalk.Entitlements.Tenancy.AccessRule.StopOnMatch.init -> void
+Chalk.Entitlements.Tenancy.AccessRule.Tests.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.Tenancy.Test>!
+Chalk.Entitlements.Tenancy.AccessRule.Tests.init -> void
+Chalk.Entitlements.Tenancy.AccessRule.When.get -> Chalk.Entitlements.Tenancy.Sql?
+Chalk.Entitlements.Tenancy.AccessRule.When.init -> void
+Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.ApproxCountDistinct = 27 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.Avg = 4 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.BoolAnd = 23 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.BoolOr = 24 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.Corr = 13 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.Count = 1 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.CovarPop = 11 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.CovarSamp = 12 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.Every = 25 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.RegrAvgX = 15 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.RegrAvgY = 16 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.RegrCount = 14 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.RegrIntercept = 17 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.RegrR2 = 18 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.RegrSlope = 19 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.RegrSxx = 20 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.RegrSxy = 21 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.RegrSyy = 22 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.Some = 26 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.StdDev = 5 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.StdDevPop = 6 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.StdDevSamp = 7 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.Sum = 2 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.Sum0 = 3 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.VarPop = 9 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.VarSamp = 10 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Aggregate.Variance = 8 -> Chalk.Entitlements.Tenancy.Aggregate
+Chalk.Entitlements.Tenancy.Column
+Chalk.Entitlements.Tenancy.Column.Column() -> void
+Chalk.Entitlements.Tenancy.Column.Equals(Chalk.Entitlements.Tenancy.Column other) -> bool
+Chalk.Entitlements.Tenancy.Column.Name.get -> string!
+Chalk.Entitlements.Tenancy.Column.References(Chalk.Entitlements.Tenancy.Column other) -> Chalk.Catalog.AssociationDescriptor!
+Chalk.Entitlements.Tenancy.Column.Table.get -> Chalk.Entitlements.Tenancy.Table
+Chalk.Entitlements.Tenancy.Confinement
+Chalk.Entitlements.Tenancy.Confinement.Confinement() -> void
+Chalk.Entitlements.Tenancy.Confinement.Id.get -> object!
+Chalk.Entitlements.Tenancy.Confinement.Id.init -> void
+Chalk.Entitlements.Tenancy.Confinement.Kind.get -> Chalk.Entitlements.Tenancy.Kind?
+Chalk.Entitlements.Tenancy.Confinement.Kind.init -> void
+Chalk.Entitlements.Tenancy.Grant
+Chalk.Entitlements.Tenancy.Grant.Confinements.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.Tenancy.Confinement!>!
+Chalk.Entitlements.Tenancy.Grant.Confinements.init -> void
+Chalk.Entitlements.Tenancy.Grant.Grant() -> void
+Chalk.Entitlements.Tenancy.Grant.Grantee.get -> Chalk.Entitlements.Tenancy.Role
+Chalk.Entitlements.Tenancy.Grant.Grantee.init -> void
+Chalk.Entitlements.Tenancy.Grant.Id.get -> object!
+Chalk.Entitlements.Tenancy.Grant.Id.init -> void
+Chalk.Entitlements.Tenancy.Grant.IsGlobal.get -> bool
+Chalk.Entitlements.Tenancy.Grant.IsGlobal.init -> void
+Chalk.Entitlements.Tenancy.Grant.IsSubject.get -> bool
+Chalk.Entitlements.Tenancy.Grant.IsSubject.init -> void
+Chalk.Entitlements.Tenancy.Grant.Scope.get -> Chalk.Entitlements.Tenancy.Scope?
+Chalk.Entitlements.Tenancy.Grant.Scope.init -> void
+Chalk.Entitlements.Tenancy.Grant.Unconfined.get -> bool
+Chalk.Entitlements.Tenancy.Grant.Unconfined.init -> void
+Chalk.Entitlements.Tenancy.Grant.Within(Chalk.Entitlements.Tenancy.Kind kind, object! id) -> Chalk.Entitlements.Tenancy.Grant!
+Chalk.Entitlements.Tenancy.Kind
+Chalk.Entitlements.Tenancy.Kind.Equals(Chalk.Entitlements.Tenancy.Kind other) -> bool
+Chalk.Entitlements.Tenancy.Kind.Kind() -> void
+Chalk.Entitlements.Tenancy.Kind.Name.get -> string!
+Chalk.Entitlements.Tenancy.Realm
+Chalk.Entitlements.Tenancy.Realm.Equals(Chalk.Entitlements.Tenancy.Realm other) -> bool
+Chalk.Entitlements.Tenancy.Realm.Name.get -> string!
+Chalk.Entitlements.Tenancy.Realm.Realm() -> void
+Chalk.Entitlements.Tenancy.ReconciledVisibility
+Chalk.Entitlements.Tenancy.ReconciledVisibility.Agrees = 1 -> Chalk.Entitlements.Tenancy.ReconciledVisibility
+Chalk.Entitlements.Tenancy.ReconciledVisibility.Disagrees = 2 -> Chalk.Entitlements.Tenancy.ReconciledVisibility
+Chalk.Entitlements.Tenancy.ReconciledVisibility.Indeterminate = 3 -> Chalk.Entitlements.Tenancy.ReconciledVisibility
+Chalk.Entitlements.Tenancy.ResourceOwnerSees
+Chalk.Entitlements.Tenancy.ResourceOwnerSees.ByRules = 1 -> Chalk.Entitlements.Tenancy.ResourceOwnerSees
+Chalk.Entitlements.Tenancy.ResourceOwnerSees.Full = 0 -> Chalk.Entitlements.Tenancy.ResourceOwnerSees
+Chalk.Entitlements.Tenancy.Role
+Chalk.Entitlements.Tenancy.Role.Equals(Chalk.Entitlements.Tenancy.Role other) -> bool
+Chalk.Entitlements.Tenancy.Role.Name.get -> string!
+Chalk.Entitlements.Tenancy.Role.Role() -> void
+Chalk.Entitlements.Tenancy.Roles
+Chalk.Entitlements.Tenancy.Scope
+Chalk.Entitlements.Tenancy.Scope.Equals(Chalk.Entitlements.Tenancy.Scope other) -> bool
+Chalk.Entitlements.Tenancy.Scope.Name.get -> string!
+Chalk.Entitlements.Tenancy.Scope.Scope() -> void
+Chalk.Entitlements.Tenancy.Source
+Chalk.Entitlements.Tenancy.Source.Equals(Chalk.Entitlements.Tenancy.Source other) -> bool
+Chalk.Entitlements.Tenancy.Source.Name.get -> string!
+Chalk.Entitlements.Tenancy.Source.Source() -> void
+Chalk.Entitlements.Tenancy.Source.SourceId.get -> string!
+Chalk.Entitlements.Tenancy.Source.Table(string! name) -> Chalk.Entitlements.Tenancy.Table
+Chalk.Entitlements.Tenancy.Sql
+Chalk.Entitlements.Tenancy.Sql.Equals(Chalk.Entitlements.Tenancy.Sql other) -> bool
+Chalk.Entitlements.Tenancy.Sql.Sql() -> void
+Chalk.Entitlements.Tenancy.Sql.Text.get -> string!
+Chalk.Entitlements.Tenancy.SubjectKind
+Chalk.Entitlements.Tenancy.SubjectKind.Equals(Chalk.Entitlements.Tenancy.SubjectKind other) -> bool
+Chalk.Entitlements.Tenancy.SubjectKind.Name.get -> string!
+Chalk.Entitlements.Tenancy.SubjectKind.SubjectKind() -> void
+Chalk.Entitlements.Tenancy.Table
+Chalk.Entitlements.Tenancy.Table.Access(Chalk.Entitlements.Tenancy.AccessRule! rule) -> Chalk.Entitlements.Tenancy.Table
+Chalk.Entitlements.Tenancy.Table.Access(Chalk.Entitlements.Tenancy.Column column, System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.Tenancy.Role>! roles, Chalk.Entitlements.Tenancy.Verdict grants, Chalk.Entitlements.Tenancy.Sql? placeholder = null) -> Chalk.Entitlements.Tenancy.Table
+Chalk.Entitlements.Tenancy.Table.Column(string! name) -> Chalk.Entitlements.Tenancy.Column
+Chalk.Entitlements.Tenancy.Table.Equals(Chalk.Entitlements.Tenancy.Table other) -> bool
+Chalk.Entitlements.Tenancy.Table.Name.get -> string!
+Chalk.Entitlements.Tenancy.Table.Realm(Chalk.Entitlements.Tenancy.Realm realm, params Chalk.Entitlements.Tenancy.Column[]! columns) -> Chalk.Entitlements.Tenancy.Table
+Chalk.Entitlements.Tenancy.Table.Source.get -> Chalk.Entitlements.Tenancy.Source
+Chalk.Entitlements.Tenancy.Table.Table() -> void
+Chalk.Entitlements.Tenancy.Table.Tenancy(System.Action<Chalk.Entitlements.Tenancy.TenancyRestrictions!>! declare) -> Chalk.Entitlements.Tenancy.Table
+Chalk.Entitlements.Tenancy.Table.Unrestricted() -> Chalk.Entitlements.Tenancy.Table
+Chalk.Entitlements.Tenancy.Table.Visible(Chalk.Entitlements.Tenancy.VisibilityRule! rule) -> Chalk.Entitlements.Tenancy.Table
+Chalk.Entitlements.Tenancy.Tenancy
+Chalk.Entitlements.Tenancy.TenancyDifference
+Chalk.Entitlements.Tenancy.TenancyDifference.Column.get -> string!
+Chalk.Entitlements.Tenancy.TenancyDifference.Column.init -> void
+Chalk.Entitlements.Tenancy.TenancyDifference.Expected.get -> Chalk.Ir.DisclosureOutcome
+Chalk.Entitlements.Tenancy.TenancyDifference.Expected.init -> void
+Chalk.Entitlements.Tenancy.TenancyDifference.Reported.get -> Chalk.Ir.DisclosureOutcome
+Chalk.Entitlements.Tenancy.TenancyDifference.Reported.init -> void
+Chalk.Entitlements.Tenancy.TenancyDifference.Table.get -> string!
+Chalk.Entitlements.Tenancy.TenancyDifference.Table.init -> void
+Chalk.Entitlements.Tenancy.TenancyDifference.TenancyDifference() -> void
+Chalk.Entitlements.Tenancy.TenancyEntitlements
+Chalk.Entitlements.Tenancy.TenancyEntitlements.Bind(Chalk.Entitlements.Tenancy.TenancyPrincipal! principal) -> Chalk.Client.RequestContext!
+Chalk.Entitlements.Tenancy.TenancyEntitlements.Bind(Chalk.Entitlements.Tenancy.TenancyPrincipal! principal, System.Collections.Generic.IReadOnlyCollection<string!>? fold) -> Chalk.Client.RequestContext!
+Chalk.Entitlements.Tenancy.TenancyEntitlements.Explain(Chalk.Entitlements.Tenancy.TenancyPrincipal! principal) -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.Tenancy.TenancyGrantGroup!>!
+Chalk.Entitlements.Tenancy.TenancyEntitlements.For(Chalk.Entitlements.Tenancy.Table table) -> Chalk.Entitlements.TableEntitlementDescriptor?
+Chalk.Entitlements.Tenancy.TenancyEntitlements.For(string! source, string! table) -> Chalk.Entitlements.TableEntitlementDescriptor?
+Chalk.Entitlements.Tenancy.TenancyEntitlements.Policy.get -> Chalk.Entitlements.Tenancy.TenancyPolicy!
+Chalk.Entitlements.Tenancy.TenancyEntitlements.Reconcile(Chalk.Entitlements.EntitledQuery! prepared, Chalk.Entitlements.Tenancy.TenancyPrincipal! principal) -> Chalk.Entitlements.Tenancy.TenancyReconciliation!
+Chalk.Entitlements.Tenancy.TenancyEntitlements.Reconcile(Chalk.Ir.Plan! plan, Chalk.Entitlements.Tenancy.TenancyPrincipal! principal) -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.Tenancy.TenancyDifference!>!
+Chalk.Entitlements.Tenancy.TenancyEntitlements.Tables.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Chalk.Entitlements.TableEntitlementDescriptor!>!
+Chalk.Entitlements.Tenancy.TenancyGrantGroup
+Chalk.Entitlements.Tenancy.TenancyGrantGroup.Confining.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Entitlements.Tenancy.TenancyGrantGroup.Confining.init -> void
+Chalk.Entitlements.Tenancy.TenancyGrantGroup.Grants.get -> int
+Chalk.Entitlements.Tenancy.TenancyGrantGroup.Grants.init -> void
+Chalk.Entitlements.Tenancy.TenancyGrantGroup.IsSubject.get -> bool
+Chalk.Entitlements.Tenancy.TenancyGrantGroup.IsSubject.init -> void
+Chalk.Entitlements.Tenancy.TenancyGrantGroup.Kind.get -> string!
+Chalk.Entitlements.Tenancy.TenancyGrantGroup.Kind.init -> void
+Chalk.Entitlements.Tenancy.TenancyGrantGroup.List.get -> string!
+Chalk.Entitlements.Tenancy.TenancyGrantGroup.List.init -> void
+Chalk.Entitlements.Tenancy.TenancyGrantGroup.Role.get -> string!
+Chalk.Entitlements.Tenancy.TenancyGrantGroup.Role.init -> void
+Chalk.Entitlements.Tenancy.TenancyGrantGroup.TenancyGrantGroup() -> void
+Chalk.Entitlements.Tenancy.TenancyPath
+Chalk.Entitlements.Tenancy.TenancyPath.Direct(Chalk.Entitlements.Tenancy.Kind kind, Chalk.Entitlements.Tenancy.Column column) -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyPath.Direct(Chalk.Entitlements.Tenancy.SubjectKind kind, Chalk.Entitlements.Tenancy.Column column) -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyPath.In(Chalk.Entitlements.Tenancy.Column column, string! list) -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyPath.Inherited(Chalk.Entitlements.Tenancy.Kind kind) -> Chalk.Entitlements.Tenancy.TenancyPath!
+Chalk.Entitlements.Tenancy.TenancyPath.Inherited(Chalk.Entitlements.Tenancy.SubjectKind kind) -> Chalk.Entitlements.Tenancy.TenancyPath!
+Chalk.Entitlements.Tenancy.TenancyPath.Predicate(Chalk.Entitlements.Tenancy.Sql sql) -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyPath.Public() -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyPath.Related(Chalk.Entitlements.Tenancy.Kind kind) -> Chalk.Entitlements.Tenancy.TenancyPath!
+Chalk.Entitlements.Tenancy.TenancyPath.Related(Chalk.Entitlements.Tenancy.SubjectKind kind) -> Chalk.Entitlements.Tenancy.TenancyPath!
+Chalk.Entitlements.Tenancy.TenancyPath.ResourceOwner(Chalk.Entitlements.Tenancy.Column column, Chalk.Entitlements.Tenancy.ResourceOwnerSees sees = Chalk.Entitlements.Tenancy.ResourceOwnerSees.Full) -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyPath.Through(Chalk.Entitlements.Tenancy.Column column) -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyPath.Through(Chalk.Entitlements.Tenancy.Table table) -> Chalk.Entitlements.Tenancy.TenancyPath!
+Chalk.Entitlements.Tenancy.TenancyPath.Through(Chalk.Entitlements.Tenancy.Table table, Chalk.Entitlements.Tenancy.Column on) -> Chalk.Entitlements.Tenancy.TenancyPath!
+Chalk.Entitlements.Tenancy.TenancyPath.Through(System.Collections.Generic.IEnumerable<Chalk.Entitlements.Tenancy.Table>! tables) -> Chalk.Entitlements.Tenancy.TenancyPath!
+Chalk.Entitlements.Tenancy.TenancyPolicy
+Chalk.Entitlements.Tenancy.TenancyPolicy.AllowGlobalGrants(bool allow = true) -> Chalk.Entitlements.Tenancy.TenancyPolicy!
+Chalk.Entitlements.Tenancy.TenancyPolicy.AllowsGlobalGrants.get -> bool
+Chalk.Entitlements.Tenancy.TenancyPolicy.Associations.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.AssociationDescriptor!>!
+Chalk.Entitlements.Tenancy.TenancyPolicy.Compile(Chalk.Catalog.CatalogContext! catalog) -> Chalk.Entitlements.Tenancy.TenancyEntitlements!
+Chalk.Entitlements.Tenancy.TenancyPolicy.Compile(System.Collections.Generic.IReadOnlyList<Chalk.Catalog.SchemaDescriptor!>! schemas) -> Chalk.Entitlements.Tenancy.TenancyEntitlements!
+Chalk.Entitlements.Tenancy.TenancyPolicy.Realm(string! name) -> Chalk.Entitlements.Tenancy.Realm
+Chalk.Entitlements.Tenancy.TenancyPolicy.Role(string! name) -> Chalk.Entitlements.Tenancy.Role
+Chalk.Entitlements.Tenancy.TenancyPolicy.Scope(string! name) -> Chalk.Entitlements.Tenancy.Scope
+Chalk.Entitlements.Tenancy.TenancyPolicy.Source(string! name) -> Chalk.Entitlements.Tenancy.Source
+Chalk.Entitlements.Tenancy.TenancyPolicy.Subject(string! name, System.Collections.Generic.IEnumerable<Chalk.Entitlements.Tenancy.Kind>! within) -> Chalk.Entitlements.Tenancy.SubjectKind
+Chalk.Entitlements.Tenancy.TenancyPolicy.Tenancy(string! name) -> Chalk.Entitlements.Tenancy.Kind
+Chalk.Entitlements.Tenancy.TenancyPrincipal
+Chalk.Entitlements.Tenancy.TenancyPrincipal.Actor.get -> string!
+Chalk.Entitlements.Tenancy.TenancyPrincipal.Actor.init -> void
+Chalk.Entitlements.Tenancy.TenancyPrincipal.CustomLists.get -> System.Collections.Generic.IReadOnlyDictionary<string!, Chalk.Client.ContextRelation!>!
+Chalk.Entitlements.Tenancy.TenancyPrincipal.CustomLists.init -> void
+Chalk.Entitlements.Tenancy.TenancyPrincipal.CustomScalars.get -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
+Chalk.Entitlements.Tenancy.TenancyPrincipal.CustomScalars.init -> void
+Chalk.Entitlements.Tenancy.TenancyPrincipal.FoldMaxRows.get -> int
+Chalk.Entitlements.Tenancy.TenancyPrincipal.FoldMaxRows.init -> void
+Chalk.Entitlements.Tenancy.TenancyPrincipal.Grants.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.Tenancy.Grant!>!
+Chalk.Entitlements.Tenancy.TenancyPrincipal.Grants.init -> void
+Chalk.Entitlements.Tenancy.TenancyPrincipal.MaskKey.get -> string!
+Chalk.Entitlements.Tenancy.TenancyPrincipal.MaskKey.init -> void
+Chalk.Entitlements.Tenancy.TenancyPrincipal.Purpose.get -> string!
+Chalk.Entitlements.Tenancy.TenancyPrincipal.Purpose.init -> void
+Chalk.Entitlements.Tenancy.TenancyPrincipal.Scope.get -> Chalk.Entitlements.Tenancy.Scope?
+Chalk.Entitlements.Tenancy.TenancyPrincipal.Scope.init -> void
+Chalk.Entitlements.Tenancy.TenancyPrincipal.TenancyPrincipal() -> void
+Chalk.Entitlements.Tenancy.TenancyPrincipal.User.get -> object!
+Chalk.Entitlements.Tenancy.TenancyPrincipal.User.init -> void
+Chalk.Entitlements.Tenancy.TenancyReconciliation
+Chalk.Entitlements.Tenancy.TenancyReconciliation.Agrees.get -> bool
+Chalk.Entitlements.Tenancy.TenancyReconciliation.Differences.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.Tenancy.TenancyDifference!>!
+Chalk.Entitlements.Tenancy.TenancyReconciliation.Differences.init -> void
+Chalk.Entitlements.Tenancy.TenancyReconciliation.TenancyReconciliation() -> void
+Chalk.Entitlements.Tenancy.TenancyReconciliation.Visibility.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.Tenancy.TenancyVisibility!>!
+Chalk.Entitlements.Tenancy.TenancyReconciliation.Visibility.init -> void
+Chalk.Entitlements.Tenancy.TenancyRestrictions
+Chalk.Entitlements.Tenancy.TenancyRestrictions.Direct(Chalk.Entitlements.Tenancy.Kind kind, Chalk.Entitlements.Tenancy.Column column) -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyRestrictions.Direct(Chalk.Entitlements.Tenancy.SubjectKind kind, Chalk.Entitlements.Tenancy.Column column) -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyRestrictions.In(Chalk.Entitlements.Tenancy.Column column, string! list) -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyRestrictions.Inherited(Chalk.Entitlements.Tenancy.Kind kind) -> Chalk.Entitlements.Tenancy.TenancyPath!
+Chalk.Entitlements.Tenancy.TenancyRestrictions.Inherited(Chalk.Entitlements.Tenancy.SubjectKind kind) -> Chalk.Entitlements.Tenancy.TenancyPath!
+Chalk.Entitlements.Tenancy.TenancyRestrictions.Predicate(Chalk.Entitlements.Tenancy.Sql sql) -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyRestrictions.Public() -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyRestrictions.Related(Chalk.Entitlements.Tenancy.Kind kind) -> Chalk.Entitlements.Tenancy.TenancyPath!
+Chalk.Entitlements.Tenancy.TenancyRestrictions.Related(Chalk.Entitlements.Tenancy.SubjectKind kind) -> Chalk.Entitlements.Tenancy.TenancyPath!
+Chalk.Entitlements.Tenancy.TenancyRestrictions.ResourceOwner(Chalk.Entitlements.Tenancy.Column column, Chalk.Entitlements.Tenancy.ResourceOwnerSees sees = Chalk.Entitlements.Tenancy.ResourceOwnerSees.Full) -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyRestrictions.Through(Chalk.Entitlements.Tenancy.Column column) -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyRestrictions.Through(Chalk.Entitlements.Tenancy.Column column, Chalk.Entitlements.Tenancy.Table parentTable, Chalk.Entitlements.Tenancy.Column parentKey) -> Chalk.Entitlements.Tenancy.TenancyRestrictions!
+Chalk.Entitlements.Tenancy.TenancyVisibility
+Chalk.Entitlements.Tenancy.TenancyVisibility.Predicted.get -> Chalk.Entitlements.TableVisibility?
+Chalk.Entitlements.Tenancy.TenancyVisibility.Predicted.init -> void
+Chalk.Entitlements.Tenancy.TenancyVisibility.Reported.get -> Chalk.Entitlements.TableVisibility
+Chalk.Entitlements.Tenancy.TenancyVisibility.Reported.init -> void
+Chalk.Entitlements.Tenancy.TenancyVisibility.Table.get -> string!
+Chalk.Entitlements.Tenancy.TenancyVisibility.Table.init -> void
+Chalk.Entitlements.Tenancy.TenancyVisibility.TenancyVisibility() -> void
+Chalk.Entitlements.Tenancy.TenancyVisibility.Verdict.get -> Chalk.Entitlements.Tenancy.ReconciledVisibility
+Chalk.Entitlements.Tenancy.TenancyVisibility.Verdict.init -> void
+Chalk.Entitlements.Tenancy.Test
+Chalk.Entitlements.Tenancy.Test.Equals = 1 -> Chalk.Entitlements.Tenancy.Test
+Chalk.Entitlements.Tenancy.Test.In = 3 -> Chalk.Entitlements.Tenancy.Test
+Chalk.Entitlements.Tenancy.Test.NotEquals = 2 -> Chalk.Entitlements.Tenancy.Test
+Chalk.Entitlements.Tenancy.Verdict
+Chalk.Entitlements.Tenancy.Verdict.AggregateOnly = 3 -> Chalk.Entitlements.Tenancy.Verdict
+Chalk.Entitlements.Tenancy.Verdict.Full = 1 -> Chalk.Entitlements.Tenancy.Verdict
+Chalk.Entitlements.Tenancy.Verdict.Mask = 2 -> Chalk.Entitlements.Tenancy.Verdict
+Chalk.Entitlements.Tenancy.Verdict.None = 4 -> Chalk.Entitlements.Tenancy.Verdict
+Chalk.Entitlements.Tenancy.Verdict.Test = 5 -> Chalk.Entitlements.Tenancy.Verdict
+Chalk.Entitlements.Tenancy.VisibilityRule
+Chalk.Entitlements.Tenancy.VisibilityRule.Roles.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.Tenancy.Role>!
+Chalk.Entitlements.Tenancy.VisibilityRule.Roles.init -> void
+Chalk.Entitlements.Tenancy.VisibilityRule.Scopes.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.Tenancy.Scope>!
+Chalk.Entitlements.Tenancy.VisibilityRule.Scopes.init -> void
+Chalk.Entitlements.Tenancy.VisibilityRule.VisibilityRule() -> void
+override Chalk.Entitlements.Tenancy.Column.GetHashCode() -> int
+override Chalk.Entitlements.Tenancy.Column.ToString() -> string!
+override Chalk.Entitlements.Tenancy.Confinement.ToString() -> string!
+override Chalk.Entitlements.Tenancy.Kind.GetHashCode() -> int
+override Chalk.Entitlements.Tenancy.Kind.ToString() -> string!
+override Chalk.Entitlements.Tenancy.Realm.GetHashCode() -> int
+override Chalk.Entitlements.Tenancy.Realm.ToString() -> string!
+override Chalk.Entitlements.Tenancy.Role.GetHashCode() -> int
+override Chalk.Entitlements.Tenancy.Role.ToString() -> string!
+override Chalk.Entitlements.Tenancy.Scope.GetHashCode() -> int
+override Chalk.Entitlements.Tenancy.Scope.ToString() -> string!
+override Chalk.Entitlements.Tenancy.Source.GetHashCode() -> int
+override Chalk.Entitlements.Tenancy.Source.ToString() -> string!
+override Chalk.Entitlements.Tenancy.Sql.GetHashCode() -> int
+override Chalk.Entitlements.Tenancy.Sql.ToString() -> string!
+override Chalk.Entitlements.Tenancy.SubjectKind.GetHashCode() -> int
+override Chalk.Entitlements.Tenancy.SubjectKind.ToString() -> string!
+override Chalk.Entitlements.Tenancy.Table.GetHashCode() -> int
+override Chalk.Entitlements.Tenancy.Table.ToString() -> string!
+override Chalk.Entitlements.Tenancy.TenancyDifference.ToString() -> string!
+override Chalk.Entitlements.Tenancy.TenancyGrantGroup.ToString() -> string!
+override Chalk.Entitlements.Tenancy.TenancyVisibility.ToString() -> string!
+static Chalk.Entitlements.Tenancy.Column.operator !=(Chalk.Entitlements.Tenancy.Column left, Chalk.Entitlements.Tenancy.Column right) -> bool
+static Chalk.Entitlements.Tenancy.Column.operator ==(Chalk.Entitlements.Tenancy.Column left, Chalk.Entitlements.Tenancy.Column right) -> bool
+static Chalk.Entitlements.Tenancy.Grant.ForSubject(Chalk.Entitlements.Tenancy.SubjectKind kind, object! id, Chalk.Entitlements.Tenancy.Role role, object? within = null, Chalk.Entitlements.Tenancy.Scope? scope = null) -> Chalk.Entitlements.Tenancy.Grant!
+static Chalk.Entitlements.Tenancy.Grant.ForTenancy(Chalk.Entitlements.Tenancy.Kind kind, object! id, Chalk.Entitlements.Tenancy.Role role, Chalk.Entitlements.Tenancy.Scope? scope = null) -> Chalk.Entitlements.Tenancy.Grant!
+static Chalk.Entitlements.Tenancy.Grant.Global(Chalk.Entitlements.Tenancy.Role role) -> Chalk.Entitlements.Tenancy.Grant!
+static Chalk.Entitlements.Tenancy.Kind.operator !=(Chalk.Entitlements.Tenancy.Kind left, Chalk.Entitlements.Tenancy.Kind right) -> bool
+static Chalk.Entitlements.Tenancy.Kind.operator ==(Chalk.Entitlements.Tenancy.Kind left, Chalk.Entitlements.Tenancy.Kind right) -> bool
+static Chalk.Entitlements.Tenancy.Realm.operator !=(Chalk.Entitlements.Tenancy.Realm left, Chalk.Entitlements.Tenancy.Realm right) -> bool
+static Chalk.Entitlements.Tenancy.Realm.operator ==(Chalk.Entitlements.Tenancy.Realm left, Chalk.Entitlements.Tenancy.Realm right) -> bool
+static Chalk.Entitlements.Tenancy.Role.operator !=(Chalk.Entitlements.Tenancy.Role left, Chalk.Entitlements.Tenancy.Role right) -> bool
+static Chalk.Entitlements.Tenancy.Role.operator ==(Chalk.Entitlements.Tenancy.Role left, Chalk.Entitlements.Tenancy.Role right) -> bool
+static Chalk.Entitlements.Tenancy.Roles.Owner.get -> Chalk.Entitlements.Tenancy.Role
+static Chalk.Entitlements.Tenancy.Roles.Visible.get -> Chalk.Entitlements.Tenancy.Role
+static Chalk.Entitlements.Tenancy.Scope.operator !=(Chalk.Entitlements.Tenancy.Scope left, Chalk.Entitlements.Tenancy.Scope right) -> bool
+static Chalk.Entitlements.Tenancy.Scope.operator ==(Chalk.Entitlements.Tenancy.Scope left, Chalk.Entitlements.Tenancy.Scope right) -> bool
+static Chalk.Entitlements.Tenancy.Source.operator !=(Chalk.Entitlements.Tenancy.Source left, Chalk.Entitlements.Tenancy.Source right) -> bool
+static Chalk.Entitlements.Tenancy.Source.operator ==(Chalk.Entitlements.Tenancy.Source left, Chalk.Entitlements.Tenancy.Source right) -> bool
+static Chalk.Entitlements.Tenancy.Sql.Of(string! text) -> Chalk.Entitlements.Tenancy.Sql
+static Chalk.Entitlements.Tenancy.Sql.operator !=(Chalk.Entitlements.Tenancy.Sql left, Chalk.Entitlements.Tenancy.Sql right) -> bool
+static Chalk.Entitlements.Tenancy.Sql.operator ==(Chalk.Entitlements.Tenancy.Sql left, Chalk.Entitlements.Tenancy.Sql right) -> bool
+static Chalk.Entitlements.Tenancy.SubjectKind.operator !=(Chalk.Entitlements.Tenancy.SubjectKind left, Chalk.Entitlements.Tenancy.SubjectKind right) -> bool
+static Chalk.Entitlements.Tenancy.SubjectKind.operator ==(Chalk.Entitlements.Tenancy.SubjectKind left, Chalk.Entitlements.Tenancy.SubjectKind right) -> bool
+static Chalk.Entitlements.Tenancy.Table.operator !=(Chalk.Entitlements.Tenancy.Table left, Chalk.Entitlements.Tenancy.Table right) -> bool
+static Chalk.Entitlements.Tenancy.Table.operator ==(Chalk.Entitlements.Tenancy.Table left, Chalk.Entitlements.Tenancy.Table right) -> bool
+static Chalk.Entitlements.Tenancy.Tenancy.Anywhere.get -> object!
+static Chalk.Entitlements.Tenancy.TenancyPolicy.Declare(Chalk.Catalog.CatalogContext! catalog) -> Chalk.Entitlements.Tenancy.TenancyPolicy!
+~override Chalk.Entitlements.Tenancy.Column.Equals(object obj) -> bool
+~override Chalk.Entitlements.Tenancy.Kind.Equals(object obj) -> bool
+~override Chalk.Entitlements.Tenancy.Realm.Equals(object obj) -> bool
+~override Chalk.Entitlements.Tenancy.Role.Equals(object obj) -> bool
+~override Chalk.Entitlements.Tenancy.Scope.Equals(object obj) -> bool
+~override Chalk.Entitlements.Tenancy.Source.Equals(object obj) -> bool
+~override Chalk.Entitlements.Tenancy.Sql.Equals(object obj) -> bool
+~override Chalk.Entitlements.Tenancy.SubjectKind.Equals(object obj) -> bool
+~override Chalk.Entitlements.Tenancy.Table.Equals(object obj) -> bool

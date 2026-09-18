@@ -1,0 +1,512 @@
+{
+  "irVersion": 1,
+  "planDigest": "72085595763315797",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "revenue",
+        "type": {
+          "kind": "TYPE_KIND_DECIMAL",
+          "nullable": true,
+          "precision": 38,
+          "scale": 4
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "revenue",
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "nullable": true,
+            "precision": 38,
+            "scale": 4
+          }
+        }
+      ]
+    },
+    "estRowCount": 1,
+    "project": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "revenue",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 38,
+                "scale": 4
+              }
+            },
+            {
+              "name": "$f1",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            }
+          ]
+        },
+        "estRowCount": 1,
+        "hashAggregate": {
+          "aggregate": {
+            "input": {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "$f0",
+                    "type": {
+                      "kind": "TYPE_KIND_DECIMAL",
+                      "precision": 30,
+                      "scale": 4
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 856.807511737089,
+              "project": {
+                "input": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "l_orderkey",
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        }
+                      },
+                      {
+                        "name": "l_linenumber",
+                        "type": {
+                          "kind": "TYPE_KIND_I32"
+                        }
+                      },
+                      {
+                        "name": "l_quantity",
+                        "type": {
+                          "kind": "TYPE_KIND_DECIMAL",
+                          "precision": 15,
+                          "scale": 2
+                        }
+                      },
+                      {
+                        "name": "l_extendedprice",
+                        "type": {
+                          "kind": "TYPE_KIND_DECIMAL",
+                          "precision": 15,
+                          "scale": 2
+                        }
+                      },
+                      {
+                        "name": "l_discount",
+                        "type": {
+                          "kind": "TYPE_KIND_DECIMAL",
+                          "precision": 15,
+                          "scale": 2
+                        }
+                      },
+                      {
+                        "name": "l_shipdate",
+                        "type": {
+                          "kind": "TYPE_KIND_DATE"
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 856.807511737089,
+                  "collations": [
+                    {
+                      "fields": [
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_DATE"
+                            },
+                            "fieldRef": {
+                              "index": 5
+                            }
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        }
+                      ]
+                    }
+                  ],
+                  "filter": {
+                    "input": {
+                      "rowType": {
+                        "fields": [
+                          {
+                            "name": "l_orderkey",
+                            "type": {
+                              "kind": "TYPE_KIND_I64"
+                            }
+                          },
+                          {
+                            "name": "l_linenumber",
+                            "type": {
+                              "kind": "TYPE_KIND_I32"
+                            }
+                          },
+                          {
+                            "name": "l_quantity",
+                            "type": {
+                              "kind": "TYPE_KIND_DECIMAL",
+                              "precision": 15,
+                              "scale": 2
+                            }
+                          },
+                          {
+                            "name": "l_extendedprice",
+                            "type": {
+                              "kind": "TYPE_KIND_DECIMAL",
+                              "precision": 15,
+                              "scale": 2
+                            }
+                          },
+                          {
+                            "name": "l_discount",
+                            "type": {
+                              "kind": "TYPE_KIND_DECIMAL",
+                              "precision": 15,
+                              "scale": 2
+                            }
+                          },
+                          {
+                            "name": "l_shipdate",
+                            "type": {
+                              "kind": "TYPE_KIND_DATE"
+                            }
+                          }
+                        ]
+                      },
+                      "estRowCount": 8568.075117370892,
+                      "collations": [
+                        {
+                          "fields": [
+                            {
+                              "expr": {
+                                "type": {
+                                  "kind": "TYPE_KIND_DATE"
+                                },
+                                "fieldRef": {
+                                  "index": 5
+                                }
+                              },
+                              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                            }
+                          ]
+                        }
+                      ],
+                      "indexLookup": {
+                        "table": {
+                          "sourceId": "mem",
+                          "schema": "main",
+                          "table": "lineitem"
+                        },
+                        "index": "ix_lineitem_l_shipdate",
+                        "ranges": [
+                          {
+                            "lower": [
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_DATE"
+                                },
+                                "literal": {
+                                  "dateValue": 8766
+                                }
+                              }
+                            ],
+                            "lowerInclusive": true,
+                            "upper": [
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_DATE"
+                                },
+                                "literal": {
+                                  "dateValue": 9131
+                                }
+                              }
+                            ]
+                          }
+                        ],
+                        "projection": [
+                          0,
+                          1,
+                          4,
+                          5,
+                          6,
+                          10
+                        ]
+                      }
+                    },
+                    "condition": {
+                      "type": {
+                        "kind": "TYPE_KIND_BOOL"
+                      },
+                      "call": {
+                        "function": "FUNCTION_ID_AND",
+                        "args": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_BOOL"
+                            },
+                            "call": {
+                              "function": "FUNCTION_ID_GE",
+                              "args": [
+                                {
+                                  "type": {
+                                    "kind": "TYPE_KIND_DECIMAL",
+                                    "precision": 15,
+                                    "scale": 2
+                                  },
+                                  "fieldRef": {
+                                    "index": 4
+                                  }
+                                },
+                                {
+                                  "type": {
+                                    "kind": "TYPE_KIND_DECIMAL",
+                                    "precision": 15,
+                                    "scale": 2
+                                  },
+                                  "cast": {
+                                    "input": {
+                                      "type": {
+                                        "kind": "TYPE_KIND_DECIMAL",
+                                        "precision": 3,
+                                        "scale": 2
+                                      },
+                                      "literal": {
+                                        "decimalValue": {
+                                          "unscaled": "BQAAAAAAAAAAAAAAAAAAAA=="
+                                        }
+                                      }
+                                    },
+                                    "onFailure": "CAST_FAILURE_ERROR"
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_BOOL"
+                            },
+                            "call": {
+                              "function": "FUNCTION_ID_LE",
+                              "args": [
+                                {
+                                  "type": {
+                                    "kind": "TYPE_KIND_DECIMAL",
+                                    "precision": 15,
+                                    "scale": 2
+                                  },
+                                  "fieldRef": {
+                                    "index": 4
+                                  }
+                                },
+                                {
+                                  "type": {
+                                    "kind": "TYPE_KIND_DECIMAL",
+                                    "precision": 15,
+                                    "scale": 2
+                                  },
+                                  "cast": {
+                                    "input": {
+                                      "type": {
+                                        "kind": "TYPE_KIND_DECIMAL",
+                                        "precision": 3,
+                                        "scale": 2
+                                      },
+                                      "literal": {
+                                        "decimalValue": {
+                                          "unscaled": "BwAAAAAAAAAAAAAAAAAAAA=="
+                                        }
+                                      }
+                                    },
+                                    "onFailure": "CAST_FAILURE_ERROR"
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_BOOL"
+                            },
+                            "call": {
+                              "function": "FUNCTION_ID_LT",
+                              "args": [
+                                {
+                                  "type": {
+                                    "kind": "TYPE_KIND_DECIMAL",
+                                    "precision": 15,
+                                    "scale": 2
+                                  },
+                                  "fieldRef": {
+                                    "index": 2
+                                  }
+                                },
+                                {
+                                  "type": {
+                                    "kind": "TYPE_KIND_DECIMAL",
+                                    "precision": 15,
+                                    "scale": 2
+                                  },
+                                  "literal": {
+                                    "decimalValue": {
+                                      "unscaled": "YAkAAAAAAAAAAAAAAAAAAA=="
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "exprs": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_DECIMAL",
+                      "precision": 30,
+                      "scale": 4
+                    },
+                    "call": {
+                      "function": "FUNCTION_ID_MULTIPLY",
+                      "args": [
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_DECIMAL",
+                            "precision": 15,
+                            "scale": 2
+                          },
+                          "fieldRef": {
+                            "index": 3
+                          }
+                        },
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_DECIMAL",
+                            "precision": 15,
+                            "scale": 2
+                          },
+                          "fieldRef": {
+                            "index": 4
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "groupings": [
+              {}
+            ],
+            "measures": [
+              {
+                "function": "AGGREGATE_FUNCTION_ID_SUM0",
+                "args": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_DECIMAL",
+                      "precision": 30,
+                      "scale": 4
+                    },
+                    "fieldRef": {}
+                  }
+                ],
+                "type": {
+                  "kind": "TYPE_KIND_DECIMAL",
+                  "precision": 38,
+                  "scale": 4
+                }
+              },
+              {
+                "function": "AGGREGATE_FUNCTION_ID_COUNT",
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "exprs": [
+        {
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "nullable": true,
+            "precision": 38,
+            "scale": 4
+          },
+          "ifThen": {
+            "clauses": [
+              {
+                "condition": {
+                  "type": {
+                    "kind": "TYPE_KIND_BOOL"
+                  },
+                  "call": {
+                    "function": "FUNCTION_ID_EQ",
+                    "args": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        },
+                        "fieldRef": {
+                          "index": 1
+                        }
+                      },
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        },
+                        "cast": {
+                          "input": {
+                            "type": {
+                              "kind": "TYPE_KIND_I32"
+                            },
+                            "literal": {
+                              "i32Value": 0
+                            }
+                          },
+                          "onFailure": "CAST_FAILURE_ERROR"
+                        }
+                      }
+                    ]
+                  }
+                },
+                "result": {
+                  "type": {
+                    "kind": "TYPE_KIND_DECIMAL",
+                    "nullable": true,
+                    "precision": 38,
+                    "scale": 4
+                  },
+                  "literal": {
+                    "isNull": true
+                  }
+                }
+              }
+            ],
+            "elseBranch": {
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 38,
+                "scale": 4
+              },
+              "fieldRef": {}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

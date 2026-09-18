@@ -1,0 +1,75 @@
+-- u1
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u2
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u3
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u3-in-o1
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u4
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u5
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u6
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u6-two-orgs
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u7
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u8
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u9
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u10-in-a-region
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u11-subject-in-a-region
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u14-a-vendor
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u15-a-vendor-and-an-org
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+

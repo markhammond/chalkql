@@ -1,0 +1,147 @@
+{
+  "irVersion": 1,
+  "planDigest": "9116510914382925156",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "vol",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "vol",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 2.5,
+    "filter": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "vol",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            }
+          ]
+        },
+        "estRowCount": 5,
+        "hashAggregate": {
+          "aggregate": {
+            "input": {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "symbol",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  },
+                  {
+                    "name": "volume",
+                    "type": {
+                      "kind": "TYPE_KIND_I64"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 100800,
+              "read": {
+                "table": {
+                  "sourceId": "mem",
+                  "schema": "main",
+                  "table": "bars"
+                },
+                "projection": [
+                  0,
+                  6
+                ]
+              }
+            },
+            "groupings": [
+              {
+                "keys": [
+                  0
+                ]
+              }
+            ],
+            "measures": [
+              {
+                "function": "AGGREGATE_FUNCTION_ID_SUM0",
+                "args": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_I64"
+                    },
+                    "fieldRef": {
+                      "index": 1
+                    }
+                  }
+                ],
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "condition": {
+        "type": {
+          "kind": "TYPE_KIND_BOOL"
+        },
+        "call": {
+          "function": "FUNCTION_ID_GT",
+          "args": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "literal": {
+                "i64Value": "1000000"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

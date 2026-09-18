@@ -1,0 +1,610 @@
+#nullable enable
+Chalk.Catalog.AssociationDescriptor
+Chalk.Catalog.AssociationDescriptor.AssociationDescriptor() -> void
+Chalk.Catalog.AssociationDescriptor.FromColumn.get -> string!
+Chalk.Catalog.AssociationDescriptor.FromColumn.init -> void
+Chalk.Catalog.AssociationDescriptor.FromSchema.get -> string!
+Chalk.Catalog.AssociationDescriptor.FromSchema.init -> void
+Chalk.Catalog.AssociationDescriptor.FromTable.get -> string!
+Chalk.Catalog.AssociationDescriptor.FromTable.init -> void
+Chalk.Catalog.AssociationDescriptor.Name.get -> string!
+Chalk.Catalog.AssociationDescriptor.Name.init -> void
+Chalk.Catalog.AssociationDescriptor.ToColumn.get -> string!
+Chalk.Catalog.AssociationDescriptor.ToColumn.init -> void
+Chalk.Catalog.AssociationDescriptor.ToSchema.get -> string!
+Chalk.Catalog.AssociationDescriptor.ToSchema.init -> void
+Chalk.Catalog.AssociationDescriptor.ToTable.get -> string!
+Chalk.Catalog.AssociationDescriptor.ToTable.init -> void
+Chalk.Catalog.CatalogContext
+Chalk.Catalog.CatalogContext.Associations.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.AssociationDescriptor!>!
+Chalk.Catalog.CatalogContext.Associations.init -> void
+Chalk.Catalog.CatalogContext.CatalogContext() -> void
+Chalk.Catalog.CatalogContext.ContextId.get -> string!
+Chalk.Catalog.CatalogContext.ContextId.init -> void
+Chalk.Catalog.CatalogContext.Epoch.get -> long
+Chalk.Catalog.CatalogContext.Epoch.init -> void
+Chalk.Catalog.CatalogContext.FindSchema(string! name) -> Chalk.Catalog.SchemaDescriptor?
+Chalk.Catalog.CatalogContext.FindTable(string? schema, string! table) -> (Chalk.Catalog.SchemaDescriptor! Schema, Chalk.Catalog.TableDescriptor! Table)?
+Chalk.Catalog.CatalogContext.JoinPolicy.get -> Chalk.Catalog.CrossSourceJoinPolicy!
+Chalk.Catalog.CatalogContext.JoinPolicy.init -> void
+Chalk.Catalog.CatalogContext.Schemas.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.SchemaDescriptor!>!
+Chalk.Catalog.CatalogContext.Schemas.init -> void
+Chalk.Catalog.CatalogSerialization
+Chalk.Catalog.CatalogValidationException
+Chalk.Catalog.CatalogValidationException.CatalogValidationException(string! path, string! detail) -> void
+Chalk.Catalog.CatalogValidationException.Path.get -> string!
+Chalk.Catalog.CatalogValidator
+Chalk.Catalog.CatalogVerificationException
+Chalk.Catalog.CatalogVerificationException.CatalogVerificationException(string! table, string! declaration, long rowIndex, string! detail) -> void
+Chalk.Catalog.CatalogVerificationException.Declaration.get -> string!
+Chalk.Catalog.CatalogVerificationException.RowIndex.get -> long
+Chalk.Catalog.CatalogVerificationException.Table.get -> string!
+Chalk.Catalog.ChalkType
+Chalk.Catalog.ChalkType.ChalkType() -> void
+Chalk.Catalog.ChalkType.ChalkType(Chalk.Ir.TypeKind Kind, bool Nullable, int Precision = 0, int Scale = 0) -> void
+Chalk.Catalog.ChalkType.Deconstruct(out Chalk.Ir.TypeKind Kind, out bool Nullable, out int Precision, out int Scale) -> void
+Chalk.Catalog.ChalkType.Element.get -> Chalk.Catalog.ChalkType?
+Chalk.Catalog.ChalkType.Element.init -> void
+Chalk.Catalog.ChalkType.Equals(Chalk.Catalog.ChalkType other) -> bool
+Chalk.Catalog.ChalkType.Kind.get -> Chalk.Ir.TypeKind
+Chalk.Catalog.ChalkType.Kind.init -> void
+Chalk.Catalog.ChalkType.Nullable.get -> bool
+Chalk.Catalog.ChalkType.Nullable.init -> void
+Chalk.Catalog.ChalkType.Precision.get -> int
+Chalk.Catalog.ChalkType.Precision.init -> void
+Chalk.Catalog.ChalkType.Scale.get -> int
+Chalk.Catalog.ChalkType.Scale.init -> void
+Chalk.Catalog.ChalkType.ToProto() -> Chalk.Ir.Type!
+Chalk.Catalog.ChalkType.WithNullable(bool nullable) -> Chalk.Catalog.ChalkType
+Chalk.Catalog.ClientFunctionBody
+Chalk.Catalog.ClientFunctionBody.ClientFunctionBody() -> void
+Chalk.Catalog.ClientFunctionBody.Registration.get -> string?
+Chalk.Catalog.ClientFunctionBody.Registration.init -> void
+Chalk.Catalog.CollationDescriptor
+Chalk.Catalog.CollationDescriptor.CollationDescriptor() -> void
+Chalk.Catalog.CollationDescriptor.Keys.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.KeyOrder>!
+Chalk.Catalog.CollationDescriptor.Keys.init -> void
+Chalk.Catalog.ColumnDescriptor
+Chalk.Catalog.ColumnDescriptor.ColumnDescriptor() -> void
+Chalk.Catalog.ColumnDescriptor.Name.get -> string!
+Chalk.Catalog.ColumnDescriptor.Name.init -> void
+Chalk.Catalog.ColumnDescriptor.Statistics.get -> Chalk.Catalog.ColumnStatistics!
+Chalk.Catalog.ColumnDescriptor.Statistics.init -> void
+Chalk.Catalog.ColumnDescriptor.Type.get -> Chalk.Catalog.ChalkType
+Chalk.Catalog.ColumnDescriptor.Type.init -> void
+Chalk.Catalog.ColumnStatistics
+Chalk.Catalog.ColumnStatistics.ColumnStatistics() -> void
+Chalk.Catalog.ColumnStatistics.DistinctCount.get -> long
+Chalk.Catalog.ColumnStatistics.DistinctCount.init -> void
+Chalk.Catalog.ColumnStatistics.FrequentValues.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.FrequentValue!>!
+Chalk.Catalog.ColumnStatistics.FrequentValues.init -> void
+Chalk.Catalog.ColumnStatistics.Histogram.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.HistogramBucket!>!
+Chalk.Catalog.ColumnStatistics.Histogram.init -> void
+Chalk.Catalog.ColumnStatistics.Level.get -> Chalk.Ir.StatisticsLevel
+Chalk.Catalog.ColumnStatistics.Level.init -> void
+Chalk.Catalog.ColumnStatistics.Max.get -> object?
+Chalk.Catalog.ColumnStatistics.Max.init -> void
+Chalk.Catalog.ColumnStatistics.Min.get -> object?
+Chalk.Catalog.ColumnStatistics.Min.init -> void
+Chalk.Catalog.ColumnStatistics.NullCount.get -> long
+Chalk.Catalog.ColumnStatistics.NullCount.init -> void
+Chalk.Catalog.ContextValues
+Chalk.Catalog.CostProfile
+Chalk.Catalog.CostProfile.CostProfile() -> void
+Chalk.Catalog.CostProfile.IsInherit.get -> bool
+Chalk.Catalog.CostProfile.LookupRowCost.get -> double
+Chalk.Catalog.CostProfile.LookupRowCost.init -> void
+Chalk.Catalog.CostProfile.LookupSeekCost.get -> double
+Chalk.Catalog.CostProfile.LookupSeekCost.init -> void
+Chalk.Catalog.CostProfile.RemoteCallCost.get -> double
+Chalk.Catalog.CostProfile.RemoteCallCost.init -> void
+Chalk.Catalog.CostProfile.RemoteRowCost.get -> double
+Chalk.Catalog.CostProfile.RemoteRowCost.init -> void
+Chalk.Catalog.CostProfile.ScanRowCost.get -> double
+Chalk.Catalog.CostProfile.ScanRowCost.init -> void
+Chalk.Catalog.CrossSourceJoinPolicy
+Chalk.Catalog.CrossSourceJoinPolicy.BroadcastMaxRows.get -> long
+Chalk.Catalog.CrossSourceJoinPolicy.BroadcastMaxRows.init -> void
+Chalk.Catalog.CrossSourceJoinPolicy.CrossSourceJoinPolicy() -> void
+Chalk.Catalog.CrossSourceJoinPolicy.DefaultStrategy.get -> Chalk.Catalog.JoinStrategy
+Chalk.Catalog.CrossSourceJoinPolicy.DefaultStrategy.init -> void
+Chalk.Catalog.CrossSourceJoinPolicy.LocalJoinMaxRows.get -> long
+Chalk.Catalog.CrossSourceJoinPolicy.LocalJoinMaxRows.init -> void
+Chalk.Catalog.CrossSourceJoinPolicy.LookupMaxCalls.get -> int
+Chalk.Catalog.CrossSourceJoinPolicy.LookupMaxCalls.init -> void
+Chalk.Catalog.CrossSourceJoinPolicy.Pairs.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.SourcePairRule!>!
+Chalk.Catalog.CrossSourceJoinPolicy.Pairs.init -> void
+Chalk.Catalog.CrossSourceJoinPolicy.UnknownRowCountAssumption.get -> long
+Chalk.Catalog.CrossSourceJoinPolicy.UnknownRowCountAssumption.init -> void
+Chalk.Catalog.DialectProfileDescriptor
+Chalk.Catalog.DialectProfileDescriptor.ApproximateDecimal.get -> bool
+Chalk.Catalog.DialectProfileDescriptor.ApproximateDecimal.init -> void
+Chalk.Catalog.DialectProfileDescriptor.ApproximateDistinctCount.get -> bool
+Chalk.Catalog.DialectProfileDescriptor.ApproximateDistinctCount.init -> void
+Chalk.Catalog.DialectProfileDescriptor.ApproximateTopN.get -> bool
+Chalk.Catalog.DialectProfileDescriptor.ApproximateTopN.init -> void
+Chalk.Catalog.DialectProfileDescriptor.CaseSensitiveIdentifiers.get -> bool
+Chalk.Catalog.DialectProfileDescriptor.CaseSensitiveIdentifiers.init -> void
+Chalk.Catalog.DialectProfileDescriptor.Conformance.get -> Chalk.Ir.SqlConformance
+Chalk.Catalog.DialectProfileDescriptor.Conformance.init -> void
+Chalk.Catalog.DialectProfileDescriptor.DefaultNullCollation.get -> Chalk.Ir.NullCollation
+Chalk.Catalog.DialectProfileDescriptor.DefaultNullCollation.init -> void
+Chalk.Catalog.DialectProfileDescriptor.Dialect.get -> string!
+Chalk.Catalog.DialectProfileDescriptor.Dialect.init -> void
+Chalk.Catalog.DialectProfileDescriptor.DialectProfileDescriptor() -> void
+Chalk.Catalog.DialectProfileDescriptor.DynamicallyTyped.get -> bool
+Chalk.Catalog.DialectProfileDescriptor.DynamicallyTyped.init -> void
+Chalk.Catalog.DialectProfileDescriptor.HasBoolean.get -> bool
+Chalk.Catalog.DialectProfileDescriptor.HasBoolean.init -> void
+Chalk.Catalog.DialectProfileDescriptor.ImplicitCoercionMatches.get -> bool
+Chalk.Catalog.DialectProfileDescriptor.ImplicitCoercionMatches.init -> void
+Chalk.Catalog.DialectProfileDescriptor.Libraries.get -> System.Collections.Generic.IReadOnlyList<Chalk.Ir.SqlLibrary>!
+Chalk.Catalog.DialectProfileDescriptor.Libraries.init -> void
+Chalk.Catalog.DialectProfileDescriptor.MaxNumericPrecision.get -> uint
+Chalk.Catalog.DialectProfileDescriptor.MaxNumericPrecision.init -> void
+Chalk.Catalog.DialectProfileDescriptor.MaxTimestampPrecision.get -> uint
+Chalk.Catalog.DialectProfileDescriptor.MaxTimestampPrecision.init -> void
+Chalk.Catalog.DialectProfileDescriptor.ParameterPlaceholder.get -> Chalk.Ir.ParameterPlaceholder
+Chalk.Catalog.DialectProfileDescriptor.ParameterPlaceholder.init -> void
+Chalk.Catalog.DialectProfileDescriptor.QuotedCasing.get -> Chalk.Ir.IdentifierCasing
+Chalk.Catalog.DialectProfileDescriptor.QuotedCasing.init -> void
+Chalk.Catalog.DialectProfileDescriptor.Quoting.get -> Chalk.Ir.IdentifierQuoting
+Chalk.Catalog.DialectProfileDescriptor.Quoting.init -> void
+Chalk.Catalog.DialectProfileDescriptor.StringCollation.get -> Chalk.Ir.StringCollation
+Chalk.Catalog.DialectProfileDescriptor.StringCollation.init -> void
+Chalk.Catalog.DialectProfileDescriptor.SupportsNullOrderingClause.get -> bool
+Chalk.Catalog.DialectProfileDescriptor.SupportsNullOrderingClause.init -> void
+Chalk.Catalog.DialectProfileDescriptor.TimeZone.get -> string!
+Chalk.Catalog.DialectProfileDescriptor.TimeZone.init -> void
+Chalk.Catalog.DialectProfileDescriptor.UnquotedCasing.get -> Chalk.Ir.IdentifierCasing
+Chalk.Catalog.DialectProfileDescriptor.UnquotedCasing.init -> void
+Chalk.Catalog.DialectProfiles
+Chalk.Catalog.ForeignKeyDescriptor
+Chalk.Catalog.ForeignKeyDescriptor.Columns.get -> System.Collections.Generic.IReadOnlyList<int>!
+Chalk.Catalog.ForeignKeyDescriptor.Columns.init -> void
+Chalk.Catalog.ForeignKeyDescriptor.ForeignKeyDescriptor() -> void
+Chalk.Catalog.ForeignKeyDescriptor.Name.get -> string!
+Chalk.Catalog.ForeignKeyDescriptor.Name.init -> void
+Chalk.Catalog.ForeignKeyDescriptor.ParentColumns.get -> System.Collections.Generic.IReadOnlyList<int>!
+Chalk.Catalog.ForeignKeyDescriptor.ParentColumns.init -> void
+Chalk.Catalog.ForeignKeyDescriptor.ParentTable.get -> string!
+Chalk.Catalog.ForeignKeyDescriptor.ParentTable.init -> void
+Chalk.Catalog.FrequentValue
+Chalk.Catalog.FrequentValue.Count.get -> long
+Chalk.Catalog.FrequentValue.Count.init -> void
+Chalk.Catalog.FrequentValue.FrequentValue() -> void
+Chalk.Catalog.FrequentValue.Value.get -> object?
+Chalk.Catalog.FrequentValue.Value.init -> void
+Chalk.Catalog.FunctionBody
+Chalk.Catalog.FunctionBuilder
+Chalk.Catalog.FunctionBuilder.Aggregate<T1, T2, TResult>(string! p1, string! p2) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Aggregate<T1, TResult>(string! p1) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Build() -> Chalk.Catalog.FunctionDescriptor!
+Chalk.Catalog.FunctionBuilder.Client(string? registration = null) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Column(string! name, Chalk.Catalog.ChalkType type) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Column<T>(string! name) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Cost(double cost) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Decreasing(string! parameter, bool strictly = false) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.FunctionBuilder(string! name) -> void
+Chalk.Catalog.FunctionBuilder.Immutable() -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Increasing(string! parameter, bool strictly = false) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Leakproof(bool leakproof = true) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Native(string? dialectName = null) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.NullTreatment(bool nullTreatment = true) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Optional(string! name, Chalk.Catalog.ChalkType type, object? defaultValue) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Optional<T>(string! name, T defaultValue) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Ordered(bool ordered = true) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Parameter(string! name, Chalk.Catalog.ChalkType type) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Parameter<T>(string! name) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Returns(Chalk.Catalog.ChalkType type) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Returns<T>() -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.ReturnsNullable<T>() -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Rows(long rows) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Scalar() -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Scalar<T1, T2, T3, TResult>(string! p1, string! p2, string! p3) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Scalar<T1, T2, TResult>(string! p1, string! p2) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Scalar<T1, TResult>(string! p1) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Scalar<TResult>() -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Sql(string! text) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Stable() -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Strict(bool strict = true) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.TableFunction() -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Volatile() -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Window(bool window = true) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionDescriptor
+Chalk.Catalog.FunctionDescriptor.Body.get -> Chalk.Catalog.FunctionBody!
+Chalk.Catalog.FunctionDescriptor.Body.init -> void
+Chalk.Catalog.FunctionDescriptor.Cost.get -> double
+Chalk.Catalog.FunctionDescriptor.Cost.init -> void
+Chalk.Catalog.FunctionDescriptor.FunctionDescriptor() -> void
+Chalk.Catalog.FunctionDescriptor.Kind.get -> Chalk.Ir.FunctionKind
+Chalk.Catalog.FunctionDescriptor.Kind.init -> void
+Chalk.Catalog.FunctionDescriptor.Leakproof.get -> bool
+Chalk.Catalog.FunctionDescriptor.Leakproof.init -> void
+Chalk.Catalog.FunctionDescriptor.Monotonicity.get -> System.Collections.Generic.IReadOnlyList<Chalk.Ir.Monotonicity>!
+Chalk.Catalog.FunctionDescriptor.Monotonicity.init -> void
+Chalk.Catalog.FunctionDescriptor.Name.get -> string!
+Chalk.Catalog.FunctionDescriptor.Name.init -> void
+Chalk.Catalog.FunctionDescriptor.NullTreatment.get -> bool
+Chalk.Catalog.FunctionDescriptor.NullTreatment.init -> void
+Chalk.Catalog.FunctionDescriptor.Ordered.get -> bool
+Chalk.Catalog.FunctionDescriptor.Ordered.init -> void
+Chalk.Catalog.FunctionDescriptor.Parameters.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ParameterDescriptor!>!
+Chalk.Catalog.FunctionDescriptor.Parameters.init -> void
+Chalk.Catalog.FunctionDescriptor.ReturnType.get -> Chalk.Catalog.ChalkType?
+Chalk.Catalog.FunctionDescriptor.ReturnType.init -> void
+Chalk.Catalog.FunctionDescriptor.ReturnsTable.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ColumnDescriptor!>!
+Chalk.Catalog.FunctionDescriptor.ReturnsTable.init -> void
+Chalk.Catalog.FunctionDescriptor.Rows.get -> long
+Chalk.Catalog.FunctionDescriptor.Rows.init -> void
+Chalk.Catalog.FunctionDescriptor.Strict.get -> bool
+Chalk.Catalog.FunctionDescriptor.Strict.init -> void
+Chalk.Catalog.FunctionDescriptor.Volatility.get -> Chalk.Ir.Volatility
+Chalk.Catalog.FunctionDescriptor.Volatility.init -> void
+Chalk.Catalog.FunctionDescriptor.Window.get -> bool
+Chalk.Catalog.FunctionDescriptor.Window.init -> void
+Chalk.Catalog.HistogramBucket
+Chalk.Catalog.HistogramBucket.Count.get -> long
+Chalk.Catalog.HistogramBucket.Count.init -> void
+Chalk.Catalog.HistogramBucket.DistinctCount.get -> long
+Chalk.Catalog.HistogramBucket.DistinctCount.init -> void
+Chalk.Catalog.HistogramBucket.HistogramBucket() -> void
+Chalk.Catalog.HistogramBucket.Upper.get -> object?
+Chalk.Catalog.HistogramBucket.Upper.init -> void
+Chalk.Catalog.ICrossSourceJoinPolicy
+Chalk.Catalog.ICrossSourceJoinPolicy.Build(Chalk.Catalog.CatalogContext! catalog) -> Chalk.Catalog.CrossSourceJoinPolicy!
+Chalk.Catalog.IndexDescriptor
+Chalk.Catalog.IndexDescriptor.Columns.get -> System.Collections.Generic.IReadOnlyList<int>!
+Chalk.Catalog.IndexDescriptor.Columns.init -> void
+Chalk.Catalog.IndexDescriptor.Covering.get -> System.Collections.Generic.IReadOnlyList<int>!
+Chalk.Catalog.IndexDescriptor.Covering.init -> void
+Chalk.Catalog.IndexDescriptor.Covers(System.Collections.Generic.IReadOnlyList<int>! projection) -> bool
+Chalk.Catalog.IndexDescriptor.DirectionAt(int position) -> Chalk.Ir.SortDirection
+Chalk.Catalog.IndexDescriptor.Directions.get -> System.Collections.Generic.IReadOnlyList<Chalk.Ir.SortDirection>!
+Chalk.Catalog.IndexDescriptor.Directions.init -> void
+Chalk.Catalog.IndexDescriptor.IndexDescriptor() -> void
+Chalk.Catalog.IndexDescriptor.Key() -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.KeyOrder>!
+Chalk.Catalog.IndexDescriptor.Kind.get -> Chalk.Ir.IndexKind
+Chalk.Catalog.IndexDescriptor.Kind.init -> void
+Chalk.Catalog.IndexDescriptor.Name.get -> string!
+Chalk.Catalog.IndexDescriptor.Name.init -> void
+Chalk.Catalog.IndexDescriptor.Unique.get -> bool
+Chalk.Catalog.IndexDescriptor.Unique.init -> void
+Chalk.Catalog.JoinStrategy
+Chalk.Catalog.JoinStrategy.Adaptive = 4 -> Chalk.Catalog.JoinStrategy
+Chalk.Catalog.JoinStrategy.Broadcast = 3 -> Chalk.Catalog.JoinStrategy
+Chalk.Catalog.JoinStrategy.Local = 1 -> Chalk.Catalog.JoinStrategy
+Chalk.Catalog.JoinStrategy.Lookup = 2 -> Chalk.Catalog.JoinStrategy
+Chalk.Catalog.JoinStrategy.Unspecified = 0 -> Chalk.Catalog.JoinStrategy
+Chalk.Catalog.KeyOrder
+Chalk.Catalog.KeyOrder.Column.get -> int
+Chalk.Catalog.KeyOrder.Column.init -> void
+Chalk.Catalog.KeyOrder.Deconstruct(out int Column, out Chalk.Ir.SortDirection Direction) -> void
+Chalk.Catalog.KeyOrder.Direction.get -> Chalk.Ir.SortDirection
+Chalk.Catalog.KeyOrder.Direction.init -> void
+Chalk.Catalog.KeyOrder.Equals(Chalk.Catalog.KeyOrder other) -> bool
+Chalk.Catalog.KeyOrder.KeyOrder() -> void
+Chalk.Catalog.KeyOrder.KeyOrder(int Column, Chalk.Ir.SortDirection Direction) -> void
+Chalk.Catalog.NativeFunctionBody
+Chalk.Catalog.NativeFunctionBody.DialectName.get -> string?
+Chalk.Catalog.NativeFunctionBody.DialectName.init -> void
+Chalk.Catalog.NativeFunctionBody.NativeFunctionBody() -> void
+Chalk.Catalog.ParameterDescriptor
+Chalk.Catalog.ParameterDescriptor.Default.get -> object?
+Chalk.Catalog.ParameterDescriptor.Default.init -> void
+Chalk.Catalog.ParameterDescriptor.Name.get -> string!
+Chalk.Catalog.ParameterDescriptor.Name.init -> void
+Chalk.Catalog.ParameterDescriptor.Optional.get -> bool
+Chalk.Catalog.ParameterDescriptor.Optional.init -> void
+Chalk.Catalog.ParameterDescriptor.ParameterDescriptor() -> void
+Chalk.Catalog.ParameterDescriptor.Type.get -> Chalk.Catalog.ChalkType
+Chalk.Catalog.ParameterDescriptor.Type.init -> void
+Chalk.Catalog.PartitionDescriptor
+Chalk.Catalog.PartitionDescriptor.HasValue.get -> bool
+Chalk.Catalog.PartitionDescriptor.HasValue.init -> void
+Chalk.Catalog.PartitionDescriptor.LowerBound.get -> object?
+Chalk.Catalog.PartitionDescriptor.LowerBound.init -> void
+Chalk.Catalog.PartitionDescriptor.PartitionDescriptor() -> void
+Chalk.Catalog.PartitionDescriptor.RowCount.get -> long
+Chalk.Catalog.PartitionDescriptor.RowCount.init -> void
+Chalk.Catalog.PartitionDescriptor.Schema.get -> string!
+Chalk.Catalog.PartitionDescriptor.Schema.init -> void
+Chalk.Catalog.PartitionDescriptor.Table.get -> string!
+Chalk.Catalog.PartitionDescriptor.Table.init -> void
+Chalk.Catalog.PartitionDescriptor.UpperBound.get -> object?
+Chalk.Catalog.PartitionDescriptor.UpperBound.init -> void
+Chalk.Catalog.PartitionDescriptor.Value.get -> object?
+Chalk.Catalog.PartitionDescriptor.Value.init -> void
+Chalk.Catalog.PartitioningDescriptor
+Chalk.Catalog.PartitioningDescriptor.PartitionColumn.get -> int
+Chalk.Catalog.PartitioningDescriptor.PartitionColumn.init -> void
+Chalk.Catalog.PartitioningDescriptor.PartitioningDescriptor() -> void
+Chalk.Catalog.PartitioningDescriptor.Partitions.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.PartitionDescriptor!>!
+Chalk.Catalog.PartitioningDescriptor.Partitions.init -> void
+Chalk.Catalog.SchemaDescriptor
+Chalk.Catalog.SchemaDescriptor.Capabilities.get -> Chalk.Catalog.SourceCapabilities!
+Chalk.Catalog.SchemaDescriptor.Capabilities.init -> void
+Chalk.Catalog.SchemaDescriptor.CostProfile.get -> Chalk.Catalog.CostProfile!
+Chalk.Catalog.SchemaDescriptor.CostProfile.init -> void
+Chalk.Catalog.SchemaDescriptor.Dialect.get -> string?
+Chalk.Catalog.SchemaDescriptor.Dialect.init -> void
+Chalk.Catalog.SchemaDescriptor.DialectProfile.get -> Chalk.Catalog.DialectProfileDescriptor!
+Chalk.Catalog.SchemaDescriptor.DialectProfile.init -> void
+Chalk.Catalog.SchemaDescriptor.FindFunction(string! name) -> Chalk.Catalog.FunctionDescriptor?
+Chalk.Catalog.SchemaDescriptor.FindTable(string! name) -> Chalk.Catalog.TableDescriptor?
+Chalk.Catalog.SchemaDescriptor.Functions.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.FunctionDescriptor!>!
+Chalk.Catalog.SchemaDescriptor.Functions.init -> void
+Chalk.Catalog.SchemaDescriptor.Kind.get -> Chalk.Ir.SourceKind
+Chalk.Catalog.SchemaDescriptor.Kind.init -> void
+Chalk.Catalog.SchemaDescriptor.Name.get -> string!
+Chalk.Catalog.SchemaDescriptor.Name.init -> void
+Chalk.Catalog.SchemaDescriptor.SchemaDescriptor() -> void
+Chalk.Catalog.SchemaDescriptor.SourceId.get -> string!
+Chalk.Catalog.SchemaDescriptor.SourceId.init -> void
+Chalk.Catalog.SchemaDescriptor.Tables.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.TableDescriptor!>!
+Chalk.Catalog.SchemaDescriptor.Tables.init -> void
+Chalk.Catalog.SchemaDescriptor.TrustSourceRowSecurity.get -> bool
+Chalk.Catalog.SchemaDescriptor.TrustSourceRowSecurity.init -> void
+Chalk.Catalog.SourceCapabilities
+Chalk.Catalog.SourceCapabilities.MaxInList.get -> int
+Chalk.Catalog.SourceCapabilities.MaxInList.init -> void
+Chalk.Catalog.SourceCapabilities.MaxPushdownRows.get -> long
+Chalk.Catalog.SourceCapabilities.MaxPushdownRows.init -> void
+Chalk.Catalog.SourceCapabilities.NativeFunctions.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Catalog.SourceCapabilities.NativeFunctions.init -> void
+Chalk.Catalog.SourceCapabilities.PushableAggregates.get -> System.Collections.Generic.IReadOnlyList<Chalk.Ir.AggregateFunctionId>!
+Chalk.Catalog.SourceCapabilities.PushableAggregates.init -> void
+Chalk.Catalog.SourceCapabilities.PushableFunctions.get -> System.Collections.Generic.IReadOnlyList<Chalk.Ir.FunctionId>!
+Chalk.Catalog.SourceCapabilities.PushableFunctions.init -> void
+Chalk.Catalog.SourceCapabilities.PushablePredicates.get -> System.Collections.Generic.IReadOnlyList<Chalk.Ir.PredicateShape>!
+Chalk.Catalog.SourceCapabilities.PushablePredicates.init -> void
+Chalk.Catalog.SourceCapabilities.QueryLanguage.get -> Chalk.Ir.QueryLanguage
+Chalk.Catalog.SourceCapabilities.QueryLanguage.init -> void
+Chalk.Catalog.SourceCapabilities.SourceCapabilities() -> void
+Chalk.Catalog.SourceCapabilities.SupportsDistinct.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsDistinct.init -> void
+Chalk.Catalog.SourceCapabilities.SupportsGroupBy.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsGroupBy.init -> void
+Chalk.Catalog.SourceCapabilities.SupportsHaving.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsHaving.init -> void
+Chalk.Catalog.SourceCapabilities.SupportsCase.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsCase.init -> void
+Chalk.Catalog.SourceCapabilities.SupportsInnerJoin.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsInnerJoin.init -> void
+Chalk.Catalog.SourceCapabilities.SupportsLimit.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsLimit.init -> void
+Chalk.Catalog.SourceCapabilities.SupportsMaskPushdown.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsMaskPushdown.init -> void
+Chalk.Catalog.SourceCapabilities.SupportsOffset.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsOffset.init -> void
+Chalk.Catalog.SourceCapabilities.SupportsOuterJoin.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsOuterJoin.init -> void
+Chalk.Catalog.SourceCapabilities.SupportsParameters.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsParameters.init -> void
+Chalk.Catalog.SourceCapabilities.SupportsProject.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsProject.init -> void
+Chalk.Catalog.SourceCapabilities.SupportsRowValueInList.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsRowValueInList.init -> void
+Chalk.Catalog.SourceCapabilities.SupportsSemiAntiJoin.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsSemiAntiJoin.init -> void
+Chalk.Catalog.SourceCapabilities.SupportsSort.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsSort.init -> void
+Chalk.Catalog.SourceCapabilities.SupportsValuesJoin.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsValuesJoin.init -> void
+Chalk.Catalog.SourceCapabilities.UnsupportedFunctions.get -> System.Collections.Generic.IReadOnlyList<Chalk.Ir.FunctionId>!
+Chalk.Catalog.SourceCapabilities.UnsupportedFunctions.init -> void
+Chalk.Catalog.SourcePairRule
+Chalk.Catalog.SourcePairRule.Allowed.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.JoinStrategy>!
+Chalk.Catalog.SourcePairRule.Allowed.init -> void
+Chalk.Catalog.SourcePairRule.BroadcastMaxRows.get -> long
+Chalk.Catalog.SourcePairRule.BroadcastMaxRows.init -> void
+Chalk.Catalog.SourcePairRule.LeftSource.get -> string!
+Chalk.Catalog.SourcePairRule.LeftSource.init -> void
+Chalk.Catalog.SourcePairRule.Preferred.get -> Chalk.Catalog.JoinStrategy
+Chalk.Catalog.SourcePairRule.Preferred.init -> void
+Chalk.Catalog.SourcePairRule.RightSource.get -> string!
+Chalk.Catalog.SourcePairRule.RightSource.init -> void
+Chalk.Catalog.SourcePairRule.SourcePairRule() -> void
+Chalk.Catalog.SqlFunctionBody
+Chalk.Catalog.SqlFunctionBody.SqlFunctionBody() -> void
+Chalk.Catalog.SqlFunctionBody.Text.get -> string!
+Chalk.Catalog.SqlFunctionBody.Text.init -> void
+Chalk.Catalog.TableDescriptor
+Chalk.Catalog.TableDescriptor.Collations.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.CollationDescriptor!>!
+Chalk.Catalog.TableDescriptor.Collations.init -> void
+Chalk.Catalog.TableDescriptor.Columns.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ColumnDescriptor!>!
+Chalk.Catalog.TableDescriptor.Columns.init -> void
+Chalk.Catalog.TableDescriptor.CostProfile.get -> Chalk.Catalog.CostProfile!
+Chalk.Catalog.TableDescriptor.CostProfile.init -> void
+Chalk.Catalog.TableDescriptor.Entitlement.get -> Chalk.Entitlements.TableEntitlementDescriptor?
+Chalk.Catalog.TableDescriptor.Entitlement.init -> void
+Chalk.Catalog.TableDescriptor.ForeignKeys.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ForeignKeyDescriptor!>!
+Chalk.Catalog.TableDescriptor.ForeignKeys.init -> void
+Chalk.Catalog.TableDescriptor.IndexOfColumn(string! name) -> int
+Chalk.Catalog.TableDescriptor.Indexes.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.IndexDescriptor!>!
+Chalk.Catalog.TableDescriptor.Indexes.init -> void
+Chalk.Catalog.TableDescriptor.IsPublic.get -> bool
+Chalk.Catalog.TableDescriptor.IsPublic.init -> void
+Chalk.Catalog.TableDescriptor.Name.get -> string!
+Chalk.Catalog.TableDescriptor.Name.init -> void
+Chalk.Catalog.TableDescriptor.Partitioning.get -> Chalk.Catalog.PartitioningDescriptor?
+Chalk.Catalog.TableDescriptor.Partitioning.init -> void
+Chalk.Catalog.TableDescriptor.RowCount.get -> long
+Chalk.Catalog.TableDescriptor.RowCount.init -> void
+Chalk.Catalog.TableDescriptor.RowCountKind.get -> Chalk.Ir.RowCountKind
+Chalk.Catalog.TableDescriptor.RowCountKind.init -> void
+Chalk.Catalog.TableDescriptor.TableDescriptor() -> void
+Chalk.Catalog.TableDescriptor.UniqueKeys.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.UniqueKeyDescriptor!>!
+Chalk.Catalog.TableDescriptor.UniqueKeys.init -> void
+Chalk.Catalog.UniqueKeyDescriptor
+Chalk.Catalog.UniqueKeyDescriptor.Columns.get -> System.Collections.Generic.IReadOnlyList<int>!
+Chalk.Catalog.UniqueKeyDescriptor.Columns.init -> void
+Chalk.Catalog.UniqueKeyDescriptor.UniqueKeyDescriptor() -> void
+Chalk.Entitlements.CatalogOptions
+Chalk.Entitlements.CatalogOptions.CatalogOptions() -> void
+Chalk.Entitlements.CatalogOptions.PlaceholderPolicy.get -> Chalk.Entitlements.PlaceholderPolicy
+Chalk.Entitlements.CatalogOptions.PlaceholderPolicy.init -> void
+Chalk.Entitlements.CatalogOptions.RequireEntitlements.get -> bool
+Chalk.Entitlements.CatalogOptions.RequireEntitlements.init -> void
+Chalk.Entitlements.ColumnEntitlementDescriptor
+Chalk.Entitlements.ColumnEntitlementDescriptor.AggregateOnlyFunctions.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Entitlements.ColumnEntitlementDescriptor.AggregateOnlyFunctions.init -> void
+Chalk.Entitlements.ColumnEntitlementDescriptor.Column.get -> int
+Chalk.Entitlements.ColumnEntitlementDescriptor.Column.init -> void
+Chalk.Entitlements.ColumnEntitlementDescriptor.ColumnEntitlementDescriptor() -> void
+Chalk.Entitlements.ColumnEntitlementDescriptor.Mask.get -> string!
+Chalk.Entitlements.ColumnEntitlementDescriptor.Mask.init -> void
+Chalk.Entitlements.ColumnEntitlementDescriptor.MinGroupSize.get -> int
+Chalk.Entitlements.ColumnEntitlementDescriptor.MinGroupSize.init -> void
+Chalk.Entitlements.ColumnEntitlementDescriptor.Otherwise.get -> Chalk.Entitlements.Disclosure
+Chalk.Entitlements.ColumnEntitlementDescriptor.Otherwise.init -> void
+Chalk.Entitlements.ColumnEntitlementDescriptor.Placeholder.get -> string!
+Chalk.Entitlements.ColumnEntitlementDescriptor.Placeholder.init -> void
+Chalk.Entitlements.ColumnEntitlementDescriptor.Rules.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.DisclosureRule!>!
+Chalk.Entitlements.ColumnEntitlementDescriptor.Rules.init -> void
+Chalk.Entitlements.ColumnEntitlementDescriptor.Statistical.get -> bool
+Chalk.Entitlements.ColumnEntitlementDescriptor.Statistical.init -> void
+Chalk.Entitlements.Disclosure
+Chalk.Entitlements.Disclosure.AggregateOnly = 3 -> Chalk.Entitlements.Disclosure
+Chalk.Entitlements.Disclosure.Full = 1 -> Chalk.Entitlements.Disclosure
+Chalk.Entitlements.Disclosure.Masked = 2 -> Chalk.Entitlements.Disclosure
+Chalk.Entitlements.Disclosure.None = 4 -> Chalk.Entitlements.Disclosure
+Chalk.Entitlements.Disclosure.Test = 5 -> Chalk.Entitlements.Disclosure
+Chalk.Entitlements.Disclosure.Unspecified = 0 -> Chalk.Entitlements.Disclosure
+Chalk.Entitlements.DisclosureRule
+Chalk.Entitlements.DisclosureRule.DisclosureRule() -> void
+Chalk.Entitlements.DisclosureRule.Mask.get -> string!
+Chalk.Entitlements.DisclosureRule.Mask.init -> void
+Chalk.Entitlements.DisclosureRule.Placeholder.get -> string!
+Chalk.Entitlements.DisclosureRule.Placeholder.init -> void
+Chalk.Entitlements.DisclosureRule.Tests.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.TestShape>!
+Chalk.Entitlements.DisclosureRule.Tests.init -> void
+Chalk.Entitlements.DisclosureRule.Then.get -> Chalk.Entitlements.Disclosure
+Chalk.Entitlements.DisclosureRule.Then.init -> void
+Chalk.Entitlements.DisclosureRule.When.get -> string!
+Chalk.Entitlements.DisclosureRule.When.init -> void
+Chalk.Entitlements.Enforcement
+Chalk.Entitlements.Enforcement.Local = 2 -> Chalk.Entitlements.Enforcement
+Chalk.Entitlements.Enforcement.Pushdown = 1 -> Chalk.Entitlements.Enforcement
+Chalk.Entitlements.Enforcement.PushdownRequired = 3 -> Chalk.Entitlements.Enforcement
+Chalk.Entitlements.Enforcement.Unspecified = 0 -> Chalk.Entitlements.Enforcement
+Chalk.Entitlements.InheritedVisibilityDescriptor
+Chalk.Entitlements.InheritedVisibilityDescriptor.EndpointPredicate.get -> string!
+Chalk.Entitlements.InheritedVisibilityDescriptor.EndpointPredicate.init -> void
+Chalk.Entitlements.InheritedVisibilityDescriptor.EndpointSchema.get -> string!
+Chalk.Entitlements.InheritedVisibilityDescriptor.EndpointSchema.init -> void
+Chalk.Entitlements.InheritedVisibilityDescriptor.EndpointTable.get -> string!
+Chalk.Entitlements.InheritedVisibilityDescriptor.EndpointTable.init -> void
+Chalk.Entitlements.InheritedVisibilityDescriptor.InheritedVisibilityDescriptor() -> void
+Chalk.Entitlements.InheritedVisibilityDescriptor.Kind.get -> string!
+Chalk.Entitlements.InheritedVisibilityDescriptor.Kind.init -> void
+Chalk.Entitlements.InheritedVisibilityDescriptor.Steps.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.VisibilityStepDescriptor!>!
+Chalk.Entitlements.InheritedVisibilityDescriptor.Steps.init -> void
+Chalk.Entitlements.ParentVisibilityDescriptor
+Chalk.Entitlements.ParentVisibilityDescriptor.Column.get -> int
+Chalk.Entitlements.ParentVisibilityDescriptor.Column.init -> void
+Chalk.Entitlements.ParentVisibilityDescriptor.ParentColumn.get -> int
+Chalk.Entitlements.ParentVisibilityDescriptor.ParentColumn.init -> void
+Chalk.Entitlements.ParentVisibilityDescriptor.ParentSchema.get -> string!
+Chalk.Entitlements.ParentVisibilityDescriptor.ParentSchema.init -> void
+Chalk.Entitlements.ParentVisibilityDescriptor.ParentTable.get -> string!
+Chalk.Entitlements.ParentVisibilityDescriptor.ParentTable.init -> void
+Chalk.Entitlements.ParentVisibilityDescriptor.ParentVisibilityDescriptor() -> void
+Chalk.Entitlements.PlaceholderPolicy
+Chalk.Entitlements.PlaceholderPolicy.PlaceholdersAsEmpty = 2 -> Chalk.Entitlements.PlaceholderPolicy
+Chalk.Entitlements.PlaceholderPolicy.PlaceholdersAsNull = 1 -> Chalk.Entitlements.PlaceholderPolicy
+Chalk.Entitlements.PlaceholderPolicy.Unspecified = 0 -> Chalk.Entitlements.PlaceholderPolicy
+Chalk.Entitlements.PopulationAggregates
+Chalk.Entitlements.StepDirection
+Chalk.Entitlements.StepDirection.ToChild = 2 -> Chalk.Entitlements.StepDirection
+Chalk.Entitlements.StepDirection.ToParent = 1 -> Chalk.Entitlements.StepDirection
+Chalk.Entitlements.StepDirection.Unspecified = 0 -> Chalk.Entitlements.StepDirection
+Chalk.Entitlements.TableEntitlementDescriptor
+Chalk.Entitlements.TableEntitlementDescriptor.Columns.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.ColumnEntitlementDescriptor!>!
+Chalk.Entitlements.TableEntitlementDescriptor.Columns.init -> void
+Chalk.Entitlements.TableEntitlementDescriptor.DefaultDisclosure.get -> Chalk.Entitlements.Disclosure
+Chalk.Entitlements.TableEntitlementDescriptor.DefaultDisclosure.init -> void
+Chalk.Entitlements.TableEntitlementDescriptor.DescriptorHash.get -> string!
+Chalk.Entitlements.TableEntitlementDescriptor.Enforcement.get -> Chalk.Entitlements.Enforcement
+Chalk.Entitlements.TableEntitlementDescriptor.Enforcement.init -> void
+Chalk.Entitlements.TableEntitlementDescriptor.FindColumn(int column) -> Chalk.Entitlements.ColumnEntitlementDescriptor?
+Chalk.Entitlements.TableEntitlementDescriptor.Inherited.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.InheritedVisibilityDescriptor!>!
+Chalk.Entitlements.TableEntitlementDescriptor.Inherited.init -> void
+Chalk.Entitlements.TableEntitlementDescriptor.PushMasks.get -> bool
+Chalk.Entitlements.TableEntitlementDescriptor.PushMasks.init -> void
+Chalk.Entitlements.TableEntitlementDescriptor.RowPredicate.get -> string!
+Chalk.Entitlements.TableEntitlementDescriptor.RowPredicate.init -> void
+Chalk.Entitlements.TableEntitlementDescriptor.TableEntitlementDescriptor() -> void
+Chalk.Entitlements.TableEntitlementDescriptor.Through.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.ParentVisibilityDescriptor!>!
+Chalk.Entitlements.TableEntitlementDescriptor.Through.init -> void
+Chalk.Entitlements.TestShape
+Chalk.Entitlements.TestShape.Equals = 1 -> Chalk.Entitlements.TestShape
+Chalk.Entitlements.TestShape.In = 3 -> Chalk.Entitlements.TestShape
+Chalk.Entitlements.TestShape.NotEquals = 2 -> Chalk.Entitlements.TestShape
+Chalk.Entitlements.TestShape.Unspecified = 0 -> Chalk.Entitlements.TestShape
+Chalk.Entitlements.VisibilityStepDescriptor
+Chalk.Entitlements.VisibilityStepDescriptor.Direction.get -> Chalk.Entitlements.StepDirection
+Chalk.Entitlements.VisibilityStepDescriptor.Direction.init -> void
+Chalk.Entitlements.VisibilityStepDescriptor.FromColumn.get -> int
+Chalk.Entitlements.VisibilityStepDescriptor.FromColumn.init -> void
+Chalk.Entitlements.VisibilityStepDescriptor.Schema.get -> string!
+Chalk.Entitlements.VisibilityStepDescriptor.Schema.init -> void
+Chalk.Entitlements.VisibilityStepDescriptor.Table.get -> string!
+Chalk.Entitlements.VisibilityStepDescriptor.Table.init -> void
+Chalk.Entitlements.VisibilityStepDescriptor.ToColumn.get -> int
+Chalk.Entitlements.VisibilityStepDescriptor.ToColumn.init -> void
+Chalk.Entitlements.VisibilityStepDescriptor.VisibilityStepDescriptor() -> void
+override Chalk.Catalog.AssociationDescriptor.ToString() -> string!
+override Chalk.Catalog.ChalkType.GetHashCode() -> int
+override Chalk.Catalog.ChalkType.ToString() -> string!
+override Chalk.Catalog.KeyOrder.GetHashCode() -> int
+static Chalk.Catalog.AssociationDescriptor.Same(Chalk.Catalog.AssociationDescriptor! left, Chalk.Catalog.AssociationDescriptor! right) -> bool
+static Chalk.Catalog.CatalogSerialization.FromProto(Chalk.Ir.CatalogContext! message) -> Chalk.Catalog.CatalogContext!
+static Chalk.Catalog.CatalogSerialization.ToProto(Chalk.Catalog.CatalogContext! catalog) -> Chalk.Ir.CatalogContext!
+static Chalk.Catalog.CatalogSerialization.ToProto(Chalk.Catalog.ColumnStatistics! statistics, Chalk.Catalog.ChalkType type) -> Chalk.Ir.ColumnStatistics?
+static Chalk.Catalog.CatalogSerialization.ToProto(Chalk.Catalog.CrossSourceJoinPolicy! policy) -> Chalk.Ir.CrossSourceJoinPolicy!
+static Chalk.Catalog.CatalogValidator.Validate(Chalk.Catalog.CatalogContext! catalog) -> void
+static Chalk.Catalog.CatalogValidator.Validate(Chalk.Catalog.CatalogContext! catalog, Chalk.Entitlements.CatalogOptions! options) -> void
+static Chalk.Catalog.ChalkType.Binary(bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.Bool(bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.Date(bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.Decimal(int precision = 28, int scale = 10, bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.Float32(bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.Float64(bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.FromProto(Chalk.Ir.Type! type) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.Int16(bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.Int32(bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.Int64(bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.Int8(bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.IntervalDay(bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.IntervalYear(bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.List(Chalk.Catalog.ChalkType element, bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.String(bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.Time(int precision = 6, bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.Timestamp(int precision = 9, bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.TimestampTz(int precision = 9, bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.Uuid(bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.operator !=(Chalk.Catalog.ChalkType left, Chalk.Catalog.ChalkType right) -> bool
+static Chalk.Catalog.ChalkType.operator ==(Chalk.Catalog.ChalkType left, Chalk.Catalog.ChalkType right) -> bool
+static Chalk.Catalog.ColumnStatistics.Unknown.get -> Chalk.Catalog.ColumnStatistics!
+static Chalk.Catalog.ContextValues.InferType(object! value) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ContextValues.ToLiteral(object? value, Chalk.Catalog.ChalkType type, string! what) -> Chalk.Ir.Expr!
+static Chalk.Catalog.ContextValues.ToLiteral(object? value, string! what) -> Chalk.Ir.Expr!
+static Chalk.Catalog.CostProfile.Inherit.get -> Chalk.Catalog.CostProfile!
+static Chalk.Catalog.CrossSourceJoinPolicy.Default.get -> Chalk.Catalog.CrossSourceJoinPolicy!
+static Chalk.Catalog.DialectProfileDescriptor.None.get -> Chalk.Catalog.DialectProfileDescriptor!
+static Chalk.Catalog.DialectProfiles.Ansi.get -> Chalk.Catalog.DialectProfileDescriptor!
+static Chalk.Catalog.DialectProfiles.ByName(string? name) -> Chalk.Catalog.DialectProfileDescriptor!
+static Chalk.Catalog.DialectProfiles.DuckDb.get -> Chalk.Catalog.DialectProfileDescriptor!
+static Chalk.Catalog.DialectProfiles.PostgreSql.get -> Chalk.Catalog.DialectProfileDescriptor!
+static Chalk.Catalog.DialectProfiles.Sqlite.get -> Chalk.Catalog.DialectProfileDescriptor!
+static Chalk.Catalog.DialectProfiles.With(this Chalk.Catalog.DialectProfileDescriptor! profile, Chalk.Ir.StringCollation? stringCollation = null, bool? supportsNullOrderingClause = null, Chalk.Ir.NullCollation? defaultNullCollation = null, Chalk.Ir.SqlConformance? conformance = null, System.Collections.Generic.IReadOnlyList<Chalk.Ir.SqlLibrary>? libraries = null, uint? maxNumericPrecision = null, uint? maxTimestampPrecision = null, bool? hasBoolean = null, string? timeZone = null, bool? approximateDecimal = null, bool? approximateDistinctCount = null, bool? approximateTopN = null, bool? implicitCoercionMatches = null, Chalk.Ir.ParameterPlaceholder? parameterPlaceholder = null) -> Chalk.Catalog.DialectProfileDescriptor!
+static Chalk.Catalog.KeyOrder.operator !=(Chalk.Catalog.KeyOrder left, Chalk.Catalog.KeyOrder right) -> bool
+static Chalk.Catalog.KeyOrder.operator ==(Chalk.Catalog.KeyOrder left, Chalk.Catalog.KeyOrder right) -> bool
+static Chalk.Catalog.SourceCapabilities.None.get -> Chalk.Catalog.SourceCapabilities!
+static Chalk.Entitlements.CatalogOptions.Default.get -> Chalk.Entitlements.CatalogOptions!
+static Chalk.Entitlements.PopulationAggregates.IsPermitted(string! function) -> bool
+static Chalk.Entitlements.PopulationAggregates.Listing.get -> string!
+~override Chalk.Catalog.ChalkType.Equals(object obj) -> bool
+~override Chalk.Catalog.KeyOrder.Equals(object obj) -> bool
+~override Chalk.Catalog.KeyOrder.ToString() -> string

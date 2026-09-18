@@ -1,0 +1,30 @@
+Chalk source conformance: kit
+server: SQLite through Microsoft.Data.Sqlite, in-process
+PASSED — 26 checks, 0 failed, 1 skipped
+
+SKIP text strategy: VARCHAR: declared (undeclared), observed String. Declare .Provider(new AdoProviderTraits { Text = TextStrategy.String }) on this source's builder to skip the measurement.
+PASS PredicateShape.Eq: declared pushable with Chalk's semantics, observed the same 1 rows the scan gives
+PASS PredicateShape.Range: declared pushable with Chalk's semantics, observed the same 8 rows the scan gives
+PASS PredicateShape.In: declared pushable with Chalk's semantics, observed the same 4 rows the scan gives
+PASS PredicateShape.IsNull: declared pushable with Chalk's semantics, observed the same 1 rows the scan gives
+PASS PredicateShape.Not: declared pushable with Chalk's semantics, observed the same 14 rows the scan gives
+PASS PredicateShape.And: declared pushable with Chalk's semantics, observed the same 7 rows the scan gives
+PASS PredicateShape.Or: declared pushable with Chalk's semantics, observed the same 2 rows the scan gives
+PASS SupportsProject: declared the source projects columns, observed 16 rows of 2 columns, as the scan has
+PASS SupportsCase: declared pushable with Chalk's semantics, observed the same 8 rows the scan gives
+PASS SupportsLimit: declared the source honours LIMIT, observed 3 rows for LIMIT 3
+PASS SupportsGroupBy: declared the source groups as Chalk does, observed 4 groups, as the scan has
+PASS string collation: declared Binary, observed 'alpha' matched only itself, which is code-point comparison
+PASS string ordering (accents): declared Binary, observed code-point order
+PASS LIKE case sensitivity: declared no LIKE shape is pushable, observed LIKE 'alpha' matched 3 rows
+PASS default NULL placement: declared Low, observed NULLs first ascending
+PASS BETWEEN inclusivity: declared inclusive at both ends, as SQL says, observed 5 rows for BETWEEN 1 AND 7, both ends included
+PASS empty string versus NULL: declared distinct, as SQL says, observed '' matched the one empty-string row and neither NULL
+PASS integer division of a negative: declared truncates towards zero (-7 / 3 = -2) in an integer type, as Chalk does, observed -7 / 3 = -2, in the integer type the column declares
+PASS modulus of a negative: declared the sign of the dividend, as Chalk does, observed -7 mod 3 = -1
+PASS decimal precision: declared 15, observed 1234567890.123456 came back as 1234567890.123460. The profile already says this source's decimals are approximate, and the planner refuses to push a comparison it would truncate.
+PASS timestamp precision: declared 3, observed 100 ns survived the round trip
+PASS LIKE escape handling: declared no LIKE shape declared, observed '100!%' ESCAPE '!' matched only the literal '100%'
+PASS string cast truncation: declared an unbounded string cast keeps the value, as Chalk's does, observed all 82 characters survived CAST(... AS VARCHAR)
+PASS parameter round trip: declared the source takes parameters, observed a decimal at scale 6 did not match the row it came from (declared precision 15). The profile already says this source's values are coarser than Chalk's, and the planner refuses to push a comparison it would truncate.
+PASS unique key (id): declared unique, observed 16 distinct non-NULL keys over 16 rows

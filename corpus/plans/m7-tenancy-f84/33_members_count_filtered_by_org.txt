@@ -1,0 +1,59 @@
+-- u1
+report org_id:Full, n:Redacted, members:Some
+1|0
+2|0
+
+-- u2
+report org_id:Full, n:Redacted, members:Some
+1|0
+
+-- u3
+report org_id:Full, n:Redacted, members:Some
+2|0
+
+-- u3-in-o1
+report org_id:Full, n:Redacted, members:Some
+
+-- u4
+report org_id:Full, n:Redacted, members:All
+1|0
+2|0
+3|0
+
+-- u5
+report org_id:Full, n:Redacted, members:None
+
+-- u6
+report org_id:Full, n:Redacted, members:Some
+1|0
+
+-- u6-two-orgs
+report org_id:Full, n:Redacted, members:Some
+1|0
+2|0
+
+-- u7
+report org_id:Full, n:Redacted, members:None
+
+-- u8
+report org_id:Full, n:Tested, members:Some
+1|0
+
+-- u9
+report org_id:Full, n:Aggregate, members:Some
+1|<null>
+2|1
+
+-- u10-in-a-region
+report org_id:Full, n:Redacted, members:None
+
+-- u11-subject-in-a-region
+report org_id:Full, n:Redacted, members:None
+
+-- u14-a-vendor
+report org_id:Full, n:Redacted, members:None
+
+-- u15-a-vendor-and-an-org
+report org_id:Full, n:Redacted, members:Some
+1|0
+
