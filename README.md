@@ -2,30 +2,47 @@
 
 [![NuGet](https://img.shields.io/nuget/v/ChalkQL.svg)](https://www.nuget.org/packages/ChalkQL) [![ci](https://github.com/markhammond/chalkql/actions/workflows/ci.yml/badge.svg)](https://github.com/markhammond/chalkql/actions/workflows/ci.yml)
 
-ChalkQL applies zero-trust principles to SQL, rewriting queries to enforce need-to-know access and tenant isolation across federated data sources. *Federated SQL query planning and optimisation for .NET, powered by <a href="https://calcite.apache.org">Apache Calcite</a>.*
+ChalkQL applies zero-trust principles to SQL, rewriting queries to enforce need-to-know access and tenant isolation across federated data sources. *Federated SQL query planning and optimisation for .NET, powered by [Apache Calcite](https://calcite.apache.org).*
 
-Targets .NET 10. JDK 21+ needed for Apache Calcite planner.
+Targets .NET 10. JDK 21+ required for the Apache Calcite planner.
 
 ## Democratise access to your data with confidence.
 
 The objective is simple: just write the SQL you mean and let ChalkQL enforce fine-grained authorisation. Applications and agents increasingly need to query data they do not completely own, across sources with different capabilities and trust boundaries. Access control is too often entangled with individual queries, views, ORMs, or application code — conflating query intent with what a principal is permitted to know.
 
-### Live streaming pivots _using_ idiomatic SQL.
+### Who is this for, anyway?
 
-The <a href="docs/tutorial.md">tutorial</a> builds from ordinary C# objects and federated queries through to a live inventory view combining streaming state, temporal joins and tenancy-aware access control.
+ChalkQL is most useful where ***who may know what*** matters, or where the data needed to answer a question does not live neatly in one place.
 
-### Where separation of concerns matters.
+Database row-level security is often exactly the right answer when access can be expressed cleanly within one database and its schema. ChalkQL addresses the less tidy cases: authorisation follows relationships the original schema was not designed around, different principals reach the same data through different scopes, disclosure rules extend beyond rows, or the _correct_ answer spans several sources of truth.
 
-Applications submit ordinary SQL expressing the data they need. Independent policies govern what the requesting principal is permitted to access or derive. ChalkQL binds the principal and rewrites the relational plan to enforce those policies prior to execution. The rewritten plan is then optimised across heterogeneous data sources.
+It is intended for applications that need to:
 
-### Domain-specific entitlements.
+* expose SQL or analytical capability across trust boundaries without granting unrestricted access to the underlying data;
+* compartmentalise data by tenant, role, relationship or resource scope, including transitive and multi-dimensional relationships;
+* query across fragmented sources of truth — databases, application-owned state, embedded data and services — without first consolidating everything into one database;
+* keep application-defined authorisation independent of individual queries and of the physical source in which data happens to reside;
+* evolve access rules as the domain changes, rather than requiring the original storage model to have anticipated every future boundary.
 
-Entitlements are application-defined and may incorporate application state, relationships, roles, resource scopes, or other domain-specific policy, and can govern:
+If one trusted application talks to one database and that database's native access controls already express everything required, ChalkQL's **entitlement layer** may add little. The less tidy middle ground is where it becomes challenging: the architecture has evolved, the data is already distributed, boundaries matter, and replacing every source with the theoretically perfect model is neither necessary nor practical.
 
-* **Rows and columns** — restrict which records and values a principal may access.
-* **Tenant isolation** — constrain access to the appropriate tenant or resource scope, including transitive relationships.
-* **Aggregate disclosure** — permit approved statistical aggregates over protected values without granting direct access to those values.
-* **Multi-dimensional resource scopes** — resolve access through different relationships to the same resource; for example, a franchise owner may access their stores while an auditor accesses stores within their region.
+There’s more to it, of course. But if battling these constraints sounds familiar, ChalkQL may be for you.
+
+### _Live streaming queries the ~~hard~~ easy way._
+
+The [tutorial](docs/tutorial.md) develops this step by step, culminating in a live inventory view combining streaming state, temporal joins and tenancy-aware access control — using idiomatic SQL throughout.
+
+### Access control you can reason about.
+
+ChalkQL separates application-defined entitlements from individual queries and physical sources. That makes the access model explicit: entitlements can be inspected and reasoned about without reconstructing them from views, predicates, ORMs or application code.
+
+Entitlements may draw on application state, relationships, roles, resource scopes, or other domain-specific context to govern what a principal may access or derive:
+
+* **Row and column access** — restrict which rows and columns a principal may access.
+* **Value disclosure** — allow direct access, masked values, or testing the presence of a value without revealing it.
+* **Tenancy** — constrain access to the appropriate tenant or resource scope, including transitive relationships.
+* **Aggregate disclosure** — allow approved statistical aggregates over restricted values without direct access.
+* **Multiple resource scopes** — resolve access through different relationships to the same resource; for example, a franchise owner may access their stores while an auditor accesses stores within their region.
 
 ### Federation for (almost) everyone.
 
@@ -44,52 +61,7 @@ ChalkQL introduces no persistence layer: data is queried on demand, wherever it 
 
 ### Security, meet first principles.
 
-Treating SQL as a _mathematically closed language_ is foundational to ChalkQL’s security architecture. ChalkQL embeds access-control policies into query execution. Structural enforcement at the query-plan level prevents access controls from being bypassed through joins, subqueries, CTEs, and aggregation.
-
-## Beyond access control
-
-A handful of open-source projects overlap with parts of ChalkQL’s capability set, though the comparison is not exhaustive: BetweenRows focuses on policy-enforced SQL proxying, SQE combines DataFusion query execution with fine-grained access control, and AccessFlow provides broader data access governance and proxying.
-
-| Capability                                             |         **ChalkQL**          |       BetweenRows        |        SQE           |     AccessFlow    |
-|--------------------------------------------------------|:----------------------------:|:------------------------:|:--------------------:|:-----------------:|
-| `SELECT` queries                                       |              ✅¹             |            ✅             |         ✅         |       ✅          |
-| **Row- and column-level access control**               |              ✅              |            ✅             |         ✅         |         ✅        |
-| **Tenant isolation**                                   |              ✅              |            ✅             |    ◐<br>policy     |         ✅         |
-| **Multi-dimensional entitlements**                     |    **✅<br>first-class**     |    ◐<br>policy / ABAC     |    ◐<br>policy     | ◐<br>policy / ABAC |
-| **Reachability-based entitlements**                    |            **✅**            | ✅<br>explicit FK anchors |         —          |         —          |
-| **Aggregate disclosure controls**                      |            **✅**            |            —             |         —           |          —          |
-| Logical-plan policy rewriting                          |              ✅              |            ✅            |         ✅          |         ◐          |
-| Policy enforcement before optimisation                 |              ✅              |            ✅            |         ✅          |         —          |
-| JOIN / CTE / subquery bypass resistance                |              ✅              |            ✅            |         ✅          |         ◐          |
-| **Federated query execution**                          |            **✅**            |            —             |         ◐          |         —          |
-| **Federated query planning**                           |            **✅**            |            —             |         —          |         —          |
-| **Federated query optimisation**                       |            **✅**            |            —             |         —          |         —          |
-| **Cross-source joins**                                 |           **✅²**            |            —             |         ◐⁴         |         —          |
-| **Virtual tables**                                     |            **✅**            |            —             |         —          |         —          |
-| **Indexed in-memory virtual tables**                   |            **✅**            |            —             |         —          |         —          |
-| **Partial binding and incremental query optimisation** |            **✅**            |            —             |         —          |         —          |
-| **Resource usage limits**                              |           **✅³**            |            ◐             |         ✅          |         ◐         |
-| SQL-defined UDFs                                       |            **✅**            |            —             |         —          |         —          |
-| Native / application UDFs                              |            **✅**            |            —             |         —          |         —          |
-| **Local-only / non-pushdown UDFs**                     |            **✅**            |            —             |         —          |         —          |
-| Embeddable as a library                                |            **✅**            |            —             |         ◐          |         —          |
-| Primary deployment                                     |        **Embedded**          |     Service / proxy      | Embedded / service |  Service / proxy   |
-| Primary runtime                                        |  **.NET + JVM / Calcite**    |    Rust / DataFusion     | Rust / DataFusion  |   Java / Spring    |
-| Managed / hosted service                               |             🚫               |            —             |         —          |         —          |
-| Admin portal                                           |              —               |            ✅            |   ◐<br>Dashboard   |         ✅         |
-| Source-data persistence                                |             🚫               |            —             |    ✅<br>Iceberg   |         —          |
-
-**Legend:** ✅ supported · ◐ achievable through a more general mechanism or only partially comparable · — not demonstrated/documented · 🚫 deliberately not provided by ChalkQL.
-
-**1.** Read-only `SELECT`. No DML (planned), DDL or transactions.
-
-**2.** Cross-source joins depend on data-source capabilities. Complex correlated `LATERAL` joins may currently be refused by the query planner as a precautionary measure due to an Apache Calcite planning limitation.
-
-**3.** An optional working-set limit bounds memory available to query execution.
-
-**4.** SQE supports cross-catalog querying; this is not necessarily equivalent to heterogeneous federated planning across arbitrary source types.
-
-The comparison reflects publicly documented capabilities and is intended to distinguish architectural models rather than imply that an undocumented capability cannot be implemented by another project.
+Treating SQL as a _mathematically closed language_ is foundational to ChalkQL’s security architecture. ChalkQL rewrites the relational plan to embed access-control policies before optimisation and execution. Structural enforcement at the query-plan level prevents access controls from being bypassed through joins, subqueries, CTEs, and aggregation.
 
 ## Choose your own topology
 
@@ -139,6 +111,78 @@ Apache Calcite has helped catalyse a Cambrian explosion in query-engine developm
 
 By delegating parsing, validation, decorrelation, and optimisation to Calcite, ChalkQL provides sophisticated query planning alongside embedded vectorised execution — without imposing an opinionated deployment model on the host application.
 
+
+## Beyond access control
+
+A handful of open-source projects overlap with parts of ChalkQL’s capability set, though the comparison is not exhaustive: BetweenRows focuses on policy-enforced SQL proxying, SQE combines DataFusion query execution with fine-grained access control, and AccessFlow provides broader data access governance and proxying.
+
+| Capability                                             |         **ChalkQL**          |       BetweenRows        |        SQE           |     AccessFlow    |
+|--------------------------------------------------------|:----------------------------:|:------------------------:|:--------------------:|:-----------------:|
+| `SELECT` queries                                       |              ✅¹             |            ✅             |         ✅         |       ✅          |
+| **Row- and column-level access control**               |              ✅              |            ✅             |         ✅         |         ✅        |
+| **Tenant isolation**                                   |              ✅              |            ✅             |    ◐<br>policy     |         ✅         |
+| **Multi-dimensional entitlements**                     |    **✅<br>first-class**     |    ◐<br>policy / ABAC     |    ◐<br>policy     | ◐<br>policy / ABAC |
+| **Reachability-based entitlements**                    |            **✅**            | ✅<br>explicit FK anchors |         —          |         —          |
+| **Aggregate disclosure controls**                      |            **✅**            |            —             |         —           |          —          |
+| Logical-plan policy rewriting                          |              ✅              |            ✅            |         ✅          |         ◐          |
+| Policy enforcement before optimisation                 |              ✅              |            ✅            |         ✅          |         —          |
+| JOIN / CTE / subquery bypass resistance                |              ✅              |            ✅            |         ✅          |         ◐          |
+| **Federated query execution**                          |            **✅**            |            —             |         ◐          |         —          |
+| **Federated query planning**                           |            **✅**            |            —             |         —          |         —          |
+| **Federated query optimisation**                       |            **✅**            |            —             |         —          |         —          |
+| **Cross-source joins**                                 |           **✅²**            |            —             |         ◐⁴         |         —          |
+| **Virtual tables**                                     |            **✅**            |            —             |         —          |         —          |
+| **Indexed in-memory virtual tables**                   |            **✅**            |            —             |         —          |         —          |
+| **Partial binding and incremental query optimisation** |            **✅**            |            —             |         —          |         —          |
+| **Resource usage limits**                              |           **✅³**            |            ◐             |         ✅          |         ◐         |
+| SQL-defined UDFs                                       |            **✅**            |            —             |         —          |         —          |
+| Native / application UDFs                              |            **✅**            |            —             |         —          |         —          |
+| **Local-only / non-pushdown UDFs**                     |            **✅**            |            —             |         —          |         —          |
+| Embeddable as a library                                |            **✅**            |            —             |         ◐          |         —          |
+| Primary deployment                                     |        **Embedded**          |     Service / proxy      | Embedded / service |  Service / proxy   |
+| Primary runtime                                        |  **.NET + JVM / Calcite**    |    Rust / DataFusion     | Rust / DataFusion  |   Java / Spring    |
+| Managed / hosted service                               |             🚫               |            —             |         —          |         —          |
+| Admin portal                                           |              —               |            ✅            |   ◐<br>Dashboard   |         ✅         |
+| Source-data persistence                                |             🚫               |            —             |    ✅<br>Iceberg   |         —          |
+
+**Legend:** ✅ supported · ◐ achievable through a more general mechanism or only partially comparable · — not demonstrated/documented · 🚫 deliberately not provided by ChalkQL.
+
+**1.** Read-only `SELECT`. No DML (planned), DDL or transactions.
+
+**2.** Cross-source joins depend on data-source capabilities. Complex correlated `LATERAL` joins may currently be refused by the query planner as a precautionary measure due to an Apache Calcite planning limitation.
+
+**3.** An optional working-set limit bounds memory available to query execution.
+
+**4.** SQE supports cross-catalog querying; this is not necessarily equivalent to heterogeneous federated planning across arbitrary source types.
+
+The comparison reflects publicly documented capabilities and is intended to distinguish architectural models rather than imply that an undocumented capability cannot be implemented by another project.
+
+## Indicative numbers
+
+ChalkQL’s vectorised executor is currently single-threaded and designed to keep managed allocation out of the hot path.
+
+The figures below are indicative measurements from toy queries over 10M rows. For each query, elapsed time is normalised to ChalkQL at 100% (lower is faster); DuckDB is included as a familiar native baseline.
+
+| Query                   | Runtime   | Engine  | Elapsed |   Gen0 |  Gen1 |  Gen2 |  Allocated |
+| ----------------------- |-----------|---------|--------:| -----: | ----: | ----: |-----------:|
+| scan + filter + project | .NET 10.0 | ChalkQL |    100% |  166.7 |     — |     — |    1.60 MB |
+|                         | .NET 10.0 | DuckDB  |     65% |  600.0 | 100.0 | 100.0 |    4.56 MB |
+| group by                | .NET 10.0 | ChalkQL |    100% |      — |     — |     — |    2.43 KB |
+|                         | .NET 10.0 | DuckDB  |      7% |      — |     — |     — |   11.46 KB |
+| sort                    | .NET 10.0 | ChalkQL |    100% |      — |     — |     — |    1.60 MB |
+|                         | .NET 10.0 | DuckDB  |     92% | 1000.0 |     — |     — |    8.00 MB |
+| window                  | .NET 10.0 | ChalkQL |    100% |      — |     — |     — |    1.60 MB |
+|                         | .NET 10.0 | DuckDB  |     31% | 1000.0 |     — |     — |    8.00 MB |
+| hopping window          | .NET 10.0 | ChalkQL |    100% |      — |     — |     — |    6.03 MB |
+|                         | .NET 10.0 | DuckDB  |     90% | 3000.0 |     — |     — |   29.86 MB |
+
+GC counts are BenchmarkDotNet collections per 1,000 benchmark operations. They are included because total allocated bytes do not show whether allocation pressure remains short-lived or reaches older generations.
+
+These are not intended as a database shoot-out. There's substantial headroom remaining, particularly in aggregation and window execution. The current implementation should be read as an early performance snapshot rather than a throughput ceiling.
+
+### Predictable execution.
+
+ChalkQL deliberately prioritises predictable memory use and low managed allocation alongside execution throughput. Scratch and intermediate memory are served from reusable arenas; an engine owns a bounded `ArenaPool` by default, with excess concurrent executions receiving transient arenas which are released when they finish. Hosts may also supply separate arena pools to partition retained memory between workloads.
 ## Approaches worth overthinking
 
 Several open-source projects approach data access, authorisation, and querying in ways worth contemplating:
@@ -161,35 +205,12 @@ There’s a lot to consider.
 [**calcite-dotnet**](https://github.com/ikvmnet/calcite-dotnet) builds upon the remarkable [**IKVM**](https://github.com/ikvmnet/ikvm) to provide in-process interoperability between Apache Calcite and the .NET runtime.
 The tenacity required to see such an ambitious integration through is itself a source of motivation, and its evolution may offer ChalkQL a future path towards deeper in-process integration.
 
-## Indicative numbers
-
-ChalkQL’s vectorised executor takes care to keep managed allocation out of the hot path. Scratch and intermediate memory are served from reusable arenas; an engine owns a bounded arena pool by default, and hosts may provide separate pools to partition workloads.
-
-The figures below are indicative toy-query measurements over 10M rows. Runtime is shown relative to ChalkQL rather than as absolute wall-clock time; DuckDB is included as a familiar native baseline.
-
-| Query                   | Engine  | Runtime |   Gen0 |  Gen1 |  Gen2 | Allocated |
-| ----------------------- | ------- | ------: | -----: | ----: | ----: | --------: |
-| scan + filter + project | ChalkQL |    100% |  166.7 |     — |     — |   1.60 MB |
-|                         | DuckDB  |     65% |  600.0 | 100.0 | 100.0 |   4.56 MB |
-| group by                | ChalkQL |    100% |      — |     — |     — |   2.43 KB |
-|                         | DuckDB  |      7% |      — |     — |     — |  11.46 KB |
-| sort                    | ChalkQL |    100% |      — |     — |     — |   1.60 MB |
-|                         | DuckDB  |     92% | 1000.0 |     — |     — |   8.00 MB |
-| window                  | ChalkQL |    100% |      — |     — |     — |   1.60 MB |
-|                         | DuckDB  |     31% | 1000.0 |     — |     — |   8.00 MB |
-| hopping window          | ChalkQL |    100% |      — |     — |     — |   6.03 MB |
-|                         | DuckDB  |     90% | 3000.0 |     — |     — |  29.86 MB |
-
-GC counts are BenchmarkDotNet collections per benchmark operation. They are included because total allocated bytes do not show whether execution pressure remains short-lived or reaches older generations.
-
-These are not intended as a database shoot-out. ChalkQL’s execution engine is currently single-threaded and deliberately prioritises embedding, federation, predictable memory use and low managed allocation alongside operator throughput.
-
-There is substantial headroom remaining — particularly in aggregation and window execution — and the current implementation should be read as an early performance snapshot rather than a throughput ceiling.
-
-`ArenaPool` keeps a bounded number of `ExecutionArena`s warm between executions; excess concurrent executions receive transient arenas which are released when they finish. Hosts may also supply their own arena pools to isolate retained memory between workloads.
-
 ## Project status
 
 ChalkQL is under active development. APIs, policy semantics, and planner behaviour may change as the project evolves.
 
 Feedback, experiments, adversarial SQL, and contributions are welcome.
+
+_Technically_ sound, it was tempting to name the library _Derpinator_, in reference to preventing derpy agentic behaviour.
+
+<img width="56" height="56" alt="derp_smiley" src="docs/assets/derp_smiley.svg">
