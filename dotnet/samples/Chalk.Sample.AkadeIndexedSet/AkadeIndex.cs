@@ -17,7 +17,9 @@ namespace Chalk.Sample.AkadeIndexedSet;
 /// The point of this sample is that Chalk asks an index exactly two things — "which rows does this
 /// range match" and "in what order" — and that a structure Chalk knows nothing about can answer
 /// both. Everything below is the translation between Chalk's <see cref="IndexKeyRange"/> and
-/// Akade's <c>Range</c> / <c>GreaterThanOrEqual</c> / <c>LessThan</c> / <c>OrderBy</c>.
+/// Akade's <c>Range</c> / <c>GreaterThanOrEqual</c> / <c>LessThan</c> / <c>OrderBy</c>, yielded as
+/// Akade produces it and checked for key order as it goes, so a consumer that stops after one row
+/// pays for one row.
 /// </para>
 /// <para>
 /// Two things an adapter author has to get right, and this one does:
@@ -131,13 +133,42 @@ public sealed class AkadeIndex<T, TKey> : IPocoIndex<T>
             return _set.Where(_key, _bounds.Fill(range.Lower, useMaximum: false), _akadeIndexName);
         }
 
-        var rows = Bounded(range);
+        // Akade's range index is a sorted structure, but the enumeration order of a range query is
+        // not part of its documented contract, while the order an ORDERED index promises Chalk is.
+        // Sorting the matched rows would settle that at the price of the whole range before the
+        // first row — the one thing a consumer that stops after a few rows must not pay — so the
+        // rows are yielded as Akade produces them and checked as they go.
+        return InKeyOrder(Bounded(range));
+    }
 
-        // Akade's range index is a sorted structure, but its iteration order is its own business:
-        // the ordering an ORDERED index promises Chalk is a contract, so this asserts it here
-        // rather than assuming it. Sorting an already-sorted sequence is cheap, and a sample is the
-        // wrong place to be clever about someone else's internals.
-        return rows.OrderBy(_key, _comparer);
+    /// <summary>
+    /// Akade's enumeration, yielded as it comes and verified as it goes: one key comparison per row
+    /// against the previous key, nothing allocated per row, and the first row that arrives out of
+    /// order refused by name rather than sorted around — a lookup the planner relied on for its
+    /// order must be in that order or fail.
+    /// </summary>
+    private IEnumerable<T> InKeyOrder(IEnumerable<T> rows)
+    {
+        var previous = default(TKey)!;
+        var hasPrevious = false;
+
+        foreach (var row in rows)
+        {
+            var key = _key(row);
+            if (hasPrevious && _comparer.Compare(previous, key) > 0)
+            {
+                throw new SourceContractException(
+                    "akade",
+                    Descriptor.Name,
+                    $"Akade index '{_akadeIndexName}', behind the ORDERED index '{Descriptor.Name}', "
+                    + $"yielded key '{key}' after '{previous}'. An ordered lookup must arrive in "
+                    + "ascending key order.");
+            }
+
+            previous = key;
+            hasPrevious = true;
+            yield return row;
+        }
     }
 
     /// <inheritdoc />
@@ -154,7 +185,8 @@ public sealed class AkadeIndex<T, TKey> : IPocoIndex<T>
 
         if (!hasLower && !hasUpper)
         {
-            return _set.FullScan();
+            // The whole table in key order: Akade documents OrderBy as the order the index defines.
+            return _set.OrderBy(_key, 0, _akadeIndexName);
         }
 
         var keyColumns = Descriptor.Columns.Count;
