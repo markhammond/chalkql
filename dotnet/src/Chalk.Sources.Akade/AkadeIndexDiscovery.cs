@@ -76,6 +76,8 @@ internal static class AkadeIndexDiscovery
                 index.Kind,
                 index.Accessor,
                 index.Members,
+                index.Order,
+                index.Comparer,
                 options.SourceId,
                 options.TableName);
 
@@ -142,7 +144,14 @@ internal static class AkadeIndexDiscovery
             }
 
             var members = Members<T>(name, keyType, accessor, options);
-            if (members is null || !Supports(kind.Value, keyType, members))
+            if (members is null || !Shaped(keyType, members))
+            {
+                continue;
+            }
+
+            var declared = Declaration(name, accessor, keyType, options);
+            var order = Admit(kind.Value, keyType, members, declared, name);
+            if (order == AkadeOrder.None)
             {
                 continue;
             }
@@ -152,7 +161,9 @@ internal static class AkadeIndexDiscovery
                 kind.Value,
                 keyType,
                 accessor,
-                members));
+                members,
+                order,
+                declared?.Comparer));
         }
 
         result.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
@@ -296,17 +307,14 @@ internal static class AkadeIndexDiscovery
     }
 
     /// <summary>
-    /// Whether this key's type — and, for a compound key, every component of it — has the semantics
-    /// the kind promises Chalk.
+    /// Whether the key's CLR type really is the members' — one member's type, or the tuple of them,
+    /// in order.
     /// </summary>
     /// <remarks>
-    /// Nullable keys need explicit SQL NULL semantics and stay excluded; a compound key is admitted
-    /// component by component, so a tuple is exactly as disclosable as its least disclosable part.
+    /// Nullable keys need explicit SQL NULL semantics and stay excluded. The tuple check also rejects
+    /// Akade's multi-key overloads, whose accessor returns <c>IEnumerable&lt;TKey&gt;</c>.
     /// </remarks>
-    private static bool Supports(
-        AkadePhysicalIndexKind kind,
-        Type keyType,
-        MemberInfo[] members)
+    private static bool Shaped(Type keyType, MemberInfo[] members)
     {
         foreach (var member in members)
         {
@@ -318,11 +326,9 @@ internal static class AkadeIndexDiscovery
 
         if (members.Length == 1)
         {
-            return MemberType(members[0]) == keyType && Admits(kind, keyType);
+            return MemberType(members[0]) == keyType;
         }
 
-        // A compound key's CLR type has to be the tuple of its members' types, in order. This also
-        // rejects Akade's multi-key overloads, whose accessor returns IEnumerable<TKey>.
         var components = AkadeTupleKey.ComponentTypes(keyType);
         if (components is null || components.Length != members.Length)
         {
@@ -331,7 +337,7 @@ internal static class AkadeIndexDiscovery
 
         for (var i = 0; i < members.Length; i++)
         {
-            if (components[i] != MemberType(members[i]) || !Admits(kind, components[i]))
+            if (components[i] != MemberType(members[i]))
             {
                 return false;
             }
@@ -340,10 +346,113 @@ internal static class AkadeIndexDiscovery
         return true;
     }
 
-    private static bool Admits(AkadePhysicalIndexKind kind, Type type) =>
-        kind is AkadePhysicalIndexKind.Hash or AkadePhysicalIndexKind.UniqueHash
-            ? AkadeKeyOrder.IsHashKeyType(type)
-            : AkadeKeyOrder.IsOrderedKeyType(type);
+    /// <summary>
+    /// What order this index is in, or <see cref="AkadeOrder.None"/> when it is not an access path
+    /// Chalk will claim (D281).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A HASH index answers equality and claims no order, so it needs only exact equality on every
+    /// component, and a comparer declared for it says nothing Chalk reads.
+    /// </para>
+    /// <para>
+    /// An ORDERED index is a claim that its keys arrive in Chalk's order. Without a declaration that
+    /// holds for the types whose CLR order already is Chalk's and for no others. With one, the
+    /// declared comparer decides — and one Chalk does not recognise is refused by name rather than
+    /// left silently undisclosed, because the host asked for this index to be an access path.
+    /// </para>
+    /// </remarks>
+    private static AkadeOrder Admit<T>(
+        AkadePhysicalIndexKind kind,
+        Type keyType,
+        MemberInfo[] members,
+        AkadeComparerBinding<T>? declared,
+        string indexName)
+    {
+        if (kind is AkadePhysicalIndexKind.Hash or AkadePhysicalIndexKind.UniqueHash)
+        {
+            foreach (var member in members)
+            {
+                if (!AkadeKeyOrder.IsHashKeyType(MemberType(member)))
+                {
+                    return AkadeOrder.None;
+                }
+            }
+
+            return AkadeOrder.Ascending;
+        }
+
+        if (declared is null)
+        {
+            foreach (var member in members)
+            {
+                if (!AkadeKeyOrder.IsOrderedKeyType(MemberType(member)))
+                {
+                    return AkadeOrder.None;
+                }
+            }
+
+            return AkadeOrder.Ascending;
+        }
+
+        var order = AkadeKeyOrder.Classify(declared.Comparer, keyType);
+        if (order == AkadeOrder.None)
+        {
+            throw new InvalidOperationException(
+                $"the comparer declared for the Akade index '{indexName}' is a "
+                + $"'{declared.Comparer.GetType().Name}', which is not an order Chalk recognises. An "
+                + "ORDERED index is a claim that its keys arrive in Chalk's order, and Chalk "
+                + "classifies the comparer rather than trusting it. Accepted here: "
+                + $"{AkadeKeyOrder.Accepted(keyType)}.");
+        }
+
+        foreach (var member in members)
+        {
+            var type = MemberType(member);
+            if (!AkadeKeyOrder.IsOrderedKeyType(type) && !AkadeKeyOrder.NeedsDeclaredComparer(type))
+            {
+                return AkadeOrder.None;
+            }
+        }
+
+        return order;
+    }
+
+    /// <summary>
+    /// The comparer the host declared for this index, if any. Matched by the text Akade files the
+    /// index under — which is the text the compiler recorded at the declaration — or by the
+    /// accessor's method identity, which is what a static key method has instead of a distinctive
+    /// text.
+    /// </summary>
+    private static AkadeComparerBinding<T>? Declaration<T>(
+        string indexName,
+        Delegate accessor,
+        Type keyType,
+        AkadeSourceOptions<T> options)
+    {
+        foreach (var binding in options.Comparers)
+        {
+            var matches = string.Equals(binding.Accessor, indexName, StringComparison.Ordinal)
+                || binding.Method == accessor.Method;
+
+            if (!matches)
+            {
+                continue;
+            }
+
+            if (binding.KeyType != keyType)
+            {
+                throw new InvalidOperationException(
+                    $"the comparer declared for the Akade index '{indexName}' orders "
+                    + $"'{binding.KeyType.Name}', but that index's key is a '{keyType.Name}'. Declare "
+                    + "the comparer against the accessor the index was registered with.");
+            }
+
+            return binding;
+        }
+
+        return null;
+    }
 
     private static Type MemberType(MemberInfo member) => member switch
     {
@@ -390,7 +499,8 @@ internal static class AkadeIndexDiscovery
                 index.Kind,
                 index.KeyType,
                 index.Accessor.Method,
-                string.Join("+", index.Members.Select(m => m.Name)));
+                string.Join("+", index.Members.Select(m => m.Name)),
+                index.Order);
         }
 
         return shapes;
@@ -493,14 +603,17 @@ internal sealed record AkadeDiscoveredIndex<T>(
     AkadePhysicalIndexKind Kind,
     Type KeyType,
     Delegate Accessor,
-    MemberInfo[] Members);
+    MemberInfo[] Members,
+    AkadeOrder Order,
+    object? Comparer);
 
 internal sealed record AkadeIndexShape(
     string Name,
     AkadePhysicalIndexKind Kind,
     Type KeyType,
     MethodInfo AccessorMethod,
-    string Member);
+    string Member,
+    AkadeOrder Order);
 
 internal sealed class AkadeIndexTopologyException(string message) : Exception(message);
 
@@ -556,6 +669,7 @@ internal sealed class AkadeIndexPlan<T, TSet>
                 || expected.Kind != found.Kind
                 || expected.KeyType != found.KeyType
                 || expected.AccessorMethod != found.AccessorMethod
+                || expected.Order != found.Order
                 || !string.Equals(expected.Member, found.Member, StringComparison.Ordinal))
             {
                 throw new AkadeIndexTopologyException(
@@ -569,7 +683,7 @@ internal sealed class AkadeIndexPlan<T, TSet>
         string.Join(", ", shapes.Select(Describe));
 
     private static string Describe(AkadeIndexShape shape) =>
-        $"{shape.Name}:{shape.Kind}<{shape.KeyType.Name}>/{shape.Member}";
+        $"{shape.Name}:{shape.Kind}<{shape.KeyType.Name}>/{shape.Member}/{shape.Order}";
 }
 
 internal interface IAkadeIndexRegistration<T>
@@ -590,6 +704,8 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
     private readonly AkadePhysicalIndexKind _kind;
     private readonly Func<T, TKey> _key;
     private readonly MemberInfo[] _members;
+    private readonly AkadeOrder _order;
+    private readonly IComparer<TKey>? _declared;
     private readonly string _sourceId;
     private readonly string _table;
 
@@ -598,6 +714,8 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
         AkadePhysicalIndexKind kind,
         Delegate key,
         MemberInfo[] members,
+        AkadeOrder order,
+        object? declared,
         string sourceId,
         string table)
     {
@@ -605,6 +723,8 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
         _kind = kind;
         _key = (Func<T, TKey>)key;
         _members = members;
+        _order = order;
+        _declared = declared as IComparer<TKey>;
         _sourceId = sourceId;
         _table = table;
     }
@@ -619,14 +739,27 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
             : IndexKind.Hash;
 
         var unique = _kind == AkadePhysicalIndexKind.UniqueHash;
+        var descending = _order == AkadeOrder.Descending;
+
+        // The exact reverse of the ascending default: NULLS LAST reversed is NULLS FIRST, which is
+        // also where `ORDER BY x DESC` puts them, so the index serves that ordering without a sort.
+        var direction = descending
+            ? SortDirection.DescNullsFirst
+            : SortDirection.AscNullsLast;
+
         IReadOnlyList<SortDirection> directions = kind == IndexKind.Ordered
-            ? [.. _members.Select(_ => SortDirection.AscNullsLast)]
+            ? [.. _members.Select(_ => direction)]
             : Array.Empty<SortDirection>();
 
         var selectors = Array.ConvertAll(_members, MemberSelector);
 
         if (_members.Length == 1)
         {
+            // The declared comparer where there is one, and the type's Chalk order otherwise. The
+            // guard checks against exactly the order the descriptor claims.
+            var comparer = _declared
+                ?? (descending ? AkadeKeyOrder.Descending<TKey>() : AkadeKeyOrder.Ascending<TKey>());
+
             table.Index(
                 _name,
                 kind,
@@ -638,15 +771,17 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
                     _key,
                     _name,
                     _sourceId,
-                    _table),
+                    _table,
+                    comparer),
                 selectors);
             return;
         }
 
         // Compiled once, here, and shared by every snapshot's index: the compiled fill and the
-        // composed comparer depend on the key type alone.
+        // composed comparer depend on the key type and the direction alone.
         var shape = AkadeTupleKey<TKey>.Create(
-            [.. _members.Select(m => Order(m))]);
+            [.. _members.Select(m => Order(m, descending))],
+            descending);
 
         table.Index(
             _name,
@@ -665,7 +800,7 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
     }
 
     /// <summary>The Chalk order of one key component, which discovery has already admitted.</summary>
-    private static object Order(MemberInfo member)
+    private static object Order(MemberInfo member, bool descending)
     {
         var type = member switch
         {
@@ -677,7 +812,7 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
 
         // A component Chalk has no order for — GUID — is admitted for a HASH key, which never asks
         // for one; the CLR's own is what the composed comparer then carries, and nothing reads it.
-        return AkadeKeyOrder.Ascending(type)
+        return (descending ? AkadeKeyOrder.Descending(type) : AkadeKeyOrder.Ascending(type))
             ?? typeof(Comparer<>).MakeGenericType(type).GetProperty("Default")!.GetValue(null)!;
     }
 

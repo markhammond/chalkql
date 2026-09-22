@@ -53,6 +53,7 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
         _distinctKeys = descriptor.Unique
             ? set.Count
             : AkadePhysicalStatistics.DistinctKeys(set, akadeIndexName);
+
     }
 
     public IndexDescriptor Descriptor { get; }
@@ -138,44 +139,38 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
             return [];
         }
 
-        IEnumerable<T> rows;
-
-        if (hasLower && hasUpper)
-        {
-            if (_comparer.Compare(lower, upper) > 0)
-            {
-                return [];
-            }
-
-            rows = _set.Range(
-                _key,
-                lower,
-                upper,
-                range.LowerInclusive,
-                range.UpperInclusive,
-                _akadeIndexName);
-        }
-        else if (hasLower)
-        {
-            rows = range.LowerInclusive
-                ? _set.GreaterThanOrEqual(_key, lower, _akadeIndexName)
-                : _set.GreaterThan(_key, lower, _akadeIndexName);
-        }
-        else if (hasUpper)
-        {
-            rows = range.UpperInclusive
-                ? _set.LessThanOrEqual(_key, upper, _akadeIndexName)
-                : _set.LessThan(_key, upper, _akadeIndexName);
-        }
-        else
+        if (!hasLower && !hasUpper)
         {
             // The whole-range ordered scan. Akade documents OrderBy as "the order defined by the
-            // index", which is exactly the contract; the range shapes above have no such promise,
-            // which is what the guard below is for.
-            rows = _set.OrderBy(_key, 0, _akadeIndexName);
+            // index", which is exactly the contract; the range shapes below have no such promise,
+            // which is what the guard is for.
+            return InKeyOrder(_set.OrderBy(_key, 0, _akadeIndexName));
         }
 
-        return InKeyOrder(rows);
+        if (_set.Count == 0)
+        {
+            return [];
+        }
+
+        // One side open becomes the index's own extreme on that side, because Akade's one-sided
+        // shapes do not honour the comparer the index was built with (D281).
+        var start = hasLower ? lower : _set.Min(_key, _akadeIndexName);
+        var end = hasUpper ? upper : _set.Max(_key, _akadeIndexName);
+
+        // A range whose start is past its end matches nothing. Chalk says so; Akade throws, so the
+        // empty case is answered here rather than by an exception.
+        if (_comparer.Compare(start, end) > 0)
+        {
+            return [];
+        }
+
+        return InKeyOrder(_set.Range(
+            _key,
+            start,
+            end,
+            !hasLower || range.LowerInclusive,
+            !hasUpper || range.UpperInclusive,
+            _akadeIndexName));
     }
 
     /// <summary>
@@ -184,8 +179,8 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
     /// <remarks>
     /// <para>
     /// Chalk's ORDERED contract is about the rows a lookup returns, and Akade documents
-    /// <c>OrderBy</c> as the index's order but says nothing about the enumeration order of a range
-    /// query. Sorting the matched rows defensively would cost the whole range before the first row —
+    /// <c>OrderBy</c> as the index's order but says nothing about the enumeration order of a
+    /// <c>Range</c>. Sorting the matched rows defensively would cost the whole range before the first row —
     /// which is the one thing a consumer under a <c>LIMIT 1</c> must not pay — so the adapter
     /// enumerates lazily and checks instead: one key comparison per row against the previous key,
     /// the previous key held in a local, and nothing allocated per row.
@@ -213,7 +208,7 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
                     _table,
                     $"Akade index '{_akadeIndexName}', behind the ORDERED index "
                     + $"'{Descriptor.Name}', yielded key '{key}' after '{previous}'. An ordered "
-                    + "lookup must arrive in ascending key order.");
+                    + "lookup must arrive in the index's declared key order.");
             }
 
             previous = key;

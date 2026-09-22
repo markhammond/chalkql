@@ -69,7 +69,14 @@ internal sealed class AkadeTupleKey<TKey>
     /// <paramref name="componentComparers"/> — one per component, in key order, each an
     /// <c>IComparer&lt;TComponent&gt;</c>.
     /// </summary>
-    public static AkadeTupleKey<TKey> Create(IReadOnlyList<object> componentComparers)
+    /// <param name="descending">
+    /// Whether the index reads from the largest key down (D281). The extremes that fill the
+    /// components a range does not reach are the extremes of the <em>index's</em> order, so a
+    /// descending key fills below everything with its type's maximum.
+    /// </param>
+    public static AkadeTupleKey<TKey> Create(
+        IReadOnlyList<object> componentComparers,
+        bool descending = false)
     {
         ArgumentNullException.ThrowIfNull(componentComparers);
 
@@ -87,12 +94,12 @@ internal sealed class AkadeTupleKey<TKey>
         }
 
         return new AkadeTupleKey<TKey>(
-            CompileFill(types),
+            CompileFill(types, descending),
             CompileComparer(types, componentComparers),
             types.Length);
     }
 
-    private static Func<IReadOnlyList<object?>, bool, TKey> CompileFill(Type[] types)
+    private static Func<IReadOnlyList<object?>, bool, TKey> CompileFill(Type[] types, bool descending)
     {
         var bounds = Expression.Parameter(typeof(IReadOnlyList<object?>), "bounds");
         var useMaximum = Expression.Parameter(typeof(bool), "useMaximum");
@@ -114,8 +121,8 @@ internal sealed class AkadeTupleKey<TKey>
                 bounds,
                 Expression.Constant(i),
                 useMaximum,
-                Extreme(AkadeKeyOrder.Minimum(type), type),
-                Extreme(AkadeKeyOrder.Maximum(type), type));
+                Extreme(descending ? AkadeKeyOrder.Maximum(type) : AkadeKeyOrder.Minimum(type), type),
+                Extreme(descending ? AkadeKeyOrder.Minimum(type) : AkadeKeyOrder.Maximum(type), type));
         }
 
         var constructor = typeof(TKey).GetConstructor(types)

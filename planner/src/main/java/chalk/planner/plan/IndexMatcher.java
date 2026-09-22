@@ -111,6 +111,26 @@ public final class IndexMatcher {
       RelDataType rowType,
       boolean equalityOnly,
       RexBuilder rexBuilder) {
+    return split(condition, keyFields, rowType, equalityOnly, rexBuilder, List.of());
+  }
+
+  /**
+   * The same, for an index whose key columns are not all ascending.
+   *
+   * <p>A range's {@code lower} and {@code upper} are bounds <em>in the index's own key order</em> —
+   * which is what {@code IndexKeyRange.Contains} compares and what a source binary-searches with —
+   * so on a descending key column the {@code >} bound is the range's upper bound and the {@code <}
+   * bound its lower one. Everything above the bound column is an equality and unaffected (D281).
+   *
+   * @param descending one flag per key column, in key order; shorter or empty means ascending
+   */
+  public static Result split(
+      RexNode condition,
+      List<Integer> keyFields,
+      RelDataType rowType,
+      boolean equalityOnly,
+      RexBuilder rexBuilder,
+      List<Boolean> descending) {
     // SEARCH first: a BETWEEN arrives as a Sarg, and expanding it gives back the two comparisons
     // this classifier understands. RexToIr expands the same way, so a residual built from the
     // expanded form produces exactly the IR the unexpanded one would have.
@@ -229,7 +249,8 @@ public final class IndexMatcher {
       return Result.NONE;
     }
 
-    ImmutableList<Range> ranges = ranges(prefix, leading, low, high);
+    boolean flip = position < descending.size() && Boolean.TRUE.equals(descending.get(position));
+    ImmutableList<Range> ranges = ranges(prefix, leading, low, high, flip);
     if (ranges.isEmpty()) {
       return Result.NONE;
     }
@@ -248,22 +269,32 @@ public final class IndexMatcher {
 
   /** The ranges for one prefix, expanded over the leading IN list when there is one. */
   private static ImmutableList<Range> ranges(
-      List<RexNode> prefix, @Nullable List<RexNode> leading, @Nullable Bound low, @Nullable Bound high) {
+      List<RexNode> prefix,
+      @Nullable List<RexNode> leading,
+      @Nullable Bound low,
+      @Nullable Bound high,
+      boolean flip) {
     if (leading == null) {
-      return ImmutableList.of(range(prefix, low, high));
+      return ImmutableList.of(range(prefix, low, high, flip));
     }
 
     ImmutableList.Builder<Range> ranges = ImmutableList.builder();
     for (RexNode value : leading) {
       List<RexNode> keys = new ArrayList<>(prefix);
       keys.set(0, value);
-      ranges.add(range(keys, low, high));
+      ranges.add(range(keys, low, high, flip));
     }
 
     return ranges.build();
   }
 
-  private static Range range(List<RexNode> prefix, @Nullable Bound low, @Nullable Bound high) {
+  private static Range range(
+      List<RexNode> prefix, @Nullable Bound low, @Nullable Bound high, boolean flip) {
+    // On a descending key column the smaller value comes last, so the bound that opens the range in
+    // index order is the `<` one.
+    Bound first = flip ? high : low;
+    Bound last = flip ? low : high;
+
     ImmutableList.Builder<RexNode> lower = ImmutableList.builder();
     ImmutableList.Builder<RexNode> upper = ImmutableList.builder();
     lower.addAll(prefix);
@@ -271,14 +302,14 @@ public final class IndexMatcher {
 
     boolean lowerInclusive = true;
     boolean upperInclusive = true;
-    if (low != null) {
-      lower.add(low.value());
-      lowerInclusive = low.inclusive();
+    if (first != null) {
+      lower.add(first.value());
+      lowerInclusive = first.inclusive();
     }
 
-    if (high != null) {
-      upper.add(high.value());
-      upperInclusive = high.inclusive();
+    if (last != null) {
+      upper.add(last.value());
+      upperInclusive = last.inclusive();
     }
 
     ImmutableList<RexNode> lowerKeys = lower.build();

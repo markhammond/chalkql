@@ -267,10 +267,62 @@ Akade source snapshot. The concurrent source captures its inner `IndexedSet<T>` 
 same instance to both the row wrapper and every registered index, so a scan and an index lookup
 cannot accidentally address different Akade states.
 
+## Key types and the comparer an index was built with
+
+An `ORDERED` index is a claim that its keys arrive in Chalk's order — numbers and temporals by
+value, NaN above every number, strings by code point — and the planner deletes sorts on the strength
+of it. So the key type decides what Chalk will claim:
+
+- the integer, decimal and temporal types (`DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly`,
+  `TimeSpan`) are ordered access paths on the strength of the type alone, because the CLR's default
+  order for them already is Chalk's;
+- `float`, `double`, `string` and `Utf8String` are not, until the host says what the index was built
+  with — `Comparer<double>.Default` puts NaN first where Chalk puts it last, and
+  `Comparer<string>.Default` is culture-aware where Chalk compares by code point;
+- `Guid` stays equality-only: its CLR comparison is not the byte order Chalk sorts UUIDs by;
+- nullable keys stay excluded altogether.
+
+`ChalkComparers.For<T>()` is Chalk's order as an `IComparer<T>`, for every type above and for a
+tuple of them; the host builds the index with it and declares it:
+
+```csharp
+var set = rows.ToIndexedSet()
+    .WithRangeIndex(x => x.Symbol, ChalkComparers.For<string>())
+    .Build();
+
+AkadeSource.From("bars", set)
+    .Comparer(x => x.Symbol, ChalkComparers.For<string>());
+```
+
+The declaration is matched to the index by the text the compiler records for the accessor, which is
+the text Akade files the index under, or by the accessor's method identity. Chalk then classifies
+the comparer rather than trusting it: `Comparer<T>.Default` where that is Chalk's order, the
+comparers above, and `StringComparer.Ordinal`. Anything else is refused at registration, by name,
+with the accepted ones listed.
+
+`StringComparer.Ordinal` comes with a caveat worth stating. It compares UTF-16 code *units*, and
+Chalk's STRING order is by code point; the two agree everywhere except across the surrogate range,
+where a code point above U+FFFF is stored as a pair of units below U+E000. A key from that range
+makes the index arrive out of Chalk's order, and the order check below reports it by name at that
+row rather than answering wrongly.
+
+`ChalkComparers.For<T>(descending: true)` makes a descending index. Chalk registers it as one, and
+the planner then serves `ORDER BY … DESC` from it without a sort — which, under a `LIMIT`, is one
+seek and one row where it used to be a sort of the whole table.
+
+## What the adapter asks Akade, and why only that
+
 Akade's public documentation describes range indexes as supporting range predicates and ordered
 access, and documents `OrderBy(...)` as the order the index defines — but it does not make the
 enumeration order of `Range(...)`, `GreaterThan[OrEqual](...)` or `LessThan[OrEqual](...)` part of
 the public contract.
+
+Measured against Akade 1.5.0, there is a sharper reason than order to be careful here:
+`GreaterThan[OrEqual](...)` and `LessThan[OrEqual](...)` do not honour the comparer the index was
+built with. On an index whose order is not the CLR's default for the key type they return the wrong
+rows, and usually none at all. `Range(...)`, `Min()`, `Max()` and `OrderBy(...)` do honour it. So a
+half-open Chalk range becomes a `Range` from the bound to the index's own extreme on the open side,
+and the adapter calls none of the one-sided shapes. An adapter of your own should do the same.
 
 Chalk used to sort the matched rows before publishing any of them through an `ORDERED` index. It no
 longer does: a consumer that reads one row and stops — `ORDER BY amount LIMIT 1` over an ordered
@@ -283,4 +335,5 @@ Akade's documented `OrderBy(...)`.
 Failing by name is deliberate. A silently re-sorted lookup would be a wrong answer already relied
 on, because the declared ordered index is why there is no sort above it in the plan at all; and a
 defensive sort would give back exactly the early exit the ordered index is worth having for.
-Descending enumeration of an ascending index is not offered, so `ORDER BY … DESC` still sorts.
+Descending enumeration of an *ascending* index is not offered, so `ORDER BY … DESC` over one still
+sorts; an index the host built descending serves it directly.

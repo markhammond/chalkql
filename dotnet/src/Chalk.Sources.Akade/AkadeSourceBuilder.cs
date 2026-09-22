@@ -17,6 +17,7 @@ internal sealed class AkadeSourceOptions<T>
     public required FunctionDescriptor[] Functions { get; init; }
     public required AkadeFunctionIndexBinding<T>[] FunctionIndexes { get; init; }
     public required AkadeCompoundIndexBinding<T>[] CompoundIndexes { get; init; }
+    public required AkadeComparerBinding<T>[] Comparers { get; init; }
     public Action<PocoTableBuilder<T>>? ConfigureTable { get; init; }
     public CostProfile CostProfile { get; init; } = CostProfile.Inherit;
     public bool TrustSourceRowSecurity { get; init; }
@@ -31,6 +32,7 @@ public abstract class AkadeSourceBuilder<T, TSelf>
     private readonly List<FunctionDescriptor> _functions = [];
     private readonly List<AkadeFunctionIndexBinding<T>> _functionIndexes = [];
     private readonly List<AkadeCompoundIndexBinding<T>> _compoundIndexes = [];
+    private readonly List<AkadeComparerBinding<T>> _comparers = [];
 
     private string _schemaName = "main";
     private string _tableName = "data";
@@ -207,6 +209,48 @@ public abstract class AkadeSourceBuilder<T, TSelf>
         return Self;
     }
 
+    /// <summary>
+    /// States the comparer an Akade range index was built with (D281). Chalk classifies it rather
+    /// than trusting it: an ORDERED index is a claim that its keys arrive in Chalk's order, and only
+    /// a comparer Chalk recognises makes that claim true.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Without a declaration, a key type whose CLR order already is Chalk's — the integer, decimal
+    /// and temporal types — is an ordered access path on the strength of the type alone, and a
+    /// string or a real is not an access path at all.
+    /// </para>
+    /// <para>
+    /// A descending comparer makes a descending index, which the planner serves
+    /// <c>ORDER BY … DESC</c> from without a sort.
+    /// </para>
+    /// </remarks>
+    /// <param name="key">
+    /// The accessor the Akade index was registered with. Matched by the text Akade files the index
+    /// under — the same text the compiler records here — or by the accessor's method identity, which
+    /// is what a static key method has instead.
+    /// </param>
+    /// <param name="comparer">
+    /// <c>Comparer&lt;TKey&gt;.Default</c> where that is Chalk's order, one of
+    /// <see cref="ChalkComparers"/>'s, or <c>StringComparer.Ordinal</c>.
+    /// </param>
+    public TSelf Comparer<TKey>(
+        Func<T, TKey> key,
+        IComparer<TKey> comparer,
+        [System.Runtime.CompilerServices.CallerArgumentExpression(nameof(key))] string? accessor = null)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(comparer);
+
+        _comparers.Add(new AkadeComparerBinding<T>(
+            key.Method,
+            accessor,
+            comparer,
+            typeof(TKey)));
+
+        return Self;
+    }
+
     private static string Describe<TKey>(Func<T, TKey> key) =>
         key.Method.DeclaringType is { } declaring
             ? declaring.Name + "." + key.Method.Name
@@ -222,6 +266,7 @@ public abstract class AkadeSourceBuilder<T, TSelf>
         Functions = [.. _functions],
         FunctionIndexes = [.. _functionIndexes],
         CompoundIndexes = [.. _compoundIndexes],
+        Comparers = [.. _comparers],
         ConfigureTable = _configureTable,
         CostProfile = _costProfile,
         TrustSourceRowSecurity = _trustSourceRowSecurity,
@@ -395,3 +440,15 @@ internal sealed record AkadeFunctionIndexBinding<T>(
 internal sealed record AkadeCompoundIndexBinding<T>(
     System.Reflection.MethodInfo Method,
     string[] Members);
+
+/// <summary>
+/// The comparer a host says an Akade index was built with (D281), bound to the accessor two ways:
+/// by the text the compiler recorded for it, which is the text Akade files the index under, and by
+/// its method identity, which is what a static key method has instead. Two lambdas spelled the same
+/// way at two places are two methods, so the text is what matches them.
+/// </summary>
+internal sealed record AkadeComparerBinding<T>(
+    System.Reflection.MethodInfo Method,
+    string? Accessor,
+    object Comparer,
+    Type KeyType);

@@ -82,12 +82,15 @@ public sealed class SampleAkadeIndexTests
     public void An_out_of_order_enumeration_is_refused_by_name()
     {
         // Akade orders the index ascending; the adapter is told the key order is descending, so the
-        // second row Akade yields is out of order as far as Chalk's contract is concerned.
+        // second row Akade yields is out of order as far as Chalk's contract is concerned. The
+        // unbounded shape is the one that reaches the guard whatever the two orders are: a bounded
+        // one is a Range between the index's own extremes, and those come back in Akade's order.
         var descending = Comparer<int>.Create((a, b) => b.CompareTo(a));
         var set = Shuffled(10).ToIndexedSet().WithRangeIndex(KeyOf).Build();
         var index = new AkadeIndex<Row, int>(Descriptor, set, KeyOf, "KeyOf", Bounds, descending);
 
-        var refusal = Assert.Throws<SourceContractException>(() => index.Lookup(From(0)).ToList());
+        var refusal = Assert.Throws<SourceContractException>(
+            () => index.Lookup(IndexKeyRange.All).ToList());
 
         Assert.Contains("KeyOf", refusal.Message, StringComparison.Ordinal);
         Assert.Contains("ix_rows_key", refusal.Message, StringComparison.Ordinal);

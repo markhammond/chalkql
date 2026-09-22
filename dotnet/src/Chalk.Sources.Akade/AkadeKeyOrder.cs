@@ -2,6 +2,17 @@ using Chalk.Sources;
 
 namespace Chalk.Sources.Akade;
 
+/// <summary>What order an Akade index's keys turn out to be in (D281).</summary>
+internal enum AkadeOrder
+{
+    /// <summary>Not an order Chalk will claim.</summary>
+    None,
+
+    Ascending,
+
+    Descending,
+}
+
 /// <summary>
 /// Chalk's own order, per admitted key type, as an <see cref="IComparer{T}"/> the adapter can hold
 /// and the guard can call once per row without allocating (D280, D281).
@@ -64,6 +75,27 @@ internal static class AkadeKeyOrder
         // into place rather than converted.
         if (type == typeof(string)) return StringOrder.Instance;
         if (type == typeof(Utf8String)) return Comparer<Utf8String>.Default;
+
+        // A compound key's order is its components' orders, in key order — compiled over the
+        // tuple's fields, so it costs no boxing (D280).
+        if (AkadeTupleKey.ComponentTypes(type) is { } components)
+        {
+            var comparers = new object[components.Length];
+            for (var i = 0; i < components.Length; i++)
+            {
+                if (Ascending(components[i]) is not { } component)
+                {
+                    return null;
+                }
+
+                comparers[i] = component;
+            }
+
+            var shape = typeof(AkadeTupleKey<>).MakeGenericType(type);
+            var built = shape.GetMethod(nameof(AkadeTupleKey<int>.Create))!
+                .Invoke(null, [comparers]);
+            return shape.GetProperty(nameof(AkadeTupleKey<int>.Comparer))!.GetValue(built);
+        }
 
         return null;
     }
@@ -142,6 +174,72 @@ internal static class AkadeKeyOrder
             || type == typeof(double)
             || type == typeof(string)
             || type == typeof(Utf8String);
+    }
+
+    /// <summary>
+    /// What a host-declared comparer turns out to be (D281). Chalk classifies the comparer the Akade
+    /// index was built with rather than trusting it, because the declaration is what makes the
+    /// index's key order a planner-visible claim.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Accepted: <c>Comparer&lt;T&gt;.Default</c> where the CLR's order is Chalk's, the comparers
+    /// this package ships, and — for a CLR <see cref="string"/> — <c>StringComparer.Ordinal</c>.
+    /// </para>
+    /// <para>
+    /// <b>The caveat on <c>StringComparer.Ordinal</c>.</b> It compares UTF-16 code <em>units</em>,
+    /// and Chalk's STRING order is by code point. The two agree everywhere except across the
+    /// surrogate range: a code point above U+FFFF is stored as units at U+D800..U+DFFF, so ordinal
+    /// order puts it below U+E000..U+FFFF where Chalk puts it above. Such a row makes the index
+    /// arrive out of order and the guard says so, by name, at that row.
+    /// </para>
+    /// </remarks>
+    public static AkadeOrder Classify(object comparer, Type keyType)
+    {
+        ArgumentNullException.ThrowIfNull(comparer);
+        ArgumentNullException.ThrowIfNull(keyType);
+
+        if (ReferenceEquals(comparer, Ascending(keyType)))
+        {
+            return AkadeOrder.Ascending;
+        }
+
+        if (ReferenceEquals(comparer, Descending(keyType)))
+        {
+            return AkadeOrder.Descending;
+        }
+
+        if (keyType == typeof(string) && ReferenceEquals(comparer, StringComparer.Ordinal))
+        {
+            return AkadeOrder.Ascending;
+        }
+
+        return AkadeOrder.None;
+    }
+
+    /// <summary>The comparers <see cref="Classify"/> accepts for this key type, for a refusal.</summary>
+    public static string Accepted(Type keyType)
+    {
+        ArgumentNullException.ThrowIfNull(keyType);
+
+        var name = keyType.Name;
+        var accepted = new List<string>
+        {
+            $"ChalkComparers.For<{name}>()",
+            $"ChalkComparers.For<{name}>(descending: true)",
+        };
+
+        if (IsOrderedKeyType(keyType))
+        {
+            accepted.Insert(0, $"Comparer<{name}>.Default");
+        }
+
+        if (keyType == typeof(string))
+        {
+            accepted.Add("StringComparer.Ordinal");
+        }
+
+        return string.Join(", ", accepted);
     }
 
     /// <summary>
@@ -250,7 +348,7 @@ internal static class AkadeKeyOrder
         }
 
         private static int Rank(char value) =>
-            value < '\uD800' ? value : value < '' ? value + 0x2000 : value - 0x800;
+            value < '\uD800' ? value : value < '\uE000' ? value + 0x2000 : value - 0x800;
     }
 
     private sealed class SingleOrder : IComparer<float>

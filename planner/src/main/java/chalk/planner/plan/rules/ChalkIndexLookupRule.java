@@ -88,7 +88,8 @@ public final class ChalkIndexLookupRule extends RelRule<ChalkRuleConfig> {
               keyFields,
               scan.getRowType(),
               index.getKind() == IndexKind.INDEX_KIND_HASH,
-              rexBuilder);
+              rexBuilder,
+              descending(index));
       if (!result.matched()) {
         continue;
       }
@@ -106,6 +107,26 @@ public final class ChalkIndexLookupRule extends RelRule<ChalkRuleConfig> {
       RelNode alternative = residual == null ? lookup : ChalkFilter.create(lookup, residual);
       call.transformTo(alternative);
     }
+  }
+
+  /**
+   * Which of the index's key columns read from the largest key down (D281). A range's bounds are
+   * stated in the index's own key order, so a descending column swaps which comparison opens the
+   * range; an index that declares no directions is ascending throughout.
+   */
+  private static List<Boolean> descending(Index index) {
+    if (index.getDirectionsCount() == 0) {
+      return List.of();
+    }
+
+    List<Boolean> flags = new ArrayList<>(index.getDirectionsCount());
+    for (chalk.ir.v1.SortDirection direction : index.getDirectionsList()) {
+      flags.add(
+          direction == chalk.ir.v1.SortDirection.SORT_DIRECTION_DESC_NULLS_FIRST
+              || direction == chalk.ir.v1.SortDirection.SORT_DIRECTION_DESC_NULLS_LAST);
+    }
+
+    return flags;
   }
 
   /**

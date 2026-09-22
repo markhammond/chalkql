@@ -139,48 +139,35 @@ internal sealed class AkadeTupleIndex<T, TKey> : IPocoIndex<T>
         var hasLower = range.Lower.Count != 0;
         var hasUpper = range.Upper.Count != 0;
 
-        IEnumerable<T> rows;
-
-        if (hasLower && hasUpper)
+        if (!hasLower && !hasUpper)
         {
-            var start = LowerKey(range);
-            var end = UpperKey(range);
-
-            // A range whose lower bound is above its upper matches nothing. Chalk says so; Akade
-            // throws, so the empty case is answered here rather than by an exception.
-            if (_shape.Comparer.Compare(start, end) > 0)
-            {
-                return [];
-            }
-
-            rows = _set.Range(
-                _key,
-                start,
-                end,
-                range.LowerInclusive,
-                range.UpperInclusive,
-                _akadeIndexName);
-        }
-        else if (hasLower)
-        {
-            var from = LowerKey(range);
-            rows = range.LowerInclusive
-                ? _set.GreaterThanOrEqual(_key, from, _akadeIndexName)
-                : _set.GreaterThan(_key, from, _akadeIndexName);
-        }
-        else if (hasUpper)
-        {
-            var to = UpperKey(range);
-            rows = range.UpperInclusive
-                ? _set.LessThanOrEqual(_key, to, _akadeIndexName)
-                : _set.LessThan(_key, to, _akadeIndexName);
-        }
-        else
-        {
-            rows = _set.OrderBy(_key, 0, _akadeIndexName);
+            return InKeyOrder(_set.OrderBy(_key, 0, _akadeIndexName));
         }
 
-        return InKeyOrder(rows);
+        if (_set.Count == 0)
+        {
+            return [];
+        }
+
+        // One side open becomes the index's own extreme on that side, because Akade's one-sided
+        // shapes do not honour the comparer the index was built with (D281).
+        var start = hasLower ? LowerKey(range) : _set.Min(_key, _akadeIndexName);
+        var end = hasUpper ? UpperKey(range) : _set.Max(_key, _akadeIndexName);
+
+        // A range whose start is past its end matches nothing. Chalk says so; Akade throws, so the
+        // empty case is answered here rather than by an exception.
+        if (_shape.Comparer.Compare(start, end) > 0)
+        {
+            return [];
+        }
+
+        return InKeyOrder(_set.Range(
+            _key,
+            start,
+            end,
+            !hasLower || range.LowerInclusive,
+            !hasUpper || range.UpperInclusive,
+            _akadeIndexName));
     }
 
     /// <summary>
@@ -204,7 +191,7 @@ internal sealed class AkadeTupleIndex<T, TKey> : IPocoIndex<T>
                     _table,
                     $"Akade index '{_akadeIndexName}', behind the ORDERED index "
                     + $"'{Descriptor.Name}', yielded key '{key}' after '{previous}'. An ordered "
-                    + "lookup must arrive in ascending key order.");
+                    + "lookup must arrive in the index's declared key order.");
             }
 
             previous = key;

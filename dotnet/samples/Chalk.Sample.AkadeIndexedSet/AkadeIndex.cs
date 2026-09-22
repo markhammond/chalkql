@@ -22,7 +22,7 @@ namespace Chalk.Sample.AkadeIndexedSet;
 /// pays for one row.
 /// </para>
 /// <para>
-/// Two things an adapter author has to get right, and this one does:
+/// Three things an adapter author has to get right, and this one does:
 /// </para>
 /// <list type="bullet">
 ///   <item>
@@ -39,6 +39,13 @@ namespace Chalk.Sample.AkadeIndexedSet;
 ///     the minimum there would keep every row whose symbol <em>is</em> 'A'. Symmetrically for the
 ///     upper bound. That is what <see cref="AkadeKey{T,TKey}.Fill"/> takes its flag for, and it is
 ///     the mistake <c>PocoIndexConformance.Verify</c> caught when this sample was written.
+///   </item>
+///   <item>
+///     <b>Only the operations that honour the comparer may be used.</b> Akade's
+///     <c>GreaterThan[OrEqual]</c> and <c>LessThan[OrEqual]</c> do not: on an index whose order is
+///     not the CLR's default they return the wrong rows, and usually none at all. <c>Range</c>,
+///     <c>Min</c>, <c>Max</c> and <c>OrderBy</c> do, so a half-open Chalk range becomes a
+///     <c>Range</c> from the bound to the index's own extreme. See <see cref="Bounded"/>.
 ///   </item>
 /// </list>
 /// <para>
@@ -178,6 +185,15 @@ public sealed class AkadeIndex<T, TKey> : IPocoIndex<T>
     /// </remarks>
     public long? DistinctCount(int keyPositions) => null;
 
+    /// <remarks>
+    /// Every bounded shape is a <c>Range</c>, and a side the Chalk range leaves open becomes the
+    /// index's own extreme on that side. That is deliberate and it is the third thing an adapter
+    /// author has to get right: Akade's <c>GreaterThan[OrEqual]</c> and <c>LessThan[OrEqual]</c> do
+    /// not honour the comparer the index was built with, and answer an index whose order is not the
+    /// CLR's default with the wrong rows — usually none at all. <c>Range</c>, <c>Min</c>, <c>Max</c>
+    /// and <c>OrderBy</c> do honour it. The comparer here is Chalk's order rather than the CLR's, so
+    /// this adapter uses only those.
+    /// </remarks>
     private IEnumerable<T> Bounded(IndexKeyRange range)
     {
         var hasLower = range.Lower.Count > 0;
@@ -189,38 +205,32 @@ public sealed class AkadeIndex<T, TKey> : IPocoIndex<T>
             return _set.OrderBy(_key, 0, _akadeIndexName);
         }
 
+        if (_set.Count == 0)
+        {
+            return [];
+        }
+
         var keyColumns = Descriptor.Columns.Count;
 
         // An exclusive bound on a prefix excludes every key with that prefix, so the components the
         // range does not bound take the *opposite* extreme.
-        if (hasLower && hasUpper)
+        var start = hasLower ? LowerKey(range, keyColumns) : _set.Min(_key, _akadeIndexName);
+        var end = hasUpper ? UpperKey(range, keyColumns) : _set.Max(_key, _akadeIndexName);
+
+        // A range whose lower bound is above its upper matches nothing. Chalk says so; Akade
+        // throws, so the empty case is answered here rather than by an exception.
+        if (_comparer.Compare(start, end) > 0)
         {
-            var start = LowerKey(range, keyColumns);
-            var end = UpperKey(range, keyColumns);
-
-            // A range whose lower bound is above its upper matches nothing. Chalk says so; Akade
-            // throws, so the empty case is answered here rather than by an exception.
-            if (_comparer.Compare(start, end) > 0)
-            {
-                return [];
-            }
-
-            return _set.Range(
-                _key, start, end, range.LowerInclusive, range.UpperInclusive, _akadeIndexName);
+            return [];
         }
 
-        if (hasLower)
-        {
-            var from = LowerKey(range, keyColumns);
-            return range.LowerInclusive
-                ? _set.GreaterThanOrEqual(_key, from, _akadeIndexName)
-                : _set.GreaterThan(_key, from, _akadeIndexName);
-        }
-
-        var to = UpperKey(range, keyColumns);
-        return range.UpperInclusive
-            ? _set.LessThanOrEqual(_key, to, _akadeIndexName)
-            : _set.LessThan(_key, to, _akadeIndexName);
+        return _set.Range(
+            _key,
+            start,
+            end,
+            !hasLower || range.LowerInclusive,
+            !hasUpper || range.UpperInclusive,
+            _akadeIndexName);
     }
 
     private TKey LowerKey(IndexKeyRange range, int keyColumns) =>
