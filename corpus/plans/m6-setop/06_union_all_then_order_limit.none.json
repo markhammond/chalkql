@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "11750343558600434036",
+  "planDigest": "6933454867089167081",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -85,7 +85,7 @@
             }
           ]
         },
-        "estRowCount": 2000,
+        "estRowCount": 20,
         "setOp": {
           "inputs": [
             {
@@ -106,8 +106,35 @@
                   }
                 ]
               },
-              "estRowCount": 1000,
-              "project": {
+              "estRowCount": 10,
+              "collations": [
+                {
+                  "fields": [
+                    {
+                      "expr": {
+                        "type": {
+                          "kind": "TYPE_KIND_TIMESTAMP",
+                          "precision": 9
+                        },
+                        "fieldRef": {
+                          "index": 1
+                        }
+                      },
+                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                    },
+                    {
+                      "expr": {
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        },
+                        "fieldRef": {}
+                      },
+                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                    }
+                  ]
+                }
+              ],
+              "topN": {
                 "input": {
                   "rowType": {
                     "fields": [
@@ -127,34 +154,7 @@
                     ]
                   },
                   "estRowCount": 1000,
-                  "collations": [
-                    {
-                      "fields": [
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        },
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "fieldRef": {}
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        }
-                      ]
-                    }
-                  ],
-                  "filter": {
+                  "project": {
                     "input": {
                       "rowType": {
                         "fields": [
@@ -173,7 +173,7 @@
                           }
                         ]
                       },
-                      "estRowCount": 5000,
+                      "estRowCount": 1000,
                       "collations": [
                         {
                           "fields": [
@@ -201,7 +201,7 @@
                           ]
                         }
                       ],
-                      "project": {
+                      "filter": {
                         "input": {
                           "rowType": {
                             "fields": [
@@ -216,52 +216,6 @@
                                 "type": {
                                   "kind": "TYPE_KIND_TIMESTAMP",
                                   "precision": 9
-                                }
-                              },
-                              {
-                                "name": "open",
-                                "type": {
-                                  "kind": "TYPE_KIND_FP64"
-                                }
-                              },
-                              {
-                                "name": "high",
-                                "type": {
-                                  "kind": "TYPE_KIND_FP64"
-                                }
-                              },
-                              {
-                                "name": "low",
-                                "type": {
-                                  "kind": "TYPE_KIND_FP64"
-                                }
-                              },
-                              {
-                                "name": "close",
-                                "type": {
-                                  "kind": "TYPE_KIND_FP64"
-                                }
-                              },
-                              {
-                                "name": "volume",
-                                "type": {
-                                  "kind": "TYPE_KIND_I64"
-                                }
-                              },
-                              {
-                                "name": "vwap",
-                                "type": {
-                                  "kind": "TYPE_KIND_DECIMAL",
-                                  "nullable": true,
-                                  "precision": 28,
-                                  "scale": 10
-                                }
-                              },
-                              {
-                                "name": "trade_count",
-                                "type": {
-                                  "kind": "TYPE_KIND_I32",
-                                  "nullable": true
                                 }
                               }
                             ]
@@ -294,89 +248,208 @@
                               ]
                             }
                           ],
-                          "read": {
-                            "table": {
-                              "sourceId": "mem",
-                              "schema": "main",
-                              "table": "bars_small"
+                          "project": {
+                            "input": {
+                              "rowType": {
+                                "fields": [
+                                  {
+                                    "name": "symbol",
+                                    "type": {
+                                      "kind": "TYPE_KIND_STRING"
+                                    }
+                                  },
+                                  {
+                                    "name": "ts",
+                                    "type": {
+                                      "kind": "TYPE_KIND_TIMESTAMP",
+                                      "precision": 9
+                                    }
+                                  },
+                                  {
+                                    "name": "open",
+                                    "type": {
+                                      "kind": "TYPE_KIND_FP64"
+                                    }
+                                  },
+                                  {
+                                    "name": "high",
+                                    "type": {
+                                      "kind": "TYPE_KIND_FP64"
+                                    }
+                                  },
+                                  {
+                                    "name": "low",
+                                    "type": {
+                                      "kind": "TYPE_KIND_FP64"
+                                    }
+                                  },
+                                  {
+                                    "name": "close",
+                                    "type": {
+                                      "kind": "TYPE_KIND_FP64"
+                                    }
+                                  },
+                                  {
+                                    "name": "volume",
+                                    "type": {
+                                      "kind": "TYPE_KIND_I64"
+                                    }
+                                  },
+                                  {
+                                    "name": "vwap",
+                                    "type": {
+                                      "kind": "TYPE_KIND_DECIMAL",
+                                      "nullable": true,
+                                      "precision": 28,
+                                      "scale": 10
+                                    }
+                                  },
+                                  {
+                                    "name": "trade_count",
+                                    "type": {
+                                      "kind": "TYPE_KIND_I32",
+                                      "nullable": true
+                                    }
+                                  }
+                                ]
+                              },
+                              "estRowCount": 5000,
+                              "collations": [
+                                {
+                                  "fields": [
+                                    {
+                                      "expr": {
+                                        "type": {
+                                          "kind": "TYPE_KIND_TIMESTAMP",
+                                          "precision": 9
+                                        },
+                                        "fieldRef": {
+                                          "index": 1
+                                        }
+                                      },
+                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                    },
+                                    {
+                                      "expr": {
+                                        "type": {
+                                          "kind": "TYPE_KIND_STRING"
+                                        },
+                                        "fieldRef": {}
+                                      },
+                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                    }
+                                  ]
+                                }
+                              ],
+                              "read": {
+                                "table": {
+                                  "sourceId": "mem",
+                                  "schema": "main",
+                                  "table": "bars_small"
+                                },
+                                "projection": [
+                                  0,
+                                  1,
+                                  2,
+                                  3,
+                                  4,
+                                  5,
+                                  6,
+                                  7,
+                                  8
+                                ]
+                              }
                             },
-                            "projection": [
-                              0,
-                              1,
-                              2,
-                              3,
-                              4,
-                              5,
-                              6,
-                              7,
-                              8
+                            "exprs": [
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                },
+                                "fieldRef": {}
+                              },
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_TIMESTAMP",
+                                  "precision": 9
+                                },
+                                "fieldRef": {
+                                  "index": 1
+                                }
+                              }
                             ]
                           }
                         },
-                        "exprs": [
-                          {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "fieldRef": {}
+                        "condition": {
+                          "type": {
+                            "kind": "TYPE_KIND_BOOL"
                           },
-                          {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
+                          "call": {
+                            "function": "FUNCTION_ID_EQ",
+                            "args": [
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                },
+                                "fieldRef": {}
+                              },
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                },
+                                "literal": {
+                                  "stringValue": "BTCUSDT"
+                                }
+                              }
+                            ]
                           }
-                        ]
+                        }
                       }
                     },
-                    "condition": {
-                      "type": {
-                        "kind": "TYPE_KIND_BOOL"
+                    "exprs": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        },
+                        "literal": {
+                          "stringValue": "BTCUSDT"
+                        }
                       },
-                      "call": {
-                        "function": "FUNCTION_ID_EQ",
-                        "args": [
-                          {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "fieldRef": {}
-                          },
-                          {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "literal": {
-                              "stringValue": "BTCUSDT"
-                            }
-                          }
-                        ]
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_TIMESTAMP",
+                          "precision": 9
+                        },
+                        "fieldRef": {
+                          "index": 1
+                        }
                       }
-                    }
+                    ]
                   }
                 },
-                "exprs": [
+                "fields": [
                   {
-                    "type": {
-                      "kind": "TYPE_KIND_STRING"
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_TIMESTAMP",
+                        "precision": 9
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
                     },
-                    "literal": {
-                      "stringValue": "BTCUSDT"
-                    }
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
                   },
                   {
-                    "type": {
-                      "kind": "TYPE_KIND_TIMESTAMP",
-                      "precision": 9
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {}
                     },
-                    "fieldRef": {
-                      "index": 1
-                    }
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
                   }
-                ]
+                ],
+                "count": "10"
               }
             },
             {
@@ -397,8 +470,35 @@
                   }
                 ]
               },
-              "estRowCount": 1000,
-              "project": {
+              "estRowCount": 10,
+              "collations": [
+                {
+                  "fields": [
+                    {
+                      "expr": {
+                        "type": {
+                          "kind": "TYPE_KIND_TIMESTAMP",
+                          "precision": 9
+                        },
+                        "fieldRef": {
+                          "index": 1
+                        }
+                      },
+                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                    },
+                    {
+                      "expr": {
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        },
+                        "fieldRef": {}
+                      },
+                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                    }
+                  ]
+                }
+              ],
+              "topN": {
                 "input": {
                   "rowType": {
                     "fields": [
@@ -418,34 +518,7 @@
                     ]
                   },
                   "estRowCount": 1000,
-                  "collations": [
-                    {
-                      "fields": [
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        },
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "fieldRef": {}
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        }
-                      ]
-                    }
-                  ],
-                  "filter": {
+                  "project": {
                     "input": {
                       "rowType": {
                         "fields": [
@@ -464,7 +537,7 @@
                           }
                         ]
                       },
-                      "estRowCount": 5000,
+                      "estRowCount": 1000,
                       "collations": [
                         {
                           "fields": [
@@ -492,7 +565,7 @@
                           ]
                         }
                       ],
-                      "project": {
+                      "filter": {
                         "input": {
                           "rowType": {
                             "fields": [
@@ -507,52 +580,6 @@
                                 "type": {
                                   "kind": "TYPE_KIND_TIMESTAMP",
                                   "precision": 9
-                                }
-                              },
-                              {
-                                "name": "open",
-                                "type": {
-                                  "kind": "TYPE_KIND_FP64"
-                                }
-                              },
-                              {
-                                "name": "high",
-                                "type": {
-                                  "kind": "TYPE_KIND_FP64"
-                                }
-                              },
-                              {
-                                "name": "low",
-                                "type": {
-                                  "kind": "TYPE_KIND_FP64"
-                                }
-                              },
-                              {
-                                "name": "close",
-                                "type": {
-                                  "kind": "TYPE_KIND_FP64"
-                                }
-                              },
-                              {
-                                "name": "volume",
-                                "type": {
-                                  "kind": "TYPE_KIND_I64"
-                                }
-                              },
-                              {
-                                "name": "vwap",
-                                "type": {
-                                  "kind": "TYPE_KIND_DECIMAL",
-                                  "nullable": true,
-                                  "precision": 28,
-                                  "scale": 10
-                                }
-                              },
-                              {
-                                "name": "trade_count",
-                                "type": {
-                                  "kind": "TYPE_KIND_I32",
-                                  "nullable": true
                                 }
                               }
                             ]
@@ -585,89 +612,208 @@
                               ]
                             }
                           ],
-                          "read": {
-                            "table": {
-                              "sourceId": "mem",
-                              "schema": "main",
-                              "table": "bars_small"
+                          "project": {
+                            "input": {
+                              "rowType": {
+                                "fields": [
+                                  {
+                                    "name": "symbol",
+                                    "type": {
+                                      "kind": "TYPE_KIND_STRING"
+                                    }
+                                  },
+                                  {
+                                    "name": "ts",
+                                    "type": {
+                                      "kind": "TYPE_KIND_TIMESTAMP",
+                                      "precision": 9
+                                    }
+                                  },
+                                  {
+                                    "name": "open",
+                                    "type": {
+                                      "kind": "TYPE_KIND_FP64"
+                                    }
+                                  },
+                                  {
+                                    "name": "high",
+                                    "type": {
+                                      "kind": "TYPE_KIND_FP64"
+                                    }
+                                  },
+                                  {
+                                    "name": "low",
+                                    "type": {
+                                      "kind": "TYPE_KIND_FP64"
+                                    }
+                                  },
+                                  {
+                                    "name": "close",
+                                    "type": {
+                                      "kind": "TYPE_KIND_FP64"
+                                    }
+                                  },
+                                  {
+                                    "name": "volume",
+                                    "type": {
+                                      "kind": "TYPE_KIND_I64"
+                                    }
+                                  },
+                                  {
+                                    "name": "vwap",
+                                    "type": {
+                                      "kind": "TYPE_KIND_DECIMAL",
+                                      "nullable": true,
+                                      "precision": 28,
+                                      "scale": 10
+                                    }
+                                  },
+                                  {
+                                    "name": "trade_count",
+                                    "type": {
+                                      "kind": "TYPE_KIND_I32",
+                                      "nullable": true
+                                    }
+                                  }
+                                ]
+                              },
+                              "estRowCount": 5000,
+                              "collations": [
+                                {
+                                  "fields": [
+                                    {
+                                      "expr": {
+                                        "type": {
+                                          "kind": "TYPE_KIND_TIMESTAMP",
+                                          "precision": 9
+                                        },
+                                        "fieldRef": {
+                                          "index": 1
+                                        }
+                                      },
+                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                    },
+                                    {
+                                      "expr": {
+                                        "type": {
+                                          "kind": "TYPE_KIND_STRING"
+                                        },
+                                        "fieldRef": {}
+                                      },
+                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                    }
+                                  ]
+                                }
+                              ],
+                              "read": {
+                                "table": {
+                                  "sourceId": "mem",
+                                  "schema": "main",
+                                  "table": "bars_small"
+                                },
+                                "projection": [
+                                  0,
+                                  1,
+                                  2,
+                                  3,
+                                  4,
+                                  5,
+                                  6,
+                                  7,
+                                  8
+                                ]
+                              }
                             },
-                            "projection": [
-                              0,
-                              1,
-                              2,
-                              3,
-                              4,
-                              5,
-                              6,
-                              7,
-                              8
+                            "exprs": [
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                },
+                                "fieldRef": {}
+                              },
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_TIMESTAMP",
+                                  "precision": 9
+                                },
+                                "fieldRef": {
+                                  "index": 1
+                                }
+                              }
                             ]
                           }
                         },
-                        "exprs": [
-                          {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "fieldRef": {}
+                        "condition": {
+                          "type": {
+                            "kind": "TYPE_KIND_BOOL"
                           },
-                          {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
+                          "call": {
+                            "function": "FUNCTION_ID_EQ",
+                            "args": [
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                },
+                                "fieldRef": {}
+                              },
+                              {
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                },
+                                "literal": {
+                                  "stringValue": "ETHUSDT"
+                                }
+                              }
+                            ]
                           }
-                        ]
+                        }
                       }
                     },
-                    "condition": {
-                      "type": {
-                        "kind": "TYPE_KIND_BOOL"
+                    "exprs": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        },
+                        "literal": {
+                          "stringValue": "ETHUSDT"
+                        }
                       },
-                      "call": {
-                        "function": "FUNCTION_ID_EQ",
-                        "args": [
-                          {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "fieldRef": {}
-                          },
-                          {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "literal": {
-                              "stringValue": "ETHUSDT"
-                            }
-                          }
-                        ]
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_TIMESTAMP",
+                          "precision": 9
+                        },
+                        "fieldRef": {
+                          "index": 1
+                        }
                       }
-                    }
+                    ]
                   }
                 },
-                "exprs": [
+                "fields": [
                   {
-                    "type": {
-                      "kind": "TYPE_KIND_STRING"
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_TIMESTAMP",
+                        "precision": 9
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
                     },
-                    "literal": {
-                      "stringValue": "ETHUSDT"
-                    }
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
                   },
                   {
-                    "type": {
-                      "kind": "TYPE_KIND_TIMESTAMP",
-                      "precision": 9
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {}
                     },
-                    "fieldRef": {
-                      "index": 1
-                    }
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
                   }
-                ]
+                ],
+                "count": "10"
               }
             }
           ],

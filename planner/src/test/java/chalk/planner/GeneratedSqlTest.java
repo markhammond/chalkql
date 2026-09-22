@@ -51,6 +51,35 @@ class GeneratedSqlTest {
     }
   }
 
+  /**
+   * Every {@code RemoteQuery} a plan holds, with the physical plan text beside them. A query whose
+   * branches are pushed separately — a {@code UNION ALL}, a partitioned scan — has more than one,
+   * and what stayed local is exactly what the plan text says.
+   */
+  private record Pushed(List<RemoteQuery> queries, String planText) {}
+
+  private static Pushed pushed(DialectProfile profile, String sql) {
+    RegisteredCatalog catalog =
+        new CatalogRegistry()
+            .register(TestCatalogs.withRemote("db", TestCatalogs.fullSqlCapabilities().build(), profile));
+    try (PlannerPipeline pipeline = PlannerPipeline.create(catalog, PushdownPolicy.full())) {
+      PlannerPipeline.Result result = pipeline.plan(sql, true);
+      Plan plan =
+          new RelToIr(
+                  new chalk.planner.types.TypeMapper(
+                      result.physical().getCluster().getTypeFactory()),
+                  result.physical().getCluster().getRexBuilder(),
+                  org.apache.calcite.rel.metadata.RelMetadataQuery.instance(),
+                  IrVersionGate.current())
+              .toPlan(result.physical(), result.parameterRowType(), "test", 1L);
+      List<RemoteQuery> found = new ArrayList<>();
+      collect(plan.getRoot(), found);
+      return new Pushed(found, result.physicalPlanText());
+    } catch (Exception failure) {
+      throw new AssertionError("planning failed for: " + sql, failure);
+    }
+  }
+
   private static void collect(Rel rel, List<RemoteQuery> into) {
     if (rel.getKindCase() == Rel.KindCase.REMOTE_QUERY) {
       into.add(rel.getRemoteQuery());
@@ -122,6 +151,60 @@ class GeneratedSqlTest {
 
     assertThat(sqlite).containsIgnoringCase("LIMIT 5").doesNotContainIgnoringCase("FETCH");
     assertThat(duck).containsIgnoringCase("LIMIT 5").doesNotContainIgnoringCase("FETCH");
+  }
+
+  // ------------------------------------------------------------ a copied limit, per branch (D276)
+
+  /**
+   * D276 §3 and §4: a bound above a {@code UNION ALL} is copied into every branch, and a branch that
+   * is one source's subtree carries it away as that source's own {@code ORDER BY … LIMIT}. The copy
+   * carries {@code offset + fetch} and <b>no</b> {@code OFFSET}: each branch must offer its first
+   * {@code o + n} candidates and the global sort applies the offset once, so a source never needs
+   * {@code supports_offset} for a copy.
+   */
+  @Test
+  void a_copied_bound_becomes_each_remote_branchs_own_order_by_and_limit() {
+    Pushed pushed =
+        pushed(
+            TestCatalogs.duckDbProfile(),
+            "SELECT symbol, volume FROM db.bars WHERE volume > 1"
+                + " UNION ALL SELECT symbol, volume FROM db.bars WHERE volume > 2"
+                + " ORDER BY symbol OFFSET 2 ROWS FETCH NEXT 3 ROWS ONLY");
+
+    assertThat(pushed.queries()).hasSize(2);
+    for (RemoteQuery branch : pushed.queries()) {
+      assertThat(branch.getQueryText())
+          .containsIgnoringCase("ORDER BY")
+          .containsIgnoringCase("LIMIT 5")
+          .doesNotContainIgnoringCase("OFFSET");
+    }
+  }
+
+  /**
+   * And where the gate refuses the collation the copy still pays: it stays a local top-N over the
+   * branch rather than being pushed or abandoned, so the global node still picks from at most
+   * {@code branches × (o + n)} rows. SQLite's profile caps a timestamp at millisecond precision, and
+   * {@code bars.ts} is a nanosecond one, so sorting there would not be sorting by the same key.
+   */
+  @Test
+  void a_branch_whose_collation_the_gate_refuses_keeps_its_bound_locally() {
+    Pushed pushed =
+        pushed(
+            TestCatalogs.sqliteProfile(),
+            "SELECT symbol, ts FROM db.bars WHERE volume > 1"
+                + " UNION ALL SELECT symbol, ts FROM db.bars WHERE volume > 2"
+                + " ORDER BY ts LIMIT 5");
+
+    assertThat(pushed.queries()).hasSize(2);
+    for (RemoteQuery branch : pushed.queries()) {
+      assertThat(branch.getQueryText())
+          .doesNotContainIgnoringCase("ORDER BY")
+          .doesNotContainIgnoringCase("LIMIT");
+    }
+
+    // The global bound and one per branch.
+    assertThat(pushed.planText().lines().filter(line -> line.contains("ChalkTopN(")).count())
+        .isEqualTo(3);
   }
 
   // -------------------------------------------------------- any Calcite product is a preset (D249)
