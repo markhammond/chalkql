@@ -7,36 +7,46 @@ using IndexKind = Chalk.Ir.IndexKind;
 namespace Chalk.Sources.Akade;
 
 /// <summary>
-/// Adapts one scalar, direct-member Akade hash/range index to Chalk's host-index contract.
+/// Adapts one compound Akade index — a <c>ValueTuple</c> key of two to four direct members — to
+/// Chalk's host-index contract (D280).
 /// </summary>
 /// <remarks>
-/// Discovery deliberately limits this adapter to key types whose equality/order semantics currently
-/// match Chalk's catalog contract. Computed, compound, nullable and comparer-sensitive keys are not
-/// registered here; they remain available to the host through Akade itself.
+/// <para>
+/// Chalk may bound only a prefix of the key, and a tuple cannot say "anything" for the rest, so the
+/// components a range does not reach take their type's minimum or maximum by the bound's
+/// inclusivity: <c>symbol &gt;= 'A'</c> is <c>('A', min)</c> inclusive, and <c>symbol &gt; 'A'</c> is
+/// <c>('A', max)</c>, because filling with the minimum there would keep every row whose symbol
+/// <em>is</em> 'A'.
+/// </para>
+/// <para>
+/// Tuples are structs and the composed comparer is compiled over their fields, so the ordered
+/// guard's one comparison per row allocates nothing.
+/// </para>
 /// </remarks>
-internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
+internal sealed class AkadeTupleIndex<T, TKey> : IPocoIndex<T>
     where TKey : notnull
 {
     private readonly IndexedSet<T> _set;
     private readonly Func<T, TKey> _key;
+    private readonly AkadeTupleKey<TKey> _shape;
     private readonly string _akadeIndexName;
     private readonly string _sourceId;
     private readonly string _table;
-    private readonly IComparer<TKey> _comparer;
     private readonly long? _distinctKeys;
 
-    public AkadeScalarIndex(
+    public AkadeTupleIndex(
         IndexDescriptor descriptor,
         IndexedSet<T> set,
         Func<T, TKey> key,
+        AkadeTupleKey<TKey> shape,
         string akadeIndexName,
         string sourceId,
-        string table,
-        IComparer<TKey>? comparer = null)
+        string table)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(set);
         ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(shape);
         ArgumentException.ThrowIfNullOrWhiteSpace(akadeIndexName);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
         ArgumentException.ThrowIfNullOrWhiteSpace(table);
@@ -44,10 +54,10 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
         Descriptor = descriptor;
         _set = set;
         _key = key;
+        _shape = shape;
         _akadeIndexName = akadeIndexName;
         _sourceId = sourceId;
         _table = table;
-        _comparer = comparer ?? AkadeKeyOrder.Ascending<TKey>() ?? Comparer<TKey>.Default;
 
         // Read once, here, off the execution path: the index is built once per snapshot.
         _distinctKeys = descriptor.Unique
@@ -74,35 +84,31 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
     }
 
     /// <summary>
-    /// The distinct keys the physical index holds. A unique index has one per row; a hash index is a
-    /// dictionary of keys and knows its own count; a range index does not, and unknown is the only
-    /// honest alternative to an exact answer, because the planner divides by this.
+    /// The distinct keys the physical index holds, and only for the whole key: a prefix of a
+    /// compound key is a question no Akade structure answers in constant time, and the planner
+    /// divides by this number, so a shorter prefix is answered "unknown" rather than estimated.
     /// </summary>
-    public long? DistinctCount(int keyPositions) => keyPositions == 1 ? _distinctKeys : null;
+    public long? DistinctCount(int keyPositions) =>
+        keyPositions == Descriptor.Columns.Count ? _distinctKeys : null;
 
     private IEnumerable<T> Hash(IndexKeyRange range)
     {
         if (!range.LowerInclusive
             || !range.UpperInclusive
-            || range.Lower.Count != 1
-            || range.Upper.Count != 1)
+            || range.Lower.Count != Descriptor.Columns.Count
+            || range.Upper.Count != Descriptor.Columns.Count
+            || !range.Lower.Zip(range.Upper).All(pair => Equals(pair.First, pair.Second)))
         {
             throw NonEqualityHashRange(range);
         }
 
-        if (!TryKey(range.Lower[0], out var lower)
-            || !TryKey(range.Upper[0], out var upper))
+        if (HasNullBound(range))
         {
             // SQL equality against NULL cannot match a non-null indexed member.
             return [];
         }
 
-        if (!EqualityComparer<TKey>.Default.Equals(lower, upper))
-        {
-            throw NonEqualityHashRange(range);
-        }
-
-        return _set.Where(_key, lower, _akadeIndexName);
+        return _set.Where(_key, _shape.Fill(range.Lower, useMaximum: false), _akadeIndexName);
     }
 
     /// <summary>
@@ -113,65 +119,64 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
         new(
             _sourceId,
             _table,
-            $"Akade hash index '{Descriptor.Name}' was asked for non-equality range {range}.");
+            $"Akade compound hash index '{Descriptor.Name}' answers equality on all "
+            + $"{Descriptor.Columns.Count} key column(s) and was asked for {range}.");
 
     private IEnumerable<T> Ordered(IndexKeyRange range)
     {
-        if (range.Lower.Count > 1 || range.Upper.Count > 1)
+        if (range.BoundedColumns > Descriptor.Columns.Count)
         {
             throw new InvalidOperationException(
-                $"Akade scalar index '{Descriptor.Name}' was asked to bound more than one key column.");
+                $"Akade compound index '{Descriptor.Name}' has {Descriptor.Columns.Count} key "
+                + $"column(s) and was asked to bound {range.BoundedColumns}.");
+        }
+
+        if (HasNullBound(range))
+        {
+            return [];
         }
 
         var hasLower = range.Lower.Count != 0;
         var hasUpper = range.Upper.Count != 0;
-        var lower = default(TKey)!;
-        var upper = default(TKey)!;
-
-        if (hasLower && !TryKey(range.Lower[0], out lower))
-        {
-            return [];
-        }
-
-        if (hasUpper && !TryKey(range.Upper[0], out upper))
-        {
-            return [];
-        }
 
         IEnumerable<T> rows;
 
         if (hasLower && hasUpper)
         {
-            if (_comparer.Compare(lower, upper) > 0)
+            var start = LowerKey(range);
+            var end = UpperKey(range);
+
+            // A range whose lower bound is above its upper matches nothing. Chalk says so; Akade
+            // throws, so the empty case is answered here rather than by an exception.
+            if (_shape.Comparer.Compare(start, end) > 0)
             {
                 return [];
             }
 
             rows = _set.Range(
                 _key,
-                lower,
-                upper,
+                start,
+                end,
                 range.LowerInclusive,
                 range.UpperInclusive,
                 _akadeIndexName);
         }
         else if (hasLower)
         {
+            var from = LowerKey(range);
             rows = range.LowerInclusive
-                ? _set.GreaterThanOrEqual(_key, lower, _akadeIndexName)
-                : _set.GreaterThan(_key, lower, _akadeIndexName);
+                ? _set.GreaterThanOrEqual(_key, from, _akadeIndexName)
+                : _set.GreaterThan(_key, from, _akadeIndexName);
         }
         else if (hasUpper)
         {
+            var to = UpperKey(range);
             rows = range.UpperInclusive
-                ? _set.LessThanOrEqual(_key, upper, _akadeIndexName)
-                : _set.LessThan(_key, upper, _akadeIndexName);
+                ? _set.LessThanOrEqual(_key, to, _akadeIndexName)
+                : _set.LessThan(_key, to, _akadeIndexName);
         }
         else
         {
-            // The whole-range ordered scan. Akade documents OrderBy as "the order defined by the
-            // index", which is exactly the contract; the range shapes above have no such promise,
-            // which is what the guard below is for.
             rows = _set.OrderBy(_key, 0, _akadeIndexName);
         }
 
@@ -179,23 +184,9 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
     }
 
     /// <summary>
-    /// Akade's enumeration, yielded as it comes and verified as it goes (D277).
+    /// Akade's enumeration, yielded as it comes and verified as it goes, exactly as the scalar
+    /// adapter does (D277) — with the composed tuple comparer as the order it checks against.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Chalk's ORDERED contract is about the rows a lookup returns, and Akade documents
-    /// <c>OrderBy</c> as the index's order but says nothing about the enumeration order of a range
-    /// query. Sorting the matched rows defensively would cost the whole range before the first row —
-    /// which is the one thing a consumer under a <c>LIMIT 1</c> must not pay — so the adapter
-    /// enumerates lazily and checks instead: one key comparison per row against the previous key,
-    /// the previous key held in a local, and nothing allocated per row.
-    /// </para>
-    /// <para>
-    /// A row that arrives out of order fails immediately and by name rather than being sorted
-    /// around, because a silently reordered lookup is a wrong answer the planner has already relied
-    /// on: the ordered index is why there is no sort above this at all.
-    /// </para>
-    /// </remarks>
     internal IEnumerable<T> InKeyOrder(IEnumerable<T> rows)
     {
         ArgumentNullException.ThrowIfNull(rows);
@@ -206,7 +197,7 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
         foreach (var row in rows)
         {
             var key = _key(row);
-            if (hasPrevious && _comparer.Compare(previous, key) > 0)
+            if (hasPrevious && _shape.Comparer.Compare(previous, key) > 0)
             {
                 throw new SourceContractException(
                     _sourceId,
@@ -222,15 +213,38 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
         }
     }
 
-    private static bool TryKey(object? value, out TKey key)
+    private TKey LowerKey(IndexKeyRange range) =>
+        _shape.Fill(
+            range.Lower,
+            useMaximum: range.Lower.Count < Descriptor.Columns.Count && !range.LowerInclusive);
+
+    private TKey UpperKey(IndexKeyRange range) =>
+        _shape.Fill(
+            range.Upper,
+            useMaximum: range.Upper.Count == Descriptor.Columns.Count || range.UpperInclusive);
+
+    /// <summary>
+    /// Whether any bound is NULL. A range never matches a NULL in a column it bounds, whichever way
+    /// the bound points, so such a range matches nothing at all.
+    /// </summary>
+    private static bool HasNullBound(IndexKeyRange range)
     {
-        if (value is null)
+        for (var i = 0; i < range.Lower.Count; i++)
         {
-            key = default!;
-            return false;
+            if (range.Lower[i] is null)
+            {
+                return true;
+            }
         }
 
-        key = AkadeBound.Coerce<TKey>(value);
-        return true;
+        for (var i = 0; i < range.Upper.Count; i++)
+        {
+            if (range.Upper[i] is null)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

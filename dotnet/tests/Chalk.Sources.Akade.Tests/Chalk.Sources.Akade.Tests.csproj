@@ -7,6 +7,12 @@
     <ItemGroup>
         <ProjectReference Include="../../src/Chalk.Sources.Akade/Chalk.Sources.Akade.csproj" />
         <ProjectReference Include="..\..\samples\Chalk.Sample.AkadeIndexedSet\Chalk.Sample.AkadeIndexedSet.csproj" />
+        <!--
+          For PocoIndexConformance: a host index's descriptor is trusted as declared, so every
+          adapter this package ships is proven against the full scan it replaces rather than
+          inspected.
+        -->
+        <ProjectReference Include="../Chalk.TestKit/Chalk.TestKit.csproj" />
     </ItemGroup>
 
     <ItemGroup>

@@ -122,6 +122,13 @@ public final class IndexMatcher {
       return Result.NONE;
     }
 
+    // A hash index locates a whole key or nothing, so a key column the row does not carry does not
+    // shorten its key — it makes the index unusable here. Truncating would produce a lookup over a
+    // prefix, which is a bucket no hash index has (D280).
+    if (equalityOnly && keyLength != keyFields.size()) {
+      return Result.NONE;
+    }
+
     // Classify every conjunct against the key column it constrains, if any.
     List<@Nullable RexNode> equality = new ArrayList<>(keyLength);
     List<@Nullable RexNode> equalityConjunct = new ArrayList<>(keyLength);

@@ -128,10 +128,22 @@ public sealed class IndexedSetSourcePlanningTests
         Assert.Contains("IndexLookup", plan, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// D280: the whole key of the compound hash index, and nothing left over. Asserted by the
+    /// index's name, because "fewer rows than the table" was also true when the compound index was
+    /// undisclosed and the single-column hash on <c>product_id</c> served this with a residual.
+    /// </summary>
     [Fact]
     public async Task Compound_hash_lookup_requires_full_key()
     {
         await using var fixture = await Fixture.CreateAsync();
+
+        var plan = await fixture.PlanTextAsync(
+            "SELECT id FROM purchases WHERE product_id = ? AND unit_price = ?");
+
+        Assert.Contains("IndexLookup", plan, StringComparison.Ordinal);
+        Assert.Contains(CompoundIndexName, plan, StringComparison.Ordinal);
+        Assert.DoesNotContain("Filter", plan, StringComparison.Ordinal);
 
         var result = await fixture.CountAsync(
             "SELECT id FROM purchases WHERE product_id = ? AND unit_price = ?",
@@ -140,6 +152,26 @@ public sealed class IndexedSetSourcePlanningTests
         Assert.Equal(1, result.Rows);
         Assert.True(result.Scanned < AkadeReadmeExamples.PlanningPurchases().Length);
     }
+
+    /// <summary>
+    /// And half the key is no key at all: a hash bucket is named by the whole key, so the planner
+    /// leaves <c>product_id = ?</c> alone to the single-column hash index beside it.
+    /// </summary>
+    [Fact]
+    public async Task A_compound_hash_index_does_not_serve_a_prefix()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        var plan = await fixture.PlanTextAsync("SELECT id FROM purchases WHERE product_id = ?");
+
+        Assert.DoesNotContain(CompoundIndexName, plan, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Akade files an index under the source text of its accessor, so this is the name the catalog
+    /// publishes for the compound index the fixture declares.
+    /// </summary>
+    private const string CompoundIndexName = "PurchaseKeys.ProductAndUnitPrice";
 
     /*
      * Keep the computed-expression case separate from the base-column cases. It should be enabled
@@ -183,6 +215,12 @@ public sealed class IndexedSetSourcePlanningTests
                 .From("purchases", set)
                 .TableName("purchases")
                 .NamingPolicy(PocoNamingPolicy.SnakeCase)
+                // The compound key is a method, so its recorded text names no columns; the host
+                // states them once and the index becomes an access path (D280).
+                .CompoundIndex(
+                    AkadeReadmeExamples.PurchaseKeys.ProductAndUnitPrice,
+                    x => x.ProductId,
+                    x => x.UnitPrice)
                 .Build();
 
             var sidecar = await PlannerProcess.StartAsync();

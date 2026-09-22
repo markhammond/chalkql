@@ -15,8 +15,11 @@ namespace Chalk.Sources.Akade;
 /// that Akade does not otherwise expose.
 ///
 /// Only indexes that Chalk can describe truthfully with today's column-ordinal IndexDescriptor are
-/// returned by discovery. In particular, computed, compound, multi-key and specialised Akade indexes
-/// remain physical implementation details until Chalk's catalog can represent their key semantics.
+/// returned by discovery: a direct-member scalar key, and a compound key of two to four direct
+/// members (D280) — written as a tuple lambda, whose recorded source text names the members, or as a
+/// method whose members the host states with CompoundIndex. Computed, multi-key and specialised
+/// Akade indexes remain physical implementation details until Chalk's catalog can represent their
+/// key semantics.
 /// </summary>
 internal static class AkadeIndexDiscovery
 {
@@ -72,7 +75,7 @@ internal static class AkadeIndexDiscovery
                 index.Name,
                 index.Kind,
                 index.Accessor,
-                index.Member,
+                index.Members,
                 options.SourceId,
                 options.TableName);
 
@@ -138,8 +141,8 @@ internal static class AkadeIndexDiscovery
                 continue;
             }
 
-            var member = DirectMember<T>(name, keyType);
-            if (member is null || !Supports(kind.Value, keyType, member))
+            var members = Members<T>(name, keyType, accessor, options);
+            if (members is null || !Supports(kind.Value, keyType, members))
             {
                 continue;
             }
@@ -149,15 +152,38 @@ internal static class AkadeIndexDiscovery
                 kind.Value,
                 keyType,
                 accessor,
-                member));
+                members));
         }
 
         result.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
         return result;
     }
 
-    private static MemberInfo? DirectMember<T>(string indexName, Type keyType)
+    /// <summary>
+    /// The row members this index's key is made of, in key order, or null when Chalk cannot say what
+    /// they are.
+    /// </summary>
+    /// <remarks>
+    /// Two spellings (D280). A lambda accessor names its own members in the text Akade filed the
+    /// index under — <c>x =&gt; x.Amount</c> for a scalar key, <c>x =&gt; (x.A, x.B)</c> for a
+    /// compound one — and is parsed from it. A method accessor names none, so the host states them
+    /// with <c>CompoundIndex</c>, keyed by the accessor's method identity exactly as a function index
+    /// is bound; a method with no such declaration stays undisclosed, as it was before.
+    /// </remarks>
+    private static MemberInfo[]? Members<T>(
+        string indexName,
+        Type keyType,
+        Delegate accessor,
+        AkadeSourceOptions<T> options)
     {
+        foreach (var binding in options.CompoundIndexes)
+        {
+            if (binding.Method == accessor.Method)
+            {
+                return Resolve<T>(binding.Members);
+            }
+        }
+
         var arrow = indexName.IndexOf("=>", StringComparison.Ordinal);
         if (arrow <= 0)
         {
@@ -171,32 +197,84 @@ internal static class AkadeIndexDiscovery
             return null;
         }
 
+        var components = body.StartsWith('(') && body.EndsWith(')')
+            ? Split(body[1..^1])
+            : [body];
+
+        if (components is null || components.Length == 0)
+        {
+            return null;
+        }
+
         var prefix = parameter + ".";
-        if (!body.StartsWith(prefix, StringComparison.Ordinal))
+        var names = new string[components.Length];
+        for (var i = 0; i < components.Length; i++)
         {
-            return null;
+            var component = components[i].Trim();
+            if (!component.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var memberName = component[prefix.Length..];
+            if (!Identifier(memberName))
+            {
+                return null;
+            }
+
+            names[i] = memberName;
         }
 
-        var memberName = body[prefix.Length..];
-        if (!Identifier(memberName))
+        return Resolve<T>(names);
+    }
+
+    /// <summary>
+    /// A tuple body's components, or null when it nests anything — a call, an index or a tuple of
+    /// tuples is not a key of direct members, whatever else it may be.
+    /// </summary>
+    private static string[]? Split(string body)
+    {
+        var components = new List<string>();
+        var start = 0;
+
+        for (var i = 0; i < body.Length; i++)
         {
-            return null;
+            switch (body[i])
+            {
+                case ',':
+                    components.Add(body[start..i]);
+                    start = i + 1;
+                    break;
+                case '(' or ')' or '[' or ']' or '"' or '\'':
+                    return null;
+                default:
+                    break;
+            }
         }
 
+        components.Add(body[start..]);
+        return [.. components];
+    }
+
+    private static MemberInfo[]? Resolve<T>(IReadOnlyList<string> names)
+    {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public;
-        MemberInfo? member = typeof(T).GetProperty(memberName, flags)
-            ?? (MemberInfo?)typeof(T).GetField(memberName, flags);
 
-        var memberType = member switch
+        var members = new MemberInfo[names.Count];
+        for (var i = 0; i < names.Count; i++)
         {
-            PropertyInfo property => property.PropertyType,
-            FieldInfo field => field.FieldType,
-            _ => null,
-        };
+            MemberInfo? member = typeof(T).GetProperty(names[i], flags)
+                ?? (MemberInfo?)typeof(T).GetField(names[i], flags);
 
-        // This also rejects Akade's multi-key overloads: their physical lookup key is one element of
-        // the returned sequence, whereas the accessor itself returns IEnumerable<TKey>.
-        return memberType == keyType ? member : null;
+            if (member is null)
+            {
+                return null;
+            }
+
+            members[i] = member;
+        }
+
+        return members;
     }
 
     private static bool Identifier(string value)
@@ -217,46 +295,62 @@ internal static class AkadeIndexDiscovery
         return true;
     }
 
+    /// <summary>
+    /// Whether this key's type — and, for a compound key, every component of it — has the semantics
+    /// the kind promises Chalk.
+    /// </summary>
+    /// <remarks>
+    /// Nullable keys need explicit SQL NULL semantics and stay excluded; a compound key is admitted
+    /// component by component, so a tuple is exactly as disclosable as its least disclosable part.
+    /// </remarks>
     private static bool Supports(
         AkadePhysicalIndexKind kind,
         Type keyType,
-        MemberInfo member)
+        MemberInfo[] members)
     {
-        // Nullable keys need explicit SQL NULL semantics; float/double need Chalk's NaN ordering;
-        // ordered strings need an explicit comparer contract. Do not advertise those yet.
-        if (Nullable.GetUnderlyingType(keyType) is not null || IsNullableReference(member))
+        foreach (var member in members)
+        {
+            if (Nullable.GetUnderlyingType(MemberType(member)) is not null || IsNullableReference(member))
+            {
+                return false;
+            }
+        }
+
+        if (members.Length == 1)
+        {
+            return MemberType(members[0]) == keyType && Admits(kind, keyType);
+        }
+
+        // A compound key's CLR type has to be the tuple of its members' types, in order. This also
+        // rejects Akade's multi-key overloads, whose accessor returns IEnumerable<TKey>.
+        var components = AkadeTupleKey.ComponentTypes(keyType);
+        if (components is null || components.Length != members.Length)
         {
             return false;
         }
 
-        var exactEquality = keyType == typeof(bool)
-            || keyType == typeof(byte)
-            || keyType == typeof(sbyte)
-            || keyType == typeof(short)
-            || keyType == typeof(ushort)
-            || keyType == typeof(int)
-            || keyType == typeof(uint)
-            || keyType == typeof(long)
-            || keyType == typeof(ulong)
-            || keyType == typeof(decimal)
-            || keyType == typeof(Guid)
-            || keyType == typeof(string);
-
-        if (kind is AkadePhysicalIndexKind.Hash or AkadePhysicalIndexKind.UniqueHash)
+        for (var i = 0; i < members.Length; i++)
         {
-            return exactEquality;
+            if (components[i] != MemberType(members[i]) || !Admits(kind, components[i]))
+            {
+                return false;
+            }
         }
 
-        return keyType == typeof(byte)
-            || keyType == typeof(sbyte)
-            || keyType == typeof(short)
-            || keyType == typeof(ushort)
-            || keyType == typeof(int)
-            || keyType == typeof(uint)
-            || keyType == typeof(long)
-            || keyType == typeof(ulong)
-            || keyType == typeof(decimal);
+        return true;
     }
+
+    private static bool Admits(AkadePhysicalIndexKind kind, Type type) =>
+        kind is AkadePhysicalIndexKind.Hash or AkadePhysicalIndexKind.UniqueHash
+            ? AkadeKeyOrder.IsHashKeyType(type)
+            : AkadeKeyOrder.IsOrderedKeyType(type);
+
+    private static Type MemberType(MemberInfo member) => member switch
+    {
+        PropertyInfo property => property.PropertyType,
+        FieldInfo field => field.FieldType,
+        _ => typeof(void),
+    };
 
     private static bool IsNullableReference(MemberInfo member)
     {
@@ -296,7 +390,7 @@ internal static class AkadeIndexDiscovery
                 index.Kind,
                 index.KeyType,
                 index.Accessor.Method,
-                index.Member.Name);
+                string.Join("+", index.Members.Select(m => m.Name)));
         }
 
         return shapes;
@@ -399,7 +493,7 @@ internal sealed record AkadeDiscoveredIndex<T>(
     AkadePhysicalIndexKind Kind,
     Type KeyType,
     Delegate Accessor,
-    MemberInfo Member);
+    MemberInfo[] Members);
 
 internal sealed record AkadeIndexShape(
     string Name,
@@ -484,9 +578,10 @@ internal interface IAkadeIndexRegistration<T>
 }
 
 /// <summary>
-/// One direct scalar Akade index registered through PocoTableBuilder's late-bound host-index API.
-/// The builder resolves the member selector to its final column ordinal; the factory closes over the
-/// exact IndexedSet captured for the enclosing Akade snapshot.
+/// One Akade index registered through PocoTableBuilder's late-bound host-index API: a direct scalar
+/// key, or a compound key of two to four direct members (D280). The builder resolves the member
+/// selectors to their final column ordinals; the factory closes over the exact IndexedSet captured
+/// for the enclosing Akade snapshot.
 /// </summary>
 internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<T>
     where TKey : notnull
@@ -494,7 +589,7 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
     private readonly string _name;
     private readonly AkadePhysicalIndexKind _kind;
     private readonly Func<T, TKey> _key;
-    private readonly MemberInfo _member;
+    private readonly MemberInfo[] _members;
     private readonly string _sourceId;
     private readonly string _table;
 
@@ -502,14 +597,14 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
         string name,
         AkadePhysicalIndexKind kind,
         Delegate key,
-        MemberInfo member,
+        MemberInfo[] members,
         string sourceId,
         string table)
     {
         _name = name;
         _kind = kind;
         _key = (Func<T, TKey>)key;
-        _member = member;
+        _members = members;
         _sourceId = sourceId;
         _table = table;
     }
@@ -525,24 +620,65 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
 
         var unique = _kind == AkadePhysicalIndexKind.UniqueHash;
         IReadOnlyList<SortDirection> directions = kind == IndexKind.Ordered
-            ? [SortDirection.AscNullsLast]
+            ? [.. _members.Select(_ => SortDirection.AscNullsLast)]
             : Array.Empty<SortDirection>();
 
-        var member = MemberSelector(_member);
+        var selectors = Array.ConvertAll(_members, MemberSelector);
+
+        if (_members.Length == 1)
+        {
+            table.Index(
+                _name,
+                kind,
+                unique,
+                directions,
+                (descriptor, _) => new AkadeScalarIndex<T, TKey>(
+                    descriptor,
+                    set,
+                    _key,
+                    _name,
+                    _sourceId,
+                    _table),
+                selectors);
+            return;
+        }
+
+        // Compiled once, here, and shared by every snapshot's index: the compiled fill and the
+        // composed comparer depend on the key type alone.
+        var shape = AkadeTupleKey<TKey>.Create(
+            [.. _members.Select(m => Order(m))]);
 
         table.Index(
             _name,
             kind,
             unique,
             directions,
-            (descriptor, _) => new AkadeScalarIndex<T, TKey>(
+            (descriptor, _) => new AkadeTupleIndex<T, TKey>(
                 descriptor,
                 set,
                 _key,
+                shape,
                 _name,
                 _sourceId,
                 _table),
-            member);
+            selectors);
+    }
+
+    /// <summary>The Chalk order of one key component, which discovery has already admitted.</summary>
+    private static object Order(MemberInfo member)
+    {
+        var type = member switch
+        {
+            PropertyInfo property => property.PropertyType,
+            FieldInfo field => field.FieldType,
+            _ => throw new NotSupportedException(
+                $"Akade index member '{member.Name}' is neither a property nor a field."),
+        };
+
+        // A component Chalk has no order for — GUID — is admitted for a HASH key, which never asks
+        // for one; the CLR's own is what the composed comparer then carries, and nothing reads it.
+        return AkadeKeyOrder.Ascending(type)
+            ?? typeof(Comparer<>).MakeGenericType(type).GetProperty("Default")!.GetValue(null)!;
     }
 
     private static Expression<Func<T, object?>> MemberSelector(MemberInfo member)

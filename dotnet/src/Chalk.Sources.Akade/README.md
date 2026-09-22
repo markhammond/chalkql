@@ -148,9 +148,9 @@ Supported Akade index topology is part of the published table shape.
 - `Refresh(table)` must preserve it.
 - `Replace` / `Append` must preserve it.
 
-The reflection adapter fingerprints supported indexes by Akade index name, physical kind, key type and
-accessor method identity. A successor rebuilt with different supported topology is rejected rather than
-silently changing the planner's access paths.
+The reflection adapter fingerprints supported indexes by Akade index name, physical kind, key type,
+accessor method identity and key members. A successor rebuilt with different supported topology is
+rejected rather than silently changing the planner's access paths.
 
 Unsupported Akade index families remain invisible to Chalk until there is a matching planner/runtime
 access-path representation.
@@ -177,23 +177,40 @@ while live host mutation deliberately bypasses those snapshot guarantees.
 
 ## Current catalogue boundary
 
-Direct scalar member indexes are now registered through `PocoTableBuilder<T>`'s late-bound host-index
-API, so the POCO builder resolves the member to its final catalog column ordinal after naming rules
-have been applied. The per-snapshot factory closes over the exact `IndexedSet<T>` used by that Akade
-snapshot; scan rows and index lookups therefore address the same physical set.
+Member indexes — one member, or a tuple of two to four — are registered through
+`PocoTableBuilder<T>`'s late-bound host-index API, so the POCO builder resolves each member to its
+final catalog column ordinal after naming rules have been applied. The per-snapshot factory closes
+over the exact `IndexedSet<T>` used by that Akade snapshot; scan rows and index lookups therefore
+address the same physical set.
 
-Expression-valued Akade keys remain deliberately undisclosed. The current `IndexDescriptor` still
+A compound key is written in one of two ways, and Chalk reads both:
+
+```csharp
+.WithIndex(x => (x.ProductId, x.UnitPrice))     // the members are in the text Akade files it under
+.WithIndex(PurchaseKeys.ProductAndUnitPrice)    // the text names no members, so the host says
+```
+
+For the second, the host names them once, against the same accessor:
+
+```csharp
+AkadeSource.From("purchases", set)
+    .CompoundIndex(PurchaseKeys.ProductAndUnitPrice, x => x.ProductId, x => x.UnitPrice)
+```
+
+The accessor must return a `ValueTuple` of exactly those members' types, in that order; anything else
+is refused at registration, by name, rather than becoming a key claim the planner would act on.
+
+Expression-valued Akade keys remain deliberately undisclosed. The current `IndexDescriptor`
 represents keys as base-table `Columns`, so these cannot yet be described truthfully:
 
 ```csharp
-.WithIndex(x => (x.Start, x.End))
 .WithIndex(x => x.End - x.Start)
 .WithIndex(ComputedKey.SomeStaticMethod)
 ```
 
 A future catalogue change can make index keys expression-valued using Chalk's scalar IR. Until then,
-computed, compound and multi-key Akade structures remain usable through Akade itself but are not
-advertised to Calcite.
+computed and multi-key Akade structures remain usable through Akade itself but are not advertised to
+Calcite.
 
 
 ## CHALK002: ConcurrentIndexedSet
@@ -224,16 +241,26 @@ The adapter now uses `PocoTableBuilder<T>`'s late-bound host-index registration 
 supplies the member selector and physical index; `PocoTableBuilder` resolves that selector to the
 final POCO column ordinal after naming/ignore rules have been applied.
 
-The first supported slice is deliberately conservative:
+What is supported:
 
-- direct scalar unique/non-unique Akade indexes become Chalk `HASH` indexes;
-- direct scalar Akade range indexes become Chalk `ORDERED` indexes;
+- unique and non-unique Akade indexes become Chalk `HASH` indexes;
+- Akade range indexes become Chalk `ORDERED` indexes;
 - unique Akade indexes carry `Unique = true`;
-- computed, compound, multi-key, nullable, floating-point and specialised string/spatial/vector
-  access paths remain undisclosed until Chalk can represent and verify their semantics faithfully.
+- the key is one direct member, or a tuple of two to four of them, in tuple order;
+- a hash index reports its own distinct key count, which the planner would otherwise guess;
+- computed, multi-key, nullable and specialised string/spatial/vector access paths remain
+  undisclosed until Chalk can represent and verify their semantics faithfully.
 
 For the README `Purchase` example this means the planner sees `Id`, `ProductId`, `Amount` and
-`UnitPrice`; `PurchaseKeys.Total` and `PurchaseKeys.ProductAndUnitPrice` remain Akade-native only.
+`UnitPrice`, and `PurchaseKeys.ProductAndUnitPrice` as soon as the host names its two members;
+`PurchaseKeys.Total` is a computed key and remains Akade-native only.
+
+A compound key's bounds become a tuple. Chalk may bound only a prefix of the key, and a tuple cannot
+say "anything" for the rest, so the components a range does not reach take their type's minimum or
+maximum according to the bound's inclusivity: `product_id >= 4` is `(4, min)`, and `product_id > 4`
+is `(4, max)`, because filling with the minimum there would keep every row whose `product_id` *is*
+4. Tuples are structs and the key order is compiled over their fields, so the check below still
+costs one comparison and no allocation per row.
 
 Registration closes each `IPocoIndex<T>` factory over the exact `IndexedSet<T>` used by the enclosing
 Akade source snapshot. The concurrent source captures its inner `IndexedSet<T>` once and gives that

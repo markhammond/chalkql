@@ -16,6 +16,7 @@ internal sealed class AkadeSourceOptions<T>
     public required int DecimalScale { get; init; }
     public required FunctionDescriptor[] Functions { get; init; }
     public required AkadeFunctionIndexBinding<T>[] FunctionIndexes { get; init; }
+    public required AkadeCompoundIndexBinding<T>[] CompoundIndexes { get; init; }
     public Action<PocoTableBuilder<T>>? ConfigureTable { get; init; }
     public CostProfile CostProfile { get; init; } = CostProfile.Inherit;
     public bool TrustSourceRowSecurity { get; init; }
@@ -29,6 +30,7 @@ public abstract class AkadeSourceBuilder<T, TSelf>
 {
     private readonly List<FunctionDescriptor> _functions = [];
     private readonly List<AkadeFunctionIndexBinding<T>> _functionIndexes = [];
+    private readonly List<AkadeCompoundIndexBinding<T>> _compoundIndexes = [];
 
     private string _schemaName = "main";
     private string _tableName = "data";
@@ -137,6 +139,79 @@ public abstract class AkadeSourceBuilder<T, TSelf>
         return Self;
     }
 
+    /// <summary>
+    /// Names the row members a compound Akade key is made of, in tuple order (D280). Akade files an
+    /// index under the source text of its accessor, so a lambda tuple key — <c>x =&gt; (x.A, x.B)</c>
+    /// — names its own columns and is discovered without this; a method accessor
+    /// (<c>PurchaseKeys.ProductAndUnitPrice</c>) names none, so the host states them here.
+    /// </summary>
+    /// <param name="key">
+    /// The accessor the Akade index was registered with, by method identity — the same method group,
+    /// not an equivalent lambda.
+    /// </param>
+    /// <param name="components">
+    /// One direct row-member selector per tuple component, in tuple order.
+    /// </param>
+    /// <exception cref="ArgumentException">
+    /// The accessor does not return a <c>ValueTuple</c> of exactly these components' types, in this
+    /// order. The index would then describe a key the rows do not have, which is a claim the planner
+    /// would act on.
+    /// </exception>
+    public TSelf CompoundIndex<TKey>(
+        Func<T, TKey> key,
+        params Expression<Func<T, object?>>[] components)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(components);
+
+        var members = components.Select(AkadeMemberSelector.Member).ToArray();
+        var componentTypes = AkadeTupleKey.ComponentTypes(typeof(TKey));
+
+        if (componentTypes is null)
+        {
+            throw new ArgumentException(
+                $"The Akade compound index '{Describe(key)}' returns "
+                + $"'{typeof(TKey).FullName ?? typeof(TKey).Name}', which is not a ValueTuple of two "
+                + "to four components. A compound key is a tuple of the row members it is made of.",
+                nameof(key));
+        }
+
+        if (componentTypes.Length != members.Length)
+        {
+            throw new ArgumentException(
+                $"The Akade compound index '{Describe(key)}' returns a tuple of "
+                + $"{componentTypes.Length} component(s) but {members.Length} member(s) were given "
+                + $"({string.Join(", ", members.Select(m => m.Name))}). Give one member per "
+                + "component, in tuple order.",
+                nameof(components));
+        }
+
+        for (var i = 0; i < members.Length; i++)
+        {
+            var memberType = AkadeMemberSelector.MemberType(members[i]);
+            if (memberType != componentTypes[i])
+            {
+                throw new ArgumentException(
+                    $"The Akade compound index '{Describe(key)}' has "
+                    + $"'{componentTypes[i].Name}' at component {i + 1}, but the member given there, "
+                    + $"'{members[i].Name}', is a '{memberType.Name}'. A compound key's components "
+                    + "must be the members' own types, in tuple order.",
+                    nameof(components));
+            }
+        }
+
+        _compoundIndexes.Add(new AkadeCompoundIndexBinding<T>(
+            key.Method,
+            [.. members.Select(m => m.Name)]));
+
+        return Self;
+    }
+
+    private static string Describe<TKey>(Func<T, TKey> key) =>
+        key.Method.DeclaringType is { } declaring
+            ? declaring.Name + "." + key.Method.Name
+            : key.Method.Name;
+
     internal AkadeSourceOptions<T> Freeze() => new()
     {
         SourceId = SourceId,
@@ -146,6 +221,7 @@ public abstract class AkadeSourceBuilder<T, TSelf>
         DecimalScale = _decimalScale,
         Functions = [.. _functions],
         FunctionIndexes = [.. _functionIndexes],
+        CompoundIndexes = [.. _compoundIndexes],
         ConfigureTable = _configureTable,
         CostProfile = _costProfile,
         TrustSourceRowSecurity = _trustSourceRowSecurity,
@@ -274,7 +350,10 @@ public sealed class ConcurrentIndexedSetSourceBuilder<T>
 
 internal static class AkadeMemberSelector
 {
-    public static string MemberName<T>(Expression<Func<T, object?>> selector)
+    public static string MemberName<T>(Expression<Func<T, object?>> selector) =>
+        Member(selector).Name;
+
+    public static System.Reflection.MemberInfo Member<T>(Expression<Func<T, object?>> selector)
     {
         ArgumentNullException.ThrowIfNull(selector);
 
@@ -287,15 +366,32 @@ internal static class AkadeMemberSelector
         if (body is not MemberExpression member || member.Expression is not ParameterExpression)
         {
             throw new ArgumentException(
-                "An Akade function-index argument must be a direct row member selector, e.g. x => x.Start.",
+                "An Akade index member must be a direct row member selector, e.g. x => x.Start.",
                 nameof(selector));
         }
 
-        return member.Member.Name;
+        return member.Member;
     }
+
+    public static Type MemberType(System.Reflection.MemberInfo member) => member switch
+    {
+        System.Reflection.PropertyInfo property => property.PropertyType,
+        System.Reflection.FieldInfo field => field.FieldType,
+        _ => throw new ArgumentException(
+            $"An Akade index member must be a property or a field; '{member.Name}' is neither.",
+            nameof(member)),
+    };
 }
 
 internal sealed record AkadeFunctionIndexBinding<T>(
     System.Reflection.MethodInfo Method,
     string Function,
+    string[] Members);
+
+/// <summary>
+/// The row members a compound Akade key is made of, in tuple order, bound to the accessor's method
+/// identity — the same way a function index is bound (D280).
+/// </summary>
+internal sealed record AkadeCompoundIndexBinding<T>(
+    System.Reflection.MethodInfo Method,
     string[] Members);
