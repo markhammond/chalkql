@@ -52,6 +52,23 @@ internal static class DifferentialRunner
             ["symbols"] = Array.Empty<Utf8String>(),
         },
 
+        // The parameterised bounds (D285). The values are ordinary counts: what is being proved is
+        // that a bound the planner never saw is read when the execution starts and honoured exactly,
+        // and that the oracle and the engine agree about which rows that leaves.
+        "47_limit_param" => new Dictionary<string, object?>
+        {
+            ["p0"] = 5,
+        },
+        "48_limit_offset_params" => new Dictionary<string, object?>
+        {
+            ["p0"] = 5,
+            ["p1"] = 3,
+        },
+        "49_topn_param" => new Dictionary<string, object?>
+        {
+            ["p0"] = 5,
+        },
+
         // The M4 pushdown corpus (§5). A date inside the generated lineitem's range, so the query
         // returns rows at every level.
         "12_parameters" => new Dictionary<string, object?>

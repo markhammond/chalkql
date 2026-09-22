@@ -531,6 +531,72 @@ public static class IrBuilder
         Collations = { input.Collations },
     };
 
+    /// <summary>
+    /// A <c>Fetch</c> whose bounds are parameters rather than numbers (D285). A null ordinal leaves
+    /// that bound as the literal beside it, so one call covers every mixture.
+    /// </summary>
+    public static Rel FetchParam(
+        Rel input, int? offsetParam, int? countParam, long offset = 0, long? count = null)
+    {
+        var fetch = new Fetch { Input = input };
+        if (offsetParam is { } skip)
+        {
+            fetch.OffsetParam = new DynamicParam { Index = (uint)skip };
+        }
+        else
+        {
+            fetch.Offset = offset;
+        }
+
+        if (countParam is { } bound)
+        {
+            fetch.CountParam = new DynamicParam { Index = (uint)bound };
+        }
+        else if (count is not null)
+        {
+            fetch.Count = count.Value;
+        }
+
+        return new Rel
+        {
+            RowType = input.RowType,
+            EstRowCount = input.EstRowCount,
+            Fetch = fetch,
+            Collations = { input.Collations },
+        };
+    }
+
+    /// <summary>The same for a <c>TopN</c>.</summary>
+    public static Rel TopNParam(
+        Rel input, int? offsetParam, int? countParam, long offset, long count, params SortField[] fields)
+    {
+        var topN = new TopN { Input = input };
+        if (offsetParam is { } skip)
+        {
+            topN.OffsetParam = new DynamicParam { Index = (uint)skip };
+        }
+        else
+        {
+            topN.Offset = offset;
+        }
+
+        if (countParam is { } bound)
+        {
+            topN.CountParam = new DynamicParam { Index = (uint)bound };
+        }
+        else
+        {
+            topN.Count = count;
+        }
+
+        topN.Fields.AddRange(fields);
+        var collation = new Collation();
+        collation.Fields.AddRange(fields);
+        var rel = new Rel { RowType = input.RowType, EstRowCount = count, TopN = topN };
+        rel.Collations.Add(collation);
+        return rel;
+    }
+
     public static Rel TopN(Rel input, long offset, long count, params SortField[] fields)
     {
         var topN = new TopN { Input = input, Offset = offset, Count = count };

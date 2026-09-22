@@ -216,6 +216,29 @@ message PlanRequest {
   // holds is planned with the newest the planner holds, and one naming a version it has never seen
   // is planned with the newest too — there is nothing to fail about.
   string statistics_version = 15;
+  // What the caller expects this statement's parameters to be worth, for planning only.
+  // A hint informs an estimate and never a truth: the tree, the parameters and the rows are what
+  // they would have been without it, and the values bound at execution need not match. Sparse — a
+  // parameter with no hint is estimated as it always was — and additive, so a request that carries
+  // none sends no bytes at all.
+  repeated ParameterHint parameter_hints = 16;
+}
+
+// One parameter's expected value, for estimation.
+//
+// The ordinal is the parameter's own index, as `Plan.parameter_types` numbers it. The value is
+// checked against the parameter's inferred type by family once the statement has validated: a hint
+// of another family is refused naming the parameter, its type and the hint's, and never its value.
+message ParameterHint {
+  uint32 ordinal = 1;
+  oneof value {
+    // The expected value, typed by its own value case. Coerced to the column's exact type where an
+    // estimate needs it, as a literal bound is.
+    Literal literal = 2;
+    // The caller expects SQL NULL here. Always true when set; a comparison against it selects no
+    // row, which is what makes it different from saying nothing.
+    bool is_null = 3;
+  }
 }
 
 // How a statement's literals are turned into pseudonyms. The salt is the

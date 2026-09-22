@@ -1,0 +1,110 @@
+{
+  "irVersion": 1,
+  "planDigest": "3471660997139977168",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "ts",
+        "type": {
+          "kind": "TYPE_KIND_TIMESTAMP",
+          "precision": 9
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "ts",
+          "type": {
+            "kind": "TYPE_KIND_TIMESTAMP",
+            "precision": 9
+          }
+        }
+      ]
+    },
+    "estRowCount": 100800,
+    "fetch": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              }
+            }
+          ]
+        },
+        "estRowCount": 100800,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "read": {
+          "table": {
+            "sourceId": "mem",
+            "schema": "main",
+            "table": "bars"
+          },
+          "projection": [
+            0,
+            1
+          ]
+        }
+      },
+      "countParam": {}
+    }
+  },
+  "parameterTypes": [
+    {
+      "kind": "TYPE_KIND_DECIMAL",
+      "precision": 38
+    }
+  ]
+}

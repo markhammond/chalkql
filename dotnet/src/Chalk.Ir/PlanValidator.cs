@@ -322,6 +322,8 @@ public static class PlanValidator
                         throw Invalid("I-IR-5", kindPath, $"TopN.offset is {rel.TopN.Offset}; it must be >= 0");
                     }
 
+                    OneBound(rel.TopN.CountParam is not null, rel.TopN.Count != 0, kindPath, "TopN", "count");
+                    OneBound(rel.TopN.OffsetParam is not null, rel.TopN.Offset != 0, kindPath, "TopN", "offset");
                     RequireSameRow(output, input, kindPath, "TopN output equals its input");
                     break;
                 }
@@ -339,6 +341,8 @@ public static class PlanValidator
                         throw Invalid("I-IR-5", kindPath, $"Fetch.count is {rel.Fetch.Count}; it must be >= 0 when set");
                     }
 
+                    OneBound(rel.Fetch.CountParam is not null, rel.Fetch.HasCount, kindPath, "Fetch", "count");
+                    OneBound(rel.Fetch.OffsetParam is not null, rel.Fetch.Offset != 0, kindPath, "Fetch", "offset");
                     RequireSameRow(output, input, kindPath, "Fetch output equals its input");
                     break;
                 }
@@ -2178,6 +2182,24 @@ public static class PlanValidator
                     "I-IR-4",
                     path,
                     $"{what}, but the output row {IrTypes.Describe(output)} differs from the input row {IrTypes.Describe(input)}");
+            }
+        }
+
+        /// <summary>
+        /// A bound is written one way or the other and never both: the literal the planner knew, or
+        /// the parameter the executor reads when the execution starts (D285). A node carrying both
+        /// is terminal — there is no rule that says which one wins — so it is refused here rather
+        /// than resolved by an executor's private preference.
+        /// </summary>
+        private static void OneBound(bool hasParam, bool hasLiteral, string path, string node, string field)
+        {
+            if (hasParam && hasLiteral)
+            {
+                throw Invalid(
+                    "I-IR-5",
+                    path,
+                    $"{node}.{field} and {node}.{field}_param are both set; a bound is the literal "
+                    + "or the parameter and never both");
             }
         }
 

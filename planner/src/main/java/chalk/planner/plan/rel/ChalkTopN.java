@@ -12,7 +12,6 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.SingleRel;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
-import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -50,12 +49,36 @@ public final class ChalkTopN extends SingleRel implements ChalkRel {
     return collation;
   }
 
-  public long offsetValue() {
-    return offset == null ? 0L : RexLiteral.longValue(offset);
+  public @Nullable RexNode offset() {
+    return offset;
   }
 
-  public long fetchValue() {
-    return RexLiteral.longValue(fetch);
+  public RexNode fetch() {
+    return fetch;
+  }
+
+  /**
+   * How many rows this top-N skips: the literal, the hint for a parameterised one, or null for a
+   * parameterised offset nothing hinted (D285). No offset at all is zero: "skip none" is known.
+   */
+  public @Nullable Long offsetValue() {
+    // Boxed on both arms: see ChalkLimit.offsetValue.
+    return offset == null ? Long.valueOf(0L) : ChalkLimit.boundValue(offset, getCluster());
+  }
+
+  /** The bound: the literal, the hint, or null for a parameterised bound nothing hinted. */
+  public @Nullable Long fetchValue() {
+    return ChalkLimit.boundValue(fetch, getCluster());
+  }
+
+  /**
+   * How many rows the heap holds, or null when the planner cannot see: {@code offset + fetch}, and
+   * null for a parameterised bound nothing hinted (design 49 §4).
+   */
+  private @Nullable Double wanted() {
+    Long skip = offsetValue();
+    Long count = fetchValue();
+    return skip == null || count == null ? null : (double) skip + count;
   }
 
   @Override
@@ -74,9 +97,15 @@ public final class ChalkTopN extends SingleRel implements ChalkRel {
         .item("fetch", fetch);
   }
 
+  /**
+   * {@code min(input rows, offset + fetch)}, and the input's rows for a parameterised bound nothing
+   * hinted — which is what a top-N whose heap has no known size produces (D285).
+   */
   @Override
   public double estimateRowCount(RelMetadataQuery mq) {
-    return Math.min(mq.getRowCount(getInput()), offsetValue() + fetchValue());
+    double inputRows = mq.getRowCount(getInput());
+    Double wanted = wanted();
+    return wanted == null ? inputRows : Math.min(inputRows, wanted);
   }
 
   /**
@@ -95,7 +124,11 @@ public final class ChalkTopN extends SingleRel implements ChalkRel {
   @Override
   public @Nullable RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {
     double inputRows = mq.getRowCount(getInput());
-    double heap = offsetValue() + fetchValue() + 1;
+    Double wanted = wanted();
+    // A parameterised bound nothing hinted is a heap of no known size, so it is priced as a pass
+    // over everything — what a heap that never fills actually does (D285, design 49 §4). A hinted
+    // one is priced for the hint, which is the whole of what a hint buys a top-N.
+    double heap = (wanted == null ? inputRows : wanted) + 1;
     double work = inputRows * ChalkSort.log2(heap);
     return planner.getCostFactory().makeCost(work, work, 0);
   }

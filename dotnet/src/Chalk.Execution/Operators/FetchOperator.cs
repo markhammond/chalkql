@@ -12,8 +12,8 @@ namespace Chalk.Execution.Operators;
 internal sealed class FetchOperator : OperatorBase
 {
     private readonly IBatchOperator _input;
-    private readonly long _offset;
-    private readonly long? _count;
+    private readonly RowBound _offset;
+    private readonly RowBound? _count;
     private readonly ColumnarBatch _output;
     private int[] _window = [];
 
@@ -23,8 +23,8 @@ internal sealed class FetchOperator : OperatorBase
         ArrowSchema schema,
         IReadOnlyList<ChalkType> columnTypes,
         IBatchOperator input,
-        long offset,
-        long? count)
+        RowBound offset,
+        RowBound? count)
         : base(context, schema, columnTypes, path)
     {
         _input = input;
@@ -38,7 +38,11 @@ internal sealed class FetchOperator : OperatorBase
     protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
-        if (_count == 0)
+        // The bounds this execution runs under, read before any row moves: a parameterised one is
+        // read from its slot here, and a negative or NULL value is refused by name (D285).
+        var offset = _offset.Resolve(Context.Parameters, "OFFSET");
+        var count = _count?.Resolve(Context.Parameters, "LIMIT");
+        if (count == 0)
         {
             yield break;
         }
@@ -53,14 +57,14 @@ internal sealed class FetchOperator : OperatorBase
             await foreach (var batch in _input.ExecuteAsync(ct))
             {
                 var length = batch.Count;
-                var skip = (int)Math.Min(length, Math.Max(0, _offset - skipped));
+                var skip = (int)Math.Min(length, Math.Max(0, offset - skipped));
                 skipped += skip;
                 var available = length - skip;
-                var take = _count is null ? available : (int)Math.Min(available, _count.Value - emitted);
+                var take = count is null ? available : (int)Math.Min(available, count.Value - emitted);
 
                 if (take <= 0)
                 {
-                    if (_count is not null && emitted >= _count.Value)
+                    if (count is not null && emitted >= count.Value)
                     {
                         yield break;
                     }
@@ -92,7 +96,7 @@ internal sealed class FetchOperator : OperatorBase
 
                 yield return _output;
 
-                if (_count is not null && emitted >= _count.Value)
+                if (count is not null && emitted >= count.Value)
                 {
                     yield break;
                 }

@@ -709,8 +709,24 @@ internal static class PlanCompiler
         {
             var input = Node(rel.Fetch.Input, path);
             var schema = ArrowTypeMapping.ToArrowSchema(rel.RowType);
-            var offset = rel.Fetch.Offset;
-            var count = rel.Fetch.HasCount ? rel.Fetch.Count : (long?)null;
+            var offset = Bound(
+                rel.Fetch.OffsetParam,
+                rel.Fetch.OffsetParam is not null,
+                rel.Fetch.Offset,
+                rel.Fetch.Offset != 0,
+                "OFFSET",
+                path);
+            // Unset count and unset count_param together mean "no limit", which is the one shape
+            // that has no bound at all.
+            var count = rel.Fetch.CountParam is not null || rel.Fetch.HasCount
+                ? Bound(
+                    rel.Fetch.CountParam,
+                    rel.Fetch.CountParam is not null,
+                    rel.Fetch.Count,
+                    rel.Fetch.HasCount,
+                    "LIMIT",
+                    path)
+                : (RowBound?)null;
             var types = Types(rel.RowType);
             return context => new FetchOperator(
                 context, path, schema, types, input(context), offset, count);
@@ -722,11 +738,54 @@ internal static class PlanCompiler
             var schema = ArrowTypeMapping.ToArrowSchema(rel.RowType);
             var types = Types(rel.RowType);
             var ordering = new SortOrdering(rel.TopN.Fields, rel.TopN.Input.RowType);
-            var offset = rel.TopN.Offset;
-            var count = rel.TopN.Count;
+            var offset = Bound(
+                rel.TopN.OffsetParam,
+                rel.TopN.OffsetParam is not null,
+                rel.TopN.Offset,
+                rel.TopN.Offset != 0,
+                "OFFSET",
+                path);
+            var count = Bound(
+                rel.TopN.CountParam,
+                rel.TopN.CountParam is not null,
+                rel.TopN.Count,
+                rel.TopN.Count != 0,
+                "LIMIT",
+                path);
             return context => new TopNOperator(
                 context, path, schema, types, input(context), ordering, offset, count);
         }
+
+        /// <summary>
+        /// A <c>LIMIT</c> or <c>OFFSET</c> bound: the parameter when the plan carries one, else the
+        /// number it wrote down (D285). The two are alternatives, so a plan that sets both is
+        /// refused rather than read as one of them.
+        /// </summary>
+        private RowBound Bound(
+            DynamicParam? param, bool hasParam, long literal, bool hasLiteral, string clause, string path)
+        {
+            if (!hasParam)
+            {
+                return RowBound.Constant(literal);
+            }
+
+            if (hasLiteral)
+            {
+                throw new InvalidPlanException(
+                    "I-IR-5",
+                    path,
+                    $"a {clause} bound carries both a parameter and the literal {literal}; the two "
+                    + "are alternatives and only one of them can be the bound");
+            }
+
+            return RowBound.Parameter(BoundSlots.Of(param!, _boundSlots), Named(param!));
+        }
+
+        /// <summary>A parameter as the plan names it, for a refusal: <c>?1</c>, or its bound key.</summary>
+        private static string Named(DynamicParam param) =>
+            param.BoundKey.Length == 0
+                ? "?" + param.Index.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : param.BoundKey;
 
         public OperatorFactory HashJoin(Rel rel, string path)
         {

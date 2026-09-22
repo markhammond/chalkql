@@ -134,12 +134,17 @@ public final class ChalkRowGoalRule extends RelRule<ChalkRuleConfig> {
   public void onMatch(RelOptRuleCall call) {
     ChalkLimit limit = call.rel(0);
     Long fetch = limit.fetchValue();
-    if (fetch == null) {
-      // An offset with no fetch states no goal: nothing above bounds how far the input is read.
+    Long offset = limit.offsetValue();
+    if (fetch == null || offset == null) {
+      // An offset with no fetch states no goal: nothing above bounds how far the input is read. A
+      // parameterised bound nothing hinted says no more (D285): the goal would be a number the
+      // planner invented, and a goal is a number a leaf is costed for. With a hint there is a
+      // number, and the soft-goal contract of design 46 §1 is what makes taking it safe — a goal is
+      // never a bound the leaf enforces, so a hint that turns out wrong costs a plan and not a row.
       return;
     }
 
-    long goal = new RowGoal(limit.offsetValue(), fetch).required();
+    long goal = new RowGoal(offset, fetch).required();
     if (goal <= 0) {
       return;
     }

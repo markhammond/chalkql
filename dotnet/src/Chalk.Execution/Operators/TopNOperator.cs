@@ -30,8 +30,8 @@ internal sealed class TopNOperator : OperatorBase
     private readonly ColumnView[] _storeViews;
     private readonly ColumnView[] _spareViews;
 
-    private readonly long _offset;
-    private readonly long _count;
+    private readonly RowBound _offset;
+    private readonly RowBound _count;
     private long[] _heap = [];
     private int _heapCount;
     private int _storeRows;
@@ -44,8 +44,8 @@ internal sealed class TopNOperator : OperatorBase
         IReadOnlyList<ChalkType> columnTypes,
         IBatchOperator input,
         SortOrdering ordering,
-        long offset,
-        long count)
+        RowBound offset,
+        RowBound count)
         : base(context, schema, columnTypes, path)
     {
         _input = input;
@@ -65,7 +65,11 @@ internal sealed class TopNOperator : OperatorBase
     protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
-        var capacity = _offset + _count;
+        // The bounds this execution runs under, read before any row moves: a parameterised one is
+        // read from its slot here, and a negative or NULL value is refused by name (D285).
+        var offset = _offset.Resolve(Context.Parameters, "OFFSET");
+        var count = _count.Resolve(Context.Parameters, "LIMIT");
+        var capacity = offset + count;
         if (capacity <= 0 || capacity > int.MaxValue)
         {
             if (capacity > int.MaxValue)
@@ -115,15 +119,15 @@ internal sealed class TopNOperator : OperatorBase
             Array.Sort(entries, 0, kept, Comparer<long>.Create(Compare));
 
             var batchSize = Context.Settings.BatchSize;
-            for (var start = (int)_offset; start < kept; start += batchSize)
+            for (var start = (int)offset; start < kept; start += batchSize)
             {
                 ct.ThrowIfCancellationRequested();
-                var count = Math.Min(batchSize, kept - start);
-                _output.Begin(count);
+                var rows = Math.Min(batchSize, kept - start);
+                _output.Begin(rows);
                 for (var c = 0; c < _emit.Length; c++)
                 {
                     _emit[c].Begin();
-                    for (var i = 0; i < count; i++)
+                    for (var i = 0; i < rows; i++)
                     {
                         _emit[c].AppendRow(StoreViews[c], (int)entries[start + i]);
                     }

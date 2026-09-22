@@ -6,6 +6,7 @@ import chalk.ir.v1.Aggregate;
 import chalk.ir.v1.AsOfJoin;
 import chalk.ir.v1.AsOfMatch;
 import chalk.ir.v1.Collation;
+import chalk.ir.v1.DynamicParam;
 import chalk.ir.v1.Expr;
 import chalk.ir.v1.FieldRef;
 import chalk.ir.v1.Fetch;
@@ -177,17 +178,38 @@ public final class RelToIr {
               .setInput(toRel(sort.getInput()))
               .addAllFields(sortFields(sort.getCollation(), sort.getInput().getRowType())));
     } else if (node instanceof ChalkTopN topN) {
-      builder.setTopN(
+      TopN.Builder ir =
           TopN.newBuilder()
               .setInput(toRel(topN.getInput()))
-              .addAllFields(sortFields(topN.collation(), topN.getInput().getRowType()))
-              .setOffset(topN.offsetValue())
-              .setCount(topN.fetchValue()));
+              .addAllFields(sortFields(topN.collation(), topN.getInput().getRowType()));
+      // The bound as the statement wrote it, and never the hint that estimated it (D285): a
+      // parameter travels as a parameter, and the executor reads what is actually bound.
+      DynamicParam offsetParam = boundParam(topN.offset());
+      if (offsetParam == null) {
+        ir.setOffset(literalBound(topN.offset()));
+      } else {
+        ir.setOffsetParam(offsetParam);
+      }
+      DynamicParam countParam = boundParam(topN.fetch());
+      if (countParam == null) {
+        ir.setCount(literalBound(topN.fetch()));
+      } else {
+        ir.setCountParam(countParam);
+      }
+      builder.setTopN(ir);
     } else if (node instanceof ChalkLimit limit) {
-      Fetch.Builder fetch = Fetch.newBuilder().setInput(toRel(limit.getInput())).setOffset(limit.offsetValue());
-      Long count = limit.fetchValue();
-      if (count != null) {
-        fetch.setCount(count);
+      Fetch.Builder fetch = Fetch.newBuilder().setInput(toRel(limit.getInput()));
+      DynamicParam offsetParam = boundParam(limit.offset());
+      if (offsetParam == null) {
+        fetch.setOffset(literalBound(limit.offset()));
+      } else {
+        fetch.setOffsetParam(offsetParam);
+      }
+      DynamicParam countParam = boundParam(limit.fetch());
+      if (countParam != null) {
+        fetch.setCountParam(countParam);
+      } else if (limit.fetch() != null) {
+        fetch.setCount(literalBound(limit.fetch()));
       }
       builder.setFetch(fetch);
     } else if (node instanceof ChalkValues values) {
@@ -551,6 +573,11 @@ public final class RelToIr {
     }
 
     Fetch.Builder fetch = Fetch.newBuilder().setInput(input);
+    // A pushed bound is a literal by construction: `PushdownRules.SortRule` declines a parameterised
+    // one, because a bound that is not known until binding cannot be written into a query text.
+    // Refused here rather than dropped: silently emitting no bound would change the answer.
+    requireLiteralBound(sort.offset, "OFFSET");
+    requireLiteralBound(sort.fetch, "LIMIT");
     if (sort.offset instanceof RexLiteral offset) {
       fetch.setOffset(((Number) offset.getValue2()).longValue());
     }
@@ -558,6 +585,47 @@ public final class RelToIr {
       fetch.setCount(((Number) count.getValue2()).longValue());
     }
     builder.setFetch(fetch);
+  }
+
+  private static void requireLiteralBound(@Nullable RexNode bound, String what) {
+    if (bound != null && !(bound instanceof RexLiteral)) {
+      throw new IllegalStateException(
+          "a pushed " + what + " bound is " + bound + " and not a literal; a source is handed a"
+              + " query text, so a bound it cannot see the value of must not have been pushed");
+    }
+  }
+
+  /**
+   * A {@code LIMIT} or {@code OFFSET} bound written as the parameter it is, or null when it is a
+   * literal or absent (D285).
+   *
+   * <p>What travels is the statement's own parameter and never the hint that estimated it: a hint
+   * changes a cost and nothing the executor reads.
+   */
+  private static @Nullable DynamicParam boundParam(@Nullable RexNode bound) {
+    if (!(bound instanceof RexDynamicParam parameter)) {
+      return null;
+    }
+
+    if (parameter instanceof chalk.planner.entitlement.BoundParam named) {
+      return DynamicParam.newBuilder().setBoundKey(named.key()).build();
+    }
+
+    return DynamicParam.newBuilder().setIndex(parameter.getIndex()).build();
+  }
+
+  /** The same bound as the literal it is; absent is zero, which is what "no offset" means. */
+  private static long literalBound(@Nullable RexNode bound) {
+    if (bound == null) {
+      return 0L;
+    }
+
+    if (bound instanceof RexLiteral literal) {
+      return RexLiteral.longValue(literal);
+    }
+
+    throw new IllegalStateException(
+        "a LIMIT or OFFSET bound is " + bound + ", which is neither a literal nor a parameter");
   }
 
   /** Whether this scan reads every column of its table, which is what {@code Read.filter} needs. */

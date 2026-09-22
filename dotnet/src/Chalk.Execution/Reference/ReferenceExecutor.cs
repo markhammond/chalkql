@@ -109,6 +109,61 @@ internal sealed class ReferenceExecutor
         };
     }
 
+    /// <summary>
+    /// A <c>LIMIT</c> or <c>OFFSET</c> bound, on the same terms the compiled executor reads one
+    /// (D285): the parameter's value when the plan carries a parameter, else the literal. A NULL or
+    /// a negative value is refused by name, so the oracle and the executor refuse the same
+    /// executions.
+    /// </summary>
+    private static long Bound(
+        DynamicParam param, bool hasParam, long literal, ReferenceInterpreter interpreter, string clause)
+    {
+        if (!hasParam)
+        {
+            return literal;
+        }
+
+        var value = interpreter.Parameter(param);
+        if (value is null)
+        {
+            throw new InvalidOperationException(
+                $"NULL was bound to the {clause} bound {Named(param)}; a {clause} bound is a count, "
+                + "and NULL is not one.");
+        }
+
+        // The integer kinds and a scale-zero decimal are what a count can arrive as; a fraction is
+        // refused rather than rounded, because a bound is a number of rows and never a share of them.
+        if (value is decimal number && decimal.Truncate(number) != number)
+        {
+            throw new InvalidOperationException(
+                $"{number} was bound to the {clause} bound {Named(param)}; a {clause} bound is a "
+                + "whole number of rows, never a fraction or a share of them.");
+        }
+
+        if (value is not (decimal or long or int or short or sbyte))
+        {
+            throw new InvalidOperationException(
+                $"a {value.GetType().Name} was bound to the {clause} bound {Named(param)}; a "
+                + $"{clause} bound is a whole number of rows, and that type cannot be one.");
+        }
+
+        var bound = Convert.ToInt64(value, System.Globalization.CultureInfo.InvariantCulture);
+        if (bound < 0)
+        {
+            throw new InvalidOperationException(
+                $"{bound} was bound to the {clause} bound {Named(param)}; a {clause} bound must be "
+                + "zero or more.");
+        }
+
+        return bound;
+    }
+
+    /// <summary>A parameter as the plan names it, for a refusal: <c>?1</c>, or its bound key.</summary>
+    private static string Named(DynamicParam param) =>
+        param.BoundKey.Length == 0
+            ? "?" + param.Index.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : param.BoundKey;
+
     private async ValueTask<List<object?[]>> EvaluateAsync(
         Rel rel,
         string parentPath,
@@ -222,8 +277,17 @@ internal sealed class ReferenceExecutor
             {
                 var input = await EvaluateAsync(rel.Fetch.Input, path, interpreter, stats, arena, ct)
                     .ConfigureAwait(false);
-                var skipped = input.Skip((int)Math.Min(rel.Fetch.Offset, int.MaxValue));
-                return [.. rel.Fetch.HasCount ? skipped.Take((int)Math.Min(rel.Fetch.Count, int.MaxValue)) : skipped];
+                var offset = Bound(
+                    rel.Fetch.OffsetParam, rel.Fetch.OffsetParam is not null, rel.Fetch.Offset, interpreter, "OFFSET");
+                var skipped = input.Skip((int)Math.Min(offset, int.MaxValue));
+                if (!rel.Fetch.HasCount && rel.Fetch.CountParam is null)
+                {
+                    return [.. skipped];
+                }
+
+                var count = Bound(
+                    rel.Fetch.CountParam, rel.Fetch.CountParam is not null, rel.Fetch.Count, interpreter, "LIMIT");
+                return [.. skipped.Take((int)Math.Min(count, int.MaxValue))];
             }
 
             case Rel.KindOneofCase.TopN:
@@ -231,9 +295,13 @@ internal sealed class ReferenceExecutor
                 var input = await EvaluateAsync(rel.TopN.Input, path, interpreter, stats, arena, ct)
                     .ConfigureAwait(false);
                 input.Sort(new ReferenceRowComparer(rel.TopN.Fields));
+                var offset = Bound(
+                    rel.TopN.OffsetParam, rel.TopN.OffsetParam is not null, rel.TopN.Offset, interpreter, "OFFSET");
+                var count = Bound(
+                    rel.TopN.CountParam, rel.TopN.CountParam is not null, rel.TopN.Count, interpreter, "LIMIT");
                 return [.. input
-                    .Skip((int)Math.Min(rel.TopN.Offset, int.MaxValue))
-                    .Take((int)Math.Min(rel.TopN.Count, int.MaxValue))];
+                    .Skip((int)Math.Min(offset, int.MaxValue))
+                    .Take((int)Math.Min(count, int.MaxValue))];
             }
 
             case Rel.KindOneofCase.Aggregate:

@@ -275,6 +275,12 @@ message Fetch {
   int64 offset = 2;
   // Unset = no limit.
   optional int64 count = 3;
+  // The limit as a parameter the executor reads when the execution starts, in place of `count`:
+  // `LIMIT ?`. Set means `count` is unset and says nothing. The value is an integer and never a
+  // percentage; a negative one is refused by name before any row moves.
+  DynamicParam count_param = 4;
+  // The offset as a parameter, in place of `offset`, on the same terms.
+  DynamicParam offset_param = 5;
 }
 
 message Join {
@@ -715,4 +721,10 @@ message TopN {
   repeated SortField fields = 2;
   int64 offset = 3;
   int64 count = 4;
+  // The bound as a parameter the executor reads when the execution starts, in place of `count`:
+  // `ORDER BY … LIMIT ?`. Set means `count` is unset and says nothing. The value is an integer and
+  // never a percentage; a negative one is refused by name before any row moves.
+  DynamicParam count_param = 5;
+  // The offset as a parameter, in place of `offset`, on the same terms.
+  DynamicParam offset_param = 6;
 }

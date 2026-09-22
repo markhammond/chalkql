@@ -16,6 +16,7 @@ import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.SingleRel;
 import org.apache.calcite.rel.metadata.RelMdCollation;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
+import org.apache.calcite.rex.RexDynamicParam;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.util.Pair;
@@ -61,12 +62,45 @@ public final class ChalkLimit extends SingleRel implements ChalkRel {
     return fetch;
   }
 
-  public long offsetValue() {
-    return offset == null ? 0L : RexLiteral.longValue(offset);
+  /**
+   * How many rows this limit skips: the literal the statement wrote, the hint the request carried
+   * for a parameterised one, or <b>null</b> for a parameterised offset nothing hinted — a number the
+   * planner cannot see (D285).
+   *
+   * <p>No offset at all is zero and not null: "skip none" is known.
+   */
+  public @Nullable Long offsetValue() {
+    // Boxed on both arms on purpose: a ternary mixing `long` and `Long` unboxes the whole
+    // expression, and an unhinted parameterised offset answers null.
+    return offset == null ? Long.valueOf(0L) : boundValue(offset, getCluster());
   }
 
+  /**
+   * The bound: the literal, the hint, or null — which here means either "no bound" or "a bound the
+   * planner cannot see". Both are the same answer to every question this rel is asked, because an
+   * unhinted parameterised bound bounds nothing an estimate may rely on.
+   */
   public @Nullable Long fetchValue() {
-    return fetch == null ? null : RexLiteral.longValue(fetch);
+    return fetch == null ? null : boundValue(fetch, getCluster());
+  }
+
+  /**
+   * A bound's value: a literal's, a hinted parameter's, or null.
+   *
+   * <p>This is one of the three readers of {@link chalk.planner.plan.ParameterHints} (design 49 §3).
+   * A hint moves a cost and never a row: the {@code RexNode} stays in the tree whatever it answers,
+   * the IR carries the parameter, and the executor reads the value that is actually bound.
+   */
+  static @Nullable Long boundValue(RexNode bound, RelOptCluster cluster) {
+    if (bound instanceof RexLiteral literal) {
+      return RexLiteral.longValue(literal);
+    }
+
+    if (bound instanceof RexDynamicParam parameter) {
+      return chalk.planner.plan.ParameterHints.of(cluster).boundAt(parameter.getIndex());
+    }
+
+    return null;
   }
 
   @Override
@@ -79,11 +113,23 @@ public final class ChalkLimit extends SingleRel implements ChalkRel {
     return super.explainTerms(pw).itemIf("offset", offset, offset != null).itemIf("fetch", fetch, fetch != null);
   }
 
+  /**
+   * The input's rows, narrowed by whichever bounds the planner can see.
+   *
+   * <p>A parameterised bound with no hint is its input: it bounds nothing the planner can see, so
+   * claiming it does would price a plan for rows nobody promised (D285, design 49 §4). A hinted one
+   * is the hint, which is the whole of what a hint buys here.
+   */
   @Override
   public double estimateRowCount(RelMetadataQuery mq) {
     double rows = mq.getRowCount(getInput());
+    Long skip = offsetValue();
     Long limit = fetchValue();
-    return limit == null ? Math.max(rows - offsetValue(), 0) : Math.min(rows, offsetValue() + limit);
+    if (skip == null || (fetch != null && limit == null)) {
+      return rows;
+    }
+
+    return limit == null ? Math.max(rows - skip, 0) : Math.min(rows, skip + limit);
   }
 
   @Override

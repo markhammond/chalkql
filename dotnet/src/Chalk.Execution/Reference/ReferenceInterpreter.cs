@@ -42,6 +42,13 @@ internal sealed class ReferenceInterpreter
     /// <summary>Where this plan's named bound scalars sit among the values (D209).</summary>
     private readonly IReadOnlyDictionary<string, int> _boundSlots;
 
+    /// <summary>
+    /// The value bound to <paramref name="param"/>, by the slot the plan gives it. What a
+    /// parameterised <c>LIMIT</c> or <c>OFFSET</c> bound reads when the execution starts (D285).
+    /// </summary>
+    public object? Parameter(Chalk.Ir.DynamicParam param) =>
+        _parameters[BoundSlots.Of(param, _boundSlots)];
+
     /// <summary>The execution's clock, which a Tier 2 kernel is handed with every batch.</summary>
     public DateTimeOffset Now
     {

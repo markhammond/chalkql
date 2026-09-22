@@ -325,6 +325,21 @@ Chalk.Client.PlannerProcessOptions.CatalogVersions.get -> int?
 Chalk.Client.PlannerProcessOptions.CatalogVersions.init -> void
 Chalk.Client.PlannerProcessOptions.JarPath.get -> string?
 Chalk.Client.PlannerProcessOptions.JarPath.init -> void
+Chalk.Client.Rpc.ParameterHint
+Chalk.Client.Rpc.ParameterHint.CalculateSize() -> int
+Chalk.Client.Rpc.ParameterHint.ClearIsNull() -> void
+Chalk.Client.Rpc.ParameterHint.ClearValue() -> void
+Chalk.Client.Rpc.ParameterHint.HasIsNull.get -> bool
+Chalk.Client.Rpc.ParameterHint.IsNull.get -> bool
+Chalk.Client.Rpc.ParameterHint.IsNull.set -> void
+Chalk.Client.Rpc.ParameterHint.Ordinal.get -> uint
+Chalk.Client.Rpc.ParameterHint.Ordinal.set -> void
+Chalk.Client.Rpc.ParameterHint.ParameterHint() -> void
+Chalk.Client.Rpc.ParameterHint.ValueCase.get -> Chalk.Client.Rpc.ParameterHint.ValueOneofCase
+Chalk.Client.Rpc.ParameterHint.ValueOneofCase
+Chalk.Client.Rpc.ParameterHint.ValueOneofCase.IsNull = 3 -> Chalk.Client.Rpc.ParameterHint.ValueOneofCase
+Chalk.Client.Rpc.ParameterHint.ValueOneofCase.Literal = 2 -> Chalk.Client.Rpc.ParameterHint.ValueOneofCase
+Chalk.Client.Rpc.ParameterHint.ValueOneofCase.None = 0 -> Chalk.Client.Rpc.ParameterHint.ValueOneofCase
 const Chalk.Client.PlannerArtifact.CacheEnvironmentVariable = "CHALK_PLANNER_CACHE" -> string!
 const Chalk.Client.PlannerProcessOptions.JarEnvironmentVariable = "CHALK_PLANNER_JAR" -> string!
 Chalk.Client.PlannerProcessOptions.JavaHome.get -> string?
@@ -905,6 +920,11 @@ Chalk.Entitlements.EntitlementException
 Chalk.Entitlements.EntitlementException.EntitlementException(string! message, Chalk.Client.SqlPosition? position, System.Exception? innerException = null) -> void
 Chalk.Entitlements.EntitlementException.Kind.get -> Chalk.Client.Rpc.PlanErrorKind
 Chalk.Entitlements.EntitlementException.Position.get -> Chalk.Client.SqlPosition?
+const Chalk.Client.Rpc.ParameterHint.IsNullFieldNumber = 3 -> int
+const Chalk.Client.Rpc.ParameterHint.LiteralFieldNumber = 2 -> int
+const Chalk.Client.Rpc.ParameterHint.OrdinalFieldNumber = 1 -> int
+const Chalk.Client.Rpc.PlanRequest.ParameterHintsFieldNumber = 16 -> int
+override Chalk.Client.Rpc.ParameterHint.GetHashCode() -> int
 static Chalk.Client.PlannerArtifact.CopyToAsync(System.IO.Stream! destination, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 static Chalk.Client.PlannerArtifact.Open() -> System.IO.Stream!
 static Chalk.Client.PlannerArtifact.Sha256Async(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<string!>
@@ -1141,6 +1161,14 @@ static readonly Chalk.Client.PlanningOptions.None -> Chalk.Client.PlanningOption
 ~Chalk.Client.Rpc.GetInfoResponse.PlannerVersion.get -> string
 ~Chalk.Client.Rpc.GetInfoResponse.PlannerVersion.set -> void
 ~Chalk.Client.Rpc.GetInfoResponse.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.ParameterHint.Clone() -> Chalk.Client.Rpc.ParameterHint
+~Chalk.Client.Rpc.ParameterHint.Equals(Chalk.Client.Rpc.ParameterHint other) -> bool
+~Chalk.Client.Rpc.ParameterHint.Literal.get -> Chalk.Ir.Literal
+~Chalk.Client.Rpc.ParameterHint.Literal.set -> void
+~Chalk.Client.Rpc.ParameterHint.MergeFrom(Chalk.Client.Rpc.ParameterHint other) -> void
+~Chalk.Client.Rpc.ParameterHint.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.ParameterHint.ParameterHint(Chalk.Client.Rpc.ParameterHint other) -> void
+~Chalk.Client.Rpc.ParameterHint.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
 ~Chalk.Client.Rpc.PlanError.Clone() -> Chalk.Client.Rpc.PlanError
 ~Chalk.Client.Rpc.PlanError.Equals(Chalk.Client.Rpc.PlanError other) -> bool
 ~Chalk.Client.Rpc.PlanError.MergeFrom(Chalk.Client.Rpc.PlanError other) -> void
@@ -1164,6 +1192,7 @@ static readonly Chalk.Client.PlanningOptions.None -> Chalk.Client.PlanningOption
 ~Chalk.Client.Rpc.PlanRequest.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
 ~Chalk.Client.Rpc.PlanRequest.Options.get -> Chalk.Client.Rpc.PlannerOptions
 ~Chalk.Client.Rpc.PlanRequest.Options.set -> void
+~Chalk.Client.Rpc.PlanRequest.ParameterHints.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Client.Rpc.ParameterHint>
 ~Chalk.Client.Rpc.PlanRequest.ParameterTypes.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Ir.Type>
 ~Chalk.Client.Rpc.PlanRequest.PlanRequest(Chalk.Client.Rpc.PlanRequest other) -> void
 ~Chalk.Client.Rpc.PlanRequest.PlanningOptions.get -> Chalk.Client.Rpc.PlanningOptions
@@ -1356,6 +1385,8 @@ static readonly Chalk.Client.PlanningOptions.None -> Chalk.Client.PlanningOption
 ~override Chalk.Client.Rpc.GetInfoRequest.ToString() -> string
 ~override Chalk.Client.Rpc.GetInfoResponse.Equals(object other) -> bool
 ~override Chalk.Client.Rpc.GetInfoResponse.ToString() -> string
+~override Chalk.Client.Rpc.ParameterHint.Equals(object other) -> bool
+~override Chalk.Client.Rpc.ParameterHint.ToString() -> string
 ~override Chalk.Client.Rpc.PlanError.Equals(object other) -> bool
 ~override Chalk.Client.Rpc.PlanError.ToString() -> string
 ~override Chalk.Client.Rpc.PlanRequest.Equals(object other) -> bool
@@ -1408,6 +1439,8 @@ static readonly Chalk.Client.PlanningOptions.None -> Chalk.Client.PlanningOption
 ~static Chalk.Client.Rpc.GetInfoRequest.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.GetInfoRequest>
 ~static Chalk.Client.Rpc.GetInfoResponse.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
 ~static Chalk.Client.Rpc.GetInfoResponse.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.GetInfoResponse>
+~static Chalk.Client.Rpc.ParameterHint.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.ParameterHint.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.ParameterHint>
 ~static Chalk.Client.Rpc.PlanError.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
 ~static Chalk.Client.Rpc.PlanError.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.PlanError>
 ~static Chalk.Client.Rpc.PlanRequest.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
