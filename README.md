@@ -161,30 +161,38 @@ The comparison reflects publicly documented capabilities and is intended to dist
 
 ## Indicative numbers
 
-ChalkQL’s vectorised executor is currently single-threaded and designed to keep managed allocation out of the hot path.
+ChalkQL’s vectorised executor is designed to keep managed allocation out of the hot path.
 
-The figures below are indicative measurements from toy queries over 10M rows. For each query, elapsed time is normalised to ChalkQL at 100% (lower is faster); DuckDB is included as a familiar native baseline.
+The figures below are indicative measurements for single-threaded toy query execution over 10M rows. DuckDB is invoked in-process via `DuckDB.NET` and explicitly configured with `SET threads = 1` for a like-for-like comparison. Depending on workload, use of multiple threads may significantly reduce wall-clock execution time.
 
-| Query                   | Runtime   | Engine  | Elapsed |   Gen0 |  Gen1 |  Gen2 |  Allocated |
-| ----------------------- |-----------|---------|--------:| -----: | ----: | ----: |-----------:|
-| scan + filter + project | .NET 10.0 | ChalkQL |    100% |  166.7 |     — |     — |    1.60 MB |
-|                         | .NET 10.0 | DuckDB  |     65% |  600.0 | 100.0 | 100.0 |    4.56 MB |
-| group by                | .NET 10.0 | ChalkQL |    100% |      — |     — |     — |    2.43 KB |
-|                         | .NET 10.0 | DuckDB  |      7% |      — |     — |     — |   11.46 KB |
-| sort                    | .NET 10.0 | ChalkQL |    100% |      — |     — |     — |    1.60 MB |
-|                         | .NET 10.0 | DuckDB  |     92% | 1000.0 |     — |     — |    8.00 MB |
-| window                  | .NET 10.0 | ChalkQL |    100% |      — |     — |     — |    1.60 MB |
-|                         | .NET 10.0 | DuckDB  |     31% | 1000.0 |     — |     — |    8.00 MB |
-| hopping window          | .NET 10.0 | ChalkQL |    100% |      — |     — |     — |    6.03 MB |
-|                         | .NET 10.0 | DuckDB  |     90% | 3000.0 |     — |     — |   29.86 MB |
+For each query, elapsed time is normalised to DuckDB at `1.00` (lower is faster); DuckDB is included as a familiar native baseline.
+
+| Method                            | Categories | Rows    | Ratio | Gen0      | Allocated     | Alloc Ratio |
+|---------------------------------- |----------- |-------- |------:|----------:|--------------:|------------:|
+| 'chalkql group by'                | group by   | 2016000 |  1.34 |         - |       2.55 KB |        0.50 |
+| 'duckdb group by'                 | group by   | 2016000 |  1.00 |         - |        5.1 KB |        1.00 |
+|                                   |            |         |       |           |               |             |
+| 'chalkql hop'                     | hop        | 2016000 |  0.75 |         - | 1850175.13 KB |       60.51 |
+| 'duckdb hop'                      | hop        | 2016000 |  1.00 | 3000.0000 |    30576.6 KB |        1.00 |
+|                                   |            |         |       |           |               |             |
+| 'chalkql scan + filter + project' | scan       | 2016000 |  0.89 |  166.6667 |    1636.31 KB |        0.36 |
+| 'duckdb scan + filter + project'  | scan       | 2016000 |  1.00 |  500.0000 |    4555.04 KB |        1.00 |
+|                                   |            |         |       |           |               |             |
+| 'chalkql sort'                    | sort       | 2016000 |  0.28 |         - |    1636.45 KB |        0.20 |
+| 'duckdb sort'                     | sort       | 2016000 |  1.00 | 1000.0000 |    8195.37 KB |        1.00 |
+|                                   |            |         |       |           |               |             |
+| 'chalkql window'                  | window     | 2016000 |  0.58 |         - |    1636.85 KB |        0.20 |
+| 'chalkql window (clustered)'      | window     | 2016000 |  0.47 |         - |    1636.88 KB |        0.20 |
+| 'duckdb window'                   | window     | 2016000 |  1.00 | 1000.0000 |    8195.37 KB |        1.00 |
 
 GC counts are BenchmarkDotNet collections per 1,000 benchmark operations. They are included because total allocated bytes do not show whether allocation pressure remains short-lived or reaches older generations.
 
-These are not intended as a database shoot-out. There's substantial headroom remaining, particularly in aggregation and window execution. The current implementation should be read as an early performance snapshot rather than a throughput ceiling.
+These are not intended as a database shoot-out. DuckDB is deliberately prevented from exploiting multi-threaded execution here, while ChalkQL still has substantial headroom remaining, particularly in aggregation and window execution. The figures should therefore be read as an early comparison of single-thread execution characteristics rather than as a statement about either system’s maximum throughput.
 
-### Predictable execution.
+### Predictable execution
 
 ChalkQL deliberately prioritises predictable memory use and low managed allocation alongside execution throughput. Scratch and intermediate memory are served from reusable arenas; an engine owns a bounded `ArenaPool` by default, with excess concurrent executions receiving transient arenas which are released when they finish. Hosts may also supply separate arena pools to partition retained memory between workloads.
+
 ## Approaches worth overthinking
 
 Several open-source projects approach data access, authorisation, and querying in ways worth contemplating:

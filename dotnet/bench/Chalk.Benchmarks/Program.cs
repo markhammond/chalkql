@@ -23,10 +23,61 @@ namespace Chalk.Benchmarks;
 /// <c>Allocated / RowsScanned</c> well under one byte for the scan+filter case.
 /// </para>
 /// </summary>
+[GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
+[CategoriesColumn]
 [MemoryDiagnoser]
-[HideColumns("Job", "Error", "StdDev", "Median", "RatioSD")]
+[HideColumns("Mean", "Job", "Error", "StdDev", "Median", "RatioSD")]
 public class ExecutionBenchmarks
 {
+    [BenchmarkCategory("scan")]
+    [Benchmark(Description = "chalkql scan + filter + project")]
+    public async Task<long> ScanFilterProject() =>
+        await ConsumeAsync(_scanFilter);
+
+    [BenchmarkCategory("scan")]
+    [Benchmark(Baseline = true, Description = "duckdb scan + filter + project")]
+    public async Task<long> DuckDbScanFilterProject() =>
+        await ConsumeDuckDbAsync(_scanFilterDuckDb!);
+
+    [BenchmarkCategory("group by")]
+    [Benchmark(Description = "chalkql group by")]
+    public async Task<long> GroupBy() =>
+        await ConsumeAsync(_groupBy);
+
+    [BenchmarkCategory("group by")]
+    [Benchmark(Baseline = true, Description = "duckdb group by")]
+    public async Task<long> DuckDbGroupBy() =>
+        await ConsumeDuckDbAsync(_groupByDuckDb!);
+    
+    [BenchmarkCategory("sort")]
+    [Benchmark(Description = "chalkql sort")]
+    public async Task<long> Sort() => await ConsumeAsync(_sort);
+
+    [BenchmarkCategory("sort")]
+    [Benchmark(Baseline = true, Description = "duckdb sort")]
+    public async Task<long> DuckDbSort() => await ConsumeDuckDbAsync(_sortDuckDb!);
+
+    [BenchmarkCategory("window")]
+    [Benchmark(Description = "chalkql window")]
+    public async Task<long> Window() => await ConsumeAsync(_window);
+
+    /// <summary>The same window over the clustered table, whose leaf is a slice of the copy.</summary>
+    [BenchmarkCategory("window")]
+    [Benchmark(Description = "chalkql window (clustered)")]
+    public async Task<long> WindowClustered() => await ConsumeAsync(_windowClustered);
+
+    [BenchmarkCategory("window")]
+    [Benchmark(Baseline = true, Description = "duckdb window")]
+    public async Task<long> DuckDbWindow() => await ConsumeDuckDbAsync(_windowDuckDb!);
+
+    [BenchmarkCategory("hop")]
+    [Benchmark(Description = "chalkql hop")]
+    public async Task<long> Hop() => await ConsumeAsync(_hop);
+
+    [BenchmarkCategory("hop")]
+    [Benchmark(Baseline = true, Description = "duckdb hop")]
+    public async Task<long> DuckDbHop() => await ConsumeDuckDbAsync(_hopDuckDb!);
+    
     public class ExecutionBenchmarksSettings
     {
         public const int BarCount = 20_160 * 100;
@@ -198,6 +249,12 @@ public class ExecutionBenchmarks
     {
         var connection = new DuckDBConnection("DataSource=:memory:");
         await connection.OpenAsync();
+
+        await using (var configCommand = connection.CreateCommand())
+        {
+            configCommand.CommandText = "SET threads = 1;";
+            await configCommand.ExecuteNonQueryAsync();
+        }
         
         await using (var command = connection.CreateCommand())
         {
@@ -364,40 +421,6 @@ public class ExecutionBenchmarks
         await _engine.DisposeAsync();
         await _sidecar.DisposeAsync();
     }
-
-    [Benchmark(Description = "chalkql scan + filter + project")]
-    public async Task<long> ScanFilterProject() => await ConsumeAsync(_scanFilter);
-
-    [Benchmark(Description = "duckdb scan + filter + project")]
-    public async Task<long> DuckDbScanFilterProject() => await ConsumeDuckDbAsync(_scanFilterDuckDb!);
-    
-    [Benchmark(Description = "chalkql group by")]
-    public async Task<long> GroupBy() => await ConsumeAsync(_groupBy);
-
-    [Benchmark(Description = "duckdb group by")]
-    public async Task<long> DuckDbGroupBy() => await ConsumeDuckDbAsync(_groupByDuckDb!);
-
-    [Benchmark(Description = "chalkql sort")]
-    public async Task<long> Sort() => await ConsumeAsync(_sort);
-
-    [Benchmark(Description = "duckdb sort")]
-    public async Task<long> DuckDbSort() => await ConsumeDuckDbAsync(_sortDuckDb!);
-
-    [Benchmark(Description = "chalkql window")]
-    public async Task<long> Window() => await ConsumeAsync(_window);
-
-    /// <summary>D257: the same window over the clustered table, whose leaf is a slice of the copy.</summary>
-    [Benchmark(Description = "chalkql window (clustered)")]
-    public async Task<long> WindowClustered() => await ConsumeAsync(_windowClustered);
-
-    [Benchmark(Description = "duckdb window")]
-    public async Task<long> DuckDbWindow() => await ConsumeDuckDbAsync(_windowDuckDb!);
-
-    [Benchmark(Description = "chalkql hop")]
-    public async Task<long> Hop() => await ConsumeAsync(_hop);
-
-    [Benchmark(Description = "duckdb hop")]
-    public async Task<long> DuckDbHop() => await ConsumeDuckDbAsync(_hopDuckDb!);
 
     private async Task<long> ConsumeAsync(PreparedQuery query)
     {
