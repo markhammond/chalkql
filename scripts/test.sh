@@ -45,6 +45,8 @@ done
 if [[ "$integration" == "1" ]]; then
   export CHALK_PLANNER_JAR="$jar"
   run dotnet test "$root/dotnet/tests/Chalk.Integration.Tests" -c "$config" --no-build
+  # The Akade source's tests plan through a sidecar, so they run here, after the jar is exported.
+  run dotnet test "$root/dotnet/tests/Chalk.Sources.Akade.Tests" -c "$config" --no-build
 else
   echo
   echo "Skipped Chalk.Integration.Tests (--no-integration)."
