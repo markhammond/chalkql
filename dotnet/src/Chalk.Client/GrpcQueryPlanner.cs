@@ -392,6 +392,23 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
             message.Redaction = ToProto(redaction);
         }
 
+        // What the caller expects each parameter to be worth (D284). Sparse and additive: a request
+        // that hints nothing adds nothing here, and a hint informs an estimate and never a truth.
+        foreach (var hint in request.ParameterHints)
+        {
+            var wire = new Rpc.ParameterHint { Ordinal = (uint)hint.Ordinal };
+            if (hint.Value is { } value)
+            {
+                wire.Literal = value.Literal;
+            }
+            else
+            {
+                wire.IsNull = true;
+            }
+
+            message.ParameterHints.Add(wire);
+        }
+
         message.ParameterTypes.AddRange(request.ParameterTypes.Select(t => t.ToProto()));
         if (request.Context?.ToProto() is { } context)
         {

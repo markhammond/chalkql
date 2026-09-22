@@ -27,6 +27,12 @@ public sealed class PreparedQuery
     private readonly ConcurrentDictionary<string, ShapePlan> _shapes = new(StringComparer.Ordinal);
     private readonly RenderedStatement _prepared;
 
+    /// <summary>
+    /// This statement's hints, kept so a narrowing plans under the same ones (D284, ADR 0074). Not
+    /// exposed: <see cref="HintedParameters"/> is all a caller gets back.
+    /// </summary>
+    private readonly IReadOnlyList<ParameterValueHint> _hints;
+
     internal PreparedQuery(
         ChalkEngine engine,
         string sql,
@@ -36,8 +42,14 @@ public sealed class PreparedQuery
         CompiledPlan compiled,
         IReadOnlyList<int> prepareShape,
         RenderedStatement rendered,
-        RequestContext? context)
+        RequestContext? context,
+        IReadOnlyList<ParameterValueHint> hints)
     {
+        // The ordinals and nothing else (D284). A hint informs an estimate; it is not part of this
+        // query and no execution is held to it, so there is nothing else worth keeping — and keeping
+        // the values would put them somewhere a caller could read them back out.
+        HintedParameters = [.. hints.Select(h => h.Ordinal)];
+        _hints = hints;
         _engine = engine;
         Context = context;
         RequiredContext = RequiredNames(result.Plan, context);
@@ -84,6 +96,12 @@ public sealed class PreparedQuery
 
     /// <summary>The SQL as the host wrote it, parameter styles and all.</summary>
     public string Sql { get; }
+
+    /// <summary>
+    /// Which of this statement's placeholders were planned against a value the caller expected
+    /// (D284), in order. The ordinals only: nothing of a hint's value is retained.
+    /// </summary>
+    public IReadOnlyList<int> HintedParameters { get; }
 
     /// <summary>
     /// The execution context this query was prepared with, or null when it was prepared without one
@@ -383,7 +401,7 @@ public sealed class PreparedQuery
         ArgumentNullException.ThrowIfNull(more);
         var union = Context is null ? more : Context.Narrow(more);
         var result = await _engine
-            .PlanAsync(_prepared.Sql, _options, union, PlanDigest, ct)
+            .PlanAsync(_prepared.Sql, _options, union, PlanDigest, _hints, ct)
             .ConfigureAwait(false);
         return new PreparedQuery(
             _engine,
@@ -394,7 +412,8 @@ public sealed class PreparedQuery
             await _engine.CompileAsync(result.Plan, _options, union, ct).ConfigureAwait(false),
             _prepareShape,
             _prepared,
-            union);
+            union,
+            _hints);
     }
 
     /// <summary>The SQL the planner actually saw for the prepared shape (D27, V13).</summary>

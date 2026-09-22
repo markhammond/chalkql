@@ -70,7 +70,8 @@ public sealed class RecordedPlanner : IQueryPlanner
             request.Options.Libraries,
             request.ContextId,
             request.Options.DisabledCapabilities,
-            request.Planning);
+            request.Planning,
+            request.ParameterHints);
         var file = new FileInfo(Path.Combine(_directory.FullName, key + ".binpb"));
         if (!file.Exists)
         {
@@ -224,16 +225,37 @@ public sealed class RecordedPlanner : IQueryPlanner
         IReadOnlyList<SqlLibrary> libraries,
         string contextId,
         IReadOnlyList<DisabledCapability>? disabledCapabilities = null,
-        PlanningOptions? planning = null)
+        PlanningOptions? planning = null,
+        IReadOnlyList<ParameterValueHint>? parameterHints = null)
     {
         var named = string.Join(",", libraries.Select(l => l.ToString()));
         var off = disabledCapabilities is { Count: > 0 }
             ? "\n" + string.Join(",", disabledCapabilities.Select(c => c.ToString()))
             : string.Empty;
         var budget = planning?.CacheKeyPart is { Length: > 0 } part ? "\n" + part : string.Empty;
-        var material = $"{contextId}\n{pushdown}\n{conformance}\n{named}{off}{budget}\n{sql.Trim()}";
+        var hinted = parameterHints is { Count: > 0 } hints ? "\n" + Fingerprint(hints) : string.Empty;
+        var material = $"{contextId}\n{pushdown}\n{conformance}\n{named}{off}{budget}{hinted}\n{sql.Trim()}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(material));
         return Convert.ToHexStringLower(hash.AsSpan(0, 16));
+    }
+
+    /// <summary>
+    /// A request's parameter value hints as one opaque fingerprint (D284). The same statement with
+    /// different hints is a different plan, so the hints belong in the key; the <em>fingerprint</em>
+    /// rather than the values themselves, because a hint's value belongs in nothing a reader of a
+    /// corpus directory or a log could pick it out of.
+    /// </summary>
+    private static string Fingerprint(IReadOnlyList<ParameterValueHint> hints)
+    {
+        using var sha = SHA256.Create();
+        var buffer = new MemoryStream();
+        foreach (var hint in hints.OrderBy(h => h.Ordinal))
+        {
+            buffer.Write(BitConverter.GetBytes(hint.Ordinal));
+            buffer.Write(hint.Value is { } value ? value.Literal.ToByteArray() : [0xFF]);
+        }
+
+        return Convert.ToHexStringLower(sha.ComputeHash(buffer.ToArray()).AsSpan(0, 8));
     }
 }
 
@@ -299,7 +321,8 @@ public sealed class RecordingPlanner : IQueryPlanner
             request.Options.Libraries,
             request.ContextId,
             request.Options.DisabledCapabilities,
-            request.Planning);
+            request.Planning,
+            request.ParameterHints);
         var level = request.Options.Pushdown.ToString().ToLowerInvariant();
 
         // The content-hash name is what RecordedPlanner looks up; the readable name is what a human

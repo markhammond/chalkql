@@ -37,6 +37,7 @@ Chalk.Client.ChalkEngine.PlanExtensionsAsync(string! sql, Chalk.Client.RequestCo
 Chalk.Client.ChalkEngine.PlannerInfo.get -> Chalk.Client.PlannerInfo!
 Chalk.Client.ChalkEngine.PrepareAsync(string! sql, Chalk.Client.PrepareOptions? options = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PreparedQuery!>
 Chalk.Client.ChalkEngine.PrepareAsync(string! sql, Chalk.Client.RequestContext? context, Chalk.Client.PrepareOptions? options = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PreparedQuery!>
+Chalk.Client.ChalkEngine.PrepareAsync(string! sql, object? parameterValueHints, Chalk.Client.PrepareOptions? options = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PreparedQuery!>
 Chalk.Client.ChalkEngine.QueryAsync(string! sql, System.Collections.Generic.IReadOnlyDictionary<string!, object?>! parameters, Chalk.Client.ArenaPool! pool, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
 Chalk.Client.ChalkEngine.QueryAsync(string! sql, System.Collections.Generic.IReadOnlyDictionary<string!, object?>! parameters, Chalk.Sources.ExecutionArena? arena = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
 Chalk.Client.ChalkEngine.QueryAsync(string! sql, System.Collections.Generic.IReadOnlyList<object?>? parameters = null, Chalk.Sources.ExecutionArena? arena = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
@@ -225,6 +226,14 @@ Chalk.Client.ParameterStyle.Named = 3 -> Chalk.Client.ParameterStyle
 Chalk.Client.ParameterStyle.None = 0 -> Chalk.Client.ParameterStyle
 Chalk.Client.ParameterStyle.Ordinal = 2 -> Chalk.Client.ParameterStyle
 Chalk.Client.ParameterStyle.Positional = 1 -> Chalk.Client.ParameterStyle
+Chalk.Client.ParameterValueHint
+Chalk.Client.ParameterValueHint.Ordinal.get -> int
+Chalk.Client.ParameterValueHint.Ordinal.init -> void
+Chalk.Client.ParameterValueHint.ParameterValueHint() -> void
+Chalk.Client.ParameterValueHint.Value.get -> Chalk.Ir.Expr?
+Chalk.Client.ParameterValueHint.Value.init -> void
+Chalk.Client.PlanRequest.ParameterHints.get -> System.Collections.Generic.IReadOnlyList<Chalk.Client.ParameterValueHint!>!
+Chalk.Client.PlanRequest.ParameterHints.init -> void
 Chalk.Client.PlannerArtifact
 Chalk.Client.PlannerProcessOptions.ArtifactCacheDirectory.get -> string?
 Chalk.Client.PlannerProcessOptions.ArtifactCacheDirectory.init -> void
@@ -325,6 +334,9 @@ Chalk.Client.PlannerProcessOptions.CatalogVersions.get -> int?
 Chalk.Client.PlannerProcessOptions.CatalogVersions.init -> void
 Chalk.Client.PlannerProcessOptions.JarPath.get -> string?
 Chalk.Client.PlannerProcessOptions.JarPath.init -> void
+Chalk.Client.PrepareOptions.ParameterValueHints.get -> object?
+Chalk.Client.PrepareOptions.ParameterValueHints.init -> void
+Chalk.Client.PreparedQuery.HintedParameters.get -> System.Collections.Generic.IReadOnlyList<int>!
 Chalk.Client.Rpc.ParameterHint
 Chalk.Client.Rpc.ParameterHint.CalculateSize() -> int
 Chalk.Client.Rpc.ParameterHint.ClearIsNull() -> void
@@ -1095,7 +1107,7 @@ static Chalk.Client.ContextRelation.Of(string! column, params object?[]! values)
 static Chalk.Client.ContextRelation.Shape(System.Collections.Generic.IReadOnlyList<string!>! columns, System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>! columnTypes) -> Chalk.Client.ContextRelation!
 static Chalk.Client.PlannerProcess.StartAsync(Chalk.Client.PlannerProcessOptions! options, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PlannerProcess!>
 static Chalk.Client.PlanningCost.DivideBy(Chalk.Client.PlanningCost! cost, Chalk.Client.PlanningCost! other) -> double
-static Chalk.Client.RecordedPlanner.KeyFor(string! sql, Chalk.Client.PushdownLevel pushdown, Chalk.Client.SqlConformance conformance, System.Collections.Generic.IReadOnlyList<Chalk.Client.SqlLibrary>! libraries, string! contextId, System.Collections.Generic.IReadOnlyList<Chalk.Client.DisabledCapability>? disabledCapabilities = null, Chalk.Client.PlanningOptions? planning = null) -> string!
+static Chalk.Client.RecordedPlanner.KeyFor(string! sql, Chalk.Client.PushdownLevel pushdown, Chalk.Client.SqlConformance conformance, System.Collections.Generic.IReadOnlyList<Chalk.Client.SqlLibrary>! libraries, string! contextId, System.Collections.Generic.IReadOnlyList<Chalk.Client.DisabledCapability>? disabledCapabilities = null, Chalk.Client.PlanningOptions? planning = null, System.Collections.Generic.IReadOnlyList<Chalk.Client.ParameterValueHint!>? parameterHints = null) -> string!
 static Chalk.Client.RequestContext.Empty.get -> Chalk.Client.RequestContext!
 static Chalk.Client.SqlPosition.operator !=(Chalk.Client.SqlPosition left, Chalk.Client.SqlPosition right) -> bool
 static Chalk.Client.SqlPosition.operator ==(Chalk.Client.SqlPosition left, Chalk.Client.SqlPosition right) -> bool

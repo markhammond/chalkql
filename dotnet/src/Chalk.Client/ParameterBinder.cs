@@ -137,6 +137,167 @@ internal static class ParameterBinder
     }
 
     /// <summary>
+    /// What the caller expects each rendered <c>?</c> to be worth, for planning only (D284).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The container is resolved as an execution's values are — an <see cref="IReadOnlyList{T}"/> by
+    /// ordinal, a dictionary or a POCO by name — with one convention of its own: it is
+    /// <em>sparse</em>. A parameter the caller said nothing about is estimated exactly as it always
+    /// was, so <c>null</c> here is "no hint" where at execution it is SQL NULL, and
+    /// <see cref="DBNull.Value"/> is how a caller says it expects NULL. A planning API needs three
+    /// states where a binding API needs two.
+    /// </para>
+    /// <para>
+    /// A name the statement does not have is refused rather than ignored: a misspelt hint that
+    /// quietly became "no hint" would leave a caller wondering why the plan never moved. A
+    /// list-valued hint is refused too — the plan's shape depends on the list's <em>length</em>,
+    /// which is not something a representative value can stand in for.
+    /// </para>
+    /// <para>
+    /// A named parameter that occurs three times is one hint and three rendered placeholders, so the
+    /// hint is expanded to every occurrence: the planner numbers parameters by the <c>?</c> it sees.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<ParameterValueHint> ResolveHints(
+        IReadOnlyList<ParameterDescriptor> parameters,
+        IReadOnlyList<PlaceholderSlot> slots,
+        object? container)
+    {
+        if (container is null || parameters.Count == 0)
+        {
+            return [];
+        }
+
+        var byParameter = SparseValues(parameters, container);
+        if (byParameter is null)
+        {
+            return [];
+        }
+
+        var hints = new List<ParameterValueHint>();
+        for (var i = 0; i < slots.Count; i++)
+        {
+            var slot = slots[i];
+            if (slot.ParameterIndex < 0 || slot.ParameterIndex >= byParameter.Length)
+            {
+                continue;
+            }
+
+            var value = byParameter[slot.ParameterIndex];
+            if (value is null)
+            {
+                continue;
+            }
+
+            hints.Add(new ParameterValueHint
+            {
+                Ordinal = i,
+                Value = value is DBNull
+                    ? null
+                    : ContextValues.ToLiteral(
+                        value, $"the value hint for parameter {parameters[slot.ParameterIndex]}"),
+            });
+        }
+
+        return hints;
+    }
+
+    /// <summary>
+    /// The hint for each logical parameter, or null where the caller said nothing. Null for a
+    /// container that hints nothing at all.
+    /// </summary>
+    private static object?[]? SparseValues(
+        IReadOnlyList<ParameterDescriptor> parameters, object container)
+    {
+        var resolved = new object?[parameters.Count];
+        if (container is IReadOnlyList<object?> ordinals)
+        {
+            if (ordinals.Count > parameters.Count)
+            {
+                throw new ArgumentException(
+                    $"{ordinals.Count} parameter value hints were given and the statement has "
+                    + $"{parameters.Count} parameters. Hints are sparse — leave an entry null to "
+                    + "hint nothing about it — but there is no parameter for the extra ones.");
+            }
+
+            for (var i = 0; i < ordinals.Count; i++)
+            {
+                resolved[i] = Hinted(ordinals[i], parameters[i]);
+            }
+
+            return resolved;
+        }
+
+        var bag = Bag(container);
+        for (var i = 0; i < parameters.Count; i++)
+        {
+            if (parameters[i].Name is { } name && bag.Remove(name, out var value))
+            {
+                resolved[i] = Hinted(value, parameters[i]);
+            }
+        }
+
+        if (bag.Count > 0)
+        {
+            throw new ArgumentException(
+                "these parameter value hints were given but the statement has no such parameter: "
+                + string.Join(", ", bag.Keys.Order(StringComparer.OrdinalIgnoreCase).Select(k => "@" + k))
+                + ". A hint is optional, but a hint for a parameter that is not there is a mistake "
+                + "rather than nothing said.");
+        }
+
+        return resolved;
+    }
+
+    /// <summary>One hinted value, refused by name when it is a list.</summary>
+    private static object? Hinted(object? value, ParameterDescriptor parameter)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        if (IsList(value))
+        {
+            throw new ArgumentException(
+                $"a list was given as the value hint for parameter {parameter}. A list parameter is "
+                + "expanded into one placeholder per element, so the plan's shape depends on the "
+                + "list's length rather than on a representative value, and a hint cannot say "
+                + "anything useful about it (docs/design/04-client.md §7.4).");
+        }
+
+        return value;
+    }
+
+    /// <summary>The container's entries by name: a dictionary as it stands, a POCO by reflection.</summary>
+    private static Dictionary<string, object?> Bag(object container)
+    {
+        var bag = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (container is IReadOnlyDictionary<string, object?> dictionary)
+        {
+            foreach (var (key, value) in dictionary)
+            {
+                bag[key.TrimStart('@')] = value;
+            }
+
+            return bag;
+        }
+
+        var type = container.GetType();
+        var accessors = Accessors.GetOrAdd(type, Compile);
+        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.CanRead && p.GetIndexParameters().Length == 0)
+            .ToArray();
+        for (var i = 0; i < properties.Length; i++)
+        {
+            bag[properties[i].Name] = accessors[i](container, properties[i].Name);
+        }
+
+        return bag;
+    }
+
+    /// <summary>
     /// The shape of an execution: the list length for each list-valued parameter, and
     /// <see cref="PlaceholderSlot.Scalar"/> for the rest.
     /// </summary>

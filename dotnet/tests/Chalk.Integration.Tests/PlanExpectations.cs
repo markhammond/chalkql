@@ -101,6 +101,19 @@ public static class PlanExpectations
                 break;
             }
 
+            // The other half of the same claim: what the plan text must *not* say. One pair of
+            // corpus queries is the same statement planned with and without parameter value hints,
+            // and what separates them is a row goal one of them has and the other does not.
+            case "not_plan_text":
+            {
+                Assert.True(
+                    planText is not null,
+                    $"{query.Name}: '{expectation}' needs the planner's plan text; plan this query "
+                    + "with IncludePlanText.");
+                Assert.DoesNotContain(argument, planText, StringComparison.Ordinal);
+                break;
+            }
+
             case "ranges":
             {
                 var lookup = PlanWalker.ExecutedRels(plan)

@@ -128,6 +128,9 @@ internal static class Program
                     Sql = plannerSql,
                     ContextId = fixture.Catalog.ContextId,
                     CatalogEpoch = fixture.Catalog.Epoch,
+                    // What this query expects its parameters to be worth (D284). Empty for every
+                    // query that says nothing, which is all but the hinted half of one pair.
+                    ParameterHints = CorpusQueries.ResolvedHints(query),
                     Options = new Chalk.Client.PlannerOptions
                     {
                         Pushdown = level,

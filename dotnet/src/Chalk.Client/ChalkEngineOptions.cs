@@ -286,6 +286,28 @@ public sealed class PrepareOptions
     public IReadOnlyList<ChalkType>? ParameterTypes { get; init; }
 
     /// <summary>
+    /// What this statement's parameters are expected to be worth, so the planner can estimate a
+    /// predicate against one instead of guessing at it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A list by ordinal, a dictionary or an anonymous object or POCO by name — the containers an
+    /// execution binds values from — with one convention of its own: it is <b>sparse</b>, so
+    /// <c>null</c> means "nothing said about this parameter" and <see cref="DBNull.Value"/> means
+    /// "I expect SQL NULL here". At execution <c>null</c> binds SQL NULL; the two APIs read it
+    /// differently because a planning API needs three states where a binding API needs two.
+    /// </para>
+    /// <para>
+    /// A hint informs an estimate and never a truth. It changes which plan is chosen and nothing
+    /// else: the same rows come back whatever is hinted, and the values bound at execution need not
+    /// resemble the hints at all. A name the statement does not have is refused rather than ignored,
+    /// so a misspelt hint cannot silently become no hint; so is a list, because the plan's shape
+    /// depends on a list's length rather than on a representative value.
+    /// </para>
+    /// </remarks>
+    public object? ParameterValueHints { get; init; }
+
+    /// <summary>
     /// The SQL dialect this statement is written in (D34). <see cref="SqlConformance.Default"/> —
     /// standard SQL — unless a statement asks for another one.
     /// </summary>

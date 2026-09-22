@@ -61,6 +61,7 @@ public sealed class CorpusQuery
             Conformance = Conformance,
             Libraries = Libraries,
             JoinPolicy = JoinPolicy,
+            ParameterValueHints = CorpusQueries.Hints(Name),
         };
 
     /// <summary>The same, with capabilities the planner must ignore (D87).</summary>
@@ -71,6 +72,7 @@ public sealed class CorpusQuery
         Libraries = Libraries,
         DisabledCapabilities = disabled,
         JoinPolicy = JoinPolicy,
+        ParameterValueHints = CorpusQueries.Hints(Name),
     };
 
     /// <summary>The same, with a policy this run supplies instead of the file's.</summary>
@@ -82,6 +84,7 @@ public sealed class CorpusQuery
             Conformance = Conformance,
             Libraries = Libraries,
             JoinPolicy = policy ?? JoinPolicy,
+            ParameterValueHints = CorpusQueries.Hints(Name),
         };
 
     /// <summary>True when the host-visible SQL is not what the planner sees.</summary>
@@ -338,6 +341,44 @@ public static class CorpusQueries
             "44_probe_test_case_branch" => [TenancyFixture.Members[0].NationalId],
             _ => null,
         };
+
+    /// <summary>
+    /// What a corpus query is planned <em>expecting</em> its parameters to be worth (D284), by name.
+    /// Configuration in code beside <see cref="Parameters"/>, for the reason that one gives: a value
+    /// in a header would be a second dialect to parse.
+    /// </summary>
+    /// <remarks>
+    /// A hint informs an estimate and never a truth, so a hinted query and its unhinted twin are
+    /// executed with the <em>same</em> bound values and must answer the same rows. The values
+    /// themselves live in <c>DifferentialRunner.BindingsFor</c>, which is where every corpus query's
+    /// bindings live.
+    /// </remarks>
+    public static object? Hints(string name) =>
+        name switch
+        {
+            // The pair of design 49 §6, over `bars`. The same statement twice: this half says the
+            // caller expects a symbol at the start of the range and one row wanted, which is what
+            // turns a whole-table read into a seek that stops.
+            "16_parameterised_bound_hinted" => new object?[] { "AAA", 1 },
+            _ => null,
+        };
+
+    /// <summary>
+    /// The same, resolved against a query's own parameters and expanded to the placeholders the
+    /// planner numbers — what a caller that builds a <c>PlanRequest</c> by hand needs.
+    /// </summary>
+    public static IReadOnlyList<ParameterValueHint> ResolvedHints(CorpusQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        if (Hints(query.Name) is not { } container)
+        {
+            return [];
+        }
+
+        var rewriter = ParameterRewriter.Parse(query.Sql);
+        var rendered = rewriter.Render(rewriter.PrepareShape());
+        return ParameterBinder.ResolveHints(rewriter.Parameters, rendered.Slots, container);
+    }
 
     /// <summary>Every query in {@code corpus/queries/m7-pushdown} — the pushdown corpus (D87).</summary>
     public static IReadOnlyList<CorpusQuery> LoadM7() => CachedM7.Value;

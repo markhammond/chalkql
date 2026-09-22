@@ -136,6 +136,19 @@ internal static class DifferentialRunner
         {
             ["p0"] = 1000L,
         },
+
+        // The hinted pair of design 49 §6. The same values for both halves, because what is being
+        // proved is that the hints chose a different plan and not a different answer.
+        "15_parameterised_bound_unhinted" => new Dictionary<string, object?>
+        {
+            ["p0"] = Utf8String.FromString("AAA"),
+            ["p1"] = 1,
+        },
+        "16_parameterised_bound_hinted" => new Dictionary<string, object?>
+        {
+            ["p0"] = Utf8String.FromString("AAA"),
+            ["p1"] = 1,
+        },
         _ => null,
     };
 

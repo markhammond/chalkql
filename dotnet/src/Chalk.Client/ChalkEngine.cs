@@ -688,6 +688,28 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         PrepareAsync(sql, context: null, options, ct);
 
     /// <summary>
+    /// The same, saying what this statement's parameters are expected to be worth so the planner can
+    /// estimate a predicate against one instead of guessing at it (D284).
+    /// </summary>
+    /// <param name="parameterValueHints">
+    /// A list by ordinal, a dictionary or an anonymous object or POCO by name, <b>sparse</b>: null
+    /// hints nothing about a parameter and <see cref="DBNull.Value"/> says SQL NULL is expected. At
+    /// execution null binds SQL NULL, so the two read null differently; a planning API needs three
+    /// states where a binding API needs two. Equivalent to
+    /// <see cref="PrepareOptions.ParameterValueHints"/>, which is the one mechanism underneath.
+    /// </param>
+    /// <remarks>
+    /// A hint informs an estimate and never a truth: the rows are the rows whatever is hinted, and
+    /// the values bound at execution need not resemble the hints.
+    /// </remarks>
+    public ValueTask<PreparedQuery> PrepareAsync(
+        string sql,
+        object? parameterValueHints,
+        PrepareOptions? options = null,
+        CancellationToken ct = default) =>
+        PrepareAsync(sql, context: null, options, parameterValueHints, ct);
+
+    /// <summary>
     /// Plans and compiles a statement with an execution context, which is the primary binding mode:
     /// the planner folds every scalar and every small list into constants, so the plan is the one this
     /// principal gets and its digest differs from another principal's.
@@ -707,11 +729,23 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         return result.Extensions;
     }
 
-    public async ValueTask<PreparedQuery> PrepareAsync(
+    public ValueTask<PreparedQuery> PrepareAsync(
         string sql,
         RequestContext? context,
         PrepareOptions? options = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        PrepareAsync(sql, context, options, parameterValueHints: null, ct);
+
+    /// <summary>
+    /// The one prepare underneath all of them. <paramref name="parameterValueHints"/> is what the
+    /// hint overload passed; null falls back to the options', which is the same mechanism (D284).
+    /// </summary>
+    private async ValueTask<PreparedQuery> PrepareAsync(
+        string sql,
+        RequestContext? context,
+        PrepareOptions? options,
+        object? parameterValueHints,
+        CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
         options ??= new PrepareOptions();
@@ -727,11 +761,17 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         var shape = rewriter.PrepareShape();
         var rendered = rewriter.Render(shape);
 
-        var result = await PlanAsync(rendered.Sql, options, context, ct).ConfigureAwait(false);
+        // What the caller expects each parameter to be worth, resolved against this statement's own
+        // parameters and expanded to the placeholders the planner numbers (D284). Every refusal —
+        // an unknown name, a list, a value with no IR type — happens here, before anything is sent.
+        var hints = ParameterBinder.ResolveHints(
+            rewriter.Parameters, rendered.Slots, parameterValueHints ?? options.ParameterValueHints);
+
+        var result = await PlanAsync(rendered.Sql, options, context, hints, ct).ConfigureAwait(false);
         var compiled = await CompileAsync(result.Plan, options, context, ct).ConfigureAwait(false);
-        
-        var prepared =
-            new PreparedQuery(this, sql, rewriter, options, result, compiled, shape, rendered, context);
+
+        var prepared = new PreparedQuery(
+            this, sql, rewriter, options, result, compiled, shape, rendered, context, hints);
         _log.LogDebug(
             "prepared {Digest:x16} ({Pushdown}) in {Micros}us: {Sql}",
             result.PlanDigest,
@@ -1527,15 +1567,34 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         CancellationToken ct) =>
         PlanAsync(sql, options, context, narrowFrom: 0, ct);
 
+    /// <summary>The same, with what this request expects its parameters to be worth (D284).</summary>
+    internal ValueTask<PlanResult> PlanAsync(
+        string sql,
+        PrepareOptions options,
+        RequestContext? context,
+        IReadOnlyList<ParameterValueHint> hints,
+        CancellationToken ct) =>
+        PlanAsync(sql, options, context, narrowFrom: 0, hints, ct);
+
     /// <summary>
     /// The same, naming the plan this one narrows. A hint: the context is already the union,
     /// so the plan is the same whether the sidecar still holds that one's tree or converts again.
     /// </summary>
+    internal ValueTask<PlanResult> PlanAsync(
+        string sql,
+        PrepareOptions options,
+        RequestContext? context,
+        ulong narrowFrom,
+        CancellationToken ct) =>
+        PlanAsync(sql, options, context, narrowFrom, [], ct);
+
+    /// <summary>The same, with this request's parameter value hints (D284).</summary>
     internal async ValueTask<PlanResult> PlanAsync(
         string sql,
         PrepareOptions options,
         RequestContext? context,
         ulong narrowFrom,
+        IReadOnlyList<ParameterValueHint> hints,
         CancellationToken ct)
     {
         await EnsureSharedCatalogCurrentAsync(ct).ConfigureAwait(false);
@@ -1567,6 +1626,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             Planning = planning,
             PlanningRequestId = requestId,
             Redaction = RedactionFor(options),
+            ParameterHints = hints,
             Options = new Chalk.Client.PlannerOptions
             {
                 Pushdown = options.Pushdown,

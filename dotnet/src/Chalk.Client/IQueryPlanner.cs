@@ -237,6 +237,32 @@ public sealed class PlanRequest
     /// the planner runs no visitor.
     /// </summary>
     public RedactionRequest? Redaction { get; init; }
+
+    /// <summary>
+    /// What this request expects its parameters to be worth, for planning only (D284). Empty — the
+    /// default — sends no bytes and estimates every parameter exactly as it always did.
+    /// </summary>
+    public IReadOnlyList<ParameterValueHint> ParameterHints { get; init; } = [];
+}
+
+/// <summary>
+/// One parameter's expected value, by the ordinal the rewritten statement gives it (D284).
+/// </summary>
+/// <remarks>
+/// A hint informs an estimate and never a truth: it changes which plan is cheapest and nothing
+/// else, and the value bound at execution need not resemble it. Nothing of it is retained on the
+/// prepared query but the ordinal.
+/// </remarks>
+public sealed class ParameterValueHint
+{
+    /// <summary>The placeholder this hint is about, numbered as the planner numbers parameters.</summary>
+    public required int Ordinal { get; init; }
+
+    /// <summary>
+    /// The expected value as an IR literal expression, or null for a hint of SQL NULL — which is a
+    /// statement about the value and not the absence of one.
+    /// </summary>
+    public Chalk.Ir.Expr? Value { get; init; }
 }
 
 /// <summary>How much freedom the planner has. <c>PUSHDOWN_LEVEL_NONE</c> is the I4 reference configuration.</summary>

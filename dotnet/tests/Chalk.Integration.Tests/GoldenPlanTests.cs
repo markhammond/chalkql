@@ -137,6 +137,9 @@ public sealed class GoldenPlanTests(SharedSidecar sidecar)
             Sql = query.PlannerSql,
             ContextId = Fixture.Catalog.ContextId,
             CatalogEpoch = Fixture.Catalog.Epoch,
+            // What this query expects its parameters to be worth (D284), exactly as the recorder
+            // planned it: a hinted query whose hints were dropped here would be a different plan.
+            ParameterHints = CorpusQueries.ResolvedHints(query),
             Options = new Chalk.Client.PlannerOptions
             {
                 Pushdown = level,
