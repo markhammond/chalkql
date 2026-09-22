@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "12552568063747276151",
+  "planDigest": "11596483091731212521",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -35,44 +35,10 @@
                 "type": {
                   "kind": "TYPE_KIND_STRING"
                 }
-              },
-              {
-                "name": "ts",
-                "type": {
-                  "kind": "TYPE_KIND_TIMESTAMP",
-                  "precision": 9
-                }
               }
             ]
           },
           "estRowCount": 50400,
-          "collations": [
-            {
-              "fields": [
-                {
-                  "expr": {
-                    "type": {
-                      "kind": "TYPE_KIND_TIMESTAMP",
-                      "precision": 9
-                    },
-                    "fieldRef": {
-                      "index": 1
-                    }
-                  },
-                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                },
-                {
-                  "expr": {
-                    "type": {
-                      "kind": "TYPE_KIND_STRING"
-                    },
-                    "fieldRef": {}
-                  },
-                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                }
-              ]
-            }
-          ],
           "filter": {
             "input": {
               "rowType": {
@@ -82,44 +48,10 @@
                     "type": {
                       "kind": "TYPE_KIND_STRING"
                     }
-                  },
-                  {
-                    "name": "ts",
-                    "type": {
-                      "kind": "TYPE_KIND_TIMESTAMP",
-                      "precision": 9
-                    }
                   }
                 ]
               },
               "estRowCount": 100800,
-              "collations": [
-                {
-                  "fields": [
-                    {
-                      "expr": {
-                        "type": {
-                          "kind": "TYPE_KIND_TIMESTAMP",
-                          "precision": 9
-                        },
-                        "fieldRef": {
-                          "index": 1
-                        }
-                      },
-                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                    },
-                    {
-                      "expr": {
-                        "type": {
-                          "kind": "TYPE_KIND_STRING"
-                        },
-                        "fieldRef": {}
-                      },
-                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                    }
-                  ]
-                }
-              ],
               "project": {
                 "input": {
                   "rowType": {
@@ -238,15 +170,6 @@
                       "kind": "TYPE_KIND_STRING"
                     },
                     "fieldRef": {}
-                  },
-                  {
-                    "type": {
-                      "kind": "TYPE_KIND_TIMESTAMP",
-                      "precision": 9
-                    },
-                    "fieldRef": {
-                      "index": 1
-                    }
                   }
                 ]
               }

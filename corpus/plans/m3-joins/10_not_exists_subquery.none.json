@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "3324244309506489293",
+  "planDigest": "17192164114819313043",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -493,12 +493,6 @@
                               "rowType": {
                                 "fields": [
                                   {
-                                    "name": "id",
-                                    "type": {
-                                      "kind": "TYPE_KIND_I32"
-                                    }
-                                  },
-                                  {
                                     "name": "symbol",
                                     "type": {
                                       "kind": "TYPE_KIND_STRING"
@@ -513,31 +507,10 @@
                                 ]
                               },
                               "estRowCount": 3,
-                              "collations": [
-                                {
-                                  "fields": [
-                                    {
-                                      "expr": {
-                                        "type": {
-                                          "kind": "TYPE_KIND_I32"
-                                        },
-                                        "fieldRef": {}
-                                      },
-                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                    }
-                                  ]
-                                }
-                              ],
                               "filter": {
                                 "input": {
                                   "rowType": {
                                     "fields": [
-                                      {
-                                        "name": "id",
-                                        "type": {
-                                          "kind": "TYPE_KIND_I32"
-                                        }
-                                      },
                                       {
                                         "name": "symbol",
                                         "type": {
@@ -553,21 +526,6 @@
                                     ]
                                   },
                                   "estRowCount": 20,
-                                  "collations": [
-                                    {
-                                      "fields": [
-                                        {
-                                          "expr": {
-                                            "type": {
-                                              "kind": "TYPE_KIND_I32"
-                                            },
-                                            "fieldRef": {}
-                                          },
-                                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                        }
-                                      ]
-                                    }
-                                  ],
                                   "project": {
                                     "input": {
                                       "rowType": {
@@ -640,12 +598,6 @@
                                     "exprs": [
                                       {
                                         "type": {
-                                          "kind": "TYPE_KIND_I32"
-                                        },
-                                        "fieldRef": {}
-                                      },
-                                      {
-                                        "type": {
                                           "kind": "TYPE_KIND_STRING"
                                         },
                                         "fieldRef": {
@@ -675,7 +627,7 @@
                                           "kind": "TYPE_KIND_STRING"
                                         },
                                         "fieldRef": {
-                                          "index": 2
+                                          "index": 1
                                         }
                                       },
                                       {
@@ -696,9 +648,7 @@
                                 "type": {
                                   "kind": "TYPE_KIND_STRING"
                                 },
-                                "fieldRef": {
-                                  "index": 1
-                                }
+                                "fieldRef": {}
                               }
                             ]
                           }

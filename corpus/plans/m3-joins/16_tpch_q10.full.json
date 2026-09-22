@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "50780541966416271",
+  "planDigest": "11838896411766428228",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -514,6 +514,21 @@
                                 ]
                               },
                               "estRowCount": 9000,
+                              "collations": [
+                                {
+                                  "fields": [
+                                    {
+                                      "expr": {
+                                        "type": {
+                                          "kind": "TYPE_KIND_I64"
+                                        },
+                                        "fieldRef": {}
+                                      },
+                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                    }
+                                  ]
+                                }
+                              ],
                               "project": {
                                 "input": {
                                   "rowType": {
@@ -522,12 +537,6 @@
                                         "name": "l_orderkey",
                                         "type": {
                                           "kind": "TYPE_KIND_I64"
-                                        }
-                                      },
-                                      {
-                                        "name": "l_linenumber",
-                                        "type": {
-                                          "kind": "TYPE_KIND_I32"
                                         }
                                       },
                                       {
@@ -566,17 +575,6 @@
                                             "fieldRef": {}
                                           },
                                           "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                        },
-                                        {
-                                          "expr": {
-                                            "type": {
-                                              "kind": "TYPE_KIND_I32"
-                                            },
-                                            "fieldRef": {
-                                              "index": 1
-                                            }
-                                          },
-                                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
                                         }
                                       ]
                                     }
@@ -589,12 +587,6 @@
                                             "name": "l_orderkey",
                                             "type": {
                                               "kind": "TYPE_KIND_I64"
-                                            }
-                                          },
-                                          {
-                                            "name": "l_linenumber",
-                                            "type": {
-                                              "kind": "TYPE_KIND_I32"
                                             }
                                           },
                                           {
@@ -633,17 +625,6 @@
                                                 "fieldRef": {}
                                               },
                                               "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                            },
-                                            {
-                                              "expr": {
-                                                "type": {
-                                                  "kind": "TYPE_KIND_I32"
-                                                },
-                                                "fieldRef": {
-                                                  "index": 1
-                                                }
-                                              },
-                                              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
                                             }
                                           ]
                                         }
@@ -656,7 +637,6 @@
                                         },
                                         "projection": [
                                           0,
-                                          1,
                                           5,
                                           6,
                                           8
@@ -675,7 +655,7 @@
                                               "kind": "TYPE_KIND_STRING"
                                             },
                                             "fieldRef": {
-                                              "index": 4
+                                              "index": 3
                                             }
                                           },
                                           {
@@ -721,7 +701,7 @@
                                                 "scale": 2
                                               },
                                               "fieldRef": {
-                                                "index": 2
+                                                "index": 1
                                               }
                                             },
                                             "onFailure": "CAST_FAILURE_ERROR"
@@ -761,7 +741,7 @@
                                                   "scale": 2
                                                 },
                                                 "fieldRef": {
-                                                  "index": 3
+                                                  "index": 2
                                                 }
                                               }
                                             ]

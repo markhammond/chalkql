@@ -438,6 +438,7 @@ class CostModelTest {
       assertThat(filter).as("a Filter(Scan) at NONE for: " + sql).isNotNull();
       ChalkTableScan scan = find(filter, ChalkTableScan.class);
       assertThat(scan).as("a scan under it").isNotNull();
+      scan = asPruned(filter, scan);
 
       scan.getCluster().setMetadataProvider(ChalkRelMetadata.SOURCE);
       scan.getCluster().invalidateMetadataQuery();
@@ -451,6 +452,34 @@ class CostModelTest {
     } catch (Exception e) {
       throw new IllegalStateException("planning failed for: " + sql, e);
     }
+  }
+
+  /**
+   * The scan the filter's condition indexes.
+   *
+   * <p>The reference plan is a {@code NONE} one, where the trimmer's column-subset {@code Project}
+   * is still between the filter and the scan because {@code ChalkProjectScanRule} is switched off,
+   * so the scan reads the whole table while the condition already indexes the trimmed row. The
+   * alternative under test is the one the rule builds at {@code FULL}, over the pruned scan that
+   * rule would have made — which is what puts the condition and the scan in the same row.
+   */
+  private static ChalkTableScan asPruned(ChalkFilter filter, ChalkTableScan scan) {
+    if (!(filter.getInput() instanceof chalk.planner.plan.rel.ChalkProject project)) {
+      return scan;
+    }
+
+    List<Integer> columns = new java.util.ArrayList<>(project.getProjects().size());
+    for (RexNode expression : project.getProjects()) {
+      if (!(expression instanceof org.apache.calcite.rex.RexInputRef ref)) {
+        return scan;
+      }
+      columns.add(scan.projection().get(ref.getIndex()));
+    }
+
+    return ChalkTableScan.create(
+        scan.getCluster(),
+        scan.getTable(),
+        org.apache.calcite.util.ImmutableIntList.copyOf(columns));
   }
 
   /** The lookup the rule would build: the first index the matcher can use. */

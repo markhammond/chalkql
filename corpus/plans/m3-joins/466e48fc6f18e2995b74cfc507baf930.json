@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "11100580141242026115",
+  "planDigest": "3471670020233453030",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -645,6 +645,21 @@
                         ]
                       },
                       "estRowCount": 32558.68544600939,
+                      "collations": [
+                        {
+                          "fields": [
+                            {
+                              "expr": {
+                                "type": {
+                                  "kind": "TYPE_KIND_I64"
+                                },
+                                "fieldRef": {}
+                              },
+                              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                            }
+                          ]
+                        }
+                      ],
                       "project": {
                         "input": {
                           "rowType": {
@@ -653,12 +668,6 @@
                                 "name": "l_orderkey",
                                 "type": {
                                   "kind": "TYPE_KIND_I64"
-                                }
-                              },
-                              {
-                                "name": "l_linenumber",
-                                "type": {
-                                  "kind": "TYPE_KIND_I32"
                                 }
                               },
                               {
@@ -697,17 +706,6 @@
                                     "fieldRef": {}
                                   },
                                   "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                },
-                                {
-                                  "expr": {
-                                    "type": {
-                                      "kind": "TYPE_KIND_I32"
-                                    },
-                                    "fieldRef": {
-                                      "index": 1
-                                    }
-                                  },
-                                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
                                 }
                               ]
                             }
@@ -720,12 +718,6 @@
                                     "name": "l_orderkey",
                                     "type": {
                                       "kind": "TYPE_KIND_I64"
-                                    }
-                                  },
-                                  {
-                                    "name": "l_linenumber",
-                                    "type": {
-                                      "kind": "TYPE_KIND_I32"
                                     }
                                   },
                                   {
@@ -764,17 +756,6 @@
                                         "fieldRef": {}
                                       },
                                       "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                    },
-                                    {
-                                      "expr": {
-                                        "type": {
-                                          "kind": "TYPE_KIND_I32"
-                                        },
-                                        "fieldRef": {
-                                          "index": 1
-                                        }
-                                      },
-                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
                                     }
                                   ]
                                 }
@@ -787,7 +768,6 @@
                                 },
                                 "projection": [
                                   0,
-                                  1,
                                   5,
                                   6,
                                   10
@@ -806,7 +786,7 @@
                                       "kind": "TYPE_KIND_DATE"
                                     },
                                     "fieldRef": {
-                                      "index": 4
+                                      "index": 3
                                     }
                                   },
                                   {
@@ -852,7 +832,7 @@
                                         "scale": 2
                                       },
                                       "fieldRef": {
-                                        "index": 2
+                                        "index": 1
                                       }
                                     },
                                     "onFailure": "CAST_FAILURE_ERROR"
@@ -892,7 +872,7 @@
                                           "scale": 2
                                         },
                                         "fieldRef": {
-                                          "index": 3
+                                          "index": 2
                                         }
                                       }
                                     ]

@@ -1,8 +1,8 @@
 -- FULL
 ChalkHashAggregate(group=[{}], n=[COUNT()])
-  ChalkIndexLookup(table=[[main, bars]], index=[ix_bars_symbol_ts], ranges=[[[[?0], [?0]]]], projection=[[0, 1]])
+  ChalkIndexLookup(table=[[main, bars]], index=[ix_bars_symbol_ts], ranges=[[[[?0], [?0]]]], projection=[[0]])
 -- NONE
 ChalkHashAggregate(group=[{}], n=[COUNT()])
   ChalkFilter(condition=[=($0, ?0)])
-    ChalkProject(symbol=[$0], ts=[$1])
+    ChalkProject(symbol=[$0])
       ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])

@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "6210396768657217130",
+  "planDigest": "16244834000859077702",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -525,12 +525,6 @@
                                         }
                                       },
                                       {
-                                        "name": "l_linenumber",
-                                        "type": {
-                                          "kind": "TYPE_KIND_I32"
-                                        }
-                                      },
-                                      {
                                         "name": "l_extendedprice",
                                         "type": {
                                           "kind": "TYPE_KIND_DECIMAL",
@@ -555,32 +549,6 @@
                                     ]
                                   },
                                   "estRowCount": 9000,
-                                  "collations": [
-                                    {
-                                      "fields": [
-                                        {
-                                          "expr": {
-                                            "type": {
-                                              "kind": "TYPE_KIND_I64"
-                                            },
-                                            "fieldRef": {}
-                                          },
-                                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                        },
-                                        {
-                                          "expr": {
-                                            "type": {
-                                              "kind": "TYPE_KIND_I32"
-                                            },
-                                            "fieldRef": {
-                                              "index": 1
-                                            }
-                                          },
-                                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                        }
-                                      ]
-                                    }
-                                  ],
                                   "filter": {
                                     "input": {
                                       "rowType": {
@@ -589,12 +557,6 @@
                                             "name": "l_orderkey",
                                             "type": {
                                               "kind": "TYPE_KIND_I64"
-                                            }
-                                          },
-                                          {
-                                            "name": "l_linenumber",
-                                            "type": {
-                                              "kind": "TYPE_KIND_I32"
                                             }
                                           },
                                           {
@@ -622,32 +584,6 @@
                                         ]
                                       },
                                       "estRowCount": 60000,
-                                      "collations": [
-                                        {
-                                          "fields": [
-                                            {
-                                              "expr": {
-                                                "type": {
-                                                  "kind": "TYPE_KIND_I64"
-                                                },
-                                                "fieldRef": {}
-                                              },
-                                              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                            },
-                                            {
-                                              "expr": {
-                                                "type": {
-                                                  "kind": "TYPE_KIND_I32"
-                                                },
-                                                "fieldRef": {
-                                                  "index": 1
-                                                }
-                                              },
-                                              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                            }
-                                          ]
-                                        }
-                                      ],
                                       "project": {
                                         "input": {
                                           "rowType": {
@@ -820,14 +756,6 @@
                                           },
                                           {
                                             "type": {
-                                              "kind": "TYPE_KIND_I32"
-                                            },
-                                            "fieldRef": {
-                                              "index": 1
-                                            }
-                                          },
-                                          {
-                                            "type": {
                                               "kind": "TYPE_KIND_DECIMAL",
                                               "precision": 15,
                                               "scale": 2
@@ -869,7 +797,7 @@
                                               "kind": "TYPE_KIND_STRING"
                                             },
                                             "fieldRef": {
-                                              "index": 4
+                                              "index": 3
                                             }
                                           },
                                           {
@@ -915,7 +843,7 @@
                                                 "scale": 2
                                               },
                                               "fieldRef": {
-                                                "index": 2
+                                                "index": 1
                                               }
                                             },
                                             "onFailure": "CAST_FAILURE_ERROR"
@@ -955,7 +883,7 @@
                                                   "scale": 2
                                                 },
                                                 "fieldRef": {
-                                                  "index": 3
+                                                  "index": 2
                                                 }
                                               }
                                             ]

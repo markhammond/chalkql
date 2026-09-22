@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "5939430387170662984",
+  "planDigest": "16619658094940993103",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -314,12 +314,6 @@
                               "rowType": {
                                 "fields": [
                                   {
-                                    "name": "id",
-                                    "type": {
-                                      "kind": "TYPE_KIND_I32"
-                                    }
-                                  },
-                                  {
                                     "name": "symbol",
                                     "type": {
                                       "kind": "TYPE_KIND_STRING"
@@ -334,31 +328,10 @@
                                 ]
                               },
                               "estRowCount": 3,
-                              "collations": [
-                                {
-                                  "fields": [
-                                    {
-                                      "expr": {
-                                        "type": {
-                                          "kind": "TYPE_KIND_I32"
-                                        },
-                                        "fieldRef": {}
-                                      },
-                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                    }
-                                  ]
-                                }
-                              ],
                               "filter": {
                                 "input": {
                                   "rowType": {
                                     "fields": [
-                                      {
-                                        "name": "id",
-                                        "type": {
-                                          "kind": "TYPE_KIND_I32"
-                                        }
-                                      },
                                       {
                                         "name": "symbol",
                                         "type": {
@@ -374,21 +347,6 @@
                                     ]
                                   },
                                   "estRowCount": 20,
-                                  "collations": [
-                                    {
-                                      "fields": [
-                                        {
-                                          "expr": {
-                                            "type": {
-                                              "kind": "TYPE_KIND_I32"
-                                            },
-                                            "fieldRef": {}
-                                          },
-                                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                        }
-                                      ]
-                                    }
-                                  ],
                                   "read": {
                                     "table": {
                                       "sourceId": "mem",
@@ -396,7 +354,6 @@
                                       "table": "events"
                                     },
                                     "projection": [
-                                      0,
                                       1,
                                       4
                                     ]
@@ -414,7 +371,7 @@
                                           "kind": "TYPE_KIND_STRING"
                                         },
                                         "fieldRef": {
-                                          "index": 2
+                                          "index": 1
                                         }
                                       },
                                       {
@@ -435,9 +392,7 @@
                                 "type": {
                                   "kind": "TYPE_KIND_STRING"
                                 },
-                                "fieldRef": {
-                                  "index": 1
-                                }
+                                "fieldRef": {}
                               }
                             ]
                           }

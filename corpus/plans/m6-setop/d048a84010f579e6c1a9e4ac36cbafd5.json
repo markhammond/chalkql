@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "10569947775352839580",
+  "planDigest": "9867060478417986148",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -118,13 +118,6 @@
                         }
                       },
                       {
-                        "name": "ts",
-                        "type": {
-                          "kind": "TYPE_KIND_TIMESTAMP",
-                          "precision": 9
-                        }
-                      },
-                      {
                         "name": "trade_count",
                         "type": {
                           "kind": "TYPE_KIND_I32",
@@ -137,59 +130,6 @@
                   "collations": [
                     {
                       "fields": [
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "fieldRef": {}
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        },
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        }
-                      ]
-                    },
-                    {
-                      "fields": [
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        }
-                      ]
-                    },
-                    {
-                      "fields": [
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        },
                         {
                           "expr": {
                             "type": {
@@ -237,7 +177,6 @@
                     ],
                     "projection": [
                       0,
-                      1,
                       8
                     ]
                   }
@@ -263,7 +202,7 @@
                           "nullable": true
                         },
                         "fieldRef": {
-                          "index": 2
+                          "index": 1
                         }
                       },
                       "onFailure": "CAST_FAILURE_ERROR"
@@ -301,13 +240,6 @@
                         }
                       },
                       {
-                        "name": "ts",
-                        "type": {
-                          "kind": "TYPE_KIND_TIMESTAMP",
-                          "precision": 9
-                        }
-                      },
-                      {
                         "name": "volume",
                         "type": {
                           "kind": "TYPE_KIND_I64"
@@ -319,59 +251,6 @@
                   "collations": [
                     {
                       "fields": [
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "fieldRef": {}
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        },
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        }
-                      ]
-                    },
-                    {
-                      "fields": [
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        }
-                      ]
-                    },
-                    {
-                      "fields": [
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        },
                         {
                           "expr": {
                             "type": {
@@ -419,7 +298,6 @@
                     ],
                     "projection": [
                       0,
-                      1,
                       6
                     ]
                   }
@@ -438,7 +316,7 @@
                       "kind": "TYPE_KIND_I64"
                     },
                     "fieldRef": {
-                      "index": 2
+                      "index": 1
                     }
                   }
                 ]

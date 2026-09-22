@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "13951604998205036196",
+  "planDigest": "9367021343495617361",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -76,44 +76,10 @@
                         "type": {
                           "kind": "TYPE_KIND_STRING"
                         }
-                      },
-                      {
-                        "name": "ts",
-                        "type": {
-                          "kind": "TYPE_KIND_TIMESTAMP",
-                          "precision": 9
-                        }
                       }
                     ]
                   },
                   "estRowCount": 1000,
-                  "collations": [
-                    {
-                      "fields": [
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        },
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "fieldRef": {}
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        }
-                      ]
-                    }
-                  ],
                   "filter": {
                     "input": {
                       "rowType": {
@@ -123,44 +89,10 @@
                             "type": {
                               "kind": "TYPE_KIND_STRING"
                             }
-                          },
-                          {
-                            "name": "ts",
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            }
                           }
                         ]
                       },
                       "estRowCount": 5000,
-                      "collations": [
-                        {
-                          "fields": [
-                            {
-                              "expr": {
-                                "type": {
-                                  "kind": "TYPE_KIND_TIMESTAMP",
-                                  "precision": 9
-                                },
-                                "fieldRef": {
-                                  "index": 1
-                                }
-                              },
-                              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                            },
-                            {
-                              "expr": {
-                                "type": {
-                                  "kind": "TYPE_KIND_STRING"
-                                },
-                                "fieldRef": {}
-                              },
-                              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                            }
-                          ]
-                        }
-                      ],
                       "project": {
                         "input": {
                           "rowType": {
@@ -279,15 +211,6 @@
                               "kind": "TYPE_KIND_STRING"
                             },
                             "fieldRef": {}
-                          },
-                          {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
                           }
                         ]
                       }
@@ -351,44 +274,10 @@
                         "type": {
                           "kind": "TYPE_KIND_STRING"
                         }
-                      },
-                      {
-                        "name": "ts",
-                        "type": {
-                          "kind": "TYPE_KIND_TIMESTAMP",
-                          "precision": 9
-                        }
                       }
                     ]
                   },
                   "estRowCount": 1000,
-                  "collations": [
-                    {
-                      "fields": [
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        },
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "fieldRef": {}
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        }
-                      ]
-                    }
-                  ],
                   "filter": {
                     "input": {
                       "rowType": {
@@ -398,44 +287,10 @@
                             "type": {
                               "kind": "TYPE_KIND_STRING"
                             }
-                          },
-                          {
-                            "name": "ts",
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            }
                           }
                         ]
                       },
                       "estRowCount": 5000,
-                      "collations": [
-                        {
-                          "fields": [
-                            {
-                              "expr": {
-                                "type": {
-                                  "kind": "TYPE_KIND_TIMESTAMP",
-                                  "precision": 9
-                                },
-                                "fieldRef": {
-                                  "index": 1
-                                }
-                              },
-                              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                            },
-                            {
-                              "expr": {
-                                "type": {
-                                  "kind": "TYPE_KIND_STRING"
-                                },
-                                "fieldRef": {}
-                              },
-                              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                            }
-                          ]
-                        }
-                      ],
                       "project": {
                         "input": {
                           "rowType": {
@@ -554,15 +409,6 @@
                               "kind": "TYPE_KIND_STRING"
                             },
                             "fieldRef": {}
-                          },
-                          {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
                           }
                         ]
                       }
@@ -617,7 +463,7 @@
                 ]
               },
               "estRowCount": 1250,
-              "project": {
+              "filter": {
                 "input": {
                   "rowType": {
                     "fields": [
@@ -626,45 +472,11 @@
                         "type": {
                           "kind": "TYPE_KIND_STRING"
                         }
-                      },
-                      {
-                        "name": "ts",
-                        "type": {
-                          "kind": "TYPE_KIND_TIMESTAMP",
-                          "precision": 9
-                        }
                       }
                     ]
                   },
-                  "estRowCount": 1250,
-                  "collations": [
-                    {
-                      "fields": [
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        },
-                        {
-                          "expr": {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "fieldRef": {}
-                          },
-                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                        }
-                      ]
-                    }
-                  ],
-                  "filter": {
+                  "estRowCount": 5000,
+                  "project": {
                     "input": {
                       "rowType": {
                         "fields": [
@@ -679,6 +491,52 @@
                             "type": {
                               "kind": "TYPE_KIND_TIMESTAMP",
                               "precision": 9
+                            }
+                          },
+                          {
+                            "name": "open",
+                            "type": {
+                              "kind": "TYPE_KIND_FP64"
+                            }
+                          },
+                          {
+                            "name": "high",
+                            "type": {
+                              "kind": "TYPE_KIND_FP64"
+                            }
+                          },
+                          {
+                            "name": "low",
+                            "type": {
+                              "kind": "TYPE_KIND_FP64"
+                            }
+                          },
+                          {
+                            "name": "close",
+                            "type": {
+                              "kind": "TYPE_KIND_FP64"
+                            }
+                          },
+                          {
+                            "name": "volume",
+                            "type": {
+                              "kind": "TYPE_KIND_I64"
+                            }
+                          },
+                          {
+                            "name": "vwap",
+                            "type": {
+                              "kind": "TYPE_KIND_DECIMAL",
+                              "nullable": true,
+                              "precision": 28,
+                              "scale": 10
+                            }
+                          },
+                          {
+                            "name": "trade_count",
+                            "type": {
+                              "kind": "TYPE_KIND_I32",
+                              "nullable": true
                             }
                           }
                         ]
@@ -711,178 +569,66 @@
                           ]
                         }
                       ],
-                      "project": {
-                        "input": {
-                          "rowType": {
-                            "fields": [
-                              {
-                                "name": "symbol",
-                                "type": {
-                                  "kind": "TYPE_KIND_STRING"
-                                }
-                              },
-                              {
-                                "name": "ts",
-                                "type": {
-                                  "kind": "TYPE_KIND_TIMESTAMP",
-                                  "precision": 9
-                                }
-                              },
-                              {
-                                "name": "open",
-                                "type": {
-                                  "kind": "TYPE_KIND_FP64"
-                                }
-                              },
-                              {
-                                "name": "high",
-                                "type": {
-                                  "kind": "TYPE_KIND_FP64"
-                                }
-                              },
-                              {
-                                "name": "low",
-                                "type": {
-                                  "kind": "TYPE_KIND_FP64"
-                                }
-                              },
-                              {
-                                "name": "close",
-                                "type": {
-                                  "kind": "TYPE_KIND_FP64"
-                                }
-                              },
-                              {
-                                "name": "volume",
-                                "type": {
-                                  "kind": "TYPE_KIND_I64"
-                                }
-                              },
-                              {
-                                "name": "vwap",
-                                "type": {
-                                  "kind": "TYPE_KIND_DECIMAL",
-                                  "nullable": true,
-                                  "precision": 28,
-                                  "scale": 10
-                                }
-                              },
-                              {
-                                "name": "trade_count",
-                                "type": {
-                                  "kind": "TYPE_KIND_I32",
-                                  "nullable": true
-                                }
-                              }
-                            ]
-                          },
-                          "estRowCount": 5000,
-                          "collations": [
-                            {
-                              "fields": [
-                                {
-                                  "expr": {
-                                    "type": {
-                                      "kind": "TYPE_KIND_TIMESTAMP",
-                                      "precision": 9
-                                    },
-                                    "fieldRef": {
-                                      "index": 1
-                                    }
-                                  },
-                                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                },
-                                {
-                                  "expr": {
-                                    "type": {
-                                      "kind": "TYPE_KIND_STRING"
-                                    },
-                                    "fieldRef": {}
-                                  },
-                                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                }
-                              ]
-                            }
-                          ],
-                          "read": {
-                            "table": {
-                              "sourceId": "mem",
-                              "schema": "main",
-                              "table": "bars_small"
-                            },
-                            "projection": [
-                              0,
-                              1,
-                              2,
-                              3,
-                              4,
-                              5,
-                              6,
-                              7,
-                              8
-                            ]
-                          }
+                      "read": {
+                        "table": {
+                          "sourceId": "mem",
+                          "schema": "main",
+                          "table": "bars_small"
                         },
-                        "exprs": [
-                          {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "fieldRef": {}
-                          },
-                          {
-                            "type": {
-                              "kind": "TYPE_KIND_TIMESTAMP",
-                              "precision": 9
-                            },
-                            "fieldRef": {
-                              "index": 1
-                            }
-                          }
+                        "projection": [
+                          0,
+                          1,
+                          2,
+                          3,
+                          4,
+                          5,
+                          6,
+                          7,
+                          8
                         ]
                       }
                     },
-                    "condition": {
-                      "type": {
-                        "kind": "TYPE_KIND_BOOL"
-                      },
-                      "inList": {
-                        "value": {
-                          "type": {
-                            "kind": "TYPE_KIND_STRING"
-                          },
-                          "fieldRef": {}
+                    "exprs": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
                         },
-                        "options": [
-                          {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "literal": {
-                              "stringValue": "BTCUSDT"
-                            }
-                          },
-                          {
-                            "type": {
-                              "kind": "TYPE_KIND_STRING"
-                            },
-                            "literal": {
-                              "stringValue": "SOLUSDT"
-                            }
-                          }
-                        ]
+                        "fieldRef": {}
                       }
-                    }
+                    ]
                   }
                 },
-                "exprs": [
-                  {
-                    "type": {
-                      "kind": "TYPE_KIND_STRING"
+                "condition": {
+                  "type": {
+                    "kind": "TYPE_KIND_BOOL"
+                  },
+                  "inList": {
+                    "value": {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {}
                     },
-                    "fieldRef": {}
+                    "options": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        },
+                        "literal": {
+                          "stringValue": "BTCUSDT"
+                        }
+                      },
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        },
+                        "literal": {
+                          "stringValue": "SOLUSDT"
+                        }
+                      }
+                    ]
                   }
-                ]
+                }
               }
             }
           ],

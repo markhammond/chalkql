@@ -42,7 +42,6 @@ import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.apache.calcite.sql.validate.SqlValidatorUtil;
 import org.apache.calcite.sql2rel.RelDecorrelator;
-import org.apache.calcite.sql2rel.RelFieldTrimmer;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.Planner;
@@ -1149,8 +1148,10 @@ public final class PlannerPipeline implements AutoCloseable {
     reduced = orderJoins(reduced);
 
     // Trim columns nothing reads. This is also what puts a Project directly above each scan, which
-    // is what ChalkProjectScanRule needs in order to prune the scan itself.
-    reduced = new RelFieldTrimmer(null, relBuilder).trim(reduced);
+    // is what ChalkProjectScanRule needs in order to prune the scan itself. Chalk's own trimmer,
+    // because Calcite's keeps every column that defines an input's collation and for a catalog that
+    // declares one that is every table's ordering key in every scan (F114).
+    reduced = new ChalkFieldTrimmer(relBuilder).trim(reduced);
 
     // Last, so that nothing above can put one back: LITERAL_AGG written as the projected literal it
     // means (F71). The sub-query rules of `RuleSets.hep` are the only thing in the pipeline that

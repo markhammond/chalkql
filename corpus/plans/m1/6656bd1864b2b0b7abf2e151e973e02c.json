@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "12864269274470599468",
+  "planDigest": "5806325990978833108",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -35,44 +35,10 @@
                 "type": {
                   "kind": "TYPE_KIND_STRING"
                 }
-              },
-              {
-                "name": "ts",
-                "type": {
-                  "kind": "TYPE_KIND_TIMESTAMP",
-                  "precision": 9
-                }
               }
             ]
           },
           "estRowCount": 50400,
-          "collations": [
-            {
-              "fields": [
-                {
-                  "expr": {
-                    "type": {
-                      "kind": "TYPE_KIND_TIMESTAMP",
-                      "precision": 9
-                    },
-                    "fieldRef": {
-                      "index": 1
-                    }
-                  },
-                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                },
-                {
-                  "expr": {
-                    "type": {
-                      "kind": "TYPE_KIND_STRING"
-                    },
-                    "fieldRef": {}
-                  },
-                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                }
-              ]
-            }
-          ],
           "filter": {
             "input": {
               "rowType": {
@@ -82,44 +48,10 @@
                     "type": {
                       "kind": "TYPE_KIND_STRING"
                     }
-                  },
-                  {
-                    "name": "ts",
-                    "type": {
-                      "kind": "TYPE_KIND_TIMESTAMP",
-                      "precision": 9
-                    }
                   }
                 ]
               },
               "estRowCount": 100800,
-              "collations": [
-                {
-                  "fields": [
-                    {
-                      "expr": {
-                        "type": {
-                          "kind": "TYPE_KIND_TIMESTAMP",
-                          "precision": 9
-                        },
-                        "fieldRef": {
-                          "index": 1
-                        }
-                      },
-                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                    },
-                    {
-                      "expr": {
-                        "type": {
-                          "kind": "TYPE_KIND_STRING"
-                        },
-                        "fieldRef": {}
-                      },
-                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                    }
-                  ]
-                }
-              ],
               "read": {
                 "table": {
                   "sourceId": "mem",
@@ -127,8 +59,7 @@
                   "table": "bars"
                 },
                 "projection": [
-                  0,
-                  1
+                  0
                 ]
               }
             },

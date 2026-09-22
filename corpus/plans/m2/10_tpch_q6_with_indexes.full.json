@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "72085595763315797",
+  "planDigest": "12040671368819851271",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -73,18 +73,6 @@
                   "rowType": {
                     "fields": [
                       {
-                        "name": "l_orderkey",
-                        "type": {
-                          "kind": "TYPE_KIND_I64"
-                        }
-                      },
-                      {
-                        "name": "l_linenumber",
-                        "type": {
-                          "kind": "TYPE_KIND_I32"
-                        }
-                      },
-                      {
                         "name": "l_quantity",
                         "type": {
                           "kind": "TYPE_KIND_DECIMAL",
@@ -126,7 +114,7 @@
                               "kind": "TYPE_KIND_DATE"
                             },
                             "fieldRef": {
-                              "index": 5
+                              "index": 3
                             }
                           },
                           "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
@@ -138,18 +126,6 @@
                     "input": {
                       "rowType": {
                         "fields": [
-                          {
-                            "name": "l_orderkey",
-                            "type": {
-                              "kind": "TYPE_KIND_I64"
-                            }
-                          },
-                          {
-                            "name": "l_linenumber",
-                            "type": {
-                              "kind": "TYPE_KIND_I32"
-                            }
-                          },
                           {
                             "name": "l_quantity",
                             "type": {
@@ -192,7 +168,7 @@
                                   "kind": "TYPE_KIND_DATE"
                                 },
                                 "fieldRef": {
-                                  "index": 5
+                                  "index": 3
                                 }
                               },
                               "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
@@ -233,8 +209,6 @@
                           }
                         ],
                         "projection": [
-                          0,
-                          1,
                           4,
                           5,
                           6,
@@ -263,7 +237,7 @@
                                     "scale": 2
                                   },
                                   "fieldRef": {
-                                    "index": 4
+                                    "index": 2
                                   }
                                 },
                                 {
@@ -305,7 +279,7 @@
                                     "scale": 2
                                   },
                                   "fieldRef": {
-                                    "index": 4
+                                    "index": 2
                                   }
                                 },
                                 {
@@ -346,9 +320,7 @@
                                     "precision": 15,
                                     "scale": 2
                                   },
-                                  "fieldRef": {
-                                    "index": 2
-                                  }
+                                  "fieldRef": {}
                                 },
                                 {
                                   "type": {
@@ -387,7 +359,7 @@
                             "scale": 2
                           },
                           "fieldRef": {
-                            "index": 3
+                            "index": 1
                           }
                         },
                         {
@@ -397,7 +369,7 @@
                             "scale": 2
                           },
                           "fieldRef": {
-                            "index": 4
+                            "index": 2
                           }
                         }
                       ]

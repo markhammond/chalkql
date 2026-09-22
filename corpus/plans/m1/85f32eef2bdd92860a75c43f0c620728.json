@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "98203185283489420",
+  "planDigest": "12725241028860130781",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -35,13 +35,6 @@
                 "type": {
                   "kind": "TYPE_KIND_STRING"
                 }
-              },
-              {
-                "name": "ts",
-                "type": {
-                  "kind": "TYPE_KIND_TIMESTAMP",
-                  "precision": 9
-                }
               }
             ]
           },
@@ -49,59 +42,6 @@
           "collations": [
             {
               "fields": [
-                {
-                  "expr": {
-                    "type": {
-                      "kind": "TYPE_KIND_STRING"
-                    },
-                    "fieldRef": {}
-                  },
-                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                },
-                {
-                  "expr": {
-                    "type": {
-                      "kind": "TYPE_KIND_TIMESTAMP",
-                      "precision": 9
-                    },
-                    "fieldRef": {
-                      "index": 1
-                    }
-                  },
-                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                }
-              ]
-            },
-            {
-              "fields": [
-                {
-                  "expr": {
-                    "type": {
-                      "kind": "TYPE_KIND_TIMESTAMP",
-                      "precision": 9
-                    },
-                    "fieldRef": {
-                      "index": 1
-                    }
-                  },
-                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                }
-              ]
-            },
-            {
-              "fields": [
-                {
-                  "expr": {
-                    "type": {
-                      "kind": "TYPE_KIND_TIMESTAMP",
-                      "precision": 9
-                    },
-                    "fieldRef": {
-                      "index": 1
-                    }
-                  },
-                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                },
                 {
                   "expr": {
                     "type": {
@@ -146,8 +86,7 @@
               }
             ],
             "projection": [
-              0,
-              1
+              0
             ]
           }
         },
