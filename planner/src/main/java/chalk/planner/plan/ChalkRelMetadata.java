@@ -298,14 +298,14 @@ public final class ChalkRelMetadata {
     public @Nullable Double getSelectivity(
         ChalkTableScan rel, RelMetadataQuery mq, @Nullable RexNode predicate) {
       return ChalkSelectivity.of(
-              predicate, rel.chalkTable(), rel.projection(), rel.getCluster().getRexBuilder())
+              predicate, rel.chalkTable(), rel.projection(), rel.getCluster())
           .value();
     }
 
     public @Nullable Double getSelectivity(
         ChalkIndexLookup rel, RelMetadataQuery mq, @Nullable RexNode predicate) {
       return ChalkSelectivity.of(
-              predicate, rel.chalkTable(), rel.projection(), rel.getCluster().getRexBuilder())
+              predicate, rel.chalkTable(), rel.projection(), rel.getCluster())
           .value();
     }
 
@@ -398,9 +398,7 @@ public final class ChalkRelMetadata {
       double selectivity =
           predicate == null
               ? 1.0
-              : ChalkSelectivity.of(
-                      predicate, table, fields, rel.getCluster().getRexBuilder())
-                  .value();
+              : ChalkSelectivity.of(predicate, table, fields, rel.getCluster()).value();
       return Math.max(1.0, Math.min(rows, distinct * selectivity));
     }
   }

@@ -77,6 +77,17 @@ public final class PlanErrors {
           reserved.getMessage(),
           null);
     }
+    // A parameter value hint this statement's parameters cannot be about (D284). Refused rather
+    // than ignored, so a misspelt or mistyped hint cannot silently become "no hint" and leave the
+    // caller wondering why the plan did not move. The message names the parameter and the two
+    // types; it never carries the hint's value.
+    if (error instanceof chalk.planner.plan.ParameterHintCheck.InvalidHintException hint) {
+      return build(
+          Status.INVALID_ARGUMENT,
+          PlanErrorKind.PLAN_ERROR_KIND_INVALID_REQUEST,
+          hint.getMessage(),
+          null);
+    }
     // An extension this planner has no handler for, or one whose bytes are not what its type URL
     // names (step 26c, D212). Refused rather than ignored: a policy silently dropped is a policy not
     // enforced.

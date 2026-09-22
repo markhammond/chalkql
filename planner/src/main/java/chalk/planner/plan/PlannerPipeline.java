@@ -10,6 +10,7 @@ import java.util.List;
 import org.apache.calcite.plan.Contexts;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.ConventionTraitDef;
+import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptUtil;
@@ -78,6 +79,13 @@ public final class PlannerPipeline implements AutoCloseable {
    */
   private final org.apache.calcite.util.CancelFlag cancelFlag;
 
+  /**
+   * What this request's parameters are expected to be worth (D284). One holder per pipeline, in the
+   * framework context beside the cancel flag, empty until {@link #parameterHints} puts a request's
+   * hints in it — and set again, per request, for a pipeline a narrowing re-enters.
+   */
+  private final ParameterHints parameterHints;
+
   /** This run's governor, or null for a run no option can end early (D235). */
   private chalk.planner.diag.@Nullable PlanningGovernor governor;
 
@@ -145,7 +153,8 @@ public final class PlannerPipeline implements AutoCloseable {
       org.apache.calcite.schema.SchemaPlus defaultSchema,
       org.apache.calcite.schema.SchemaPlus declaredSchema,
       chalk.planner.entitlement.PolicyOptions policyOptions,
-      org.apache.calcite.util.CancelFlag cancelFlag) {
+      org.apache.calcite.util.CancelFlag cancelFlag,
+      ParameterHints parameterHints) {
     this.planner = planner;
     this.policy = policy;
     this.volcanoRules = volcanoRules;
@@ -158,6 +167,7 @@ public final class PlannerPipeline implements AutoCloseable {
     this.declaredSchema = declaredSchema;
     this.policyOptions = policyOptions;
     this.cancelFlag = cancelFlag;
+    this.parameterHints = parameterHints;
   }
 
   /** The outcome of a planning run, plus everything the diagnostics need. */
@@ -226,6 +236,12 @@ public final class PlannerPipeline implements AutoCloseable {
   public static final String STAGE_HEP = "hep";
   public static final String STAGE_VOLCANO = "volcano";
   public static final String STAGE_ROOT_PROJECT = "root-project";
+
+  /**
+   * What the ordinals this request hinted are named by in the stage list (D284). The ordinals only:
+   * a hint's value is not diagnostics, and a caller reading a log should never find one there.
+   */
+  public static final String STAGE_PARAMETER_HINTS = "parameter hints";
 
   /**
    * What a narrowing that used the hint says in place of parse, validation and conversion (D233).
@@ -342,6 +358,7 @@ public final class PlannerPipeline implements AutoCloseable {
         declaredSchema(catalog, context, policyOptions.placeholders(), defaultSchema);
     org.apache.calcite.util.CancelFlag cancelFlag =
         new org.apache.calcite.util.CancelFlag(new java.util.concurrent.atomic.AtomicBoolean());
+    ParameterHints parameterHints = new ParameterHints();
     return new PlannerPipeline(
         Frameworks.getPlanner(
             config(
@@ -352,7 +369,8 @@ public final class PlannerPipeline implements AutoCloseable {
                 true,
                 joinPolicy,
                 defaultSchema,
-                cancelFlag)),
+                cancelFlag,
+                parameterHints)),
         policy,
         rules,
         catalog,
@@ -363,7 +381,8 @@ public final class PlannerPipeline implements AutoCloseable {
         defaultSchema,
         declaredSchema,
         policyOptions,
-        cancelFlag);
+        cancelFlag,
+        parameterHints);
   }
 
   /**
@@ -424,7 +443,8 @@ public final class PlannerPipeline implements AutoCloseable {
         decorrelate,
         JoinPolicy.DEFAULT,
         catalog.defaultSchema(),
-        new org.apache.calcite.util.CancelFlag(new java.util.concurrent.atomic.AtomicBoolean()));
+        new org.apache.calcite.util.CancelFlag(new java.util.concurrent.atomic.AtomicBoolean()),
+        new ParameterHints());
   }
 
   private static FrameworkConfig config(
@@ -435,12 +455,15 @@ public final class PlannerPipeline implements AutoCloseable {
       boolean decorrelate,
       JoinPolicy joinPolicy,
       org.apache.calcite.schema.SchemaPlus defaultSchema,
-      org.apache.calcite.util.CancelFlag cancelFlag) {
+      org.apache.calcite.util.CancelFlag cancelFlag,
+      ParameterHints parameterHints) {
     return Frameworks.newConfigBuilder()
         // The cancel flag beside the connection config: this is the only way in, because
         // AbstractRelOptPlanner reads its flag from the Context at construction and ignores
-        // setCancelFlag entirely (D235).
-        .context(Contexts.of(SqlConfigs.connectionConfig(), cancelFlag))
+        // setCancelFlag entirely (D235). The hint holder travels the same way and for the same
+        // reason: the context is the one thing every rel's cluster can reach, and putting the hints
+        // anywhere a rule could see them would be the firewall undone (D284, ADR 0074).
+        .context(Contexts.of(SqlConfigs.connectionConfig(), cancelFlag, parameterHints))
         .parserConfig(SqlConfigs.parser(conformance))
         .sqlValidatorConfig(SqlConfigs.validator(conformance))
         .sqlToRelConverterConfig(SqlConfigs.sqlToRel().withDecorrelationEnabled(decorrelate))
@@ -492,6 +515,42 @@ public final class PlannerPipeline implements AutoCloseable {
     return context;
   }
 
+  /**
+   * What this request's parameters are expected to be worth, for the whole of this request (D284).
+   *
+   * <p>Called once per request, between the front half and the pass, because a hint is checked
+   * against the type the <em>statement</em> inferred for its parameter and there is no such type
+   * until the statement has validated. A hint the statement cannot be about is refused here, naming
+   * the parameter and the two types and never the value.
+   *
+   * <p>A narrowing re-enters a pipeline that planned another request, so this is also where the
+   * previous request's hints stop applying. The cluster's metadata query is dropped first: an
+   * estimate computed under one request's hints is cached on that cluster, and answering the next
+   * request out of it would make a hint reach a request that never sent one. The retained front half
+   * — the validated statement and the converted tree — reads no hint at all, which is why it is safe
+   * to re-enter under any hints, and is the firewall doing double duty (ADR 0074).
+   */
+  public void parameterHints(
+      List<chalk.planner.rpc.v1.ParameterHint> hints, Front front) {
+    RelOptCluster cluster = front.root().rel.getCluster();
+    cluster.invalidateMetadataQuery();
+    parameterHints.set(
+        ParameterHintCheck.resolve(hints, irParameterTypes(front.parameterRowType(), cluster)));
+  }
+
+  /** The statement's inferred parameter types, as the IR spells them, by ordinal. */
+  private static List<chalk.ir.v1.Type> irParameterTypes(
+      RelDataType parameterRowType, RelOptCluster cluster) {
+    chalk.planner.types.TypeMapper types =
+        new chalk.planner.types.TypeMapper(cluster.getTypeFactory());
+    List<chalk.ir.v1.Type> irTypes = new ArrayList<>(parameterRowType.getFieldCount());
+    for (org.apache.calcite.rel.type.RelDataTypeField field : parameterRowType.getFieldList()) {
+      irTypes.add(types.toIr(field.getType()));
+    }
+
+    return irTypes;
+  }
+
   /** The parser configuration this request plans under, which the context fold parses with. */
   public org.apache.calcite.sql.parser.SqlParser.Config parserConfig() {
     return SqlConfigs.parser(conformance);
@@ -536,7 +595,16 @@ public final class PlannerPipeline implements AutoCloseable {
   /** Runs the whole pipeline. */
   public Result plan(String sql, boolean includePlanText)
       throws SqlParseException, ValidationException, RelConversionException {
-    return finish(front(sql), context, includePlanText);
+    return plan(sql, includePlanText, ImmutableList.of());
+  }
+
+  /** The same, with what the caller expects this statement's parameters to be worth (D284). */
+  public Result plan(
+      String sql, boolean includePlanText, List<chalk.planner.rpc.v1.ParameterHint> hints)
+      throws SqlParseException, ValidationException, RelConversionException {
+    Front front = front(sql);
+    parameterHints(hints, front);
+    return finish(front, context, includePlanText);
   }
 
   /**
@@ -714,6 +782,19 @@ public final class PlannerPipeline implements AutoCloseable {
       // into SUM0 and COUNT in the Hep pass below, and a physical check against a host's list of
       // AVG alone would refuse a correct plan (§3.10).
       chalk.planner.entitlement.TaintCheck.logical(logical);
+    }
+
+    // Which of this request's parameters were planned against a value the caller expected (D284).
+    // The ordinals and nothing else: a hint's value never reaches a stage list, a log line, an
+    // exception, the plan text or a digest. A request that sent none adds nothing here, so every
+    // stage list recorded before hints existed reads exactly as it did.
+    if (!parameterHints.isEmpty()) {
+      stages.add(
+          STAGE_PARAMETER_HINTS
+              + " "
+              + parameterHints.ordinals().stream()
+                  .map(String::valueOf)
+                  .collect(java.util.stream.Collectors.joining(", ")));
     }
 
     long t3 = System.nanoTime();

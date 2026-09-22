@@ -1,10 +1,9 @@
 package chalk.planner.plan;
 
 import chalk.ir.v1.Literal;
-import chalk.planner.rpc.v1.ParameterHint;
+import chalk.ir.v1.Type;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -17,6 +16,19 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * are the same set, and the values bound at execution need not resemble the hints at all. That is
  * what makes a wrong hint a slow query rather than a wrong answer.
  *
+ * <h2>A holder, not a value</h2>
+ *
+ * <p>One instance per <em>pipeline</em>, joined to the framework context beside the connection
+ * configuration and the cancel flag, holding one request's hints at a time (ADR 0074). It is a
+ * holder rather than a value because a pipeline outlives a request: a narrowing re-enters a retained
+ * one, and the hints it plans under are the narrowing's own. {@link
+ * PlannerPipeline#parameterHints} is the only writer, and it drops whatever the previous request's
+ * hints made the metadata cache remember before it sets the new ones.
+ *
+ * <p>The retained half a narrowing starts from — the validated statement and the converted tree —
+ * reads no hint at all, which is what makes it safe to re-enter under any hints: the firewall below
+ * is also what makes hints and narrowing compose.
+ *
  * <h2>The firewall</h2>
  *
  * <p>This class is reachable <b>only</b> through the planner's context —
@@ -27,75 +39,73 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * and none may take one: an estimate that reached a rewrite would turn an expectation into a
  * semantic. {@code ChalkRowGoalRule} reads a hinted bound only as {@code ChalkLimit} already answers
  * it, which is the "through them" of design 49 §3.
- *
- * <p>One instance per request, immutable, joined to the framework context beside the connection
- * configuration and the cancel flag. A fresh pipeline per hinted request is what keeps one request's
- * metadata cache from seeing another's hints.
  */
 public final class ParameterHints {
-  /** No hints at all, which is every request that sends none. */
-  public static final ParameterHints EMPTY = new ParameterHints(ImmutableMap.of());
+  /** What {@link #of(RelOptCluster)} answers for a planner that carries no holder. */
+  private static final ParameterHints NONE = new ParameterHints(true);
 
-  private final ImmutableMap<Integer, Hint> byOrdinal;
+  private final boolean fixed;
 
-  private ParameterHints(ImmutableMap<Integer, Hint> byOrdinal) {
-    this.byOrdinal = byOrdinal;
+  /**
+   * This request's hints. Volatile because a planning runs on the scheduler's virtual thread while
+   * the call that set them ran on the gRPC one; the reference is replaced and never mutated.
+   */
+  private volatile ImmutableMap<Integer, Hint> byOrdinal = ImmutableMap.of();
+
+  /** A holder for one pipeline, empty until a request puts its hints in it. */
+  public ParameterHints() {
+    this(false);
+  }
+
+  private ParameterHints(boolean fixed) {
+    this.fixed = fixed;
   }
 
   /**
-   * One parameter's expected value.
+   * One parameter's expected value, with the type the statement inferred for that parameter.
    *
    * @param literal the value, or null for a hint of SQL NULL — which is a statement about the value
    *     and not the absence of one, so a comparison against it selects no row
+   * @param type the parameter's own inferred type, which is the units {@code literal} is in
    */
-  public record Hint(@Nullable Literal literal) {
+  public record Hint(@Nullable Literal literal, Type type) {
     /** The caller expects SQL NULL here. */
     public boolean isNull() {
       return literal == null;
     }
   }
 
-  /** A hint of SQL NULL. */
-  public static final Hint NULL = new Hint(null);
-
-  /** The request's hints, keyed by ordinal. A later entry for an ordinal replaces an earlier one. */
-  public static ParameterHints of(List<ParameterHint> hints) {
-    if (hints.isEmpty()) {
-      return EMPTY;
+  /**
+   * Puts one request's hints in this holder, by ordinal. Only {@link PlannerPipeline} calls it, and
+   * only once per request.
+   */
+  void set(java.util.Map<Integer, Hint> hints) {
+    if (fixed) {
+      throw new IllegalStateException(
+          "the empty ParameterHints is shared by every planner that carries no holder of its own "
+              + "and must never be written to");
     }
 
-    java.util.LinkedHashMap<Integer, Hint> byOrdinal = new java.util.LinkedHashMap<>();
-    for (ParameterHint hint : hints) {
-      switch (hint.getValueCase()) {
-        case LITERAL -> byOrdinal.put(hint.getOrdinal(), new Hint(hint.getLiteral()));
-        case IS_NULL -> byOrdinal.put(hint.getOrdinal(), NULL);
-        // A hint that says nothing is not a hint, and it is not an error either: a sparse container
-        // is the API's own shape. It is dropped, so the stage list names only the ordinals the
-        // caller actually said something about.
-        case VALUE_NOT_SET -> byOrdinal.remove(hint.getOrdinal());
-      }
-    }
-
-    return byOrdinal.isEmpty() ? EMPTY : new ParameterHints(ImmutableMap.copyOf(byOrdinal));
+    byOrdinal = ImmutableMap.copyOf(hints);
   }
 
   /**
-   * The hints this cluster's planner was built with, or {@link #EMPTY}. The one way in, and the one
+   * The hints this cluster's planner was built with, or an empty holder. The one way in, and the one
    * place the unwrap is written.
    */
   public static ParameterHints of(RelOptCluster cluster) {
     RelOptPlanner planner = cluster.getPlanner();
     if (planner == null) {
-      return EMPTY;
+      return NONE;
     }
 
     org.apache.calcite.plan.@Nullable Context context = planner.getContext();
     if (context == null) {
-      return EMPTY;
+      return NONE;
     }
 
     ParameterHints hints = context.unwrap(ParameterHints.class);
-    return hints == null ? EMPTY : hints;
+    return hints == null ? NONE : hints;
   }
 
   public boolean isEmpty() {
@@ -117,9 +127,9 @@ public final class ParameterHints {
    * or said something that is not an integer.
    *
    * <p>A bound is an integer and never a percentage. Calcite's grammar has no {@code LIMIT 10%} and a
-   * {@code LIMIT ?} parameter is inferred integer-typed, so a hint of another family has already been
-   * refused by name at the request boundary; this last clause is the belt to that brace, and it
-   * declines rather than rounds.
+   * bound parameter is inferred exact-numeric, so a hint of another family has already been refused
+   * by name at the request boundary; this last clause is the belt to that brace, and it declines
+   * rather than rounds.
    */
   public @Nullable Long boundAt(int ordinal) {
     Hint hint = byOrdinal.get(ordinal);
@@ -133,7 +143,24 @@ public final class ParameterHints {
       case I16_VALUE -> (long) literal.getI16Value();
       case I32_VALUE -> (long) literal.getI32Value();
       case I64_VALUE -> literal.getI64Value();
+      case DECIMAL_VALUE -> wholeDecimal(literal, hint.type().getScale());
       default -> null;
     };
+  }
+
+  /**
+   * A decimal hint as a count, or null when it is a fraction. A bound is a number of rows and never
+   * a share of them, so a fractional hint is declined rather than rounded into one.
+   */
+  private static @Nullable Long wholeDecimal(Literal literal, int scale) {
+    try {
+      return new java.math.BigDecimal(
+              chalk.planner.ir.LiteralConverter.fromLittleEndian16(
+                  literal.getDecimalValue().getUnscaled().toByteArray()),
+              scale)
+          .longValueExact();
+    } catch (ArithmeticException e) {
+      return null;
+    }
   }
 }

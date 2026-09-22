@@ -171,7 +171,7 @@ class CostModelTest {
 
     // One symbol of five, the same measurement `symbol = 'BTCUSDT'` gets — not a guess.
     ChalkSelectivity.Estimate estimate =
-        ChalkSelectivity.of(nullSafe, scan.chalkTable(), scan.projection(), rex);
+        ChalkSelectivity.of(nullSafe, scan.chalkTable(), scan.projection(), scan.getCluster());
     assertThat(estimate.value()).isEqualTo(1 / 5.0);
     assertThat(estimate.guessed()).isFalse();
   }
@@ -510,7 +510,7 @@ class CostModelTest {
               result.residual() == null ? filter.getCondition() : null,
               scan.chalkTable(),
               projection,
-              scan.getCluster().getRexBuilder()));
+              scan.getCluster()));
     }
 
     return null;

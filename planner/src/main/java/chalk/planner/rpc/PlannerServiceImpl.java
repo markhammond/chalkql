@@ -380,6 +380,12 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
           () -> {
             PlannerPipeline.Front front =
                 leased != null ? leased.front() : pipeline.front(request.getSql());
+            // What this request expects its parameters to be worth, for the whole of this request
+            // and no further (D284). After the front half, because a hint is checked against the
+            // type the statement inferred; before the pass, because that is where the estimates
+            // start. A narrowing sets its own here too: the retained tree reads no hint, so it is
+            // hint-free by construction and composes with any (ADR 0074).
+            pipeline.parameterHints(request.getParameterHintsList(), front);
             // The statement's own redaction, computed once and used twice (D262): the text the
             // response carries, and — when the request also asked for plan text — the seed the
             // plan's own literals are keyed by, so a host reads one pseudonym for one value

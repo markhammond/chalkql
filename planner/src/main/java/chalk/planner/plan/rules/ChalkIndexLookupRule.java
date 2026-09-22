@@ -98,7 +98,7 @@ public final class ChalkIndexLookupRule extends RelRule<ChalkRuleConfig> {
               consumed(filter.getCondition(), result.residual(), rexBuilder),
               scan.chalkTable(),
               projection,
-              rexBuilder);
+              scan.getCluster());
 
       ChalkIndexLookup lookup =
           ChalkIndexLookup.create(scan, index, ImmutableList.copyOf(result.ranges()), selectivity);

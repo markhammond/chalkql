@@ -84,13 +84,12 @@ public final class ChalkFilter extends Filter implements ChalkRel {
     }
 
     if (input instanceof ChalkTableScan scan) {
-      return ChalkSelectivity.of(
-          condition, scan.chalkTable(), scan.projection(), getCluster().getRexBuilder());
+      return ChalkSelectivity.of(condition, scan.chalkTable(), scan.projection(), getCluster());
     }
 
     if (input instanceof ChalkIndexLookup lookup) {
       return ChalkSelectivity.of(
-          condition, lookup.chalkTable(), lookup.projection(), getCluster().getRexBuilder());
+          condition, lookup.chalkTable(), lookup.projection(), getCluster());
     }
 
     return null;
