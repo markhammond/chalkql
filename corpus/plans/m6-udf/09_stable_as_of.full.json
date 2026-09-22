@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "6199479778163112256",
+  "planDigest": "1349800182592069626",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -96,52 +96,6 @@
                 "kind": "TYPE_KIND_TIMESTAMP",
                 "precision": 9
               }
-            },
-            {
-              "name": "open",
-              "type": {
-                "kind": "TYPE_KIND_FP64"
-              }
-            },
-            {
-              "name": "high",
-              "type": {
-                "kind": "TYPE_KIND_FP64"
-              }
-            },
-            {
-              "name": "low",
-              "type": {
-                "kind": "TYPE_KIND_FP64"
-              }
-            },
-            {
-              "name": "close",
-              "type": {
-                "kind": "TYPE_KIND_FP64"
-              }
-            },
-            {
-              "name": "volume",
-              "type": {
-                "kind": "TYPE_KIND_I64"
-              }
-            },
-            {
-              "name": "vwap",
-              "type": {
-                "kind": "TYPE_KIND_DECIMAL",
-                "nullable": true,
-                "precision": 28,
-                "scale": 10
-              }
-            },
-            {
-              "name": "trade_count",
-              "type": {
-                "kind": "TYPE_KIND_I32",
-                "nullable": true
-              }
             }
           ]
         },
@@ -181,14 +135,7 @@
           },
           "projection": [
             0,
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8
+            1
           ]
         }
       },

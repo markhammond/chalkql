@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "8728316478089355694",
+  "planDigest": "13158783822691745807",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -673,6 +673,21 @@
                                             ]
                                           },
                                           "estRowCount": 60000,
+                                          "collations": [
+                                            {
+                                              "fields": [
+                                                {
+                                                  "expr": {
+                                                    "type": {
+                                                      "kind": "TYPE_KIND_I64"
+                                                    },
+                                                    "fieldRef": {}
+                                                  },
+                                                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                                }
+                                              ]
+                                            }
+                                          ],
                                           "project": {
                                             "input": {
                                               "rowType": {
@@ -684,29 +699,9 @@
                                                     }
                                                   },
                                                   {
-                                                    "name": "l_linenumber",
-                                                    "type": {
-                                                      "kind": "TYPE_KIND_I32"
-                                                    }
-                                                  },
-                                                  {
-                                                    "name": "l_partkey",
-                                                    "type": {
-                                                      "kind": "TYPE_KIND_I64"
-                                                    }
-                                                  },
-                                                  {
                                                     "name": "l_suppkey",
                                                     "type": {
                                                       "kind": "TYPE_KIND_I64"
-                                                    }
-                                                  },
-                                                  {
-                                                    "name": "l_quantity",
-                                                    "type": {
-                                                      "kind": "TYPE_KIND_DECIMAL",
-                                                      "precision": 15,
-                                                      "scale": 2
                                                     }
                                                   },
                                                   {
@@ -724,62 +719,6 @@
                                                       "precision": 15,
                                                       "scale": 2
                                                     }
-                                                  },
-                                                  {
-                                                    "name": "l_tax",
-                                                    "type": {
-                                                      "kind": "TYPE_KIND_DECIMAL",
-                                                      "precision": 15,
-                                                      "scale": 2
-                                                    }
-                                                  },
-                                                  {
-                                                    "name": "l_returnflag",
-                                                    "type": {
-                                                      "kind": "TYPE_KIND_STRING"
-                                                    }
-                                                  },
-                                                  {
-                                                    "name": "l_linestatus",
-                                                    "type": {
-                                                      "kind": "TYPE_KIND_STRING"
-                                                    }
-                                                  },
-                                                  {
-                                                    "name": "l_shipdate",
-                                                    "type": {
-                                                      "kind": "TYPE_KIND_DATE"
-                                                    }
-                                                  },
-                                                  {
-                                                    "name": "l_commitdate",
-                                                    "type": {
-                                                      "kind": "TYPE_KIND_DATE"
-                                                    }
-                                                  },
-                                                  {
-                                                    "name": "l_receiptdate",
-                                                    "type": {
-                                                      "kind": "TYPE_KIND_DATE"
-                                                    }
-                                                  },
-                                                  {
-                                                    "name": "l_shipinstruct",
-                                                    "type": {
-                                                      "kind": "TYPE_KIND_STRING"
-                                                    }
-                                                  },
-                                                  {
-                                                    "name": "l_shipmode",
-                                                    "type": {
-                                                      "kind": "TYPE_KIND_STRING"
-                                                    }
-                                                  },
-                                                  {
-                                                    "name": "l_comment",
-                                                    "type": {
-                                                      "kind": "TYPE_KIND_STRING"
-                                                    }
                                                   }
                                                 ]
                                               },
@@ -795,17 +734,6 @@
                                                         "fieldRef": {}
                                                       },
                                                       "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                                                    },
-                                                    {
-                                                      "expr": {
-                                                        "type": {
-                                                          "kind": "TYPE_KIND_I32"
-                                                        },
-                                                        "fieldRef": {
-                                                          "index": 1
-                                                        }
-                                                      },
-                                                      "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
                                                     }
                                                   ]
                                                 }
@@ -818,21 +746,9 @@
                                                 },
                                                 "projection": [
                                                   0,
-                                                  1,
-                                                  2,
                                                   3,
-                                                  4,
                                                   5,
-                                                  6,
-                                                  7,
-                                                  8,
-                                                  9,
-                                                  10,
-                                                  11,
-                                                  12,
-                                                  13,
-                                                  14,
-                                                  15
+                                                  6
                                                 ]
                                               }
                                             },
@@ -848,7 +764,7 @@
                                                   "kind": "TYPE_KIND_I64"
                                                 },
                                                 "fieldRef": {
-                                                  "index": 3
+                                                  "index": 1
                                                 }
                                               },
                                               {
@@ -874,7 +790,7 @@
                                                             "scale": 2
                                                           },
                                                           "fieldRef": {
-                                                            "index": 5
+                                                            "index": 2
                                                           }
                                                         },
                                                         "onFailure": "CAST_FAILURE_ERROR"
@@ -914,7 +830,7 @@
                                                               "scale": 2
                                                             },
                                                             "fieldRef": {
-                                                              "index": 6
+                                                              "index": 3
                                                             }
                                                           }
                                                         ]

@@ -1,6 +1,6 @@
 -- FULL
-ChalkProject(kvol=[/(CAST($6):DOUBLE NOT NULL, 1000)], d=[CAST($1):DATE NOT NULL])
-  ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])
+ChalkProject(kvol=[/(CAST($1):DOUBLE NOT NULL, 1000)], d=[CAST($0):DATE NOT NULL])
+  ChalkTableScan(table=[[main, bars]], projection=[[1, 6]])
 -- NONE
 ChalkProject(kvol=[/(CAST($6):DOUBLE NOT NULL, 1000)], d=[CAST($1):DATE NOT NULL])
   ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])

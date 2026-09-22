@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "10736336569793539127",
+  "planDigest": "7263443185613864712",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -79,26 +79,6 @@
               }
             },
             {
-              "name": "base",
-              "type": {
-                "kind": "TYPE_KIND_STRING"
-              }
-            },
-            {
-              "name": "quote",
-              "type": {
-                "kind": "TYPE_KIND_STRING"
-              }
-            },
-            {
-              "name": "tick_size",
-              "type": {
-                "kind": "TYPE_KIND_DECIMAL",
-                "precision": 28,
-                "scale": 10
-              }
-            },
-            {
               "name": "tags",
               "type": {
                 "kind": "TYPE_KIND_LIST",
@@ -135,9 +115,6 @@
           },
           "projection": [
             0,
-            1,
-            2,
-            3,
             4
           ]
         }
@@ -167,7 +144,7 @@
                   }
                 },
                 "fieldRef": {
-                  "index": 4
+                  "index": 1
                 }
               }
             ]
@@ -191,7 +168,7 @@
                   }
                 },
                 "fieldRef": {
-                  "index": 4
+                  "index": 1
                 }
               },
               {

@@ -1,6 +1,6 @@
 -- FULL
-ChalkProject(symbol=[$0], ts=[$1], dir=[CASE(>($5, $2), 'up':VARCHAR(4) CHARACTER SET "UTF-8", <($5, $2), 'down':VARCHAR(4) CHARACTER SET "UTF-8", 'flat':VARCHAR(4) CHARACTER SET "UTF-8")])
-  ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])
+ChalkProject(symbol=[$0], ts=[$1], dir=[CASE(>($3, $2), 'up':VARCHAR(4) CHARACTER SET "UTF-8", <($3, $2), 'down':VARCHAR(4) CHARACTER SET "UTF-8", 'flat':VARCHAR(4) CHARACTER SET "UTF-8")])
+  ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 5]])
 -- NONE
 ChalkProject(symbol=[$0], ts=[$1], dir=[CASE(>($5, $2), 'up':VARCHAR(4) CHARACTER SET "UTF-8", <($5, $2), 'down':VARCHAR(4) CHARACTER SET "UTF-8", 'flat':VARCHAR(4) CHARACTER SET "UTF-8")])
   ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])

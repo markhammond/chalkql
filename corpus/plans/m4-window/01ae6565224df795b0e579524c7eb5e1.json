@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "8344712183268571165",
+  "planDigest": "11762124081979355329",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -149,49 +149,9 @@
                         }
                       },
                       {
-                        "name": "open",
-                        "type": {
-                          "kind": "TYPE_KIND_FP64"
-                        }
-                      },
-                      {
-                        "name": "high",
-                        "type": {
-                          "kind": "TYPE_KIND_FP64"
-                        }
-                      },
-                      {
-                        "name": "low",
-                        "type": {
-                          "kind": "TYPE_KIND_FP64"
-                        }
-                      },
-                      {
-                        "name": "close",
-                        "type": {
-                          "kind": "TYPE_KIND_FP64"
-                        }
-                      },
-                      {
                         "name": "volume",
                         "type": {
                           "kind": "TYPE_KIND_I64"
-                        }
-                      },
-                      {
-                        "name": "vwap",
-                        "type": {
-                          "kind": "TYPE_KIND_DECIMAL",
-                          "nullable": true,
-                          "precision": 28,
-                          "scale": 10
-                        }
-                      },
-                      {
-                        "name": "trade_count",
-                        "type": {
-                          "kind": "TYPE_KIND_I32",
-                          "nullable": true
                         }
                       }
                     ]
@@ -233,13 +193,7 @@
                     "projection": [
                       0,
                       1,
-                      2,
-                      3,
-                      4,
-                      5,
-                      6,
-                      7,
-                      8
+                      6
                     ]
                   }
                 },
@@ -283,7 +237,7 @@
                       "kind": "TYPE_KIND_I64"
                     },
                     "fieldRef": {
-                      "index": 6
+                      "index": 2
                     }
                   }
                 ]

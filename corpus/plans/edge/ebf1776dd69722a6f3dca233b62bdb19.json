@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "12563293139202039150",
+  "planDigest": "1800528888022051488",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -116,22 +116,10 @@
                           }
                         },
                         {
-                          "name": "region",
-                          "type": {
-                            "kind": "TYPE_KIND_STRING"
-                          }
-                        },
-                        {
                           "name": "amount",
                           "type": {
                             "kind": "TYPE_KIND_I32",
                             "nullable": true
-                          }
-                        },
-                        {
-                          "name": "label",
-                          "type": {
-                            "kind": "TYPE_KIND_STRING"
                           }
                         }
                       ]
@@ -145,9 +133,7 @@
                       },
                       "projection": [
                         0,
-                        1,
-                        2,
-                        3
+                        2
                       ]
                     }
                   },
@@ -164,7 +150,7 @@
                         "nullable": true
                       },
                       "fieldRef": {
-                        "index": 2
+                        "index": 1
                       }
                     },
                     {
@@ -180,7 +166,7 @@
                               "nullable": true
                             },
                             "fieldRef": {
-                              "index": 2
+                              "index": 1
                             }
                           }
                         ]
@@ -302,28 +288,10 @@
                                         "rowType": {
                                           "fields": [
                                             {
-                                              "name": "id",
-                                              "type": {
-                                                "kind": "TYPE_KIND_I32"
-                                              }
-                                            },
-                                            {
-                                              "name": "region",
-                                              "type": {
-                                                "kind": "TYPE_KIND_STRING"
-                                              }
-                                            },
-                                            {
                                               "name": "amount",
                                               "type": {
                                                 "kind": "TYPE_KIND_I32",
                                                 "nullable": true
-                                              }
-                                            },
-                                            {
-                                              "name": "label",
-                                              "type": {
-                                                "kind": "TYPE_KIND_STRING"
                                               }
                                             }
                                           ]
@@ -336,10 +304,7 @@
                                             "table": "sales"
                                           },
                                           "projection": [
-                                            0,
-                                            1,
-                                            2,
-                                            3
+                                            2
                                           ]
                                         }
                                       },
@@ -349,9 +314,7 @@
                                             "kind": "TYPE_KIND_I32",
                                             "nullable": true
                                           },
-                                          "fieldRef": {
-                                            "index": 2
-                                          }
+                                          "fieldRef": {}
                                         },
                                         {
                                           "type": {
@@ -365,9 +328,7 @@
                                                   "kind": "TYPE_KIND_I32",
                                                   "nullable": true
                                                 },
-                                                "fieldRef": {
-                                                  "index": 2
-                                                }
+                                                "fieldRef": {}
                                               }
                                             ]
                                           }

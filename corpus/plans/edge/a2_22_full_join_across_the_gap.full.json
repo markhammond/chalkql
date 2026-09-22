@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "3806514556361226836",
+  "planDigest": "15270655876896897949",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -199,12 +199,6 @@
                           "type": {
                             "kind": "TYPE_KIND_I32"
                           }
-                        },
-                        {
-                          "name": "v",
-                          "type": {
-                            "kind": "TYPE_KIND_STRING"
-                          }
                         }
                       ]
                     },
@@ -231,8 +225,7 @@
                         "table": "sorted"
                       },
                       "projection": [
-                        0,
-                        1
+                        0
                       ]
                     }
                   },

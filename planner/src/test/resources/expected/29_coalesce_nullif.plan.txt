@@ -1,6 +1,6 @@
 -- FULL
-ChalkProject(symbol=[$0], tc=[CASE(IS NOT NULL($8), CAST($8):INTEGER NOT NULL, 0)], v=[CASE(=($6, 0), null:BIGINT, $6)])
-  ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])
+ChalkProject(symbol=[$0], tc=[CASE(IS NOT NULL($2), CAST($2):INTEGER NOT NULL, 0)], v=[CASE(=($1, 0), null:BIGINT, $1)])
+  ChalkTableScan(table=[[main, bars]], projection=[[0, 6, 8]])
 -- NONE
 ChalkProject(symbol=[$0], tc=[CASE(IS NOT NULL($8), CAST($8):INTEGER NOT NULL, 0)], v=[CASE(=($6, 0), null:BIGINT, $6)])
   ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])

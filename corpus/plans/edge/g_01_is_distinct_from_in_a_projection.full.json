@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "8806916740901301612",
+  "planDigest": "3277318699902212848",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -136,22 +136,10 @@
                   }
                 },
                 {
-                  "name": "region",
-                  "type": {
-                    "kind": "TYPE_KIND_STRING"
-                  }
-                },
-                {
                   "name": "amount",
                   "type": {
                     "kind": "TYPE_KIND_I32",
                     "nullable": true
-                  }
-                },
-                {
-                  "name": "label",
-                  "type": {
-                    "kind": "TYPE_KIND_STRING"
                   }
                 }
               ]
@@ -165,9 +153,7 @@
               },
               "projection": [
                 0,
-                1,
-                2,
-                3
+                2
               ]
             }
           },
@@ -191,7 +177,7 @@
                       "nullable": true
                     },
                     "fieldRef": {
-                      "index": 2
+                      "index": 1
                     }
                   }
                 ]
@@ -210,7 +196,7 @@
                       "nullable": true
                     },
                     "fieldRef": {
-                      "index": 2
+                      "index": 1
                     }
                   }
                 ]
@@ -237,7 +223,7 @@
                             "nullable": true
                           },
                           "fieldRef": {
-                            "index": 2
+                            "index": 1
                           }
                         },
                         {
@@ -275,7 +261,7 @@
                             "nullable": true
                           },
                           "fieldRef": {
-                            "index": 2
+                            "index": 1
                           }
                         },
                         {

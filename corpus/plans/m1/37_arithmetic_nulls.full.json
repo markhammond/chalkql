@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "17440540590047658465",
+  "planDigest": "4336533277520794474",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -82,43 +82,6 @@
               }
             },
             {
-              "name": "ts",
-              "type": {
-                "kind": "TYPE_KIND_TIMESTAMP",
-                "precision": 9
-              }
-            },
-            {
-              "name": "open",
-              "type": {
-                "kind": "TYPE_KIND_FP64"
-              }
-            },
-            {
-              "name": "high",
-              "type": {
-                "kind": "TYPE_KIND_FP64"
-              }
-            },
-            {
-              "name": "low",
-              "type": {
-                "kind": "TYPE_KIND_FP64"
-              }
-            },
-            {
-              "name": "close",
-              "type": {
-                "kind": "TYPE_KIND_FP64"
-              }
-            },
-            {
-              "name": "volume",
-              "type": {
-                "kind": "TYPE_KIND_I64"
-              }
-            },
-            {
               "name": "vwap",
               "type": {
                 "kind": "TYPE_KIND_DECIMAL",
@@ -137,33 +100,6 @@
           ]
         },
         "estRowCount": 100800,
-        "collations": [
-          {
-            "fields": [
-              {
-                "expr": {
-                  "type": {
-                    "kind": "TYPE_KIND_TIMESTAMP",
-                    "precision": 9
-                  },
-                  "fieldRef": {
-                    "index": 1
-                  }
-                },
-                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-              },
-              {
-                "expr": {
-                  "type": {
-                    "kind": "TYPE_KIND_STRING"
-                  },
-                  "fieldRef": {}
-                },
-                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-              }
-            ]
-          }
-        ],
         "read": {
           "table": {
             "sourceId": "mem",
@@ -172,12 +108,6 @@
           },
           "projection": [
             0,
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
             7,
             8
           ]
@@ -204,7 +134,7 @@
                   "nullable": true
                 },
                 "fieldRef": {
-                  "index": 8
+                  "index": 2
                 }
               },
               {
@@ -236,7 +166,7 @@
                   "scale": 10
                 },
                 "fieldRef": {
-                  "index": 7
+                  "index": 1
                 }
               },
               {
@@ -275,7 +205,7 @@
                   "nullable": true
                 },
                 "fieldRef": {
-                  "index": 8
+                  "index": 2
                 }
               },
               {
