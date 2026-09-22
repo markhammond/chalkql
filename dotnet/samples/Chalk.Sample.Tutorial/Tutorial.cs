@@ -40,11 +40,11 @@ public static class Tutorial
         Console.WriteLine();
     }
 
-    /// <summary>The plan, printed by <see cref="PlanPrinter"/> — the IR, not the planner's text.</summary>
+    /// <summary>The plan, printed by <see cref="PlanExtensions"/> — the IR, not the planner's text.</summary>
     public static void Plan(string label, Plan plan)
     {
         Console.WriteLine(label + ":");
-        foreach (var line in PlanPrinter.Print(plan).TrimEnd().Split('\n'))
+        foreach (var line in plan.ToPlanText().TrimEnd().Split('\n'))
         {
             Console.WriteLine("    " + line.TrimEnd());
         }
