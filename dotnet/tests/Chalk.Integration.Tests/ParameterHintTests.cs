@@ -204,6 +204,40 @@ public sealed class ParameterHintTests(SharedSidecar sidecar)
         }
     }
 
+    /// <summary>
+    /// The other half of the four-way comparison the planner suite pins: two plans goaled at
+    /// different numbers, executed with the <em>same</em> bound values, answer the same rows. The
+    /// goal is a number the leaf is costed for and never a bound it enforces, so a hint of one and a
+    /// hint of ten are two plans and one answer.
+    /// </summary>
+    [Fact]
+    public async Task Two_differently_goaled_plans_answer_the_same_rows()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+
+        await using var engine = await CreateEngineAsync();
+        const string sql = "SELECT symbol, ts FROM bars WHERE symbol >= @from ORDER BY symbol, ts LIMIT @take";
+
+        var goaledAtOne = await engine.PrepareAsync(sql, new { from = "AAA", take = 1 });
+        var goaledAtTen = await engine.PrepareAsync(sql, new { from = "AAA", take = 10 });
+
+        Assert.Equal([0, 1], goaledAtOne.HintedParameters);
+        Assert.Equal([0, 1], goaledAtTen.HintedParameters);
+        Assert.NotEqual(goaledAtOne.PlanDigest, goaledAtTen.PlanDigest);
+
+        // Neither hint is what is bound: three rows, through both plans.
+        var values = new { from = "AAA", take = 3 };
+        var fromOne = await RowsAsync(engine, goaledAtOne, values);
+        var fromTen = await RowsAsync(engine, goaledAtTen, values);
+
+        Assert.Equal(3, fromOne.Count);
+        Assert.Equal(fromTen.Count, fromOne.Count);
+        for (var i = 0; i < fromOne.Count; i++)
+        {
+            Assert.Equal(fromTen[i], fromOne[i]);
+        }
+    }
+
     /// <summary>Invariant 3: a hint's value is not in the plan, and not in a refusal either.</summary>
     [Fact]
     public async Task A_hints_value_reaches_no_plan_text_and_no_refusal()

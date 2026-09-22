@@ -15,6 +15,8 @@ import chalk.planner.plan.ParameterHintCheck;
 import chalk.planner.plan.PlannerPipeline;
 import chalk.planner.plan.PushdownPolicy;
 import chalk.planner.plan.SqlConfigs;
+import chalk.planner.plan.rel.ChalkLimit;
+import chalk.planner.plan.rel.ChalkTopN;
 import chalk.planner.rpc.PlannerServiceImpl;
 import chalk.planner.rpc.v1.ContextScalar;
 import chalk.planner.rpc.v1.ParameterHint;
@@ -97,6 +99,41 @@ class ParameterHintsTest {
     assertThat(hinted).contains("ChalkTableScan");
   }
 
+  // ---- the two bounded nodes ----
+
+  /**
+   * A limit whose bound is a hinted parameter estimates the hint, where an unhinted one estimates
+   * its input. This is what a goal from a hinted bound is built on (D285, design 49 §4).
+   */
+  @Test
+  void a_hinted_bound_is_the_limits_own_estimate() {
+    ChalkLimit plain = find(plan("SELECT symbol, ts FROM bars LIMIT ?", List.of()), ChalkLimit.class);
+    assertThat(plain).isNotNull();
+    assertThat(rows(plain)).isEqualTo(rows(plain.getInput()));
+
+    ChalkLimit bounded =
+        find(plan("SELECT symbol, ts FROM bars LIMIT ?", List.of(i32(0, 7))), ChalkLimit.class);
+    assertThat(bounded).isNotNull();
+    assertThat(rows(bounded)).isEqualTo(7.0);
+  }
+
+  /** And a top-N's heap is the hint's size rather than its whole input's. */
+  @Test
+  void a_hinted_bound_is_the_top_ns_own_estimate() {
+    String sql = "SELECT symbol, ts FROM bars ORDER BY volume DESC LIMIT ?";
+    ChalkTopN plain = find(plan(sql, List.of()), ChalkTopN.class);
+    assertThat(plain).isNotNull();
+    assertThat(rows(plain)).isEqualTo(rows(plain.getInput()));
+
+    ChalkTopN bounded = find(plan(sql, List.of(i32(0, 3))), ChalkTopN.class);
+    assertThat(bounded).isNotNull();
+    assertThat(rows(bounded)).isEqualTo(3.0);
+
+    // And it is costed for that heap: input rows × log2(3 + 1), which is two.
+    assertThat(selfCost(bounded))
+        .isCloseTo(rows(bounded.getInput()) * 2.0, org.assertj.core.data.Offset.offset(1e-6));
+  }
+
   // ---- what the estimate is for ----
 
   /**
@@ -117,6 +154,46 @@ class ParameterHintsTest {
   void a_hinted_selectivity_inflates_the_goal_it_passes_through() {
     // One row above the filter, one row in nine below it: the leaf expects to be read for ten.
     assertThat(text(FILTERED, List.of(i64(0, 9000), i32(1, 1)))).contains("goal=[10]");
+  }
+
+  /**
+   * What a hinted bound actually buys, against the two plans it has to beat: the same statement with
+   * no bound at all, and the same statement whose bound the planner cannot see.
+   *
+   * <p>The probe is written as one test so the four plans are compared under one catalog and one
+   * cost model. The assertions are on the operators each plan is made of and on the costs relative
+   * to each other; nothing here is timed.
+   */
+  @Test
+  void a_hinted_bound_beats_both_no_bound_and_an_unseeable_one() {
+    String unbounded = "SELECT symbol, ts FROM bars WHERE symbol >= ? ORDER BY symbol, ts";
+
+    PlannerPipeline.Result noLimit = plan(unbounded, List.of());
+    PlannerPipeline.Result unhinted = plan(ORDERED, List.of());
+    PlannerPipeline.Result hintedOne = plan(ORDERED, List.of(str(0, "AAA"), i32(1, 1)));
+    PlannerPipeline.Result hintedTen = plan(ORDERED, List.of(str(0, "AAA"), i32(1, 10)));
+
+    // (a) and (b) read the whole range: an unseeable bound bounds nothing the planner may rely on,
+    // so the leaf under it is the leaf the unbounded statement gets.
+    assertThat(PlanText.withAttributes(noLimit.physical())).doesNotContain("goal=");
+    assertThat(PlanText.withAttributes(unhinted.physical())).doesNotContain("goal=");
+
+    // (c) and (d) goal the leaf at what the caller said it wants, and take the index that serves
+    // the ordering.
+    String one = PlanText.withAttributes(hintedOne.physical());
+    String ten = PlanText.withAttributes(hintedTen.physical());
+    assertThat(one).contains("ChalkIndexLookup").contains("goal=[1]");
+    assertThat(ten).contains("ChalkIndexLookup").contains("goal=[10]");
+
+    // And they cost less than either plan that reads the range whole — which is the whole point.
+    assertThat(cumulativeCost(hintedOne)).isLessThan(cumulativeCost(noLimit));
+    assertThat(cumulativeCost(hintedOne)).isLessThan(cumulativeCost(unhinted));
+    assertThat(cumulativeCost(hintedTen)).isLessThan(cumulativeCost(noLimit));
+    assertThat(cumulativeCost(hintedTen)).isLessThan(cumulativeCost(unhinted));
+
+    // Ten rows cost more than one and both cost far less than the range: the goal is a number and
+    // not a switch.
+    assertThat(cumulativeCost(hintedOne)).isLessThan(cumulativeCost(hintedTen));
   }
 
   // ---- the invariants ----
@@ -376,6 +453,51 @@ class ParameterHintsTest {
                                 .setType(
                                     chalk.ir.v1.Type.newBuilder()
                                         .setKind(chalk.ir.v1.TypeKind.TYPE_KIND_I32)))));
+  }
+
+  /** The first rel of this type in a planned result, or null. */
+  private static <T extends RelNode> T find(PlannerPipeline.Result result, Class<T> type) {
+    return find(result.physical(), type);
+  }
+
+  /** This node's estimated row count, under the metadata provider {@link #plan} installed. */
+  private static double rows(RelNode node) {
+    return org.apache.calcite.rel.metadata.RelMetadataQuery.instance().getRowCount(node);
+  }
+
+  /** This node's own cost, in the slot Volcano compares. */
+  private static double selfCost(RelNode node) {
+    org.apache.calcite.plan.RelOptCost cost =
+        node.computeSelfCost(
+            node.getCluster().getPlanner(),
+            org.apache.calcite.rel.metadata.RelMetadataQuery.instance());
+    assertThat(cost).isNotNull();
+    return cost.getRows();
+  }
+
+  /** What the whole plan costs, which is the number two plans are compared by. */
+  private static double cumulativeCost(PlannerPipeline.Result result) {
+    org.apache.calcite.plan.RelOptCost cost =
+        org.apache.calcite.rel.metadata.RelMetadataQuery.instance()
+            .getCumulativeCost(result.physical());
+    assertThat(cost).isNotNull();
+    return cost.getRows();
+  }
+
+  /** The first rel of this type in a physical plan, or null. */
+  private static <T extends RelNode> T find(RelNode root, Class<T> type) {
+    if (type.isInstance(root)) {
+      return type.cast(root);
+    }
+
+    for (RelNode input : root.getInputs()) {
+      T found = find(input, type);
+      if (found != null) {
+        return found;
+      }
+    }
+
+    return null;
   }
 
   /** Every {@code DynamicParam} the plan carries, by ordinal, wherever in the message it sits. */
