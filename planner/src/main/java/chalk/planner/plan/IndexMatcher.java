@@ -16,6 +16,7 @@ import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.sql.SqlKind;
+import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -40,7 +41,17 @@ public final class IndexMatcher {
       ImmutableList<RexNode> lower,
       boolean lowerInclusive,
       ImmutableList<RexNode> upper,
-      boolean upperInclusive) {
+      boolean upperInclusive,
+      boolean prefix) {
+
+    /** An ordinary bounded range: the four bounds, and no prefix (D37). */
+    public Range(
+        ImmutableList<RexNode> lower,
+        boolean lowerInclusive,
+        ImmutableList<RexNode> upper,
+        boolean upperInclusive) {
+      this(lower, lowerInclusive, upper, upperInclusive, false);
+    }
 
     /** How many leading key columns this range constrains at all. */
     public int boundedColumns() {
@@ -68,6 +79,10 @@ public final class IndexMatcher {
      * showed them would be exactly the half-safe log line design 37 exists to stop.
      */
     public String describe(java.util.function.UnaryOperator<RexNode> render) {
+      if (prefix) {
+        return "prefix" + render(lower, render);
+      }
+
       String low = lower.isEmpty() ? "-inf" : render(lower, render);
       String high = upper.isEmpty() ? "+inf" : render(upper, render);
       return (lowerInclusive ? "[" : "(") + low + ", " + high + (upperInclusive ? "]" : ")");
@@ -98,6 +113,16 @@ public final class IndexMatcher {
     public boolean matched() {
       return !ranges.isEmpty();
     }
+  }
+
+  /** What shapes an index answers, which is its kind read as a question about conditions. */
+  public enum Shape {
+    /** Ranges on the last bound column, and a {@code LIKE} prefix there (ORDERED, CLUSTERED). */
+    RANGES,
+    /** The whole key, pinned, and nothing else (HASH). */
+    EQUALITY,
+    /** A {@code LIKE} prefix on the one key column, and nothing else (PREFIX). */
+    PREFIX,
   }
 
   /**
@@ -131,6 +156,24 @@ public final class IndexMatcher {
       boolean equalityOnly,
       RexBuilder rexBuilder,
       List<Boolean> descending) {
+    return split(
+        condition,
+        keyFields,
+        rowType,
+        equalityOnly ? Shape.EQUALITY : Shape.RANGES,
+        rexBuilder,
+        descending);
+  }
+
+  /** The same, for an index whose kind is not one of the two the boolean can say (D282). */
+  public static Result split(
+      RexNode condition,
+      List<Integer> keyFields,
+      RelDataType rowType,
+      Shape shape,
+      RexBuilder rexBuilder,
+      List<Boolean> descending) {
+    boolean equalityOnly = shape == Shape.EQUALITY;
     // SEARCH first: a BETWEEN arrives as a Sarg, and expanding it gives back the two comparisons
     // this classifier understands. RexToIr expands the same way, so a residual built from the
     // expanded form produces exactly the IR the unexpanded one would have.
@@ -154,11 +197,13 @@ public final class IndexMatcher {
     List<@Nullable RexNode> equalityConjunct = new ArrayList<>(keyLength);
     List<Bound> lowerBound = new ArrayList<>(keyLength);
     List<Bound> upperBound = new ArrayList<>(keyLength);
+    List<Bound> patternBound = new ArrayList<>(keyLength);
     for (int i = 0; i < keyLength; i++) {
       equality.add(null);
       equalityConjunct.add(null);
       lowerBound.add(null);
       upperBound.add(null);
+      patternBound.add(null);
     }
 
     List<RexNode> inList = null;
@@ -168,6 +213,17 @@ public final class IndexMatcher {
     for (RexNode conjunct : conjuncts) {
       Comparison comparison = classify(conjunct, keyFields, keyLength, rowType);
       if (comparison == null) {
+        int pattern = shape == Shape.EQUALITY ? -1 : prefixPattern(conjunct, keyFields, keyLength, rowType);
+        if (pattern >= 0 && patternBound.get(pattern) == null) {
+          // `col LIKE 'p%'` on a STRING key column: one prefix range, and nothing left to re-check
+          // (D282). The pattern travels whole and the client strips its '%' when it binds the bound,
+          // because a parameter's text is only known then.
+          patternBound.set(
+              pattern,
+              new Bound(((RexCall) conjunct).getOperands().get(1), true, conjunct));
+          continue;
+        }
+
         List<RexNode> values = inListValues(conjunct, keyFields.get(0), rowType);
         if (values != null && inList == null) {
           // Every value of an IN list is an equality, so a hash index can serve one too.
@@ -231,6 +287,12 @@ public final class IndexMatcher {
 
     Bound low = position < keyLength ? lowerBound.get(position) : null;
     Bound high = position < keyLength ? upperBound.get(position) : null;
+
+    // A LIKE prefix is used only where the column carries no bound of its own: one range per column
+    // is the contract, and a bound is the sharper of the two.
+    Bound pattern =
+        position < keyLength && low == null && high == null ? patternBound.get(position) : null;
+
     if (low != null) {
       consumed.add(low.conjunct());
     }
@@ -239,7 +301,11 @@ public final class IndexMatcher {
       consumed.add(high.conjunct());
     }
 
-    if (prefix.isEmpty() && low == null && high == null) {
+    if (pattern != null) {
+      consumed.add(pattern.conjunct());
+    }
+
+    if (prefix.isEmpty() && low == null && high == null && pattern == null) {
       return Result.NONE;
     }
 
@@ -249,8 +315,16 @@ public final class IndexMatcher {
       return Result.NONE;
     }
 
+    if (shape == Shape.PREFIX && (pattern == null || position != 0 || keyLength != 1)) {
+      // A prefix index answers prefix ranges on its one key column and nothing else.
+      return Result.NONE;
+    }
+
     boolean flip = position < descending.size() && Boolean.TRUE.equals(descending.get(position));
-    ImmutableList<Range> ranges = ranges(prefix, leading, low, high, flip);
+    ImmutableList<Range> ranges =
+        pattern != null
+            ? prefixRanges(prefix, leading, pattern)
+            : ranges(prefix, leading, low, high, flip);
     if (ranges.isEmpty()) {
       return Result.NONE;
     }
@@ -286,6 +360,94 @@ public final class IndexMatcher {
     }
 
     return ranges.build();
+  }
+
+  /**
+   * The prefix ranges for one equality prefix: the pattern is the last bound, the range is open
+   * above, and the flags read as the half-open {@code [p, next(p))} an ORDERED index will be sent.
+   */
+  private static ImmutableList<Range> prefixRanges(
+      List<RexNode> prefix, @Nullable List<RexNode> leading, Bound pattern) {
+    if (leading == null) {
+      return ImmutableList.of(prefixRange(prefix, pattern));
+    }
+
+    ImmutableList.Builder<Range> ranges = ImmutableList.builder();
+    for (RexNode value : leading) {
+      List<RexNode> keys = new ArrayList<>(prefix);
+      keys.set(0, value);
+      ranges.add(prefixRange(keys, pattern));
+    }
+
+    return ranges.build();
+  }
+
+  private static Range prefixRange(List<RexNode> prefix, Bound pattern) {
+    ImmutableList.Builder<RexNode> lower = ImmutableList.builder();
+    lower.addAll(prefix);
+    lower.add(pattern.value());
+    return new Range(lower.build(), true, ImmutableList.of(), false, true);
+  }
+
+  /**
+   * {@code col LIKE p} on a key column whose type is STRING, where {@code p} is a bare prefix
+   * pattern — a literal ending in one {@code %} with no other wildcard, or a parameter, whose text
+   * the client checks when it binds it. Returns the key position, or -1.
+   *
+   * <p>{@code ESCAPE} is refused: its three-operand form can hide a wildcard behind an escape
+   * character, and a range that consumed such a pattern would drop rows. A case-insensitive
+   * {@code LIKE} carries the same {@link SqlKind}, so the operator is checked by name rather than by
+   * kind.
+   */
+  private static int prefixPattern(
+      RexNode conjunct, List<Integer> keyFields, int keyLength, RelDataType rowType) {
+    if (!(conjunct instanceof RexCall call)
+        || call.getKind() != SqlKind.LIKE
+        || call.getOperands().size() != 2
+        || !"LIKE".equals(call.getOperator().getName())) {
+      return -1;
+    }
+
+    if (!(call.getOperands().get(0) instanceof RexInputRef ref)) {
+      return -1;
+    }
+
+    RelDataType columnType = rowType.getFieldList().get(ref.getIndex()).getType();
+    if (columnType.getSqlTypeName().getFamily() != SqlTypeFamily.CHARACTER) {
+      return -1;
+    }
+
+    RexNode pattern = call.getOperands().get(1);
+    if (pattern instanceof RexLiteral literal) {
+      if (literal.getType().getSqlTypeName().getFamily() != SqlTypeFamily.CHARACTER
+          || !isBarePrefix(literal.getValueAs(String.class))) {
+        return -1;
+      }
+    } else if (!(pattern instanceof RexDynamicParam parameter)
+        || parameter.getType().getSqlTypeName().getFamily() != SqlTypeFamily.CHARACTER) {
+      return -1;
+    }
+
+    return keyOf(ref.getIndex(), keyFields, keyLength);
+  }
+
+  /**
+   * Whether {@code pattern} is {@code p%}: one trailing {@code %}, and no {@code %} or {@code _}
+   * anywhere before it. The same rule the client applies to a parameter's text at bind time.
+   */
+  public static boolean isBarePrefix(@Nullable String pattern) {
+    if (pattern == null || pattern.isEmpty() || pattern.charAt(pattern.length() - 1) != '%') {
+      return false;
+    }
+
+    for (int i = 0; i < pattern.length() - 1; i++) {
+      char c = pattern.charAt(i);
+      if (c == '%' || c == '_') {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private static Range range(

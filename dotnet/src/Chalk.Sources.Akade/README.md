@@ -245,11 +245,30 @@ What is supported:
 
 - unique and non-unique Akade indexes become Chalk `HASH` indexes;
 - Akade range indexes become Chalk `ORDERED` indexes;
+- Akade prefix indexes — tries — become Chalk `PREFIX` indexes;
 - unique Akade indexes carry `Unique = true`;
 - the key is one direct member, or a tuple of two to four of them, in tuple order;
 - a hash index reports its own distinct key count, which the planner would otherwise guess;
-- computed, multi-key, nullable and specialised string/spatial/vector access paths remain
+- computed, multi-key, nullable and specialised full-text/spatial/vector access paths remain
   undisclosed until Chalk can represent and verify their semantics faithfully.
+
+## `LIKE 'p%'` and the prefix index
+
+`WHERE name LIKE 'Int%'` is a range, not a predicate: one trailing `%`, no other wildcard and no
+`ESCAPE`. The planner turns such a pattern on a STRING key column into a **prefix range**, and what
+the source is finally asked for depends on the index's kind:
+
+- an **ordered** string index is sent the plain half-open range `[Int, Inu)` — the prefix and the
+  smallest text above everything it matches — so it serves a `LIKE` with no change at all;
+- a **prefix** index is sent the prefix itself, and Akade's trie walks straight to it.
+
+A pattern with more than a prefix in it — `'%USDT'`, `'a%b%'`, anything with `_`, anything with an
+`ESCAPE` — is left where it was, as a predicate evaluated per row. A parameter's text is the one
+thing the plan could not know, so it is checked when it is bound and refused by name if it turns out
+not to be a bare prefix.
+
+A trie's fuzzy search is deliberately not an access path: Chalk's ranges say "between these bounds"
+and "starting with this text", and there is no range that says "within one edit of".
 
 For the README `Purchase` example this means the planner sees `Id`, `ProductId`, `Amount` and
 `UnitPrice`, and `PurchaseKeys.ProductAndUnitPrice` as soon as the host names its two members;

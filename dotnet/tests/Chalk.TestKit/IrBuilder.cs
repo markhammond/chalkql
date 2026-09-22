@@ -222,12 +222,14 @@ public static class IrBuilder
         IEnumerable<Expr>? lower = null,
         IEnumerable<Expr>? upper = null,
         bool lowerInclusive = true,
-        bool upperInclusive = true)
+        bool upperInclusive = true,
+        bool prefix = false)
     {
         var range = new IndexRange
         {
             LowerInclusive = lowerInclusive,
             UpperInclusive = upperInclusive,
+            Prefix = prefix,
         };
         range.Lower.AddRange(lower ?? []);
         range.Upper.AddRange(upper ?? []);

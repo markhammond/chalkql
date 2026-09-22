@@ -522,6 +522,17 @@ message IndexRange {
   bool lower_inclusive = 2;
   repeated Expr upper = 3;
   bool upper_inclusive = 4;
+  // The range is `col LIKE p || '%'` on the last bound column: `lower` holds the equality prefix and
+  // then `p`, `upper` is empty, and both inclusive flags are unset. Additive and false by default,
+  // so a range that is not one is byte-identical to a range from before this field.
+  //
+  // What the source is finally asked for depends on the index's kind, and the client resolves it
+  // when it binds the bounds: an ORDERED index gets the plain half-open range `[p, next(p))`, where
+  // `next(p)` increments the last code point of `p` and carries; an INDEX_KIND_PREFIX one gets the
+  // prefix itself. A bound that turns out not to be a bare prefix — a parameter whose text has a
+  // wildcard in the middle, or one that ends at the largest code point there is and therefore has no
+  // successor — is refused at bind time, because the plan was made for a prefix.
+  bool prefix = 5;
 }
 
 // Opaque native query executed by an ISourceRuntime. Output row type is Rel.row_type.

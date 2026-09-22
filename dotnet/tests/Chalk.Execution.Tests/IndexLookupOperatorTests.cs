@@ -150,6 +150,69 @@ public sealed class IndexLookupOperatorTests
         Assert.Contains("only a literal or a parameter", error.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// D282: an ordered index is sent the plain half-open range the prefix stands for, so the rows
+    /// are exactly the ones a LIKE would keep and nothing is left to re-check.
+    /// </summary>
+    [Fact]
+    public async Task A_prefix_range_on_an_ordered_index_becomes_the_range_it_stands_for()
+    {
+        var plan = Plan([IrBuilder.Range([Text("b%")], [], prefix: true)]);
+        var (rows, stats) = await RunAsync(plan);
+
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, row => Assert.Equal("b", row[0]));
+        Assert.Equal(2, stats.RowsScanned);
+    }
+
+    /// <summary>An empty prefix matches every text, and still excludes a NULL key.</summary>
+    [Fact]
+    public async Task An_empty_prefix_is_every_row()
+    {
+        var plan = Plan([IrBuilder.Range([Text("%")], [], prefix: true)]);
+        var (rows, _) = await RunAsync(plan);
+
+        Assert.Equal(Points.Length, rows.Count);
+    }
+
+    /// <summary>
+    /// A parameter's text is the one thing about a prefix the plan could not know, so it is checked
+    /// when it is bound — and a pattern that is not a bare prefix is refused by name rather than
+    /// answered as though it were one.
+    /// </summary>
+    [Fact]
+    public async Task A_parameter_that_is_not_a_bare_prefix_is_refused_at_bind_time()
+    {
+        var plan = Plan(
+            [IrBuilder.Range([IrBuilder.Param(0, IrBuilder.Str(nullable: true))], [], prefix: true)],
+            IrBuilder.Str(nullable: true));
+
+        var error = await Assert.ThrowsAsync<ExecutionException>(() => RunAsync(plan, ["a%b%"]));
+        var refusal = Assert.IsType<UnsupportedFeatureException>(error.InnerException);
+
+        Assert.Contains("ix_points_Group", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("planned for a LIKE prefix", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("a%b%", refusal.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// And a prefix that ends at the largest code point there is has no text above it to close the
+    /// range with, which is the other shape the fast-fail rule covers.
+    /// </summary>
+    [Fact]
+    public async Task A_prefix_with_no_successor_is_refused_at_bind_time()
+    {
+        var plan = Plan(
+            [IrBuilder.Range([IrBuilder.Param(0, IrBuilder.Str(nullable: true))], [], prefix: true)],
+            IrBuilder.Str(nullable: true));
+
+        var error = await Assert.ThrowsAsync<ExecutionException>(
+            () => RunAsync(plan, ["\U0010FFFF%"]));
+        var refusal = Assert.IsType<UnsupportedFeatureException>(error.InnerException);
+
+        Assert.Contains("no text above it", refusal.Message, StringComparison.Ordinal);
+    }
+
     private static Expr Text(string value) => IrBuilder.Lit(value);
 
     private static PocoSource Source() =>

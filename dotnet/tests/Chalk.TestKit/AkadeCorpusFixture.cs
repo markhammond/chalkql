@@ -35,9 +35,11 @@ public sealed class AkadeCorpusFixture
         IReadOnlyList<Bar> rows,
         IReadOnlyList<SymbolRow> symbols,
         IReadOnlyList<Trade> sparseTrades,
-        IReadOnlyList<LineItem> lineItems)
+        IReadOnlyList<LineItem> lineItems,
+        IReadOnlyList<SearchRow> searchRows)
     {
         Source = source;
+        SearchRows = searchRows;
         Bars = bars;
         BarRows = rows;
         SymbolRows = symbols;
@@ -76,6 +78,10 @@ public sealed class AkadeCorpusFixture
         var nations = Fixtures.Nations();
         var regions = Fixtures.Regions();
         var suppliers = Fixtures.Suppliers(seed);
+        var searchRows = Fixtures.SearchRows();
+        var searchSet = searchRows.ToIndexedSet()
+            .WithPrefixIndex(CorpusFixture.SearchName, indexName: CorpusFixture.SearchAccessor)
+            .Build();
 
         var set = IndexedSetBuilder.Create((IEnumerable<Bar>)rows)
             .WithRangeIndex(SymbolTs, SymbolTsComparer)
@@ -198,10 +204,19 @@ public sealed class AkadeCorpusFixture
                 .OrderedBy(s => s.SuppKey)
                 .UniqueKey(s => s.SuppKey)
                 .Index(s => s.NationKey))
+
+            // D282's table, declared exactly as the built-in configuration declares it: this
+            // configuration is about `bars`' indexes and every other table is a control.
+            .AddTable("terms", searchRows, t => t
+                .Index(CorpusFixture.SearchIndex, _ => new AkadePrefixIndex<SearchRow>(
+                    CorpusFixture.SearchIndex,
+                    searchSet,
+                    CorpusFixture.SearchName,
+                    CorpusFixture.SearchAccessor)))
             )
             .Build();
 
-        return new AkadeCorpusFixture(source, set, rows, symbols, sparseTrades, lineItems);
+        return new AkadeCorpusFixture(source, set, rows, symbols, sparseTrades, lineItems, searchRows);
     }
 
     public PocoSource Source { get; }
@@ -220,6 +235,9 @@ public sealed class AkadeCorpusFixture
     public IReadOnlyList<Trade> SparseTrades { get; }
 
     public IReadOnlyList<LineItem> LineItems { get; }
+
+    /// <summary>The prefix corpus's rows (D282).</summary>
+    public IReadOnlyList<SearchRow> SearchRows { get; }
 
     public IReadOnlyList<ISourceRuntime> Sources => [Source];
 

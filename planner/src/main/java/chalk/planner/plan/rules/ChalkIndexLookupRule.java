@@ -87,7 +87,7 @@ public final class ChalkIndexLookupRule extends RelRule<ChalkRuleConfig> {
               filter.getCondition(),
               keyFields,
               scan.getRowType(),
-              index.getKind() == IndexKind.INDEX_KIND_HASH,
+              shape(index.getKind()),
               rexBuilder,
               descending(index));
       if (!result.matched()) {
@@ -107,6 +107,18 @@ public final class ChalkIndexLookupRule extends RelRule<ChalkRuleConfig> {
       RelNode alternative = residual == null ? lookup : ChalkFilter.create(lookup, residual);
       call.transformTo(alternative);
     }
+  }
+
+  /**
+   * What the index's kind lets it answer. A prefix index answers a {@code LIKE} prefix and nothing
+   * else (D282); a hash index the whole key; everything else ranges.
+   */
+  private static IndexMatcher.Shape shape(IndexKind kind) {
+    return switch (kind) {
+      case INDEX_KIND_HASH -> IndexMatcher.Shape.EQUALITY;
+      case INDEX_KIND_PREFIX -> IndexMatcher.Shape.PREFIX;
+      default -> IndexMatcher.Shape.RANGES;
+    };
   }
 
   /**

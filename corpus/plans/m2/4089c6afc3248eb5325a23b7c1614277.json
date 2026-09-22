@@ -1,0 +1,97 @@
+{
+  "irVersion": 1,
+  "planDigest": "2261844303171806886",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "name",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "text",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "name",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "text",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        }
+      ]
+    },
+    "estRowCount": 501.75,
+    "filter": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "name",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "text",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            }
+          ]
+        },
+        "estRowCount": 2007,
+        "read": {
+          "table": {
+            "sourceId": "mem",
+            "schema": "main",
+            "table": "terms"
+          },
+          "projection": [
+            0,
+            1
+          ]
+        }
+      },
+      "condition": {
+        "type": {
+          "kind": "TYPE_KIND_BOOL"
+        },
+        "call": {
+          "function": "FUNCTION_ID_LIKE",
+          "args": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "literal": {
+                "stringValue": "Int%"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -337,6 +337,37 @@ public static class Fixtures
         new(6, "WEST", 5, "F"),
     ];
 
+    /// <summary>
+    /// The <c>search</c> rows (D282): short names with shared prefixes, so that every prefix of
+    /// every name is a range worth asking for, and one name that is a prefix of another.
+    /// </summary>
+    public static IReadOnlyList<Chalk.Sample.AkadeIndexedSet.SearchRow> SearchRows()
+    {
+        var rows = new List<Chalk.Sample.AkadeIndexedSet.SearchRow>(SearchFiller + 7)
+        {
+            new("String", "System.String"),
+            new("Int32", "System.Int32"),
+            new("Int64", "System.Int64"),
+            new("Int", "the prefix of the two above"),
+            new("Interesting", "Something Interesting"),
+            new("Stream", "System.IO.Stream"),
+            new("Decimal", "System.Decimal"),
+        };
+
+        // Enough rows that a prefix lookup is worth a seek, which is what makes the corpus case an
+        // index-shape claim rather than a coincidence.
+        for (var i = 0; i < SearchFiller; i++)
+        {
+            var id = i.ToString("D4", System.Globalization.CultureInfo.InvariantCulture);
+            rows.Add(new("Type" + id, "generated row " + id));
+        }
+
+        return rows;
+    }
+
+    /// <summary>The generated part of <c>search</c>.</summary>
+    public const int SearchFiller = 2_000;
+
     /// <summary>The four <c>sorted</c> rows: a duplicate key at 2 and a gap at 3 (D164).</summary>
     public static IReadOnlyList<SortedRow> SortedRows() =>
     [

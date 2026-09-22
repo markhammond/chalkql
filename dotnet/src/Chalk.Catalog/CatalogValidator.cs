@@ -1439,6 +1439,7 @@ public static class CatalogValidator
             }
 
             ValidateCovering(table, index, indexPath, indexColumns);
+            ValidatePrefix(table, index, indexPath);
         }
 
         for (var c = 0; c < table.Columns.Count; c++)
@@ -1795,6 +1796,37 @@ public static class CatalogValidator
     /// has a copy to describe, so any other kind declaring one is a registration error rather than a
     /// field the planner would silently ignore.
     /// </summary>
+    /// <summary>
+    /// A PREFIX index answers <c>LIKE 'p%'</c> on one STRING key column and nothing else (D282). Two
+    /// key columns or a key of another type is a shape the planner has no rule for, so it is refused
+    /// at registration rather than declared and never matched.
+    /// </summary>
+    private static void ValidatePrefix(TableDescriptor table, IndexDescriptor index, string indexPath)
+    {
+        if (index.Kind != IndexKind.Prefix)
+        {
+            return;
+        }
+
+        if (index.Columns.Count != 1)
+        {
+            throw new CatalogValidationException(
+                indexPath,
+                $"index '{index.Name}' is PREFIX and declares {index.Columns.Count} key columns. A "
+                + "prefix index answers prefix lookups on one STRING column and claims no ordering, "
+                + "so it has exactly one key.");
+        }
+
+        if (table.Columns[index.Columns[0]].Type.Kind != TypeKind.String)
+        {
+            throw new CatalogValidationException(
+                indexPath,
+                $"index '{index.Name}' is PREFIX over column '{table.Columns[index.Columns[0]].Name}', "
+                + $"which is {table.Columns[index.Columns[0]].Type.Kind}. A prefix is a question about "
+                + "text, so a prefix index's key is a STRING column.");
+        }
+    }
+
     private static void ValidateCovering(
         TableDescriptor table, IndexDescriptor index, string indexPath, HashSet<int> keyColumns)
     {

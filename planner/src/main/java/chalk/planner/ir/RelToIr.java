@@ -864,6 +864,13 @@ public final class RelToIr {
           IndexRange.newBuilder()
               .setLowerInclusive(range.lowerInclusive())
               .setUpperInclusive(range.upperInclusive());
+
+      // D282: the last lower bound is a LIKE pattern rather than a value. Written only when set, so
+      // every range that is not one is byte-identical to a range from before the field existed.
+      if (range.prefix()) {
+        bounds.setPrefix(true);
+      }
+
       for (int i = 0; i < range.lower().size(); i++) {
         bounds.addLower(bound(range.lower().get(i), lookup, i));
       }

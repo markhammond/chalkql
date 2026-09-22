@@ -92,6 +92,7 @@ public final class TestCatalogs {
                 .addTables(supplier())
                 .addTables(sales())
                 .addTables(sorted())
+                .addTables(terms())
                 .addAllFunctions(functions()))
         // The client sets the message and leaves every field at its default, which is what "this
         // catalog declares no cross-source join policy" is on the wire (D104). Stated here so the
@@ -639,6 +640,25 @@ public final class TestCatalogs {
         .addColumns(column("k", type(TypeKind.TYPE_KIND_I32)))
         .addColumns(column("v", type(TypeKind.TYPE_KIND_STRING)))
         .addCollations(TableCollation.newBuilder().addKeys(ascending(0)))
+        .setRowCountKind(chalk.ir.v1.RowCountKind.ROW_COUNT_KIND_EXACT)
+        .build();
+  }
+
+  /**
+   * The prefix corpus's table (D282): a trie the host owns, declared INDEX_KIND_PREFIX over one
+   * STRING column. It claims no ordering at all, which is what the kind is for.
+   */
+  public static Table terms() {
+    return Table.newBuilder()
+        .setName("terms")
+        .setRowCount(2_007)
+        .addColumns(column("name", type(TypeKind.TYPE_KIND_STRING)))
+        .addColumns(column("text", type(TypeKind.TYPE_KIND_STRING)))
+        .addIndexes(
+            chalk.ir.v1.Index.newBuilder()
+                .setName("ix_terms_name")
+                .setKind(chalk.ir.v1.IndexKind.INDEX_KIND_PREFIX)
+                .addColumns(0))
         .setRowCountKind(chalk.ir.v1.RowCountKind.ROW_COUNT_KIND_EXACT)
         .build();
   }

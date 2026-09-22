@@ -1,7 +1,10 @@
+using Akade.IndexedSet;
 using Chalk.Catalog;
+using Chalk.Sample.AkadeIndexedSet;
 using Chalk.Sources;
 using Chalk.Sources.Poco;
 using CatalogContext = Chalk.Catalog.CatalogContext;
+using IndexKind = Chalk.Ir.IndexKind;
 
 namespace Chalk.TestKit;
 
@@ -33,7 +36,8 @@ public sealed class CorpusFixture
         IReadOnlyList<Region> regions,
         IReadOnlyList<Supplier> suppliers,
         IReadOnlyList<Sale> sales,
-        IReadOnlyList<SortedRow> sortedRows)
+        IReadOnlyList<SortedRow> sortedRows,
+        IReadOnlyList<SearchRow> searchRows)
     {
         Source = source;
         Bars = bars;
@@ -50,6 +54,7 @@ public sealed class CorpusFixture
         Suppliers = suppliers;
         Sales = sales;
         SortedRows = sortedRows;
+        SearchRows = searchRows;
         Catalog = new CatalogContext
         {
             ContextId = ContextId,
@@ -85,6 +90,10 @@ public sealed class CorpusFixture
         
         var sales = Fixtures.Sales();
         var sortedRows = Fixtures.SortedRows();
+        var searchRows = Fixtures.SearchRows();
+        var searchSet = searchRows.ToIndexedSet()
+            .WithPrefixIndex(SearchName, indexName: SearchAccessor)
+            .Build();
 
         const bool skipIntegrityCheckForTestFixtures = true;
         const bool checkFk = !skipIntegrityCheckForTestFixtures;
@@ -231,11 +240,19 @@ public sealed class CorpusFixture
             .AddTable("sales", sales)
             // `sorted` is ordered without a unique key, inducing use of merge joins and merge unions.
             .AddTable("sorted", sortedRows, t => t.OrderedBy(r => r.K))
+
+            // D282: the one table here whose index is the host's own, because a prefix index is a
+            // trie and this source builds permutations. The structure comes from
+            // samples/Chalk.Sample.AkadeIndexedSet, exactly as `bars` indexes do in the
+            // `bars-akade` configuration.
+            .AddTable("terms", searchRows, t => t
+                .Index(SearchIndex, _ => new AkadePrefixIndex<SearchRow>(
+                    SearchIndex, searchSet, SearchName, SearchAccessor)))
             .Build();
 
         return new CorpusFixture(
             source, bars, barsSmall, symbols, sparseTrades, lineItems, funding, events, customers,
-            orders, nations, regions, suppliers, sales, sortedRows);
+            orders, nations, regions, suppliers, sales, sortedRows, searchRows);
     }
 
     public PocoSource Source { get; }
@@ -273,6 +290,39 @@ public sealed class CorpusFixture
 
     /// <summary>The graft's four-row ordered table (D164): a duplicate key and a gap.</summary>
     public IReadOnlyList<SortedRow> SortedRows { get; }
+
+    /// <summary>The prefix corpus's rows (D282).</summary>
+    public IReadOnlyList<SearchRow> SearchRows { get; }
+
+    /// <summary>
+    /// Static, so Akade files the prefix index under this name and every snapshot's index asks for
+    /// the same one.
+    /// </summary>
+    internal static string SearchName(SearchRow row) => row.Name;
+
+    /// <summary>
+    /// The name Akade files the prefix index under. Stated rather than left to the compiler, because
+    /// the text it would record depends on where the accessor is written and two fixtures declare
+    /// this same index.
+    /// </summary>
+    internal const string SearchAccessor = "SearchName";
+
+    /// <summary>What the catalog says about `terms`'s prefix index: one STRING key, no order.</summary>
+    /// <remarks>
+    /// Held in a nested class rather than a static field of this one: field initialisers run in
+    /// declaration order, and <see cref="Shared"/> builds the fixture that reads this.
+    /// </remarks>
+    internal static IndexDescriptor SearchIndex => SearchIndexHolder.Instance;
+
+    private static class SearchIndexHolder
+    {
+        internal static readonly IndexDescriptor Instance = new()
+        {
+            Name = "ix_terms_name",
+            Kind = IndexKind.Prefix,
+            Columns = [0],
+        };
+    }
 
     /// <summary>The one source, keyed the way the engine wants it.</summary>
     public IReadOnlyList<ISourceRuntime> Sources => [Source];

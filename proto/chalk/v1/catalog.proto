@@ -669,6 +669,11 @@ enum IndexKind {
   // a covered lookup, which is the price of a scan. A sidecar older than this value sees an
   // unrecognised kind and a client older than it never declares one.
   INDEX_KIND_CLUSTERED = 3;
+  // Prefix lookups on one STRING key column and nothing else: `IndexRange.prefix` ranges, never an
+  // equality and never a bound. It claims no ordering — a trie hands its matches back in whatever
+  // order it walks them — and is costed as a hash lookup is. A sidecar older than this value sees an
+  // unrecognised kind and a client older than it never declares one.
+  INDEX_KIND_PREFIX = 4;
 }
 
 // What a source can execute itself. All-false / empty = nothing is pushed, which is the safe

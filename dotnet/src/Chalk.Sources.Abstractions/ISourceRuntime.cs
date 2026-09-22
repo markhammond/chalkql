@@ -247,6 +247,20 @@ public sealed class IndexKeyRange
     public bool UpperInclusive { get; init; } = true;
 
     /// <summary>
+    /// "The last bound column starts with this text", for an index whose kind is
+    /// <see cref="Chalk.Ir.IndexKind.Prefix"/> (D282). Null for every other range, which is every
+    /// range any other kind of index is ever sent.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Lower"/> then holds the equality prefix and this text as its last element, and
+    /// <see cref="Upper"/> holds the equality prefix alone, so the bounded columns — and with them
+    /// the rule that a NULL in a bounded column never matches — read exactly as they do for any
+    /// other range. An ORDERED index is never sent one: the client turns a prefix into the plain
+    /// half-open range it is before the source sees it.
+    /// </remarks>
+    public string? Prefix { get; init; }
+
+    /// <summary>
     /// An equality lookup on the given key prefix.
     /// </summary>
     public static IndexKeyRange Equality(params object?[] key) =>
@@ -288,6 +302,26 @@ public sealed class IndexKeyRange
                 return false;
         }
 
+        if (Prefix is not null)
+        {
+            // The columns before the last are equalities; the last starts with the prefix.
+            for (var i = 0; i + 1 < Lower.Count && i < key.Count; i++)
+            {
+                if (SourceValueOrder.Compare(
+                        key[i],
+                        Lower[i],
+                        i < directions.Count ? directions[i] : SortDirection.AscNullsLast) != 0)
+                {
+                    return false;
+                }
+            }
+
+            var last = Lower.Count - 1;
+            return last < key.Count
+                && IndexPrefix.AsText(key[last]) is { } text
+                && text.StartsWith(Prefix, StringComparison.Ordinal);
+        }
+
         if (Lower.Count > 0)
         {
             var comparison = ComparePrefix(key, Lower, directions);
@@ -315,6 +349,11 @@ public sealed class IndexKeyRange
 
     public override string ToString()
     {
+        if (Prefix is not null)
+        {
+            return "prefix(" + string.Join(", ", Lower.Select(Render)) + ")";
+        }
+
         var lower = Lower.Count == 0
             ? "-inf"
             : "(" + string.Join(", ", Lower.Select(Render)) + ")";

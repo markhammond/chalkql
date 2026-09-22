@@ -45,12 +45,13 @@ Chalk.Sources.ArrowTypeMapping
 Chalk.Sources.BatchLifetimeException
 Chalk.Sources.BatchLifetimeException.CapturedGeneration.get -> int
 Chalk.Sources.BatchLifetimeException.CurrentGeneration.get -> int
+Chalk.Sources.BatchRamp
 Chalk.Sources.ColumnarBatch
 Chalk.Sources.ColumnarBatch.Adopt(Chalk.Sources.ColumnarBatch! source) -> void
 Chalk.Sources.ColumnarBatch.Begin(int rowCount) -> void
 Chalk.Sources.ColumnarBatch.Column(int index) -> Chalk.Sources.ColumnView
-Chalk.Sources.ColumnarBatch.ColumnarBatch(System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>! types) -> void
 Chalk.Sources.ColumnarBatch.ColumnCount.get -> int
+Chalk.Sources.ColumnarBatch.ColumnarBatch(System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>! types) -> void
 Chalk.Sources.ColumnarBatch.Columns.get -> System.ReadOnlySpan<Chalk.Sources.ColumnView>
 Chalk.Sources.ColumnarBatch.Count.get -> int
 Chalk.Sources.ColumnarBatch.EnsureColumns(int count) -> void
@@ -67,7 +68,6 @@ Chalk.Sources.ColumnarBatch.ShareSelection(Chalk.Sources.ColumnarBatch! source) 
 Chalk.Sources.ColumnarBatch.Types.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>!
 Chalk.Sources.ColumnarBatch.ValidateLifetimes.get -> bool
 Chalk.Sources.ColumnarBatch.ValidateLifetimes.init -> void
-Chalk.Sources.BatchRamp
 Chalk.Sources.ExecutionArena
 Chalk.Sources.ExecutionArena.Allocator.get -> Apache.Arrow.Memory.MemoryAllocator!
 Chalk.Sources.ExecutionArena.BeginExecution(Chalk.Sources.ExecutionStats? stats = null) -> void
@@ -166,6 +166,8 @@ Chalk.Sources.IndexKeyRange.Lower.get -> System.Collections.Generic.IReadOnlyLis
 Chalk.Sources.IndexKeyRange.Lower.init -> void
 Chalk.Sources.IndexKeyRange.LowerInclusive.get -> bool
 Chalk.Sources.IndexKeyRange.LowerInclusive.init -> void
+Chalk.Sources.IndexKeyRange.Prefix.get -> string?
+Chalk.Sources.IndexKeyRange.Prefix.init -> void
 Chalk.Sources.IndexKeyRange.Upper.get -> System.Collections.Generic.IReadOnlyList<object?>!
 Chalk.Sources.IndexKeyRange.Upper.init -> void
 Chalk.Sources.IndexKeyRange.UpperInclusive.get -> bool
@@ -186,6 +188,7 @@ Chalk.Sources.IndexLookupRequest.RowGoal.get -> long?
 Chalk.Sources.IndexLookupRequest.RowGoal.init -> void
 Chalk.Sources.IndexLookupRequest.Table.get -> string!
 Chalk.Sources.IndexLookupRequest.Table.init -> void
+Chalk.Sources.IndexPrefix
 Chalk.Sources.InvalidUtf8Exception
 Chalk.Sources.InvalidUtf8Exception.InvalidUtf8Exception(string! subject, long row) -> void
 Chalk.Sources.InvalidUtf8Exception.Row.get -> long
@@ -406,6 +409,7 @@ Chalk.Utf8StringExtensions
 [CHALK001]Chalk.Sources.IVectorFunction
 [CHALK001]Chalk.Sources.IVectorFunction.Invoke(System.ReadOnlySpan<Chalk.Sources.ColumnView> args, Chalk.Sources.ColumnWriter! result, in Chalk.Sources.FunctionContext context) -> void
 [CHALK001]Chalk.Sources.IVectorFunction.Signature.get -> Chalk.Sources.FunctionSignature!
+[CHALK001]static Chalk.Sources.ColumnView.Empty(Chalk.Catalog.ChalkType type) -> Chalk.Sources.ColumnView
 const Chalk.Sources.ArrowTypeMapping.ListElementName = "item" -> string!
 override Chalk.Sources.AdaptiveDecision.ToString() -> string!
 override Chalk.Sources.ExecutionStats.ToString() -> string!
@@ -436,6 +440,10 @@ static Chalk.Sources.ArrowTypeMapping.UnitsPerSecond(Apache.Arrow.Types.TimeUnit
 static Chalk.Sources.BatchRamp.Next(int previous, int batchSize, long? rowGoal) -> int
 static Chalk.Sources.IndexKeyRange.All.get -> Chalk.Sources.IndexKeyRange!
 static Chalk.Sources.IndexKeyRange.Equality(params object?[]! key) -> Chalk.Sources.IndexKeyRange!
+static Chalk.Sources.IndexPrefix.AsText(object? value) -> string?
+static Chalk.Sources.IndexPrefix.IsBarePrefix(string? pattern) -> bool
+static Chalk.Sources.IndexPrefix.Of(string! pattern) -> string!
+static Chalk.Sources.IndexPrefix.TryNext(string! prefix, out string! next) -> bool
 static Chalk.Sources.RefreshTarget.Source(string! sourceId) -> Chalk.Sources.IRefreshTarget!
 static Chalk.Sources.RefreshTarget.Table(string! schema, string! table) -> Chalk.Sources.IRefreshTarget!
 static Chalk.Sources.SourceEncoding.WriteDecimal(decimal value, int precision, int scale, System.Span<byte> destination, string! sourceId, string! table, string! column) -> void
@@ -477,4 +485,3 @@ static Chalk.Utf8StringExtensions.TryGetUtf8String(System.ReadOnlyMemory<byte> v
 static Chalk.Utf8StringExtensions.TryGetUtf8String(System.ReadOnlySpan<byte> value, out Chalk.Utf8String text) -> bool
 static Chalk.Utf8StringExtensions.TryGetUtf8String(byte[]? value, out Chalk.Utf8String text) -> bool
 virtual Chalk.Sources.Accumulate<TState, TIn>.Invoke(ref TState state, TIn value) -> void
-[CHALK001]static Chalk.Sources.ColumnView.Empty(Chalk.Catalog.ChalkType type) -> Chalk.Sources.ColumnView

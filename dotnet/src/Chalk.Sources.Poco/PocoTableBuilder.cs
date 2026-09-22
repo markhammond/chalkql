@@ -294,6 +294,17 @@ public sealed class PocoTableBuilder<T>
                 nameof(kind));
         }
 
+        if (kind == IndexKind.Prefix)
+        {
+            // D282: a prefix index is a trie, and the POCO source builds permutations. A host that
+            // has one registers the structure itself.
+            throw new ArgumentException(
+                $"Table '{_table}': a PREFIX index is a structure this source does not build. "
+                + "Register the host's own with Index(name, IndexKind.Prefix, …, factory, key) or "
+                + "Index(IPocoIndex<T>).",
+                nameof(kind));
+        }
+
         if (directions.Count != 0 && directions.Count != keys.Length)
         {
             throw new ArgumentException(

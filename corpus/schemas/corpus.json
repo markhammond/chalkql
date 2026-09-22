@@ -2200,6 +2200,54 @@
             }
           ],
           "rowCountKind": "ROW_COUNT_KIND_EXACT"
+        },
+        {
+          "name": "terms",
+          "columns": [
+            {
+              "name": "name",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "2007",
+                "min": {
+                  "stringValue": "Decimal"
+                },
+                "max": {
+                  "stringValue": "Type1999"
+                }
+              }
+            },
+            {
+              "name": "text",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "stringValue": "Something Interesting"
+                },
+                "max": {
+                  "stringValue": "the prefix of the two above"
+                }
+              }
+            }
+          ],
+          "rowCount": "2007",
+          "indexes": [
+            {
+              "name": "ix_terms_name",
+              "kind": "INDEX_KIND_PREFIX",
+              "columns": [
+                0
+              ]
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT"
         }
       ],
       "dialectProfile": {},

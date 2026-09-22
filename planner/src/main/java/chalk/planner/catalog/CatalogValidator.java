@@ -674,6 +674,7 @@ public final class CatalogValidator {
         }
       }
       validateCovering(table, index, indexPath, indexColumns, columns);
+      validatePrefix(table, index, indexPath);
     }
 
     validateCostProfile(table.getCostProfile(), path);
@@ -682,6 +683,41 @@ public final class CatalogValidator {
       validateStatistics(
           table.getColumns(c).getStatistics(),
           path + ".columns[" + c + "] (" + table.getColumns(c).getName() + ")");
+    }
+  }
+
+  /**
+   * A PREFIX index answers {@code LIKE 'p%'} on one STRING key column and nothing else (D282). Two
+   * key columns or a key of another type is a shape no rule matches, so it is refused here rather
+   * than declared and silently ignored.
+   */
+  private static void validatePrefix(Table table, Index index, String indexPath) {
+    if (index.getKind() != chalk.ir.v1.IndexKind.INDEX_KIND_PREFIX) {
+      return;
+    }
+
+    if (index.getColumnsCount() != 1) {
+      throw new InvalidCatalogException(
+          indexPath,
+          "index '"
+              + index.getName()
+              + "' is PREFIX and declares "
+              + index.getColumnsCount()
+              + " key columns; a prefix index answers prefix lookups on one STRING column and "
+              + "claims no ordering, so it has exactly one key");
+    }
+
+    Column column = table.getColumns(index.getColumns(0));
+    if (column.getType().getKind() != chalk.ir.v1.TypeKind.TYPE_KIND_STRING) {
+      throw new InvalidCatalogException(
+          indexPath,
+          "index '"
+              + index.getName()
+              + "' is PREFIX over column '"
+              + column.getName()
+              + "', which is "
+              + column.getType().getKind()
+              + "; a prefix is a question about text, so a prefix index's key is a STRING column");
     }
   }
 

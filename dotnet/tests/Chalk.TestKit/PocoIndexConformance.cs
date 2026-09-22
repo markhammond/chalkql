@@ -101,6 +101,17 @@ public static class PocoIndexConformance
         {
             actual = [.. index.Lookup(range)];
         }
+        catch (SourceContractException) when (index.Descriptor.Kind == Chalk.Ir.IndexKind.Prefix)
+        {
+            // A prefix index is allowed to refuse anything that is not a prefix; that is the
+            // contract, not a failure. It is not allowed to refuse a prefix.
+            if (range.Prefix is not null)
+            {
+                throw;
+            }
+
+            return;
+        }
         catch (SourceContractException) when (index.Descriptor.Kind == Chalk.Ir.IndexKind.Hash)
         {
             // A hash index is allowed to refuse a non-equality range; that is the contract, not a
@@ -266,6 +277,18 @@ public static class PocoIndexConformance
         IReadOnlyList<Func<T, object?>> keys,
         IReadOnlyList<SortDirection> directions)
     {
+        if (index.Descriptor.Kind == Chalk.Ir.IndexKind.Prefix)
+        {
+            // Every prefix of every key, the empty prefix — which is every row — and three that
+            // match nothing (D282).
+            foreach (var range in Prefixes(rows, keys))
+            {
+                yield return range;
+            }
+
+            yield break;
+        }
+
         yield return IndexKeyRange.All;
 
         var ordered = index.Descriptor.Kind == Chalk.Ir.IndexKind.Ordered;
@@ -310,6 +333,47 @@ public static class PocoIndexConformance
             yield return new IndexKeyRange
             {
                 Lower = points[i], LowerInclusive = true, Upper = points[i - 1], UpperInclusive = true,
+            };
+        }
+    }
+
+    /// <summary>
+    /// The prefix battery: every prefix of every key the rows hold, the empty prefix, and prefixes
+    /// nothing can match.
+    /// </summary>
+    private static IEnumerable<IndexKeyRange> Prefixes<T>(
+        IReadOnlyList<T> rows,
+        IReadOnlyList<Func<T, object?>> keys)
+    {
+        var texts = rows
+            .Select(row => IndexPrefix.AsText(keys[0](row)))
+            .Where(text => text is not null)
+            .Select(text => text!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        var wanted = new List<string> { string.Empty };
+        foreach (var text in texts)
+        {
+            for (var length = 1; length <= text.Length; length++)
+            {
+                wanted.Add(text[..length]);
+            }
+
+            wanted.Add(text + "\uFFFD");
+        }
+
+        wanted.Add("\uFFFD no key starts with this");
+
+        foreach (var prefix in wanted.Distinct(StringComparer.Ordinal))
+        {
+            yield return new IndexKeyRange
+            {
+                Lower = [prefix],
+                LowerInclusive = true,
+                Upper = [],
+                UpperInclusive = false,
+                Prefix = prefix,
             };
         }
     }

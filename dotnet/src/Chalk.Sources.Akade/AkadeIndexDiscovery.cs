@@ -369,6 +369,15 @@ internal static class AkadeIndexDiscovery
         AkadeComparerBinding<T>? declared,
         string indexName)
     {
+        if (kind == AkadePhysicalIndexKind.Prefix)
+        {
+            // Akade's trie is keyed by text and answers one column; it claims no order at all, so
+            // there is no comparer to classify and nothing wider to admit (D282).
+            return members.Length == 1 && MemberType(members[0]) == typeof(string)
+                ? AkadeOrder.Ascending
+                : AkadeOrder.None;
+        }
+
         if (kind is AkadePhysicalIndexKind.Hash or AkadePhysicalIndexKind.UniqueHash)
         {
             foreach (var member in members)
@@ -572,6 +581,13 @@ internal static class AkadeIndexDiscovery
             return AkadePhysicalIndexKind.Range;
         }
 
+        // The trie (D282). It answers StartsWith and nothing else, which is exactly what Chalk's
+        // PREFIX kind promises; FuzzyStartsWith is not an access path, because no range says it.
+        if (name.StartsWith("PrefixIndex", StringComparison.Ordinal))
+        {
+            return AkadePhysicalIndexKind.Prefix;
+        }
+
         return null;
     }
 
@@ -596,6 +612,7 @@ internal enum AkadePhysicalIndexKind
     Hash,
     UniqueHash,
     Range,
+    Prefix,
 }
 
 internal sealed record AkadeDiscoveredIndex<T>(
@@ -734,9 +751,12 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(set);
 
-        var kind = _kind == AkadePhysicalIndexKind.Range
-            ? IndexKind.Ordered
-            : IndexKind.Hash;
+        var kind = _kind switch
+        {
+            AkadePhysicalIndexKind.Range => IndexKind.Ordered,
+            AkadePhysicalIndexKind.Prefix => IndexKind.Prefix,
+            _ => IndexKind.Hash,
+        };
 
         var unique = _kind == AkadePhysicalIndexKind.UniqueHash;
         var descending = _order == AkadeOrder.Descending;
@@ -752,6 +772,24 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
             : Array.Empty<SortDirection>();
 
         var selectors = Array.ConvertAll(_members, MemberSelector);
+
+        if (kind == IndexKind.Prefix)
+        {
+            table.Index(
+                _name,
+                kind,
+                unique: false,
+                directions,
+                (descriptor, _) => new AkadePrefixIndex<T>(
+                    descriptor,
+                    set,
+                    (Func<T, string>)(object)_key,
+                    _name,
+                    _sourceId,
+                    _table),
+                selectors);
+            return;
+        }
 
         if (_members.Length == 1)
         {

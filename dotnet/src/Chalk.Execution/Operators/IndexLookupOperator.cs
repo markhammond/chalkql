@@ -159,6 +159,21 @@ internal sealed class IndexLookupOperator : OperatorBase
 
         public required bool UpperInclusive { get; init; }
 
+        /// <summary>The last lower bound is a <c>LIKE</c> pattern rather than a value (D282).</summary>
+        public bool Prefix { get; init; }
+
+        /// <summary>
+        /// The index answers prefixes itself, so it is sent the prefix rather than the half-open
+        /// range the prefix stands for.
+        /// </summary>
+        public bool PrefixIndex { get; init; }
+
+        public string IndexName { get; init; } = string.Empty;
+
+        public string Table { get; init; } = string.Empty;
+
+        public string SourceId { get; init; } = string.Empty;
+
         /// <summary>The bound range, or null when a NULL parameter emptied it.</summary>
         public IndexKeyRange? Bind(IReadOnlyList<ScalarValue> parameters)
         {
@@ -180,12 +195,96 @@ internal sealed class IndexLookupOperator : OperatorBase
                 }
             }
 
+            if (Prefix)
+            {
+                return BindPrefix(lower);
+            }
+
             return new IndexKeyRange
             {
                 Lower = lower,
                 LowerInclusive = LowerInclusive,
                 Upper = upper,
                 UpperInclusive = UpperInclusive,
+            };
+        }
+
+        /// <summary>
+        /// What a <c>LIKE 'p%'</c> range becomes, resolved by the index's kind (D282).
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A prefix index is sent the prefix. Every other kind is sent the plain half-open range
+        /// <c>[p, next(p))</c>, where <c>next(p)</c> is the smallest text above every text that
+        /// starts with <c>p</c> — so an ordinary ordered string index serves a <c>LIKE</c> with no
+        /// change at all.
+        /// </para>
+        /// <para>
+        /// A pattern that turns out not to be a bare prefix is refused here, by name. The plan was
+        /// made for a prefix, and a parameter's text is the one thing about it that was not known
+        /// when the plan was made.
+        /// </para>
+        /// </remarks>
+        private IndexKeyRange BindPrefix(object?[] lower)
+        {
+            var pattern = IndexPrefix.AsText(lower[^1]);
+            if (!IndexPrefix.IsBarePrefix(pattern))
+            {
+                throw new UnsupportedFeatureException(
+                    $"LIKE '{pattern}' as a lookup on index '{IndexName}'",
+                    $"The lookup on '{Table}' was planned for a LIKE prefix, and a prefix ends in "
+                    + "one '%' and holds no other wildcard. Anything else is a predicate and has to "
+                    + "be evaluated per row, which this plan has nothing left to do it with.");
+            }
+
+            var prefix = IndexPrefix.Of(pattern!);
+
+            if (PrefixIndex)
+            {
+                return new IndexKeyRange
+                {
+                    Lower = lower,
+                    LowerInclusive = true,
+                    Upper = lower[..^1],
+                    UpperInclusive = false,
+                    Prefix = prefix,
+                };
+            }
+
+            // An empty prefix matches every text, so the range is open above — and still bounds the
+            // column, which is what keeps a NULL out of it.
+            if (prefix.Length == 0)
+            {
+                return new IndexKeyRange
+                {
+                    Lower = lower[..^1].Append((object?)string.Empty).ToArray(),
+                    LowerInclusive = true,
+                    Upper = lower[..^1],
+                    UpperInclusive = false,
+                };
+            }
+
+            if (!IndexPrefix.TryNext(prefix, out var next))
+            {
+                throw new UnsupportedFeatureException(
+                    $"LIKE '{pattern}' as a lookup on index '{IndexName}'",
+                    $"The lookup on '{Table}' was planned for a LIKE prefix, and this one ends at "
+                    + "the largest code point there is, so there is no text above it to close the "
+                    + "range with.");
+            }
+
+            var start = lower.ToArray();
+            start[^1] = prefix;
+
+            var end = lower.ToArray();
+            end[^1] = next;
+
+            return new IndexKeyRange
+            {
+                Lower = start,
+                LowerInclusive = true,
+                Upper = end,
+                UpperInclusive = false,
             };
         }
     }

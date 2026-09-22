@@ -168,8 +168,30 @@ class IndexMatcherTest {
             isNull(ref(3)), SYMBOL_TS, false, null, null),
         new Case("IS NOT NULL alone",
             isNotNull(ref(3)), SYMBOL_TS, false, null, null),
-        new Case("LIKE",
-            like(symbol, str("BTC%")), SYMBOL_TS, false, null, null),
+        // D282: a bare prefix pattern is a range; every other pattern is a predicate.
+        new Case("LIKE a bare prefix on the first key column",
+            like(symbol, str("BTC%")), SYMBOL_TS, false, "prefix['BTC%']", null),
+        new Case("LIKE a bare prefix against a parameter, checked at bind time",
+            like(symbol, p0), SYMBOL_TS, false, "prefix[?0]", null),
+        new Case("LIKE a bare prefix after an equality prefix",
+            and(eq(ts, day3), like(symbol, str("BTC%"))), TS_SYMBOL, false,
+            "prefix[2026-01-03 00:00:00:TIMESTAMP(9), 'BTC%']", null),
+        new Case("LIKE with a wildcard in the middle",
+            like(symbol, str("B%C%")), SYMBOL_TS, false, null, null),
+        new Case("LIKE with a leading wildcard",
+            like(symbol, str("%USDT")), SYMBOL_TS, false, null, null),
+        new Case("LIKE with an underscore before the trailing wildcard",
+            like(symbol, str("B_C%")), SYMBOL_TS, false, null, null),
+        new Case("LIKE with no wildcard at all",
+            like(symbol, str("BTCUSDT")), SYMBOL_TS, false, null, null),
+        new Case("LIKE with an ESCAPE clause",
+            REX.makeCall(SqlStdOperatorTable.LIKE, symbol, str("BTC!%"), str("!")),
+            SYMBOL_TS, false, null, null),
+        new Case("a hash index refuses a LIKE prefix",
+            like(symbol, str("BTC%")), SYMBOL_TS, true, null, null),
+        new Case("a bound on the column wins over a LIKE on it",
+            and(ge(symbol, btc), like(symbol, str("BTC%"))), SYMBOL_TS, false,
+            "[['BTCUSDT'], [-inf]]", "LIKE($0, 'BTC%')"),
         new Case("a comparison between two columns",
             eq(symbol, ref(2)), SYMBOL_TS, false, null, null),
         new Case("a cast on the column side",
@@ -257,10 +279,71 @@ class IndexMatcherTest {
   }
 
   private static String render(IndexMatcher.Range range) {
+    if (range.prefix()) {
+      return "prefix" + range.lower();
+    }
+
     String lower = range.lower().isEmpty() ? "[-inf]" : range.lower().toString();
     String upper = range.upper().isEmpty() ? "[-inf]" : range.upper().toString();
     return (range.lowerInclusive() ? "[" : "(") + lower + ", " + upper
         + (range.upperInclusive() ? "]" : ")");
+  }
+
+  /**
+   * A prefix index answers a {@code LIKE} prefix on its one key column and nothing else — not an
+   * equality, not a bound, and not a prefix on a second key column it does not have (D282).
+   */
+  @Test
+  void a_prefix_index_answers_prefixes_and_nothing_else() {
+    List<Integer> symbolOnly = List.of(0);
+
+    assertThat(
+            render(
+                IndexMatcher.split(
+                        like(ref(0), str("BTC%")),
+                        symbolOnly,
+                        ROW,
+                        IndexMatcher.Shape.PREFIX,
+                        REX,
+                        List.of())
+                    .ranges()))
+        .isEqualTo("prefix['BTC%']");
+
+    assertThat(
+            IndexMatcher.split(
+                    eq(ref(0), str("BTCUSDT")),
+                    symbolOnly,
+                    ROW,
+                    IndexMatcher.Shape.PREFIX,
+                    REX,
+                    List.of())
+                .matched())
+        .as("an equality")
+        .isFalse();
+
+    assertThat(
+            IndexMatcher.split(
+                    ge(ref(0), str("BTCUSDT")),
+                    symbolOnly,
+                    ROW,
+                    IndexMatcher.Shape.PREFIX,
+                    REX,
+                    List.of())
+                .matched())
+        .as("a bound")
+        .isFalse();
+
+    assertThat(
+            IndexMatcher.split(
+                    and(eq(ref(1), timestamp("2026-01-03 00:00:00")), like(ref(0), str("BTC%"))),
+                    TS_SYMBOL,
+                    ROW,
+                    IndexMatcher.Shape.PREFIX,
+                    REX,
+                    List.of())
+                .matched())
+        .as("a prefix on a second key column")
+        .isFalse();
   }
 
   private static RexNode ref(int index) {

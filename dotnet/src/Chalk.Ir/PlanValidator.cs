@@ -638,6 +638,29 @@ public static class PlanValidator
                     continue; // the whole index, in key order
                 }
 
+                if (range.Prefix)
+                {
+                    // A prefix range is the equality prefix and then a LIKE pattern, open above: the
+                    // bound it finally becomes depends on the index's kind and is resolved when the
+                    // bounds are bound (D282).
+                    if (range.Upper.Count != 0)
+                    {
+                        throw Invalid(
+                            "I-IR-6",
+                            rangePath,
+                            $"the range is a prefix but bounds {range.Upper.Count} key column(s) above; "
+                            + "a prefix names its own upper bound and the range is open there");
+                    }
+
+                    foreach (var bound in range.Lower)
+                    {
+                        Expression(bound, rel.RowType, rangePath);
+                    }
+
+                    RequireKind(range.Lower[^1], TypeKind.String, rangePath);
+                    continue;
+                }
+
                 if (Math.Abs(range.Lower.Count - range.Upper.Count) > 1)
                 {
                     throw Invalid(

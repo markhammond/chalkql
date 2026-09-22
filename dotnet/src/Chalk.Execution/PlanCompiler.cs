@@ -561,12 +561,29 @@ internal static class PlanCompiler
                         + $"({index.Columns.Count})");
                 }
 
+                if (range.Prefix && index.Kind is not (IndexKind.Ordered or IndexKind.Clustered or IndexKind.Prefix))
+                {
+                    throw new InvalidPlanException(
+                        "I-IR-6",
+                        path,
+                        $"the range is a LIKE prefix but index '{index.Name}' is {index.Kind}; only "
+                        + "an ordered, clustered or prefix index answers one");
+                }
+
                 ranges.Add(new IndexLookupOperator.RangePlan
                 {
                     Lower = [.. range.Lower.Select(b => Bound(b, path))],
                     LowerInclusive = range.LowerInclusive,
                     Upper = [.. range.Upper.Select(b => Bound(b, path))],
                     UpperInclusive = range.UpperInclusive,
+                    // D282: how a prefix is resolved depends on the index's kind, and the kind is
+                    // known here rather than on the wire. A prefix index is sent the prefix; every
+                    // other kind is sent the plain half-open range it stands for.
+                    Prefix = range.Prefix,
+                    PrefixIndex = index.Kind == IndexKind.Prefix,
+                    IndexName = index.Name,
+                    Table = descriptor.Table.Name,
+                    SourceId = table.SourceId,
                 });
             }
 

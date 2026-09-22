@@ -208,8 +208,13 @@ public sealed class CorpusDifferentialTests(SharedSidecar sidecar)
                 continue;
             }
 
+            // A lookup that claims no ordering has none to check: a HASH index answers equality in
+            // whatever order it finds the rows, and a PREFIX one walks a trie (D282). The claim is
+            // what this test is about, so a lookup that makes none is not one of its cases.
             var root = Plan.Parser.ParseFrom(File.ReadAllBytes(path)).Root;
-            if (root.KindCase == Rel.KindOneofCase.IndexLookup && root.IndexLookup.Ranges.Count == 1)
+            if (root.KindCase == Rel.KindOneofCase.IndexLookup
+                && root.IndexLookup.Ranges.Count == 1
+                && root.Collations.Count > 0)
             {
                 data.Add(query.Name);
             }

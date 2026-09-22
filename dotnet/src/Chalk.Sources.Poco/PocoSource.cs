@@ -946,6 +946,27 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
                     $"index '{index.Descriptor.Name}' is a hash index and answers equality only, but "
                     + $"the plan asked for the range {range}.");
             }
+
+            // D282: a prefix range belongs to a PREFIX index and nowhere else. Every other kind is
+            // sent the plain half-open range the prefix stands for, resolved before the source sees
+            // it, and a PREFIX index is sent nothing but prefixes.
+            if (index.Descriptor.Kind == Chalk.Ir.IndexKind.Prefix && range.Prefix is null)
+            {
+                throw new SourceContractException(
+                    sourceId,
+                    Name,
+                    $"index '{index.Descriptor.Name}' is a prefix index and answers prefix lookups "
+                    + $"only, but the plan asked for the range {range}.");
+            }
+
+            if (index.Descriptor.Kind != Chalk.Ir.IndexKind.Prefix && range.Prefix is not null)
+            {
+                throw new SourceContractException(
+                    sourceId,
+                    Name,
+                    $"index '{index.Descriptor.Name}' is {index.Descriptor.Kind} and was asked for "
+                    + $"the prefix range {range}; only a PREFIX index answers one.");
+            }
         }
 
         if (index is IPositionalPocoIndex<T> && snapshot.RandomAccess)
