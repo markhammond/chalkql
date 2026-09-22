@@ -182,6 +182,7 @@ public final class EntitlementExtension implements PlanExtensionHandler {
                 .setElided(path.elided())
                 .setDropped(path.dropped())
                 .setEndpointPredicate(path.endpointPredicate())
+                .setPathPredicate(path.pathPredicate())
                 .setKeyDisclosure(path.keyDisclosure());
         for (PolicyExplain.Step step : path.steps()) {
           explainedPath.addSteps(

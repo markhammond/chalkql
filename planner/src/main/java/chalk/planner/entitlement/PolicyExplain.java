@@ -50,6 +50,7 @@ public final class PolicyExplain {
       boolean elided,
       boolean dropped,
       String endpointPredicate,
+      String pathPredicate,
       String keyDisclosure) {}
 
   /** One step of a {@link Path}, by the names the policy wrote rather than by ordinal. */
@@ -127,6 +128,7 @@ public final class PolicyExplain {
               path.elided(),
               path.dropped(),
               path.endpointPredicate(),
+              path.pathPredicate(),
               fold.map().of(path.keyColumn()).name()));
     }
     return paths.build();

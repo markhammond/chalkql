@@ -322,6 +322,23 @@ public final class ThroughParents {
                 + " path without one would grant every row (§2, §3, D265).");
       }
 
+      // A path predicate is decided above the join, over the target's own row and the endpoint's
+      // together, and that needs one endpoint row per target key. An inherited path is one — a
+      // foreign key onto a unique key — and a related path is many, so the verdict would have to be
+      // borne by the path's existence marker. Refused here rather than built at the wrong
+      // cardinality (docs/design/47-conjoined-across-a-path.md §1, §4, D279).
+      if (!declared.getPathPredicate().isBlank()
+          && declared.getSteps(0).getDirection() == StepDirection.STEP_DIRECTION_TO_CHILD) {
+        throw new InvalidCatalogException(
+            field,
+            "on " + where + ", the path of kind '" + declared.getKind() + "' goes up to a bridge"
+                + " and carries a path predicate. A path predicate is decided above the join, over"
+                + " this table's own row and the endpoint's together, and that needs one endpoint"
+                + " row per key: an inherited path is one, a related path is many, so the verdict"
+                + " would have to be borne by the path's existence marker. Reach the endpoint with"
+                + " an inherited path, or drop the confinement (§1, §4, D279).");
+      }
+
       String alias = fromTable.getName().toLowerCase(Locale.ROOT);
       String qualifiedName = endpointSchemaName + "." + fromTable.getName();
       String already = byAlias.putIfAbsent(alias, qualifiedName);

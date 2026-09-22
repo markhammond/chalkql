@@ -160,6 +160,23 @@ public final class EntitlementRegistration {
           "the endpoint predicate of the path of kind '" + declaredPath.getKind() + "'",
           declaredPath.getEndpointPredicate(),
           null);
+
+      // And the path predicate over the target's own row with *this* endpoint in scope (D279 §2):
+      // it is decided above the join, where both rows are, and a name resolving to neither — another
+      // endpoint's column, a parent's — is refused here rather than read at an offset that means
+      // something else.
+      if (!declaredPath.getPathPredicate().isBlank()) {
+        check(
+            converter,
+            typeFactory,
+            qualified,
+            List.of(List.of(endpointSchemaName, declaredPath.getEndpointTable())),
+            where,
+            path + ".inherited[" + i + "].path_predicate",
+            "the path predicate of the path of kind '" + declaredPath.getKind() + "'",
+            declaredPath.getPathPredicate(),
+            null);
+      }
     }
 
     List<ColumnEntitlement> columns = entitlement.getColumnsList();

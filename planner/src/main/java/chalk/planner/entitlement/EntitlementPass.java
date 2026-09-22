@@ -359,6 +359,7 @@ public final class EntitlementPass {
                 through.elided()[k],
                 through.dropped()[k],
                 path.endpointPredicate() == null ? "" : path.endpointPredicate().toString(),
+                path.pathPredicate() == null ? "" : path.pathPredicate().toString(),
                 entry.column()));
       }
       return paths;
@@ -378,6 +379,7 @@ public final class EntitlementPass {
       boolean elided,
       boolean dropped,
       String endpointPredicate,
+      String pathPredicate,
       int keyColumn) {}
 
   /** One step of a resolved path, by the names the policy wrote. */
@@ -703,7 +705,28 @@ public final class EntitlementPass {
       ImmutableList<PathStep> onward,
       RelOptTable endpoint,
       @Nullable RexNode endpointPredicate,
-      boolean related) {}
+      boolean related,
+      @Nullable RexNode pathPredicate,
+      ImmutableList<Integer> projected,
+      int endpointBlock) {
+
+    PathPlan(
+        String kind,
+        RelOptTable base,
+        int baseKey,
+        ImmutableList<PathStep> onward,
+        RelOptTable endpoint,
+        @Nullable RexNode endpointPredicate,
+        boolean related) {
+      this(kind, base, baseKey, onward, endpoint, endpointPredicate, related, null,
+          ImmutableList.of(), 0);
+    }
+
+    /** How many endpoint columns this path's side carries beyond the key, marker and verdicts. */
+    int extra() {
+      return projected.size();
+    }
+  }
 
   /** One join of a path's chain: from the current table's column to {@code table}'s key. */
   private record PathStep(int fromColumn, RelOptTable table, int toColumn) {}
@@ -730,6 +753,8 @@ public final class EntitlementPass {
     Map<String, int[]> blocks = new java.util.LinkedHashMap<>();
     List<List<String>> from = new ArrayList<>();
     List<ThroughEntry> entries = new ArrayList<>(entitlement.getThroughCount());
+    // Which declared path each path entry came from, so the second pass below can reach its text.
+    Map<Integer, chalk.ir.v1.InheritedVisibility> declaredOf = new java.util.LinkedHashMap<>();
     int offset = fullRowType(scan).getFieldCount();
 
     for (chalk.ir.v1.ParentVisibility through : entitlement.getThroughList()) {
@@ -839,8 +864,92 @@ public final class EntitlementPass {
                   endpoint,
                   endpointPredicate(declared, endpoint),
                   related)));
+      declaredOf.put(entries.size() - 1, declared);
     }
-    return new ThroughLayout(ImmutableList.copyOf(entries), ImmutableList.copyOf(from));
+
+    // The path predicates, converted over the target's own row with the endpoints in scope — the
+    // very layout a column rule of a path's perspective is converted over (D279 §2). It runs here,
+    // after the loop, because the `FROM` the conversion needs is complete only once every path has
+    // its block.
+    ImmutableList<List<String>> resolvedFrom = ImmutableList.copyOf(from);
+    List<String> texts = new ArrayList<>();
+    List<Integer> at = new ArrayList<>();
+    for (Map.Entry<Integer, chalk.ir.v1.InheritedVisibility> pending : declaredOf.entrySet()) {
+      String sql = pending.getValue().getPathPredicate();
+      if (!sql.isBlank()) {
+        texts.add("(" + sql + ")");
+        at.add(pending.getKey());
+      }
+    }
+    if (!texts.isEmpty()) {
+      List<RexNode> converted =
+          converter.convert(
+              texts,
+              scan.getTable().getQualifiedName(),
+              resolvedFrom,
+              table.schemaName() + "." + table.tableName());
+      int childWidth = fullRowType(scan).getFieldCount();
+      for (int i = 0; i < at.size(); i++) {
+        int k = at.get(i);
+        ThroughEntry entry = entries.get(k);
+        PathPlan path = entry.path();
+        int[] block = entry.block();
+        entries.set(
+            k,
+            new ThroughEntry(
+                entry.column(),
+                entry.parent(),
+                entry.parentColumn(),
+                block,
+                entry.total(),
+                new PathPlan(
+                    path.kind(),
+                    path.base(),
+                    path.baseKey(),
+                    path.onward(),
+                    path.endpoint(),
+                    path.endpointPredicate(),
+                    path.related(),
+                    converted.get(i),
+                    endpointColumns(converted.get(i), block, childWidth, table, path),
+                    block[0])));
+      }
+    }
+    return new ThroughLayout(ImmutableList.copyOf(entries), resolvedFrom);
+  }
+
+  /**
+   * Which of the endpoint's columns a path predicate names, ascending — what the chain projects
+   * beside its key so the marker can read them above the join (D279 §4).
+   *
+   * <p>A reference outside the target's own row and outside this path's endpoint block is one
+   * registration proved cannot be written, so it is refused here rather than read at an offset that
+   * means something else.
+   */
+  private ImmutableList<Integer> endpointColumns(
+      RexNode predicate, int[] block, int childWidth, ChalkTable table, PathPlan path) {
+    java.util.TreeSet<Integer> columns = new java.util.TreeSet<>();
+    for (int bit : org.apache.calcite.plan.RelOptUtil.InputFinder.bits(predicate)) {
+      if (bit < childWidth) {
+        continue;
+      }
+      if (bit < block[0] || bit >= block[0] + block[1]) {
+        throw new PolicyException(
+            "the entitlement on "
+                + table.schemaName()
+                + "."
+                + table.tableName()
+                + " has a path predicate on the path of kind '"
+                + path.kind()
+                + "' that reads a table other than its own row and the endpoint '"
+                + path.endpoint().getQualifiedName()
+                + "'. A path predicate is decided above the join, where this table's row and that"
+                + " endpoint's are, and nothing else is there"
+                + " (docs/design/47-conjoined-across-a-path.md §2, §4, D279).");
+      }
+      columns.add(bit - block[0]);
+    }
+    return ImmutableList.copyOf(columns);
   }
 
   /**
@@ -1114,14 +1223,15 @@ public final class EntitlementPass {
       kept += elided[k] || dropped[k] ? 0 : 1;
     }
 
-    int stride = VerdictColumns.FIXED + verdicts;
+    // A path that carries a path predicate projects the endpoint columns it names beyond the key,
+    // the marker and the verdicts, so a side is as wide as its own route needs (D279 §4).
     List<Integer> offsets = new ArrayList<>(layout.entries().size());
     int at = childWidth;
     for (int k = 0; k < layout.entries().size(); k++) {
       boolean gone = elided[k] || dropped[k];
       offsets.add(gone ? -1 : at);
       if (!gone) {
-        at += stride;
+        at += VerdictColumns.FIXED + verdicts + extraOf(layout.entries().get(k));
       }
     }
 
@@ -1132,29 +1242,54 @@ public final class EntitlementPass {
     // Filter_R: any path grants (D226). An elided entry contributes TRUE, so the OR folds away and
     // the leaf is unfiltered; a kept one contributes its marker.
     List<RexNode> terms = new ArrayList<>(layout.entries().size() + 1);
+    boolean anyDecider = false;
     for (int k = 0; k < layout.entries().size(); k++) {
+      if (dropped[k]) {
+        terms.add(rexBuilder.makeLiteral(false));
+        continue;
+      }
+      if (elided[k]) {
+        terms.add(rexBuilder.makeLiteral(true));
+        continue;
+      }
+      RexNode matched =
+          rexBuilder.makeCall(
+              SqlStdOperatorTable.IS_NOT_NULL,
+              rexBuilder.makeInputRef(
+                  typeFactory.createTypeWithNullability(
+                      typeFactory.createSqlType(org.apache.calcite.sql.type.SqlTypeName.BOOLEAN),
+                      true),
+                  offsets.get(k) + 1));
+
+      // The decider of a cross-row confinement (D279 §4): the chain reached an endpoint row a
+      // confined grant could admit, and this says whether the target's own row is the one it was
+      // confined to. The target's columns are read plain and the endpoint's off the chain's
+      // projection.
+      PathPlan path = layout.entries().get(k).path();
+      if (path == null || path.pathPredicate() == null) {
+        terms.add(matched);
+        continue;
+      }
+      anyDecider = true;
       terms.add(
-          dropped[k]
-              ? rexBuilder.makeLiteral(false)
-              : elided[k]
-              ? rexBuilder.makeLiteral(true)
-              : rexBuilder.makeCall(
-                  SqlStdOperatorTable.IS_NOT_NULL,
-                  rexBuilder.makeInputRef(
-                      typeFactory.createTypeWithNullability(
-                          typeFactory.createSqlType(
-                              org.apache.calcite.sql.type.SqlTypeName.BOOLEAN),
-                          true),
-                      offsets.get(k) + 1)));
+          rexBuilder.makeCall(
+              SqlStdOperatorTable.AND,
+              matched,
+              overTheJoinedRow(
+                  path, offsets.get(k) + VerdictColumns.FIXED + verdicts, childWidth)));
     }
     if (descriptor.rowPredicate() != null) {
       terms.add(simplify.simplifyUnknownAsFalse(descriptor.rowPredicate()));
     }
 
     // Exactly one `Through` and no other restriction is the INNER JOIN that the OR collapses to
-    // (D226): the join is the filter, and there is no `Filter_R` above it at all.
+    // (D226): the join is the filter, and there is no `Filter_R` above it at all. A path predicate
+    // is not in the join — it is decided above it — so a side that carries one keeps its filter.
     boolean inner =
-        kept == 1 && layout.entries().size() == 1 && descriptor.rowPredicate() == null;
+        kept == 1
+            && layout.entries().size() == 1
+            && descriptor.rowPredicate() == null
+            && !anyDecider;
     RexNode folded =
         inner
             ? null
@@ -1210,6 +1345,39 @@ public final class EntitlementPass {
         through);
   }
 
+  /** How many columns one side carries beyond the key, the marker and the verdicts (D279 §4). */
+  private static int extraOf(ThroughEntry entry) {
+    return entry.path() == null ? 0 : entry.path().extra();
+  }
+
+  /**
+   * A path predicate as the <b>joined</b> row reads it (D279 §4): the target's own columns where
+   * they are, and each endpoint column at its position in the chain's projection, which starts at
+   * {@code base}.
+   *
+   * <p>The projected columns come through a LEFT JOIN and are nullable there whatever the endpoint
+   * stores, so the reference takes the nullable type and the whole term is read unknown-as-false
+   * beside the marker — a row the chain did not reach is a row this path does not grant.
+   */
+  private RexNode overTheJoinedRow(PathPlan path, int base, int childWidth) {
+    ImmutableList<Integer> projected = path.projected();
+    int block = path.endpointBlock();
+    return path.pathPredicate()
+        .accept(
+            new org.apache.calcite.rex.RexShuttle() {
+              @Override
+              public RexNode visitInputRef(org.apache.calcite.rex.RexInputRef ref) {
+                if (ref.getIndex() < childWidth) {
+                  return ref;
+                }
+                int column = ref.getIndex() - block;
+                int slot = projected.indexOf(column);
+                return rexBuilder.makeInputRef(
+                    typeFactory.createTypeWithNullability(ref.getType(), true), base + slot);
+              }
+            });
+  }
+
   /**
    * What the parent's own entitled scan comes to for this principal (§3.13, D226, D230).
    *
@@ -1253,7 +1421,21 @@ public final class EntitlementPass {
     if (folded != null && folded.isAlwaysFalse()) {
       return new ParentFold(DisclosureMap.Visibility.NONE, folded);
     }
+
+    // And the decider above the join (D279 §4). Folded to FALSE it reaches nothing either, and the
+    // joins go with it; still standing, it leaves the path SOME however total its keys are, because
+    // the marker reads the endpoint's column through those joins and elision would take them away.
+    RexNode decider =
+        path.pathPredicate() == null
+            ? null
+            : simplify.simplifyUnknownAsFalse(path.pathPredicate());
+    if (decider != null && decider.isAlwaysFalse()) {
+      return new ParentFold(DisclosureMap.Visibility.NONE, folded);
+    }
     if (folded == null || folded.isAlwaysTrue()) {
+      if (decider != null && !decider.isAlwaysTrue()) {
+        return new ParentFold(DisclosureMap.Visibility.SOME, null);
+      }
       return new ParentFold(
           path.related() ? DisclosureMap.Visibility.SOME : DisclosureMap.Visibility.ALL, null);
     }
@@ -1805,13 +1987,22 @@ public final class EntitlementPass {
       }
     }
 
-    List<RexNode> grouped = new ArrayList<>(verdicts.size() + 1);
-    List<String> names = new ArrayList<>(verdicts.size() + 1);
+    List<RexNode> grouped = new ArrayList<>(verdicts.size() + 1 + path.extra());
+    List<String> names = new ArrayList<>(verdicts.size() + 1 + path.extra());
     grouped.add(rexBuilder.makeInputRef(rel, path.baseKey()));
     names.add(chalk.planner.ReservedNames.PREFIX + "key");
     for (int i = 0; i < verdicts.size(); i++) {
       grouped.add(shift(verdicts.get(i), endpoint));
       names.add(chalk.planner.ReservedNames.PREFIX + "verdict" + i);
+    }
+
+    // The endpoint columns the path predicate names (D279 §4). An `Inherited` path is one endpoint
+    // row per target key — a foreign key onto a unique key — so each of these is a function of the
+    // key: they are grouped by beside it rather than aggregated, and the chain stays one row per
+    // key without a MIN.
+    for (int i = 0; i < path.extra(); i++) {
+      grouped.add(rexBuilder.makeInputRef(rel, endpoint + path.projected().get(i)));
+      names.add(chalk.planner.ReservedNames.PREFIX + "path" + i);
     }
 
     RelNode projected =
@@ -1826,18 +2017,27 @@ public final class EntitlementPass {
     for (int i = 0; i < verdicts.size(); i++) {
       calls.add(least(projected, i + 1));
     }
+    org.apache.calcite.util.ImmutableBitSet.Builder keys =
+        org.apache.calcite.util.ImmutableBitSet.builder();
+    keys.set(0);
+    for (int i = 0; i < path.extra(); i++) {
+      keys.set(1 + verdicts.size() + i);
+    }
     RelNode distinct =
         org.apache.calcite.rel.logical.LogicalAggregate.create(
             projected,
             ImmutableList.<org.apache.calcite.rel.hint.RelHint>of(),
-            org.apache.calcite.util.ImmutableBitSet.of(0),
+            keys.build(),
             null,
             ImmutableList.copyOf(calls));
 
     // The shape every side takes, so the target reads one position whatever the route was: the key,
     // a match marker, then the verdicts — all nullable, so the LEFT JOIN above answers the same way.
-    List<RexNode> side = new ArrayList<>(verdicts.size() + VerdictColumns.FIXED);
-    List<String> sideNames = new ArrayList<>(verdicts.size() + VerdictColumns.FIXED);
+    // The aggregate puts its group keys first — the chain's key, then the projected endpoint
+    // columns — and the MIN verdicts after them.
+    int aggregated = 1 + path.extra();
+    List<RexNode> side = new ArrayList<>(verdicts.size() + VerdictColumns.FIXED + path.extra());
+    List<String> sideNames = new ArrayList<>(side.size());
     side.add(rexBuilder.makeInputRef(distinct, 0));
     sideNames.add(distinct.getRowType().getFieldList().get(0).getName());
     side.add(
@@ -1847,11 +2047,18 @@ public final class EntitlementPass {
             rexBuilder.makeLiteral(true)));
     sideNames.add(chalk.planner.ReservedNames.PREFIX + "matched");
     for (int i = 0; i < verdicts.size(); i++) {
-      RexNode ref = rexBuilder.makeInputRef(distinct, i + 1);
+      RexNode ref = rexBuilder.makeInputRef(distinct, aggregated + i);
       side.add(
           rexBuilder.makeCast(
               typeFactory.createTypeWithNullability(ref.getType(), true), ref));
       sideNames.add(chalk.planner.ReservedNames.PREFIX + "verdict" + i);
+    }
+    for (int i = 0; i < path.extra(); i++) {
+      RexNode ref = rexBuilder.makeInputRef(distinct, 1 + i);
+      side.add(
+          rexBuilder.makeCast(
+              typeFactory.createTypeWithNullability(ref.getType(), true), ref));
+      sideNames.add(chalk.planner.ReservedNames.PREFIX + "path" + i);
     }
 
     return LogicalProject.create(
