@@ -21,6 +21,18 @@ namespace Chalk.Sources.Poco;
 /// </remarks>
 public sealed class PocoTableBuilder<T>
 {
+    /// <summary>
+    /// A host index declaration whose catalog descriptor is resolved after POCO column inference.
+    /// The resolver is evaluated once at Build(); the factory is then retained and invoked once per
+    /// snapshot by <see cref="PocoSnapshotFactory{T}"/>.
+    /// </summary>
+    private sealed record HostIndexDeclaration(
+        Func<Dictionary<string, int>, IndexDescriptor> ResolveDescriptor,
+        Func<
+            IndexDescriptor,
+            IReadOnlyCollection<T>,
+            IPocoIndex<T>> Factory);
+    
     private readonly string _table;
     private readonly Dictionary<string, ColumnOverride> _overrides = new(StringComparer.Ordinal);
     private readonly HashSet<string> _ignored = new(StringComparer.Ordinal);
@@ -29,7 +41,7 @@ public sealed class PocoTableBuilder<T>
     private readonly List<string[]> _uniqueKeys = [];
     private readonly List<ForeignKeyDeclaration> _foreignKeys = [];
     private readonly List<IndexDeclaration> _indexes = [];
-    private readonly List<PocoHostIndex<T>> _hostIndexes = [];
+    private readonly List<HostIndexDeclaration> _hostIndexDeclarations = [];
     private readonly Dictionary<string, ColumnStatistics> _columnStatistics = new(StringComparer.Ordinal);
     private bool _verify = true;
     private StatisticsLevel _statisticsLevel = StatisticsLevel.Basic;
@@ -310,6 +322,86 @@ public sealed class PocoTableBuilder<T>
             Covering: null));
         return this;
     }
+    
+    public PocoTableBuilder<T> Index(
+        string name, IndexKind kind, bool unique, 
+        Func<IndexDescriptor, IReadOnlyCollection<T>, IPocoIndex<T>> factory,
+        params Expression<Func<T, object?>>[] keys) =>
+        Index(
+            name,
+            kind,
+            unique,
+            directions: [],
+            factory,
+            keys);
+
+    /// <summary>
+    /// Registers a host index whose key columns are named as POCO members but whose storage and
+    /// lookup implementation belong to the host. Member names are resolved to catalog column
+    /// ordinals at <c>Build()</c>; <paramref name="factory"/> is then called once per snapshot.
+    /// </summary>
+    public PocoTableBuilder<T> Index(
+        string name, IndexKind kind, bool unique,
+        IReadOnlyList<SortDirection> directions,
+        Func<IndexDescriptor, IReadOnlyCollection<T>, IPocoIndex<T>> factory,
+        params Expression<Func<T, object?>>[] keys)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(directions);
+        ArgumentNullException.ThrowIfNull(factory);
+        ArgumentNullException.ThrowIfNull(keys);
+
+        if (keys.Length == 0)
+        {
+            throw new ArgumentException(
+                $"Table '{_table}': an index needs at least one column.",
+                nameof(keys));
+        }
+
+        if (kind == IndexKind.Unspecified)
+        {
+            throw new ArgumentException(
+                $"Table '{_table}': an index needs a kind; ORDERED answers ranges, HASH only equality.",
+                nameof(kind));
+        }
+
+        if (directions.Count != 0 && directions.Count != keys.Length)
+        {
+            throw new ArgumentException(
+                $"Table '{_table}': {directions.Count} direction(s) were given for {keys.Length} key "
+                + "column(s); give one per column or none at all.",
+                nameof(directions));
+        }
+
+        foreach (var direction in directions)
+        {
+            if (direction == SortDirection.Unspecified)
+            {
+                throw new ArgumentException(
+                    "An index key needs an explicit direction; leave the directions empty for the "
+                    + "ascending-nulls-last default.",
+                    nameof(directions));
+            }
+        }
+
+        var members = keys
+            .Select(k => PocoMembers.Resolve(k, _table, "Index(keys)").Name)
+            .ToArray();
+        var declaredDirections = directions.ToArray();
+
+        _hostIndexDeclarations.Add(new HostIndexDeclaration(
+            byMember => new IndexDescriptor
+            {
+                Name = name,
+                Kind = kind,
+                Columns = Array.ConvertAll(members, member => Index(byMember, member)),
+                Unique = unique,
+                Directions = declaredDirections,
+            },
+            factory));
+
+        return this;
+    }
 
     /// <summary>
     /// Declares a clustered index over these columns (D257,
@@ -399,7 +491,10 @@ public sealed class PocoTableBuilder<T>
     public PocoTableBuilder<T> Index(IPocoIndex<T> index)
     {
         ArgumentNullException.ThrowIfNull(index);
-        _hostIndexes.Add(new PocoHostIndex<T>(index.Descriptor, _ => index));
+        var descriptor = index.Descriptor;
+        _hostIndexDeclarations.Add(new HostIndexDeclaration(
+            _ => descriptor,
+            (_, _) => index));
         return this;
     }
 
@@ -416,7 +511,9 @@ public sealed class PocoTableBuilder<T>
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(index);
-        _hostIndexes.Add(new PocoHostIndex<T>(descriptor, index));
+        _hostIndexDeclarations.Add(new HostIndexDeclaration(
+            _ => descriptor,
+            (_, rows) => index(rows)));
         return this;
     }
 
@@ -657,13 +754,39 @@ public sealed class PocoTableBuilder<T>
 
         // The declarations are resolved once, here, because they are shape; the indexes themselves
         // are built per snapshot, because they are data (D260 §2).
-        var plans = PlanIndexes(built, byMember, collations, rows.RandomAccess);
+        var hostIndexes = ResolveHostIndexes(byMember);
+        var plans = PlanIndexes(built, byMember, collations, rows.RandomAccess, hostIndexes);
         var factory = new PocoSnapshotFactory<T>(
-            _table, rows, built, collations, uniqueKeys, plans, [.. _hostIndexes], _indexScratch, _verify);
+            _table, rows, built, collations, uniqueKeys, plans, hostIndexes, _indexScratch, _verify);
 
         return new PocoTableRuntime<T>(
             _table, factory, factory.FromRegistration(), built, uniqueKeys, collations, statistics,
             foreignKeys, byMember, _entitlement);
+    }
+
+    /// <summary>
+    /// Resolves host index declarations after POCO member discovery, while the member-to-column map
+    /// is available. The resulting descriptor is shape and is shared by every per-snapshot product.
+    /// </summary>
+    private PocoHostIndex<T>[] ResolveHostIndexes(Dictionary<string, int> byMember)
+    {
+        if (_hostIndexDeclarations.Count == 0)
+        {
+            return [];
+        }
+
+        var resolved = new PocoHostIndex<T>[_hostIndexDeclarations.Count];
+        for (var i = 0; i < resolved.Length; i++)
+        {
+            var declaration = _hostIndexDeclarations[i];
+            var descriptor = declaration.ResolveDescriptor(byMember);
+
+            resolved[i] = new PocoHostIndex<T>(
+                descriptor,
+                rows => declaration.Factory(descriptor, rows));
+        }
+
+        return resolved;
     }
 
     /// <summary>
@@ -680,12 +803,13 @@ public sealed class PocoTableBuilder<T>
         PocoColumn<T>[] columns,
         Dictionary<string, int> byMember,
         IReadOnlyList<CollationDescriptor> collations,
-        bool randomAccess)
+        bool randomAccess,
+        IReadOnlyList<PocoHostIndex<T>> hostIndexes)
     {
         var indexCount = _indexes.Count;
         var plans = new List<PocoIndexPlan<T>>(indexCount);
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
+        
         for (var declarationIndex = 0; declarationIndex < indexCount; declarationIndex++)
         {
             var declaration = _indexes[declarationIndex];
@@ -747,7 +871,7 @@ public sealed class PocoTableBuilder<T>
         }
 
         var descriptors = plans.Select(p => p.Descriptor)
-            .Concat(_hostIndexes.Select(i => i.Descriptor));
+            .Concat(hostIndexes.Select(i => i.Descriptor));
 
         foreach (var descriptor in descriptors)
         {

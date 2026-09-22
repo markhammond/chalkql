@@ -64,11 +64,13 @@ Chalk.Sources.Poco.PocoSource.IndexLookupAsync(Chalk.Sources.IndexLookupRequest!
 Chalk.Sources.Poco.PocoSource.PrepareRefreshAsync(System.Collections.Generic.IReadOnlyList<Chalk.Sources.SourceRefreshEntry!>! entries, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<Chalk.Sources.ISourceRefreshCommit!>
 Chalk.Sources.Poco.PocoSource.RefreshAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
 Chalk.Sources.Poco.PocoSource.RefreshTableAsync(string! table, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+Chalk.Sources.Poco.PocoSource.ReleaseEngine(object! identity) -> void
 Chalk.Sources.Poco.PocoSource.ScanAsync(Chalk.Sources.ScanRequest! request, Chalk.Sources.ScanContext! context, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
 Chalk.Sources.Poco.PocoSource.SchemaName.get -> string!
 Chalk.Sources.Poco.PocoSource.SnapshotReleased -> System.Action<Chalk.Sources.Poco.PocoSnapshotRelease!>?
 Chalk.Sources.Poco.PocoSource.SourceId.get -> string!
 Chalk.Sources.Poco.PocoSource.Table<T>(string! name) -> Chalk.Sources.Poco.PocoTable<T>
+Chalk.Sources.Poco.PocoSource.TryClaimEngine(object! identity, out Chalk.Sources.SourceSharing mode) -> bool
 Chalk.Sources.Poco.PocoSource.ValidateRefresh(System.Collections.Generic.IReadOnlyList<Chalk.Sources.SourceRefreshEntry!>! entries) -> void
 Chalk.Sources.Poco.PocoSourceBuilder
 Chalk.Sources.Poco.PocoSourceBuilder.AddFunction(string! name, System.Action<Chalk.Catalog.FunctionBuilder!>! configure) -> Chalk.Sources.Poco.PocoSourceBuilder!
@@ -82,6 +84,7 @@ Chalk.Sources.Poco.PocoSourceBuilder.AddTable<T>(string! name, System.Func<Syste
 Chalk.Sources.Poco.PocoSourceBuilder.AddTable<T>(string! name, System.Func<System.Collections.Generic.IReadOnlyList<T>!>! rows, out Chalk.Sources.Poco.PocoTable<T> table, System.Action<Chalk.Sources.Poco.PocoTableBuilder<T>!>? configure = null) -> Chalk.Sources.Poco.PocoSourceBuilder!
 Chalk.Sources.Poco.PocoSourceBuilder.Build() -> Chalk.Sources.Poco.PocoSource!
 Chalk.Sources.Poco.PocoSourceBuilder.DefaultDecimalScale(int scale) -> Chalk.Sources.Poco.PocoSourceBuilder!
+Chalk.Sources.Poco.PocoSourceBuilder.Exclusive() -> Chalk.Sources.Poco.PocoSourceBuilder!
 Chalk.Sources.Poco.PocoSourceBuilder.NamingPolicy(Chalk.Sources.Poco.PocoNamingPolicy policy) -> Chalk.Sources.Poco.PocoSourceBuilder!
 Chalk.Sources.Poco.PocoSourceBuilder.PocoSourceBuilder(string! sourceId, string! schemaName = "main") -> void
 Chalk.Sources.Poco.PocoTable<T>
@@ -108,6 +111,8 @@ Chalk.Sources.Poco.PocoTableBuilder<T>.Ignore<TProp>(System.Linq.Expressions.Exp
 Chalk.Sources.Poco.PocoTableBuilder<T>.Index(Chalk.Catalog.IndexDescriptor! descriptor, System.Func<System.Collections.Generic.IReadOnlyCollection<T>!, Chalk.Sources.Poco.IPocoIndex<T>!>! index) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
 Chalk.Sources.Poco.PocoTableBuilder<T>.Index(Chalk.Sources.Poco.IPocoIndex<T>! index) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
 Chalk.Sources.Poco.PocoTableBuilder<T>.Index(params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Index(string! name, Chalk.Ir.IndexKind kind, bool unique, System.Collections.Generic.IReadOnlyList<Chalk.Ir.SortDirection>! directions, System.Func<Chalk.Catalog.IndexDescriptor!, System.Collections.Generic.IReadOnlyCollection<T>!, Chalk.Sources.Poco.IPocoIndex<T>!>! factory, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Index(string! name, Chalk.Ir.IndexKind kind, bool unique, System.Func<Chalk.Catalog.IndexDescriptor!, System.Collections.Generic.IReadOnlyCollection<T>!, Chalk.Sources.Poco.IPocoIndex<T>!>! factory, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
 Chalk.Sources.Poco.PocoTableBuilder<T>.Index(string? name, Chalk.Ir.IndexKind kind, bool unique, System.Collections.Generic.IReadOnlyList<Chalk.Ir.SortDirection>! directions, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
 Chalk.Sources.Poco.PocoTableBuilder<T>.Index(string? name, Chalk.Ir.IndexKind kind, bool unique, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
 Chalk.Sources.Poco.PocoTableBuilder<T>.OrderedBy<TKey>(System.Linq.Expressions.Expression<System.Func<T, TKey>!>! key, Chalk.Ir.SortDirection direction = Chalk.Ir.SortDirection.AscNullsLast) -> Chalk.Sources.Poco.PocoTableBuilder<T>!

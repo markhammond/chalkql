@@ -226,7 +226,7 @@ internal static class Program
         }
 
         var plan = Plan.Parser.ParseFrom(File.ReadAllBytes(file.FullName));
-        Console.Write(PlanPrinter.Print(plan));
+        Console.Write(plan.ToPlanText());
         return 0;
     }
 

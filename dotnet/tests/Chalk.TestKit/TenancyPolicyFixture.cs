@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Chalk.Catalog;
 using Chalk.Client;
 using Chalk.Entitlements.Tenancy;

@@ -40,6 +40,7 @@ public sealed class AdoSource : ISourceRuntime
     private readonly FunctionDescriptor[] _functions;
     private readonly IRemoteFetch _fetch;
     private readonly AdoProviderTraits? _traits;
+    private SourceRuntimeMixin _runtime;
 
     /// <summary>
     /// The tables and the descriptor over them, swapped as one reference so a query that starts
@@ -97,9 +98,6 @@ public sealed class AdoSource : ISourceRuntime
 
     private readonly bool _trustSourceRowSecurity;
 
-    /// <inheritdoc />
-    public string SourceId { get; }
-
     /// <summary>The SQL schema these tables live in, as Chalk addresses them.</summary>
     public string SchemaName { get; }
 
@@ -118,6 +116,14 @@ public sealed class AdoSource : ISourceRuntime
     /// DuckDB reader that way.
     /// </summary>
     public IRemoteFetch Fetch => _fetch;
+
+    public SourceSharing Sharing => Options.Sharing;
+
+    public bool TryClaimEngine(object identity, out SourceSharing Mode) => _runtime.TryClaimEngine(identity, out Mode);
+
+    public void ReleaseEngine(object identity) => _runtime.ReleaseEngine(identity);
+
+    public string SourceId { get; }
 
     /// <inheritdoc />
     public SchemaDescriptor DescribeSchema() => Volatile.Read(ref _current).Schema;

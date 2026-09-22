@@ -8,13 +8,15 @@ Targets .NET 10. JDK 21+ required for the Apache Calcite planner.
 
 ## Democratise access to your data with confidence.
 
-The objective is simple: just write the SQL you mean and let ChalkQL enforce fine-grained authorisation. Applications and agents increasingly need to query data they do not completely own, across sources with different capabilities and trust boundaries. Access control is too often entangled with individual queries, views, ORMs, or application code — conflating query intent with what a principal is permitted to know.
+The objective is simple: just write the SQL you mean and let ChalkQL enforce fine-grained authorisation. 
+
+Applications and agents increasingly need to query data they do not completely own, across sources with different capabilities and trust boundaries. Access control is too often entangled with individual queries, views, ORMs, or application code — conflating query intent with what a principal is permitted to know.
 
 ### Who is this for, anyway?
 
 ChalkQL is most useful where ***who may know what*** matters, or where the data needed to answer a question does not live neatly in one place.
 
-Database row-level security is often exactly the right answer when access can be expressed cleanly within one database and its schema. ChalkQL addresses the less tidy cases: authorisation follows relationships the original schema was not designed around, different principals reach the same data through different scopes, disclosure rules extend beyond rows, or the _correct_ answer spans several sources of truth.
+Database row-level security is often exactly the right answer when access can be expressed cleanly within one database and its schema. ChalkQL addresses the less tidy case: authorisation follows relationships the original schema was not designed around, different principals reach the same data through different scopes, disclosure rules extend beyond rows, or the _correct_ answer spans several sources of truth.
 
 It is intended for applications that need to:
 

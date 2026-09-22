@@ -15,7 +15,7 @@
   <ItemGroup>
     <PackageReference Include="Akade.IndexedSet" />
     <ProjectReference Include="../../src/Chalk.Client/Chalk.Client.csproj" />
-    <ProjectReference Include="../../src/Chalk.Sources.Poco/Chalk.Sources.Poco.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.Akade/Chalk.Sources.Akade.csproj" />
   </ItemGroup>
 
 </Project>

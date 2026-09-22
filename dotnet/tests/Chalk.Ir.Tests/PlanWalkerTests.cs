@@ -52,7 +52,7 @@ public sealed class PlanWalkerTests
             Call(FunctionId.Eq, Bool(), Ref(Bars, 0), Lit("BTCUSDT")),
             Call(FunctionId.Gt, Bool(), Ref(Bars, 3), Lit(5000L)));
 
-        var printed = PlanWalker.Exprs(condition).Select(PlanPrinter.Print).ToArray();
+        var printed = PlanWalker.Exprs(condition).Select(PlanExtensions.ToPlanText).ToArray();
 
         Assert.Equal(
             [

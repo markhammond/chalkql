@@ -6,6 +6,16 @@ using ArrowSchema = Apache.Arrow.Schema;
 
 namespace Chalk.Sources;
 
+public enum SourceSharing
+{
+    /// <summary>
+    /// Whether this source instance may be attached to multiple live engines.
+    /// Shared is the safe default; exclusive sources avoid cross-engine refresh coordination.
+    /// </summary>
+    Shared = 0,
+    Exclusive = 1,
+}
+
 /// <summary>
 /// The public extension point (rev 3 §3). A source describes its tables to the catalog and produces
 /// Arrow batches when the engine scans them.
@@ -18,6 +28,16 @@ namespace Chalk.Sources;
 /// </remarks>
 public interface ISourceRuntime
 {
+    bool TryClaimEngine(object identity, out SourceSharing mode)
+    {
+        mode = SourceSharing.Shared;
+        return true;
+    }
+
+    void ReleaseEngine(object identity)
+    {
+    }
+
     /// <summary>
     /// Identifies this source in the catalog and in every <c>TableRef</c> that names it.
     /// </summary>

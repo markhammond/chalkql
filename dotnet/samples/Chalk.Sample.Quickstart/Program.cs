@@ -1,4 +1,5 @@
 using Chalk.Client;
+using Chalk.Ir;
 using Chalk.Sources.Poco;
 
 namespace Chalk.Sample.Quickstart;
@@ -73,7 +74,7 @@ internal static class Program
         // `ORDER BY ts` costs nothing: the declared collation means the plan carries no Sort at all.
         var ordered = await engine.PrepareAsync("SELECT currency, ts FROM usd_rates ORDER BY ts");
         Console.WriteLine(
-            "ORDER BY ts plan:" + Environment.NewLine + Chalk.Ir.PlanPrinter.Print(ordered.Plan).TrimEnd());
+            "ORDER BY ts plan:" + Environment.NewLine + ordered.Plan.ToPlanText().TrimEnd());
 
         return 0;
     }

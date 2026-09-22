@@ -63,7 +63,7 @@ public sealed class PlanDigestFixtureTests
         var path = Path.Combine(RepoLayout.DigestFixtures.FullName, name + ".binpb");
         var plan = Plan.Parser.ParseFrom(File.ReadAllBytes(path));
 
-        var text = PlanPrinter.Print(plan);
+        var text = PlanExtensions.ToPlanText(plan);
 
         Assert.Contains("Plan ir_version=1", text, StringComparison.Ordinal);
         Assert.DoesNotContain("<no kind set>", text, StringComparison.Ordinal);

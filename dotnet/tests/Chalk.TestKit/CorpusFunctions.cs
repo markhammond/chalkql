@@ -80,7 +80,7 @@ public static class CorpusFunctions
 
     /// <summary>
     /// The implementations, exactly as a host would write them. Every delegate here allocates
-    /// nothing, which is what the allocation gate on corpus 04 asserts.
+    /// nothing (which is what the allocation gate on corpus 04 asserts).
     /// </summary>
     [Experimental("CHALK001")]
     public static void Register(IFunctionRegistry registry)
@@ -93,17 +93,17 @@ public static class CorpusFunctions
         registry.AddScalar<long, long>("minute_of", static ticks => ticks / 60_000_000_000L);
 
         // VOLATILE: a new value per lane, and the planner never folds or de-duplicates a call.
-        registry.AddScalar<long>("next_seq", static () => Interlocked.Increment(ref _sequence));
+        registry.AddScalar("next_seq", static () => Interlocked.Increment(ref _sequence));
 
         // STABLE: one value per execution, which the engine arranges by evaluating it once.
-        registry.AddScalar<long>("as_of", static () => AsOfTicks);
+        registry.AddScalar("as_of", static () => AsOfTicks);
 
         // Tier 1 aggregates. `geo_mean` declares Merge and no Remove; `wsum` declares both, which is
         // what makes its sliding frame slide (D80).
         registry.AddAggregate("geo_mean", new AggregateSpec<GeoMeanState, double, double?>
         {
             Init = static () => default,
-            Add = static (ref GeoMeanState s, double x) =>
+            Add = static (ref s, x) =>
             {
                 s.LogSum += Math.Log(x);
                 s.Count++;
@@ -118,12 +118,12 @@ public static class CorpusFunctions
         registry.AddAggregate("wsum", new AggregateSpec<WeightedSumState, double, double?>
         {
             Init = static () => default,
-            Add = static (ref WeightedSumState s, double x) =>
+            Add = static (ref s, x) =>
             {
                 s.Sum += x;
                 s.Count++;
             },
-            Remove = static (ref WeightedSumState s, double x) =>
+            Remove = static (ref s, x) =>
             {
                 s.Sum -= x;
                 s.Count--;

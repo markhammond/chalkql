@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <RootNamespace>Chalk.Sources.Akade.Tests</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../../src/Chalk.Sources.Akade/Chalk.Sources.Akade.csproj" />
+        <ProjectReference Include="..\..\samples\Chalk.Sample.AkadeIndexedSet\Chalk.Sample.AkadeIndexedSet.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- The allocation gates' measurement, shared with the other test projects that have one. -->
+        <Compile Include="../Shared/AllocationProbe.cs" Link="AllocationProbe.cs" />
+    </ItemGroup>
+
+    <PropertyGroup>
+        <NoWarn>$(NoWarn);CHALK001</NoWarn>
+        <NoWarn>$(NoWarn);CHALK002</NoWarn>
+    </PropertyGroup>
+
+</Project>

@@ -595,6 +595,16 @@ internal static class AllocationProfile
             }
         }
 
+        public bool TryClaimEngine(object identity, out SourceSharing mode)
+        {
+            mode = SourceSharing.Exclusive;
+            return true;
+        }
+
+        public void ReleaseEngine(object identity)
+        {
+        }
+
         public string SourceId => _inner.SourceId;
 
         public Catalog.SchemaDescriptor DescribeSchema()

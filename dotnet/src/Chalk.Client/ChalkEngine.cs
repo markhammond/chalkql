@@ -1,5 +1,8 @@
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Apache.Arrow;
 using Chalk.Catalog;
+using Chalk.Client.Rpc;
 using Chalk.Execution;
 using Chalk.Ir;
 using Chalk.Sources;
@@ -24,6 +27,22 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     private readonly ExecutionSettings _settings;
     private readonly ArenaPool _arenas;
     private readonly ILogger _log;
+
+    /// <summary>Stable identity handed to every source claim for this engine instance.</summary>
+    private readonly object _identity;
+
+    /// <summary>Each source's one-time sharing handshake, cached for the life of the engine.</summary>
+    private readonly SourceRegistration[] _sourceRegistrations;
+    private readonly Dictionary<string, SourceRegistration>? _sharedSourceRegistrationsById;
+    private readonly SourceRegistration[] _sharedSourceRegistrations;
+    private readonly SharedSourceState[] _orderedSharedSourceStates;
+
+    /// <summary>
+    /// Process-wide coordination exists only for sources that explicitly report Shared. Exclusive
+    /// sources never enter this table, so their refresh path remains the engine-local path.
+    /// </summary>
+    private static readonly ConditionalWeakTable<ISourceRuntime, SharedSourceState> SharedSources = new();
+    private static long _nextSharedSourceOrder;
 
     /// <summary>One refresh at a time; a second caller waits rather than racing the epoch.</summary>
     private readonly SemaphoreSlim _refreshing = new(1, 1);
@@ -73,11 +92,28 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         Dictionary<string, ISourceRuntime> sources,
         PlannerInfo plannerInfo,
         Chalk.Sources.HostFunctionSet functions,
-        CatalogVersionState versions)
+        CatalogVersionState versions,
+        object identity,
+        SourceRegistration[] sourceRegistrations,
+        SharedSourceState[] orderedSharedSourceStates)
     {
         _options = options;
         _functions = functions;
         _sources = sources;
+        _identity = identity;
+        _sourceRegistrations = sourceRegistrations;
+        _sharedSourceRegistrations = sourceRegistrations.Where(r => r.Shared is not null).ToArray();
+        _sharedSourceRegistrationsById = _sharedSourceRegistrations.Length == 0
+            ? null
+            : _sharedSourceRegistrations.ToDictionary(r => r.Source.SourceId, StringComparer.Ordinal);
+        
+        _orderedSharedSourceStates = sourceRegistrations
+            .Where(static registration => registration.Shared is not null)
+            .Select(static registration => registration.Shared!)
+            .Distinct<SharedSourceState>(ReferenceEqualityComparer.Instance)
+            .OrderBy(static state => state.Order)
+            .ToArray();
+        
         _catalog = catalog;
         _shape = versions.Shape;
         _shapeEpoch = catalog.Epoch;
@@ -186,96 +222,392 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 nameof(options));
         }
 
-        var sources = new Dictionary<string, ISourceRuntime>(StringComparer.Ordinal);
-        var schemas = new List<SchemaDescriptor>(options.Sources.Count);
-        foreach (var source in options.Sources)
+        var identity = new object();
+        var claimed = new List<SourceRegistration>(options.Sources.Count);
+
+        try
         {
-            if (!sources.TryAdd(source.SourceId, source))
+            var sources = new Dictionary<string, ISourceRuntime>(StringComparer.Ordinal);
+            foreach (var source in options.Sources)
             {
-                throw new ArgumentException(
-                    $"two sources share the id '{source.SourceId}'; source ids identify a schema's runtime "
-                    + "and must be unique",
-                    nameof(options));
+                if (!sources.TryAdd(source.SourceId, source))
+                {
+                    throw new ArgumentException(
+                        $"two sources share the id '{source.SourceId}'; source ids identify a schema's runtime "
+                        + "and must be unique",
+                        nameof(options));
+                }
+
+                claimed.Add(ClaimSource(source, identity));
             }
 
-            schemas.Add(source.DescribeSchema());
-        }
+            var sourceRegistrations = claimed.ToArray();
+            var sharedSourceStates = sourceRegistrations
+                .Where(r => r.Shared is not null)
+                .Select(r => r.Shared!)
+                .OrderBy(s => s.Order)
+                .ToArray();
 
-        // The engine's instance version (D271 (a)): the host's own name for its catalog when it gave
-        // one — a test, a corpus recording, anything that needs the same id in two processes — and a
-        // minted ULID otherwise, unique across engines and across restarts.
-        var instanceId = string.IsNullOrEmpty(options.ContextId)
-            ? CatalogVersions.Mint()
-            : options.ContextId;
+            using var sharedLease = await AcquireSharedSourcesAsync(sharedSourceStates, ct).ConfigureAwait(false);
 
-        var catalog = WithJoinPolicy(
-            new CatalogContext
+            var schemas = new List<SchemaDescriptor>(sourceRegistrations.Length);
+            foreach (var registration in sourceRegistrations)
             {
-                ContextId = instanceId,
-                Epoch = 1,
-                Schemas = schemas,
-                Associations = options.Associations,
-            },
-            options.JoinPolicy);
-        CatalogValidator.Validate(catalog);
+                schemas.Add(registration.Source.DescribeSchema());
+            }
 
-        var functions = HostFunctions.Build(options.Functions);
-        HostFunctions.CheckCatalog(catalog, functions);
+            // The engine's instance version (D271 (a)): the host's own name for its catalog when it gave
+            // one — a test, a corpus recording, anything that needs the same id in two processes — and a
+            // minted ULID otherwise, unique across engines and across restarts.
+            var instanceId = string.IsNullOrEmpty(options.ContextId)
+                ? CatalogVersions.Mint()
+                : options.ContextId;
 
-        var info = await options.Planner.GetInfoAsync(ct).ConfigureAwait(false);
-        if (!info.Serves(IrVersion.Current))
-        {
-            throw new IrVersionMismatchException(
-                info.MaxIrVersion,
-                IrVersion.Current,
-                $"The planner serves IR versions {info.MinIrVersion}..{info.MaxIrVersion}.");
-        }
-
-        // D256: a source's dialect the planner does not recognise is refused at RegisterCatalog
-        // anyway (the sidecar remains the authority — this is not a second, independent policy),
-        // but a name a host mistyped is cheaper to report here, naming the source, before the round
-        // trip. Only when GetInfo reported a real list (D248): a recorded planner's is empty (D250)
-        // because it never asked a sidecar anything, and there is nothing honest to check against.
-        if (info.Dialects.Count > 0)
-        {
-            foreach (var schema in catalog.Schemas)
-            {
-                var dialect = schema.DialectProfile.Dialect;
-                if (!string.IsNullOrEmpty(dialect) && !DialectIsAccepted(dialect, info.Dialects))
+            var catalog = WithJoinPolicy(
+                new CatalogContext
                 {
-                    throw new CatalogValidationException(
-                        $"schemas ({schema.SourceId})",
-                        $"dialect '{dialect}' is not one of the presets this planner accepts: "
-                        + string.Join(", ", info.Dialects.Select(d => d.Name))
-                        + ". Leave it empty for ANSI.");
+                    ContextId = instanceId,
+                    Epoch = 1,
+                    Schemas = schemas,
+                    Associations = options.Associations,
+                },
+                options.JoinPolicy);
+            CatalogValidator.Validate(catalog);
+
+            var functions = HostFunctions.Build(options.Functions);
+            HostFunctions.CheckCatalog(catalog, functions);
+
+            var info = await options.Planner.GetInfoAsync(ct).ConfigureAwait(false);
+            if (!info.Serves(IrVersion.Current))
+            {
+                throw new IrVersionMismatchException(
+                    info.MaxIrVersion,
+                    IrVersion.Current,
+                    $"The planner serves IR versions {info.MinIrVersion}..{info.MaxIrVersion}.");
+            }
+
+            // D256: a source's dialect the planner does not recognise is refused at RegisterCatalog
+            // anyway (the sidecar remains the authority — this is not a second, independent policy),
+            // but a name a host mistyped is cheaper to report here, naming the source, before the round
+            // trip. Only when GetInfo reported a real list (D248): a recorded planner's is empty (D250)
+            // because it never asked a sidecar anything, and there is nothing honest to check against.
+            if (info.Dialects.Count > 0)
+            {
+                foreach (var schema in catalog.Schemas)
+                {
+                    var dialect = schema.DialectProfile.Dialect;
+                    if (!string.IsNullOrEmpty(dialect) && !DialectIsAccepted(dialect, info.Dialects))
+                    {
+                        throw new CatalogValidationException(
+                            $"schemas ({schema.SourceId})",
+                            $"dialect '{dialect}' is not one of the presets this planner accepts: "
+                            + string.Join(", ", info.Dialects.Select(d => d.Name))
+                            + ". Leave it empty for ANSI.");
+                    }
                 }
             }
+
+            // Registered once, under the versions this engine mints — not once per prepare, as it was
+            // before D271 (b). The shape goes first and the numbers follow on their own version; a plan
+            // names both, and the planner joins them.
+            var shape = CatalogShape.Of(catalog);
+            var versions = new CatalogVersionState(
+                instanceId, shape, CatalogVersions.Mint(), CatalogVersions.Mint());
+            await options.Planner.RegisterCatalogAsync(
+                new CatalogRegistration
+                {
+                    Catalog = catalog,
+                    InstanceId = versions.InstanceId,
+                    ShapeVersion = versions.ShapeVersion,
+                },
+                ct).ConfigureAwait(false);
+            await options.Planner.RegisterStatisticsAsync(
+                StatisticsFor(catalog, versions.InstanceId, versions.StatisticsVersion, tables: null),
+                ct).ConfigureAwait(false);
+
+            var engine = new ChalkEngine(
+                options,
+                catalog,
+                sources,
+                info,
+                functions,
+                versions,
+                identity,
+                sourceRegistrations,
+                sharedSourceStates);
+            engine.CaptureSharedRevisions();
+            return engine;
+        }
+        catch
+        {
+            ReleaseClaims(claimed, identity);
+            throw;
+        }
+    }
+    
+    private static async ValueTask<SharedSourceLease?> AcquireSharedSourcesAsync(
+        IEnumerable<SharedSourceState> sourceStates,
+        CancellationToken ct)
+    {
+        var states = sourceStates
+            .Distinct<SharedSourceState>(ReferenceEqualityComparer.Instance)
+            .OrderBy(static state => state.Order)
+            .ToArray();
+
+        if (states.Length == 0)
+        {
+            return null;
         }
 
-        // Registered once, under the versions this engine mints — not once per prepare, as it was
-        // before D271 (b). The shape goes first and the numbers follow on their own version; a plan
-        // names both, and the planner joins them.
-        var shape = CatalogShape.Of(catalog);
-        var versions = new CatalogVersionState(
-            instanceId, shape, CatalogVersions.Mint(), CatalogVersions.Mint());
-        await options.Planner.RegisterCatalogAsync(
-            new CatalogRegistration
-            {
-                Catalog = catalog,
-                InstanceId = versions.InstanceId,
-                ShapeVersion = versions.ShapeVersion,
-            },
-            ct).ConfigureAwait(false);
-        await options.Planner.RegisterStatisticsAsync(
-            StatisticsFor(catalog, versions.InstanceId, versions.StatisticsVersion, tables: null),
-            ct).ConfigureAwait(false);
+        var acquired = 0;
 
-        return new ChalkEngine(options, catalog, sources, info, functions, versions);
+        try
+        {
+#if DEBUG
+            for (var i = 1; i < states.Length; i++)
+            {
+                Debug.Assert(states[i - 1].Order < states[i].Order);
+            }
+#endif
+            
+            for (; acquired < states.Length; acquired++)
+            {
+                await states[acquired]
+                    .Refresh
+                    .WaitAsync(ct)
+                    .ConfigureAwait(false);
+            }
+
+            return new SharedSourceLease(states);
+        }
+        catch
+        {
+            for (var i = acquired - 1; i >= 0; i--)
+            {
+                states[i].Refresh.Release();
+            }
+
+            throw;
+        }
     }
+    
 
     /// <summary>The versions an engine is created with, so the constructor takes one argument.</summary>
     private readonly record struct CatalogVersionState(
         string InstanceId, CatalogShape Shape, string ShapeVersion, string StatisticsVersion);
+
+    private sealed class SourceRegistration
+    {
+        private long _observedRevision;
+        private long _observedShapeRevision;
+
+        internal SourceRegistration(ISourceRuntime source, SharedSourceState? shared)
+        {
+            Source = source;
+            Shared = shared;
+        }
+
+        internal ISourceRuntime Source { get; }
+        internal SharedSourceState? Shared { get; }
+        internal long ObservedRevision => Volatile.Read(ref _observedRevision);
+        internal long ObservedShapeRevision => Volatile.Read(ref _observedShapeRevision);
+
+        internal void Observe()
+        {
+            if (Shared is not { } shared)
+            {
+                return;
+            }
+
+            Volatile.Write(ref _observedShapeRevision, shared.ShapeRevision);
+            Volatile.Write(ref _observedRevision, shared.Revision);
+        }
+    }
+
+    private sealed class SharedSourceState(long order)
+    {
+        private long _revision;
+        private long _shapeRevision;
+
+        internal long Order { get; } = order;
+        internal SemaphoreSlim Refresh { get; } = new(1, 1);
+        internal long Revision => Volatile.Read(ref _revision);
+        internal long ShapeRevision => Volatile.Read(ref _shapeRevision);
+
+        internal void Changed(bool shapeMayHaveChanged)
+        {
+            if (shapeMayHaveChanged)
+            {
+                Interlocked.Increment(ref _shapeRevision);
+            }
+
+            Interlocked.Increment(ref _revision);
+        }
+    }
+
+    private sealed class SharedSourceLease : IDisposable
+    {
+        private SharedSourceState[]? _states;
+
+        internal SharedSourceLease(SharedSourceState[] states)
+        {
+            _states = states;
+        }
+
+        public void Dispose()
+        {
+            var states = Interlocked.Exchange(ref _states, null);
+            if (states is null)
+            {
+                return;
+            }
+
+            for (var i = states.Length - 1; i >= 0; i--)
+            {
+                states[i].Refresh.Release();
+            }
+        }
+    }
+
+    private static SourceRegistration ClaimSource(ISourceRuntime source, object identity)
+    {
+        if (!source.TryClaimEngine(identity, out var mode))
+        {
+            throw new InvalidOperationException(
+                $"source '{source.SourceId}' is exclusive and is already claimed by another ChalkEngine.");
+        }
+
+        try
+        {
+            return mode switch
+            {
+                SourceSharing.Exclusive => new SourceRegistration(source, shared: null),
+                SourceSharing.Shared => new SourceRegistration(
+                    source,
+                    SharedSources.GetValue(
+                        source,
+                        static _ => new SharedSourceState(
+                            Interlocked.Increment(ref _nextSharedSourceOrder)))),
+                _ => throw new InvalidOperationException(
+                    $"source '{source.SourceId}' returned unsupported sharing mode '{mode}'."),
+            };
+        }
+        catch
+        {
+            source.ReleaseEngine(identity);
+            throw;
+        }
+    }
+
+    private static void ReleaseClaims(IReadOnlyList<SourceRegistration> registrations, object identity)
+    {
+        for (var i = registrations.Count - 1; i >= 0; i--)
+        {
+            registrations[i].Source.ReleaseEngine(identity);
+        }
+    }
+
+    private async ValueTask<SharedSourceLease?> AcquireSharedSourcesAsync(
+        CancellationToken ct)
+    {
+        var states = _orderedSharedSourceStates;
+
+        if (states.Length == 0)
+        {
+            return null;
+        }
+
+        var acquired = 0;
+        try
+        {
+            for (; acquired < states.Length; acquired++)
+            {
+                await states[acquired].Refresh.WaitAsync(ct).ConfigureAwait(false);
+            }
+
+            return new SharedSourceLease(states);
+        }
+        catch
+        {
+            for (var i = acquired - 1; i >= 0; i--)
+            {
+                states[i].Refresh.Release();
+            }
+
+            throw;
+        }
+    }
+
+    private void CaptureSharedRevisions()
+    {
+        for (var i = 0; i < _sharedSourceRegistrations.Length; i++)
+        {
+            _sharedSourceRegistrations[i].Observe();
+        }
+    }
+
+    private bool SharedCatalogCurrent()
+    {
+        for (var i = 0; i < _sharedSourceRegistrations.Length; i++)
+        {
+            var registration = _sharedSourceRegistrations[i];
+            if (registration.ObservedRevision != registration.Shared!.Revision)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool SharedShapesCurrent()
+    {
+        for (var i = 0; i < _sharedSourceRegistrations.Length; i++)
+        {
+            var registration = _sharedSourceRegistrations[i];
+            if (registration.ObservedShapeRevision != registration.Shared!.ShapeRevision)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool SharedShapeCurrent(string sourceId) =>
+        _sharedSourceRegistrationsById is null
+        || !_sharedSourceRegistrationsById.TryGetValue(sourceId, out var registration)
+        || registration.ObservedShapeRevision == registration.Shared!.ShapeRevision;
+
+    private async ValueTask EnsureSharedCatalogCurrentAsync(CancellationToken ct)
+    {
+        // The exclusive-only fast path: no CWT access, no global semaphore and no catalogue work.
+        if (_sharedSourceRegistrations.Length == 0 || SharedCatalogCurrent())
+        {
+            return;
+        }
+
+        await _refreshing.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // Another prepare on this engine may have repaired the catalogue while this caller waited.
+            if (SharedCatalogCurrent())
+            {
+                return;
+            }
+
+            using var shared = await AcquireSharedSourcesAsync(ct).ConfigureAwait(false);
+            
+            // The shared source is already current: another engine performed the source refresh.
+            // Re-publish only this engine's catalogue; do not invoke RefreshAsync on the source again.
+            await PublishAsync(ct).ConfigureAwait(false);
+            CaptureSharedRevisions();
+        }
+        finally
+        {
+            _refreshing.Release();
+        }
+    }
 
     /// <summary>
     /// The statistics message for <paramref name="tables"/>, or for every table when it is null
@@ -680,12 +1012,29 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         await _refreshing.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            foreach (var source in _options.Sources)
+            // Exclusive-only engines take exactly the pre-sharing path: the engine semaphore and
+            // source refreshes, with no process-wide source coordination.
+            if (_orderedSharedSourceStates.Length == 0)
             {
-                await source.RefreshAsync(ct).ConfigureAwait(false);
+                foreach (var registration in _sourceRegistrations)
+                {
+                    await registration.Source.RefreshAsync(ct).ConfigureAwait(false);
+                }
+
+                return await PublishAsync(ct).ConfigureAwait(false);
             }
 
-            return await PublishAsync(ct).ConfigureAwait(false);
+            using var shared = await AcquireSharedSourcesAsync(ct).ConfigureAwait(false);
+            
+            foreach (var registration in _sourceRegistrations)
+            {
+                await registration.Source.RefreshAsync(ct).ConfigureAwait(false);
+                registration.Shared?.Changed(shapeMayHaveChanged: true);
+            }
+
+            var epoch = await PublishAsync(ct).ConfigureAwait(false);
+            CaptureSharedRevisions();
+            return epoch;
         }
         finally
         {
@@ -707,8 +1056,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// it is published at once, the sources are described again, and the epoch moves once.
     /// </para>
     /// <para>
-    /// The refresh lock is held for all of it, so a scheduled refresh waits rather than publishing
-    /// between two of the swaps: an execution therefore sees this transaction whole or not at all.
+    /// The engine refresh lock is held for all of it; when this engine contains shared sources, their
+    /// process-wide refresh gates are held too. A scheduled or second-engine refresh therefore waits
+    /// rather than publishing between two of the swaps: an execution sees this transaction whole or not at all.
     /// Executions already running keep the state they captured, and a
     /// <see cref="PreparedQuery"/> survives — a replacement changes rows, and rows are not shape
     /// (<see cref="PreparedQuery.IsStale"/>).
@@ -735,7 +1085,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
         // Grouped by source instance, in the order the entries were written, so a source hears about
         // all of its tables at once and the validation message names the entry the host wrote.
-        var bySource = new List<(IRefreshableSource Source, List<SourceRefreshEntry> Entries)>();
+        var bySource =
+            new List<(ISourceRuntime Runtime, IRefreshableSource Refreshable, List<SourceRefreshEntry> Entries)>();
         foreach (var (source, entry) in builder.Entries)
         {
             if (!_sources.TryGetValue(source.SourceId, out var held) || !ReferenceEquals(held, source))
@@ -756,10 +1107,10 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                     nameof(plan));
             }
 
-            var found = bySource.FindIndex(g => ReferenceEquals(g.Source, refreshable));
+            var found = bySource.FindIndex(g => ReferenceEquals(g.Refreshable, refreshable));
             if (found < 0)
             {
-                bySource.Add((refreshable, [entry]));
+                bySource.Add((source, refreshable, [entry]));
             }
             else
             {
@@ -768,7 +1119,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         }
 
         // Every source refuses what it cannot do before any of them builds anything.
-        foreach (var (source, entries) in bySource)
+        foreach (var (_, source, entries) in bySource)
         {
             source.ValidateRefresh(entries);
         }
@@ -776,36 +1127,62 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         await _refreshing.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            // The scopes first: a re-introspection is the source going to look again, and a
-            // replacement in the same transaction is the host saying what the rows are. The host's
-            // word is the one that survives, so it is applied last.
-            foreach (var (source, table) in scopes)
+            SharedSourceLease? sharedLease = null;
+            if (_orderedSharedSourceStates.Length != 0)
             {
-                if (table.Length == 0)
+                sharedLease = await AcquireSharedSourcesAsync(ct).ConfigureAwait(false);
+            }
+
+            using (sharedLease)
+            {
+                // The scopes first: a re-introspection is the source going to look again, and a
+                // replacement in the same transaction is the host saying what the rows are. The host's
+                // word is the one that survives, so it is applied last.
+                foreach (var (source, table) in scopes)
                 {
-                    await source.RefreshAsync(ct).ConfigureAwait(false);
+                    if (table.Length == 0)
+                    {
+                        await source.RefreshAsync(ct).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await source.RefreshTableAsync(table, ct).ConfigureAwait(false);
+                    }
+
+                    if (_sharedSourceRegistrationsById is { } sharedById
+                        && sharedById.TryGetValue(source.SourceId, out var sharedRegistration))
+                    {
+                        sharedRegistration.Shared!.Changed(shapeMayHaveChanged: true);
+                    }
                 }
-                else
+
+                var commits =
+                    new List<(ISourceRuntime Runtime, ISourceRefreshCommit Commit)>(bySource.Count);
+                foreach (var (runtime, source, entries) in bySource)
                 {
-                    await source.RefreshTableAsync(table, ct).ConfigureAwait(false);
+                    commits.Add((
+                        runtime,
+                        await source.PrepareRefreshAsync(entries, ct).ConfigureAwait(false)));
                 }
-            }
 
-            var commits = new List<ISourceRefreshCommit>(bySource.Count);
-            foreach (var (source, entries) in bySource)
-            {
-                commits.Add(await source.PrepareRefreshAsync(entries, ct).ConfigureAwait(false));
-            }
+                // The one moment the transaction is not atomic is this loop, and it is a handful of
+                // reference writes with nothing between them that can fail: everything that could was
+                // done above. Replace/Append cannot change table shape, so cross-engine shape invalidation
+                // is not needed for this publication.
+                foreach (var (runtime, commit) in commits)
+                {
+                    commit.Commit();
+                    if (_sharedSourceRegistrationsById is { } sharedById
+                        && sharedById.TryGetValue(runtime.SourceId, out var sharedRegistration))
+                    {
+                        sharedRegistration.Shared!.Changed(shapeMayHaveChanged: false);
+                    }
+                }
 
-            // The one moment the transaction is not atomic is this loop, and it is a handful of
-            // reference writes with nothing between them that can fail: everything that could was
-            // done above.
-            foreach (var commit in commits)
-            {
-                commit.Commit();
+                var epoch = await PublishAsync(ct).ConfigureAwait(false);
+                CaptureSharedRevisions();
+                return epoch;
             }
-
-            return await PublishAsync(ct).ConfigureAwait(false);
         }
         finally
         {
@@ -888,14 +1265,15 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
     /// <summary>
     /// Describes every source, assembles the next catalog, validates and registers it, and publishes
-    /// it one epoch on. The caller holds the refresh lock.
+    /// it one epoch on. The caller holds the engine refresh lock and, when shared sources exist, all
+    /// of this engine's shared-source refresh gates.
     /// </summary>
     private async ValueTask<long> PublishAsync(CancellationToken ct)
     {
-        var schemas = new List<SchemaDescriptor>(_options.Sources.Count);
-        foreach (var source in _options.Sources)
+        var schemas = new List<SchemaDescriptor>(_sourceRegistrations.Length);
+        foreach (var registration in _sourceRegistrations)
         {
-            schemas.Add(source.DescribeSchema());
+            schemas.Add(registration.Source.DescribeSchema());
         }
 
         var current = Catalog;
@@ -1109,6 +1487,16 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             await _refreshTimer.DisposeAsync().ConfigureAwait(false);
         }
 
+        await _refreshing.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            ReleaseClaims(_sourceRegistrations, _identity);
+        }
+        finally
+        {
+            _refreshing.Release();
+        }
+
         _arenas.Dispose();
         _refreshing.Dispose();
         await _options.Planner.DisposeAsync().ConfigureAwait(false);
@@ -1150,6 +1538,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         ulong narrowFrom,
         CancellationToken ct)
     {
+        await EnsureSharedCatalogCurrentAsync(ct).ConfigureAwait(false);
+
         // Nothing is registered here since D271 (b): the catalog crossed the wire when its version
         // was minted, and a prepare against a steady catalog carries no catalog bytes at all. What it
         // carries instead is the two versions, and a planner that does not hold the shape answers by
@@ -1496,8 +1886,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         if (tables is null)
         {
             // No honest list of tables (a pushed query whose subtree is absent): the whole catalog's
-            // shape epoch decides, as it did before D271 (d).
-            if (plan.CatalogEpoch < ShapeEpoch)
+            // shape epoch decides, as it did before D271 (d). A shared source refreshed by another
+            // engine is conservatively stale until this engine has re-described it.
+            if (!SharedShapesCurrent() || plan.CatalogEpoch < ShapeEpoch)
             {
                 throw new StalePlanException(
                     plan.ContextId, plan.CatalogEpoch, Catalog.ContextId, Catalog.Epoch);
@@ -1529,7 +1920,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// <inheritdoc cref="IsCurrent(Plan)"/>
     internal bool IsCurrent(Plan plan, IReadOnlyList<TableKey>? tables) =>
         string.Equals(plan.ContextId, Catalog.ContextId, StringComparison.Ordinal)
-        && (tables is null ? plan.CatalogEpoch >= ShapeEpoch : StaleTable(plan, tables) is null);
+        && (tables is null
+            ? SharedShapesCurrent() && plan.CatalogEpoch >= ShapeEpoch
+            : StaleTable(plan, tables) is null);
 
     /// <summary>
     /// The first table this plan reads whose shape has moved since it was planned, or null when none
@@ -1542,6 +1935,11 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         for (var i = 0; i < tables.Count; i++)
         {
             var table = tables[i];
+            if (!SharedShapeCurrent(table.SourceId))
+            {
+                return table;
+            }
+
             if (epochs.TryGetValue(table, out var changedAt))
             {
                 if (changedAt > plan.CatalogEpoch)

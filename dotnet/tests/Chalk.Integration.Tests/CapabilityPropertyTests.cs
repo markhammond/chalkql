@@ -112,7 +112,7 @@ public sealed class CapabilityPropertyTests(SharedSidecar sidecar)
             Assert.False(
                 PushedSubtreesOf(plan).Any(rel => Count(rel, kind) > 0),
                 $"{name}: {capability} is disabled, but a pushed subtree still contains a {kind}:\n"
-                + PlanPrinter.Print(plan));
+                + PlanExtensions.ToPlanText(plan));
         }
     }
 
@@ -172,7 +172,7 @@ public sealed class CapabilityPropertyTests(SharedSidecar sidecar)
                             Assert.False(
                                 Count(rel, kind) > 0,
                                 $"{name}: every capability is disabled, but a pushed subtree still "
-                                + $"contains a {kind}:\n{PlanPrinter.Print(plan)}");
+                                + $"contains a {kind}:\n{PlanExtensions.ToPlanText(plan)}");
                         }
                     }
                 }

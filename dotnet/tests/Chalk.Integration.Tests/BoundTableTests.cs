@@ -140,7 +140,7 @@ public sealed class BoundTableTests(SharedSidecar sidecar)
 
         // The rows the host bound are in no artefact the plan leaves behind, however many branches
         // the split made: the plan names the relation, never its members.
-        var text = PlanPrinter.Print(prepared.Plan);
+        var text = PlanExtensions.ToPlanText(prepared.Plan);
         Assert.Contains("BoundTable", text, StringComparison.Ordinal);
         Assert.DoesNotContain("1199", text, StringComparison.Ordinal);
     }
@@ -167,18 +167,18 @@ public sealed class BoundTableTests(SharedSidecar sidecar)
         const string Sql = "SELECT id FROM members ORDER BY id";
 
         var folded = await engine.WithEntitlements().PrepareAsync(Sql, TwoOrgManager);
-        Assert.DoesNotContain("BoundTable", PlanPrinter.Print(folded.Plan), StringComparison.Ordinal);
+        Assert.DoesNotContain("BoundTable", PlanExtensions.ToPlanText(folded.Plan), StringComparison.Ordinal);
 
         var materialised = await engine.WithEntitlements().PrepareAsync(
             Sql, TenancyFixture.WithFoldCeiling(TwoOrgManager, 1));
-        Assert.Contains("BoundTable", PlanPrinter.Print(materialised.Plan), StringComparison.Ordinal);
+        Assert.Contains("BoundTable", PlanExtensions.ToPlanText(materialised.Plan), StringComparison.Ordinal);
 
         // The names are bound — by the prepared query's own context — so nothing is outstanding.
         Assert.Empty(materialised.Query.RequiredContext);
 
         // And the rows the host bound are in no artefact the plan leaves behind: the plan text names
         // the relation, never its members.
-        Assert.DoesNotContain("manager_orgs=[", PlanPrinter.Print(materialised.Plan), StringComparison.Ordinal);
+        Assert.DoesNotContain("manager_orgs=[", PlanExtensions.ToPlanText(materialised.Plan), StringComparison.Ordinal);
     }
 
     /// <summary>

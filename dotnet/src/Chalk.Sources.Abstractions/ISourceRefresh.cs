@@ -84,6 +84,11 @@ public interface IRefreshableSource
     /// Refuses everything this source cannot do: a table it does not have, a row type its table was
     /// not built over, a kind it does not support. Throws, and changes nothing.
     /// </summary>
+    /// <remarks>
+    /// ValidateRefresh must not validate facts about the current published snapshot.
+    /// State-dependent validation belongs in PrepareRefreshAsync, which executes under
+    /// the engine refresh semaphore.
+    /// </remarks>
     void ValidateRefresh(IReadOnlyList<SourceRefreshEntry> entries);
 
     /// <summary>

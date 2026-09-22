@@ -218,7 +218,7 @@ public sealed class WindowsIiPropertyTests
             Assert.True(
                 Same(expected, actual),
                 $"case {iteration} (seed {Seed}) disagreed.\n"
-                + $"frame: {PlanPrinter.Print(plan.Root)}\n"
+                + $"frame: {plan.Root.ToPlanText()}\n"
                 + $"expected: {Describe(expected)}\nactual:   {Describe(actual)}");
         }
     }
@@ -294,7 +294,7 @@ public sealed class WindowsIiPropertyTests
             Assert.True(
                 Same(fast, tree),
                 $"case {iteration} (seed {Seed}) disagreed.\n"
-                + $"frame: {PlanPrinter.Print(plan.Root)}\n"
+                + $"frame: {plan.Root.ToPlanText()}\n"
                 + $"fast paths:   {Describe(fast)}\nsegment tree: {Describe(tree)}");
         }
 

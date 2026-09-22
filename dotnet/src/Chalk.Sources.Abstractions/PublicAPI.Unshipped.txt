@@ -45,6 +45,28 @@ Chalk.Sources.ArrowTypeMapping
 Chalk.Sources.BatchLifetimeException
 Chalk.Sources.BatchLifetimeException.CapturedGeneration.get -> int
 Chalk.Sources.BatchLifetimeException.CurrentGeneration.get -> int
+Chalk.Sources.ColumnarBatch
+Chalk.Sources.ColumnarBatch.Adopt(Chalk.Sources.ColumnarBatch! source) -> void
+Chalk.Sources.ColumnarBatch.Begin(int rowCount) -> void
+Chalk.Sources.ColumnarBatch.Column(int index) -> Chalk.Sources.ColumnView
+Chalk.Sources.ColumnarBatch.ColumnarBatch(System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>! types) -> void
+Chalk.Sources.ColumnarBatch.ColumnCount.get -> int
+Chalk.Sources.ColumnarBatch.Columns.get -> System.ReadOnlySpan<Chalk.Sources.ColumnView>
+Chalk.Sources.ColumnarBatch.Count.get -> int
+Chalk.Sources.ColumnarBatch.EnsureColumns(int count) -> void
+Chalk.Sources.ColumnarBatch.Generation.get -> int
+Chalk.Sources.ColumnarBatch.HasSelection.get -> bool
+Chalk.Sources.ColumnarBatch.RowAt(int i) -> int
+Chalk.Sources.ColumnarBatch.RowCount.get -> int
+Chalk.Sources.ColumnarBatch.Select(int[]! selection, int count) -> void
+Chalk.Sources.ColumnarBatch.SelectAll() -> void
+Chalk.Sources.ColumnarBatch.Selection.get -> System.ReadOnlySpan<int>
+Chalk.Sources.ColumnarBatch.Set(int index, in Chalk.Sources.ColumnView column) -> void
+Chalk.Sources.ColumnarBatch.SetAll(System.ReadOnlySpan<Chalk.Sources.ColumnView> columns) -> void
+Chalk.Sources.ColumnarBatch.ShareSelection(Chalk.Sources.ColumnarBatch! source) -> void
+Chalk.Sources.ColumnarBatch.Types.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>!
+Chalk.Sources.ColumnarBatch.ValidateLifetimes.get -> bool
+Chalk.Sources.ColumnarBatch.ValidateLifetimes.init -> void
 Chalk.Sources.ExecutionArena
 Chalk.Sources.ExecutionArena.Allocator.get -> Apache.Arrow.Memory.MemoryAllocator!
 Chalk.Sources.ExecutionArena.BeginExecution(Chalk.Sources.ExecutionStats? stats = null) -> void
@@ -106,6 +128,12 @@ Chalk.Sources.ExecutionStats.SourceFetches.get -> System.Collections.Generic.IRe
 Chalk.Sources.ExecutionStats.SourcePaths.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
 Chalk.Sources.ExecutionStats.WindowsBuffered.get -> long
 Chalk.Sources.ExecutionStats.WindowsStreamed.get -> long
+Chalk.Sources.IColumnarBatchSource
+Chalk.Sources.IColumnarBatchSource.ColumnarLookup(Chalk.Sources.IndexLookupRequest! request, Chalk.Sources.ScanContext! context) -> Chalk.Sources.IColumnarScan?
+Chalk.Sources.IColumnarBatchSource.ColumnarScan(Chalk.Sources.ScanRequest! request, Chalk.Sources.ScanContext! context) -> Chalk.Sources.IColumnarScan?
+Chalk.Sources.IColumnarScan
+Chalk.Sources.IColumnarScan.TryNext(Chalk.Sources.ColumnarBatch! batch) -> bool
+Chalk.Sources.IColumnarScan.WaitAsync(Chalk.Sources.ColumnarBatch! batch, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<bool>
 Chalk.Sources.IRefreshTarget
 Chalk.Sources.IRefreshTarget.Schema.get -> string!
 Chalk.Sources.IRefreshTarget.SourceId.get -> string!
@@ -122,8 +150,10 @@ Chalk.Sources.ISourceRuntime.IndexLookupAsync(Chalk.Sources.IndexLookupRequest! 
 Chalk.Sources.ISourceRuntime.NativeStringLayout.get -> Chalk.Sources.StringLayouts
 Chalk.Sources.ISourceRuntime.RefreshAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
 Chalk.Sources.ISourceRuntime.RefreshTableAsync(string! table, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+Chalk.Sources.ISourceRuntime.ReleaseEngine(object! identity) -> void
 Chalk.Sources.ISourceRuntime.ScanAsync(Chalk.Sources.ScanRequest! request, Chalk.Sources.ScanContext! context, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
 Chalk.Sources.ISourceRuntime.SourceId.get -> string!
+Chalk.Sources.ISourceRuntime.TryClaimEngine(object! identity, out Chalk.Sources.SourceSharing mode) -> bool
 Chalk.Sources.ITableTarget
 Chalk.Sources.ITableTarget.Runtime.get -> Chalk.Sources.ISourceRuntime!
 Chalk.Sources.ITableTarget<T>
@@ -228,6 +258,7 @@ Chalk.Sources.SourceOptions.MaxConcurrentQueries.init -> void
 Chalk.Sources.SourceOptions.QueryTimeout.get -> System.TimeSpan
 Chalk.Sources.SourceOptions.QueryTimeout.init -> void
 Chalk.Sources.SourceOptions.Retries.get -> int
+Chalk.Sources.SourceOptions.Sharing.get -> Chalk.Sources.SourceSharing
 Chalk.Sources.SourceOptions.SourceOptions() -> void
 Chalk.Sources.SourceRefreshEntry
 Chalk.Sources.SourceRefreshEntry.Kind.get -> Chalk.Sources.SourceRefreshKind
@@ -244,6 +275,15 @@ Chalk.Sources.SourceRefreshEntry.Table.init -> void
 Chalk.Sources.SourceRefreshKind
 Chalk.Sources.SourceRefreshKind.Append = 1 -> Chalk.Sources.SourceRefreshKind
 Chalk.Sources.SourceRefreshKind.Replace = 0 -> Chalk.Sources.SourceRefreshKind
+Chalk.Sources.SourceRuntimeMixin
+Chalk.Sources.SourceRuntimeMixin.ReleaseEngine(object! identity) -> void
+Chalk.Sources.SourceRuntimeMixin.Sharing.get -> Chalk.Sources.SourceSharing
+Chalk.Sources.SourceRuntimeMixin.SourceRuntimeMixin() -> void
+Chalk.Sources.SourceRuntimeMixin.SourceRuntimeMixin(Chalk.Sources.SourceSharing sharing) -> void
+Chalk.Sources.SourceRuntimeMixin.TryClaimEngine(object! identity, out Chalk.Sources.SourceSharing mode) -> bool
+Chalk.Sources.SourceSharing
+Chalk.Sources.SourceSharing.Exclusive = 1 -> Chalk.Sources.SourceSharing
+Chalk.Sources.SourceSharing.Shared = 0 -> Chalk.Sources.SourceSharing
 Chalk.Sources.SourceTimeoutException
 Chalk.Sources.SourceTimeoutException.SourceId.get -> string!
 Chalk.Sources.SourceTimeoutException.SourceTimeoutException(string! sourceId, string! subject, System.TimeSpan timeout, System.Exception? innerException = null) -> void
@@ -361,7 +401,6 @@ Chalk.Utf8StringExtensions
 [CHALK001]Chalk.Sources.IVectorFunction
 [CHALK001]Chalk.Sources.IVectorFunction.Invoke(System.ReadOnlySpan<Chalk.Sources.ColumnView> args, Chalk.Sources.ColumnWriter! result, in Chalk.Sources.FunctionContext context) -> void
 [CHALK001]Chalk.Sources.IVectorFunction.Signature.get -> Chalk.Sources.FunctionSignature!
-[CHALK001]static Chalk.Sources.ColumnView.Empty(Chalk.Catalog.ChalkType type) -> Chalk.Sources.ColumnView
 const Chalk.Sources.ArrowTypeMapping.ListElementName = "item" -> string!
 override Chalk.Sources.AdaptiveDecision.ToString() -> string!
 override Chalk.Sources.ExecutionStats.ToString() -> string!
@@ -432,3 +471,4 @@ static Chalk.Utf8StringExtensions.TryGetUtf8String(System.ReadOnlyMemory<byte> v
 static Chalk.Utf8StringExtensions.TryGetUtf8String(System.ReadOnlySpan<byte> value, out Chalk.Utf8String text) -> bool
 static Chalk.Utf8StringExtensions.TryGetUtf8String(byte[]? value, out Chalk.Utf8String text) -> bool
 virtual Chalk.Sources.Accumulate<TState, TIn>.Invoke(ref TState state, TIn value) -> void
+[CHALK001]static Chalk.Sources.ColumnView.Empty(Chalk.Catalog.ChalkType type) -> Chalk.Sources.ColumnView

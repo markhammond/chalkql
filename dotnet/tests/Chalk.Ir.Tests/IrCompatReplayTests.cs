@@ -73,7 +73,7 @@ public sealed class IrCompatReplayTests
 
         Assert.Equal(uint.Parse(version[1..], System.Globalization.CultureInfo.InvariantCulture), plan.IrVersion);
         PlanValidator.Validate(plan);
-        Assert.NotEmpty(PlanPrinter.Print(plan));
+        Assert.NotEmpty(plan.ToPlanText());
         Assert.Equal(plan.PlanDigest, PlanDigest.Compute(plan));
     }
 }

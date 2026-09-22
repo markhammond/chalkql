@@ -11,12 +11,12 @@ namespace Chalk.Catalog;
 public sealed class CatalogContext
 {
     public required string ContextId { get; init; }
-
-    /// <summary>Bumped whenever the shape of any schema changes. Executors refuse plans from another epoch.</summary>
-    public required long Epoch { get; init; }
-
+    
     /// <summary>The first schema is the default one; the rest are addressed <c>schema.table</c> (A4).</summary>
     public required IReadOnlyList<SchemaDescriptor> Schemas { get; init; }
+
+    /// <summary>Bumped whenever the shape of any schema changes. Executors refuse plans from another epoch.</summary>
+    public long Epoch { get; init; } = 0;
 
     /// <summary>
     /// How a join whose two sides live in different sources is planned (D104, M5). Produced by the

@@ -74,7 +74,7 @@ internal static class ColumnarBoundary
 /// back views over them; the caller's slot is valid until the next <see cref="MoveNextAsync"/>, the
 /// same contract every operator has.
 /// </remarks>
-internal interface IColumnarScan : IAsyncDisposable
+public interface IColumnarScan : IAsyncDisposable
 {
     /// <summary>
     /// The next batch, into <paramref name="batch"/>. False when the scan is done. Returns
@@ -90,7 +90,7 @@ internal interface IColumnarScan : IAsyncDisposable
 }
 
 /// <summary>A source that can serve <see cref="IColumnarScan"/>s as well as Arrow batches.</summary>
-internal interface IColumnarBatchSource
+public interface IColumnarBatchSource
 {
     /// <summary>A scan of <paramref name="request"/> that fills the caller's slot, or null when this source cannot.</summary>
     IColumnarScan? ColumnarScan(ScanRequest request, ScanContext context);

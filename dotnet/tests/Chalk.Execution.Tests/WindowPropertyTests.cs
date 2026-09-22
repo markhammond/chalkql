@@ -94,7 +94,7 @@ public sealed class WindowPropertyTests
             Assert.True(
                 Same(expected, actual),
                 $"case {iteration} (seed {Seed}) disagreed.\n"
-                + $"frame: {PlanPrinter.Print(plan.Root)}\n"
+                + $"frame: {plan.Root.ToPlanText()}\n"
                 + $"rows: {Describe(table)}\n"
                 + $"expected: {Describe(expected)}\n"
                 + $"actual:   {Describe(actual)}");

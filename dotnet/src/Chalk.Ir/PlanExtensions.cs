@@ -8,13 +8,15 @@ namespace Chalk.Ir;
 /// Indented text rendering of a plan — one relation per line, expressions inline. For diagnostics
 /// and test failure messages only; nothing parses it back (<c>docs/design/02-ir.md</c> §1).
 /// </summary>
-public static class PlanPrinter
+public static class PlanExtensions
 {
+    public static string ToPlanText(this Plan plan)
+        => plan.ToPlanText(new StringBuilder());
+
     /// <summary>Renders the whole plan: header line, parameter types, then the relation tree.</summary>
-    public static string Print(Plan plan)
+    public static string ToPlanText(this Plan plan, StringBuilder sb)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        var sb = new StringBuilder();
         sb.Append(CultureInfo.InvariantCulture, $"Plan ir_version={plan.IrVersion}")
           .Append(CultureInfo.InvariantCulture, $" digest={plan.PlanDigest:x16}")
           .Append(CultureInfo.InvariantCulture, $" context_id={plan.ContextId}")
@@ -36,21 +38,36 @@ public static class PlanPrinter
     }
 
     /// <summary>Renders one relation and its inputs.</summary>
-    public static string Print(Rel rel)
+    public static string ToPlanText(this Rel rel)
+        => rel.ToPlanText(new StringBuilder());
+
+    /// <summary>Renders one relation and its inputs.</summary>
+    public static string ToPlanText(this Rel rel, StringBuilder sb)
     {
         ArgumentNullException.ThrowIfNull(rel);
-        var sb = new StringBuilder();
         Print(sb, rel, 0);
         return sb.ToString();
     }
 
     /// <summary>Renders one expression on a single line.</summary>
-    public static string Print(Expr expr)
+    public static string ToPlanText(this Expr expr)
+        => expr.ToPlanText(new StringBuilder());
+
+    /// <summary>Renders one expression on a single line.</summary>
+    public static string ToPlanText(this Expr expr, StringBuilder sb)
     {
         ArgumentNullException.ThrowIfNull(expr);
-        var sb = new StringBuilder();
         Append(sb, expr);
         return sb.ToString();
+    }
+    
+    public static IEnumerable<RemoteQuery> SourceQueries(this Plan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        return PlanWalker.Rels(plan)
+            .Where(r => r.KindCase == Rel.KindOneofCase.RemoteQuery)
+            .Select(r => r.RemoteQuery);
     }
 
     private static void Print(StringBuilder sb, Rel rel, int depth)
@@ -84,7 +101,7 @@ public static class PlanPrinter
     private static string Describe(Rel rel) => rel.KindCase switch
     {
         Rel.KindOneofCase.Read => $"Read {Describe(rel.Read.Table)} projection=[{string.Join(",", rel.Read.Projection)}]"
-            + (rel.Read.Filter is null ? string.Empty : $" filter={Print(rel.Read.Filter)}")
+            + (rel.Read.Filter is null ? string.Empty : $" filter={rel.Read.Filter.ToPlanText()}")
             // The entitlement rewrite's per-column outcomes, in the table's own column ordinals
             // (step 26, 16-entitlements.md §3.10). Empty for an unentitled read, so no recorded plan
             // of a catalog without entitlements gains a word; FULL is elided, so what a reader sees
@@ -95,8 +112,8 @@ public static class PlanPrinter
             + (rel.Read.DescriptorHash.Length == 0
                 ? string.Empty
                 : $" descriptor={rel.Read.DescriptorHash}"),
-        Rel.KindOneofCase.Filter => $"Filter {Print(rel.Filter.Condition)}",
-        Rel.KindOneofCase.Project => $"Project [{string.Join(", ", rel.Project.Exprs.Select(Print))}]",
+        Rel.KindOneofCase.Filter => $"Filter {rel.Filter.Condition.ToPlanText()}",
+        Rel.KindOneofCase.Project => $"Project [{string.Join(", ", rel.Project.Exprs.Select(ToPlanText))}]",
         Rel.KindOneofCase.Aggregate => "Aggregate " + Describe(rel.Aggregate),
         Rel.KindOneofCase.HashAggregate => "HashAggregate " + Describe(rel.HashAggregate.Aggregate),
         Rel.KindOneofCase.StreamAggregate => "StreamAggregate " + Describe(rel.StreamAggregate.Aggregate),
@@ -106,15 +123,15 @@ public static class PlanPrinter
         Rel.KindOneofCase.TopN => $"TopN [{string.Join(", ", rel.TopN.Fields.Select(Describe))}]"
             + string.Create(CultureInfo.InvariantCulture, $" offset={rel.TopN.Offset} count={rel.TopN.Count}"),
         Rel.KindOneofCase.Join => $"Join {rel.Join.Type} on "
-            + (rel.Join.Condition is null ? "true" : Print(rel.Join.Condition)),
+            + (rel.Join.Condition is null ? "true" : rel.Join.Condition.ToPlanText()),
         Rel.KindOneofCase.HashJoin => $"HashJoin {rel.HashJoin.Type} "
             + $"left_keys=[{string.Join(",", rel.HashJoin.LeftKeys)}] right_keys=[{string.Join(",", rel.HashJoin.RightKeys)}]"
-            + (rel.HashJoin.PostJoinFilter is null ? string.Empty : $" residual={Print(rel.HashJoin.PostJoinFilter)}"),
+            + (rel.HashJoin.PostJoinFilter is null ? string.Empty : $" residual={rel.HashJoin.PostJoinFilter.ToPlanText()}"),
         Rel.KindOneofCase.MergeJoin => $"MergeJoin {rel.MergeJoin.Type} "
             + $"left_keys=[{string.Join(",", rel.MergeJoin.LeftKeys)}] right_keys=[{string.Join(",", rel.MergeJoin.RightKeys)}]"
-            + (rel.MergeJoin.PostJoinFilter is null ? string.Empty : $" residual={Print(rel.MergeJoin.PostJoinFilter)}"),
+            + (rel.MergeJoin.PostJoinFilter is null ? string.Empty : $" residual={rel.MergeJoin.PostJoinFilter.ToPlanText()}"),
         Rel.KindOneofCase.NestedLoopJoin => $"NestedLoopJoin {rel.NestedLoopJoin.Type} on "
-            + (rel.NestedLoopJoin.Condition is null ? "true" : Print(rel.NestedLoopJoin.Condition)),
+            + (rel.NestedLoopJoin.Condition is null ? "true" : rel.NestedLoopJoin.Condition.ToPlanText()),
         Rel.KindOneofCase.AsOfJoin => $"AsOfJoin {rel.AsOfJoin.Type} "
             + $"left_keys=[{string.Join(",", rel.AsOfJoin.LeftKeys)}] right_keys=[{string.Join(",", rel.AsOfJoin.RightKeys)}]"
             + string.Create(
@@ -122,15 +139,15 @@ public static class PlanPrinter
                 $" match=${rel.AsOfJoin.LeftTime} {Describe(rel.AsOfJoin.Match)} ${rel.AsOfJoin.RightTime}"),
         Rel.KindOneofCase.SetOp => $"SetOp {rel.SetOp.Kind} inputs={rel.SetOp.Inputs.Count}",
         Rel.KindOneofCase.Hop => $"Hop time={Ref(rel.Hop.TimeColumn)} "
-            + $"slide={Print(rel.Hop.Slide)} size={Print(rel.Hop.Size)}",
+            + $"slide={rel.Hop.Slide.ToPlanText()} size={rel.Hop.Size.ToPlanText()}",
         Rel.KindOneofCase.Session => $"Session partition=[{string.Join(",", rel.Session.PartitionKeys)}] "
-            + $"time={Ref(rel.Session.TimeColumn)} gap={Print(rel.Session.Gap)}",
+            + $"time={Ref(rel.Session.TimeColumn)} gap={rel.Session.Gap.ToPlanText()}",
         Rel.KindOneofCase.Unnest => $"Unnest list={Ref(rel.Unnest.ListColumn)}"
             + (rel.Unnest.WithOrdinality ? " with_ordinality" : string.Empty)
             + (rel.Unnest.KeepEmpty ? " keep_empty" : string.Empty),
         Rel.KindOneofCase.TableFunctionScan =>
             $"TableFunctionScan {rel.TableFunctionScan.Function}("
-            + string.Join(", ", rel.TableFunctionScan.Args.Select(Print)) + ")",
+            + string.Join(", ", rel.TableFunctionScan.Args.Select(ToPlanText)) + ")",
         Rel.KindOneofCase.Window => Describe(rel.Window),
         // A relation the host bound by name (step 26, 16-entitlements.md §2). Its name and its row
         // type are all the plan carries; the rows are the host's and stay out of every artefact.
@@ -140,10 +157,10 @@ public static class PlanPrinter
                 ? string.Empty
                 : " " + string.Join(
                     ", ",
-                    rel.VirtualTable.Rows.Select(r => "(" + string.Join(", ", r.Values.Select(Print)) + ")"))),
+                    rel.VirtualTable.Rows.Select(r => "(" + string.Join(", ", r.Values.Select(ToPlanText)) + ")"))),
         Rel.KindOneofCase.IndexLookup => $"IndexLookup {Describe(rel.IndexLookup.Table)} index={rel.IndexLookup.Index} "
             + $"ranges={rel.IndexLookup.Ranges.Count} projection=[{string.Join(",", rel.IndexLookup.Projection)}]"
-            + (rel.IndexLookup.Residual is null ? string.Empty : $" residual={Print(rel.IndexLookup.Residual)}"),
+            + (rel.IndexLookup.Residual is null ? string.Empty : $" residual={rel.IndexLookup.Residual.ToPlanText()}"),
         Rel.KindOneofCase.RemoteQuery => $"RemoteQuery source={rel.RemoteQuery.SourceId} dialect={rel.RemoteQuery.Dialect} "
             + $"sql={Quote(rel.RemoteQuery.QueryText)}"
             + (rel.RemoteQuery.PushedPlan is null ? string.Empty : " pushed_plan=yes"),
@@ -152,7 +169,7 @@ public static class PlanPrinter
             + $"lookup_keys=[{string.Join(",", rel.LookupJoin.LookupKeys)}] "
             + string.Create(CultureInfo.InvariantCulture, $"max_keys_per_call={rel.LookupJoin.MaxKeysPerCall}")
             + (rel.LookupJoin.KeySetRows ? " key_set=rows" : " key_set=in")
-            + (rel.LookupJoin.PostJoinFilter is null ? string.Empty : $" residual={Print(rel.LookupJoin.PostJoinFilter)}"),
+            + (rel.LookupJoin.PostJoinFilter is null ? string.Empty : $" residual={rel.LookupJoin.PostJoinFilter.ToPlanText()}"),
         Rel.KindOneofCase.AdaptiveJoin => $"AdaptiveJoin {rel.AdaptiveJoin.Lookup.Type} "
             + string.Create(
                 CultureInfo.InvariantCulture,
@@ -162,7 +179,7 @@ public static class PlanPrinter
         Rel.KindOneofCase.PartitionedScan => $"PartitionedScan partitions={rel.PartitionedScan.Partitions.Count} "
             + "values=[" + string.Join(
                 ", ",
-                rel.PartitionedScan.Matches.Select(m => m.Value is null ? "range" : Print(m.Value)))
+                rel.PartitionedScan.Matches.Select(m => m.Value is null ? "range" : m.Value.ToPlanText()))
             + "]",
         Rel.KindOneofCase.None => "<no kind set>",
         _ => $"<unknown kind {(int)rel.KindCase}>",
@@ -229,7 +246,7 @@ public static class PlanPrinter
         };
 
     private static string Offset(FrameBound bound) =>
-        bound.Offset is null ? "<none>" : Print(bound.Offset);
+        bound.Offset is null ? "<none>" : bound.Offset.ToPlanText();
 
     private static string Describe(WindowCall call)
     {
@@ -244,7 +261,7 @@ public static class PlanPrinter
             sb.Append("DISTINCT ");
         }
 
-        sb.Append(string.Join(", ", call.Args.Select(Print))).Append(')');
+        sb.Append(string.Join(", ", call.Args.Select(ToPlanText))).Append(')');
         if (call.OrderBy.Count > 0)
         {
             sb.Append(" WITHIN GROUP (ORDER BY ")
@@ -280,7 +297,7 @@ public static class PlanPrinter
             sb.Append("DISTINCT ");
         }
 
-        sb.Append(string.Join(", ", measure.Args.Select(Print))).Append(')');
+        sb.Append(string.Join(", ", measure.Args.Select(ToPlanText))).Append(')');
         if (measure.OrderBy.Count > 0)
         {
             sb.Append(" WITHIN GROUP (ORDER BY ")
@@ -290,7 +307,7 @@ public static class PlanPrinter
 
         if (measure.Filter is not null)
         {
-            sb.Append(" FILTER ").Append(Print(measure.Filter));
+            sb.Append(" FILTER ").Append(measure.Filter.ToPlanText());
         }
 
         sb.Append("->").Append(IrTypes.Describe(measure.Type));
@@ -331,7 +348,7 @@ public static class PlanPrinter
     };
 
     private static string Describe(SortField field) =>
-        (field.Expr is null ? "<none>" : Print(field.Expr)) + " " + Describe(field.Direction);
+        (field.Expr is null ? "<none>" : field.Expr.ToPlanText()) + " " + Describe(field.Direction);
 
     private static string Describe(SortDirection direction) => direction switch
     {

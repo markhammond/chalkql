@@ -178,7 +178,7 @@ public sealed class TenancyExecuteTimeTests(SharedSidecar sidecar)
 
         Assert.Equal(first.PlanDigest, second.PlanDigest);
         Assert.Equal(
-            Chalk.Ir.PlanPrinter.Print(first.Plan), Chalk.Ir.PlanPrinter.Print(second.Plan));
+            Chalk.Ir.PlanExtensions.ToPlanText(first.Plan), Chalk.Ir.PlanExtensions.ToPlanText(second.Plan));
 
         // And it is not the folded plan: a manager's carries their own organisations as literals.
         var folded = await entitlements.PrepareAsync(Shaped, TenancyFixture.U1);

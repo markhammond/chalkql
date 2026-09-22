@@ -346,7 +346,7 @@ public sealed class StreamingWindowTests
             Assert.True(
                 Identical(expected, actual),
                 $"case {iteration} (seed {Seed}, batch {batchSize}, shape {shape}) disagreed.\n"
-                + $"plan: {PlanPrinter.Print(plan.Root)}\n"
+                + $"plan: {plan.Root.ToPlanText()}\n"
                 + $"buffered:  {Describe(expected)}\nstreaming: {Describe(actual)}");
         }
 

@@ -24,9 +24,14 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
     /// <summary>One refresh of this source at a time; snapshots are built one table after another.</summary>
     private readonly Lock _refreshing = new();
 
+    /// <summary>The handles this source's tables are named by, made once per name (D271 (h)).</summary>
+    private readonly Dictionary<string, PocoTableBinding> _bindings;
+
+    private SourceRuntimeMixin _runtime;
+
     internal PocoSource(
-        string sourceId, string schemaName, PocoTableRuntime[] tables, FunctionDescriptor[] functions)
-        : this(sourceId, schemaName, tables, functions, bindings: null)
+        SourceSharing sharing, string sourceId, string schemaName, PocoTableRuntime[] tables, FunctionDescriptor[] functions)
+        : this(sharing, sourceId, schemaName, tables, functions, bindings: null)
     {
     }
 
@@ -36,12 +41,14 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
     /// the runtime it names.
     /// </summary>
     internal PocoSource(
+        SourceSharing sharing,
         string sourceId,
         string schemaName,
         PocoTableRuntime[] tables,
         FunctionDescriptor[] functions,
         IReadOnlyDictionary<string, PocoTableBinding>? bindings)
     {
+        _runtime = new(sharing);
         SourceId = sourceId;
         SchemaName = schemaName;
         _tables = tables;
@@ -61,8 +68,9 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
         }
     }
 
-    /// <summary>The handles this source's tables are named by, made once per name (D271 (h)).</summary>
-    private readonly Dictionary<string, PocoTableBinding> _bindings;
+    public bool TryClaimEngine(object identity, out SourceSharing mode) => _runtime.TryClaimEngine(identity, out mode);
+
+    public void ReleaseEngine(object identity) => _runtime.ReleaseEngine(identity);
 
     /// <summary>
     /// The handle for one of this source's tables (D271 (h)), for a host that did not take it at

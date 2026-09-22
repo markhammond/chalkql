@@ -18,6 +18,7 @@ namespace Chalk.Sources.Poco;
 /// </example>
 public sealed class PocoSourceBuilder
 {
+    private SourceSharing _sharing = SourceSharing.Shared;
     private readonly List<TableRegistration> _tables = [];
     private PocoNamingPolicy _policy = PocoNamingPolicy.AsIs;
     private int _decimalScale = 10;
@@ -36,6 +37,12 @@ public sealed class PocoSourceBuilder
 
     internal string SchemaName { get; }
 
+    public PocoSourceBuilder Exclusive()
+    {
+        _sharing = SourceSharing.Exclusive;
+        return this;
+    }
+    
     /// <summary>How member names become column names (D15). <see cref="PocoNamingPolicy.AsIs"/> by default.</summary>
     public PocoSourceBuilder NamingPolicy(PocoNamingPolicy policy)
     {
@@ -68,10 +75,9 @@ public sealed class PocoSourceBuilder
     }
 
     /// <summary>
-    /// The same, yielding the handle this table is named by from here on (D271 (h),
-    /// <c>docs/design/44-catalog-registration.md</c> §6 (h)). The handle carries the source with the
-    /// name and the row type with both, so <c>Replace(orders, rows)</c> can neither reach the wrong
-    /// source nor take the wrong rows.
+    /// Registers a collection as a table, yielding the handle this table is named by from here on.
+    /// The handle carries the source with the name and the row type with both, so that
+    /// <c>Replace(orders, rows)</c> can neither reach the wrong source nor take the wrong rows.
     /// </summary>
     /// <remarks>
     /// An <c>out</c> parameter rather than a different return type, so the fluent chain the rest of
@@ -242,7 +248,7 @@ public sealed class PocoSourceBuilder
 
         var tables = _tables.Select(t => t.Build(SourceId, _policy, _decimalScale)).ToArray();
         ResolveForeignKeys(tables);
-        var source = new PocoSource(SourceId, SchemaName, tables, [.. _functions], _handles);
+        var source = new PocoSource(_sharing, SourceId, SchemaName, tables, [.. _functions], _handles);
 
         // The same rules the planner applies (03-planner.md §3.1). Running them here turns a duplicate
         // column name or an out-of-range key index into a registration error rather than a planner one.

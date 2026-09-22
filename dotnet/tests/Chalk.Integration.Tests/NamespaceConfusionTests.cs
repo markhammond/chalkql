@@ -163,7 +163,7 @@ public sealed class NamespaceConfusionTests(SharedSidecar sidecar)
             recorded.AppendLine();
 
             Leaks.For(principal).Inspect(
-                statement.Name, rows, Chalk.Ir.PlanPrinter.Print(prepared.Plan), report);
+                statement.Name, rows, Chalk.Ir.PlanExtensions.ToPlanText(prepared.Plan), report);
 
             // And the policy's own answer beside the golden, from the grants alone with no plan
             // involved, exactly as the tenancy corpus takes it (F89). It is worth taking here for a
@@ -234,8 +234,8 @@ public sealed class NamespaceConfusionTests(SharedSidecar sidecar)
         Assert.NotEqual(ledgerTable.DescriptorHash, archiveTable.DescriptorHash);
 
         // And the leaf in the plan says the same thing, which is what the digest covers.
-        var ledgerPlan = Chalk.Ir.PlanPrinter.Print(ledger.Plan);
-        var archivePlan = Chalk.Ir.PlanPrinter.Print(archive.Plan);
+        var ledgerPlan = Chalk.Ir.PlanExtensions.ToPlanText(ledger.Plan);
+        var archivePlan = Chalk.Ir.PlanExtensions.ToPlanText(archive.Plan);
         Assert.Contains(
             $"descriptor={ledgerTable.DescriptorHash}", ledgerPlan, StringComparison.Ordinal);
         Assert.Contains(

@@ -444,5 +444,5 @@ public static class PlanExpectations
     };
 
     private static string Because(CorpusQuery query, Plan plan, string what) =>
-        $"{query.Name}: {what}.{Environment.NewLine}{PlanPrinter.Print(plan)}";
+        $"{query.Name}: {what}.{Environment.NewLine}{PlanExtensions.ToPlanText(plan)}";
 }

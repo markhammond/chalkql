@@ -86,7 +86,7 @@ public sealed class IrCompatEntitledTests(SharedSidecar sidecar)
             plan,
             new PlanValidationOptions { EntitledTables = EntitledColumnCount });
 
-        Assert.NotEmpty(PlanPrinter.Print(plan));
+        Assert.NotEmpty(PlanExtensions.ToPlanText(plan));
     }
 
     /// <summary>
@@ -107,7 +107,7 @@ public sealed class IrCompatEntitledTests(SharedSidecar sidecar)
         }
 
         var plan = Plan.Parser.ParseFrom(await File.ReadAllBytesAsync(file.FullName));
-        Assert.Contains("entitled", PlanPrinter.Print(plan), StringComparison.Ordinal);
+        Assert.Contains("entitled", PlanExtensions.ToPlanText(plan), StringComparison.Ordinal);
         await Task.CompletedTask;
     }
 

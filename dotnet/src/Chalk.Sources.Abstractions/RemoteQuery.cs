@@ -63,6 +63,8 @@ public sealed class RemoteQueryRequest
 /// </summary>
 public sealed class SourceOptions
 {
+    public SourceSharing Sharing { get; } = SourceSharing.Shared;
+
     /// <summary>The defaults: thirty seconds, no concurrency limit, no retries.</summary>
     public static SourceOptions Default { get; } = new();
 
@@ -83,5 +85,5 @@ public sealed class SourceOptions
     /// Retries are the host's business, not Chalk's: a retry after a partial read would duplicate
     /// rows, and Chalk cannot know whether a failure was transient. Always <c>0</c> in v1.
     /// </summary>
-    public int Retries => 0;
+    public int Retries => 0; 
 }

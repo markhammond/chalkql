@@ -15,12 +15,17 @@ Chalk.Sources.Ado.AdoSource.Options.get -> Chalk.Sources.SourceOptions!
 Chalk.Sources.Ado.AdoSource.Profile.get -> Chalk.Catalog.DialectProfileDescriptor!
 Chalk.Sources.Ado.AdoSource.RefreshAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
 Chalk.Sources.Ado.AdoSource.RefreshTableAsync(string! table, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+Chalk.Sources.Ado.AdoSource.ReleaseEngine(object! identity) -> void
 Chalk.Sources.Ado.AdoSource.ScanAsync(Chalk.Sources.ScanRequest! request, Chalk.Sources.ScanContext! context, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
 Chalk.Sources.Ado.AdoSource.SchemaName.get -> string!
+Chalk.Sources.Ado.AdoSource.Sharing.get -> Chalk.Sources.SourceSharing
 Chalk.Sources.Ado.AdoSource.SourceId.get -> string!
 Chalk.Sources.Ado.AdoSource.Table(string! name) -> Chalk.Sources.Ado.AdoTable
+Chalk.Sources.Ado.AdoSource.TryClaimEngine(object! identity, out Chalk.Sources.SourceSharing Mode) -> bool
 Chalk.Sources.Ado.AdoSourceBuilder
 Chalk.Sources.Ado.AdoSourceBuilder.AddFunction(string! name, System.Action<Chalk.Catalog.FunctionBuilder!>! configure) -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.AddTable(string! name, out Chalk.Sources.Ado.AdoTable table, string? remoteName = null, System.Action<Chalk.Sources.Ado.AdoTableBuilder!>? configure = null) -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.AddTable(string! name, string? remoteName = null, System.Action<Chalk.Sources.Ado.AdoTableBuilder!>? configure = null) -> Chalk.Sources.Ado.AdoSourceBuilder!
 Chalk.Sources.Ado.AdoSourceBuilder.AddTable(string! name, System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ColumnDescriptor!>! columns, out Chalk.Sources.Ado.AdoTable table, string? remoteName = null, System.Action<Chalk.Sources.Ado.AdoTableBuilder!>? configure = null) -> Chalk.Sources.Ado.AdoSourceBuilder!
 Chalk.Sources.Ado.AdoSourceBuilder.AddTable(string! name, System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ColumnDescriptor!>! columns, string? remoteName = null, System.Action<Chalk.Sources.Ado.AdoTableBuilder!>? configure = null) -> Chalk.Sources.Ado.AdoSourceBuilder!
 Chalk.Sources.Ado.AdoSourceBuilder.AdoSourceBuilder(string! sourceId, System.Data.Common.DbProviderFactory! factory, string! connectionString, string! schemaName = "main") -> void
@@ -49,9 +54,9 @@ Chalk.Sources.Ado.AdoTable.SourceId.get -> string!
 Chalk.Sources.Ado.AdoTableBuilder
 Chalk.Sources.Ado.AdoTableBuilder.Costs(Chalk.Catalog.CostProfile! costProfile) -> Chalk.Sources.Ado.AdoTableBuilder!
 Chalk.Sources.Ado.AdoTableBuilder.ForeignKey(string! name, string![]! columns, string! parentTable, string![]! parentColumns) -> Chalk.Sources.Ado.AdoTableBuilder!
-Chalk.Sources.Ado.AdoTableBuilder.Index(string! name, bool unique, params string![]! columns) -> Chalk.Sources.Ado.AdoTableBuilder!
+Chalk.Sources.Ado.AdoTableBuilder.Index(string! name, bool unique, params System.ReadOnlySpan<string!> columns) -> Chalk.Sources.Ado.AdoTableBuilder!
 Chalk.Sources.Ado.AdoTableBuilder.RowCount(long rows, Chalk.Ir.RowCountKind kind = Chalk.Ir.RowCountKind.Estimate) -> Chalk.Sources.Ado.AdoTableBuilder!
-Chalk.Sources.Ado.AdoTableBuilder.UniqueKey(params string![]! columns) -> Chalk.Sources.Ado.AdoTableBuilder!
+Chalk.Sources.Ado.AdoTableBuilder.UniqueKey(params System.ReadOnlySpan<string!> columns) -> Chalk.Sources.Ado.AdoTableBuilder!
 Chalk.Sources.Ado.AdoTypeMapping
 Chalk.Sources.Ado.DbDataReaderFetch
 Chalk.Sources.Ado.DbDataReaderFetch.FetchAsync(Chalk.Sources.Ado.RemoteFetchRequest! request, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!

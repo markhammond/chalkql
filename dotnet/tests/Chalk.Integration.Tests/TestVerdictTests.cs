@@ -214,7 +214,7 @@ public sealed class TestVerdictTests(SharedSidecar sidecar)
         await using var engine = await EngineAsync();
         var prepared = await engine.WithEntitlements().PrepareAsync(
             "SELECT id FROM members WHERE national_id = ? ORDER BY id", Context("u8"));
-        var text = Chalk.Ir.PlanPrinter.Print(prepared.Plan);
+        var text = Chalk.Ir.PlanExtensions.ToPlanText(prepared.Plan);
 
         // The leaf's own projection holds the comparison; what stands above it is a reference.
         Assert.Contains("national_id", text, StringComparison.Ordinal);

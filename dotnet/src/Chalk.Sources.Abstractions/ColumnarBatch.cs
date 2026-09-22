@@ -20,7 +20,7 @@ namespace Chalk.Sources;
 /// root and every boundary compact.
 /// </para>
 /// </remarks>
-internal sealed class ColumnarBatch
+public sealed class ColumnarBatch
 {
     private ColumnView[] _columns;
     private int[] _selection = [];
