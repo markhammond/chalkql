@@ -164,6 +164,82 @@ class LimitCopyRulesTest {
     assertThat(sorts(plan)).isEqualTo(1);
   }
 
+  // ------------------------------------------ a bound that is a parameter (D288, F122)
+
+  /**
+   * A parameterised fetch with no offset is copied the way a literal one is: the copy's bound is
+   * {@code offset + fetch}, which with no offset is the parameter itself, so every branch carries
+   * the same {@code RexNode} and renders the same number when the execution starts.
+   */
+  @Test
+  void a_parameterised_fetch_is_copied_into_every_branch() {
+    String plan =
+        logical(
+            corpus, "SELECT symbol FROM bars_small UNION ALL SELECT symbol FROM symbols LIMIT ?");
+
+    assertThat(plan).contains("LogicalUnion(all=[true])");
+    assertThat(sorts(plan)).isEqualTo(3);
+    assertThat(bounded(plan, "LogicalSort(fetch=[?0])")).isEqualTo(3);
+  }
+
+  /** And into every partition, which is the same rewrite over the node D106 gave partitions. */
+  @Test
+  void a_parameterised_fetch_is_copied_into_every_partition() {
+    String plan =
+        logical(
+            partitioned,
+            "SELECT symbol, ts FROM federated.bars_by_symbol ORDER BY symbol, ts LIMIT ?");
+
+    assertThat(plan).contains("ChalkPartitionedScan");
+    assertThat(sorts(plan)).isEqualTo(6);
+    assertThat(
+            bounded(
+                plan, "LogicalSort(sort0=[$0], sort1=[$1], dir0=[ASC], dir1=[ASC], fetch=[?0])"))
+        .isEqualTo(6);
+  }
+
+  /**
+   * With an offset beside it the copy is declined, at both spellings of {@code UNION ALL}. The
+   * copy's bound would be {@code offset + fetch} — an expression, which is neither a literal the
+   * planner can read nor a parameter the executor can render — and before this run Calcite's own
+   * "deterministic fetch" guard let one through and the plan failed several nodes later (F122).
+   * The statement still plans: the bound stays where the statement put it.
+   */
+  @Test
+  void a_parameterised_fetch_with_an_offset_is_not_copied() {
+    String union =
+        logical(
+            corpus,
+            "SELECT symbol FROM bars_small UNION ALL SELECT symbol FROM symbols"
+                + " ORDER BY symbol OFFSET 2 ROWS FETCH NEXT ? ROWS ONLY");
+
+    assertThat(union).contains("LogicalUnion(all=[true])");
+    assertThat(sorts(union)).isEqualTo(1);
+    assertThat(union).contains("offset=[2]").contains("fetch=[?0]");
+
+    String scan =
+        logical(
+            partitioned,
+            "SELECT symbol, ts FROM federated.bars_by_symbol ORDER BY symbol, ts"
+                + " OFFSET 2 ROWS FETCH NEXT ? ROWS ONLY");
+
+    assertThat(scan).contains("ChalkPartitionedScan");
+    assertThat(sorts(scan)).isEqualTo(1);
+  }
+
+  /** A parameterised offset over a literal fetch is the same shape and is declined too. */
+  @Test
+  void a_parameterised_offset_is_not_copied_either() {
+    String plan =
+        logical(
+            corpus,
+            "SELECT symbol FROM bars_small UNION ALL SELECT symbol FROM symbols"
+                + " ORDER BY symbol OFFSET ? ROWS FETCH NEXT 4 ROWS ONLY");
+
+    assertThat(sorts(plan)).isEqualTo(1);
+    assertThat(plan).contains("offset=[?0]").contains("fetch=[4]");
+  }
+
   /**
    * A branch that already delivers the collation within the bound is left as it is rather than
    * wrapped a second time — the guard that lets the rule match its own output and stop.
