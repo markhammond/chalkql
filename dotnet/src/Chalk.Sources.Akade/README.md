@@ -241,6 +241,19 @@ same instance to both the row wrapper and every registered index, so a scan and 
 cannot accidentally address different Akade states.
 
 Akade's public documentation describes range indexes as supporting range predicates and ordered
-access. Chalk still sorts the rows returned by a bounded range before publishing them through an
-`ORDERED` index, because the ordering of `Range(...)` enumeration itself is not part of the public
-Akade contract. This is conservative and can be specialised if Akade exposes an ordered-range API.
+access, and documents `OrderBy(...)` as the order the index defines — but it does not make the
+enumeration order of `Range(...)`, `GreaterThan[OrEqual](...)` or `LessThan[OrEqual](...)` part of
+the public contract.
+
+Chalk used to sort the matched rows before publishing any of them through an `ORDERED` index. It no
+longer does: a consumer that reads one row and stops — `ORDER BY amount LIMIT 1` over an ordered
+index — would have paid for the whole range before seeing it. The adapter now yields Akade's
+enumeration as it comes and **verifies it as it yields**: one key comparison per row against the
+previous key, nothing allocated per row, and a `SourceContractException` naming the Akade index and
+the two keys the moment a row arrives out of ascending order. An unbounded ordered lookup uses
+Akade's documented `OrderBy(...)`.
+
+Failing by name is deliberate. A silently re-sorted lookup would be a wrong answer already relied
+on, because the declared ordered index is why there is no sort above it in the plan at all; and a
+defensive sort would give back exactly the early exit the ordered index is worth having for.
+Descending enumeration of an ascending index is not offered, so `ORDER BY … DESC` still sorts.

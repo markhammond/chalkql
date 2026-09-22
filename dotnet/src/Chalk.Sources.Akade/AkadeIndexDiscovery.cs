@@ -30,6 +30,7 @@ internal static class AkadeIndexDiscovery
         var discovered = Inspect(set, options);
         return CreatePlan<T, IndexedSet<T>>(
             discovered,
+            options,
             candidate => Shapes(Inspect(candidate, options)));
     }
 
@@ -46,6 +47,7 @@ internal static class AkadeIndexDiscovery
 
         return CreatePlan<T, ConcurrentIndexedSet<T>>(
             discovered,
+            options,
             candidate => Shapes(
                 Inspect(
                     ConcurrentIndexedSetAccess.CaptureForQuiescentRead(candidate),
@@ -54,6 +56,7 @@ internal static class AkadeIndexDiscovery
 
     private static AkadeIndexPlan<T, TSet> CreatePlan<T, TSet>(
         IReadOnlyList<AkadeDiscoveredIndex<T>> discovered,
+        AkadeSourceOptions<T> options,
         Func<TSet, AkadeIndexShape[]> inspect)
         where TSet : class
     {
@@ -69,7 +72,9 @@ internal static class AkadeIndexDiscovery
                 index.Name,
                 index.Kind,
                 index.Accessor,
-                index.Member);
+                index.Member,
+                options.SourceId,
+                options.TableName);
 
             if (registration is not null)
             {
@@ -490,17 +495,23 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
     private readonly AkadePhysicalIndexKind _kind;
     private readonly Func<T, TKey> _key;
     private readonly MemberInfo _member;
+    private readonly string _sourceId;
+    private readonly string _table;
 
     public AkadeIndexRegistration(
         string name,
         AkadePhysicalIndexKind kind,
         Delegate key,
-        MemberInfo member)
+        MemberInfo member,
+        string sourceId,
+        string table)
     {
         _name = name;
         _kind = kind;
         _key = (Func<T, TKey>)key;
         _member = member;
+        _sourceId = sourceId;
+        _table = table;
     }
 
     public void Register(PocoTableBuilder<T> table, IndexedSet<T> set)
@@ -528,7 +539,9 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
                 descriptor,
                 set,
                 _key,
-                _name),
+                _name,
+                _sourceId,
+                _table),
             member);
     }
 

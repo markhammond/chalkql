@@ -21,23 +21,31 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
     private readonly IndexedSet<T> _set;
     private readonly Func<T, TKey> _key;
     private readonly string _akadeIndexName;
+    private readonly string _sourceId;
+    private readonly string _table;
     private readonly IComparer<TKey> _comparer = Comparer<TKey>.Default;
 
     public AkadeScalarIndex(
         IndexDescriptor descriptor,
         IndexedSet<T> set,
         Func<T, TKey> key,
-        string akadeIndexName)
+        string akadeIndexName,
+        string sourceId,
+        string table)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(set);
         ArgumentNullException.ThrowIfNull(key);
         ArgumentException.ThrowIfNullOrWhiteSpace(akadeIndexName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
 
         Descriptor = descriptor;
         _set = set;
         _key = key;
         _akadeIndexName = akadeIndexName;
+        _sourceId = sourceId;
+        _table = table;
     }
 
     public IndexDescriptor Descriptor { get; }
@@ -146,14 +154,57 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
         }
         else
         {
-            rows = _set.FullScan();
+            // The whole-range ordered scan. Akade documents OrderBy as "the order defined by the
+            // index", which is exactly the contract; the range shapes above have no such promise,
+            // which is what the guard below is for.
+            rows = _set.OrderBy(_key, 0, _akadeIndexName);
         }
 
-        // Chalk's ORDERED contract concerns the rows returned by the lookup. Akade documents its
-        // range index as supporting indexed ordering, but does not make Range(...) enumeration order
-        // part of the public contract. Sort the matched rows explicitly for now rather than relying
-        // on an implementation detail; this can later be replaced by a dedicated ordered-range path.
-        return rows.OrderBy(_key, _comparer);
+        return InKeyOrder(rows);
+    }
+
+    /// <summary>
+    /// Akade's enumeration, yielded as it comes and verified as it goes (D277).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Chalk's ORDERED contract is about the rows a lookup returns, and Akade documents
+    /// <c>OrderBy</c> as the index's order but says nothing about the enumeration order of a range
+    /// query. Sorting the matched rows defensively would cost the whole range before the first row —
+    /// which is the one thing a consumer under a <c>LIMIT 1</c> must not pay — so the adapter
+    /// enumerates lazily and checks instead: one key comparison per row against the previous key,
+    /// the previous key held in a local, and nothing allocated per row.
+    /// </para>
+    /// <para>
+    /// A row that arrives out of order fails immediately and by name rather than being sorted
+    /// around, because a silently reordered lookup is a wrong answer the planner has already relied
+    /// on: the ordered index is why there is no sort above this at all.
+    /// </para>
+    /// </remarks>
+    internal IEnumerable<T> InKeyOrder(IEnumerable<T> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        var previous = default(TKey)!;
+        var hasPrevious = false;
+
+        foreach (var row in rows)
+        {
+            var key = _key(row);
+            if (hasPrevious && _comparer.Compare(previous, key) > 0)
+            {
+                throw new SourceContractException(
+                    _sourceId,
+                    _table,
+                    $"Akade index '{_akadeIndexName}', behind the ORDERED index "
+                    + $"'{Descriptor.Name}', yielded key '{key}' after '{previous}'. An ordered "
+                    + "lookup must arrive in ascending key order.");
+            }
+
+            previous = key;
+            hasPrevious = true;
+            yield return row;
+        }
     }
 
     private static bool TryKey(object? value, out TKey key)
