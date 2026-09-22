@@ -138,6 +138,12 @@ tasks.test {
     maxHeapSize = "2g"
     // DigestFixturesTest reads (and, with CHALK_WRITE_FIXTURES=1, writes) src/test/resources.
     systemProperty("chalk.projectDir", projectDir.absolutePath)
+    // The corpus tests read the repository's corpus/ (its queries, the recorded catalog, the recorded
+    // plans), which is outside this project: declare it as an input, so a re-recorded catalog or
+    // plan re-runs the comparison instead of leaving the task up to date.
+    inputs.dir(projectDir.resolve("../corpus"))
+        .withPropertyName("corpus")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 tasks.shadowJar {
