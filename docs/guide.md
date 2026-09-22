@@ -562,6 +562,83 @@ both, concurrently, bounded by `ExecutionOptions.MaxRemoteConcurrency` overall a
 by each source's own `SourceOptions.MaxConcurrentQueries`. The union claims no
 ordering, so ask for one if you need one.
 
+### Letting a source do the truncating
+
+Every SQL text below is what the source was actually sent, copied from the test
+that reads it off the connection.
+
+**Enabling it.** `AdoCapabilities.For(profile)` derives what a source may be asked
+from its dialect profile, and `SupportsSort`, `SupportsLimit` and `SupportsOffset`
+are part of what it turns on. The two are separate on purpose: the *profile* says
+how to spell SQL for this source, and the *capabilities* say what it may be asked
+to do. A source built with `SourceCapabilities.None` is scanned and nothing else.
+
+```csharp
+var duck = DuckDbSources.AddDuckDbSource("duck", "DataSource=orders.duckdb")
+    .Capabilities(AdoCapabilities.For(DialectProfiles.DuckDb))
+    .DiscoverTables()
+    .Build();
+```
+
+**A literal bound travels.** The source truncates, and twenty-five rows cross the
+boundary instead of every open order:
+
+```sql
+SELECT id, total FROM duck.orders WHERE status = 'open' ORDER BY id DESC LIMIT 25
+-- SELECT "id", "total" FROM "orders" WHERE "status" = 'open'
+--   ORDER BY "id" DESC NULLS FIRST LIMIT 25
+```
+
+**A parameterised bound travels too, rendered per execution.** Prepare once,
+execute with a page size, execute again with another: the text the source is sent
+carries each execution's own number, while the statement's other parameters are
+still bound by the provider (`$p0` here, because that is how this dialect spells a
+placeholder).
+
+```sql
+SELECT id, total FROM duck.orders WHERE status = ? ORDER BY id DESC LIMIT ?
+-- executed with ("open", 25):
+-- SELECT "id", "total" FROM "orders" WHERE "status" = $p0
+--   ORDER BY "id" DESC NULLS FIRST LIMIT 25
+-- executed with ("open", 100):
+-- SELECT "id", "total" FROM "orders" WHERE "status" = $p0
+--   ORDER BY "id" DESC NULLS FIRST LIMIT 100
+```
+
+The number written into the text is the value bound at execution, and never
+anything the planner was told beforehand: a value hint moves a cost estimate and
+is not a value.
+
+**Every branch gets it.** Over a `UNION ALL` or a partitioned table, the bound is
+copied into each branch and rendered in each branch's own query. The local top-N
+above them still decides the answer, so each source only has to offer its first
+few candidates:
+
+```sql
+SELECT region, id FROM books.all_orders ORDER BY id LIMIT ?
+-- executed with (4):
+-- SELECT "region", "id" FROM "orders_north" ORDER BY "id" LIMIT 4
+-- SELECT "region", "id" FROM "orders_south" ORDER BY "id" LIMIT 4
+```
+
+A bound with an `OFFSET` beside it is not copied: a branch's share of it would be
+`offset + fetch`, which is an expression rather than a number, so the bound stays
+where the statement put it.
+
+**When it stays local.** The same statement over a source whose capabilities say
+`SupportsLimit = false` — a host can register a narrower descriptor than the
+derived one for a source it would rather not have sort or truncate for it — ships
+the subtree without a bound, and the local fetch stops pulling once it has enough:
+
+```sql
+SELECT id, total FROM duck.orders WHERE status = ? ORDER BY id DESC LIMIT ?
+-- SELECT "id", "total" FROM "orders" WHERE "status" = $p0
+```
+
+The answer is the same; the cost is not. Every matching row crosses the boundary
+and the ordering is done here, which is worth knowing the price of before turning
+a capability off.
+
 ### Cancellation, failure, and what a result means
 
 - **Cancellation reaches the fetches.** One linked token per execution; the
