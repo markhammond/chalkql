@@ -219,6 +219,11 @@ public sealed class ParameterHintTests(SharedSidecar sidecar)
             new PrepareOptions { IncludePlanText = true });
 
         Assert.DoesNotContain("8675309", prepared.PlanText ?? string.Empty, StringComparison.Ordinal);
+        Assert.Equal([0], prepared.HintedParameters);
+
+        // And the sidecar's own log, which is the other place a value could have been written down.
+        Assert.DoesNotContain(
+            "8675309", string.Join('\n', sidecar.Sidecar.Diagnostics()), StringComparison.Ordinal);
 
         var failure = await Assert.ThrowsAsync<PlanningException>(
             () => engine.PrepareAsync(
