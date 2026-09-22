@@ -559,6 +559,121 @@ class PushdownRulesTest {
     assertThat(plan).contains("ChalkFilter");
   }
 
+  // ------------------------------------------- a bound that is a parameter travels too (D288)
+
+  /**
+   * The rule reads a bound as the {@code RexNode} it is: a parameter is pushed exactly where a
+   * literal would be, under the same capability gate, and the text carries a placeholder for it.
+   */
+  @Test
+  public void a_parameterised_limit_is_pushed_under_the_same_gate_a_literal_is() {
+    String plan = plan(full(), duck(), "SELECT l_orderkey FROM db.lineitem LIMIT ?");
+
+    assertThat(plan).contains("SourceSort(fetch=[?0])");
+    assertThat(plan).doesNotContain("ChalkLimit");
+  }
+
+  @Test
+  public void a_parameterised_offset_travels_beside_it() {
+    String plan =
+        plan(
+            full(),
+            duck(),
+            "SELECT l_orderkey FROM db.lineitem ORDER BY l_orderkey OFFSET ? ROWS"
+                + " FETCH NEXT ? ROWS ONLY");
+
+    assertThat(plan).contains("offset=[?0]").contains("fetch=[?1]");
+    assertThat(plan).contains("SourceSort");
+  }
+
+  /** And a source that declares no limit keeps it local, exactly as it does for a literal one. */
+  @Test
+  public void a_source_without_supports_limit_keeps_a_parameterised_bound_local() {
+    SourceCapabilities noLimit =
+        TestCatalogs.fullSqlCapabilities().setSupportsLimit(false).setSupportsOffset(false).build();
+
+    String plan = plan(noLimit, duck(), "SELECT l_orderkey FROM db.lineitem LIMIT ?");
+
+    assertThat(plan).contains("ChalkLimit(fetch=[?0])");
+    assertThat(plan).doesNotContain("SourceSort");
+  }
+
+  /** The switch a host flips per request says the same thing (D87). */
+  @Test
+  public void the_limit_switch_keeps_a_parameterised_bound_local_too() {
+    String plan =
+        plan(
+            full(),
+            duck(),
+            "SELECT l_orderkey FROM db.lineitem LIMIT ?",
+            disabling(DisabledCapability.DISABLED_CAPABILITY_LIMIT));
+
+    assertThat(plan).contains("ChalkLimit(fetch=[?0])");
+    assertThat(plan).doesNotContain("SourceSort");
+  }
+
+  /**
+   * The bound is exempt from {@code supports_parameters}: it never reaches the provider as one,
+   * because the executor writes its value into the text. A source that takes no parameters at all
+   * still gets its {@code LIMIT ?} — and still gets no parameterised <em>predicate</em>.
+   */
+  @Test
+  public void a_source_that_takes_no_parameters_still_gets_a_parameterised_bound() {
+    SourceCapabilities noParameters =
+        TestCatalogs.fullSqlCapabilities().setSupportsParameters(false).build();
+
+    assertThat(plan(noParameters, duck(), "SELECT l_orderkey FROM db.lineitem LIMIT ?"))
+        .contains("SourceSort(fetch=[?0])")
+        .doesNotContain("ChalkLimit");
+    assertThat(
+            plan(
+                noParameters,
+                duck(),
+                "SELECT l_orderkey FROM db.lineitem WHERE l_orderkey > ? LIMIT 5"))
+        .doesNotContain("SourceFilter")
+        .contains("ChalkFilter(condition=[>($0, ?0)])");
+  }
+
+  /**
+   * An IR source has no text to write a number into, so a parameterised bound stays local there —
+   * a refusal at the rule, where the shape is decided, rather than a bound the source could not
+   * resolve.
+   */
+  @Test
+  public void an_ir_source_keeps_a_parameterised_bound_local_and_a_literal_one_travels() {
+    SourceCapabilities ir =
+        TestCatalogs.fullSqlCapabilities()
+            .setQueryLanguage(chalk.ir.v1.QueryLanguage.QUERY_LANGUAGE_IR)
+            .build();
+
+    assertThat(plan(ir, duck(), "SELECT l_orderkey FROM db.lineitem LIMIT ?"))
+        .contains("ChalkLimit(fetch=[?0])")
+        .doesNotContain("SourceSort");
+    assertThat(plan(ir, duck(), "SELECT l_orderkey FROM db.lineitem LIMIT 5"))
+        .contains("SourceSort(fetch=[5])");
+  }
+
+  /**
+   * F121: a dialect whose unparser writes no {@code OFFSET} is handed none, literal or parameter.
+   * Calcite's SQL Server dialect spells a bound {@code TOP (n)} and drops the offset beside it, so
+   * a pushed {@code OFFSET 2 FETCH 3} would come back as the first three rows — the wrong three.
+   * The fetch still travels; only the offset stays here.
+   */
+  @Test
+  public void a_dialect_that_cannot_write_an_offset_is_never_handed_one() {
+    DialectProfile sqlServer = duck().toBuilder().setDialect("mssql").build();
+
+    assertThat(
+            plan(
+                full(),
+                sqlServer,
+                "SELECT l_orderkey FROM db.lineitem ORDER BY l_orderkey OFFSET 2 ROWS"
+                    + " FETCH NEXT 3 ROWS ONLY"))
+        .doesNotContain("SourceSort");
+    assertThat(plan(full(), sqlServer, "SELECT l_orderkey FROM db.lineitem LIMIT ?"))
+        .contains("SourceSort(fetch=[?0])");
+  }
+
   private static String lineContaining(String plan, String needle) {
     for (String line : plan.split("\n")) {
       if (line.contains(needle)) {

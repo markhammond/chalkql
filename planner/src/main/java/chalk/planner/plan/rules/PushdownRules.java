@@ -12,7 +12,9 @@ import chalk.planner.plan.rel.SourceScan;
 import chalk.planner.plan.rel.SourceToLocalConverter;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptUtil;
@@ -30,6 +32,7 @@ import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexBuilder;
+import org.apache.calcite.rex.RexDynamicParam;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexUtil;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -381,6 +384,24 @@ public final class PushdownRules {
    * all three on one node: a bare {@code LIMIT} is a {@code Sort} with an empty collation. The gate
    * answers each part separately, so a source that fetches but does not sort still gets its
    * {@code LIMIT}, and one that sorts but will not honour the plan's null placement gets neither.
+   *
+   * <p>A bound that is a <b>parameter</b> travels where a literal one does (D288). It is carried in
+   * the pushed text as its own {@code ?}, and the executor writes the value bound at execution into
+   * the text before the query is sent, so nothing here has to know which dialects would take a
+   * parameter in a {@code LIMIT}. The capability gates are the same ones a literal answers to, and
+   * the bound is exempt from {@code supports_parameters} because it never reaches the provider as
+   * a parameter. Three shapes are still declined, each for a reason of its own:
+   *
+   * <ul>
+   *   <li>a source whose query language is IR: there is no text to write a number into, and the
+   *       pushed plan's bound would be a parameter the source has no way to resolve;
+   *   <li>a bound scalar the entitlement rewrite put there ({@code BoundParam}): a bound is the
+   *       statement's own parameter, and a context value is not the statement's to read here;
+   *   <li>a bound whose parameter the pushed subtree <em>also</em> mentions somewhere else. Then
+   *       one placeholder is rendered and another, standing for the same value, is bound, and
+   *       which is which is decided by counting placeholders in a text this rule has not seen.
+   *       Declining is the honest answer and costs one local fetch.
+   * </ul>
    */
   private static final class SortRule extends Base {
     SortRule(SourceConvention convention, PushdownGate gate, PushdownPolicy policy) {
@@ -415,10 +436,7 @@ public final class PushdownRules {
       if (!sorts && !fetches && !offsets) {
         return null;
       }
-      // A LIMIT with a literal count is the only shape a source can be handed: a parameterised one
-      // would have to be bound before the query text existed.
-      if ((fetches && !(sort.fetch instanceof org.apache.calcite.rex.RexLiteral))
-          || (offsets && !(sort.offset instanceof org.apache.calcite.rex.RexLiteral))) {
+      if (!pushableBound(sort, sort.fetch) || !pushableBound(sort, sort.offset)) {
         return null;
       }
       if (!gate.withinRowCeiling(rowsOf(sort))) {
@@ -430,6 +448,50 @@ public final class PushdownRules {
           sort.getCluster().traitSetOf(convention).replace(sort.getCollation());
       return new SourceRels.SourceSort(
           sort.getCluster(), traits, input, sort.getCollation(), sort.offset, sort.fetch);
+    }
+
+    /** Whether this bound is one this source can be handed. Absent is trivially yes. */
+    private boolean pushableBound(LogicalSort sort, @Nullable RexNode bound) {
+      if (bound == null || bound instanceof org.apache.calcite.rex.RexLiteral) {
+        return true;
+      }
+      if (!(bound instanceof RexDynamicParam parameter)
+          || parameter instanceof chalk.planner.entitlement.BoundParam
+          || !convention.isSql()) {
+        return false;
+      }
+
+      Set<Integer> elsewhere = new HashSet<>();
+      collectParameters(sort.getInput(), elsewhere);
+      return !elsewhere.contains(parameter.getIndex());
+    }
+
+    /**
+     * Every dynamic parameter index in {@code rel}'s own expressions and its inputs'.
+     *
+     * <p>A {@code RelSubset} is read through its best or original member, the way {@code JoinRule}
+     * reads one: this runs during conversion, where an input is a subset rather than a tree, and
+     * the question — which of the statement's parameters this subtree mentions — is one every
+     * member of a set answers the same way.
+     */
+    private static void collectParameters(RelNode rel, Set<Integer> into) {
+      if (rel instanceof org.apache.calcite.plan.volcano.RelSubset subset) {
+        RelNode best = subset.getBest();
+        collectParameters(best != null ? best : subset.getOriginal(), into);
+        return;
+      }
+
+      rel.accept(
+          new org.apache.calcite.rex.RexShuttle() {
+            @Override
+            public RexNode visitDynamicParam(RexDynamicParam parameter) {
+              into.add(parameter.getIndex());
+              return parameter;
+            }
+          });
+      for (RelNode input : rel.getInputs()) {
+        collectParameters(input, into);
+      }
     }
   }
 

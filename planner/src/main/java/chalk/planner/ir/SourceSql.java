@@ -38,6 +38,7 @@ import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.SqlWriterConfig;
 import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.sql.util.SqlShuttle;
+import org.apache.calcite.sql.util.SqlString;
 
 /**
  * Generated SQL for a pushed subtree (§2). Calcite's {@code RelToSqlConverter} does the work; the
@@ -50,9 +51,12 @@ import org.apache.calcite.sql.util.SqlShuttle;
  * <ul>
  *   <li><b>Dynamic parameters.</b> {@code SqlImplementor} converts a {@code RexDynamicParam} into a
  *       {@code SqlDynamicParam}, which every dialect unparses as {@code ?}. So a source that takes
- *       parameters gets positional {@code ?} placeholders in the order the plan's parameters are
- *       numbered, and one that does not never sees a {@code RexDynamicParam} at all, because
- *       {@link chalk.planner.plan.PushdownGate} refuses to push an expression containing one.
+ *       parameters gets positional {@code ?} placeholders, and one that does not never sees a
+ *       {@code RexDynamicParam} in an expression at all, because
+ *       {@link chalk.planner.plan.PushdownGate} refuses to push one. Which parameter each
+ *       placeholder stands for is read off the writer ({@link Generated#placeholders}) rather than
+ *       assumed from the numbering: a dialect that spells a bound as {@code TOP (?)} writes that
+ *       placeholder before the statement's own.
  *   <li><b>Casts and quoting.</b> The converter emits a cast wherever the rel tree has a {@code
  *       CAST}, spelled through {@code SqlDialect.getCastSpec}, and quotes every identifier with the
  *       dialect's quote string. Both therefore follow the profile, which is what {@link
@@ -62,8 +66,22 @@ import org.apache.calcite.sql.util.SqlShuttle;
 public final class SourceSql {
   private SourceSql() {}
 
+  /**
+   * The SQL for {@code pushed}, and what its {@code ?} placeholders stand for in the order they
+   * appear in it.
+   *
+   * <p>{@code placeholders} is the writer's own record: every {@code SqlWriter.dynamicParam(i)}
+   * call the unparse made, in order, each carrying the {@code RexDynamicParam} index it was given
+   * — and a {@code 0} for a key set, which writes its one placeholder through the same method
+   * (see {@link chalk.planner.plan.ChalkKeySet}). Reading it off the writer is what makes
+   * "placeholder order" a fact about the text rather than a hope about the converter: a dialect
+   * that spells a bound at the <em>front</em> of the statement puts that placeholder first, and
+   * the parameter order the source binds has to say so.
+   */
+  public record Generated(String sql, List<Integer> placeholders) {}
+
   /** The SQL for {@code pushed}, in its source's dialect. */
-  public static String generate(RelNode pushed, SourceConvention convention) {
+  public static Generated generate(RelNode pushed, SourceConvention convention) {
     DialectProfile profile = convention.profile();
     SqlDialect dialect = SourceDialects.of(profile);
     SqlImplementor.Result result =
@@ -72,17 +90,21 @@ public final class SourceSql {
     // Never a star (F35): the source would answer with its physical columns in its own order.
     SqlNode node = SelectStar.named(result.asStatement(), pushed);
 
-    return singleLine(
+    SqlString written =
         node.toSqlString(
-                config ->
-                    config
-                        .withDialect(dialect)
-                        .withLineFolding(SqlWriterConfig.LineFolding.WIDE)
-                        .withFoldLength(Integer.MAX_VALUE)
-                        .withIndentation(0)
-                        .withClauseStartsLine(false)
-                        .withSelectListItemsOnSeparateLines(false))
-            .getSql());
+            config ->
+                config
+                    .withDialect(dialect)
+                    .withLineFolding(SqlWriterConfig.LineFolding.WIDE)
+                    .withFoldLength(Integer.MAX_VALUE)
+                    .withIndentation(0)
+                    .withClauseStartsLine(false)
+                    .withSelectListItemsOnSeparateLines(false));
+
+    // Calcite hands back a null list rather than an empty one for a statement with no placeholder.
+    List<Integer> placeholders = written.getDynamicParameters();
+    return new Generated(
+        singleLine(written.getSql()), placeholders == null ? List.of() : placeholders);
   }
 
   /**

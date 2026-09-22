@@ -447,6 +447,189 @@ class GeneratedSqlTest {
                 + " WHERE \"c_mktsegment\" = 'BUILDING'");
   }
 
+  // ---------------------------------------- a bound that is a parameter, per dialect (D288)
+
+  /**
+   * The five spellings, pinned: whatever the dialect writes where the count goes, it writes a
+   * {@code ?} there, and every one of these unparsers accepts a {@code SqlDynamicParam} in that
+   * position. The tuned SQLite and DuckDB dialects spell it {@code LIMIT ?}; the tuned PostgreSQL
+   * dialect and the ANSI rendering spell it {@code FETCH NEXT ? ROWS ONLY} — PostgreSQL has taken
+   * that spelling since 8.4 and it is what Calcite's dialect writes; and the SQL Server product
+   * {@code SourceDialects} resolves writes {@code TOP (?)}, at the <em>front</em> of the statement.
+   */
+  @Test
+  void every_dialect_writes_a_placeholder_where_the_count_goes() {
+    String bounded = "SELECT l_orderkey FROM db.lineitem WHERE l_orderkey > 10 LIMIT ?";
+
+    assertThat(inDialect(TestCatalogs.sqliteProfile(), bounded))
+        .isEqualTo(
+            "SELECT \"l_orderkey\" FROM (SELECT \"l_orderkey\" FROM \"lineitem\") AS \"t\""
+                + " WHERE \"l_orderkey\" > 10 LIMIT ?");
+    assertThat(inDialect(TestCatalogs.duckDbProfile(), bounded))
+        .isEqualTo(
+            "SELECT \"l_orderkey\" FROM (SELECT \"l_orderkey\" FROM \"lineitem\") AS \"t\""
+                + " WHERE \"l_orderkey\" > 10 LIMIT ?");
+    assertThat(inDialect(TestCatalogs.postgresProfile(), bounded))
+        .isEqualTo(
+            "SELECT \"l_orderkey\" FROM (SELECT \"l_orderkey\" FROM \"lineitem\") AS \"t\""
+                + " WHERE \"l_orderkey\" > 10 FETCH NEXT ? ROWS ONLY");
+    assertThat(inDialect(ansiProfile(), bounded))
+        .isEqualTo(
+            "SELECT \"l_orderkey\" FROM (SELECT \"l_orderkey\" FROM \"lineitem\") AS \"t\""
+                + " WHERE \"l_orderkey\" > 10 FETCH NEXT ? ROWS ONLY");
+    assertThat(inDialect(sqlServerProfile(), bounded))
+        .isEqualTo(
+            "SELECT TOP (?) \"l_orderkey\" FROM (SELECT \"l_orderkey\" FROM \"lineitem\") AS \"t\""
+                + " WHERE \"l_orderkey\" > 10");
+  }
+
+  /** And where a dialect takes an offset, that placeholder is written beside it. */
+  @Test
+  void an_offset_placeholder_is_written_where_the_dialect_puts_one() {
+    String both =
+        "SELECT l_orderkey FROM db.lineitem WHERE l_orderkey > 10 ORDER BY l_orderkey"
+            + " OFFSET ? ROWS FETCH NEXT ? ROWS ONLY";
+
+    assertThat(inDialect(ansiProfile(), both))
+        .isEqualTo(
+            "SELECT \"l_orderkey\" FROM (SELECT \"l_orderkey\" FROM \"lineitem\") AS \"t\""
+                + " WHERE \"l_orderkey\" > 10 ORDER BY \"l_orderkey\""
+                + " OFFSET ? ROWS FETCH NEXT ? ROWS ONLY");
+    assertThat(inDialect(TestCatalogs.duckDbProfile(), both))
+        .isEqualTo(
+            "SELECT \"l_orderkey\" FROM (SELECT \"l_orderkey\" FROM \"lineitem\") AS \"t\""
+                + " WHERE \"l_orderkey\" > 10 ORDER BY \"l_orderkey\" LIMIT ? OFFSET ?");
+  }
+
+  /**
+   * F121: the SQL Server dialect writes {@code TOP (n)} and <b>nothing</b> for an offset, so it is
+   * never handed one — the offset stays local and the query it is sent carries neither. Measured
+   * rather than listed: {@link chalk.planner.plan.SourceDialects#rendersOffset} puts the question
+   * to the dialect, so a dialect Calcite adds or changes is answered on its own behaviour.
+   */
+  @Test
+  void a_dialect_that_writes_no_offset_is_sent_a_query_with_neither_bound() {
+    String sql =
+        inDialect(
+            sqlServerProfile(),
+            "SELECT l_orderkey FROM db.lineitem WHERE l_orderkey > 10 ORDER BY l_orderkey"
+                + " OFFSET 2 ROWS FETCH NEXT 3 ROWS ONLY");
+
+    assertThat(sql).doesNotContainIgnoringCase("TOP").doesNotContainIgnoringCase("OFFSET");
+  }
+
+  /**
+   * {@code rendered_bounds} names positions among {@code parameters}, and {@code parameters} are
+   * the text's placeholders in the order the text writes them. For {@code LIMIT ?} at the end of a
+   * statement whose predicate also binds one, the bound is the <b>second</b> placeholder; for
+   * {@code TOP (?)} it is the <b>first</b>, although its parameter is the one the statement
+   * numbered last. That reversal is the whole reason the field names a position.
+   */
+  @Test
+  void the_rendered_bound_is_named_by_its_position_in_the_text() {
+    String statement = "SELECT l_orderkey FROM db.lineitem WHERE l_orderkey > ? LIMIT ?";
+
+    RemoteQuery duck = remoteQuery(TestCatalogs.duckDbProfile(), statement);
+    assertThat(duck.getQueryText()).endsWith("WHERE \"l_orderkey\" > ? LIMIT ?");
+    assertThat(duck.getParametersCount()).isEqualTo(2);
+    assertThat(duck.getRenderedBoundsList()).containsExactly(1);
+    assertThat(duck.getParameters(0).getParam().getIndex()).isEqualTo(0);
+    assertThat(duck.getParameters(1).getParam().getIndex()).isEqualTo(1);
+
+    RemoteQuery sqlServer = remoteQuery(sqlServerProfile(), statement);
+    assertThat(sqlServer.getQueryText()).startsWith("SELECT TOP (?) ");
+    assertThat(sqlServer.getParametersCount()).isEqualTo(2);
+    assertThat(sqlServer.getRenderedBoundsList()).containsExactly(0);
+    // The bound first, the predicate's parameter second — the reverse of how they are numbered.
+    assertThat(sqlServer.getParameters(0).getParam().getIndex()).isEqualTo(1);
+    assertThat(sqlServer.getParameters(1).getParam().getIndex()).isEqualTo(0);
+  }
+
+  /** Both bounds of an {@code OFFSET … FETCH} are named, in the order the text writes them. */
+  @Test
+  void an_offset_and_a_fetch_are_both_named() {
+    RemoteQuery query =
+        remoteQuery(
+            ansiCapabilities(),
+            ansiProfile(),
+            "SELECT l_orderkey FROM db.lineitem ORDER BY l_orderkey"
+                + " OFFSET ? ROWS FETCH NEXT ? ROWS ONLY");
+
+    assertThat(query.getParametersCount()).isEqualTo(2);
+    assertThat(query.getRenderedBoundsList()).containsExactly(0, 1);
+  }
+
+  /** A query with no parameterised bound names none, and carries no bytes for the field. */
+  @Test
+  void a_literal_bound_names_no_rendered_position() {
+    RemoteQuery query =
+        remoteQuery(
+            TestCatalogs.duckDbProfile(),
+            "SELECT l_orderkey FROM db.lineitem WHERE l_orderkey > ? LIMIT 5");
+
+    assertThat(query.getRenderedBoundsList()).isEmpty();
+    assertThat(query.getParametersCount()).isEqualTo(1);
+  }
+
+  /** The pushed plan keeps the bound as the parameter it is, beside the text that renders it. */
+  @Test
+  void the_pushed_plan_carries_the_bound_as_a_parameter() {
+    RemoteQuery query =
+        remoteQuery(TestCatalogs.duckDbProfile(), "SELECT l_orderkey FROM db.lineitem LIMIT ?");
+
+    chalk.ir.v1.Fetch fetch = onlyFetch(query.getPushedPlan());
+    assertThat(fetch.hasCountParam()).isTrue();
+    assertThat(fetch.getCountParam().getIndex()).isEqualTo(0);
+    assertThat(fetch.hasCount()).isFalse();
+  }
+
+  private static chalk.ir.v1.Fetch onlyFetch(Rel rel) {
+    if (rel.getKindCase() == Rel.KindCase.FETCH) {
+      return rel.getFetch();
+    }
+    for (Rel input : chalk.planner.IrNodes.inputs(rel)) {
+      chalk.ir.v1.Fetch found = onlyFetch(input);
+      if (found != null) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * A copied bound is rendered in every branch's own text (D288 with D276): each partition renders
+   * the same number when the execution starts, and the global top-N above them still decides the
+   * answer.
+   */
+  @Test
+  void a_copied_parameterised_bound_is_rendered_in_every_branch() {
+    Pushed pushed =
+        pushed(
+            TestCatalogs.duckDbProfile(),
+            "SELECT symbol, volume FROM db.bars WHERE volume > 1"
+                + " UNION ALL SELECT symbol, volume FROM db.bars WHERE volume > 2"
+                + " ORDER BY symbol LIMIT ?");
+
+    assertThat(pushed.queries()).hasSize(2);
+    for (RemoteQuery branch : pushed.queries()) {
+      assertThat(branch.getQueryText()).endsWith("ORDER BY \"symbol\" LIMIT ?");
+      assertThat(branch.getRenderedBoundsList()).containsExactly(0);
+    }
+  }
+
+  private static DialectProfile ansiProfile() {
+    return TestCatalogs.duckDbProfile().toBuilder().setDialect("ansi").build();
+  }
+
+  /** The SQL Server product {@code SourceDialects.parseProduct} resolves, over a tuned profile. */
+  private static DialectProfile sqlServerProfile() {
+    return TestCatalogs.duckDbProfile().toBuilder().setDialect("mssql").build();
+  }
+
+  private static SourceCapabilities ansiCapabilities() {
+    return TestCatalogs.fullSqlCapabilities().build();
+  }
+
   /** Every shape the corpus can push, with no star left anywhere in any of them. */
   @Test
   void no_generated_query_of_any_shape_says_star() {

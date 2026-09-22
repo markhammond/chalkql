@@ -72,7 +72,11 @@ import chalk.planner.plan.rel.SourceScan;
 import chalk.planner.plan.rel.SourceToLocalConverter;
 import chalk.planner.types.TypeMapper;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelCollationTraitDef;
 import org.apache.calcite.rel.RelFieldCollation;
@@ -573,26 +577,42 @@ public final class RelToIr {
     }
 
     Fetch.Builder fetch = Fetch.newBuilder().setInput(input);
-    // A pushed bound is a literal by construction: `PushdownRules.SortRule` declines a parameterised
-    // one, because a bound that is not known until binding cannot be written into a query text.
-    // Refused here rather than dropped: silently emitting no bound would change the answer.
-    requireLiteralBound(sort.offset, "OFFSET");
-    requireLiteralBound(sort.fetch, "LIMIT");
-    if (sort.offset instanceof RexLiteral offset) {
+    // A pushed bound is a literal or one of the statement's own parameters (D288). A parameter is
+    // written into the pushed plan as the parameter it is, the same way a local `Fetch` writes one,
+    // so the algebra the query text came from says what the text's placeholder stands for; the
+    // executor renders its value into the text when the execution starts. Anything else — an
+    // expression, a context-bound scalar — must not have been pushed, and is refused here rather
+    // than dropped, because silently emitting no bound would change the answer.
+    requirePushableBound(sort.offset, "OFFSET");
+    requirePushableBound(sort.fetch, "LIMIT");
+    DynamicParam offsetParam = boundParam(sort.offset);
+    if (offsetParam != null) {
+      fetch.setOffsetParam(offsetParam);
+    } else if (sort.offset instanceof RexLiteral offset) {
       fetch.setOffset(((Number) offset.getValue2()).longValue());
     }
-    if (sort.fetch instanceof RexLiteral count) {
+    DynamicParam countParam = boundParam(sort.fetch);
+    if (countParam != null) {
+      fetch.setCountParam(countParam);
+    } else if (sort.fetch instanceof RexLiteral count) {
       fetch.setCount(((Number) count.getValue2()).longValue());
     }
     builder.setFetch(fetch);
   }
 
-  private static void requireLiteralBound(@Nullable RexNode bound, String what) {
-    if (bound != null && !(bound instanceof RexLiteral)) {
-      throw new IllegalStateException(
-          "a pushed " + what + " bound is " + bound + " and not a literal; a source is handed a"
-              + " query text, so a bound it cannot see the value of must not have been pushed");
+  private static void requirePushableBound(@Nullable RexNode bound, String what) {
+    if (bound == null || bound instanceof RexLiteral) {
+      return;
     }
+    if (bound instanceof RexDynamicParam parameter
+        && !(parameter instanceof chalk.planner.entitlement.BoundParam)) {
+      return;
+    }
+
+    throw new IllegalStateException(
+        "a pushed " + what + " bound is " + bound + ", which is neither a literal nor one of the"
+            + " statement's own parameters; a source is handed a query text, so a bound nothing can"
+            + " write a number for must not have been pushed");
   }
 
   /**
@@ -659,9 +679,9 @@ public final class RelToIr {
   }
 
   /**
-   * Every dynamic parameter in a pushed subtree, in the order the generated SQL's {@code ?}
-   * placeholders appear — which is the order {@code RelToSqlConverter} unparses them, and therefore
-   * the order the adapter must bind them in.
+   * Every dynamic parameter in a pushed subtree, once per index, in index order. The order an
+   * IR source reads, and the fallback for a SQL source whose text is not what says the order —
+   * which never happens, because a SQL source always has one.
    */
   private static List<RexDynamicParam> dynamicParams(RelNode rel) {
     List<RexDynamicParam> found = new ArrayList<>();
@@ -692,6 +712,27 @@ public final class RelToIr {
     return distinct;
   }
 
+  /** The indexes of the {@code LIMIT}/{@code OFFSET} bounds a pushed subtree carries as parameters. */
+  private static Set<Integer> boundIndexes(RelNode rel) {
+    Set<Integer> found = new HashSet<>(2);
+    collectBoundIndexes(rel, found);
+    return found;
+  }
+
+  private static void collectBoundIndexes(RelNode rel, Set<Integer> into) {
+    if (rel instanceof SourceRels.SourceSort sort) {
+      if (sort.fetch instanceof RexDynamicParam fetch) {
+        into.add(fetch.getIndex());
+      }
+      if (sort.offset instanceof RexDynamicParam offset) {
+        into.add(offset.getIndex());
+      }
+    }
+    for (RelNode input : rel.getInputs()) {
+      collectBoundIndexes(input, into);
+    }
+  }
+
   /**
    * The boundary node, in both flavours (D84). A SQL source gets {@code query_text} <em>and</em>
    * {@code pushed_plan}, so the algebra a query text was generated from is never lost and step 24
@@ -715,11 +756,15 @@ public final class RelToIr {
     } finally {
       rex.exitPushed();
     }
+    List<RexNode> keySets = keySets(pushed);
     if (convention.isSql()) {
-      ir.setQueryText(SourceSql.generate(pushed, convention));
-    }
-    for (RexDynamicParam parameter : dynamicParams(pushed)) {
-      ir.addParameters(rex.convert(parameter));
+      SourceSql.Generated generated = SourceSql.generate(pushed, convention);
+      ir.setQueryText(generated.sql());
+      statementParameters(ir, generated, pushed, !keySets.isEmpty());
+    } else {
+      for (RexDynamicParam parameter : dynamicParams(pushed)) {
+        ir.addParameters(rex.convert(parameter));
+      }
     }
 
     // A lookup subtree's key set is a placeholder like any other, and the last one: the rule appends
@@ -727,7 +772,7 @@ public final class RelToIr {
     // that carries any other parameter, so in practice it is also the only one (ADR 0022). What
     // goes in `parameters` is the *bare* key set — the executor binds a set of values into that one
     // placeholder — while the pushed predicate keeps the `col IN (key set)` shape a source reads.
-    for (RexNode key : keySets(pushed)) {
+    for (RexNode key : keySets) {
       List<RexNode> columns = ((org.apache.calcite.rex.RexCall) key).getOperands();
       if (columns.size() > 1) {
         // A composite key set binds a whole *row* into its one placeholder, so the entry is the
@@ -743,6 +788,66 @@ public final class RelToIr {
               .build());
     }
     return ir.build();
+  }
+
+  /**
+   * The statement's own parameters, one entry per {@code ?} the generated text writes for one, in
+   * the order the text writes them — and {@code rendered_bounds} naming the ones that are a pushed
+   * {@code LIMIT} or {@code OFFSET} (D288).
+   *
+   * <p>Textual order, not index order, is what a positional binding needs and what a dialect that
+   * spells a bound at the front of the statement makes visible: for {@code TOP (?) … WHERE x > ?}
+   * the bound is placeholder <b>0</b> and the statement's first parameter is placeholder 1, and a
+   * list ordered by the numbering Calcite gave the {@code ?}s would have them the other way round.
+   * It is also why a parameter a text names twice is listed twice: two placeholders are two things
+   * to bind, and the value behind them happens to be the same.
+   *
+   * <p>A key set writes its placeholder through the same writer method as a parameter and cannot be
+   * told apart in the writer's record, so a subtree that carries one is handled the way it always
+   * was — its key sets are appended by the caller, in their own order — and a subtree that carries
+   * <em>both</em> is refused. The lookup rule already declines that shape (ADR 0022); this is the
+   * assertion that it did.
+   */
+  private void statementParameters(
+      RemoteQuery.Builder ir, SourceSql.Generated generated, RelNode pushed, boolean hasKeySets) {
+    Map<Integer, RexDynamicParam> byIndex = new HashMap<>();
+    for (RexDynamicParam parameter : dynamicParams(pushed)) {
+      byIndex.put(parameter.getIndex(), parameter);
+    }
+
+    if (hasKeySets) {
+      if (!byIndex.isEmpty()) {
+        throw new IllegalStateException(
+            "a pushed subtree carries both a key set and the statement's own parameters "
+                + byIndex.keySet()
+                + "; the two write the same placeholder and nothing can say which `?` is which");
+      }
+      return;
+    }
+
+    Set<Integer> bounds = boundIndexes(pushed);
+    int position = 0;
+    for (int index : generated.placeholders()) {
+      RexDynamicParam parameter = byIndex.get(index);
+      if (parameter == null) {
+        throw new IllegalStateException(
+            "the generated SQL writes a placeholder for parameter "
+                + index
+                + ", which the pushed subtree does not carry");
+      }
+      ir.addParameters(rex.convert(parameter));
+      if (bounds.contains(index)) {
+        ir.addRenderedBounds(position);
+      }
+      position++;
+    }
+
+    for (int index : bounds) {
+      if (!byIndex.containsKey(index)) {
+        throw new IllegalStateException(
+            "a pushed bound reads parameter " + index + ", which the generated SQL does not write");
+      }
+    }
   }
 
   /** The key-set predicates in a pushed subtree, in the order they were found. */
