@@ -19,7 +19,10 @@ namespace Chalk.Execution.Operators;
 /// <item>
 /// Parameters are bound <em>per execution</em>: the query text has positional placeholders and the
 /// values come from the execution's bound parameters, so a prepared query is planned once and run
-/// with different values.
+/// with different values. A pushed <c>LIMIT</c> or <c>OFFSET</c> that is a parameter is the one
+/// placeholder the provider never binds: its value is read from its slot when the execution starts,
+/// refused by name if it is not a count, and written into the text as a whole number (D288). One
+/// string per execution, and nothing per row.
 /// </item>
 /// <item>
 /// Every failure is attributed (§4): a provider exception becomes
@@ -37,12 +40,28 @@ internal sealed class RemoteQueryOperator : OperatorBase
 {
     private readonly ISourceRuntime _source;
     private readonly RemoteQuery _query;
-    private readonly IReadOnlyList<int> _parameterIndexes;
     private readonly TimeSpan? _timeout;
     private readonly ColumnarBatch _output;
     private readonly ColumnView[]?[] _children;
-    private readonly object?[] _bound;
     private readonly ChalkType[] _parameterTypes;
+
+    /// <summary>The slot each placeholder the <em>provider</em> binds reads, in placeholder order.</summary>
+    private readonly int[] _parameterIndexes;
+
+    /// <summary>This execution's value for each of those, reused between executions.</summary>
+    private readonly object?[] _bound;
+
+    /// <summary>The placeholders this executor writes a number into, ascending (D288).</summary>
+    private readonly int[] _renderedPositions;
+
+    /// <summary>The bound behind each of those, read at execution start.</summary>
+    private readonly RowBound[] _renderedBounds;
+
+    /// <summary>Which clause each one is, for a refusal that names it: <c>LIMIT</c> or <c>OFFSET</c>.</summary>
+    private readonly string[] _renderedClauses;
+
+    /// <summary>This execution's number for each, reused: plan-shaped array, per-run values.</summary>
+    private readonly long[] _rendered;
 
     /// <summary>
     /// This query's text with its literals as pseudonyms, when the engine's redaction is on (D262),
@@ -56,6 +75,7 @@ internal sealed class RemoteQueryOperator : OperatorBase
         ISourceRuntime source,
         RemoteQuery query,
         IReadOnlyList<int> parameterIndexes,
+        IReadOnlyList<RenderedBound> renderedBounds,
         TimeSpan? timeout,
         ArrowSchema schema,
         IReadOnlyList<ChalkType> columnTypes,
@@ -65,26 +85,62 @@ internal sealed class RemoteQueryOperator : OperatorBase
         _source = source;
         _query = query;
         _redactedQueryText = redactedQueryText;
-        _parameterIndexes = parameterIndexes;
         _timeout = timeout;
         _output = NewOutput();
         _children = ArrowBatchViews.ChildHolders(columnTypes);
-        _bound = new object?[parameterIndexes.Count];
-        _parameterTypes = new ChalkType[query.Parameters.Count];
-        for (var i = 0; i < _parameterTypes.Length; i++)
+
+        _renderedPositions = new int[renderedBounds.Count];
+        _renderedBounds = new RowBound[renderedBounds.Count];
+        _renderedClauses = new string[renderedBounds.Count];
+        _rendered = new long[renderedBounds.Count];
+        for (var i = 0; i < renderedBounds.Count; i++)
         {
-            _parameterTypes[i] = ChalkType.FromProto(query.Parameters[i].Type);
+            _renderedPositions[i] = renderedBounds[i].Position;
+            _renderedBounds[i] = renderedBounds[i].Bound;
+            _renderedClauses[i] = renderedBounds[i].Clause;
+        }
+
+        // What is left after the bounds are taken out is what the provider binds, still in
+        // placeholder order — which is what makes dropping one from the middle of the list safe.
+        var bound = parameterIndexes.Count - _renderedPositions.Length;
+        _parameterIndexes = new int[bound];
+        _parameterTypes = new ChalkType[bound];
+        _bound = new object?[bound];
+        var next = 0;
+        var rendered = 0;
+        for (var i = 0; i < parameterIndexes.Count; i++)
+        {
+            if (rendered < _renderedPositions.Length && _renderedPositions[rendered] == i)
+            {
+                rendered++;
+                continue;
+            }
+
+            _parameterIndexes[next] = parameterIndexes[i];
+            _parameterTypes[next] = ChalkType.FromProto(query.Parameters[i].Type);
+            next++;
         }
     }
+
+    /// <summary>One pushed bound the executor renders: where it is, what it reads, what to call it.</summary>
+    internal readonly record struct RenderedBound(int Position, RowBound Bound, string Clause);
 
     protected override ValueTask DisposeCoreAsync() => default;
 
     protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
+        // The bounds this execution runs under, read before any row moves and before the round trip
+        // is even made: a negative, a NULL and a fraction are refused by the names D285 gave them,
+        // and the number is written into the text in the placeholder's place (D288).
+        for (var i = 0; i < _renderedBounds.Length; i++)
+        {
+            _rendered[i] = _renderedBounds[i].Resolve(Context.Parameters, _renderedClauses[i]);
+        }
+
         var request = new RemoteQueryRequest
         {
-            QueryText = _query.QueryText,
+            QueryText = RenderedBounds.Substitute(_query.QueryText, _renderedPositions, _rendered),
             PushedPlan = _query.PushedPlan,
             Parameters = BindParameters(),
             ParameterTypes = _parameterTypes,
@@ -143,12 +199,13 @@ internal sealed class RemoteQueryOperator : OperatorBase
     }
 
     /// <summary>
-    /// This execution's values for the query's placeholders, in placeholder order. Reused between
-    /// executions: the array is plan-shaped, and the values it holds belong to one run.
+    /// This execution's values for the placeholders the provider binds, in placeholder order —
+    /// which is every placeholder the text still has a <c>?</c> for. Reused between executions: the
+    /// array is plan-shaped, and the values it holds belong to one run.
     /// </summary>
     private IReadOnlyList<object?> BindParameters()
     {
-        for (var i = 0; i < _parameterIndexes.Count; i++)
+        for (var i = 0; i < _parameterIndexes.Length; i++)
         {
             var index = _parameterIndexes[i];
             _bound[i] = index >= 0 && index < Context.Parameters.Count

@@ -280,17 +280,92 @@ internal static class PlanCompiler
             }
 
             var schema = ArrowTypeMapping.ToArrowSchema(rel.RowType);
+            var rendered = RenderedBounds(query, indexes, path);
             return context => new RemoteQueryOperator(
                 context,
                 path,
                 source,
                 query,
                 indexes,
+                rendered,
                 context.Settings.SourceTimeout(query.SourceId),
                 schema,
                 Types(rel.RowType),
                 Redacted(query.QueryText));
         }
+
+        /// <summary>
+        /// The placeholders this executor writes a number into rather than binding (D288): where
+        /// each one is in the text, the slot it reads, and whether it is the <c>LIMIT</c> or the
+        /// <c>OFFSET</c> — which the pushed plan says, because that is the algebra the text was
+        /// generated from.
+        /// </summary>
+        private IReadOnlyList<RemoteQueryOperator.RenderedBound> RenderedBounds(
+            Chalk.Ir.RemoteQuery query, int[] indexes, string path)
+        {
+            if (query.RenderedBounds.Count == 0)
+            {
+                return [];
+            }
+
+            var bounds = new RemoteQueryOperator.RenderedBound[query.RenderedBounds.Count];
+            for (var i = 0; i < bounds.Length; i++)
+            {
+                var position = (int)query.RenderedBounds[i];
+                if (position >= indexes.Length)
+                {
+                    throw new InvalidPlanException(
+                        "I-IR-4",
+                        path,
+                        $"RemoteQuery.rendered_bounds names placeholder {position} and the query "
+                        + $"has {indexes.Length}");
+                }
+
+                var param = query.Parameters[position].Param;
+                var clause = ClauseOf(query.PushedPlan, param);
+                bounds[i] = new RemoteQueryOperator.RenderedBound(
+                    position,
+                    RowBound.Parameter(indexes[position], Named(param)),
+                    clause);
+            }
+
+            return bounds;
+        }
+
+        /// <summary>
+        /// Which clause a pushed bound is, read off the pushed plan: <c>OFFSET</c> when a
+        /// <c>Fetch</c> under this query reads it as one, and <c>LIMIT</c> otherwise. Only the
+        /// wording of a refusal turns on it, so a plan that says nothing gets the common answer.
+        /// </summary>
+        private static string ClauseOf(Chalk.Ir.Rel? rel, DynamicParam param)
+        {
+            if (rel is null)
+            {
+                return "LIMIT";
+            }
+
+            if (rel.KindCase == Rel.KindOneofCase.Fetch
+                && rel.Fetch.OffsetParam is { } offset
+                && Same(offset, param))
+            {
+                return "OFFSET";
+            }
+
+            foreach (var input in PlanWalker.Inputs(rel))
+            {
+                if (ClauseOf(input, param) == "OFFSET")
+                {
+                    return "OFFSET";
+                }
+            }
+
+            return "LIMIT";
+        }
+
+        private static bool Same(DynamicParam left, DynamicParam right) =>
+            left.BoundKey.Length == 0 && right.BoundKey.Length == 0
+                ? left.Index == right.Index
+                : string.Equals(left.BoundKey, right.BoundKey, StringComparison.Ordinal);
 
         /// <summary>
         /// A cross-source lookup join (M5, D105): the driving side streams, the lookup side is a

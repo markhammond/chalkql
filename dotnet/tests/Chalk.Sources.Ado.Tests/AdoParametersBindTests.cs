@@ -86,6 +86,37 @@ public sealed class AdoParametersBindTests
         Assert.Equal(expected, viaFourArguments.Parameters[0].DbType);
     }
 
+    /// <summary>
+    /// A pushed bound the engine rendered is gone from the text and gone from the values, together,
+    /// so the placeholders this rewrites and the values bound onto them still line up by position.
+    /// </summary>
+    /// <remarks>
+    /// The engine writes the number into the text before the request is made, so a source sees
+    /// ordinary SQL with one placeholder fewer. Nothing in this package knows a bound from any
+    /// other value — which is the point, and is what this pins: the arithmetic that has to agree is
+    /// "one placeholder per value", and it does.
+    /// </remarks>
+    [Theory]
+    [InlineData(ParameterPlaceholder.NamedAt)]
+    [InlineData(ParameterPlaceholder.NamedDollar)]
+    [InlineData(ParameterPlaceholder.OrdinalDollar)]
+    [InlineData(ParameterPlaceholder.Question)]
+    public void A_rendered_bound_leaves_the_placeholders_and_the_values_lined_up(
+        ParameterPlaceholder style)
+    {
+        var (sql, names) = AdoParameters.Rewrite("SELECT k FROM t WHERE k >= ? LIMIT 25", style);
+
+        Assert.Single(names);
+        Assert.DoesNotContain("LIMIT ?", sql, StringComparison.Ordinal);
+        Assert.Contains("LIMIT 25", sql, StringComparison.Ordinal);
+
+        using var command = MakeCommand();
+        AdoParameters.Bind(command, names, ["a"], [ChalkType.String()]);
+
+        Assert.Single(command.Parameters.Cast<DbParameter>());
+        Assert.Equal("a", command.Parameters[0].Value);
+    }
+
     private static DbCommand MakeCommand() => new FakeProvider().Connect().CreateCommand();
 
     private static RemoteFetchRequest MakeRequest(

@@ -44,6 +44,9 @@ internal sealed class FakeRemoteSource : ISourceRuntime
     /// <summary>Every call's bound key values, in call order.</summary>
     public List<object?[]> Calls { get; } = [];
 
+    /// <summary>The query text of every call, in call order — the text as it was actually sent.</summary>
+    public List<string> Queries { get; } = [];
+
     /// <summary>The most calls that were ever in flight at once.</summary>
     public int PeakConcurrency { get; private set; }
 
@@ -109,6 +112,7 @@ internal sealed class FakeRemoteSource : ISourceRuntime
         lock (Calls)
         {
             Calls.Add(keys);
+            Queries.Add(request.QueryText);
             ordinal = Calls.Count;
             _inFlight++;
             PeakConcurrency = Math.Max(PeakConcurrency, _inFlight);
