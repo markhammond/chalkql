@@ -549,12 +549,27 @@ message RemoteQuery {
   string dialect = 2;
   // The generated SQL, in `dialect`. Empty for a source whose query language is IR.
   string query_text = 3;
-  // Parameters `query_text` (or `pushed_plan`) refers to, in placeholder order.
+  // Parameters `query_text` (or `pushed_plan`) refers to, in placeholder order: one entry per
+  // placeholder in the text, so a parameter the text names twice is listed twice and a consumer
+  // binds the list straight through by position.
   repeated Expr parameters = 4;
   // The pushed subtree as IR: a `Read` with its filter and projection, and whatever `Fetch`,
   // `Sort` or `Aggregate` was pushed above it. Set for every RemoteQuery. The executor
   // hands it to an IR-language source verbatim, and reads it for diagnostics otherwise.
   Rel pushed_plan = 5;
+  // Which of `parameters` are the pushed `LIMIT`/`OFFSET` bound, by position among them.
+  //
+  // A bound that is a parameter travels in the query text as its own placeholder, like any other,
+  // and is the one kind that is *not* bound by the provider: when the execution starts the
+  // executor reads the value, refuses a negative, a NULL and a fraction by name, writes the whole
+  // number into the text in that placeholder's place and drops the entry from the list it binds.
+  // Every dialect is served by that one mechanism, whether it spells the bound at the end of the
+  // statement or at the front, which is why the field names a position rather than a clause.
+  //
+  // Positions are distinct and ascending, and each names an entry that is a `DynamicParam`. Empty
+  // for every query with no parameterised bound, and an empty repeated field emits no bytes, so a
+  // plan from before this field existed is byte-identical to one made now.
+  repeated uint32 rendered_bounds = 6;
 }
 
 // Equi-join on key columns with an optional residual over the joined row.

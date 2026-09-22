@@ -401,24 +401,40 @@ public static class IrBuilder
     }
 
     /// <summary>A <c>RemoteQuery</c> leaf, for the tests that hand one to a fake source (M5).</summary>
+    /// <param name="renderedBounds">
+    /// The placeholder positions that are a pushed <c>LIMIT</c> or <c>OFFSET</c> the executor writes
+    /// a number into rather than binding. Empty for every query without one.
+    /// </param>
+    /// <param name="pushedPlan">
+    /// The algebra the text was generated from. Defaults to a bare leaf of the same row type; a
+    /// test whose bound is an <c>OFFSET</c> passes one that says so, because that is where the
+    /// executor reads the clause name for a refusal.
+    /// </param>
     public static Rel RemoteQuery(
         string sourceId,
         string queryText,
         RowType row,
         double rows = 0,
         IEnumerable<Expr>? parameters = null,
-        string dialect = "fake")
+        string dialect = "fake",
+        IEnumerable<uint>? renderedBounds = null,
+        Rel? pushedPlan = null)
     {
         var query = new RemoteQuery
         {
             SourceId = sourceId,
             Dialect = dialect,
             QueryText = queryText,
-            PushedPlan = new Rel { RowType = row },
+            PushedPlan = pushedPlan ?? new Rel { RowType = row },
         };
         if (parameters is not null)
         {
             query.Parameters.AddRange(parameters);
+        }
+
+        if (renderedBounds is not null)
+        {
+            query.RenderedBounds.AddRange(renderedBounds);
         }
 
         return new Rel { RowType = row, EstRowCount = rows, RemoteQuery = query };

@@ -528,6 +528,7 @@ public static class PlanValidator
                         throw Invalid("I-IR-4", kindPath, "RemoteQuery.source_id is empty");
                     }
 
+                    RenderedBounds(rel.RemoteQuery, kindPath);
                     break;
 
                 case Chalk.Ir.Rel.KindOneofCase.LookupJoin:
@@ -594,6 +595,54 @@ public static class PlanValidator
                     path,
                     "Read.filter is set, but the source did not declare a matching pushdown capability "
                     + "(an M1-M3 planner never sets it)");
+            }
+        }
+
+        /// <summary>
+        /// <c>I-IR-4</c>: every <c>rendered_bounds</c> position names a parameter entry, once.
+        /// </summary>
+        /// <remarks>
+        /// A rendered bound is the one placeholder the provider is never asked to bind: the
+        /// executor reads its value when the execution starts and writes the number into the query
+        /// text in its place. So a position out of range, or one naming an entry that is not a
+        /// <c>DynamicParam</c>, is a plan whose text and parameter list cannot be lined up at all —
+        /// and a position named twice says to render one placeholder for two different reasons.
+        /// All three are refused here rather than at the first row.
+        /// </remarks>
+        private void RenderedBounds(Chalk.Ir.RemoteQuery query, string path)
+        {
+            var last = -1;
+            foreach (var position in query.RenderedBounds)
+            {
+                if (position >= query.Parameters.Count)
+                {
+                    throw Invalid(
+                        "I-IR-4",
+                        path,
+                        $"RemoteQuery.rendered_bounds names placeholder {position} and the query has "
+                        + $"{query.Parameters.Count}");
+                }
+
+                if (query.Parameters[(int)position].KindCase != Expr.KindOneofCase.Param)
+                {
+                    throw Invalid(
+                        "I-IR-4",
+                        path,
+                        $"RemoteQuery.rendered_bounds names placeholder {position}, which is a "
+                        + $"{query.Parameters[(int)position].KindCase}; a rendered bound is the "
+                        + "DynamicParam the executor reads the count from");
+                }
+
+                if ((int)position <= last)
+                {
+                    throw Invalid(
+                        "I-IR-4",
+                        path,
+                        $"RemoteQuery.rendered_bounds is {string.Join(", ", query.RenderedBounds)}; "
+                        + "the positions are distinct and ascending");
+                }
+
+                last = (int)position;
             }
         }
 

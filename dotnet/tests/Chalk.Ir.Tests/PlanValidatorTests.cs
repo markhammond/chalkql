@@ -695,6 +695,78 @@ public sealed class PlanValidatorTests
         Assert.Equal("I-IR-4", AssertInvalid(plan).Invariant);
     }
 
+    // ---- a rendered bound names a parameter entry (D288) ----
+
+    /// <summary>A position among the parameters, naming a <c>DynamicParam</c>, is the whole rule.</summary>
+    [Fact]
+    public void A_rendered_bound_that_names_a_parameter_validates()
+    {
+        PlanValidator.Validate(
+            IrBuilder.Plan(
+                RemoteQuery(
+                    "far",
+                    "SELECT \"symbol\" FROM \"bars\" WHERE \"symbol\" >= ? LIMIT ?",
+                    Bars,
+                    parameters: [Param(0, Str()), Param(1, I64())],
+                    renderedBounds: [1]),
+                parameterTypes: [Str(), I64()]));
+    }
+
+    [Fact]
+    public void A_rendered_bound_past_the_end_of_the_parameters_is_rejected()
+    {
+        var plan = Restamp(IrBuilder.Plan(
+            RemoteQuery(
+                "far",
+                "SELECT \"symbol\" FROM \"bars\" LIMIT ?",
+                Bars,
+                parameters: [Param(0, I64())],
+                renderedBounds: [1]),
+            parameterTypes: I64()));
+
+        var failure = AssertInvalid(plan);
+
+        Assert.Equal("I-IR-4", failure.Invariant);
+        Assert.Contains("names placeholder 1", failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>A key set is bound and never rendered: a bound reads a slot, and a set is not one.</summary>
+    [Fact]
+    public void A_rendered_bound_that_names_a_key_set_is_rejected()
+    {
+        var plan = Restamp(IrBuilder.Plan(
+            RemoteQuery(
+                "far",
+                "SELECT \"symbol\" FROM \"bars\" WHERE \"symbol\" IN (?)",
+                Bars,
+                parameters: [KeySet(Str())],
+                renderedBounds: [0])));
+
+        var failure = AssertInvalid(plan);
+
+        Assert.Equal("I-IR-4", failure.Invariant);
+        Assert.Contains("which is a KeySet", failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>One placeholder is one bound: a repeated position names it twice.</summary>
+    [Fact]
+    public void A_rendered_bound_named_twice_is_rejected()
+    {
+        var plan = Restamp(IrBuilder.Plan(
+            RemoteQuery(
+                "far",
+                "SELECT \"symbol\" FROM \"bars\" LIMIT ?",
+                Bars,
+                parameters: [Param(0, I64())],
+                renderedBounds: [0, 0]),
+            parameterTypes: I64()));
+
+        var failure = AssertInvalid(plan);
+
+        Assert.Equal("I-IR-4", failure.Invariant);
+        Assert.Contains("distinct and ascending", failure.Message, StringComparison.Ordinal);
+    }
+
     // ---- error message quality ----
 
     [Fact]
