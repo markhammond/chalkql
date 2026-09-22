@@ -1,4 +1,5 @@
 using Chalk.Client;
+using Chalk.Ir;
 using Chalk.Sources.Poco;
 using Chalk.Sample.AkadeIndexedSet;
 
@@ -22,7 +23,7 @@ public sealed class IndexedSetSourcePlanningTests
             [6]);
 
         Assert.Equal(1, result.Rows);
-        Assert.True(result.Scanned < AkadeReadmeExamples.Purchases.Length);
+        Assert.True(result.Scanned < AkadeReadmeExamples.PlanningPurchases().Length);
     }
 
     [Fact]
@@ -35,7 +36,7 @@ public sealed class IndexedSetSourcePlanningTests
             [4]);
 
         Assert.Equal(2, result.Rows);
-        Assert.True(result.Scanned < AkadeReadmeExamples.Purchases.Length);
+        Assert.True(result.Scanned < AkadeReadmeExamples.PlanningPurchases().Length);
     }
 
     [Fact]
@@ -48,9 +49,15 @@ public sealed class IndexedSetSourcePlanningTests
             [1, 3]);
 
         Assert.Equal(3, result.Rows);
-        Assert.True(result.Scanned < AkadeReadmeExamples.Purchases.Length);
+        Assert.True(result.Scanned < AkadeReadmeExamples.PlanningPurchases().Length);
     }
 
+    /// <summary>
+    /// D276's worked example, end to end. The limit states a row goal of one, the goal makes the
+    /// ordered lookup on <c>amount</c> the cheapest plan although the parameter's selectivity is
+    /// only guessed, and the source is told to size its first batch for one row — so the seek lands
+    /// on the first matching row and exactly that row is read.
+    /// </summary>
     [Fact]
     public async Task Greater_than_or_equal_lookup()
     {
@@ -61,7 +68,64 @@ public sealed class IndexedSetSourcePlanningTests
             [10000]);
 
         Assert.Equal(1, result.Rows);
-        Assert.True(result.Scanned < AkadeReadmeExamples.PlanningPurchases().Length);
+        Assert.Equal(1, result.Scanned);
+    }
+
+    /// <summary>
+    /// The same bound without the ordering is a goaled <em>scan</em>, and that is the right choice
+    /// rather than a missed one: any matching row answers the query, a parameter's selectivity is
+    /// guessed at one half, so the first match is expected two rows in and two rows at a unit each
+    /// beat a seek. Asserted as a scan so that a change of mind here is a change somebody made.
+    /// </summary>
+    [Fact]
+    public async Task A_parameterised_bound_without_an_ordering_stays_a_scan()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        var plan = await fixture.PlanTextAsync("SELECT id FROM purchases WHERE amount >= ? LIMIT 1");
+
+        Assert.Contains("Read ", plan, StringComparison.Ordinal);
+        Assert.DoesNotContain("IndexLookup", plan, StringComparison.Ordinal);
+
+        // And the scan is goaled rather than left whole: the leaf is what the limit reaches.
+        Assert.Contains("goal=", plan, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// And the goal reaches the source: the leaf is read for the rows the limit will pull rather
+    /// than for a full batch. Two rows is the goal a filter guessed at one half inflates a limit of
+    /// one to; the batches that follow double, so a goal that under-estimated costs a few small
+    /// batches and never the table.
+    /// </summary>
+    [Fact]
+    public async Task A_limit_over_the_filtered_scan_reads_a_ramp_and_not_a_batch()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        var result = await fixture.CountAsync(
+            "SELECT id FROM purchases WHERE amount >= ? LIMIT 1",
+            [1]);
+
+        Assert.Equal(1, result.Rows);
+        Assert.True(
+            result.Scanned <= 8,
+            $"scanned {result.Scanned}: the first ramp steps are 2, 4 and 8 rows, and the first row "
+            + "of the set already matches.");
+    }
+
+    /// <summary>
+    /// With a <em>literal</em> bound the statistics are real rather than guessed: one percent of the
+    /// rows match, the goaled scan would have to examine a hundred of them, and the seek wins.
+    /// </summary>
+    [Fact]
+    public async Task A_literal_bound_under_a_limit_is_a_lookup()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        var plan = await fixture.PlanTextAsync(
+            "SELECT id FROM purchases WHERE amount >= 10000 LIMIT 1");
+
+        Assert.Contains("IndexLookup", plan, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -74,7 +138,7 @@ public sealed class IndexedSetSourcePlanningTests
             [4, 10]);
 
         Assert.Equal(1, result.Rows);
-        Assert.True(result.Scanned < AkadeReadmeExamples.Purchases.Length);
+        Assert.True(result.Scanned < AkadeReadmeExamples.PlanningPurchases().Length);
     }
 
     /*
@@ -92,7 +156,7 @@ public sealed class IndexedSetSourcePlanningTests
      *         [36]);
      *
      *     Assert.Equal(2, result.Rows);
-     *     Assert.True(result.Scanned < AkadeReadmeExamples.Purchases.Length);
+     *     Assert.True(result.Scanned < AkadeReadmeExamples.PlanningPurchases().Length);
      * }
      */
 
@@ -139,6 +203,12 @@ public sealed class IndexedSetSourcePlanningTests
                 await sidecar.DisposeAsync();
                 throw;
             }
+        }
+
+        public async Task<string> PlanTextAsync(string sql)
+        {
+            var query = await Engine.PrepareAsync(sql);
+            return query.Plan.ToPlanText();
         }
 
         public async Task<(int Rows, long Scanned)> CountAsync(
