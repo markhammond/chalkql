@@ -358,6 +358,13 @@ public sealed class ExplainedPath
     public required string EndpointPredicate { get; init; }
 
     /// <summary>
+    /// The path predicate as SQL text, folded, or empty where the path carries none and where it
+    /// folded away. It is what a confinement conjoining this perspective with a kind the entitled
+    /// table holds directly comes to, decided above the join over the two rows together.
+    /// </summary>
+    public string PathPredicate { get; init; } = "";
+
+    /// <summary>
     /// What this principal sees of the column the entitled table joins on: <c>FULL</c>,
     /// <c>MASKED</c>, <c>REDACTED</c>, <c>AGGREGATE</c> or <c>PER_ROW</c>.
     /// </summary>

@@ -178,26 +178,50 @@ internal static class TenancyCompiler
     }
 
     /// <summary>
+    /// One kind confining a group, and <b>which row</b> its column is read off (D279 §2).
+    /// </summary>
+    /// <remarks>
+    /// A confining dimension is ordinarily a sibling on the very row the membership test is written
+    /// over. For a path's endpoint dimension it may instead be a dimension the <em>target</em> holds
+    /// directly, which is a row the endpoint predicate cannot see: the term is then written over both
+    /// rows at once and belongs to the path predicate rather than to the admission.
+    /// </remarks>
+    private sealed class ConfiningDimension
+    {
+        internal required ResolvedDimension Dimension { get; init; }
+
+        /// <summary>True where the column is the target's own rather than this row's.</summary>
+        internal required bool OnTarget { get; init; }
+    }
+
+    /// <summary>
     /// One <b>group</b> a dimension and role bind a list for (D266 §4): the ordered set of kinds
-    /// confining it, resolved to the columns of the row the membership test is written over.
+    /// confining it, resolved to the columns of the rows the membership test is written over.
     /// </summary>
     /// <remarks>
     /// The empty group is today's bare list; a group of one is today's pair list; a group of several
     /// is the tuple of arity <c>1 + n</c>. Which groups exist at all is the <em>declaration's</em>
     /// answer and not a principal's, because one descriptor serves every principal: every subset of
-    /// the confining kinds the policy permits that <b>resolves on this row</b> gets a term, and a
-    /// principal holding no grant of that group binds the list empty, which folds the term away.
+    /// the confining kinds the policy permits that <b>resolves</b> gets a term, and a principal
+    /// holding no grant of that group binds the list empty, which folds the term away.
     /// </remarks>
     private sealed class ConfinementGroup
     {
-        internal required IReadOnlyList<ResolvedDimension> Confining { get; init; }
+        internal required IReadOnlyList<ConfiningDimension> Confining { get; init; }
 
         internal required string Name { get; init; }
 
         internal required IReadOnlyList<string> Columns { get; init; }
 
         internal IReadOnlyList<string> Kinds =>
-            [.. Confining.Select(dimension => dimension.Declared.Kind)];
+            [.. Confining.Select(dimension => dimension.Dimension.Declared.Kind)];
+
+        /// <summary>
+        /// Whether any confining column is the target's rather than this row's (D279 §2): the group
+        /// is then a <em>cross-row</em> one, decided by the path predicate above the join, and the
+        /// chain admits its endpoint rows through the derived list instead.
+        /// </summary>
+        internal bool IsCrossRow => Confining.Any(dimension => dimension.OnTarget);
     }
 
     /// <summary>One <c>Through</c> restriction, resolved against the schema (§3.13, D227).</summary>
@@ -312,8 +336,15 @@ internal static class TenancyCompiler
         /// </summary>
         internal required IReadOnlyList<string> Confining { get; init; }
 
+        /// <summary>
+        /// Whether this list is the <b>projection</b> of a cross-row group onto its dimension
+        /// (D279 §2), which the same grants fill one row each and which the chain's admission reads
+        /// in place of a term it cannot write.
+        /// </summary>
+        internal bool IsProjection { get; init; }
+
         /// <summary>Whether it holds tuples rather than bare identifiers.</summary>
-        internal bool IsPair => Confining.Count > 0;
+        internal bool IsPair => Confining.Count > 0 && !IsProjection;
     }
 
     /// <summary>One table, resolved: what its predicate reads and which roles may see its rows.</summary>
@@ -431,6 +462,10 @@ internal static class TenancyCompiler
             // target's rules for that perspective read it, so the lists those memberships read are
             // this table's to bind too (D265 §2). A confinement of that perspective is written over
             // the endpoint's own row, which is the row the predicate is evaluated on (D266 §3).
+            // The target's own dimensions come in beside the endpoint's, for the cross-row groups of
+            // D279 §2: the grant that confines a path's perspective by a kind the target holds
+            // directly fills the same list, and its projection admits the endpoint rows the chain
+            // has to reach for the path predicate to decide them.
             foreach (var declaredPath in paths)
             {
                 lists.AddRange(ListsOf(
@@ -438,7 +473,8 @@ internal static class TenancyCompiler
                     role,
                     declaredPath.EndpointDimensions,
                     confinable,
-                    path));
+                    path,
+                    declaredPath.IsRelated ? null : dimensions));
             }
         }
 
@@ -542,10 +578,11 @@ internal static class TenancyCompiler
         string role,
         IReadOnlyList<ResolvedDimension> siblings,
         IReadOnlyDictionary<string, IReadOnlyList<string>> confinable,
-        string path)
+        string path,
+        IReadOnlyList<ResolvedDimension>? crossRow = null)
     {
         var declared = dimension.Declared;
-        var available = new List<ResolvedDimension>();
+        var available = new List<ConfiningDimension>();
         if (confinable.TryGetValue(declared.Kind, out var permitted))
         {
             foreach (var kind in permitted)
@@ -555,13 +592,33 @@ internal static class TenancyCompiler
                     continue;
                 }
 
+                var found = false;
                 foreach (var sibling in siblings)
                 {
                     if (!sibling.Declared.IsSubject
                         && string.Equals(sibling.Declared.Kind, kind, StringComparison.Ordinal)
-                        && !available.Contains(sibling))
+                        && !available.Any(c => ReferenceEquals(c.Dimension, sibling)))
                     {
-                        available.Add(sibling);
+                        available.Add(new ConfiningDimension { Dimension = sibling, OnTarget = false });
+                        found = true;
+                    }
+                }
+
+                // A kind this row does not hold, held <em>directly</em> by the target of a path: the
+                // cross-row group of D279 §2. The row's own sibling wins where there is one, which is
+                // what keeps every policy that compiles today compiling to the text it compiled to.
+                if (found || crossRow is null)
+                {
+                    continue;
+                }
+
+                foreach (var target in crossRow)
+                {
+                    if (!target.Declared.IsSubject
+                        && string.Equals(target.Declared.Kind, kind, StringComparison.Ordinal)
+                        && !available.Any(c => ReferenceEquals(c.Dimension, target)))
+                    {
+                        available.Add(new ConfiningDimension { Dimension = target, OnTarget = true });
                     }
                 }
             }
@@ -588,9 +645,9 @@ internal static class TenancyCompiler
         return groups;
     }
 
-    private static List<ResolvedDimension> Subset(IReadOnlyList<ResolvedDimension> of, int mask)
+    private static List<ConfiningDimension> Subset(IReadOnlyList<ConfiningDimension> of, int mask)
     {
-        var chosen = new List<ResolvedDimension>();
+        var chosen = new List<ConfiningDimension>();
         for (var i = 0; i < of.Count; i++)
         {
             if ((mask & (1 << i)) != 0)
@@ -609,7 +666,7 @@ internal static class TenancyCompiler
     /// <c>&lt;kind&gt;_&lt;role&gt;_within_&lt;c1&gt;[_&lt;c2&gt;…]</c>.
     /// </summary>
     private static ConfinementGroup Group(
-        ResolvedDimension dimension, string role, IReadOnlyList<ResolvedDimension> confining)
+        ResolvedDimension dimension, string role, IReadOnlyList<ConfiningDimension> confining)
     {
         var declared = dimension.Declared;
         var kind = declared.Kind;
@@ -629,7 +686,7 @@ internal static class TenancyCompiler
         if (declared.IsSubject
             && confining.Count == 1
             && string.Equals(
-                confining[0].Declared.Kind, declared.Within, StringComparison.Ordinal))
+                confining[0].Dimension.Declared.Kind, declared.Within, StringComparison.Ordinal))
         {
             return new ConfinementGroup
             {
@@ -643,30 +700,59 @@ internal static class TenancyCompiler
         {
             Confining = confining,
             Name = $"{kind}_{role}_within_"
-                + string.Join("_", confining.Select(c => c.Declared.Kind)),
-            Columns = [head, .. confining.Select(c => c.Declared.Kind)],
+                + string.Join("_", confining.Select(c => c.Dimension.Declared.Kind)),
+            Columns = [head, .. confining.Select(c => c.Dimension.Declared.Kind)],
         };
     }
 
-    /// <summary>The lists one dimension and role bind: one per group (D266 §4).</summary>
+    /// <summary>
+    /// The derived list a cross-row group's admission reads (D279 §2): the projection of the group's
+    /// own list onto the dimension, under the group's name with <c>_ids</c> after it.
+    /// </summary>
+    /// <remarks>
+    /// The chain cannot test a cross-row group — the target's column is not on the endpoint's row —
+    /// so the endpoint predicate admits every endpoint row a confined grant <em>could</em> reach, and
+    /// the path predicate finishes the check above the join. The same grants fill it, one row each.
+    /// </remarks>
+    private static string Derived(ConfinementGroup group) => group.Name + "_ids";
+
+    /// <summary>The lists one dimension and role bind: one per group (D266 §4, D279 §2).</summary>
     private static IEnumerable<BoundList> ListsOf(
         ResolvedDimension dimension,
         string role,
         IReadOnlyList<ResolvedDimension> siblings,
         IReadOnlyDictionary<string, IReadOnlyList<string>> confinable,
-        string path)
+        string path,
+        IReadOnlyList<ResolvedDimension>? crossRow = null)
     {
-        foreach (var group in Groups(dimension, role, siblings, confinable, path))
+        foreach (var group in Groups(dimension, role, siblings, confinable, path, crossRow))
         {
             yield return new BoundList
             {
                 Name = group.Name,
                 Columns = group.Columns,
-                Types = [dimension.Type, .. group.Confining.Select(c => c.Type)],
+                Types = [dimension.Type, .. group.Confining.Select(c => c.Dimension.Type)],
                 Kind = dimension.Declared.Kind,
                 Role = role,
                 IsSubject = dimension.Declared.IsSubject,
                 Confining = group.Kinds,
+            };
+
+            if (!group.IsCrossRow)
+            {
+                continue;
+            }
+
+            yield return new BoundList
+            {
+                Name = Derived(group),
+                Columns = [group.Columns[0]],
+                Types = [dimension.Type],
+                Kind = dimension.Declared.Kind,
+                Role = role,
+                IsSubject = dimension.Declared.IsSubject,
+                Confining = group.Kinds,
+                IsProjection = true,
             };
         }
     }
@@ -1599,6 +1685,7 @@ internal static class TenancyCompiler
                 Kind = declaredPath.Kind,
                 Steps = steps,
                 EndpointPredicate = EndpointPredicate(model, declaredPath),
+                PathPredicate = PathPredicate(model, declaredPath),
                 EndpointSchema =
                     string.Equals(declaredPath.EndpointSchema, schema, StringComparison.OrdinalIgnoreCase)
                         ? ""
@@ -1634,7 +1721,9 @@ internal static class TenancyCompiler
                 "",
                 declaredPath.EndpointDimensions,
                 model.Confinable,
-                model.Path);
+                model.Path,
+                CrossRow(model, declaredPath),
+                admission: true);
             parts.Add($"@ctx.global_{role}");
             scopes.Add(parts.Count == 1 ? parts[0] : "(" + string.Join(" OR ", parts) + ")");
         }
@@ -1645,6 +1734,89 @@ internal static class TenancyCompiler
             1 => scopes[0],
             _ => "(" + string.Join(" OR ", scopes) + ")",
         };
+    }
+
+    /// <summary>
+    /// The target's own dimensions a path's endpoint dimension may be confined by across the two
+    /// rows (D279 §1, §2), or null where none may be.
+    /// </summary>
+    /// <remarks>
+    /// An <c>Inherited</c> path is one endpoint row per target key, so a projected endpoint column is
+    /// a function of the key and the verdict can be computed above the join. A <c>Related</c> path is
+    /// many endpoint rows per key and would need it computed inside the chain, where the target's
+    /// columns are not — refused by name in <see cref="RefuseCrossRowAlongRelated"/> rather than
+    /// compiled into a term that could not be evaluated.
+    /// </remarks>
+    private static IReadOnlyList<ResolvedDimension>? CrossRow(
+        TableModel model, ResolvedPath declaredPath) =>
+        declaredPath.IsRelated ? null : model.Dimensions;
+
+    /// <summary>
+    /// The <b>path predicate</b> (D279 §2): the whole membership for a path's perspective, written
+    /// over the target's own columns and the endpoint's as <c>&lt;endpoint_table&gt;.&lt;column&gt;</c>
+    /// — the vocabulary the target's column rules already have.
+    /// </summary>
+    /// <remarks>
+    /// It is the <em>decider</em>: the endpoint predicate admits every endpoint row a confined grant
+    /// could reach, and this finishes the check above the join, where both rows are. Empty where the
+    /// path has no cross-row group, which is every policy that has only ever needed one row — so
+    /// every existing descriptor carries no such field and serialises exactly as it did.
+    /// </remarks>
+    private static string PathPredicate(TableModel model, ResolvedPath declaredPath)
+    {
+        var crossRow = CrossRow(model, declaredPath);
+        if (crossRow is null || !AnyCrossRow(model, declaredPath, crossRow))
+        {
+            return "";
+        }
+
+        var scopes = new List<string>();
+        foreach (var role in model.AdmittedRoles)
+        {
+            var parts = new List<string>();
+            Membership(
+                parts,
+                declaredPath.EndpointDimension,
+                role,
+                declaredPath.EndpointTable + ".",
+                declaredPath.EndpointDimensions,
+                model.Confinable,
+                model.Path,
+                crossRow);
+            parts.Add($"@ctx.global_{role}");
+            scopes.Add(parts.Count == 1 ? parts[0] : "(" + string.Join(" OR ", parts) + ")");
+        }
+
+        return scopes.Count switch
+        {
+            0 => "FALSE",
+            1 => scopes[0],
+            _ => "(" + string.Join(" OR ", scopes) + ")",
+        };
+    }
+
+    /// <summary>Whether any role's groups for this path's dimension read both rows (D279 §2).</summary>
+    private static bool AnyCrossRow(
+        TableModel model, ResolvedPath declaredPath, IReadOnlyList<ResolvedDimension> crossRow)
+    {
+        foreach (var role in model.AdmittedRoles)
+        {
+            foreach (var group in Groups(
+                declaredPath.EndpointDimension,
+                role,
+                declaredPath.EndpointDimensions,
+                model.Confinable,
+                model.Path,
+                crossRow))
+            {
+                if (group.IsCrossRow)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1992,6 +2164,9 @@ internal static class TenancyCompiler
         // `<endpoint_table>.<column>` and evaluated there, once per endpoint row (D265 §2, §4). The
         // `MIN` over the rows reaching one target key is what makes "first match wins across the
         // rows that reach it" of them.
+        // A cross-row group is spelled here exactly as the path predicate spells it (D279 §2): the
+        // endpoint's column qualified, the target's own plain — both already in scope of the
+        // target's column rules.
         foreach (var declaredPath in model.Paths)
         {
             Membership(
@@ -2001,7 +2176,8 @@ internal static class TenancyCompiler
                 declaredPath.EndpointTable + ".",
                 declaredPath.EndpointDimensions,
                 model.Confinable,
-                model.Path);
+                model.Path,
+                CrossRow(model, declaredPath));
         }
 
         parts.Add($"@ctx.global_{role}");
@@ -2019,9 +2195,11 @@ internal static class TenancyCompiler
         string qualifier,
         IReadOnlyList<ResolvedDimension> siblings,
         IReadOnlyDictionary<string, IReadOnlyList<string>> confinable,
-        string path)
+        string path,
+        IReadOnlyList<ResolvedDimension>? crossRow = null,
+        bool admission = false)
     {
-        foreach (var group in Groups(dimension, role, siblings, confinable, path))
+        foreach (var group in Groups(dimension, role, siblings, confinable, path, crossRow))
         {
             if (group.Confining.Count == 0)
             {
@@ -2029,11 +2207,20 @@ internal static class TenancyCompiler
                 continue;
             }
 
+            // A cross-row group cannot be tested on one row (D279 §2). Inside the chain, where only
+            // the endpoint's row is there, the admission reads the group's projection instead and
+            // the path predicate finishes the check above the join.
+            if (group.IsCrossRow && admission)
+            {
+                parts.Add($"{qualifier}{dimension.Column} IN (@ctx.{Derived(group)})");
+                continue;
+            }
+
             var columns = string.Join(
                 ", ",
-                new[] { dimension.Column }
-                    .Concat(group.Confining.Select(c => c.Column))
-                    .Select(column => qualifier + column));
+                new[] { qualifier + dimension.Column }
+                    .Concat(group.Confining.Select(
+                        c => (c.OnTarget ? "" : qualifier) + c.Dimension.Column)));
             parts.Add($"({columns}) IN (@ctx.{group.Name})");
         }
     }

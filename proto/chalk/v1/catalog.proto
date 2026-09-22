@@ -338,6 +338,17 @@ message InheritedVisibility {
   // that a reader — explain, the report, the registration check on a rule condition — needs no walk.
   string endpoint_schema = 4;
   string endpoint_table = 5;
+  // SQL boolean over **this table's own** columns and the endpoint's as
+  // `<endpoint_table>.<column>` — the vocabulary this table's column rules already have. Where a
+  // grant confines this perspective by a kind the target holds directly, the two halves of the test
+  // sit on two rows: `endpoint_predicate` admits every endpoint row such a grant could reach, and
+  // this decides them, above the join, where both rows are.
+  //
+  // Empty for a path that needs only the endpoint's own row, which is every path that carries no
+  // such confinement. The chain then projects nothing beyond its key and a total path whose endpoint
+  // predicate folds to TRUE is elided as before; a path predicate that still stands holds the joins
+  // in the plan, because the marker reads the endpoint's column through them.
+  string path_predicate = 6;
 }
 
 // One step of an `InheritedVisibility` path: from the table the previous step arrived at (the

@@ -163,6 +163,16 @@ public sealed class TableEntitlementDescriptor
                 Append(text, path.EndpointPredicate);
                 Append(text, path.EndpointSchema);
                 Append(text, path.EndpointTable);
+
+                // The path predicate after the endpoint's, in field order, and appended only where
+                // the path carries one — so a path decided on the endpoint's row alone hashes
+                // exactly as it did before the field existed (D279 §3). The marker before it is what
+                // keeps the length-prefixed text unambiguous against the fields that follow.
+                if (path.PathPredicate.Length > 0)
+                {
+                    Append(text, "path");
+                    Append(text, path.PathPredicate);
+                }
             }
         }
 
@@ -284,6 +294,20 @@ public sealed class InheritedVisibilityDescriptor
     /// chain: FALSE drops the joins, TRUE drops the predicate.
     /// </summary>
     public string EndpointPredicate { get; init; } = "";
+
+    /// <summary>
+    /// A SQL boolean over the <b>target's own columns</b> and the endpoint's as
+    /// <c>&lt;endpoint_table&gt;.&lt;column&gt;</c>, decided above the join where both rows are
+    /// (D279 §2, §3). It is what a confinement conjoining this perspective with a kind the target
+    /// holds directly comes to; the endpoint predicate then admits every endpoint row such a grant
+    /// could reach, and this decides them.
+    /// </summary>
+    /// <remarks>
+    /// Empty for a path that needs only the endpoint's own row, which is every path a policy could
+    /// declare before this — so the field emits no bytes and an unchanged policy's descriptor and
+    /// plan are byte-identical.
+    /// </remarks>
+    public string PathPredicate { get; init; } = "";
 
     /// <summary>The endpoint's schema. Empty means the entitled table's own.</summary>
     public string EndpointSchema { get; init; } = "";

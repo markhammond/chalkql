@@ -540,6 +540,25 @@ public static class CatalogValidator
                     + "the predicate is what says which of its rows this principal holds it in; a "
                     + "path without one would grant every row (§2, §3, D265).");
             }
+
+            // A path predicate is decided above the join, over the target's row and the endpoint's
+            // together, which needs one endpoint row per target key. An `Inherited` path is one; a
+            // `Related` path is many, and the verdict would have to be borne by the existence marker
+            // (D279 §1, §4). Refused here, where the descriptor is read, rather than compiled into a
+            // term evaluated at the wrong cardinality.
+            if (declared.PathPredicate.Length > 0
+                && declared.Steps.Count > 0
+                && declared.Steps[0].Direction == Chalk.Entitlements.StepDirection.ToChild)
+            {
+                throw new CatalogValidationException(
+                    where,
+                    $"the path of kind '{declared.Kind}' on '{table.Name}' goes up to a bridge and "
+                    + "carries a path predicate. A path predicate is decided above the join, over "
+                    + "this table's own row and the endpoint's together, and that needs one endpoint "
+                    + "row per key: an inherited path is one, a related path is many, so the verdict "
+                    + "would have to be borne by the path's existence marker. Reach the endpoint "
+                    + "with an inherited path, or drop the confinement (§1, §4, D279).");
+            }
         }
 
         RefuseVisibilityCycle(catalog, schema, table, [], path);

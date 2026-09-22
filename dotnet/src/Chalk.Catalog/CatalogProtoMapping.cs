@@ -741,6 +741,7 @@ internal static class CatalogProtoMapping
             {
                 Kind = path.Kind,
                 EndpointPredicate = path.EndpointPredicate,
+                PathPredicate = path.PathPredicate,
                 EndpointSchema = path.EndpointSchema,
                 EndpointTable = path.EndpointTable,
             };
@@ -813,6 +814,7 @@ internal static class CatalogProtoMapping
                     {
                         Kind = p.Kind,
                         EndpointPredicate = p.EndpointPredicate,
+                        PathPredicate = p.PathPredicate,
                         EndpointSchema = p.EndpointSchema,
                         EndpointTable = p.EndpointTable,
                         Steps = p.Steps

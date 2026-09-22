@@ -276,6 +276,10 @@ message ExplainedPath {
   // this table's sanitiser — but the *statement's* own join does, so a role for which it is not
   // FULL is a role that cannot correlate, and that is shown here rather than refused.
   string key_disclosure = 8;
+  // The path predicate as SQL text, folded for this principal, or empty where the path carries none
+  // and where it folded away. It is what a confinement conjoining this perspective with a kind the
+  // target holds directly comes to, decided above the join over both rows.
+  string path_predicate = 9;
 }
 
 // One step of an `ExplainedPath`, by the names the policy wrote rather than by ordinal.

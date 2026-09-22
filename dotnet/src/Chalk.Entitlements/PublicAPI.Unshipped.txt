@@ -128,6 +128,8 @@ Chalk.Entitlements.ExplainedPath.EndpointTable.get -> string!
 Chalk.Entitlements.ExplainedPath.EndpointTable.init -> void
 Chalk.Entitlements.ExplainedPath.ExplainedPath() -> void
 Chalk.Entitlements.ExplainedPath.KeyDisclosure.get -> string!
+Chalk.Entitlements.ExplainedPath.PathPredicate.get -> string!
+Chalk.Entitlements.ExplainedPath.PathPredicate.init -> void
 Chalk.Entitlements.ExplainedPath.KeyDisclosure.init -> void
 Chalk.Entitlements.ExplainedPath.Kind.get -> string!
 Chalk.Entitlements.ExplainedPath.Kind.init -> void
@@ -341,6 +343,7 @@ const Chalk.Entitlements.Rpc.ExplainedPath.EndpointSchemaFieldNumber = 3 -> int
 const Chalk.Entitlements.Rpc.ExplainedPath.EndpointTableFieldNumber = 4 -> int
 const Chalk.Entitlements.Rpc.ExplainedPath.KeyDisclosureFieldNumber = 8 -> int
 const Chalk.Entitlements.Rpc.ExplainedPath.KindFieldNumber = 1 -> int
+const Chalk.Entitlements.Rpc.ExplainedPath.PathPredicateFieldNumber = 9 -> int
 const Chalk.Entitlements.Rpc.ExplainedPath.StepsFieldNumber = 2 -> int
 const Chalk.Entitlements.Rpc.ExplainedStep.FromColumnFieldNumber = 3 -> int
 const Chalk.Entitlements.Rpc.ExplainedStep.SchemaFieldNumber = 1 -> int
@@ -461,6 +464,8 @@ static Chalk.Entitlements.EntitlementsReport.Empty.get -> Chalk.Entitlements.Ent
 ~Chalk.Entitlements.Rpc.ExplainedPath.Kind.set -> void
 ~Chalk.Entitlements.Rpc.ExplainedPath.MergeFrom(Chalk.Entitlements.Rpc.ExplainedPath other) -> void
 ~Chalk.Entitlements.Rpc.ExplainedPath.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Entitlements.Rpc.ExplainedPath.PathPredicate.get -> string
+~Chalk.Entitlements.Rpc.ExplainedPath.PathPredicate.set -> void
 ~Chalk.Entitlements.Rpc.ExplainedPath.Steps.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Entitlements.Rpc.ExplainedStep>
 ~Chalk.Entitlements.Rpc.ExplainedPath.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
 ~Chalk.Entitlements.Rpc.ExplainedStep.Clone() -> Chalk.Entitlements.Rpc.ExplainedStep

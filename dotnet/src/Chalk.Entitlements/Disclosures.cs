@@ -126,6 +126,7 @@ internal static class Disclosures
                     Elided = path.Elided,
                     Dropped = path.Dropped,
                     EndpointPredicate = path.EndpointPredicate,
+                    PathPredicate = path.PathPredicate,
                     KeyDisclosure = path.KeyDisclosure,
                 });
             }

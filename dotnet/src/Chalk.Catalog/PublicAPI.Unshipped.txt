@@ -498,6 +498,8 @@ Chalk.Entitlements.InheritedVisibilityDescriptor.EndpointTable.init -> void
 Chalk.Entitlements.InheritedVisibilityDescriptor.InheritedVisibilityDescriptor() -> void
 Chalk.Entitlements.InheritedVisibilityDescriptor.Kind.get -> string!
 Chalk.Entitlements.InheritedVisibilityDescriptor.Kind.init -> void
+Chalk.Entitlements.InheritedVisibilityDescriptor.PathPredicate.get -> string!
+Chalk.Entitlements.InheritedVisibilityDescriptor.PathPredicate.init -> void
 Chalk.Entitlements.InheritedVisibilityDescriptor.Steps.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.VisibilityStepDescriptor!>!
 Chalk.Entitlements.InheritedVisibilityDescriptor.Steps.init -> void
 Chalk.Entitlements.ParentVisibilityDescriptor

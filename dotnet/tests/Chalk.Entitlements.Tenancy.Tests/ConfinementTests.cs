@@ -308,33 +308,20 @@ public sealed class ConfinementTests
 
     /// <summary>
     /// <b>F101.</b> The shape the tutorial ran into: a table that holds the confining kind
-    /// <b>directly</b> and reaches the grant's own kind along an <c>Inherited</c> path. It looks,
-    /// read off the declaration, like a table that resolves both — and it is not, because a
-    /// conjoined term along a path is written over the <em>endpoint's</em> own row (design 40 §3,
-    /// ADR 0049 §4), and the endpoint carries no dimension of the confining kind.
+    /// <b>directly</b> and reaches the grant's own kind along an <c>Inherited</c> path. It is one
+    /// perspective on two rows — the organisation on the endpoint's, the region on the target's —
+    /// and D279 builds it as a <em>cross-row</em> group: one list, filled from the grants exactly as
+    /// any other group's is, a projection of it that admits the endpoint rows the chain must reach,
+    /// and a path predicate that decides them above the join.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// F80's clause already refuses it, which is what this first asserts: <c>Rows</c> fills a list
-    /// keyed on the ordered set of confining kinds, the compiler emitted no such list for this pair,
-    /// and the check asks the question the binding will ask. Before ADR 0064 §1 the grant bound,
-    /// filled nothing and said nothing — the tutorial's own workaround was to declare both axes
-    /// directly and denormalise the inherited key onto the target (ADR 0063 §3 b).
-    /// </para>
-    /// <para>
-    /// What this run adds is the half of the message that was missing. "No table of this policy
-    /// resolves them on one row" is true and reads, to a host looking straight at a table that has
-    /// one of them and reaches the other, as though that table were not there. So the refusal names
-    /// it: the table, the path, the endpoint, and the kinds the endpoint's row does carry.
-    /// </para>
-    /// <para>
-    /// Building the <em>support</em> is a separate decision and this is not it: a list spanning the
-    /// target's own column and the path's endpoint reaches into the key-set chain, because the two
-    /// halves of one membership test would be evaluated at two cardinalities.
-    /// </para>
+    /// Before this the binding was refused by name: a conjoined term was written over the endpoint's
+    /// own row alone, and a kind the target held directly was on the wrong row for it. The tutorial's
+    /// workaround was to declare both axes directly and denormalise the inherited key onto the target
+    /// (ADR 0063 §3 b), which is the dead end D279 removes.
     /// </remarks>
     [Fact]
-    public void A_confinement_across_an_inherited_dimension_is_refused_naming_the_endpoint()
+    public void A_confinement_across_an_inherited_dimension_binds_as_a_cross_row_group()
     {
         var policy = TenancyPolicy.Declare(Catalog);
         var source = policy.Source(TenancyPolicyFixture.SourceName);
@@ -354,42 +341,189 @@ public sealed class ConfinementTests
 
         var compiled = policy.Compile([Schema]);
 
-        // The unconfined grant is unaffected: what is refused is the conjunction, not the dimension.
-        Assert.Equal(
-            [[1]],
-            compiled.Bind(new TenancyPrincipal
-            {
-                User = 1,
-                Grants = [Grant.ForTenancy(org, 1, auditor)],
-            }).Lists["org_auditor"].Rows);
+        // The unconfined grant is unaffected: it fills the bare list and the conjoined one stays
+        // empty, which is what folds its term away.
+        var unconfined = compiled.Bind(new TenancyPrincipal
+        {
+            User = 1,
+            Grants = [Grant.ForTenancy(org, 1, auditor)],
+        });
+        Assert.Equal([[1]], unconfined.Lists["org_auditor"].Rows);
+        Assert.Empty(unconfined.Lists["org_auditor_within_region"].Rows);
+        Assert.Empty(unconfined.Lists["org_auditor_within_region_ids"].Rows);
 
-        var error = Assert.Throws<CatalogValidationException>(() => compiled.Bind(
+        // And the conjoined grant now binds: the pair fills the cross-row list, and its projection
+        // onto the organisation is what the chain admits before the path predicate decides.
+        var confined = compiled.Bind(new TenancyPrincipal
+        {
+            User = 1,
+            Grants = [Grant.ForTenancy(org, 1, auditor).Within(region, 2)],
+        });
+        Assert.Equal([[1, 2]], confined.Lists["org_auditor_within_region"].Rows);
+        Assert.Equal([[1]], confined.Lists["org_auditor_within_region_ids"].Rows);
+        Assert.Empty(confined.Lists["org_auditor"].Rows);
+
+        var path = Assert.Single(compiled.For(orders)!.Inherited);
+
+        // The admission, inside the chain, over the endpoint's own row: the projection stands where
+        // the cross-row term cannot be written.
+        Assert.Equal(
+            "(org_id IN (@ctx.org_auditor_within_region_ids) OR org_id IN (@ctx.org_auditor) "
+            + "OR @ctx.global_auditor)",
+            path.EndpointPredicate);
+
+        // And the decider, above the join, over both rows: the endpoint's column qualified, the
+        // target's own plain.
+        Assert.Equal(
+            "((members.org_id, region_id) IN (@ctx.org_auditor_within_region) "
+            + "OR members.org_id IN (@ctx.org_auditor) OR @ctx.global_auditor)",
+            path.PathPredicate);
+    }
+
+    /// <summary>
+    /// The cross-row group is the <em>target's</em> own dimension beside the endpoint's, and a kind
+    /// one join further out is on neither row. A table entitled through a parent that holds the
+    /// confining kind is that shape, and the refusal says so rather than denying the table exists.
+    /// </summary>
+    [Fact]
+    public void A_confining_kind_on_a_through_parent_is_refused_naming_the_parent()
+    {
+        var policy = TenancyPolicy.Declare(Catalog);
+        var source = policy.Source(TenancyPolicyFixture.SourceName);
+        var keeper = policy.Role("keeper");
+        var org = policy.Tenancy("org");
+        var region = policy.Tenancy("region");
+
+        var members = source.Table("members");
+        members.Tenancy(r => r.Direct(org, members.Column("org_id")));
+
+        var regions = source.Table("regions");
+        regions.Tenancy(r => r.Direct(region, regions.Column("id")));
+
+        // The target holds nothing of its own: the organisation is its parent's, and the region is
+        // an inherited path away.
+        var orders = source.Table("orders");
+        orders.Tenancy(r => r
+            .Through(orders.Column("member_id"))
+            .Inherited(region).Through(regions));
+
+        var error = Assert.Throws<CatalogValidationException>(() => policy.Compile([Schema]).Bind(
             new TenancyPrincipal
             {
                 User = 1,
-                Grants = [Grant.ForTenancy(org, 1, auditor).Within(region, 2)],
+                Grants = [Grant.ForTenancy(region, 1, keeper).Within(org, 2)],
             }));
 
         Assert.Contains(
-            "no table of this policy resolves 'org' and 'region' on one row",
+            "'orders' comes closest and is not close enough: it reaches 'region' along a path whose "
+            + "endpoint is 'regions', and 'org' is held by 'members', the parent it derives "
+            + "visibility through, rather than on its own row",
             error.Message,
             StringComparison.Ordinal);
         Assert.Contains(
-            "'orders' comes closest and is not close enough: it holds 'region' on its own row and "
-            + "reaches 'org' along an inherited path whose endpoint is 'members'",
+            "Either 'org' is declared directly on 'orders', or the grant is held unconfined (F101)",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// And two kinds at the ends of two <em>different</em> paths are two endpoint rows, neither of
+    /// which holds the other's kind: the decider reads the target's row and one endpoint's.
+    /// </summary>
+    [Fact]
+    public void Two_kinds_along_different_paths_are_refused_naming_both_endpoints()
+    {
+        var policy = TenancyPolicy.Declare(Catalog);
+        var source = policy.Source(TenancyPolicyFixture.SourceName);
+        var keeper = policy.Role("keeper");
+        var org = policy.Tenancy("org");
+        var region = policy.Tenancy("region");
+
+        var members = source.Table("members");
+        members.Tenancy(r => r.Direct(org, members.Column("org_id")));
+
+        var regions = source.Table("regions");
+        regions.Tenancy(r => r.Direct(region, regions.Column("id")));
+
+        var orders = source.Table("orders");
+        orders.Tenancy(r => r
+            .Inherited(org).Through(members)
+            .Inherited(region).Through(regions));
+
+        var error = Assert.Throws<CatalogValidationException>(() => policy.Compile([Schema]).Bind(
+            new TenancyPrincipal
+            {
+                User = 1,
+                Grants = [Grant.ForTenancy(org, 1, keeper).Within(region, 2)],
+            }));
+
+        Assert.Contains(
+            "'orders' comes closest and is not close enough: it reaches 'org' along a path whose "
+            + "endpoint is 'members' and 'region' along another whose endpoint is 'regions'",
             error.Message,
             StringComparison.Ordinal);
         Assert.Contains(
-            "A conjoined term along a path is written over the endpoint's own row",
+            "two endpoints are two rows neither of which holds the other's kind",
             error.Message,
             StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Every path a policy could declare before D279 is decided on the endpoint's own row alone, so
+    /// it carries no path predicate at all — the field emits no bytes, the descriptor hashes as it
+    /// did, and the recorded plans are byte-identical.
+    /// </summary>
+    [Fact]
+    public void A_policy_that_needs_one_row_carries_no_path_predicate()
+    {
+        var paths = 0;
+        foreach (var (_, descriptor) in Compiled.Tables)
+        {
+            foreach (var path in descriptor.Inherited)
+            {
+                paths++;
+                Assert.Equal("", path.PathPredicate);
+            }
+        }
+
+        Assert.True(paths > 0, "the shared fixture declares paths for this to be about");
+    }
+
+    /// <summary>
+    /// And where the endpoint holds the confining kind on its own row, that sibling still wins: the
+    /// group stays the endpoint's, written over one row, and no path predicate is emitted.
+    /// </summary>
+    [Fact]
+    public void An_endpoints_own_sibling_wins_over_the_targets_column()
+    {
+        var policy = TenancyPolicy.Declare(Catalog);
+        var source = policy.Source(TenancyPolicyFixture.SourceName);
+        var keeper = policy.Role("keeper");
+        var org = policy.Tenancy("org");
+        var member = policy.Subject("member", within: [org]);
+
+        // The endpoint resolves both halves of the conjunction on its own row.
+        var members = source.Table("members");
+        members.Tenancy(r => r
+            .Direct(org, members.Column("org_id"))
+            .Direct(member, members.Column("id")));
+
+        var orders = source.Table("orders");
+        orders.Tenancy(r => r
+            .Inherited(member).Through(members)
+            .Direct(org, orders.Column("member.org")));
+
+        var compiled = policy.Compile([Schema]);
+        var path = Assert.Single(compiled.For(orders)!.Inherited);
+
+        // No cross-row group, so no decider above the join; the conjunction is one term over the
+        // endpoint's own row, exactly as it was written before D279.
+        Assert.Equal("", path.PathPredicate);
         Assert.Contains(
-            "'members' resolves 'org'", error.Message, StringComparison.Ordinal);
-        Assert.Contains(
-            "Either the confining kind resolves on the endpoint's row, or 'org' is declared "
-            + "directly on 'orders' (F101)",
-            error.Message,
+            $"IN (@ctx.member_{keeper.Name}_pairs)",
+            path.EndpointPredicate,
             StringComparison.Ordinal);
+        Assert.DoesNotContain("_pairs_ids", path.EndpointPredicate, StringComparison.Ordinal);
     }
 
     /// <summary>

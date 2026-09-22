@@ -298,6 +298,13 @@ public sealed class TenancyEntitlements
         var groups = new List<TenancyGrantGroup>(_lists.Count);
         foreach (var list in _lists)
         {
+            // A cross-row group's projection is the same grants under another name (D279 §2), so it
+            // is the group's own row that is reported and not the admission derived from it.
+            if (list.IsProjection)
+            {
+                continue;
+            }
+
             groups.Add(new TenancyGrantGroup
             {
                 List = list.Name,
@@ -406,10 +413,16 @@ public sealed class TenancyEntitlements
                 row.Add(id);
             }
 
-            if (matches)
+            if (!matches)
             {
-                rows.Add(row);
+                continue;
             }
+
+            // The projection of a cross-row group onto its dimension (D279 §2): the same grants fill
+            // it, one row each, and the chain reads it as the admission it can write. Built off the
+            // whole row so that only the grants of *this* group contribute, which is what keeps the
+            // admission no wider than the confined grants it stands for.
+            rows.Add(list.IsProjection ? [row[0]] : row);
         }
 
         return new ContextRelation
@@ -630,12 +643,16 @@ public sealed class TenancyEntitlements
     /// though that table did not exist.
     /// </summary>
     /// <remarks>
-    /// It does exist, and what it does not have is a <em>row</em> carrying both. A conjoined term
-    /// along a path is written over the <b>endpoint's</b> own row, because that is the row the
-    /// endpoint predicate is evaluated on (design 40 §3, ADR 0049 §4) — so the confining kind has to
-    /// be a dimension of the endpoint, and a kind the target holds directly is on the wrong row for
-    /// it. Saying which table, which path and which endpoint turns the refusal from a denial into
-    /// the two things a host can actually do about it.
+    /// <para>
+    /// The shape F101 was reported for — one <c>Inherited</c> path whose endpoint holds the grant's
+    /// kind, and the confining kind held directly by the target — is built now (D279): the compiler
+    /// forms the cross-row group, the grant fills it, and the refusal below is never reached for it.
+    /// </para>
+    /// <para>
+    /// What is left are the shapes design 47 §1 leaves refused, and a table wearing one of them still
+    /// reads, off its declaration, like a table that resolves both kinds. So each names itself: which
+    /// table, which route, and the two things a host can do about it.
+    /// </para>
     /// </remarks>
     private string AlongAPath(Grant grant, IReadOnlyList<string> named)
     {
@@ -644,40 +661,77 @@ public sealed class TenancyEntitlements
 
         foreach (var key in _models.Keys.Order(StringComparer.Ordinal))
         {
-            var model = _models[key];
-            foreach (var path in model.Paths)
+            var near = NearMiss(_models[key], conjunction);
+            if (near.Length > 0)
             {
-                if (path.IsRelated || !conjunction.Contains(path.Kind, StringComparer.Ordinal))
+                return near;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// The near miss one table is, or an empty string: two kinds at the ends of two different paths,
+    /// or a confining kind held by a <c>Through</c> parent rather than by the target (D279 §1).
+    /// </summary>
+    /// <remarks>
+    /// A conjoined confinement across a path is decided above the join, over the target's own row
+    /// and <em>one</em> endpoint's together. Two endpoints are two rows, neither holding the other's
+    /// kind; a parent's row is one join further out than the decider can read. Both are a row short
+    /// of the shape, which is what these say.
+    /// </remarks>
+    private static string NearMiss(
+        TenancyCompiler.TableModel model, IReadOnlyList<string> conjunction)
+    {
+        foreach (var path in model.Paths)
+        {
+            if (!conjunction.Contains(path.Kind, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            var rest = conjunction
+                .Where(kind => !string.Equals(kind, path.Kind, StringComparison.Ordinal))
+                .ToList();
+
+            foreach (var other in model.Paths)
+            {
+                if (ReferenceEquals(other, path)
+                    || !rest.Contains(other.Kind, StringComparer.Ordinal))
                 {
                     continue;
                 }
 
-                // The other half of the conjunction has to be on this table's own row for this to be
-                // the near miss rather than a table with nothing to do with the grant.
-                var direct = model.Dimensions
-                    .Where(d => conjunction.Contains(d.Declared.Kind, StringComparer.Ordinal)
-                        && !string.Equals(d.Declared.Kind, path.Kind, StringComparison.Ordinal))
+                return $"'{model.Declared.Name}' comes closest and is not close enough: it reaches "
+                    + $"'{path.Kind}' along a path whose endpoint is '{path.EndpointTable}' and "
+                    + $"'{other.Kind}' along another whose endpoint is '{other.EndpointTable}'. A "
+                    + "conjoined confinement across a path is decided over the target's own row and "
+                    + "one endpoint's together, and two endpoints are two rows neither of which "
+                    + $"holds the other's kind. Either '{other.Kind}' is declared directly on "
+                    + $"'{model.Declared.Name}', or the grant is held unconfined (F101). ";
+            }
+
+            foreach (var parent in model.Through)
+            {
+                var onParent = parent.ParentDimensions
+                    .Where(d => !d.Declared.IsSubject
+                        && rest.Contains(d.Declared.Kind, StringComparer.Ordinal))
                     .Select(d => d.Declared.Kind)
                     .ToList();
-                if (direct.Count == 0)
+                if (onParent.Count == 0)
                 {
                     continue;
                 }
 
-                var carries = path.EndpointDimensions
-                    .Where(d => !d.Declared.IsSubject)
-                    .Select(d => d.Declared.Kind)
-                    .ToList();
-
-                return $"'{model.Declared.Name}' comes closest and is not close enough: it holds "
-                    + $"{TenancyCompiler.Named(direct)} on its own row and reaches "
-                    + $"'{path.Kind}' along an inherited path whose endpoint is "
-                    + $"'{path.EndpointTable}'. A conjoined term along a path is written over the "
-                    + "endpoint's own row, because that is the row the endpoint predicate is "
-                    + $"evaluated on, and '{path.EndpointTable}' resolves "
-                    + $"{TenancyCompiler.Named(carries)}. Either the confining kind resolves on "
-                    + $"the endpoint's row, or '{path.Kind}' is declared directly on "
-                    + $"'{model.Declared.Name}' (F101). ";
+                return $"'{model.Declared.Name}' comes closest and is not close enough: it reaches "
+                    + $"'{path.Kind}' along a path whose endpoint is '{path.EndpointTable}', and "
+                    + $"{TenancyCompiler.Named(onParent)} is held by '{parent.ParentTable}', the "
+                    + "parent it derives visibility through, rather than on its own row. A "
+                    + "conjoined confinement across a path is decided over the target's own row and "
+                    + "the endpoint's, so a kind one join further out is on neither. Either "
+                    + $"{TenancyCompiler.Named(onParent)} is declared directly on "
+                    + $"'{model.Declared.Name}', or the grant is held unconfined (F101). ";
             }
         }
 
