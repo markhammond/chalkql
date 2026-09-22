@@ -8,6 +8,7 @@ import chalk.planner.plan.rules.ChalkIndexLookupRule;
 import chalk.planner.plan.rules.ChalkIndexOrderedScanRule;
 import chalk.planner.plan.rules.ChalkMergeJoinRule;
 import chalk.planner.plan.rules.ChalkNestedLoopJoinRule;
+import chalk.planner.plan.rules.LimitCopyRules;
 import chalk.planner.plan.rules.PartitionRules;
 import chalk.planner.plan.rules.PushdownRules;
 import chalk.planner.plan.rules.ChalkProjectRule;
@@ -207,7 +208,12 @@ public final class RuleSets {
         // D106: prune a partitioned scan once the predicates have reached the leaves, and push the
         // columns the query actually reads into every partition.
         PartitionRules.PRUNE,
-        PartitionRules.PROJECT);
+        PartitionRules.PROJECT,
+        // D276: and then copy a bound above a UNION ALL — a Calcite one or a partitioned scan —
+        // into every branch, so each contributes only its first `offset + fetch` candidates. After
+        // the two rules above, so a copy lands over a branch that is already pruned and projected.
+        LimitCopyRules.UNION,
+        LimitCopyRules.PARTITIONED_SCAN);
   }
 
   /**
