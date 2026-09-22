@@ -1,0 +1,26 @@
+-- a-reviewer-in-sin
+report id:Full, quantity:Full, positions:Some
+1|10
+5|50
+
+-- a-reviewer
+report id:Full, quantity:Full, positions:Some
+1|10
+5|50
+
+-- b-reviewer-in-sin
+report id:Full, quantity:Full, positions:Some
+3|30
+
+-- sin-keeper
+report id:Full, quantity:Full, positions:Some
+1|10
+3|30
+5|50
+
+-- finance
+report id:Full, quantity:Full, positions:All
+1|10
+3|30
+5|50
+

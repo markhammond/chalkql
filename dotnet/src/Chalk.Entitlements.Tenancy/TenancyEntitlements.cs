@@ -1033,7 +1033,10 @@ public sealed class TenancyEntitlements
                 }
 
                 reaches |= Reaches(
-                    grant, declaredPath.EndpointDimension, declaredPath.EndpointDimensions);
+                    grant,
+                    declaredPath.EndpointDimension,
+                    declaredPath.EndpointDimensions,
+                    declaredPath.IsRelated ? null : model.Dimensions);
             }
 
             var term = !reaches
@@ -1089,7 +1092,8 @@ public sealed class TenancyEntitlements
     private bool Reaches(
         Grant grant,
         TenancyCompiler.ResolvedDimension dimension,
-        IReadOnlyList<TenancyCompiler.ResolvedDimension> siblings)
+        IReadOnlyList<TenancyCompiler.ResolvedDimension> siblings,
+        IReadOnlyList<TenancyCompiler.ResolvedDimension>? crossRow = null)
     {
         if (!string.Equals(dimension.Declared.Kind, grant.Kind, StringComparison.Ordinal)
             || dimension.Declared.IsSubject != grant.IsSubject)
@@ -1104,6 +1108,18 @@ public sealed class TenancyEntitlements
             {
                 resolves |= !sibling.Declared.IsSubject
                     && string.Equals(sibling.Declared.Kind, kind, StringComparison.Ordinal);
+            }
+
+            // Or on the target's own row, which is the cross-row group of D279 §2: the compiler
+            // wrote the term over both rows and the pass decides it above the join, so a grant
+            // confined that way does reach the table.
+            if (!resolves && crossRow is not null)
+            {
+                foreach (var target in crossRow)
+                {
+                    resolves |= !target.Declared.IsSubject
+                        && string.Equals(target.Declared.Kind, kind, StringComparison.Ordinal);
+                }
             }
 
             if (!resolves)
@@ -1356,7 +1372,11 @@ public sealed class TenancyEntitlements
                     continue;
                 }
 
-                if (Reaches(grant, declaredPath.EndpointDimension, declaredPath.EndpointDimensions))
+                if (Reaches(
+                    grant,
+                    declaredPath.EndpointDimension,
+                    declaredPath.EndpointDimensions,
+                    declaredPath.IsRelated ? null : model.Dimensions))
                 {
                     tenancies.Add(Tenancy(grant));
                 }
@@ -1462,7 +1482,10 @@ public sealed class TenancyEntitlements
             foreach (var declaredPath in model.Paths)
             {
                 declares |= Reaches(
-                    grant, declaredPath.EndpointDimension, declaredPath.EndpointDimensions);
+                    grant,
+                    declaredPath.EndpointDimension,
+                    declaredPath.EndpointDimensions,
+                    declaredPath.IsRelated ? null : model.Dimensions);
             }
 
             if (!declares)

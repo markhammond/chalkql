@@ -1199,11 +1199,25 @@ public final class EntitlementPass {
       zero.add(dropped[k] ? -1 : 0);
     }
 
+    // What each side projects of its endpoint, so a column rule spanning both rows is decided off
+    // those columns rather than dropped as a conjunct nothing could read (D279 §2).
+    List<VerdictColumns.@Nullable Projection> projections =
+        new ArrayList<>(layout.entries().size());
+    for (ThroughEntry entry : layout.entries()) {
+      PathPlan path = entry.path();
+      projections.add(
+          path == null || path.projected().isEmpty()
+              ? null
+              : new VerdictColumns.Projection(entry.block(), path.projected()));
+    }
+
     // First pass, to learn how wide a parent side is: the expressions it builds are thrown away and
     // only the shape survives, because a verdict's position depends on that width and the width
     // depends on the verdicts.
     int verdicts =
-        VerdictColumns.of(descriptor, childWidth, blocks, zero, rexBuilder, simplify, underParent)
+        VerdictColumns.of(
+                descriptor, childWidth, blocks, zero, rexBuilder, simplify, underParent,
+                projections, -1)
             .width();
 
     if (verdicts == 0) {
@@ -1237,7 +1251,8 @@ public final class EntitlementPass {
 
     VerdictColumns.Plan plan =
         VerdictColumns.of(
-            descriptor, childWidth, blocks, offsets, rexBuilder, simplify, underParent);
+            descriptor, childWidth, blocks, offsets, rexBuilder, simplify, underParent,
+            projections, verdicts);
 
     // Filter_R: any path grants (D226). An elided entry contributes TRUE, so the OR folds away and
     // the leaf is unfiltered; a kept one contributes its marker.
@@ -1317,9 +1332,35 @@ public final class EntitlementPass {
       folded = rexBuilder.makeLiteral(false);
     }
 
+    // Under execute-time binding the cross-row half of a rule condition is a sub-query over a bound
+    // list (D279 §4), and a sub-query cannot stand in a projection the IR can express (§3.2, D209).
+    // Each distinct one becomes one marker column over the **joined** row — the target's columns and
+    // the sides' beside them — exactly as a leaf's own memberships become columns over its scan, and
+    // the sanitiser reads the column instead.
+    List<RexNode> conditions = new ArrayList<>();
+    for (DescriptorExpressions.Column column : descriptor.columns()) {
+      for (int rule = 0; rule < column.rules().size(); rule++) {
+        RexNode condition = plan.conditionOf(column.tableColumn(), rule);
+        if (condition != null) {
+          conditions.add(condition);
+        }
+      }
+    }
+    MembershipMarkers.Plan markers =
+        conditions.isEmpty()
+            ? null
+            : MembershipMarkers.of(
+                at, conditions, rexBuilder, table.schemaName() + "." + table.tableName());
+
     DescriptorExpressions rewritten =
         descriptor
-            .rewriteConditions((column, rule, condition) -> plan.conditionOf(column, rule))
+            .rewriteConditions(
+                (column, rule, condition) -> {
+                  RexNode restated = plan.conditionOf(column, rule);
+                  return restated == null || markers == null
+                      ? restated
+                      : markers.substitute(restated);
+                })
             .withRowPredicate(folded);
 
     Through through =
@@ -1331,6 +1372,7 @@ public final class EntitlementPass {
             ImmutableList.copyOf(offsets),
             verdicts,
             inner,
+            markers,
             // FALSE restricts nothing a plan could imply, and TRUE has already elided the marker,
             // so the only value worth carrying to clause 3 is a restriction that is still a
             // question (F69).
@@ -1476,6 +1518,7 @@ public final class EntitlementPass {
       ImmutableList<Integer> offsets,
       int verdicts,
       boolean inner,
+      MembershipMarkers.@Nullable Plan markers,
       @Nullable RexNode own) {}
 
   /**
@@ -1857,6 +1900,9 @@ public final class EntitlementPass {
               kind);
     }
 
+    if (through.markers() != null) {
+      leaf = MembershipMarkers.attach(leaf, through.markers(), rexBuilder);
+    }
     if (fold.predicate() != null && !fold.predicate().isAlwaysTrue()) {
       leaf = LogicalFilter.create(leaf, fold.predicate());
     }

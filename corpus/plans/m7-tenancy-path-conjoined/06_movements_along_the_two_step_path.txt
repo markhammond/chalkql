@@ -1,0 +1,29 @@
+-- a-reviewer-in-sin
+report id:Full, delta:Full, movements:Some
+1|5
+5|9
+
+-- a-reviewer
+report id:Full, delta:Full, movements:Some
+1|5
+2|6
+5|9
+
+-- b-reviewer-in-sin
+report id:Full, delta:Full, movements:Some
+3|7
+
+-- sin-keeper
+report id:Full, delta:Full, movements:Some
+1|5
+3|7
+5|9
+
+-- finance
+report id:Full, delta:Full, movements:All
+1|5
+2|6
+3|7
+4|8
+5|9
+

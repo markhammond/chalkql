@@ -1,0 +1,29 @@
+-- a-reviewer-in-sin
+report id:Full, product_id:Full, warehouse_code:Full, quantity:Full, cost:Full, positions:Some
+1|1|SIN|10|1000
+5|2|SIN|50|5000
+
+-- a-reviewer
+report id:Full, product_id:Full, warehouse_code:Full, quantity:Full, cost:Full, positions:Some
+1|1|SIN|10|1000
+2|1|TYO|20|2000
+5|2|SIN|50|5000
+
+-- b-reviewer-in-sin
+report id:Full, product_id:Full, warehouse_code:Full, quantity:Full, cost:Full, positions:Some
+3|3|SIN|30|3000
+
+-- sin-keeper
+report id:Full, product_id:Full, warehouse_code:Full, quantity:Full, cost:Redacted, positions:Some
+1|1|SIN|10|<null>
+3|3|SIN|30|<null>
+5|2|SIN|50|<null>
+
+-- finance
+report id:Full, product_id:Full, warehouse_code:Full, quantity:Full, cost:Redacted, positions:All
+1|1|SIN|10|<null>
+2|1|TYO|20|<null>
+3|3|SIN|30|<null>
+4|3|TYO|40|<null>
+5|2|SIN|50|<null>
+

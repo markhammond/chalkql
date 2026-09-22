@@ -1,0 +1,23 @@
+-- a-reviewer-in-sin
+report id:Full, name:Full, positions:Some, products:None
+
+-- a-reviewer
+report id:Full, name:Full, positions:Some, products:Some
+1|Anvil
+2|Anvil
+5|Bellows
+
+-- b-reviewer-in-sin
+report id:Full, name:Full, positions:Some, products:None
+
+-- sin-keeper
+report id:Full, name:Full, positions:Some, products:None
+
+-- finance
+report id:Full, name:Full, positions:All, products:All
+1|Anvil
+2|Anvil
+3|Caliper
+4|Caliper
+5|Bellows
+

@@ -1,0 +1,22 @@
+-- a-reviewer-in-sin
+report warehouse_code:Full, total:Full, positions:Some
+SIN|60
+
+-- a-reviewer
+report warehouse_code:Full, total:Full, positions:Some
+SIN|60
+TYO|20
+
+-- b-reviewer-in-sin
+report warehouse_code:Full, total:Full, positions:Some
+SIN|30
+
+-- sin-keeper
+report warehouse_code:Full, total:Full, positions:Some
+SIN|90
+
+-- finance
+report warehouse_code:Full, total:Full, positions:All
+SIN|90
+TYO|60
+

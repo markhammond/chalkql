@@ -55,6 +55,16 @@ final class VerdictColumns {
   /** How wide one parent side is before its verdicts: the key, then the match marker. */
   static final int FIXED = 2;
 
+  /**
+   * What one path side projects of its endpoint beyond the key, the marker and the verdicts
+   * (D279 §4): the block its columns occupy in the converted row, and which of them are projected,
+   * in the order the side carries them.
+   *
+   * <p>A side with none — every {@code through} parent, and every path decided on the endpoint's own
+   * row alone — is null, and the split below then behaves exactly as it did.
+   */
+  record Projection(int[] block, List<Integer> columns) {}
+
   private VerdictColumns() {}
 
   /**
@@ -122,6 +132,31 @@ final class VerdictColumns {
       RexBuilder rexBuilder,
       RexSimplify simplify,
       List<RexSimplify> underParent) {
+    List<@Nullable Projection> none = new ArrayList<>(blocks.size());
+    for (int k = 0; k < blocks.size(); k++) {
+      none.add(null);
+    }
+    return of(descriptor, childWidth, blocks, offsets, rexBuilder, simplify, underParent, none, 0);
+  }
+
+  /**
+   * The same, where a path side projects endpoint columns of its own (D279 §4).
+   *
+   * @param projections per side, what it projects of its endpoint, or null for a side that projects
+   *     nothing beyond the key, the marker and the verdicts
+   * @param verdictWidth how many verdict columns every emitted side carries, which is where a
+   *     side's projected endpoint columns begin
+   */
+  static Plan of(
+      DescriptorExpressions descriptor,
+      int childWidth,
+      List<int[]> blocks,
+      List<Integer> offsets,
+      RexBuilder rexBuilder,
+      RexSimplify simplify,
+      List<RexSimplify> underParent,
+      List<@Nullable Projection> projections,
+      int verdictWidth) {
     int sides = blocks.size();
     int live = 0;
     for (int offset : offsets) {
@@ -149,10 +184,16 @@ final class VerdictColumns {
       List<Split> splits = new ArrayList<>(first.rules().size());
       boolean everyRuleOnTheParent = true;
       for (int i = 0; i < first.rules().size(); i++) {
-        Split split = split(first.condition(i), childWidth, blocks, rexBuilder, underParent);
+        Split split =
+            split(
+                first.condition(i), childWidth, blocks, rexBuilder, underParent, projections,
+                offsets, verdictWidth);
         splits.add(split);
         everyRuleOnTheParent &=
-            split.decidedByTheParent() && split.whenHalf() == null && split.childHalf() == null;
+            split.decidedByTheParent()
+                && split.whenHalf() == null
+                && split.childHalf() == null
+                && !split.anyCross();
       }
 
       List<RexNode> rewritten =
@@ -322,6 +363,16 @@ final class VerdictColumns {
                     nullable(rexBuilder, role.getType()), offsets.get(k) + FIXED + slot)));
       }
 
+      // And what the child decides of a conjunct spanning both rows (D279 §2): the endpoint's
+      // columns off this side's own projection, the target's plain. Another disjunct of the same
+      // OR, sound for the same reason the halves above are — each implies the condition written.
+      for (int k = 0; k < verdicts.size(); k++) {
+        RexNode cross = split.crossHalf().get(k);
+        if (offsets.get(k) >= 0 && cross != null) {
+          held.add(cross);
+        }
+      }
+
       if (split.childHalf() != null) {
         held.add(split.childHalf());
       }
@@ -393,28 +444,49 @@ final class VerdictColumns {
        * anything on the child, which is the same thing as FALSE under an OR.
        */
       @Nullable RexNode childHalf,
-      boolean decidedByTheParent) {}
+      /**
+       * Per parent side, the half of a conjunct spanning the child's row and <em>that</em> side's
+       * endpoint which the child decides off the side's projected columns, or null where it has
+       * none (D279 §2). Already read at the side's own offsets.
+       */
+      List<@Nullable RexNode> crossHalf,
+      boolean decidedByTheParent) {
+
+    boolean anyCross() {
+      for (RexNode cross : crossHalf) {
+        if (cross != null) {
+          return true;
+        }
+      }
+      return false;
+    }
+  }
 
   private static Split split(
       RexNode condition,
       int childWidth,
       List<int[]> blocks,
       RexBuilder rexBuilder,
-      List<RexSimplify> underParent) {
+      List<RexSimplify> underParent,
+      List<@Nullable Projection> projections,
+      List<Integer> offsets,
+      int verdictWidth) {
     ImmutableBitSet bits = RelOptUtil.InputFinder.bits(condition);
     boolean readsParent = false;
     for (int bit : bits) {
       readsParent |= bit >= childWidth;
     }
     if (!readsParent) {
-      return new Split(condition, List.of(), null, null, false);
+      return new Split(condition, List.of(), null, null, nulls(blocks.size()), false);
     }
 
     List<RexNode> child = new ArrayList<>();
     List<RexNode> mixed = new ArrayList<>();
     List<List<RexNode>> perSide = new ArrayList<>(blocks.size());
+    List<List<RexNode>> perCross = new ArrayList<>(blocks.size());
     for (int k = 0; k < blocks.size(); k++) {
       perSide.add(new ArrayList<>());
+      perCross.add(new ArrayList<>());
     }
 
     for (RexNode conjunct : RelOptUtil.conjunctions(condition)) {
@@ -425,8 +497,34 @@ final class VerdictColumns {
       }
       for (int k = 0; k < blocks.size(); k++) {
         perSide.get(k).add(forSide(conjunct, used, blocks.get(k), rexBuilder));
+        perCross
+            .get(k)
+            .add(forCross(conjunct, childWidth, projections.get(k), rexBuilder));
       }
       mixed.add(forChild(conjunct, childWidth, rexBuilder));
+    }
+
+    // What the child decides of the conjuncts that span its own row and one side's endpoint, read
+    // off that side's projected columns (D279 §2). A side the leaf does not emit has no column to
+    // read, and a conjunct with no such disjunct is FALSE, which is no half at all.
+    List<@Nullable RexNode> crossHalf = new ArrayList<>(blocks.size());
+    for (int k = 0; k < blocks.size(); k++) {
+      Projection projection = projections.get(k);
+      RexNode cross =
+          projection == null || offsets.get(k) < 0
+              ? null
+              : RexUtil.composeConjunction(rexBuilder, perCross.get(k));
+      if (cross == null || cross.isAlwaysFalse()) {
+        crossHalf.add(null);
+      } else if (verdictWidth < 0) {
+        // The first pass learns only how wide a side is, and a cross half takes no slot on the
+        // side: its existence settles the shape, and there are no offsets yet to read it at.
+        crossHalf.add(rexBuilder.makeLiteral(false));
+      } else {
+        crossHalf.add(
+            atTheSide(
+                cross, childWidth, projection, offsets.get(k) + FIXED + verdictWidth, rexBuilder));
+      }
     }
 
     List<RexNode> roleHalf = new ArrayList<>(blocks.size());
@@ -460,7 +558,82 @@ final class VerdictColumns {
         roleHalf,
         child.isEmpty() ? null : RexUtil.composeConjunction(rexBuilder, child),
         childHalf,
+        crossHalf,
         true);
+  }
+
+  private static List<@Nullable RexNode> nulls(int sides) {
+    List<@Nullable RexNode> none = new ArrayList<>(sides);
+    for (int k = 0; k < sides; k++) {
+      none.add(null);
+    }
+    return none;
+  }
+
+  /**
+   * One conjunct as the <b>child</b> can decide it once side {@code k} projects its endpoint
+   * columns (D279 §2): the disjunction of those of its disjuncts that read the child's own row and
+   * that side's projected columns and nothing else, and FALSE where it has none.
+   *
+   * <p>Sound in the same direction as the rest of the split: a disjunct implies the disjunction, so
+   * what is kept implies the condition the descriptor wrote and a rule can only fire less often.
+   */
+  private static RexNode forCross(
+      RexNode conjunct,
+      int childWidth,
+      @Nullable Projection projection,
+      RexBuilder rexBuilder) {
+    if (projection == null) {
+      return rexBuilder.makeLiteral(false);
+    }
+    List<RexNode> kept = new ArrayList<>();
+    for (RexNode disjunct : RelOptUtil.disjunctions(conjunct)) {
+      ImmutableBitSet reads = RelOptUtil.InputFinder.bits(disjunct);
+      boolean ours = true;
+      boolean reachesTheEndpoint = false;
+      for (int bit : reads) {
+        if (bit < childWidth) {
+          continue;
+        }
+        int column = bit - projection.block()[0];
+        boolean projected =
+            bit >= projection.block()[0]
+                && bit < projection.block()[0] + projection.block()[1]
+                && projection.columns().contains(column);
+        ours &= projected;
+        reachesTheEndpoint |= projected;
+      }
+      if (ours && reachesTheEndpoint) {
+        kept.add(disjunct);
+      }
+    }
+    return kept.isEmpty()
+        ? rexBuilder.makeLiteral(false)
+        : RexUtil.composeDisjunction(rexBuilder, kept);
+  }
+
+  /**
+   * The same expression as the joined row reads it: the child's columns where they are, and each
+   * endpoint column at its position in this side's projection, which starts at {@code base}.
+   */
+  private static RexNode atTheSide(
+      RexNode expression,
+      int childWidth,
+      Projection projection,
+      int base,
+      RexBuilder rexBuilder) {
+    return expression.accept(
+        new RexShuttle() {
+          @Override
+          public RexNode visitInputRef(RexInputRef ref) {
+            if (ref.getIndex() < childWidth) {
+              return ref;
+            }
+            int slot = projection.columns().indexOf(ref.getIndex() - projection.block()[0]);
+            return rexBuilder.makeInputRef(
+                nullable(rexBuilder, ref.getType()), base + slot);
+          }
+        });
   }
 
   /**

@@ -271,6 +271,19 @@ public static class CorpusQueries
         new(() => Read(Path.Combine(RepoLayout.Corpus.FullName, "queries", "m7-tenancy"), rewrittenDir: null));
 
     /// <summary>
+    /// Every query in <c>corpus/queries/m7-tenancy-path-conjoined</c>: the family of a conjoined
+    /// confinement whose two halves sit on two rows — one held by the target, one at the end of an
+    /// inherited path — over a fixture of its own.
+    /// </summary>
+    public static IReadOnlyList<CorpusQuery> LoadM7TenancyPathConjoined() =>
+        CachedM7TenancyPathConjoined.Value;
+
+    private static readonly Lazy<IReadOnlyList<CorpusQuery>> CachedM7TenancyPathConjoined =
+        new(() => Read(
+            Path.Combine(RepoLayout.Corpus.FullName, "queries", "m7-tenancy-path-conjoined"),
+            rewrittenDir: null));
+
+    /// <summary>
     /// Every query in <c>corpus/queries/m7-adversarial</c> — the adversarial battery (D251,
     /// <c>docs/design/32-adversarial-entitlements.md</c>): statements written to subvert the leaf
     /// rewrite, run as every principal by the same theories the tenancy corpus is run by.
@@ -304,6 +317,10 @@ public static class CorpusQueries
         name switch
         {
             "03_probe_equality_against_a_parameter" => ["T"],
+
+            // The warehouse the conjoined family's parameterised filter narrows to: the one
+            // a confined reviewer holds, so the parameter and the policy agree.
+            "05_positions_filtered_by_a_parameter" => ["SIN"],
 
             // The identifier a support desk was handed: member 1's, who is in O1.
             "29_members_test_in_the_select_list" => [TenancyFixture.Members[0].NationalId],
