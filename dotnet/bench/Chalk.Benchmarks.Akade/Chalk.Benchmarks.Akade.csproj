@@ -7,7 +7,7 @@
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <NoWarn>$(NoWarn);CHALK001</NoWarn>
   </PropertyGroup>
-
+  
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" />
     <PackageReference Include="Akade.IndexedSet" />

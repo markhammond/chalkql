@@ -3,7 +3,7 @@ using BenchmarkDotNet.Running;
 
 namespace Chalk.Benchmarks.Akade;
 
-internal static class Program
+public static class Program
 {
     /// <summary>
     /// The command line is BenchmarkDotNet's, so one case can be measured on its own:
@@ -11,8 +11,7 @@ internal static class Program
     /// </summary>
     private static int Main(string[] args)
     {
-        BenchmarkRunner.Run<AkadeOverheadBenchmarks>(
-            DefaultConfig.Instance.WithOptions(ConfigOptions.DisableOptimizationsValidator), args);
+        BenchmarkRunner.Run<AkadeSourceBenchmarks>(DefaultConfig.Instance.WithOptions(ConfigOptions.DisableOptimizationsValidator), args);
         return 0;
     }
 }

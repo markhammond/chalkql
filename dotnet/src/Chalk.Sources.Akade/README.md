@@ -1,4 +1,4 @@
-# Chalk Akade source
+# ChalkQL Akade source
 
 This implementation uses the agreed model:
 

@@ -176,7 +176,6 @@ public class ExecutionBenchmarks
     private DuckDBCommand? _hopUnorderedDuckDb;
 
     
-    [ParamsSource(nameof(RowCounts))]
     public int Rows { get; set; }
 
     public IEnumerable<int> RowCounts => [ExecutionBenchmarksSettings.BarCount];

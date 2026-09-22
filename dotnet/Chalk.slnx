@@ -49,4 +49,5 @@
     <Project Path="samples/Chalk.Sample.AkadeIndexedSet/Chalk.Sample.AkadeIndexedSet.csproj" />
     <Project Path="samples/Chalk.Sample.Tutorial/Chalk.Sample.Tutorial.csproj" />
   </Folder>
+  <Project Path="bench/Chalk.Benchmarks.Akade/Chalk.Benchmarks.Akade.csproj" />
 </Solution>

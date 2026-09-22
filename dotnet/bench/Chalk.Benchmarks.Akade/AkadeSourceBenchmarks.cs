@@ -36,7 +36,7 @@ namespace Chalk.Benchmarks.Akade;
 [CategoriesColumn]
 [MemoryDiagnoser]
 [HideColumns("Job", "Error", "StdDev", "Median", "RatioSD")]
-public class AkadeOverheadBenchmarks
+public class AkadeSourceBenchmarks
 {
     public sealed record Purchase(int Id, int ProductId, int Amount, int UnitPrice);
 

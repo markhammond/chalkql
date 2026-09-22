@@ -169,19 +169,19 @@ For each query, elapsed time is normalised to DuckDB at `1.00` (lower is faster)
 
 | Method                            | Categories | Rows    | Ratio | Gen0      | Allocated     | Alloc Ratio |
 |---------------------------------- |----------- |-------- |------:|----------:|--------------:|------------:|
-| 'chalkql group by'                | group by   | 2016000 |  1.34 |         - |       2.55 KB |        0.50 |
-| 'duckdb group by'                 | group by   | 2016000 |  1.00 |         - |        5.1 KB |        1.00 |
+| 'chalkql group by'                | group by   | 2016000 |  1.39 |         - |       2.55 KB |        0.50 |
+| 'duckdb group by'                 | group by   | 2016000 |  1.00 |         - |       5.07 KB |        1.00 |
 |                                   |            |         |       |           |               |             |
-| 'chalkql hop'                     | hop        | 2016000 |  0.75 |         - | 1850175.13 KB |       60.51 |
+| 'chalkql hop'                     | hop        | 2016000 |  0.77 |         - | 1850175.04 KB |       60.51 |
 | 'duckdb hop'                      | hop        | 2016000 |  1.00 | 3000.0000 |    30576.6 KB |        1.00 |
 |                                   |            |         |       |           |               |             |
-| 'chalkql scan + filter + project' | scan       | 2016000 |  0.89 |  166.6667 |    1636.31 KB |        0.36 |
-| 'duckdb scan + filter + project'  | scan       | 2016000 |  1.00 |  500.0000 |    4555.04 KB |        1.00 |
+| 'chalkql scan + filter + project' | scan       | 2016000 |  0.87 |  166.6667 |    1636.31 KB |        0.36 |
+| 'duckdb scan + filter + project'  | scan       | 2016000 |  1.00 |  400.0000 |     4555.1 KB |        1.00 |
 |                                   |            |         |       |           |               |             |
 | 'chalkql sort'                    | sort       | 2016000 |  0.28 |         - |    1636.45 KB |        0.20 |
 | 'duckdb sort'                     | sort       | 2016000 |  1.00 | 1000.0000 |    8195.37 KB |        1.00 |
 |                                   |            |         |       |           |               |             |
-| 'chalkql window'                  | window     | 2016000 |  0.58 |         - |    1636.85 KB |        0.20 |
+| 'chalkql window'                  | window     | 2016000 |  0.62 |         - |    1636.85 KB |        0.20 |
 | 'chalkql window (clustered)'      | window     | 2016000 |  0.47 |         - |    1636.88 KB |        0.20 |
 | 'duckdb window'                   | window     | 2016000 |  1.00 | 1000.0000 |    8195.37 KB |        1.00 |
 
