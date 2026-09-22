@@ -1337,15 +1337,29 @@ public final class EntitlementPass {
     // Each distinct one becomes one marker column over the **joined** row — the target's columns and
     // the sides' beside them — exactly as a leaf's own memberships become columns over its scan, and
     // the sanitiser reads the column instead.
+    //
+    // Only where a side projects endpoint columns, which is the only way a condition decided here
+    // can hold a membership at all: without one, every membership of a rule is either the parent
+    // side's — computed in its own sub-tree, where its markers are already attached — or the child's
+    // own half, which is what it was before this and stays so. Narrow on purpose: a leaf that
+    // carries no cross-row group plans exactly as it planned.
+    var projected = false;
+    for (VerdictColumns.Projection projection : projections) {
+      projected |= projection != null;
+    }
+
     List<RexNode> conditions = new ArrayList<>();
-    for (DescriptorExpressions.Column column : descriptor.columns()) {
-      for (int rule = 0; rule < column.rules().size(); rule++) {
-        RexNode condition = plan.conditionOf(column.tableColumn(), rule);
-        if (condition != null) {
-          conditions.add(condition);
+    if (projected) {
+      for (DescriptorExpressions.Column column : descriptor.columns()) {
+        for (int rule = 0; rule < column.rules().size(); rule++) {
+          RexNode condition = plan.conditionOf(column.tableColumn(), rule);
+          if (condition != null) {
+            conditions.add(condition);
+          }
         }
       }
     }
+
     MembershipMarkers.Plan markers =
         conditions.isEmpty()
             ? null
