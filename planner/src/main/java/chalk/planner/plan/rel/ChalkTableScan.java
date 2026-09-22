@@ -137,15 +137,31 @@ public final class ChalkTableScan extends TableScan implements ChalkRel {
   }
 
   /**
+   * Cost model v8 (D276, {@code 46-row-goals.md} §2.2): the table's rows, or the goal when a limit
+   * above states a smaller one, because that is how many rows this scan will be pulled for.
+   *
+   * <p>Everything above it then follows from the ordinary bottom-up metadata: the filter costs these
+   * rows and estimates {@code sel ×} them, the project the same, the limit its fetch. The goal is a
+   * different rel, not a different way of adding up costs, so Volcano's cumulative-cost semantics
+   * are untouched.
+   */
+  @Override
+  public double estimateRowCount(RelMetadataQuery mq) {
+    double rows = table.getRowCount();
+    return rowGoal > 0 ? Math.min(rows, rowGoal) : rows;
+  }
+
+  /**
    * {@code rows × scan_row_cost × (projected / total columns)} — the table's cost profile decides
-   * what a row costs (D38), and reading fewer columns costs proportionally less.
+   * what a row costs (D38), and reading fewer columns costs proportionally less. {@code rows} is
+   * the goaled count of {@link #estimateRowCount} (cost model v8).
    *
    * <p>The same number goes in both slots because Calcite's {@code VolcanoCost} orders costs by its
    * {@code rowCount} field alone; a cpu term it never reads would be decorative (ADR 0015).
    */
   @Override
   public @Nullable RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {
-    double rows = table.getRowCount();
+    double rows = estimateRowCount(mq);
     ProjectedRelOptTable projected = table.unwrap(ProjectedRelOptTable.class);
     int totalColumns =
         projected == null

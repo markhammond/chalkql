@@ -187,6 +187,113 @@ class CostModelTest {
     assertThat(model.lookup(1, rows * 0.55)).isGreaterThan(scanAndFilter);
   }
 
+  // ---- cost model v8: the goaled leaf and the top-N's true cost (D276, F112) ----
+
+  /**
+   * A goaled scan estimates and costs the rows it will be pulled for. Nothing about the formula
+   * changed — it is still {@code rows × scan_row_cost × share} — only which {@code rows}.
+   */
+  @Test
+  void a_goaled_scan_is_estimated_and_costed_for_its_goal() {
+    Planned planned = plan("SELECT * FROM bars WHERE symbol = 'BTCUSDT'");
+    ChalkTableScan goaled = planned.scan().withRowGoal(12);
+
+    assertThat(planned.mq().getRowCount(planned.scan())).isEqualTo(100_800.0);
+    assertThat(planned.mq().getRowCount(goaled)).isEqualTo(12.0);
+    assertThat(selfCost(goaled, planned.mq()))
+        .isEqualTo(CostModel.defaults().scan(12, 1.0));
+  }
+
+  /** A goal at or above the leaf's own estimate changes nothing: the cap is a minimum. */
+  @Test
+  void a_goal_above_the_tables_rows_leaves_the_scan_where_it_was() {
+    Planned planned = plan("SELECT * FROM bars WHERE symbol = 'BTCUSDT'");
+
+    assertThat(planned.mq().getRowCount(planned.scan().withRowGoal(1_000_000))).isEqualTo(100_800.0);
+  }
+
+  /**
+   * A goaled lookup pays its seeks and the rows it will be pulled for, not its whole range. This is
+   * the comparison D276 exists for: one symbol of five is a fifth of the table, and a goal of one
+   * turns twenty thousand rows of gather into one.
+   */
+  @Test
+  void a_goaled_lookup_pays_a_seek_and_its_goal() {
+    Planned planned = plan("SELECT * FROM bars WHERE symbol = 'BTCUSDT'");
+    ChalkIndexLookup goaled = planned.lookup().withRowGoal(1);
+
+    assertThat(planned.lookupRows()).isEqualTo(100_800 / 5.0);
+    assertThat(planned.mq().getRowCount(goaled)).isEqualTo(1.0);
+    assertThat(selfCost(goaled, planned.mq())).isEqualTo(CostModel.defaults().lookup(1, 1));
+    assertThat(selfCost(goaled, planned.mq())).isLessThan(selfCost(planned.lookup(), planned.mq()));
+  }
+
+  /**
+   * F112. The top-N's heap pass reads its whole input, and it used to sit in the slot {@code
+   * VolcanoCost} ignores while the slot it compares held the output row count — so a top-N over a
+   * hundred thousand rows was, to the optimiser, as cheap as one over ten. Both slots now hold
+   * {@code input rows × log2(offset + fetch + 1)}.
+   */
+  @Test
+  void a_top_ns_heap_pass_is_in_the_slot_volcano_compares() {
+    PlannedTopN planned = topNFor("SELECT symbol, ts FROM bars ORDER BY volume, symbol, ts LIMIT 5");
+
+    double inputRows = planned.mq().getRowCount(planned.topN().getInput());
+    double expected = inputRows * (Math.log(5 + 0 + 1) / Math.log(2));
+
+    assertThat(selfCost(planned.topN(), planned.mq())).isCloseTo(
+        expected, org.assertj.core.data.Offset.offset(1e-6));
+
+    // And it is no longer the five rows the node hands back, which is what made it invisible.
+    assertThat(selfCost(planned.topN(), planned.mq())).isGreaterThan(5.0);
+  }
+
+  /** An offset is part of the heap, so it is part of the cost. */
+  @Test
+  void a_top_ns_offset_widens_its_heap() {
+    double withoutOffset =
+        selfCostOfTopN("SELECT symbol, ts FROM bars ORDER BY volume, symbol, ts LIMIT 5");
+    double withOffset =
+        selfCostOfTopN("SELECT symbol, ts FROM bars ORDER BY volume, symbol, ts LIMIT 5 OFFSET 20");
+
+    assertThat(withOffset).isGreaterThan(withoutOffset);
+  }
+
+  private static double selfCostOfTopN(String sql) {
+    PlannedTopN planned = topNFor(sql);
+    return selfCost(planned.topN(), planned.mq());
+  }
+
+  private static double selfCost(RelNode node, RelMetadataQuery mq) {
+    org.apache.calcite.plan.RelOptCost cost =
+        node.computeSelfCost(node.getCluster().getPlanner(), mq);
+    assertThat(cost).isNotNull();
+    return cost.getRows();
+  }
+
+  private record PlannedTopN(chalk.planner.plan.rel.ChalkTopN topN, RelMetadataQuery mq) {}
+
+  /** Plans {@code sql} at {@code FULL} and hands back the top-N it chose. */
+  private static PlannedTopN topNFor(String sql) {
+    CorpusPlanner planner = new CorpusPlanner();
+    try (PlannerPipeline pipeline =
+        PlannerPipeline.create(
+            planner.catalog(), PushdownPolicy.full(), SqlConfigs.DEFAULT_CONFORMANCE)) {
+      RelNode physical = pipeline.plan(sql, true).physical();
+      chalk.planner.plan.rel.ChalkTopN topN =
+          find(physical, chalk.planner.plan.rel.ChalkTopN.class);
+      assertThat(topN).as("a top-N for: " + sql).isNotNull();
+
+      topN.getCluster().setMetadataProvider(ChalkRelMetadata.SOURCE);
+      topN.getCluster().invalidateMetadataQuery();
+      return new PlannedTopN(topN, RelMetadataQuery.instance());
+    } catch (RuntimeException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new IllegalStateException("planning failed for: " + sql, e);
+    }
+  }
+
   /** One planning run, with both alternatives in hand for comparison. */
   // ---- F14: join cardinality from uniqueness, foreign keys and distinct counts ----
 

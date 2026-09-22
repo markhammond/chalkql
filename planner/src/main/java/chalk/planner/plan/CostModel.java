@@ -3,8 +3,26 @@ package chalk.planner.plan;
 import chalk.ir.v1.CostProfile;
 
 /**
- * Cost model v6 (D38, and §3 of the join, window, windows-II and user-function designs). Costs come from a {@link CostProfile} the client declares per schema and per
+ * Cost model v8 (D38, and §3 of the join, window, windows-II and user-function designs). Costs come from a {@link CostProfile} the client declares per schema and per
  * table, table over schema over these defaults, field by field; a zero field means "inherit".
+ *
+ * <p><b>What v8 changed</b> (D276, F112, {@code 46-row-goals.md} §2.2). No constant moved; two rels
+ * started counting differently.
+ *
+ * <ul>
+ *   <li>A leaf that carries a <b>row goal</b> — a scan or an index lookup under a limit that will
+ *       stop pulling — estimates and costs the rows it will actually be pulled for:
+ *       {@code rows' = min(rows, goal)} for a scan, {@code min(matched rows, goal)} for a lookup,
+ *       and the cost formulas are the v6 and v7 ones over {@code rows'}. A goaled leaf is a
+ *       different rel from the same leaf without one, so nothing else in the model changes: the
+ *       ordinary bottom-up metadata does the rest.
+ *   <li>{@code ChalkTopN} puts {@code input rows × log2(offset + fetch + 1)} in <b>both</b> slots
+ *       instead of its output row count in the one Volcano compares (F112). Its heap pass reads the
+ *       whole input and was invisible to the optimiser, exactly as {@code ChalkSort}'s was before
+ *       ADR 0017.
+ * </ul>
+ *
+ * <p>v7 was the clustered constant (D257) and is unchanged.
  *
  * <p>The numbers are per unit of work, and the units are deliberately commensurate: with a filter
  * above a scan costing two units per table row, a lookup wins below roughly 50 % selectivity and
@@ -303,7 +321,11 @@ public final class CostModel {
         + ",lookupJoin=calls*remoteCall+matched*remoteRow+hash(driving,matched)"
         + ",broadcastJoin=remoteCall+keys*remoteRow+matched*remoteRow+hash(driving,matched)"
         + ",adaptiveJoin=min(lookup,local)+small"
-        + ",partitionedScan=sum(partitions)";
+        + ",partitionedScan=sum(partitions)"
+        // v8 (D276, F112): a goaled leaf is costed for min(rows, goal), and the top-N's heap pass
+        // is in the slot Volcano compares. Both change which plan is chosen, so both are in the
+        // fingerprint a host compares two sidecars by.
+        + ",rowGoal=min(rows,goal),topN=rows*log2(offset+fetch+1)";
   }
 
   private static double or(double declared, double fallback) {

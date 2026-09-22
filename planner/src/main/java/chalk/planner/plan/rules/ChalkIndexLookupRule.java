@@ -56,6 +56,16 @@ public final class ChalkIndexLookupRule extends RelRule<ChalkRuleConfig> {
     ChalkFilter filter = call.rel(0);
     ChalkTableScan scan = call.rel(1);
 
+    // D276: a goaled scan belongs to one limit, and its goal was computed for a scan. Converting it
+    // here would produce a lookup goaled by that number — which is the wrong number, because a
+    // lookup consumes part of the condition the goal was inflated by — and would merge the goaled
+    // chain's sets back into the plain ones. ChalkRowGoalRule offers the goaled lookup chains
+    // itself, from the plain lookup this rule has already produced, so nothing is lost by
+    // declining.
+    if (scan.rowGoal() > 0) {
+      return;
+    }
+
     List<Index> indexes = scan.chalkTable().indexes();
     if (indexes.isEmpty()) {
       return;

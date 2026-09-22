@@ -3,6 +3,7 @@ package chalk.planner.plan.rel;
 import chalk.planner.plan.ChalkConvention;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
+import org.apache.calcite.plan.DeriveMode;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptCost;
 import org.apache.calcite.plan.RelOptPlanner;
@@ -97,11 +98,29 @@ public final class ChalkLimit extends SingleRel implements ChalkRel {
     return sameCollation(required);
   }
 
-  /** And it delivers whatever its input delivers. */
+  /**
+   * A limit does <b>not</b> derive from its input, and this is not an optimisation left on the
+   * table (F113).
+   *
+   * <p>Derivation registers a copy of this node, over a differently-ordered child, in the same
+   * {@code RelSet}. For a {@code Filter} or a {@code Project} that is sound: swap the child for an
+   * equivalent one in another order and the node still produces the same rows. For a limit it is
+   * not: which rows come out is decided by the order they arrive in. A {@code ChalkLimit} that
+   * {@link ChalkSortRule} put over an input converted to {@code (volume, symbol, ts)} means "the
+   * first five by that order"; a derived twin over the plain scan means "the first five rows",
+   * Volcano may satisfy the set's collation by sorting <em>above</em> it, and
+   * {@code Sort(Limit(Scan))} is not {@code Limit(Sort(Scan))}.
+   *
+   * <p>It cost nothing while a top-N was mispriced at its output row count, because the top-N won
+   * anyway; the moment {@code ChalkTopN} started costing its heap pass, the derived twin became the
+   * cheapest plan in the set and the answers changed.
+   *
+   * <p>Pushing a requirement <em>down</em> stays: {@link #passThroughTraits} is the sound direction
+   * — sort the input, then take the first n — and is what serves every ordering a parent asks for.
+   */
   @Override
-  public @Nullable Pair<RelTraitSet, List<RelTraitSet>> deriveTraits(
-      RelTraitSet childTraits, int childId) {
-    return sameCollation(childTraits);
+  public DeriveMode getDeriveMode() {
+    return DeriveMode.PROHIBITED;
   }
 
   private @Nullable Pair<RelTraitSet, List<RelTraitSet>> sameCollation(RelTraitSet other) {

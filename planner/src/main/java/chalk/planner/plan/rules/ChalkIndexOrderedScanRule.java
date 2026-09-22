@@ -56,6 +56,14 @@ public final class ChalkIndexOrderedScanRule extends RelRule<ChalkRuleConfig> {
   @Override
   public void onMatch(RelOptRuleCall call) {
     ChalkTableScan scan = call.rel(0);
+
+    // D276: a goaled scan is one limit's own alternative, and a lookup made from it would carry a
+    // goal computed for a scan into a set of its own. ChalkRowGoalRule offers the goaled ordered
+    // lookup directly, over the plain one this rule produced, so declining costs nothing.
+    if (scan.rowGoal() > 0) {
+      return;
+    }
+
     List<Integer> projection = scan.projection();
 
     for (Index index : scan.chalkTable().indexes()) {

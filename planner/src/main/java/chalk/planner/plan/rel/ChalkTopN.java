@@ -79,10 +79,24 @@ public final class ChalkTopN extends SingleRel implements ChalkRel {
     return Math.min(mq.getRowCount(getInput()), offsetValue() + fetchValue());
   }
 
+  /**
+   * {@code input rows × log2(offset + fetch + 1)}, in <b>both</b> slots (F112).
+   *
+   * <p>It used to put its <em>output</em> row count in the first slot and the heap pass in the
+   * second. Only the first is ever compared — {@code VolcanoCost.isLt} reads {@code rowCount} and
+   * nothing else (ADR 0015) — so a top-N over a hundred thousand rows cost the optimiser the same as
+   * a top-N over ten: the pass that reads the whole input was invisible, exactly as {@link
+   * ChalkSort}'s was before ADR 0017, and for the same reason.
+   *
+   * <p>It is fixed here and not earlier because with its true cost a top-N over a scan can lose to
+   * the whole-range ordered scan of D50 for a fetch above a handful of rows, and the plan it should
+   * lose to is the goaled ordered lookup — which only exists once D276's rule does.
+   */
   @Override
   public @Nullable RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {
     double inputRows = mq.getRowCount(getInput());
     double heap = offsetValue() + fetchValue() + 1;
-    return planner.getCostFactory().makeCost(estimateRowCount(mq), inputRows * ChalkSort.log2(heap), 0);
+    double work = inputRows * ChalkSort.log2(heap);
+    return planner.getCostFactory().makeCost(work, work, 0);
   }
 }

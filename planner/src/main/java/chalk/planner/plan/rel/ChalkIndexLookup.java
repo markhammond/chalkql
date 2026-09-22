@@ -353,9 +353,19 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
     return writer;
   }
 
-  /** Σ range selectivities × table rows, capped at the table, and 1 for a unique equality. */
+  /**
+   * Σ range selectivities × table rows, capped at the table, and 1 for a unique equality — then
+   * capped again at the row goal a limit above states (cost model v8, D276,
+   * {@code 46-row-goals.md} §2.2), because that is how many of the matched rows this lookup will be
+   * pulled for.
+   */
   @Override
   public double estimateRowCount(RelMetadataQuery mq) {
+    return capped(matchedRowCount(mq));
+  }
+
+  /** The rows this lookup's ranges cover, before any goal. */
+  private double matchedRowCount(RelMetadataQuery mq) {
     Double rows = chalkTable.rowCount();
     if (rows == null) {
       return super.estimateRowCount(mq);
@@ -366,6 +376,10 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
     }
 
     return Math.max(1.0, Math.min(rows, selectivity.value() * rows));
+  }
+
+  private double capped(double rows) {
+    return rowGoal > 0 ? Math.min(rows, rowGoal) : rows;
   }
 
   private boolean allPointsOnTheWholeKey() {
@@ -385,6 +399,11 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
    * source reads them sequentially out of it rather than gathering them through the permutation. io
    * is zero: whether reading a row touches a disk is the source's business, and the profile is where
    * a host says so.
+   *
+   * <p>Cost model v8 (D276): "matched rows" is {@link #estimateRowCount}, which a row goal caps, so
+   * a goaled lookup pays its seeks and the rows it will actually be pulled for. That is the whole of
+   * why {@code Limit(IndexLookup goal=1)} can beat a filtered scan it used to lose to: the seek was
+   * always the same price, and it was the whole range under it that lost the comparison.
    */
   @Override
   public @Nullable RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {

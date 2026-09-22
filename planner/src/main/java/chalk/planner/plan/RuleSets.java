@@ -281,6 +281,10 @@ public final class RuleSets {
     rules.add(new ChalkIndexLookupRule(policy));
     // D50: an unbounded lookup on an ordered index is a scan in that index's key order.
     rules.add(new ChalkIndexOrderedScanRule(policy));
+    // D276: a limit over a chain of projections and filters offers the same chain over a goaled
+    // copy of its leaf. After the index rules, so both leaf kinds are already in their sets by the
+    // time a goal is offered for them, and under the same gate, so a NONE plan carries no goal.
+    rules.addAll(chalk.planner.plan.rules.ChalkRowGoalRule.rules(policy));
     rules.add(ChalkProjectRule.INSTANCE);
     rules.add(ChalkSortRule.INSTANCE);
     rules.add(ChalkHashAggregateRule.INSTANCE);
