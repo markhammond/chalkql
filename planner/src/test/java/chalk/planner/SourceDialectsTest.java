@@ -75,6 +75,26 @@ class SourceDialectsTest {
         .containsExactly(List.of("postgres"));
   }
 
+  // ------------------------------------------- can the dialect write an offset (F121)
+
+  /**
+   * Measured rather than listed: the question is put to the dialect by unparsing a select that
+   * carries one and looking for the number. Calcite's SQL Server dialect spells a bound
+   * {@code TOP (n)}, which has no skip, and writes nothing at all where the offset was — so a
+   * pushed {@code OFFSET … FETCH} would come back as the first n rows rather than the n after the
+   * offset. {@code PushdownGate.supportsOffset} is false for it and the offset stays local.
+   */
+  @Test
+  void the_sql_server_dialect_writes_no_offset_and_every_other_one_does() {
+    assertThat(SourceDialects.rendersOffset(SourceDialects.of(profileNamed("mssql")))).isFalse();
+
+    for (String named : List.of("sqlite", "duckdb", "postgresql", "ansi", "oracle", "mysql", "big_query")) {
+      assertThat(SourceDialects.rendersOffset(SourceDialects.of(profileNamed(named))))
+          .as(named)
+          .isTrue();
+    }
+  }
+
   @Test
   void presets_list_every_other_product_as_untuned_and_never_jethro() {
     List<SourceDialects.DialectPreset> presets = SourceDialects.presets();

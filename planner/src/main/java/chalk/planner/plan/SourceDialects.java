@@ -4,18 +4,26 @@ import chalk.ir.v1.DialectProfile;
 import chalk.ir.v1.IdentifierCasing;
 import chalk.ir.v1.IdentifierQuoting;
 import chalk.planner.types.ChalkTypeSystem;
+import com.google.common.collect.ImmutableList;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.config.NullCollation;
 import org.apache.calcite.sql.SqlDialect;
+import org.apache.calcite.sql.SqlIdentifier;
+import org.apache.calcite.sql.SqlLiteral;
+import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlOperator;
+import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.dialect.AnsiSqlDialect;
 import org.apache.calcite.sql.dialect.PostgresqlSqlDialect;
+import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -216,6 +224,60 @@ public final class SourceDialects {
 
   public static @Nullable SqlOperator integerDivision(SqlDialect dialect) {
     return dialect instanceof ChalkSqlDialects.DuckDb ? ChalkSqlDialects.INTEGER_DIVIDE : null;
+  }
+
+  // ------------------------------------------------------- can this dialect write an offset (F121)
+
+  /** The answer per dialect class, measured once: it is a property of the unparser, not of a profile. */
+  private static final Map<Class<?>, Boolean> RENDERS_OFFSET = new ConcurrentHashMap<>();
+
+  /** A number no generated statement would contain for another reason, so finding it is proof. */
+  private static final String OFFSET_PROBE = "987654321";
+
+  private static final String FETCH_PROBE = "123456789";
+
+  /**
+   * Whether this dialect's unparser actually writes an {@code OFFSET} it is given (F121).
+   *
+   * <p><b>Measured, not listed.</b> Calcite's SQL Server dialect spells a bound as
+   * {@code TOP (n)} and writes <em>nothing at all</em> for the offset beside it — its
+   * {@code unparseOffsetFetch} is empty, because {@code TOP} has no skip — so a
+   * {@code Sort(offset, fetch)} handed to it comes back as a query that returns the first
+   * {@code fetch} rows instead of the {@code fetch} rows after {@code offset}. That is a wrong
+   * answer in the quiet direction, and it is not SQL Server's alone to be: any dialect Calcite
+   * ships or a later version adds could do the same.
+   *
+   * <p>So the question is put to the dialect rather than to a table of product names: a select
+   * carrying two distinctive numbers is unparsed, and the dialect renders an offset if and only if
+   * the offset's number is in what comes back. {@link PushdownGate#supportsOffset} is false where
+   * it is not, and the offset stays local — the same answer, computed here, exactly as for a source
+   * that declares no offset support.
+   */
+  public static boolean rendersOffset(SqlDialect dialect) {
+    return RENDERS_OFFSET.computeIfAbsent(dialect.getClass(), ignored -> measureOffset(dialect));
+  }
+
+  private static boolean measureOffset(SqlDialect dialect) {
+    SqlParserPos pos = SqlParserPos.ZERO;
+    SqlIdentifier column = new SqlIdentifier("x", pos);
+    SqlIdentifier table = new SqlIdentifier("t", pos);
+    SqlSelect select =
+        new SqlSelect(
+            pos,
+            null,
+            new SqlNodeList(ImmutableList.of(column), pos),
+            table,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new SqlNodeList(ImmutableList.of(column), pos),
+            SqlLiteral.createExactNumeric(OFFSET_PROBE, pos),
+            SqlLiteral.createExactNumeric(FETCH_PROBE, pos),
+            null);
+
+    return select.toSqlString(config -> config.withDialect(dialect)).getSql().contains(OFFSET_PROBE);
   }
 
   /**

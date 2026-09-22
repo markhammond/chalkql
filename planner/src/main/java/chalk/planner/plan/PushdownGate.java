@@ -62,6 +62,9 @@ public final class PushdownGate {
   /** Lower-cased {@code native_functions}, the names this source runs itself. */
   private final Set<String> nativeFunctions;
 
+  /** Whether this profile's dialect writes an {@code OFFSET} (F121); measured on first use. */
+  private @org.checkerframework.checker.nullness.qual.Nullable Boolean rendersOffset;
+
   public PushdownGate(
       SourceCapabilities capabilities, DialectProfile profile, Set<DisabledCapability> disabled) {
     this(capabilities, profile, disabled, "");
@@ -477,10 +480,16 @@ public final class PushdownGate {
       return true;
     }
     if (node instanceof RexDynamicParam) {
-      // A context scalar bound at execution never travels (D209). `RemoteQuery.parameters` are
-      // ordered by index and the generated SQL's placeholders by position, and a parameter that is
-      // not among the statement's own cannot be lined up against them; the conjunct that reads one
-      // stays local, which is a residual like any other (§3.7 item 3).
+      // A context scalar bound at execution never travels (D209). `RemoteQuery.parameters` list the
+      // generated SQL's placeholders in the order they appear, and a parameter that is not among
+      // the statement's own cannot be lined up against them; the conjunct that reads one stays
+      // local, which is a residual like any other (§3.7 item 3).
+      //
+      // A parameterised `LIMIT`/`OFFSET` bound is not asked this question at all and is exempt from
+      // `supports_parameters` (D288): it never reaches the provider as a parameter, because the
+      // executor writes its value into the query text before the query is sent. The gate it does
+      // answer to is {@link #supportsLimit} / {@link #supportsOffset}, the same one a literal bound
+      // answers to, and `PushdownRules.SortRule` is where that is asked.
       return !(node instanceof chalk.planner.entitlement.BoundParam) && supportsParameters();
     }
     if (!(node instanceof RexCall call)) {
@@ -598,8 +607,27 @@ public final class PushdownGate {
     return capabilities.getSupportsLimit() && !off(DisabledCapability.DISABLED_CAPABILITY_LIMIT);
   }
 
+  /**
+   * Whether an {@code OFFSET} may be pushed: the source has to declare one, and this source's
+   * dialect has to be able to <em>write</em> one (F121, {@link SourceDialects#rendersOffset}).
+   *
+   * <p>The second half is a semantic refusal of the D89 kind and not a descriptor question: a
+   * dialect whose unparser drops the offset would be handed "the fetch rows after offset" and
+   * would answer "the first fetch rows", which is a wrong answer and a quiet one. A source whose
+   * dialect cannot spell it keeps the offset local, exactly as one that never declared it does.
+   */
   public boolean supportsOffset() {
-    return capabilities.getSupportsOffset() && supportsLimit();
+    return capabilities.getSupportsOffset() && supportsLimit() && dialectWritesAnOffset();
+  }
+
+  /** Measured once per gate: building a dialect resolves a product reflectively. */
+  private boolean dialectWritesAnOffset() {
+    Boolean answer = rendersOffset;
+    if (answer == null) {
+      answer = SourceDialects.rendersOffset(SourceDialects.of(profile));
+      rendersOffset = answer;
+    }
+    return answer;
   }
 
   public boolean supportsGroupBy() {
