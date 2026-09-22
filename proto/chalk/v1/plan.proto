@@ -155,6 +155,21 @@ message Read {
   // of the same table is entitled as that table's policy says, quite separately. False on every
   // other read, so an unentitled plan is byte-identical to one from before this step.
   bool correlation = 8;
+  // About how many rows of this read's output the consumer above it expects to pull before it
+  // stops. Zero means nothing above said.
+  //
+  // A hint and never a bound. The read must still hand back every row it is asked for, and
+  // whatever truncates the result is the operator that says so — a `Fetch` or a `TopN` — which is
+  // unchanged and still authoritative. A source stops producing because its consumer stopped
+  // pulling, never because it counted to this number, so a plan is unaffected by whether a source
+  // reads the field at all.
+  //
+  // What it is for: sizing the first batch. A source whose rows are cheap next to a batch may
+  // start with about this many rows and grow from there, so a query that stops after one row does
+  // not pay for a full batch. A source whose backend computes the whole result whatever the
+  // consumer does gains nothing and should leave it unread; what helps there is a `LIMIT` in the
+  // query the source is sent.
+  int64 row_goal = 9;
   // Superseded by `disclosures`: two ordinal lists (withheld, tainted) that could not say FULL
   // apart from "not mentioned".
   reserved 4, 5;
@@ -486,6 +501,10 @@ message IndexLookup {
   repeated IndexRange ranges = 3;
   repeated uint32 projection = 4;
   Expr residual = 5;
+  // About how many rows of this lookup's output the consumer above it expects to pull before it
+  // stops, zero meaning nothing above said. A hint and never a bound, on exactly the terms
+  // `Read.row_goal` sets out.
+  int64 row_goal = 6;
 }
 
 // Bounds over a prefix of the index's key columns. `lower` and `upper` are Literals or

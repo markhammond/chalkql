@@ -870,15 +870,16 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     {
         CheckProjection(sourceId, request.Projection, request.OutputSchema);
         return new PocoScan<T>(
-            this, Current, request.Projection, request.OutputSchema, request.BatchSize, context, ct);
+            this, Current, request.Projection, request.OutputSchema, request.BatchSize,
+            request.RowGoal, context, ct);
     }
 
     public override IColumnarScan ColumnarScan(string sourceId, ScanRequest request, ScanContext context)
     {
         CheckProjection(sourceId, request.Projection, request.OutputSchema);
         return new PocoScan<T>(
-            this, Current, request.Projection, request.OutputSchema, request.BatchSize, context,
-            CancellationToken.None).Columnar();
+            this, Current, request.Projection, request.OutputSchema, request.BatchSize,
+            request.RowGoal, context, CancellationToken.None).Columnar();
     }
 
     public override IColumnarScan ColumnarLookup(
@@ -1165,6 +1166,7 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
     private readonly IReadOnlyList<int> _projection;
     private readonly ArrowSchema _schema;
     private readonly int _batchSize;
+    private readonly long? _rowGoal;
     private readonly ScanContext _context;
     private readonly CancellationToken _ct;
 
@@ -1174,6 +1176,7 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
         IReadOnlyList<int> projection,
         ArrowSchema schema,
         int batchSize,
+        long? rowGoal,
         ScanContext context,
         CancellationToken ct)
     {
@@ -1182,22 +1185,27 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
         _projection = projection;
         _schema = schema;
         _batchSize = batchSize;
+        _rowGoal = rowGoal;
         _context = context;
         _ct = ct;
     }
 
     public IAsyncEnumerator<RecordBatch> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
         _snapshot.RandomAccess
-            ? new ListEnumerator(_table, _snapshot, _projection, _schema, _batchSize, _context, _ct, cancellationToken)
-            : new CollectionEnumerator(_table, _snapshot, _projection, _schema, _batchSize, _context, _ct, cancellationToken);
+            ? new ListEnumerator(
+                _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct, cancellationToken)
+            : new CollectionEnumerator(
+                _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct, cancellationToken);
 
     /// <summary>The same scan as an <see cref="IColumnarScan"/>, which fills the caller's slot (§1).</summary>
     public IColumnarScan Columnar() =>
         _snapshot.RandomAccess
             ? new ListEnumerator(
-                _table, _snapshot, _projection, _schema, _batchSize, _context, _ct, CancellationToken.None)
+                _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct,
+                CancellationToken.None)
             : new CollectionEnumerator(
-                _table, _snapshot, _projection, _schema, _batchSize, _context, _ct, CancellationToken.None);
+                _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct,
+                CancellationToken.None);
 
     /// <summary>The list path: batches are windows into the collection, read in place.</summary>
     private sealed class ListEnumerator : IAsyncEnumerator<RecordBatch>, IColumnarScan
@@ -1209,8 +1217,10 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
         private readonly IReadOnlyList<T> _rows;
         private readonly PocoChunkWriters<T> _writers;
         private readonly int _batchSize;
+        private readonly long? _rowGoal;
         private readonly int _rowCount;
         private int _position;
+        private int _previousBatch;
         private bool _finished;
 
         public ListEnumerator(
@@ -1219,6 +1229,7 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
             IReadOnlyList<int> projection,
             ArrowSchema schema,
             int batchSize,
+            long? rowGoal,
             ScanContext context,
             CancellationToken scanToken,
             CancellationToken enumerationToken)
@@ -1227,6 +1238,7 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
             _scanToken = scanToken;
             _enumerationToken = enumerationToken;
             _batchSize = batchSize;
+            _rowGoal = rowGoal;
 
             // No lock and no copy: this snapshot's rows are immutable for as long as this reference
             // is counted, so the batching walks a collection nothing can change under it (D260 §1).
@@ -1264,7 +1276,7 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
                 return ValueTask.FromResult(false);
             }
 
-            var count = Math.Min(_batchSize, _rowCount - _position);
+            var count = Math.Min(NextBatch(), _rowCount - _position);
             Current = _writers.Write(_rows, _position, count);
             _position += count;
             _stats.AddRowsScanned(count);
@@ -1282,11 +1294,21 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
                 return false;
             }
 
-            var count = Math.Min(_batchSize, _rowCount - _position);
+            var count = Math.Min(NextBatch(), _rowCount - _position);
             _writers.WriteView(batch, _rows, _position, count);
             _position += count;
             _stats.AddRowsScanned(count);
             return true;
+        }
+
+        /// <summary>
+        /// The ramp of <see cref="BatchRamp"/>: the batch size, unless the plan stated a row goal,
+        /// in which case the first batch is about the goal and each one after it doubles.
+        /// </summary>
+        private int NextBatch()
+        {
+            _previousBatch = BatchRamp.Next(_previousBatch, _batchSize, _rowGoal);
+            return _previousBatch;
         }
 
         /// <summary>An in-process collection is always ready, so this only ever reports the end.</summary>
@@ -1330,7 +1352,9 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
         private readonly IEnumerator<T> _source;
         private readonly PocoChunkWriters<T> _writers;
         private readonly int _batchSize;
+        private readonly long? _rowGoal;
         private T[] _staging;
+        private int _previousBatch;
         private bool _finished;
 
         public CollectionEnumerator(
@@ -1339,6 +1363,7 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
             IReadOnlyList<int> projection,
             ArrowSchema schema,
             int batchSize,
+            long? rowGoal,
             ScanContext context,
             CancellationToken scanToken,
             CancellationToken enumerationToken)
@@ -1347,6 +1372,7 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
             _scanToken = scanToken;
             _enumerationToken = enumerationToken;
             _batchSize = batchSize;
+            _rowGoal = rowGoal;
             _snapshot = table.Lease(captured);
             _source = _snapshot.Values.GetEnumerator();
 
@@ -1384,7 +1410,7 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
             }
 
             var count = 0;
-            var wanted = Math.Min(_batchSize, _staging.Length);
+            var wanted = Math.Min(NextBatch(), _staging.Length);
             while (count < wanted && _source.MoveNext())
             {
                 _staging[count++] = _source.Current;
@@ -1413,7 +1439,7 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
             }
 
             var count = 0;
-            var wanted = Math.Min(_batchSize, _staging.Length);
+            var wanted = Math.Min(NextBatch(), _staging.Length);
             while (count < wanted && _source.MoveNext())
             {
                 _staging[count++] = _source.Current;
@@ -1438,6 +1464,13 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
             Current = null!;
             Release();
             return default;
+        }
+
+        /// <summary>The ramp of <see cref="BatchRamp"/>, as the staging path takes it.</summary>
+        private int NextBatch()
+        {
+            _previousBatch = BatchRamp.Next(_previousBatch, _batchSize, _rowGoal);
+            return _previousBatch;
         }
 
         private void Release()
@@ -1505,7 +1538,9 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
         private readonly IEnumerator<int> _positions;
         private readonly ExecutionArena _arena;
         private readonly int _batchSize;
+        private readonly long? _rowGoal;
         private int[] _buffer;
+        private int _previousBatch;
         private bool _drained;
         private bool _finished;
 
@@ -1525,6 +1560,7 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
             _rows = _snapshot.Rows!;
             _arena = context.Arena;
             _batchSize = request.BatchSize;
+            _rowGoal = request.RowGoal;
             _positions = Positions((IPositionalPocoIndex<T>)_snapshot.Indexes[ordinal], request.Ranges)
                 .GetEnumerator();
             _buffer = context.Arena.Rent<int>(Math.Max(1, request.BatchSize));
@@ -1559,7 +1595,7 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
             }
 
             var count = 0;
-            var wanted = Math.Min(_batchSize, _buffer.Length);
+            var wanted = Math.Min(NextBatch(), _buffer.Length);
             while (count < wanted && _positions.MoveNext())
             {
                 _buffer[count++] = _positions.Current;
@@ -1594,7 +1630,7 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
             }
 
             var count = 0;
-            var wanted = Math.Min(_batchSize, _buffer.Length);
+            var wanted = Math.Min(NextBatch(), _buffer.Length);
             while (count < wanted && _positions.MoveNext())
             {
                 _buffer[count++] = _positions.Current;
@@ -1624,6 +1660,13 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
             Current = null!;
             Release();
             return default;
+        }
+
+        /// <summary>The ramp of <see cref="BatchRamp"/>, as the positional lookup takes it.</summary>
+        private int NextBatch()
+        {
+            _previousBatch = BatchRamp.Next(_previousBatch, _batchSize, _rowGoal);
+            return _previousBatch;
         }
 
         private void Release()
@@ -1730,7 +1773,9 @@ internal sealed class PocoIndexRowScan<T> : IAsyncEnumerable<RecordBatch>
         private readonly PocoChunkWriters<T> _writers;
         private readonly IEnumerator<T> _source;
         private readonly int _batchSize;
+        private readonly long? _rowGoal;
         private T[] _staging;
+        private int _previousBatch;
         private bool _finished;
 
         public Enumerator(
@@ -1746,6 +1791,7 @@ internal sealed class PocoIndexRowScan<T> : IAsyncEnumerable<RecordBatch>
             _scanToken = scanToken;
             _enumerationToken = enumerationToken;
             _batchSize = request.BatchSize;
+            _rowGoal = request.RowGoal;
             _snapshot = table.Lease(captured);
             _source = Rows(_snapshot.Indexes[ordinal], request.Ranges).GetEnumerator();
             _staging = ArrayPool<T>.Shared.Rent(Math.Max(1, request.BatchSize));
@@ -1779,7 +1825,7 @@ internal sealed class PocoIndexRowScan<T> : IAsyncEnumerable<RecordBatch>
             }
 
             var count = 0;
-            var wanted = Math.Min(_batchSize, _staging.Length);
+            var wanted = Math.Min(NextBatch(), _staging.Length);
             while (count < wanted && _source.MoveNext())
             {
                 _staging[count++] = _source.Current;
@@ -1808,7 +1854,7 @@ internal sealed class PocoIndexRowScan<T> : IAsyncEnumerable<RecordBatch>
             }
 
             var count = 0;
-            var wanted = Math.Min(_batchSize, _staging.Length);
+            var wanted = Math.Min(NextBatch(), _staging.Length);
             while (count < wanted && _source.MoveNext())
             {
                 _staging[count++] = _source.Current;
@@ -1833,6 +1879,13 @@ internal sealed class PocoIndexRowScan<T> : IAsyncEnumerable<RecordBatch>
             Current = null!;
             Release();
             return default;
+        }
+
+        /// <summary>The ramp of <see cref="BatchRamp"/>, as the row-yielding lookup takes it.</summary>
+        private int NextBatch()
+        {
+            _previousBatch = BatchRamp.Next(_previousBatch, _batchSize, _rowGoal);
+            return _previousBatch;
         }
 
         private void Release()
@@ -1934,8 +1987,10 @@ internal sealed class PocoClusteredScan<T> : IAsyncEnumerable<RecordBatch>
         private readonly int[] _projection;
         private readonly int[] _windows;
         private readonly int _batchSize;
+        private readonly long? _rowGoal;
         private int _window;
         private int _position;
+        private int _previousBatch;
         private bool _finished;
 
         public Enumerator(
@@ -1949,6 +2004,7 @@ internal sealed class PocoClusteredScan<T> : IAsyncEnumerable<RecordBatch>
             _snapshot = table.Lease(captured);
             _index = (ClusteredIndex<T>)_snapshot.Indexes[ordinal];
             _batchSize = request.BatchSize;
+            _rowGoal = request.RowGoal;
             _projection = [.. request.Projection];
             _windows = Windows(_index, request.Ranges);
             _position = _windows.Length == 0 ? 0 : _windows[0];
@@ -1986,7 +2042,8 @@ internal sealed class PocoClusteredScan<T> : IAsyncEnumerable<RecordBatch>
             }
 
             var end = _windows[(_window * 2) + 1];
-            var count = Math.Min(_batchSize, end - _position);
+            _previousBatch = BatchRamp.Next(_previousBatch, _batchSize, _rowGoal);
+            var count = Math.Min(_previousBatch, end - _position);
 
             batch.Begin(count);
             for (var i = 0; i < _projection.Length; i++)

@@ -211,6 +211,13 @@ public sealed class IndexLookupRequest
     /// Upper bound on rows per batch. A source may produce smaller batches.
     /// </summary>
     public required int BatchSize { get; init; }
+
+    /// <summary>
+    /// About how many rows of this lookup's output the consumer expects to pull before it stops,
+    /// or null when the plan said nothing. A hint and never a bound, on exactly the terms
+    /// <see cref="ScanRequest.RowGoal"/> sets out.
+    /// </summary>
+    public long? RowGoal { get; init; }
 }
 
 /// <summary>
@@ -384,6 +391,27 @@ public sealed class ScanRequest
     /// that receives one it did not declare MUST throw <see cref="SourceContractException"/>.
     /// </summary>
     public Expr? PushedFilter { get; init; }
+
+    /// <summary>
+    /// About how many rows of this scan's output the consumer expects to pull before it stops, or
+    /// null when the plan said nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A hint and never a bound. The scan must still hand back every row it is asked for, and
+    /// whatever truncates the result is the operator above that says so. A source stops producing
+    /// because its consumer stopped pulling, never because it counted to this number, so what a
+    /// source does with the goal cannot change an answer — unlike <see cref="PushedFilter"/>, which
+    /// a source that never declared it must refuse.
+    /// </para>
+    /// <para>
+    /// What it is for is sizing the first batch: honour it where a row is cheap next to a batch, as
+    /// it is for an in-memory structure, or where it sizes a fetch. Leave it unread where the
+    /// backend computes the whole result whatever the consumer does — there the win is a
+    /// <c>LIMIT</c> in the query the source is sent, not a smaller first batch.
+    /// </para>
+    /// </remarks>
+    public long? RowGoal { get; init; }
 }
 
 /// <summary>

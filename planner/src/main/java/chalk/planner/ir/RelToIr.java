@@ -711,6 +711,11 @@ public final class RelToIr {
                     .setSchema(table.schemaName())
                     .setTable(table.tableName()));
     read.addAllProjection(scan.projection());
+    // The row goal a limit above this scan stated (D276). Zero means none and emits no bytes, so a
+    // plan the goal rule never touched is byte-identical to one from before this step.
+    if (scan.rowGoal() > 0) {
+      read.setRowGoal(scan.rowGoal());
+    }
     breadcrumbs(read, scan.getTable());
     correlation(read, scan.getTable());
     return read.build();
@@ -780,6 +785,11 @@ public final class RelToIr {
                     .setTable(table.tableName()))
             .setIndex(lookup.index().getName())
             .addAllProjection(lookup.projection());
+
+    // The row goal a limit above this lookup stated (D276), on the same terms as a Read's.
+    if (lookup.rowGoal() > 0) {
+      ir.setRowGoal(lookup.rowGoal());
+    }
 
     for (chalk.planner.plan.IndexMatcher.Range range : lookup.ranges()) {
       IndexRange.Builder bounds =

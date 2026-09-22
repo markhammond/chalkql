@@ -102,6 +102,11 @@ public static class PlanExtensions
     {
         Rel.KindOneofCase.Read => $"Read {Describe(rel.Read.Table)} projection=[{string.Join(",", rel.Read.Projection)}]"
             + (rel.Read.Filter is null ? string.Empty : $" filter={rel.Read.Filter.ToPlanText()}")
+            // The row goal a limit above this leaf stated (D276). Zero means none and prints
+            // nothing, so a plan that carries no goal reads exactly as it did before.
+            + (rel.Read.RowGoal == 0
+                ? string.Empty
+                : $" goal={rel.Read.RowGoal.ToString(CultureInfo.InvariantCulture)}")
             // The entitlement rewrite's per-column outcomes, in the table's own column ordinals
             // (step 26, 16-entitlements.md §3.10). Empty for an unentitled read, so no recorded plan
             // of a catalog without entitlements gains a word; FULL is elided, so what a reader sees
@@ -160,7 +165,11 @@ public static class PlanExtensions
                     rel.VirtualTable.Rows.Select(r => "(" + string.Join(", ", r.Values.Select(ToPlanText)) + ")"))),
         Rel.KindOneofCase.IndexLookup => $"IndexLookup {Describe(rel.IndexLookup.Table)} index={rel.IndexLookup.Index} "
             + $"ranges={rel.IndexLookup.Ranges.Count} projection=[{string.Join(",", rel.IndexLookup.Projection)}]"
-            + (rel.IndexLookup.Residual is null ? string.Empty : $" residual={rel.IndexLookup.Residual.ToPlanText()}"),
+            + (rel.IndexLookup.Residual is null ? string.Empty : $" residual={rel.IndexLookup.Residual.ToPlanText()}")
+            // The row goal, on the same terms as a Read's (D276).
+            + (rel.IndexLookup.RowGoal == 0
+                ? string.Empty
+                : $" goal={rel.IndexLookup.RowGoal.ToString(CultureInfo.InvariantCulture)}"),
         Rel.KindOneofCase.RemoteQuery => $"RemoteQuery source={rel.RemoteQuery.SourceId} dialect={rel.RemoteQuery.Dialect} "
             + $"sql={Quote(rel.RemoteQuery.QueryText)}"
             + (rel.RemoteQuery.PushedPlan is null ? string.Empty : " pushed_plan=yes"),

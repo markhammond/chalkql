@@ -492,4 +492,96 @@ class RelToIrTest {
         .map(e -> e.getCall().getFunction())
         .toList();
   }
+
+  // ---- the row goal on the wire (D276, 46-row-goals.md §1 and §6) ----
+
+  /**
+   * A goaled scan writes {@code Read.row_goal}. No rule states a goal yet, so the goal is put on the
+   * leaf here and what is under test is the conversion.
+   */
+  @Test
+  void a_scan_with_a_row_goal_writes_the_field() {
+    Rel leaf = leafOf(convert("SELECT symbol, ts FROM bars", 7L), Rel.KindCase.READ);
+
+    assertThat(leaf.getRead().getRowGoal()).isEqualTo(7L);
+  }
+
+  /** And a goaled lookup writes {@code IndexLookup.row_goal}. */
+  @Test
+  void a_lookup_with_a_row_goal_writes_the_field() {
+    Rel leaf =
+        leafOf(
+            convert("SELECT symbol, ts FROM bars WHERE symbol = 'BTCUSDT'", 3L),
+            Rel.KindCase.INDEX_LOOKUP);
+
+    assertThat(leaf.getIndexLookup().getRowGoal()).isEqualTo(3L);
+  }
+
+  /**
+   * The zero-cost half of the contract: a leaf with no goal leaves the field unset, and an unset
+   * {@code int64} emits no bytes, so a plan from before this step is byte-identical to the same plan
+   * after it. (The corpus's recorded plans are the other, wider, half of that claim.)
+   */
+  @Test
+  void a_leaf_without_a_row_goal_writes_no_bytes_at_all() {
+    String sql = "SELECT symbol, ts FROM bars WHERE symbol = 'BTCUSDT'";
+    Rel goaled = leafOf(convert(sql, 5L), Rel.KindCase.INDEX_LOOKUP);
+    Rel plain = leafOf(convert(sql, 0L), Rel.KindCase.INDEX_LOOKUP);
+
+    assertThat(plain.getIndexLookup().getRowGoal()).isZero();
+    assertThat(plain.getIndexLookup().toByteArray())
+        .isEqualTo(plain.getIndexLookup().toBuilder().clearRowGoal().build().toByteArray());
+    assertThat(goaled.getIndexLookup().toByteArray())
+        .isNotEqualTo(plain.getIndexLookup().toByteArray());
+  }
+
+  /** Plans {@code sql} against the declared catalog and states {@code goal} on every leaf. */
+  private static Plan convert(String sql, long goal) {
+    chalk.planner.catalog.RegisteredCatalog catalog =
+        new chalk.planner.catalog.CatalogRegistry().register(TestCatalogs.declared());
+    try (chalk.planner.plan.PlannerPipeline pipeline =
+        chalk.planner.plan.PlannerPipeline.create(catalog, PushdownPolicy.full())) {
+      chalk.planner.plan.PlannerPipeline.Result result = pipeline.plan(sql, false);
+      org.apache.calcite.rel.RelNode physical = withRowGoal(result.physical(), goal);
+      return new chalk.planner.ir.RelToIr(
+              new chalk.planner.types.TypeMapper(physical.getCluster().getTypeFactory()),
+              physical.getCluster().getRexBuilder(),
+              org.apache.calcite.rel.metadata.RelMetadataQuery.instance(),
+              chalk.planner.ir.IrVersionGate.current())
+          .toPlan(physical, result.parameterRowType(), TestCatalogs.CONTEXT_ID, TestCatalogs.EPOCH);
+    } catch (Exception failure) {
+      throw new AssertionError("planning failed for: " + sql, failure);
+    }
+  }
+
+  /** The same tree with {@code goal} on every {@code ChalkTableScan} and {@code ChalkIndexLookup}. */
+  private static org.apache.calcite.rel.RelNode withRowGoal(
+      org.apache.calcite.rel.RelNode node, long goal) {
+    if (node instanceof chalk.planner.plan.rel.ChalkTableScan scan) {
+      return scan.withRowGoal(goal);
+    }
+    if (node instanceof chalk.planner.plan.rel.ChalkIndexLookup lookup) {
+      return lookup.withRowGoal(goal);
+    }
+
+    List<org.apache.calcite.rel.RelNode> inputs = new ArrayList<>(node.getInputs().size());
+    boolean changed = false;
+    for (org.apache.calcite.rel.RelNode input : node.getInputs()) {
+      org.apache.calcite.rel.RelNode replaced = withRowGoal(input, goal);
+      changed |= replaced != input;
+      inputs.add(replaced);
+    }
+
+    return changed ? node.copy(node.getTraitSet(), inputs) : node;
+  }
+
+  private static Rel leafOf(Plan plan, Rel.KindCase kind) {
+    for (Rel rel : rels(plan)) {
+      if (rel.getKindCase() == kind) {
+        return rel;
+      }
+    }
+
+    throw new AssertionError("no " + kind + " in " + plan);
+  }
 }

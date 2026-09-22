@@ -117,4 +117,84 @@ class DigestTest {
 
     assertThat(btc).isNotEqualTo(eth);
   }
+
+  // ---- the row goal in the rel digest (D276, 46-row-goals.md §1) ----
+
+  /**
+   * A goaled leaf must be a different rel from the same leaf without one: it estimates and costs
+   * differently, so Volcano merging the two would give the parent that asked for no goal a leaf
+   * priced for one. The digest is what Volcano decides that by, which is why {@code goal} is an
+   * {@code explainTerms} item and not an {@code ALL_ATTRIBUTES} decoration like {@code sel}.
+   */
+  @Test
+  void a_row_goal_on_a_scan_changes_the_rel_digest() {
+    chalk.planner.plan.rel.ChalkTableScan scan =
+        leaf("SELECT symbol, ts FROM bars", chalk.planner.plan.rel.ChalkTableScan.class);
+
+    assertThat(digest(scan.withRowGoal(4))).isNotEqualTo(digest(scan));
+    assertThat(digest(scan.withRowGoal(4))).contains("goal=[4]");
+  }
+
+  @Test
+  void a_row_goal_on_a_lookup_changes_the_rel_digest() {
+    chalk.planner.plan.rel.ChalkIndexLookup lookup =
+        leaf(
+            "SELECT symbol, ts FROM bars WHERE symbol = 'BTCUSDT'",
+            chalk.planner.plan.rel.ChalkIndexLookup.class);
+
+    assertThat(digest(lookup.withRowGoal(9))).isNotEqualTo(digest(lookup));
+    assertThat(digest(lookup.withRowGoal(9))).contains("goal=[9]");
+  }
+
+  /** And a leaf with no goal keeps the digest it had: the term is written only when set. */
+  @Test
+  void no_row_goal_leaves_the_rel_digest_where_it_was() {
+    chalk.planner.plan.rel.ChalkTableScan scan =
+        leaf("SELECT symbol, ts FROM bars", chalk.planner.plan.rel.ChalkTableScan.class);
+    chalk.planner.plan.rel.ChalkIndexLookup lookup =
+        leaf(
+            "SELECT symbol, ts FROM bars WHERE symbol = 'BTCUSDT'",
+            chalk.planner.plan.rel.ChalkIndexLookup.class);
+
+    assertThat(digest(scan)).doesNotContain("goal=");
+    assertThat(digest(lookup)).doesNotContain("goal=");
+    assertThat(scan.withRowGoal(0)).isSameAs(scan);
+    assertThat(lookup.withRowGoal(0)).isSameAs(lookup);
+    assertThat(digest(scan.withRowGoal(4).withRowGoal(0))).isEqualTo(digest(scan));
+  }
+
+  /** The attributes Volcano compares two rels by. */
+  private static String digest(org.apache.calcite.rel.RelNode node) {
+    return org.apache.calcite.plan.RelOptUtil.toString(
+        node, org.apache.calcite.sql.SqlExplainLevel.DIGEST_ATTRIBUTES);
+  }
+
+  /** The first node of {@code kind} in the physical plan for {@code sql}. */
+  private static <T> T leaf(String sql, Class<T> kind) {
+    chalk.planner.catalog.RegisteredCatalog catalog =
+        new chalk.planner.catalog.CatalogRegistry().register(TestCatalogs.declared());
+    try (chalk.planner.plan.PlannerPipeline pipeline =
+        chalk.planner.plan.PlannerPipeline.create(catalog, PushdownPolicy.full())) {
+      T found = find(pipeline.plan(sql, false).physical(), kind);
+      assertThat(found).as("a %s for: %s", kind.getSimpleName(), sql).isNotNull();
+      return found;
+    } catch (Exception failure) {
+      throw new AssertionError("planning failed for: " + sql, failure);
+    }
+  }
+
+  private static <T> T find(org.apache.calcite.rel.RelNode node, Class<T> kind) {
+    if (kind.isInstance(node)) {
+      return kind.cast(node);
+    }
+
+    for (org.apache.calcite.rel.RelNode input : node.getInputs()) {
+      T found = find(input, kind);
+      if (found != null) {
+        return found;
+      }
+    }
+
+    return null;
+  }
 }

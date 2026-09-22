@@ -238,6 +238,9 @@ internal static class PlanCompiler
                     OutputSchema = schema,
                     BatchSize = context.Settings.BatchSize,
                     PushedFilter = pushedFilter,
+                    // `Read.row_goal` is a hint the source may size its first batch to (D276).
+                    // Zero on the wire means "nothing above said", which is null here.
+                    RowGoal = read.RowGoal > 0 ? read.RowGoal : null,
                 },
                 schema,
                 columnTypes);
@@ -569,9 +572,12 @@ internal static class PlanCompiler
 
             var schema = ArrowTypeMapping.ToArrowSchema(rel.RowType);
             var columnTypes = Types(rel.RowType);
+            // `IndexLookup.row_goal` is a hint the source may size its first batch to (D276). Zero
+            // on the wire means "nothing above said", which is null here.
+            var rowGoal = lookup.RowGoal > 0 ? lookup.RowGoal : (long?)null;
             return context => new IndexLookupOperator(
                 context, path, source, descriptor.Table.Name, index.Name, ranges, projection, schema,
-                columnTypes);
+                columnTypes, rowGoal);
         }
 
         /// <summary>A range bound: a literal the planner wrote down, or a parameter slot.</summary>

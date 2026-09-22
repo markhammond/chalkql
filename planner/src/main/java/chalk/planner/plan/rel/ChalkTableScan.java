@@ -28,9 +28,12 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * produces.
  */
 public final class ChalkTableScan extends TableScan implements ChalkRel {
+  private final long rowGoal;
 
-  private ChalkTableScan(RelOptCluster cluster, RelTraitSet traitSet, RelOptTable table) {
+  private ChalkTableScan(
+      RelOptCluster cluster, RelTraitSet traitSet, RelOptTable table, long rowGoal) {
     super(cluster, traitSet, ImmutableList.of(), table);
+    this.rowGoal = rowGoal;
   }
 
   /** A scan of every column, carrying the table's declared collation as a trait. */
@@ -39,7 +42,7 @@ public final class ChalkTableScan extends TableScan implements ChalkRel {
         cluster
             .traitSetOf(ChalkConvention.LOCAL)
             .replaceIfs(RelCollationTraitDef.INSTANCE, () -> RelMdCollation.table(table));
-    return new ChalkTableScan(cluster, traits, table);
+    return new ChalkTableScan(cluster, traits, table, 0L);
   }
 
   /** A scan of the given table columns, in that output order. */
@@ -67,9 +70,31 @@ public final class ChalkTableScan extends TableScan implements ChalkRel {
     return org.apache.calcite.util.ImmutableIntList.identity(getRowType().getFieldCount());
   }
 
+  /**
+   * How many rows a parent expects to pull from this scan before it stops, or zero when nothing
+   * above it said. A planning fact and a hint to the source, never a semantic: the scan serves
+   * every row it is asked for whatever this says, and the {@code Fetch} or {@code TopN} above stays
+   * authoritative.
+   */
+  public long rowGoal() {
+    return rowGoal;
+  }
+
+  /**
+   * The same scan asked for at most {@code goal} rows. A different rel, not a mutation: the goal is
+   * in the digest, so Volcano keeps the two apart and a goaled scan is reachable only from the
+   * parent that asked for one.
+   */
+  public ChalkTableScan withRowGoal(long goal) {
+    long wanted = Math.max(0L, goal);
+    return wanted == rowGoal
+        ? this
+        : new ChalkTableScan(getCluster(), traitSet, table, wanted);
+  }
+
   @Override
   public RelNode copy(RelTraitSet traitSet, List<RelNode> inputs) {
-    return new ChalkTableScan(getCluster(), traitSet, table);
+    return new ChalkTableScan(getCluster(), traitSet, table, rowGoal);
   }
 
   /** A leaf: it delivers the table's declared collation and there is nothing below to derive from. */
@@ -85,6 +110,14 @@ public final class ChalkTableScan extends TableScan implements ChalkRel {
   @Override
   public RelWriter explainTerms(RelWriter pw) {
     RelWriter written = super.explainTerms(pw).item("projection", projection());
+
+    // The row goal is a digest item, because a goaled scan estimates and costs differently from the
+    // same scan without one and Volcano must never merge the two. Written only when set, so no plan
+    // that carries no goal gains a term.
+    if (rowGoal > 0) {
+      written = written.item("goal", rowGoal);
+    }
+
     // The entitlement rewrite's mark (step 26, 16-entitlements.md §3.12): this leaf's own verdict
     // for every column, in the table's ordinals. It is the *whole* map and not a summary of it,
     // because these terms are the node's digest: two occurrences of one table that disclose

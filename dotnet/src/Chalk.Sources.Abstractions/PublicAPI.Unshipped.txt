@@ -67,6 +67,7 @@ Chalk.Sources.ColumnarBatch.ShareSelection(Chalk.Sources.ColumnarBatch! source) 
 Chalk.Sources.ColumnarBatch.Types.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkType>!
 Chalk.Sources.ColumnarBatch.ValidateLifetimes.get -> bool
 Chalk.Sources.ColumnarBatch.ValidateLifetimes.init -> void
+Chalk.Sources.BatchRamp
 Chalk.Sources.ExecutionArena
 Chalk.Sources.ExecutionArena.Allocator.get -> Apache.Arrow.Memory.MemoryAllocator!
 Chalk.Sources.ExecutionArena.BeginExecution(Chalk.Sources.ExecutionStats? stats = null) -> void
@@ -181,6 +182,8 @@ Chalk.Sources.IndexLookupRequest.Projection.get -> System.Collections.Generic.IR
 Chalk.Sources.IndexLookupRequest.Projection.init -> void
 Chalk.Sources.IndexLookupRequest.Ranges.get -> System.Collections.Generic.IReadOnlyList<Chalk.Sources.IndexKeyRange!>!
 Chalk.Sources.IndexLookupRequest.Ranges.init -> void
+Chalk.Sources.IndexLookupRequest.RowGoal.get -> long?
+Chalk.Sources.IndexLookupRequest.RowGoal.init -> void
 Chalk.Sources.IndexLookupRequest.Table.get -> string!
 Chalk.Sources.IndexLookupRequest.Table.init -> void
 Chalk.Sources.InvalidUtf8Exception
@@ -224,6 +227,8 @@ Chalk.Sources.ScanRequest.Projection.get -> System.Collections.Generic.IReadOnly
 Chalk.Sources.ScanRequest.Projection.init -> void
 Chalk.Sources.ScanRequest.PushedFilter.get -> Chalk.Ir.Expr?
 Chalk.Sources.ScanRequest.PushedFilter.init -> void
+Chalk.Sources.ScanRequest.RowGoal.get -> long?
+Chalk.Sources.ScanRequest.RowGoal.init -> void
 Chalk.Sources.ScanRequest.ScanRequest() -> void
 Chalk.Sources.ScanRequest.Table.get -> string!
 Chalk.Sources.ScanRequest.Table.init -> void
@@ -428,6 +433,7 @@ static Chalk.Sources.ArrowTypeMapping.ToArrowSchema(Chalk.Ir.RowType! rowType) -
 static Chalk.Sources.ArrowTypeMapping.ToArrowSchema(Chalk.Ir.RowType! rowType, System.Collections.Generic.IReadOnlyList<Chalk.Sources.StringLayouts>! strings) -> Apache.Arrow.Schema!
 static Chalk.Sources.ArrowTypeMapping.ToArrowSchema(System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ColumnDescriptor!>! columns) -> Apache.Arrow.Schema!
 static Chalk.Sources.ArrowTypeMapping.UnitsPerSecond(Apache.Arrow.Types.TimeUnit unit) -> long
+static Chalk.Sources.BatchRamp.Next(int previous, int batchSize, long? rowGoal) -> int
 static Chalk.Sources.IndexKeyRange.All.get -> Chalk.Sources.IndexKeyRange!
 static Chalk.Sources.IndexKeyRange.Equality(params object?[]! key) -> Chalk.Sources.IndexKeyRange!
 static Chalk.Sources.RefreshTarget.Source(string! sourceId) -> Chalk.Sources.IRefreshTarget!

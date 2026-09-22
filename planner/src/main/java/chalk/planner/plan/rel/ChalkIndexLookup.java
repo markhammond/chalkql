@@ -46,6 +46,7 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
   private final ImmutableList<IndexMatcher.Range> ranges;
   private final ImmutableIntList projection;
   private final ChalkSelectivity.Estimate selectivity;
+  private final long rowGoal;
 
   private ChalkIndexLookup(
       RelOptCluster cluster,
@@ -56,7 +57,8 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
       ImmutableList<IndexMatcher.Range> ranges,
       ImmutableIntList projection,
       RelDataType rowType,
-      ChalkSelectivity.Estimate selectivity) {
+      ChalkSelectivity.Estimate selectivity,
+      long rowGoal) {
     super(cluster, traits);
     this.table = table;
     this.chalkTable = chalkTable;
@@ -65,6 +67,7 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
     this.projection = projection;
     this.rowType = rowType;
     this.selectivity = selectivity;
+    this.rowGoal = rowGoal;
   }
 
   /**
@@ -93,7 +96,8 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
         ranges,
         projection,
         scan.getRowType(),
-        selectivity);
+        selectivity,
+        0L);
   }
 
   public ChalkTable chalkTable() {
@@ -121,6 +125,40 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
   /** How selective the ranges are, and whether that was measured or guessed. */
   public ChalkSelectivity.Estimate selectivity() {
     return selectivity;
+  }
+
+  /**
+   * How many rows a parent expects to pull from this lookup before it stops, or zero when nothing
+   * above it said. A planning fact and a hint to the source, never a semantic: the lookup serves
+   * every row of its ranges whatever this says, and the {@code Fetch} or {@code TopN} above stays
+   * authoritative.
+   */
+  public long rowGoal() {
+    return rowGoal;
+  }
+
+  /**
+   * The same lookup asked for at most {@code goal} rows. A different rel, not a mutation: the goal
+   * is in the digest, so Volcano keeps the two apart and a goaled lookup is reachable only from the
+   * parent that asked for one.
+   */
+  public ChalkIndexLookup withRowGoal(long goal) {
+    long wanted = Math.max(0L, goal);
+    if (wanted == rowGoal) {
+      return this;
+    }
+
+    return new ChalkIndexLookup(
+        getCluster(),
+        traitSet,
+        table,
+        chalkTable,
+        index,
+        ranges,
+        projection,
+        rowType,
+        selectivity,
+        wanted);
   }
 
   /**
@@ -261,7 +299,16 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
   @Override
   public RelNode copy(RelTraitSet traitSet, List<RelNode> inputs) {
     return new ChalkIndexLookup(
-        getCluster(), traitSet, table, chalkTable, index, ranges, projection, rowType, selectivity);
+        getCluster(),
+        traitSet,
+        table,
+        chalkTable,
+        index,
+        ranges,
+        projection,
+        rowType,
+        selectivity,
+        rowGoal);
   }
 
   /** A leaf: it delivers the index's key order and there is nothing below to derive from. */
@@ -283,6 +330,13 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
             .item("index", index.getName())
             .item("ranges", ranges)
             .item("projection", projection);
+
+    // The row goal is a digest item, because a goaled lookup estimates and costs differently from
+    // the same lookup without one and Volcano must never merge the two. Written only when set, so
+    // no plan that carries no goal gains a term.
+    if (rowGoal > 0) {
+      writer.item("goal", rowGoal);
+    }
 
     // D257: the kind, and what the copy is for. Written only for a clustered index — every lookup
     // before D257 was over an ordered or a hash one and its plan text is unchanged — so the text
