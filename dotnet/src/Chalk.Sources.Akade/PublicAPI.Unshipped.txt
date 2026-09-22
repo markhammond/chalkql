@@ -1,0 +1,56 @@
+Chalk.Sources.Akade.AkadeSetSource<T, TSet>
+Chalk.Sources.Akade.AkadeSetSource<T, TSet>.DescribeSchema() -> Chalk.Catalog.SchemaDescriptor!
+Chalk.Sources.Akade.AkadeSetSource<T, TSet>.IndexLookupAsync(Chalk.Sources.IndexLookupRequest! request, Chalk.Sources.ScanContext! context, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Sources.Akade.AkadeSetSource<T, TSet>.PrepareRefreshAsync(System.Collections.Generic.IReadOnlyList<Chalk.Sources.SourceRefreshEntry!>! entries, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<Chalk.Sources.ISourceRefreshCommit!>
+Chalk.Sources.Akade.AkadeSetSource<T, TSet>.RefreshAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Chalk.Sources.Akade.AkadeSetSource<T, TSet>.RefreshTableAsync(string! table, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Chalk.Sources.Akade.AkadeSetSource<T, TSet>.ReleaseEngine(object! identity) -> void
+Chalk.Sources.Akade.AkadeSetSource<T, TSet>.ScanAsync(Chalk.Sources.ScanRequest! request, Chalk.Sources.ScanContext! context, System.Threading.CancellationToken ct) -> System.Collections.Generic.IAsyncEnumerable<Apache.Arrow.RecordBatch!>!
+Chalk.Sources.Akade.AkadeSetSource<T, TSet>.SchemaName.get -> string!
+Chalk.Sources.Akade.AkadeSetSource<T, TSet>.SourceId.get -> string!
+Chalk.Sources.Akade.AkadeSetSource<T, TSet>.Table.get -> Chalk.Sources.Akade.AkadeTable<T>!
+Chalk.Sources.Akade.AkadeSetSource<T, TSet>.TryClaimEngine(object! identity, out Chalk.Sources.SourceSharing mode) -> bool
+Chalk.Sources.Akade.AkadeSetSource<T, TSet>.ValidateRefresh(System.Collections.Generic.IReadOnlyList<Chalk.Sources.SourceRefreshEntry!>! entries) -> void
+Chalk.Sources.Akade.AkadeSource
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.AddFunction(string! name, System.Action<Chalk.Catalog.FunctionBuilder!>! configure) -> TSelf!
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.AkadeSourceBuilder(string! sourceId) -> void
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.BindFunctionIndex<TKey>(System.Func<T, TKey>! key, string! function, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! arguments) -> TSelf!
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.Comparer<TKey>(System.Func<T, TKey>! key, System.Collections.Generic.IComparer<TKey>! comparer, string? accessor = null) -> TSelf!
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.CompoundIndex<TKey>(System.Func<T, TKey>! key, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! components) -> TSelf!
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.ConfigureTable(System.Action<Chalk.Sources.Poco.PocoTableBuilder<T>!>! configure) -> TSelf!
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.CostProfile(Chalk.Catalog.CostProfile! profile) -> TSelf!
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.DefaultDecimalScale(int scale) -> TSelf!
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.NamingPolicy(Chalk.Sources.Poco.PocoNamingPolicy policy) -> TSelf!
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.SchemaName(string! name) -> TSelf!
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.Self.get -> TSelf!
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.SourceId.get -> string!
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.TableName(string! name) -> TSelf!
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.TrustSourceRowSecurity(bool trust = true) -> TSelf!
+Chalk.Sources.Akade.AkadeTable<T>
+Chalk.Sources.Akade.AkadeTable<T>.Runtime.get -> Chalk.Sources.ISourceRuntime!
+Chalk.Sources.Akade.AkadeTable<T>.Schema.get -> string!
+Chalk.Sources.Akade.AkadeTable<T>.SourceId.get -> string!
+Chalk.Sources.Akade.AkadeTable<T>.Table.get -> string!
+Chalk.Sources.Akade.ChalkComparers
+Chalk.Sources.Akade.ConcurrentIndexedSetEditor<T>
+Chalk.Sources.Akade.ConcurrentIndexedSetEditor<T>.ConcurrentIndexedSetEditor(System.Func<System.Collections.Generic.IReadOnlyList<T>!, Akade.IndexedSet.Concurrency.ConcurrentIndexedSet<T>!>! build) -> void
+Chalk.Sources.Akade.ConcurrentIndexedSetSource<T>
+Chalk.Sources.Akade.ConcurrentIndexedSetSourceBuilder<T>
+Chalk.Sources.Akade.ConcurrentIndexedSetSourceBuilder<T>.Build() -> Chalk.Sources.Akade.ConcurrentIndexedSetSource<T>!
+Chalk.Sources.Akade.ConcurrentIndexedSetSourceBuilder<T>.Editor(Chalk.Sources.Akade.ConcurrentIndexedSetEditor<T>! editor) -> Chalk.Sources.Akade.ConcurrentIndexedSetSourceBuilder<T>!
+Chalk.Sources.Akade.ConcurrentIndexedSetSourceBuilder<T>.RebuildWith(System.Func<System.Collections.Generic.IReadOnlyList<T>!, Akade.IndexedSet.Concurrency.ConcurrentIndexedSet<T>!>! build) -> Chalk.Sources.Akade.ConcurrentIndexedSetSourceBuilder<T>!
+Chalk.Sources.Akade.IndexedSetEditor<T>
+Chalk.Sources.Akade.IndexedSetEditor<T>.IndexedSetEditor(System.Func<System.Collections.Generic.IReadOnlyList<T>!, Akade.IndexedSet.IndexedSet<T>!>! build) -> void
+Chalk.Sources.Akade.IndexedSetSource<T>
+Chalk.Sources.Akade.IndexedSetSourceBuilder<T>
+Chalk.Sources.Akade.IndexedSetSourceBuilder<T>.Build() -> Chalk.Sources.Akade.IndexedSetSource<T>!
+Chalk.Sources.Akade.IndexedSetSourceBuilder<T>.Editor(Chalk.Sources.Akade.IndexedSetEditor<T>! editor) -> Chalk.Sources.Akade.IndexedSetSourceBuilder<T>!
+Chalk.Sources.Akade.IndexedSetSourceBuilder<T>.RebuildWith(System.Func<System.Collections.Generic.IReadOnlyList<T>!, Akade.IndexedSet.IndexedSet<T>!>! build) -> Chalk.Sources.Akade.IndexedSetSourceBuilder<T>!
+static Chalk.Sources.Akade.AkadeSource.From<T>(string! sourceId, Akade.IndexedSet.IndexedSet<T>! set) -> Chalk.Sources.Akade.IndexedSetSourceBuilder<T>!
+static Chalk.Sources.Akade.AkadeSource.From<T>(string! sourceId, System.Func<Akade.IndexedSet.IndexedSet<T>!>! set) -> Chalk.Sources.Akade.IndexedSetSourceBuilder<T>!
+static Chalk.Sources.Akade.ChalkComparers.For<T>(bool descending = false) -> System.Collections.Generic.IComparer<T>!
+[CHALK002]static Chalk.Sources.Akade.AkadeSource.From<T>(string! sourceId, Akade.IndexedSet.Concurrency.ConcurrentIndexedSet<T>! set) -> Chalk.Sources.Akade.ConcurrentIndexedSetSourceBuilder<T>!
+[CHALK002]static Chalk.Sources.Akade.AkadeSource.From<T>(string! sourceId, System.Func<Akade.IndexedSet.Concurrency.ConcurrentIndexedSet<T>!>! set) -> Chalk.Sources.Akade.ConcurrentIndexedSetSourceBuilder<T>!
+[CHALK002]static Chalk.Sources.Akade.AkadeSource.FromConcurrent<T>(string! sourceId, Akade.IndexedSet.Concurrency.ConcurrentIndexedSet<T>! set) -> Chalk.Sources.Akade.ConcurrentIndexedSetSourceBuilder<T>!
+[CHALK002]static Chalk.Sources.Akade.AkadeSource.FromConcurrent<T>(string! sourceId, System.Func<Akade.IndexedSet.Concurrency.ConcurrentIndexedSet<T>!>! set) -> Chalk.Sources.Akade.ConcurrentIndexedSetSourceBuilder<T>!
