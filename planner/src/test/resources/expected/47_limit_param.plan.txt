@@ -1,0 +1,7 @@
+-- FULL
+ChalkLimit(fetch=[?0])
+  ChalkTableScan(table=[[main, bars]], projection=[[0, 1]])
+-- NONE
+ChalkLimit(fetch=[?0])
+  ChalkProject(symbol=[$0], ts=[$1])
+    ChalkTableScan(table=[[main, bars]], projection=[[0, 1, 2, 3, 4, 5, 6, 7, 8]])
