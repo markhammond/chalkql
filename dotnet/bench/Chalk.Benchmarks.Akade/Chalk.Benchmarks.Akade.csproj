@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Chalk.Benchmarks.Akade</RootNamespace>
+    <AssemblyName>Chalk.Benchmarks.Akade</AssemblyName>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <NoWarn>$(NoWarn);CHALK001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="Akade.IndexedSet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Chalk.Client/Chalk.Client.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.Akade/Chalk.Sources.Akade.csproj" />
+    <ProjectReference Include="../../tests/Chalk.TestKit/Chalk.TestKit.csproj" />
+  </ItemGroup>
+
+</Project>

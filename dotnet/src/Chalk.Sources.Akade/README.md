@@ -8,6 +8,122 @@ This implementation uses the agreed model:
 `ConcurrentIndexedSetSourceBuilder<T>`. `Build()` returns the corresponding typed source, whose
 `Table` is an `ITableTarget<T>`.
 
+## Supported indexes at a glance
+
+One `IndexedSet<T>` index becomes one Chalk index when Chalk can describe it truthfully. What you
+build, what the planner sees, and what that serves:
+
+| You build | Chalk sees | It serves |
+|---|---|---|
+| `.WithUniqueIndex(x => x.M)` or `.WithIndex(x => x.M)` | a `HASH` index on `M`, `Unique` when it is; its exact distinct key count | `= ?` and `IN (…)` lookups |
+| `.WithIndex(x => (x.A, x.B))`, or `.WithIndex(Keys.Method)` plus `.CompoundIndex(Keys.Method, x => x.A, x => x.B)` | a `HASH` index on a tuple of two to four members | equality on every component; a scan that does not project the whole key is never offered the index |
+| `.WithRangeIndex(x => x.M)` on an integer, decimal or temporal key | an `ORDERED` index on `M` | `=`, `<`, `>`, `BETWEEN`; `ORDER BY M` without a sort; a `LIMIT` above it stopping early; `ORDER BY M DESC` read from the last row down for a range with no upper bound |
+| `.WithRangeIndex(x => x.M)` on a `float`, `double`, `string` or `Utf8String` key, plus `.Comparer(x => x.M, ChalkComparers.For<T>())` — or `StringComparer.Ordinal` | the same `ORDERED` index, once the order the index was built with is declared; undisclosed until then | the same; `ChalkComparers.For<T>(descending: true)` declares a descending index, which serves `ORDER BY M DESC` |
+| `.WithRangeIndex(x => (x.A, x.B))`, a tuple of two to four members | an `ORDERED` index on the tuple | equality on a leading run of components and a range on the next, in tuple order |
+| `.WithPrefixIndex(x => x.Text)` — a trie | a `PREFIX` index | `LIKE 'p%'`; nothing else, and no order |
+| `.WithFullTextIndex(…)`, spatial and vector indexes, a computed key such as `x => x.End - x.Start` | nothing, deliberately | the structure stays usable through Akade itself and is not advertised to the planner |
+
+Everything in the table is checked at registration rather than trusted: a tuple accessor of the wrong
+arity, a comparer Chalk cannot classify and a compound declaration that does not match its accessor
+are each refused by name. The sections below say why each line reads as it does.
+
+## Measuring the overhead
+
+`dotnet/bench/Chalk.Benchmarks.Akade` asks the same four questions of a two-hundred-thousand-row set
+twice — once of Akade directly, once as a prepared ChalkQL statement executed with the same values —
+so that what ChalkQL's execution costs over the raw set is a number: a point lookup through the hash
+index, a band through an ordered index, the cheapest row through the other ordered index, and a sum
+over every row. The statements are prepared once, so nothing in it measures the planner.
+
+```
+dotnet run -c Release --project dotnet/bench/Chalk.Benchmarks.Akade
+dotnet run -c Release --project dotnet/bench/Chalk.Benchmarks.Akade -- --job short   # a quick look
+```
+
+Read `Ratio` and `Allocated`: the ratio is what a request pays for going through the engine, and the
+allocation is what says the per-row path costs nothing on the heap. One short job on a laptop with
+other work running, for the shape of the numbers rather than the numbers:
+
+| case | rows | Akade directly | through ChalkQL | ratio | allocated per execution |
+|---|---|---|---|---|---|
+| the cheapest row, `ORDER BY unit_price LIMIT 1` | 1 | 19 ns | 2.2 µs | 115× | 2.8 KB |
+| a point lookup, `WHERE product_id = ?` | 400 | 450 ns | 6.7 µs | 15× | 3.3 KB |
+| a band, `WHERE amount BETWEEN ? AND ?` | 1,000 | 1.9 µs | 14.3 µs | 7.5× | 3.3 KB |
+| a sum over every row | 200,000 | 207 µs | 3.5 ms | 17× | 2.6 KB |
+
+Two things to take from it. An execution has a floor of about two microseconds and three kilobytes
+— the pipeline, the batches and the arena's bookkeeping — which is what the one-row case is made of
+and is paid once per request, never per row. Above the floor a row costs on the order of ten to
+fifteen nanoseconds to stream through a filter or an aggregate, against one or two for Akade's own
+enumeration, and the allocation does not move with the row count: two hundred thousand rows allocate
+less than one does, because a wider batch is a cheaper one.
+
+## Modifying the set safely
+
+ChalkQL never mutates a published set; the host does, and one rule governs how. **No mutation may
+overlap a ChalkQL execution, a scoped refresh, or the preparation of a transactional refresh that
+reads the set.** An execution streams rows from the set it captured when it started, outside any lock
+Akade holds, so a row added while a scan is half way through is neither reliably seen nor reliably
+unseen. Three patterns keep the rule, and they are the only three.
+
+**Between requests, in place.** When the host can bracket its own writes — a single writer, an
+application lock, a request queue — it mutates the set directly and then tells ChalkQL that the
+table's metadata moved:
+
+```csharp
+// Nothing is executing against `orders` while this runs: that is the host's guarantee.
+lock (ordersGate)
+{
+    set.Add(order);
+    set.Update(changed);
+}
+
+await engine.RefreshAsync(r => r.Refresh(source.Table));   // row count and statistics; no rebuild
+```
+
+The refresh is cheap and asks nothing of Akade beyond a re-count; it exists so the planner's
+estimates follow the data. Reads that begin after it see the new rows; reads that begin before the
+`lock` is released are the ones the rule forbids.
+
+**Swapping the whole set.** When the set is rebuilt rather than edited, register it through a
+delegate and refresh the source, which also rediscovers the index topology:
+
+```csharp
+IndexedSet<Order> current = BuildIndexedSet(initialRows);
+var source = AkadeSource.From("orders", () => current).TableName("orders").Build();
+
+current = BuildIndexedSet(nextRows);                      // built off to the side, then published
+await engine.RefreshAsync(r => r.Refresh(source));
+```
+
+**While requests are in flight.** When the host cannot promise a quiet moment, it uses the
+transactional refresh, and ChalkQL keeps the promise for it: an execution already reading `orders`
+finishes against the set it started on, and one started after the commit sees the successor. The
+successor is built by the host's `RebuildWith` from the rows ChalkQL hands it, never by editing the
+published set:
+
+```csharp
+var source = AkadeSource.From("orders", set)
+    .TableName("orders")
+    .RebuildWith(rows => BuildIndexedSet(rows))
+    .Build();
+
+await engine.RefreshAsync(r => r.Append(source.Table, batch));   // or r.Replace(source.Table, rows)
+```
+
+This is the pattern to reach for by default in a server: it costs a rebuild per commit, and buys the
+one thing the other two cannot, a snapshot per execution.
+
+**On `ConcurrentIndexedSet<T>`.** Akade's concurrent set protects each of its *own* operations with
+a lock, and that is all it protects. It does not make a ChalkQL execution a point-in-time read: the
+adapter captures the wrapped set once and streams from it after Akade's reader lock has been
+released, so the host must still exclude mutation for the whole of an execution — exactly what the
+rule above already requires of a plain `IndexedSet<T>`. With the rule kept, the concurrent wrapper
+adds locking that nothing needs; without it, the wrapper does not save the read. Its practical
+utility under ChalkQL's lifecycle is therefore limited, which is why the `From(...)` overloads that
+take one are marked experimental (`CHALK002`, below): they exist for a host that already holds a
+concurrent set and wants to publish it as it is, not as a way around the rule.
+
 ## The two consistency modes
 
 The source deliberately supports both the cheap in-memory mode and Chalk's stronger transactional
