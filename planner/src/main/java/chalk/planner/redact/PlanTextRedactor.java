@@ -14,7 +14,11 @@ import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.rel.rel2sql.SqlImplementor;
 import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.calcite.sql.dialect.CalciteSqlDialect;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.Pair;
+import org.apache.calcite.util.Sarg;
+import com.google.common.collect.Range;
+import com.google.common.collect.RangeSet;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
@@ -51,14 +55,28 @@ public final class PlanTextRedactor {
 
   private final Pseudonyms pseudonyms;
   private final RedactionPolicy policy;
+  private final Labels labels;
+
+  /** The plan's own builder, for spelling a {@code Sarg}'s points as the literals they stand for. */
+  private @Nullable RexBuilder rexBuilder;
 
   public PlanTextRedactor(Pseudonyms pseudonyms, RedactionPolicy policy) {
+    this(pseudonyms, policy, Labels.NONE);
+  }
+
+  /**
+   * The same, with the context names a literal is labelled with when it is one of the request's
+   * bound values (D286, {@code docs/design/37-redacted-sql.md} §5).
+   */
+  public PlanTextRedactor(Pseudonyms pseudonyms, RedactionPolicy policy, Labels labels) {
     this.pseudonyms = pseudonyms;
     this.policy = policy;
+    this.labels = labels;
   }
 
   /** {@code RelOptUtil.dumpPlan} with this redaction in force. */
   public String explain(RelNode rel, SqlExplainLevel level) {
+    rexBuilder = rel.getCluster().getRexBuilder();
     StringWriter sw = new StringWriter();
     PrintWriter pw = new PrintWriter(sw);
     rel.explain(new Writer(pw, level));
@@ -83,8 +101,63 @@ public final class PlanTextRedactor {
       return literal;
     }
 
-    String text = pseudonyms.marker(type, canonical(literal));
+    String canonical = canonical(literal);
+    String text = pseudonyms.marker(type, canonical, label(literal, type, canonical));
     return new RedactedRex(literal.getType(), text, LITERALS.makeLiteral(text));
+  }
+
+  /** The name this literal is a bound value of, or null. */
+  private @Nullable String label(RexLiteral literal, String type, String canonical) {
+    if (labels.isEmpty()) {
+      return null;
+    }
+    return literal.getTypeName() == SqlTypeName.SARG
+        ? sargLabel(literal)
+        : labels.of(type, canonical);
+  }
+
+  /**
+   * A {@code Sarg} is labelled as one set: the name every one of its points carries, and none when
+   * one point is unlabelled or two carry different names — a set the optimiser merged out of two
+   * lists is nobody's list. The marker stays one pseudonym for the whole set; a range set is never
+   * expanded into its elements, and a set with a range in it is no list at all.
+   */
+  private @Nullable String sargLabel(RexLiteral literal) {
+    Sarg<?> sarg = literal.getValueAs(Sarg.class);
+    RexBuilder builder = rexBuilder;
+    if (sarg == null || builder == null) {
+      return null;
+    }
+    RangeSet<?> ranges =
+        sarg.isPoints()
+            ? sarg.rangeSet
+            : sarg.isComplementedPoints() ? sarg.rangeSet.complement() : null;
+    if (ranges == null || ranges.isEmpty()) {
+      return null;
+    }
+    String label = null;
+    for (Range<?> range : ranges.asRanges()) {
+      if (!range.hasLowerBound()
+          || !range.hasUpperBound()
+          || !range.lowerEndpoint().equals(range.upperEndpoint())) {
+        return null;
+      }
+      String pointLabel;
+      try {
+        RexNode point = builder.makeLiteral(range.lowerEndpoint(), literal.getType(), false);
+        if (!(point instanceof RexLiteral pointLiteral)) {
+          return null;
+        }
+        pointLabel = labels.of(pointLiteral.getTypeName().name(), canonical(pointLiteral));
+      } catch (RuntimeException unspellable) {
+        return null;
+      }
+      if (pointLabel == null || (label != null && !label.equals(pointLabel))) {
+        return null;
+      }
+      label = pointLabel;
+    }
+    return label;
   }
 
   private static boolean isString(RexLiteral literal) {
@@ -97,6 +170,13 @@ public final class PlanTextRedactor {
    * pseudonym over, so the two texts agree wherever the optimiser kept the literal as it was.
    */
   private static String canonical(RexLiteral literal) {
+    if (literal.getTypeName() == SqlTypeName.SARG) {
+      // A search argument is a set, not a literal with a SQL spelling: `SqlImplementor.toSql`
+      // refuses one with an AssertionError — an Error, which the catch below was never going to
+      // see (F120). Its digest is the canonical form of the set, and one pseudonym for the whole
+      // set is what a plan over a folded list gets.
+      return literal.toString();
+    }
     try {
       return SqlImplementor.toSql(literal).toSqlString(CalciteSqlDialect.DEFAULT).getSql();
     } catch (RuntimeException notExpressible) {

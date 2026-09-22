@@ -728,7 +728,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         var rendered = rewriter.Render(shape);
 
         var result = await PlanAsync(rendered.Sql, options, context, ct).ConfigureAwait(false);
-        var compiled = await CompileAsync(result.Plan, options, ct).ConfigureAwait(false);
+        var compiled = await CompileAsync(result.Plan, options, context, ct).ConfigureAwait(false);
         
         var prepared =
             new PreparedQuery(this, sql, rewriter, options, result, compiled, shape, rendered, context);
@@ -1731,14 +1731,36 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// The same, saying which dialect the text is written in (D34, D259), so the token fallback
     /// lexes it with the grammar a prepare would have used.
     /// </summary>
-    public ValueTask<RedactedSql> RedactSqlAsync(
+    public async ValueTask<RedactedSql> RedactSqlAsync(
         string sql, SqlConformance conformance, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(sql);
-        return _options.Planner.RedactSqlAsync(
+
+        // A named parameter is rewritten to `?` exactly as a prepare rewrites it, and the name is
+        // put back into the text that comes back, so the statement reads as the host wrote it
+        // (D287). Any other style, and any text the rewrite cannot read, goes as it is: this call
+        // exists above all for text that failed to parse, and is not the place to refuse one.
+        var text = sql;
+        IReadOnlyList<string>? names = null;
+        try
+        {
+            var rewriter = ParameterRewriter.Parse(sql);
+            if (rewriter.Style == ParameterStyle.Named)
+            {
+                var rendered = rewriter.Render(rewriter.PrepareShape());
+                text = rendered.Sql;
+                names = rewriter.SlotNames(rendered);
+            }
+        }
+        catch (ArgumentException)
+        {
+            // Mixed styles, or a gap in the ordinals: not a statement a prepare would take.
+        }
+
+        var redacted = await _options.Planner.RedactSqlAsync(
             new RedactSqlRequest
             {
-                Sql = sql,
+                Sql = text,
                 Conformance = conformance,
                 Redaction = new RedactionRequest
                 {
@@ -1747,7 +1769,18 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                     KeepStructural = _options.Redaction.KeepStructural,
                 },
             },
-            ct);
+            ct).ConfigureAwait(false);
+        if (names is null)
+        {
+            return redacted;
+        }
+
+        return new RedactedSql
+        {
+            Sql = ParameterNames.Substitute(redacted.Sql, names, indexed: false),
+            Parsed = redacted.Parsed,
+            StructuralHash = redacted.StructuralHash,
+        };
     }
 
     /// <summary>
@@ -1816,7 +1849,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// failure path quotes what was computed here and makes no call of its own.
     /// </summary>
     internal async ValueTask<CompiledPlan> CompileAsync(
-        Plan plan, PrepareOptions options, CancellationToken ct)
+        Plan plan, PrepareOptions options, RequestContext? context, CancellationToken ct)
     {
         RequireCurrentCatalog(plan);
         if (RedactionFor(options) is not { } redaction)
@@ -1839,6 +1872,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                     Sql = text,
                     Conformance = options.Conformance,
                     Redaction = redaction,
+                    // A folded value in the pushed text is labelled with the name it was bound
+                    // under, which the sidecar can only do from the context that folded it (D286).
+                    Context = context,
                 },
                 ct).ConfigureAwait(false);
             redacted[text] = result.Sql;

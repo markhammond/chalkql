@@ -49,6 +49,43 @@ class SqlRedactorTest {
     return MARKER.matcher(redacted).replaceAll("/*REDACTED-xxxxxxxx:$2*/");
   }
 
+  /** A marker with the label it may carry after its type (D286). */
+  private static final Pattern LABELLED =
+      Pattern.compile("/\\*REDACTED-([0-9a-f]{8}):([A-Z0-9_]+)((?: [^*]+)?)\\*/");
+
+  /** The same text with every pseudonym masked and the labels left as they are. */
+  private static String maskedLabelled(String redacted) {
+    return LABELLED.matcher(redacted).replaceAll("/*REDACTED-xxxxxxxx:$2$3*/");
+  }
+
+  /** The labels a redaction's markers carry, in order, "" for none. */
+  private static List<String> labels(String redacted) {
+    List<String> labels = new ArrayList<>();
+    Matcher matcher = LABELLED.matcher(redacted);
+    while (matcher.find()) {
+      labels.add(matcher.group(3).strip());
+    }
+    return labels;
+  }
+
+  /** The pseudonyms of a redaction's markers, labelled or not, in order. */
+  private static List<String> hexes(String redacted) {
+    List<String> hexes = new ArrayList<>();
+    Matcher matcher = LABELLED.matcher(redacted);
+    while (matcher.find()) {
+      hexes.add(matcher.group(1));
+    }
+    return hexes;
+  }
+
+  private static Labels boundValues() {
+    return LabelsTest.labels(
+        chalk.planner.rpc.v1.RequestContext.newBuilder()
+            .addScalars(LabelsTest.scalar("org", LabelsTest.literal(7)))
+            .addScalars(LabelsTest.scalar("sym", LabelsTest.literal("BTCUSDT")))
+            .addRelations(LabelsTest.list("orgs", 1, 2)));
+  }
+
   /** The types the markers in {@code redacted} name, in order. */
   private static List<String> types(String redacted) {
     List<String> types = new ArrayList<>();
@@ -445,5 +482,66 @@ class SqlRedactorTest {
 
     assertThat(redact(sql)).isEqualTo(redact(sql));
     assertThat(result(sql).structuralHash()).isEqualTo(result(sql).structuralHash());
+  }
+
+  // ---- the labels (D286) ----
+
+  /**
+   * A literal that is, in type and value, one of the request's bound values carries the name it was
+   * bound under beside its type; every other literal carries none.
+   */
+  @Test
+  void a_literal_that_is_a_bound_value_is_labelled_with_its_name() {
+    SqlRedactor.Result result =
+        SqlRedactor.redact(
+            "SELECT id FROM t WHERE org = 7 AND sym = 'BTCUSDT' AND other = 8 AND note = '7'",
+            SqlConformanceEnum.DEFAULT,
+            policy(),
+            boundValues());
+
+    assertThat(maskedLabelled(result.redactedSql()))
+        .isEqualTo(
+            "SELECT \"id\" FROM \"t\" WHERE \"org\" = /*REDACTED-xxxxxxxx:DECIMAL @ctx.org*/"
+                + " AND \"sym\" = /*REDACTED-xxxxxxxx:CHAR @ctx.sym*/"
+                + " AND \"other\" = /*REDACTED-xxxxxxxx:DECIMAL*/"
+                + " AND \"note\" = /*REDACTED-xxxxxxxx:CHAR*/");
+  }
+
+  /** An element of a folded list is labelled with the list's name — the pushed-query form of a fold. */
+  @Test
+  void an_in_list_element_is_labelled_with_the_lists_name() {
+    SqlRedactor.Result result =
+        SqlRedactor.redact(
+            "SELECT id FROM t WHERE org_id IN (1, 2, 3)",
+            SqlConformanceEnum.DEFAULT,
+            policy(),
+            boundValues());
+
+    assertThat(labels(result.redactedSql())).containsExactly("@ctx.orgs", "@ctx.orgs", "");
+  }
+
+  /** A label is a rendering: the structural hash and every pseudonym are what they are without it. */
+  @Test
+  void a_label_changes_neither_the_structural_hash_nor_a_pseudonym() {
+    String sql = "SELECT id FROM t WHERE org = 7 AND sym = 'BTCUSDT'";
+    SqlRedactor.Result plain = SqlRedactor.redact(sql, SqlConformanceEnum.DEFAULT, policy());
+    SqlRedactor.Result labelled =
+        SqlRedactor.redact(sql, SqlConformanceEnum.DEFAULT, policy(), boundValues());
+
+    assertThat(labelled.structuralHash()).isEqualTo(plain.structuralHash());
+    assertThat(hexes(labelled.redactedSql())).isEqualTo(hexes(plain.redactedSql()));
+    assertThat(labels(plain.redactedSql())).containsExactly("", "");
+    assertThat(labels(labelled.redactedSql())).containsExactly("@ctx.org", "@ctx.sym");
+  }
+
+  /** The token fallback labels nothing: without a tree a token has no type to look a value up by. */
+  @Test
+  void the_token_fallback_labels_nothing() {
+    SqlRedactor.Result result =
+        SqlRedactor.redact(
+            "SELECT id FROM t WHERE org = 7 AND AND", SqlConformanceEnum.DEFAULT, policy(), boundValues());
+
+    assertThat(result.parsed()).isFalse();
+    assertThat(labels(result.redactedSql())).allSatisfy(label -> assertThat(label).isEmpty());
   }
 }

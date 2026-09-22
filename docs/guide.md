@@ -807,6 +807,22 @@ safe. `ChalkEngine.RedactSqlAsync(sql)` serves text that was never prepared —
 above all text that failed to parse, which falls back to the parser's token
 stream and keeps nothing at all.
 
+Two things read by name rather than by position. A parameter you wrote as
+`@name` reads as `@name` in the redacted text and in the plan text, not as the
+positional `?` the planner saw. And a literal that is one of the request
+context's bound values — a tenant list folded into a policy's predicate, say —
+carries the name it was bound under beside its pseudonym, in the plan text and
+in the query text a source failure quotes:
+
+```
+/*REDACTED-3f9a1c2e:DECIMAL @ctx.tenant_id*/
+```
+
+The label says only that the value is the one bound under that name. A
+membership list folded into one set is named as the set; a value the optimiser
+coerced to another type is another value and carries no name; and the label is
+a rendering, so it changes neither the pseudonym nor the structural hash.
+
 Two properties are worth knowing before you rely on it:
 
 - **Equal values correlate within a shape, and not across shapes.** The seed is

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Chalk.Catalog;
 using Chalk.Client;
+using Chalk.Entitlements;
 using Chalk.TestKit;
 using CatalogContext = Chalk.Catalog.CatalogContext;
 
@@ -250,7 +251,8 @@ public sealed partial class RedactedSqlTests(SharedSidecar sidecar)
 
     /// <summary>
     /// A host's parameters never reach the text at all: the planner sees the D27 rewrite, so the
-    /// redaction is of a statement whose values are already placeholders.
+    /// redaction is of a statement whose values are already placeholders — and a named one reads by
+    /// its name again on the way back (D287).
     /// </summary>
     [Fact]
     public async Task A_parameterised_statement_redacts_the_rewritten_text()
@@ -263,8 +265,161 @@ public sealed partial class RedactedSqlTests(SharedSidecar sidecar)
             TestContext.Current.CancellationToken);
 
         Assert.NotNull(prepared.RedactedSql);
-        Assert.Contains("?", prepared.RedactedSql, StringComparison.Ordinal);
+        Assert.Contains("= @symbol", prepared.RedactedSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("?", prepared.RedactedSql, StringComparison.Ordinal);
         Assert.Empty(Pseudonyms(prepared.RedactedSql));
+    }
+
+    // ------------------------------------------------------------ the host's parameter names
+
+    /// <summary>
+    /// A parameter the host wrote as <c>@name</c> reads as <c>@name</c> in the redacted statement
+    /// and in the redacted plan text, not as the positional placeholder the planner saw.
+    /// </summary>
+    [Fact]
+    public async Task A_named_parameter_reads_by_its_name_in_the_redacted_text_and_the_plan_text()
+    {
+        await using var engine = await CreateEngineAsync(Salted());
+
+        var prepared = await engine.PrepareAsync(
+            "SELECT symbol FROM bars WHERE symbol = @symbol AND ts >= @since",
+            new PrepareOptions { IncludePlanText = true },
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(prepared.RedactedSql);
+        Assert.Contains("= @symbol", prepared.RedactedSql, StringComparison.Ordinal);
+        Assert.Contains(">= @since", prepared.RedactedSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("?", prepared.RedactedSql, StringComparison.Ordinal);
+        Assert.NotNull(prepared.PlanText);
+        Assert.Contains("@symbol", prepared.PlanText, StringComparison.Ordinal);
+        Assert.Contains("@since", prepared.PlanText, StringComparison.Ordinal);
+        Assert.DoesNotContain("?0", prepared.PlanText, StringComparison.Ordinal);
+        Assert.DoesNotContain("?1", prepared.PlanText, StringComparison.Ordinal);
+    }
+
+    /// <summary>The same for text that was never prepared: rewritten as a prepare would, names put back.</summary>
+    [Fact]
+    public async Task Redact_sql_puts_the_names_back_too()
+    {
+        await using var engine = await CreateEngineAsync(Salted());
+
+        var redacted = await engine.RedactSqlAsync(
+            "SELECT symbol FROM bars WHERE symbol = @symbol AND ts >= 5",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(redacted.Parsed);
+        Assert.Contains("= @symbol", redacted.Sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("?", redacted.Sql, StringComparison.Ordinal);
+        Assert.Single(Pseudonyms(redacted.Sql));
+    }
+
+    /// <summary>An ordinal or positional statement has no names to put back and keeps its <c>?</c>s.</summary>
+    [Fact]
+    public async Task An_ordinal_statement_keeps_its_positional_placeholders()
+    {
+        await using var engine = await CreateEngineAsync(Salted());
+
+        var prepared = await engine.PrepareAsync(
+            "SELECT symbol FROM bars WHERE symbol = $1",
+            new PrepareOptions { IncludePlanText = true },
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(prepared.RedactedSql);
+        Assert.Contains("= ?", prepared.RedactedSql, StringComparison.Ordinal);
+        Assert.NotNull(prepared.PlanText);
+        Assert.Contains("?0", prepared.PlanText, StringComparison.Ordinal);
+    }
+
+    /// <summary>The names go back only into a redacted text; a plain plan text is the one it always was.</summary>
+    [Fact]
+    public async Task A_prepare_that_does_not_redact_keeps_the_plan_texts_placeholders()
+    {
+        await using var engine = await CreateEngineAsync();
+
+        var prepared = await engine.PrepareAsync(
+            "SELECT symbol FROM bars WHERE symbol = @symbol",
+            new PrepareOptions { IncludePlanText = true },
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(prepared.RedactedSql);
+        Assert.NotNull(prepared.PlanText);
+        Assert.Contains("?0", prepared.PlanText, StringComparison.Ordinal);
+        Assert.DoesNotContain("@symbol", prepared.PlanText, StringComparison.Ordinal);
+    }
+
+    // ------------------------------------------------------------ the context names
+
+    /// <summary>
+    /// A literal in a pushed query's text that is, in type and value, one of the request context's
+    /// bound values is labelled with the name it was bound under — in the query text a source
+    /// failure quotes, and never in the redacted statement, which names the reference rather than
+    /// its value.
+    /// </summary>
+    [Fact]
+    public async Task A_pushed_query_labels_a_literal_that_is_a_bound_value()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+
+        await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+        {
+            ContextId = CorpusFixture.ContextId,
+            Functions = CorpusFunctions.Register,
+            Sources = [.. Fixture.Sources, BrokenSource()],
+            Planner = sidecar.CreatePlanner(),
+            Redaction = Salted(),
+        });
+        var context = new RequestContext().With("sym", "BTCUSDT");
+
+        var prepared = await engine.PrepareAsync(
+            "SELECT symbol, v FROM down.bars_down WHERE symbol = 'BTCUSDT'",
+            context,
+            ct: TestContext.Current.CancellationToken);
+        Assert.NotNull(prepared.RedactedSql);
+        Assert.DoesNotContain("@ctx.", prepared.RedactedSql, StringComparison.Ordinal);
+
+        await using var execution = await engine.ExecuteAsync(
+            prepared, (IReadOnlyList<object?>?)null, ct: TestContext.Current.CancellationToken);
+        var failure = await Assert.ThrowsAnyAsync<Chalk.ChalkException>(async () =>
+        {
+            await foreach (var batch in execution.Batches.WithCancellation(
+                TestContext.Current.CancellationToken))
+            {
+                batch.Dispose();
+            }
+        });
+
+        var attributed = Find<Chalk.Sources.SourceExecutionException>(failure);
+        Assert.NotNull(attributed);
+        Assert.DoesNotContain("BTCUSDT", attributed.Subject, StringComparison.Ordinal);
+        Assert.Contains(":CHAR @ctx.sym*/", attributed.Subject, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A context value folded into an entitled table's predicate is a literal in the plan, and its
+    /// marker names the entry it came from.
+    /// </summary>
+    [Fact]
+    public async Task A_folded_context_value_is_labelled_in_the_plan_text()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+        {
+            ContextId = TenancyFixture.ContextId,
+            Sources = [TenancyFixture.Shared.Source],
+            Planner = sidecar.CreatePlanner(),
+            Redaction = Salted(),
+        });
+
+        var prepared = await engine.WithEntitlements().PrepareAsync(
+            "SELECT id FROM members",
+            TenancyFixture.U2,
+            new PrepareOptions { IncludePlanText = true },
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(prepared.Query.PlanText);
+        Assert.Contains(" @ctx.agent_orgs*/", prepared.Query.PlanText, StringComparison.Ordinal);
+        Assert.NotNull(prepared.Query.RedactedSql);
+        Assert.DoesNotContain("@ctx.", prepared.Query.RedactedSql, StringComparison.Ordinal);
     }
 
     // ------------------------------------------------------------ the plan text

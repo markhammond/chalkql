@@ -522,6 +522,8 @@ Chalk.Client.RedactSqlRequest.Conformance.init -> void
 Chalk.Client.RedactSqlRequest.RedactSqlRequest() -> void
 Chalk.Client.RedactSqlRequest.Redaction.get -> Chalk.Client.RedactionRequest!
 Chalk.Client.RedactSqlRequest.Redaction.init -> void
+Chalk.Client.RedactSqlRequest.Context.get -> Chalk.Client.RequestContext?
+Chalk.Client.RedactSqlRequest.Context.init -> void
 Chalk.Client.RedactSqlRequest.Sql.get -> string!
 Chalk.Client.RedactSqlRequest.Sql.init -> void
 Chalk.Client.RedactedSql
@@ -1002,6 +1004,7 @@ const Chalk.Client.Rpc.PlanningStats.StagesFieldNumber = 7 -> int
 const Chalk.Client.Rpc.PlanningStats.TotalMicrosFieldNumber = 1 -> int
 const Chalk.Client.Rpc.PlanningStats.ValidateMicrosFieldNumber = 3 -> int
 const Chalk.Client.Rpc.RedactSqlRequest.ConformanceFieldNumber = 2 -> int
+const Chalk.Client.Rpc.RedactSqlRequest.ContextFieldNumber = 4 -> int
 const Chalk.Client.Rpc.RedactSqlRequest.RedactionFieldNumber = 3 -> int
 const Chalk.Client.Rpc.RedactSqlRequest.SqlFieldNumber = 1 -> int
 const Chalk.Client.Rpc.RedactSqlResponse.ParsedFieldNumber = 3 -> int
@@ -1241,6 +1244,8 @@ static readonly Chalk.Client.PlanningOptions.None -> Chalk.Client.PlanningOption
 ~Chalk.Client.Rpc.PlanningStats.Stages.get -> Google.Protobuf.Collections.RepeatedField<string>
 ~Chalk.Client.Rpc.PlanningStats.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
 ~Chalk.Client.Rpc.RedactSqlRequest.Clone() -> Chalk.Client.Rpc.RedactSqlRequest
+~Chalk.Client.Rpc.RedactSqlRequest.Context.get -> Chalk.Client.Rpc.RequestContext
+~Chalk.Client.Rpc.RedactSqlRequest.Context.set -> void
 ~Chalk.Client.Rpc.RedactSqlRequest.Equals(Chalk.Client.Rpc.RedactSqlRequest other) -> bool
 ~Chalk.Client.Rpc.RedactSqlRequest.MergeFrom(Chalk.Client.Rpc.RedactSqlRequest other) -> void
 ~Chalk.Client.Rpc.RedactSqlRequest.MergeFrom(Google.Protobuf.CodedInputStream input) -> void

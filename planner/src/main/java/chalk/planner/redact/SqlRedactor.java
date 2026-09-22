@@ -63,6 +63,15 @@ public final class SqlRedactor {
    * Redacts a parsed statement — the prepare-time path, over the tree the sidecar already holds.
    */
   public static Result redact(SqlNode statement, RedactionPolicy policy) {
+    return redact(statement, policy, Labels.NONE);
+  }
+
+  /**
+   * The same, with the context names a literal may be labelled with when it is one of the request's
+   * bound values (D286). The labels touch the redacted form only: the structural form, and so the
+   * hash and every pseudonym, are what they are without them.
+   */
+  public static Result redact(SqlNode statement, RedactionPolicy policy, Labels labels) {
     RedactedMarker.Mode mode = new RedactedMarker.Mode();
     Keep keep = Keep.of(statement, policy);
     List<RedactedMarker> markers = new ArrayList<>();
@@ -74,7 +83,7 @@ public final class SqlRedactor {
     Pseudonyms pseudonyms = Pseudonyms.forStatement(structuralHash, policy);
     for (RedactedMarker marker : markers) {
       if (marker.isReplaced()) {
-        marker.resolve(pseudonyms);
+        marker.resolve(pseudonyms, labels);
       }
     }
 
@@ -88,13 +97,23 @@ public final class SqlRedactor {
    * form and is exactly where nothing may be kept.
    */
   public static Result redact(String sql, SqlConformanceEnum conformance, RedactionPolicy policy) {
+    return redact(sql, conformance, policy, Labels.NONE);
+  }
+
+  /**
+   * The same, with labels — the form a pushed query's text is redacted in, since its literals are
+   * the statement's folded values. The token fallback labels nothing: without a tree a token has no
+   * type to look a value up by.
+   */
+  public static Result redact(
+      String sql, SqlConformanceEnum conformance, RedactionPolicy policy, Labels labels) {
     SqlNode parsed;
     try {
       parsed = SqlParser.create(sql, SqlConfigs.parser(conformance)).parseStmt();
     } catch (Exception | StackOverflowError unparseable) {
       return TokenRedactor.redact(sql, conformance, policy);
     }
-    return redact(parsed, policy);
+    return redact(parsed, policy, labels);
   }
 
   /** The seed for a statement whose structural hash is already known. */

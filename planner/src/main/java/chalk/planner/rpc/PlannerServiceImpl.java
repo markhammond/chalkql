@@ -224,9 +224,20 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
             "RedactSqlRequest carries no redaction options; a redaction needs at least a salt"
                 + " (docs/design/37-redacted-sql.md §2).");
       }
+      // The context the statement was planned with, when the caller passed it on: a literal that
+      // is one of its bound values is labelled with the name it was bound under (D286). A request
+      // without one labels nothing.
+      chalk.planner.redact.Labels labels =
+          request.hasContext()
+              ? chalk.planner.redact.Labels.of(
+                  chalk.planner.entitlement.BoundContext.of(request.getContext()))
+              : chalk.planner.redact.Labels.NONE;
       chalk.planner.redact.SqlRedactor.Result result =
           chalk.planner.redact.SqlRedactor.redact(
-              request.getSql(), SqlConfigs.conformance(request.getConformanceValue()), policy);
+              request.getSql(),
+              SqlConfigs.conformance(request.getConformanceValue()),
+              policy,
+              labels);
       observer.onNext(
           chalk.planner.rpc.v1.RedactSqlResponse.newBuilder()
               .setRedactedSql(result.redactedSql())
@@ -390,7 +401,9 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
                         : new chalk.planner.redact.PlanTextRedactor(
                             chalk.planner.redact.SqlRedactor.pseudonyms(
                                 redacted.structuralHash(), redaction),
-                            redaction));
+                            redaction,
+                            // A folded value's marker names the entry it came from (D286).
+                            chalk.planner.redact.Labels.of(boundContext)));
 
             long convertStart = System.nanoTime();
             RelDataType parameterRowType = result.parameterRowType();

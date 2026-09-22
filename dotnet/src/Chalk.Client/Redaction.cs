@@ -91,6 +91,15 @@ public sealed class RedactSqlRequest
     public SqlConformance Conformance { get; init; } = SqlConformance.Default;
 
     public required RedactionRequest Redaction { get; init; }
+
+    /// <summary>
+    /// The context the statement was planned with, when there was one (D286). A literal in the text
+    /// that is, in type and value, one of its bound values is labelled with the name it was bound
+    /// under — <c>/*REDACTED-3f9a1c2e:DECIMAL @ctx.tenant_id*/</c> — so a pushed query's redacted
+    /// text says which context entry a folded value came from. Optional; the label is a rendering
+    /// only and never part of the structural hash or the pseudonym.
+    /// </summary>
+    public RequestContext? Context { get; init; }
 }
 
 /// <summary>What a redaction produced (D262).</summary>

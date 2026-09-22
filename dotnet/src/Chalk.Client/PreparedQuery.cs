@@ -54,8 +54,18 @@ public sealed class PreparedQuery
         _tablesRead = ChalkEngine.TablesRead(result.Plan);
         Sql = sql;
         Plan = result.Plan;
-        PlanText = result.PlanText;
-        RedactedSql = result.RedactedSql;
+        // When the prepare asked for a redaction and the statement's parameters are named, the
+        // names go back where the rewrite put a `?` — in the statement and in the plan text, whose
+        // dynamic parameters read `?0`, `?1`, … (D287). Anything else is served as it came.
+        var names = result.RedactedSql is null ? null : rewriter.SlotNames(rendered);
+        PlanText =
+            names is null || result.PlanText is null
+                ? result.PlanText
+                : ParameterNames.Substitute(result.PlanText, names, indexed: true);
+        RedactedSql =
+            names is null || result.RedactedSql is null
+                ? result.RedactedSql
+                : ParameterNames.Substitute(result.RedactedSql, names, indexed: false);
         PlanningStats = result.Stats;
         PlanningState = result.PlanningState;
 
@@ -381,7 +391,7 @@ public sealed class PreparedQuery
             _rewriter,
             _options,
             result,
-            await _engine.CompileAsync(result.Plan, _options, ct).ConfigureAwait(false),
+            await _engine.CompileAsync(result.Plan, _options, union, ct).ConfigureAwait(false),
             _prepareShape,
             _prepared,
             union);
@@ -460,7 +470,7 @@ public sealed class PreparedQuery
             var rendered = _rewriter.Render(shape);
             var result =
                 await _engine.PlanAsync(rendered.Sql, _options, Context, ct).ConfigureAwait(false);
-            var compiled = await _engine.CompileAsync(result.Plan, _options, ct).ConfigureAwait(false);
+            var compiled = await _engine.CompileAsync(result.Plan, _options, Context, ct).ConfigureAwait(false);
             if (_decorateSchema is { } decorate)
             {
                 var decorated = decorate(compiled.OutputSchema);

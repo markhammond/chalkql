@@ -500,6 +500,10 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
             Conformance = (Chalk.Ir.SqlConformance)request.Conformance,
             Redaction = ToProto(request.Redaction),
         };
+        if (request.Context?.ToProto() is { } context)
+        {
+            message.Context = context;
+        }
 
         var response = await CallAsync(
             deadline => _client.RedactSqlAsync(message, deadline: deadline, cancellationToken: ct),

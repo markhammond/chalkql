@@ -203,6 +203,28 @@ internal sealed class ParameterRewriter
         return new RenderedStatement(sql.ToString(), slots);
     }
 
+    /// <summary>
+    /// The host's name for each rendered <c>?</c>, in order — <c>@symbol</c> for a parameter the
+    /// statement wrote as <c>@symbol</c>, once per occurrence — or null for a statement whose
+    /// parameters are not named, which has nothing to put back (D287).
+    /// </summary>
+    public IReadOnlyList<string>? SlotNames(RenderedStatement rendered)
+    {
+        ArgumentNullException.ThrowIfNull(rendered);
+        if (Style != ParameterStyle.Named)
+        {
+            return null;
+        }
+
+        var names = new string[rendered.Slots.Count];
+        for (var i = 0; i < names.Length; i++)
+        {
+            names[i] = "@" + Parameters[rendered.Slots[i].ParameterIndex].Name;
+        }
+
+        return names;
+    }
+
     /// <summary>A literal run of SQL, or a parameter occurrence to render.</summary>
     private readonly record struct Segment(string Text, int Occurrence);
 

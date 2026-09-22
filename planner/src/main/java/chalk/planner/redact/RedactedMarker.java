@@ -57,7 +57,12 @@ final class RedactedMarker extends SqlLiteral {
     this.mode = mode;
     this.replaced = replaced;
     this.type = typeOf(original);
-    this.canonical = original.toSqlString(CalciteSqlDialect.DEFAULT).getSql();
+    this.canonical = canonicalOf(original);
+  }
+
+  /** The literal's own canonical unparse, which is what the pseudonym is taken over. */
+  static String canonicalOf(SqlLiteral literal) {
+    return literal.toSqlString(CalciteSqlDialect.DEFAULT).getSql();
   }
 
   /**
@@ -70,7 +75,7 @@ final class RedactedMarker extends SqlLiteral {
    * {@link org.apache.calcite.sql.SqlUnknownLiteral} whose type name is literally {@code UNKNOWN}
    * until the validator resolves it, and the tag it carries is the name a reader wants to see.
    */
-  private static String typeOf(SqlLiteral literal) {
+  static String typeOf(SqlLiteral literal) {
     return literal instanceof org.apache.calcite.sql.SqlUnknownLiteral unknown
         ? unknown.tag
         : literal.getTypeName().name();
@@ -93,7 +98,12 @@ final class RedactedMarker extends SqlLiteral {
 
   /** Fixes the pseudonym this marker prints once the seed is known. */
   void resolve(Pseudonyms pseudonyms) {
-    marker = pseudonyms.marker(type, canonical);
+    resolve(pseudonyms, Labels.NONE);
+  }
+
+  /** The same, with the name of the context entry this literal is a value of, if it is one. */
+  void resolve(Pseudonyms pseudonyms, Labels labels) {
+    marker = pseudonyms.marker(type, canonical, labels.of(type, canonical));
   }
 
   @Override

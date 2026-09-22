@@ -15,7 +15,9 @@ import chalk.planner.rpc.v1.RedactSqlRequest;
 import chalk.planner.rpc.v1.RedactSqlResponse;
 import chalk.planner.rpc.v1.RedactionOptions;
 import chalk.planner.rpc.v1.RedactionScope;
+import chalk.planner.rpc.v1.ContextScalar;
 import chalk.planner.rpc.v1.RegisterCatalogRequest;
+import chalk.planner.rpc.v1.RequestContext;
 import com.google.protobuf.ByteString;
 import io.grpc.ManagedChannel;
 import io.grpc.Server;
@@ -191,5 +193,55 @@ class RedactionServiceTest {
     assertThat(response.getParsed()).isTrue();
     assertThat(response.getRedactedSql()).contains(":: VARCHAR");
     assertThat(response.getRedactedSql()).doesNotContain("a secret");
+  }
+
+  // ---- the labels (D286) ----
+
+  private static RequestContext.Builder bound(String name, String value) {
+    return RequestContext.newBuilder()
+        .addScalars(
+            ContextScalar.newBuilder()
+                .setName(name)
+                .setValue(
+                    chalk.ir.v1.Expr.newBuilder()
+                        .setType(chalk.ir.v1.Type.newBuilder().setKind(chalk.ir.v1.TypeKind.TYPE_KIND_STRING))
+                        .setLiteral(chalk.ir.v1.Literal.newBuilder().setStringValue(value))));
+  }
+
+  /**
+   * A {@code RedactSql} request that carries the context the statement was planned with labels a
+   * literal that is one of its values — the form each pushed query's text is redacted in.
+   */
+  @Test
+  void a_redact_sql_request_with_a_context_labels_its_bound_values() {
+    RedactSqlResponse response =
+        client.redactSql(
+            RedactSqlRequest.newBuilder()
+                .setSql("SELECT symbol FROM bars WHERE symbol = 'BTCUSDT' AND ts > 5")
+                .setRedaction(redaction())
+                .setContext(bound("sym", "BTCUSDT"))
+                .build());
+
+    assertThat(response.getRedactedSql())
+        .matches(
+            "SELECT \"symbol\" FROM \"bars\" WHERE \"symbol\" = /\\*REDACTED-[0-9a-f]{8}:CHAR"
+                + " @ctx\\.sym\\*/ AND \"ts\" > /\\*REDACTED-[0-9a-f]{8}:DECIMAL\\*/");
+    assertThat(response.getParsed()).isTrue();
+  }
+
+  /** The label is a rendering: with and without the context, one structural hash and one pseudonym. */
+  @Test
+  void a_labelled_redaction_has_the_unlabelled_ones_hash_and_pseudonyms() {
+    RedactSqlRequest.Builder request =
+        RedactSqlRequest.newBuilder()
+            .setSql("SELECT symbol FROM bars WHERE symbol = 'BTCUSDT'")
+            .setRedaction(redaction());
+    RedactSqlResponse plain = client.redactSql(request.build());
+    RedactSqlResponse labelled =
+        client.redactSql(request.setContext(bound("sym", "BTCUSDT")).build());
+
+    assertThat(labelled.getStructuralHash()).isEqualTo(plain.getStructuralHash());
+    assertThat(labelled.getRedactedSql().replace(" @ctx.sym", "")).isEqualTo(plain.getRedactedSql());
+    assertThat(labelled.getRedactedSql()).contains(" @ctx.sym*/");
   }
 }

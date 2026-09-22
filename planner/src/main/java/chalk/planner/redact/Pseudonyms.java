@@ -5,6 +5,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
  * The owner's hashing policy, and nothing else (D262, {@code docs/design/37-redacted-sql.md} §2).
@@ -54,7 +55,24 @@ public final class Pseudonyms {
    * @param canonical the literal's own canonical unparse
    */
   public String marker(String type, String canonical) {
-    return "/*REDACTED-" + pseudonym(type, canonical) + ":" + type + "*/";
+    return marker(type, canonical, null);
+  }
+
+  /**
+   * The same, with the name of the context entry the literal is a value of beside the type: {@code
+   * /*REDACTED-<eight hex>:<type> @ctx.<name>*}{@code /}. The label is a rendering and nothing
+   * else — it is not in the pseudonym's input, so a labelled marker carries the very pseudonym an
+   * unlabelled one does.
+   *
+   * @param label the name, or null for a literal that is no bound value
+   */
+  public String marker(String type, String canonical, @Nullable String label) {
+    return "/*REDACTED-"
+        + pseudonym(type, canonical)
+        + ":"
+        + type
+        + (label == null ? "" : " " + label)
+        + "*/";
   }
 
   /** The marker a structural form uses: the type alone, because the seed is derived from it. */
