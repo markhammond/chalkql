@@ -69,6 +69,18 @@ internal static class DifferentialRunner
             ["p0"] = 5,
         },
 
+        // The federated bounds (D288). A page small enough that the source truncating and the
+        // engine truncating are visibly different amounts of work, and large enough that the
+        // answer is more than one row.
+        "17_parameterised_limit_to_a_source" => new Dictionary<string, object?>
+        {
+            ["p0"] = 6,
+        },
+        "18_parameterised_limit_over_the_branches" => new Dictionary<string, object?>
+        {
+            ["p0"] = 6,
+        },
+
         // The M4 pushdown corpus (§5). A date inside the generated lineitem's range, so the query
         // returns rows at every level.
         "12_parameters" => new Dictionary<string, object?>
