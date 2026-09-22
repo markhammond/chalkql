@@ -527,18 +527,26 @@ public sealed class ConfinementTests
     }
 
     /// <summary>
-    /// And the near miss is named only when there is one. The fixture's own vendor-within-region
-    /// refusal (F80 above) is about two kinds no table brings together by any route, so the message
-    /// stays the one ADR 0064 §1 wrote and gains nothing.
+    /// And the near miss along a <c>Related</c> path is named too: the fixture's own
+    /// vendor-within-region refusal (F80 above) reaches the vendor one step up through a bridge and
+    /// holds the region on the order's own row, which is exactly the shape F101 was reported for,
+    /// so the message says which path, why it cannot carry the conjunction, and the two ways out.
     /// </summary>
     [Fact]
-    public void A_refusal_with_no_path_to_name_says_nothing_about_one()
+    public void A_confinement_along_a_related_path_names_the_near_miss()
     {
+        // The shape F101 was reported for: the confining kind on the target's own row, the grant's
+        // kind reached along a Related path. Refused, since a marker-borne confinement is a later
+        // decision — and refused by name, saying which path and which way out.
         var error = RefusedAtBind(
             Grant.ForTenancy(TenancyPolicyFixture.Vendor, 1, TenancyPolicyFixture.VendorRole)
                 .Within(Region, 1));
 
-        Assert.DoesNotContain("comes closest", error.Message, StringComparison.Ordinal);
+        Assert.Contains("comes closest", error.Message, StringComparison.Ordinal);
+        Assert.Contains("along a Related path whose endpoint is 'items'", error.Message, StringComparison.Ordinal);
+        Assert.Contains("holds 'region' on its own row", error.Message, StringComparison.Ordinal);
+        Assert.Contains("existence marker", error.Message, StringComparison.Ordinal);
+        Assert.Contains("held unconfined (F101)", error.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

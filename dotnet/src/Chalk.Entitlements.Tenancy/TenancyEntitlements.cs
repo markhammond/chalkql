@@ -673,7 +673,9 @@ public sealed class TenancyEntitlements
 
     /// <summary>
     /// The near miss one table is, or an empty string: two kinds at the ends of two different paths,
-    /// or a confining kind held by a <c>Through</c> parent rather than by the target (D279 §1).
+    /// a confining kind held by a <c>Through</c> parent rather than by the target, or the grant's
+    /// kind reached along a <c>Related</c> path with the confining kind on the target's own row
+    /// (D279 §1, F101).
     /// </summary>
     /// <remarks>
     /// A conjoined confinement across a path is decided above the join, over the target's own row
@@ -732,6 +734,27 @@ public sealed class TenancyEntitlements
                     + "the endpoint's, so a kind one join further out is on neither. Either "
                     + $"{TenancyCompiler.Named(onParent)} is declared directly on "
                     + $"'{model.Declared.Name}', or the grant is held unconfined (F101). ";
+            }
+
+            // The third near miss, and the one F101 was reported for: the confining kind is on the
+            // target's own row and the grant's kind is reached along a *Related* path, whose first
+            // step goes up to a bridge. A conjoined confinement along a Related kind would have to
+            // be borne by the path's existence marker, which design 40 §7 leaves to a later decision.
+            var onTarget = model.Dimensions
+                .Where(d => !d.Declared.IsSubject
+                    && rest.Contains(d.Declared.Kind, StringComparer.Ordinal))
+                .Select(d => d.Declared.Kind)
+                .ToList();
+            if (path.IsRelated && onTarget.Count > 0)
+            {
+                return $"'{model.Declared.Name}' comes closest and is not close enough: it holds "
+                    + $"{TenancyCompiler.Named(onTarget)} on its own row and reaches '{path.Kind}' "
+                    + $"along a Related path whose endpoint is '{path.EndpointTable}' — a path whose "
+                    + "first step goes up, to a bridge. A conjoined confinement along a Related kind "
+                    + "would have to be borne by the path's existence marker, and that is refused in "
+                    + "this decision (docs/design/40-conjoined-confinement.md §3, §7, D266). Either "
+                    + $"'{path.Kind}' resolves on '{model.Declared.Name}' directly, or the grant is "
+                    + "held unconfined (F101). ";
             }
         }
 
