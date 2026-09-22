@@ -844,7 +844,13 @@ public final class TestCatalogs {
 
   private static Index index(String name, boolean unique, int... columns) {
     Index.Builder index =
-        Index.newBuilder().setName(name).setKind(IndexKind.INDEX_KIND_ORDERED).setUnique(unique);
+        Index.newBuilder()
+            .setName(name)
+            .setKind(IndexKind.INDEX_KIND_ORDERED)
+            .setUnique(unique)
+            // D283: a permutation walks a contiguous slice either way, so the POCO builder declares
+            // this for every index it builds.
+            .setReversal(chalk.ir.v1.IndexReversal.INDEX_REVERSAL_ANY);
     for (int column : columns) {
       index.addColumns(column);
     }
@@ -858,7 +864,11 @@ public final class TestCatalogs {
   private static Index clusteredIndex(
       String name, boolean unique, int[] columns, int[] covering) {
     Index.Builder index =
-        Index.newBuilder().setName(name).setKind(IndexKind.INDEX_KIND_CLUSTERED).setUnique(unique);
+        Index.newBuilder()
+            .setName(name)
+            .setKind(IndexKind.INDEX_KIND_CLUSTERED)
+            .setUnique(unique)
+            .setReversal(chalk.ir.v1.IndexReversal.INDEX_REVERSAL_ANY);
     for (int column : columns) {
       index.addColumns(column);
     }

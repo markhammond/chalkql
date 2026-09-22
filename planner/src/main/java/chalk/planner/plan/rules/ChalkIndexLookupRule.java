@@ -101,11 +101,20 @@ public final class ChalkIndexLookupRule extends RelRule<ChalkRuleConfig> {
               projection,
               scan.getCluster());
 
-      ChalkIndexLookup lookup =
-          ChalkIndexLookup.create(scan, index, ImmutableList.copyOf(result.ranges()), selectivity);
+      ImmutableList<IndexMatcher.Range> ranges = ImmutableList.copyOf(result.ranges());
       RexNode residual = result.residual();
-      RelNode alternative = residual == null ? lookup : ChalkFilter.create(lookup, residual);
-      call.transformTo(alternative);
+
+      ChalkIndexLookup lookup = ChalkIndexLookup.create(scan, index, ranges, selectivity);
+      call.transformTo(residual == null ? lookup : ChalkFilter.create(lookup, residual));
+
+      // D283: the same rows in the reverse of the index's key order, offered beside the forward
+      // lookup where the index's declared reversal admits these ranges' shape. Same cost; Volcano
+      // takes it only when a parent wants that order.
+      if (ChalkIndexLookup.canReverse(index, ranges)) {
+        ChalkIndexLookup backwards =
+            ChalkIndexLookup.create(scan, index, ranges, selectivity, true);
+        call.transformTo(residual == null ? backwards : ChalkFilter.create(backwards, residual));
+      }
     }
   }
 

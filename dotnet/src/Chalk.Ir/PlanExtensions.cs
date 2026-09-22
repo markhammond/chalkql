@@ -169,7 +169,9 @@ public static class PlanExtensions
             // The row goal, on the same terms as a Read's (D276).
             + (rel.IndexLookup.RowGoal == 0
                 ? string.Empty
-                : $" goal={rel.IndexLookup.RowGoal.ToString(CultureInfo.InvariantCulture)}"),
+                : $" goal={rel.IndexLookup.RowGoal.ToString(CultureInfo.InvariantCulture)}")
+            // Read from the last matching row to the first (D283).
+            + (rel.IndexLookup.Reverse ? " reverse" : string.Empty),
         Rel.KindOneofCase.RemoteQuery => $"RemoteQuery source={rel.RemoteQuery.SourceId} dialect={rel.RemoteQuery.Dialect} "
             + $"sql={Quote(rel.RemoteQuery.QueryText)}"
             + (rel.RemoteQuery.PushedPlan is null ? string.Empty : " pushed_plan=yes"),

@@ -1,4 +1,5 @@
 using Chalk.Catalog;
+using IndexReversal = Chalk.Ir.IndexReversal;
 
 namespace Chalk.Sources.Poco;
 
@@ -54,6 +55,39 @@ public interface IPocoIndex<T>
     /// How much memory this index holds per row of the table, for the build report. -1 = unknown.
     /// </summary>
     long BytesPerRow => -1;
+}
+
+/// <summary>
+/// An index that can also be read from its last matching row to its first (D283).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <c>ORDER BY ts DESC LIMIT 1</c> — the latest row, and the commonest ordered query there is —
+/// needs an index read backwards or a sort. An index that implements this says which ranges it can
+/// hand back in reverse, and the planner then offers a reversed lookup beside the forward one and
+/// lets cost choose.
+/// </para>
+/// <para>
+/// <see cref="Reversal"/> is a claim about the structure, not about a query: the built-in
+/// permutation and clustered indexes walk their slice either way and declare
+/// <see cref="IndexReversal.Any"/>, while a structure a source can only enumerate forwards may still
+/// be readable from its top down to a lower bound — <see cref="IndexReversal.OpenAbove"/> — and no
+/// further, because reaching an upper bound backwards would mean skipping every row above it or
+/// buffering the matched range. An index that does not implement this interface is read forwards
+/// only, so no existing adapter changes behaviour.
+/// </para>
+/// </remarks>
+public interface IReversiblePocoIndex<T> : IPocoIndex<T>
+{
+    /// <summary>Which ranges this index can be read backwards.</summary>
+    IndexReversal Reversal { get; }
+
+    /// <summary>
+    /// The rows the range matches, from the last in key order to the first. The same rows
+    /// <see cref="IPocoIndex{T}.Lookup"/> returns, in the reverse order; lazily, so a consumer that
+    /// stops after one row pays for one row.
+    /// </summary>
+    IEnumerable<T> LookupReversed(IndexKeyRange range);
 }
 
 /// <summary>

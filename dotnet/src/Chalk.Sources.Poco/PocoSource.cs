@@ -969,6 +969,26 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             }
         }
 
+        // D283: a reversed lookup is a requirement rather than a hint — the plan has no sort above
+        // it — so an index that cannot serve one says so here rather than answering forwards.
+        if (request.Reverse)
+        {
+            foreach (var range in request.Ranges)
+            {
+                if (!index.Descriptor.CanReverse(range.Upper.Count == 0)
+                    || index is not IReversiblePocoIndex<T>)
+                {
+                    throw new SourceContractException(
+                        sourceId,
+                        Name,
+                        $"the plan asks index '{index.Descriptor.Name}' for the range {range} read "
+                        + $"backwards, and the index declares reversal {index.Descriptor.Reversal}.");
+                }
+            }
+
+            return new PocoIndexRowScan<T>(this, snapshot, ordinal, request, context, ct);
+        }
+
         if (index is IPositionalPocoIndex<T> && snapshot.RandomAccess)
         {
             // D257: a clustered index whose copy carries every projected column answers in slices of
@@ -1814,7 +1834,7 @@ internal sealed class PocoIndexRowScan<T> : IAsyncEnumerable<RecordBatch>
             _batchSize = request.BatchSize;
             _rowGoal = request.RowGoal;
             _snapshot = table.Lease(captured);
-            _source = Rows(_snapshot.Indexes[ordinal], request.Ranges).GetEnumerator();
+            _source = Rows(_snapshot.Indexes[ordinal], request.Ranges, request.Reverse).GetEnumerator();
             _staging = ArrayPool<T>.Shared.Rent(Math.Max(1, request.BatchSize));
             try
             {
@@ -1930,22 +1950,33 @@ internal sealed class PocoIndexRowScan<T> : IAsyncEnumerable<RecordBatch>
     /// where the row type allows it, and structurally otherwise — a value-typed row has no identity,
     /// so the planner's promise of non-overlapping ranges is what actually keeps this honest.
     /// </summary>
-    private static IEnumerable<T> Rows(IPocoIndex<T> index, IReadOnlyList<IndexKeyRange> ranges)
+    private static IEnumerable<T> Rows(
+        IPocoIndex<T> index, IReadOnlyList<IndexKeyRange> ranges, bool reverse)
     {
         if (ranges.Count == 1)
         {
-            return index.Lookup(ranges[0]);
+            return Lookup(index, ranges[0], reverse);
         }
 
-        return Deduplicated(index, ranges);
+        return Deduplicated(index, ranges, reverse);
     }
 
-    private static IEnumerable<T> Deduplicated(IPocoIndex<T> index, IReadOnlyList<IndexKeyRange> ranges)
+    /// <summary>
+    /// The rows one range matches, forwards or — where the plan asked and the index declared it —
+    /// from the last to the first (D283).
+    /// </summary>
+    private static IEnumerable<T> Lookup(IPocoIndex<T> index, IndexKeyRange range, bool reverse) =>
+        reverse && index is IReversiblePocoIndex<T> reversible
+            ? reversible.LookupReversed(range)
+            : index.Lookup(range);
+
+    private static IEnumerable<T> Deduplicated(
+        IPocoIndex<T> index, IReadOnlyList<IndexKeyRange> ranges, bool reverse)
     {
         var seen = new HashSet<T>();
         foreach (var range in ranges)
         {
-            foreach (var row in index.Lookup(range))
+            foreach (var row in Lookup(index, range, reverse))
             {
                 if (seen.Add(row))
                 {

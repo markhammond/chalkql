@@ -218,6 +218,13 @@ public sealed class IndexLookupRequest
     /// <see cref="ScanRequest.RowGoal"/> sets out.
     /// </summary>
     public long? RowGoal { get; init; }
+
+    /// <summary>
+    /// Read the matched rows from the last to the first (D283): the same rows, in the reverse of the
+    /// index's key order. Unlike <see cref="RowGoal"/> this <em>is</em> a requirement — the plan has
+    /// no sort above it — and it is set only where the index declared it could serve one.
+    /// </summary>
+    public bool Reverse { get; init; }
 }
 
 /// <summary>

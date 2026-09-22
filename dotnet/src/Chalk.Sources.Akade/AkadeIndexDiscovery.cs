@@ -773,6 +773,12 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
 
         var selectors = Array.ConvertAll(_members, MemberSelector);
 
+        // D283: a range with no upper bound, the whole index included, is what Akade's public
+        // surface serves backwards without a copy.
+        var reversal = kind == IndexKind.Ordered
+            ? Chalk.Ir.IndexReversal.OpenAbove
+            : Chalk.Ir.IndexReversal.Unspecified;
+
         if (kind == IndexKind.Prefix)
         {
             table.Index(
@@ -803,6 +809,7 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
                 kind,
                 unique,
                 directions,
+                reversal,
                 (descriptor, _) => new AkadeScalarIndex<T, TKey>(
                     descriptor,
                     set,
@@ -826,6 +833,7 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
             kind,
             unique,
             directions,
+            reversal,
             (descriptor, _) => new AkadeTupleIndex<T, TKey>(
                 descriptor,
                 set,

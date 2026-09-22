@@ -132,7 +132,7 @@ public static class PocoIndexConformance
                 + $"returned {actual.Count}");
         }
 
-        if (index.Descriptor.Kind == Chalk.Ir.IndexKind.Ordered)
+        if (IsOrdered(index.Descriptor.Kind))
         {
             // An ordered index promises key order, which for equal keys need not be the scan's
             // order — so the rows are compared by key, and the key order is asserted separately.
@@ -154,6 +154,8 @@ public static class PocoIndexConformance
                     + $"full scan has ({Render(expectedKeys[i])})");
             }
         }
+
+        VerifyReversed(index, actual, keys, directions, range);
 
         if (index is IPositionalPocoIndex<T> positional)
         {
@@ -181,6 +183,62 @@ public static class PocoIndexConformance
                         $"position {positions[i]} names a row whose key is not the one Lookup "
                         + $"returned at the same offset, for the range {range}");
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The same rows, from the last to the first (D283). A reversed lookup is a requirement rather
+    /// than a hint — the plan it belongs to has no sort above it — so this checks both halves: the
+    /// rows are the forward lookup's, and they arrive in the reverse of its order.
+    /// </summary>
+    private static void VerifyReversed<T>(
+        IPocoIndex<T> index,
+        IReadOnlyList<T> forward,
+        IReadOnlyList<Func<T, object?>> keys,
+        IReadOnlyList<SortDirection> directions,
+        IndexKeyRange range)
+    {
+        if (index is not IReversiblePocoIndex<T> reversible
+            || !index.Descriptor.CanReverse(range.Upper.Count == 0))
+        {
+            return;
+        }
+
+        var backwards = reversible.LookupReversed(range).ToList();
+        if (backwards.Count != forward.Count)
+        {
+            throw new PocoIndexConformanceException(
+                index.Descriptor.Name,
+                $"the range {range} matches {forward.Count} row(s) forwards but {backwards.Count} "
+                + "read backwards");
+        }
+
+        for (var i = 0; i < backwards.Count; i++)
+        {
+            var mirrored = KeyOf(forward[forward.Count - 1 - i], keys);
+            if (Compare(KeyOf(backwards[i], keys), mirrored, directions) != 0)
+            {
+                throw new PocoIndexConformanceException(
+                    index.Descriptor.Name,
+                    $"the range {range} read backwards has key ({Render(KeyOf(backwards[i], keys))}) "
+                    + $"at position {i}, where reading it forwards has ({Render(mirrored)})");
+            }
+        }
+
+        if (!IsOrdered(index.Descriptor.Kind))
+        {
+            return;
+        }
+
+        for (var i = 1; i < backwards.Count; i++)
+        {
+            if (Compare(KeyOf(backwards[i - 1], keys), KeyOf(backwards[i], keys), directions) < 0)
+            {
+                throw new PocoIndexConformanceException(
+                    index.Descriptor.Name,
+                    $"a reversed ORDERED lookup must hand back rows in the reverse of key order, "
+                    + $"but rows {i - 1} and {i} of the range {range} go forwards");
             }
         }
     }
@@ -291,7 +349,7 @@ public static class PocoIndexConformance
 
         yield return IndexKeyRange.All;
 
-        var ordered = index.Descriptor.Kind == Chalk.Ir.IndexKind.Ordered;
+        var ordered = IsOrdered(index.Descriptor.Kind);
         for (var prefix = 1; prefix <= keys.Count; prefix++)
         {
             foreach (var value in Sample(rows, keys, prefix, directions))
@@ -439,6 +497,14 @@ public static class PocoIndexConformance
 
         return left.Count.CompareTo(right.Count);
     }
+
+    /// <summary>
+    /// Whether a kind answers ranges and yields rows in key order. The clustered kind does
+    /// everything the ordered kind does — it <em>is</em> ordered, with a copy of its columns beside
+    /// it — so every claim checked here is the same for both.
+    /// </summary>
+    private static bool IsOrdered(Chalk.Ir.IndexKind kind) =>
+        kind is Chalk.Ir.IndexKind.Ordered or Chalk.Ir.IndexKind.Clustered;
 
     private static bool IsEquality(IndexKeyRange range, int keyColumns) =>
         range.LowerInclusive

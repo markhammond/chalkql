@@ -357,6 +357,7 @@ internal static class CatalogProtoMapping
                 Name = index.Name,
                 Kind = index.Kind,
                 Unique = index.Unique,
+                Reversal = index.Reversal,
             };
             indexMessage.Columns.AddRange(index.Columns.Select(c => (uint)c));
             indexMessage.Directions.AddRange(index.Directions);
@@ -544,6 +545,7 @@ internal static class CatalogProtoMapping
                 Unique = i.Unique,
                 Directions = i.Directions.ToArray(),
                 Covering = i.Covering.ToArray(),
+                Reversal = i.Reversal,
             })
             .ToArray(),
         Partitioning = message.Partitioning is null

@@ -529,6 +529,27 @@ public sealed class IndexDescriptor
     /// </summary>
     public IReadOnlyList<int> Covering { get; init; } = [];
 
+    /// <summary>
+    /// Which ranges this index can also be read from its last row to its first (D283). The default —
+    /// and every index that says nothing — is forwards only.
+    /// </summary>
+    /// <remarks>
+    /// A question about the structure rather than about the query: the built-in permutation and
+    /// clustered indexes walk their slice either way, while a sorted structure a source only
+    /// enumerates forwards can still be read from its top down to a lower bound and no further. The
+    /// POCO builder reads it from the index instance, so a host declares it by implementing
+    /// <c>IReversiblePocoIndex&lt;T&gt;</c> rather than by saying so twice.
+    /// </remarks>
+    public IndexReversal Reversal { get; init; } = IndexReversal.Unspecified;
+
+    /// <summary>Whether a range of this shape can be read backwards.</summary>
+    public bool CanReverse(bool openAbove) => Reversal switch
+    {
+        IndexReversal.Any => true,
+        IndexReversal.OpenAbove => openAbove,
+        _ => false,
+    };
+
     /// <summary>The direction of key <paramref name="position"/>, defaulted when none was declared.</summary>
     public SortDirection DirectionAt(int position) =>
         position < Directions.Count ? Directions[position] : SortDirection.AscNullsLast;

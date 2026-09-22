@@ -64,6 +64,26 @@ class DigestTest {
   }
 
   /**
+   * D283: a lookup read backwards is a different plan from the same lookup read forwards, and the
+   * digest has to say so. It delivers the opposite ordering, so a digest that merged the two would
+   * hand whatever asked for one of them the other.
+   */
+  @Test
+  void reading_an_index_backwards_is_a_different_plan() {
+    Plan forwards = planner.plan("SELECT ts, symbol FROM bars ORDER BY ts LIMIT 1");
+    Plan backwards = planner.plan("SELECT ts, symbol FROM bars ORDER BY ts DESC LIMIT 1");
+
+    assertThat(backwards.getRoot().getFetch().getInput().getIndexLookup().getReverse())
+        .as("the reversed plan reads the index backwards")
+        .isTrue();
+    assertThat(forwards.getRoot().getFetch().getInput().getIndexLookup().getReverse())
+        .as("the forward plan does not")
+        .isFalse();
+    assertThat(PlanDigest.format(backwards.getPlanDigest()))
+        .isNotEqualTo(PlanDigest.format(forwards.getPlanDigest()));
+  }
+
+  /**
    * The digest is recomputable from the recorded plan, which is what makes {@code corpus/plans}
    * reviewable: the {@code .digest} file is derived, not asserted.
    */

@@ -23,6 +23,8 @@ Chalk.Sources.Poco.ClusteredIndex<T>.GetPosition(int ordinal) -> int
 Chalk.Sources.Poco.ClusteredIndex<T>.GetWindow(Chalk.Sources.IndexKeyRange! range, out int from, out int to) -> void
 Chalk.Sources.Poco.ClusteredIndex<T>.Lookup(Chalk.Sources.IndexKeyRange! range) -> System.Collections.Generic.IEnumerable<T>!
 Chalk.Sources.Poco.ClusteredIndex<T>.LookupPositions(Chalk.Sources.IndexKeyRange! range) -> System.Collections.Generic.IEnumerable<int>!
+Chalk.Sources.Poco.ClusteredIndex<T>.LookupReversed(Chalk.Sources.IndexKeyRange! range) -> System.Collections.Generic.IEnumerable<T>!
+Chalk.Sources.Poco.ClusteredIndex<T>.Reversal.get -> Chalk.Ir.IndexReversal
 Chalk.Sources.Poco.IPocoIndex<T>
 Chalk.Sources.Poco.IPocoIndex<T>.BytesPerRow.get -> long
 Chalk.Sources.Poco.IPocoIndex<T>.Descriptor.get -> Chalk.Catalog.IndexDescriptor!
@@ -32,6 +34,9 @@ Chalk.Sources.Poco.IPositionalPocoIndex<T>
 Chalk.Sources.Poco.IPositionalPocoIndex<T>.GetPosition(int ordinal) -> int
 Chalk.Sources.Poco.IPositionalPocoIndex<T>.GetWindow(Chalk.Sources.IndexKeyRange! range, out int from, out int to) -> void
 Chalk.Sources.Poco.IPositionalPocoIndex<T>.LookupPositions(Chalk.Sources.IndexKeyRange! range) -> System.Collections.Generic.IEnumerable<int>!
+Chalk.Sources.Poco.IReversiblePocoIndex<T>
+Chalk.Sources.Poco.IReversiblePocoIndex<T>.LookupReversed(Chalk.Sources.IndexKeyRange! range) -> System.Collections.Generic.IEnumerable<T>!
+Chalk.Sources.Poco.IReversiblePocoIndex<T>.Reversal.get -> Chalk.Ir.IndexReversal
 Chalk.Sources.Poco.PermutationIndex<T>
 Chalk.Sources.Poco.PermutationIndex<T>.BytesPerRow.get -> long
 Chalk.Sources.Poco.PermutationIndex<T>.Descriptor.get -> Chalk.Catalog.IndexDescriptor!
@@ -41,6 +46,8 @@ Chalk.Sources.Poco.PermutationIndex<T>.GetWindow(Chalk.Sources.IndexKeyRange! ra
 Chalk.Sources.Poco.PermutationIndex<T>.IsCollationBacked.get -> bool
 Chalk.Sources.Poco.PermutationIndex<T>.Lookup(Chalk.Sources.IndexKeyRange! range) -> System.Collections.Generic.IEnumerable<T>!
 Chalk.Sources.Poco.PermutationIndex<T>.LookupPositions(Chalk.Sources.IndexKeyRange! range) -> System.Collections.Generic.IEnumerable<int>!
+Chalk.Sources.Poco.PermutationIndex<T>.LookupReversed(Chalk.Sources.IndexKeyRange! range) -> System.Collections.Generic.IEnumerable<T>!
+Chalk.Sources.Poco.PermutationIndex<T>.Reversal.get -> Chalk.Ir.IndexReversal
 Chalk.Sources.Poco.PocoForeignKeyBuilder<T>
 Chalk.Sources.Poco.PocoForeignKeyBuilder<T>.References(string! table, System.Collections.Generic.IReadOnlyList<string!>! parentColumns, bool verify) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
 Chalk.Sources.Poco.PocoForeignKeyBuilder<T>.References(string! table, string! parentColumn, bool verify) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
@@ -111,6 +118,7 @@ Chalk.Sources.Poco.PocoTableBuilder<T>.Ignore<TProp>(System.Linq.Expressions.Exp
 Chalk.Sources.Poco.PocoTableBuilder<T>.Index(Chalk.Catalog.IndexDescriptor! descriptor, System.Func<System.Collections.Generic.IReadOnlyCollection<T>!, Chalk.Sources.Poco.IPocoIndex<T>!>! index) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
 Chalk.Sources.Poco.PocoTableBuilder<T>.Index(Chalk.Sources.Poco.IPocoIndex<T>! index) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
 Chalk.Sources.Poco.PocoTableBuilder<T>.Index(params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Index(string! name, Chalk.Ir.IndexKind kind, bool unique, System.Collections.Generic.IReadOnlyList<Chalk.Ir.SortDirection>! directions, Chalk.Ir.IndexReversal reversal, System.Func<Chalk.Catalog.IndexDescriptor!, System.Collections.Generic.IReadOnlyCollection<T>!, Chalk.Sources.Poco.IPocoIndex<T>!>! factory, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
 Chalk.Sources.Poco.PocoTableBuilder<T>.Index(string! name, Chalk.Ir.IndexKind kind, bool unique, System.Collections.Generic.IReadOnlyList<Chalk.Ir.SortDirection>! directions, System.Func<Chalk.Catalog.IndexDescriptor!, System.Collections.Generic.IReadOnlyCollection<T>!, Chalk.Sources.Poco.IPocoIndex<T>!>! factory, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
 Chalk.Sources.Poco.PocoTableBuilder<T>.Index(string! name, Chalk.Ir.IndexKind kind, bool unique, System.Func<Chalk.Catalog.IndexDescriptor!, System.Collections.Generic.IReadOnlyCollection<T>!, Chalk.Sources.Poco.IPocoIndex<T>!>! factory, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
 Chalk.Sources.Poco.PocoTableBuilder<T>.Index(string? name, Chalk.Ir.IndexKind kind, bool unique, System.Collections.Generic.IReadOnlyList<Chalk.Ir.SortDirection>! directions, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!

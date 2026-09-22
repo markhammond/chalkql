@@ -354,5 +354,21 @@ Akade's documented `OrderBy(...)`.
 Failing by name is deliberate. A silently re-sorted lookup would be a wrong answer already relied
 on, because the declared ordered index is why there is no sort above it in the plan at all; and a
 defensive sort would give back exactly the early exit the ordered index is worth having for.
-Descending enumeration of an *ascending* index is not offered, so `ORDER BY … DESC` over one still
-sorts; an index the host built descending serves it directly.
+
+## Reading an ordered index backwards
+
+`ORDER BY ts DESC LIMIT 1` — the latest row — is the commonest ordered query there is, and an
+ascending index used to serve it by sorting everything it matched. An ordered Akade index now says
+it can be read from its last row to its first, and the planner offers that beside the forward
+lookup; a `LIMIT` above it then makes the whole thing one walk and one row.
+
+What is offered is a range with **no upper bound**, the whole index included. That is what Akade's
+public surface serves without a copy: `OrderByDescending` starts at the top, every row down to the
+lower bound is wanted, and the walk simply stops at the first key below it — no skipping and no
+buffering. A range with an upper bound is not offered backwards, because reaching it would mean
+skipping every row above it or buffering the matched range to reverse it, which is exactly the copy
+this adapter exists without; the planner sorts those instead. So `symbol = ? ORDER BY ts DESC` over
+a compound index still sorts, and will until Akade grows a descending bounded enumeration.
+
+The order check runs on the reversed walk too, against the order that walk claims — the bound and
+the order are read from the same key, so it is still one key read and one comparison per row.

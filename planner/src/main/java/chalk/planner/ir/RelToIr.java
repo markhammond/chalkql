@@ -859,6 +859,12 @@ public final class RelToIr {
       ir.setRowGoal(lookup.rowGoal());
     }
 
+    // D283: written only when the lookup reads backwards, so a plan that reads forwards is
+    // byte-identical to one from before the field existed.
+    if (lookup.reverse()) {
+      ir.setReverse(true);
+    }
+
     for (chalk.planner.plan.IndexMatcher.Range range : lookup.ranges()) {
       IndexRange.Builder bounds =
           IndexRange.newBuilder()

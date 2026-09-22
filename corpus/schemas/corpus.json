@@ -200,7 +200,8 @@
                 0,
                 1
               ],
-              "unique": true
+              "unique": true,
+              "reversal": "INDEX_REVERSAL_ANY"
             },
             {
               "name": "ix_bars_ts_symbol",
@@ -208,7 +209,8 @@
               "columns": [
                 1,
                 0
-              ]
+              ],
+              "reversal": "INDEX_REVERSAL_ANY"
             }
           ],
           "rowCountKind": "ROW_COUNT_KIND_EXACT",
@@ -414,7 +416,8 @@
                 0,
                 1
               ],
-              "unique": true
+              "unique": true,
+              "reversal": "INDEX_REVERSAL_ANY"
             }
           ],
           "rowCountKind": "ROW_COUNT_KIND_EXACT",
@@ -625,7 +628,8 @@
                 0,
                 1,
                 5
-              ]
+              ],
+              "reversal": "INDEX_REVERSAL_ANY"
             }
           ],
           "rowCountKind": "ROW_COUNT_KIND_EXACT",
@@ -1150,14 +1154,16 @@
               "kind": "INDEX_KIND_ORDERED",
               "columns": [
                 0
-              ]
+              ],
+              "reversal": "INDEX_REVERSAL_ANY"
             },
             {
               "name": "ix_lineitem_l_shipdate",
               "kind": "INDEX_KIND_ORDERED",
               "columns": [
                 10
-              ]
+              ],
+              "reversal": "INDEX_REVERSAL_ANY"
             }
           ],
           "rowCountKind": "ROW_COUNT_KIND_EXACT",
@@ -1537,7 +1543,8 @@
               "kind": "INDEX_KIND_ORDERED",
               "columns": [
                 3
-              ]
+              ],
+              "reversal": "INDEX_REVERSAL_ANY"
             }
           ],
           "rowCountKind": "ROW_COUNT_KIND_EXACT",
@@ -1731,7 +1738,8 @@
               "kind": "INDEX_KIND_ORDERED",
               "columns": [
                 1
-              ]
+              ],
+              "reversal": "INDEX_REVERSAL_ANY"
             }
           ],
           "rowCountKind": "ROW_COUNT_KIND_EXACT",
@@ -2063,7 +2071,8 @@
               "kind": "INDEX_KIND_ORDERED",
               "columns": [
                 3
-              ]
+              ],
+              "reversal": "INDEX_REVERSAL_ANY"
             }
           ],
           "rowCountKind": "ROW_COUNT_KIND_EXACT",

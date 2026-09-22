@@ -25,6 +25,7 @@ internal sealed class IndexLookupOperator : OperatorBase
     private readonly IReadOnlyList<int> _projection;
     private readonly int _keyColumns;
     private readonly long? _rowGoal;
+    private readonly bool _reverse;
     private readonly ColumnarBatch _output;
     private readonly ColumnView[]?[] _children;
 
@@ -38,7 +39,8 @@ internal sealed class IndexLookupOperator : OperatorBase
         IReadOnlyList<int> projection,
         ArrowSchema schema,
         IReadOnlyList<ChalkType> columnTypes,
-        long? rowGoal = null)
+        long? rowGoal = null,
+        bool reverse = false)
         : base(context, schema, columnTypes, path)
     {
         _source = source;
@@ -47,6 +49,7 @@ internal sealed class IndexLookupOperator : OperatorBase
         _ranges = ranges;
         _projection = projection;
         _rowGoal = rowGoal;
+        _reverse = reverse;
         _keyColumns = ranges.Count == 0 ? 0 : ranges.Max(r => Math.Max(r.Lower.Count, r.Upper.Count));
         _output = NewOutput();
         _children = ArrowBatchViews.ChildHolders(columnTypes);
@@ -83,6 +86,9 @@ internal sealed class IndexLookupOperator : OperatorBase
             BatchSize = Context.Settings.BatchSize,
             // `IndexLookup.row_goal` is a hint the source may size its first batch to (D276).
             RowGoal = _rowGoal,
+            // `IndexLookup.reverse` is not a hint: the plan claims the reverse of the index's key
+            // order and has no sort above it to make good on that (D283).
+            Reverse = _reverse,
         };
 
         var scanContext = ScanContextFor(Context);

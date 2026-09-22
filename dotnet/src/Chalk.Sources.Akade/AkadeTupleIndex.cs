@@ -3,6 +3,7 @@ using Chalk.Catalog;
 using Chalk.Sources;
 using Chalk.Sources.Poco;
 using IndexKind = Chalk.Ir.IndexKind;
+using IndexReversal = Chalk.Ir.IndexReversal;
 
 namespace Chalk.Sources.Akade;
 
@@ -23,7 +24,7 @@ namespace Chalk.Sources.Akade;
 /// guard's one comparison per row allocates nothing.
 /// </para>
 /// </remarks>
-internal sealed class AkadeTupleIndex<T, TKey> : IPocoIndex<T>
+internal sealed class AkadeTupleIndex<T, TKey> : IPocoIndex<T>, IReversiblePocoIndex<T>
     where TKey : notnull
 {
     private readonly IndexedSet<T> _set;
@@ -168,6 +169,85 @@ internal sealed class AkadeTupleIndex<T, TKey> : IPocoIndex<T>
             !hasLower || range.LowerInclusive,
             !hasUpper || range.UpperInclusive,
             _akadeIndexName));
+    }
+
+    /// <inheritdoc cref="AkadeScalarIndex{T,TKey}.Reversal" />
+    public IndexReversal Reversal =>
+        Descriptor.Kind == IndexKind.Ordered ? IndexReversal.OpenAbove : IndexReversal.Unspecified;
+
+    /// <inheritdoc />
+    public IEnumerable<T> LookupReversed(IndexKeyRange range)
+    {
+        ArgumentNullException.ThrowIfNull(range);
+
+        if (Descriptor.Kind != IndexKind.Ordered || range.Upper.Count != 0)
+        {
+            throw new SourceContractException(
+                _sourceId,
+                _table,
+                $"Akade index '{_akadeIndexName}', behind the index '{Descriptor.Name}', was asked "
+                + $"for {range} backwards. Only a range with no upper bound is offered that way: "
+                + "reaching one backwards would mean skipping every row above it, or buffering the "
+                + "matched range to reverse it.");
+        }
+
+        if (HasNullBound(range))
+        {
+            return [];
+        }
+
+        return InReverseKeyOrder(
+            _set.OrderByDescending(_key, 0, _akadeIndexName),
+            range.Lower.Count == 0 ? default! : LowerKey(range),
+            range.Lower.Count != 0,
+            range.LowerInclusive);
+    }
+
+    /// <summary>The guard, reversed (D283).</summary>
+    internal IEnumerable<T> InReverseKeyOrder(IEnumerable<T> rows) =>
+        InReverseKeyOrder(rows, default!, bounded: false, inclusive: true);
+
+    /// <summary>
+    /// The same, stopping at <paramref name="lower"/>: a descending walk reaches the rows above the
+    /// bound first and wants every one of them, so the first key below it ends the walk. The bound
+    /// and the order are checked from the same key, so the row path reads each key once.
+    /// </summary>
+    private IEnumerable<T> InReverseKeyOrder(
+        IEnumerable<T> rows, TKey lower, bool bounded, bool inclusive)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        var previous = default(TKey)!;
+        var hasPrevious = false;
+
+        foreach (var row in rows)
+        {
+            var key = _key(row);
+
+            if (bounded)
+            {
+                var toBound = _shape.Comparer.Compare(key, lower);
+                if (toBound < 0 || (toBound == 0 && !inclusive))
+                {
+                    yield break;
+                }
+            }
+
+            if (hasPrevious && _shape.Comparer.Compare(previous, key) < 0)
+            {
+                throw new SourceContractException(
+                    _sourceId,
+                    _table,
+                    $"Akade index '{_akadeIndexName}', behind the ORDERED index "
+                    + $"'{Descriptor.Name}', yielded key '{key}' after '{previous}' while being read "
+                    + "backwards. A reversed lookup must arrive in the reverse of the index's "
+                    + "declared key order.");
+            }
+
+            previous = key;
+            hasPrevious = true;
+            yield return row;
+        }
     }
 
     /// <summary>

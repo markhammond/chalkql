@@ -177,6 +177,8 @@ public sealed class AkadeComparerTests
                 Kind = IndexKind.Ordered,
                 Columns = [1],
                 Directions = [descending ? SortDirection.DescNullsFirst : SortDirection.AscNullsLast],
+                // D283: so the kit checks every one of these ranges backwards as well as forwards.
+                Reversal = Chalk.Ir.IndexReversal.OpenAbove,
             },
             set,
             Key,

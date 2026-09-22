@@ -15,7 +15,7 @@ namespace Chalk.Sources.Poco;
 /// uniqueness verification, then discarded. Consequently the persistent index
 /// still costs one int per row, or nothing when backed by a declared collation.
 /// </summary>
-public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>
+public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePocoIndex<T>
 {
     private readonly IReadOnlyList<T> _rows;
     private readonly ISearchKey[] _searchKeys;
@@ -436,6 +436,31 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>
              ordinal++)
         {
             yield return GetPosition(ordinal);
+        }
+    }
+
+    /// <summary>
+    /// Any range at all (D283): the window a range resolves to is a contiguous slice of the
+    /// permutation, and walking it from its end costs exactly what walking it from its start does.
+    /// </summary>
+    public Chalk.Ir.IndexReversal Reversal =>
+        Chalk.Ir.IndexReversal.Any;
+
+    /// <inheritdoc />
+    public IEnumerable<T> LookupReversed(
+        IndexKeyRange range)
+    {
+        GetWindow(
+            range,
+            out var from,
+            out var to);
+
+        for (var ordinal = to - 1;
+             ordinal >= from;
+             ordinal--)
+        {
+            yield return _rows[
+                GetPosition(ordinal)];
         }
     }
 

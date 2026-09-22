@@ -47,6 +47,7 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
   private final ImmutableIntList projection;
   private final ChalkSelectivity.Estimate selectivity;
   private final long rowGoal;
+  private final boolean reverse;
 
   private ChalkIndexLookup(
       RelOptCluster cluster,
@@ -58,7 +59,8 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
       ImmutableIntList projection,
       RelDataType rowType,
       ChalkSelectivity.Estimate selectivity,
-      long rowGoal) {
+      long rowGoal,
+      boolean reverse) {
     super(cluster, traits);
     this.table = table;
     this.chalkTable = chalkTable;
@@ -68,6 +70,7 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
     this.rowType = rowType;
     this.selectivity = selectivity;
     this.rowGoal = rowGoal;
+    this.reverse = reverse;
   }
 
   /**
@@ -79,10 +82,24 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
       Index index,
       ImmutableList<IndexMatcher.Range> ranges,
       ChalkSelectivity.Estimate selectivity) {
+    return create(scan, index, ranges, selectivity, false);
+  }
+
+  /**
+   * The same lookup, read from its last matching row to its first (D283). A different rel, not a
+   * flag on this one: the orientation is in the digest, and its collations are the index's with
+   * every direction flipped.
+   */
+  public static ChalkIndexLookup create(
+      ChalkTableScan scan,
+      Index index,
+      ImmutableList<IndexMatcher.Range> ranges,
+      ChalkSelectivity.Estimate selectivity,
+      boolean reverse) {
     RelOptCluster cluster = scan.getCluster();
     ChalkTable chalkTable = scan.chalkTable();
     ImmutableIntList projection = ImmutableIntList.copyOf(scan.projection());
-    List<RelCollation> collations = collations(index, ranges, projection);
+    List<RelCollation> collations = collations(index, ranges, projection, reverse);
     RelTraitSet traits =
         cluster.traitSetOf(ChalkConvention.LOCAL).replaceIfs(
             RelCollationTraitDef.INSTANCE, () -> collations);
@@ -97,7 +114,35 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
         projection,
         scan.getRowType(),
         selectivity,
-        0L);
+        0L,
+        reverse);
+  }
+
+  /** Whether this lookup reads its ranges backwards (D283). */
+  public boolean reverse() {
+    return reverse;
+  }
+
+  /**
+   * Whether {@code index} can be read backwards over every one of {@code ranges}: ANY for any range,
+   * OPEN_ABOVE only for a range with no upper bound, because reaching one backwards would mean
+   * skipping every row above it or buffering the matched range.
+   *
+   * <p>And only where reading it backwards would <em>say</em> something. A lookup claims an ordering
+   * for one range on an ordered kind and nothing otherwise, so a reversed alternative anywhere else
+   * would be a second rel of the same cost that no parent could ever prefer — and which of two
+   * equal-cost rels Volcano keeps is a matter of iteration order.
+   */
+  public static boolean canReverse(Index index, ImmutableList<IndexMatcher.Range> ranges) {
+    if (!isOrdered(index.getKind()) || ranges.size() != 1) {
+      return false;
+    }
+
+    return switch (index.getReversal()) {
+      case INDEX_REVERSAL_ANY -> true;
+      case INDEX_REVERSAL_OPEN_ABOVE -> ranges.get(0).upper().isEmpty();
+      default -> false;
+    };
   }
 
   public ChalkTable chalkTable() {
@@ -158,7 +203,8 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
         projection,
         rowType,
         selectivity,
-        wanted);
+        wanted,
+        reverse);
   }
 
   /**
@@ -180,7 +226,10 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
    * not promise.
    */
   private static List<RelCollation> collations(
-      Index index, ImmutableList<IndexMatcher.Range> ranges, ImmutableIntList projection) {
+      Index index,
+      ImmutableList<IndexMatcher.Range> ranges,
+      ImmutableIntList projection,
+      boolean reverse) {
     if (!isOrdered(index.getKind()) || ranges.size() != 1) {
       return ImmutableList.of();
     }
@@ -192,7 +241,7 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
         break; // a key column this lookup does not emit ends the ordering it can claim
       }
 
-      full.add(ChalkTable.toFieldCollation(field, direction(index, i)));
+      full.add(ChalkTable.toFieldCollation(field, direction(index, i, reverse)));
     }
 
     if (full.isEmpty()) {
@@ -238,10 +287,26 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
     return prefix;
   }
 
-  private static SortDirection direction(Index index, int position) {
-    return position < index.getDirectionsCount()
-        ? index.getDirections(position)
-        : SortDirection.SORT_DIRECTION_ASC_NULLS_LAST;
+  private static SortDirection direction(Index index, int position, boolean reverse) {
+    SortDirection declared =
+        position < index.getDirectionsCount()
+            ? index.getDirections(position)
+            : SortDirection.SORT_DIRECTION_ASC_NULLS_LAST;
+    return reverse ? flipped(declared) : declared;
+  }
+
+  /**
+   * The exact opposite of a direction, NULL placement included: reading an index backwards reverses
+   * where its NULLs are as surely as it reverses where its values are (D283).
+   */
+  private static SortDirection flipped(SortDirection direction) {
+    return switch (direction) {
+      case SORT_DIRECTION_ASC_NULLS_LAST -> SortDirection.SORT_DIRECTION_DESC_NULLS_FIRST;
+      case SORT_DIRECTION_ASC_NULLS_FIRST -> SortDirection.SORT_DIRECTION_DESC_NULLS_LAST;
+      case SORT_DIRECTION_DESC_NULLS_FIRST -> SortDirection.SORT_DIRECTION_ASC_NULLS_LAST;
+      case SORT_DIRECTION_DESC_NULLS_LAST -> SortDirection.SORT_DIRECTION_ASC_NULLS_FIRST;
+      default -> direction;
+    };
   }
 
   /**
@@ -308,7 +373,8 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
         projection,
         rowType,
         selectivity,
-        rowGoal);
+        rowGoal,
+        reverse);
   }
 
   /** A leaf: it delivers the index's key order and there is nothing below to derive from. */
@@ -336,6 +402,13 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
     // no plan that carries no goal gains a term.
     if (rowGoal > 0) {
       writer.item("goal", rowGoal);
+    }
+
+    // D283: the orientation is a digest item, because a lookup read backwards delivers a different
+    // ordering from the same lookup read forwards and Volcano must never merge the two. Written only
+    // when set, so no plan that reads forwards gains a term.
+    if (reverse) {
+      writer.item("reverse", true);
     }
 
     // D257: the kind, and what the copy is for. Written only for a clustered index — every lookup

@@ -656,6 +656,22 @@ message Index {
   // it; for the other kinds there is no copy to describe. A lookup whose projection lies inside this
   // set is served sequentially from the copy and is priced as a scan.
   repeated int32 covering = 6;
+  // Which ranges this index can also be read from its last row to its first. Additive, and
+  // absent reads as NONE, so an index that says nothing is read forwards as it always was.
+  IndexReversal reversal = 7;
+}
+
+// How far backwards an index can be read, which is a question about the structure rather than about
+// the query: a permutation walks its slice either way, while a sorted structure a source only
+// enumerates forwards can still be read from its top down to a lower bound and no further.
+enum IndexReversal {
+  // Forwards only, which is every index that says nothing.
+  INDEX_REVERSAL_UNSPECIFIED = 0;
+  // A range with no upper bound, the whole index included: the walk starts at the last row and every
+  // row down to the lower bound is wanted, so nothing is skipped and nothing is buffered.
+  INDEX_REVERSAL_OPEN_ABOVE = 1;
+  // Any range at all.
+  INDEX_REVERSAL_ANY = 2;
 }
 
 enum IndexKind {

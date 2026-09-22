@@ -249,6 +249,25 @@ internal sealed class PocoHostIndex<T>
                 + "a snapshot's index must be what the catalog says it is.");
         }
 
+        // D283: the catalog has told the planner which ranges this index can be read backwards, and
+        // a plan may already have chosen a reversed lookup on the strength of it. A product that
+        // cannot serve one is refused here rather than at the first query that asks.
+        if (Descriptor.Reversal != Chalk.Ir.IndexReversal.Unspecified
+            && (index is not IReversiblePocoIndex<T> reversible
+                || reversible.Reversal != Descriptor.Reversal))
+        {
+            throw new CatalogVerificationException(
+                table,
+                $"index '{Descriptor.Name}'",
+                0,
+                $"the registration declared reversal {Descriptor.Reversal}, but the index the "
+                + "factory returned "
+                + (index is IReversiblePocoIndex<T> other
+                    ? $"declares {other.Reversal}."
+                    : "cannot be read backwards at all.")
+                + " A plan may already have been made on the strength of the declaration.");
+        }
+
         return index;
     }
 

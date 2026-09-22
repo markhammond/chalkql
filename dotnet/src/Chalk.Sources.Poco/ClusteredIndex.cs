@@ -27,7 +27,7 @@ namespace Chalk.Sources.Poco;
 /// <c>Func</c> registration is refused by the same staleness check that has always refused it.
 /// </para>
 /// </remarks>
-public sealed class ClusteredIndex<T> : IPositionalPocoIndex<T>
+public sealed class ClusteredIndex<T> : IPositionalPocoIndex<T>, IReversiblePocoIndex<T>
 {
     private readonly PermutationIndex<T> _keys;
     private readonly ClusteredColumnCopy _copy;
@@ -112,6 +112,14 @@ public sealed class ClusteredIndex<T> : IPositionalPocoIndex<T>
     /// <inheritdoc />
     public IEnumerable<int> LookupPositions(IndexKeyRange range) =>
         _keys.LookupPositions(range);
+
+    /// <inheritdoc />
+    /// <remarks>Any range: the key half is a permutation, and so is the copy beside it (D283).</remarks>
+    public Chalk.Ir.IndexReversal Reversal => _keys.Reversal;
+
+    /// <inheritdoc />
+    public IEnumerable<T> LookupReversed(IndexKeyRange range) =>
+        _keys.LookupReversed(range);
 
     /// <inheritdoc />
     public void GetWindow(IndexKeyRange range, out int from, out int to) =>

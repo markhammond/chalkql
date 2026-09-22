@@ -280,6 +280,13 @@ POCO indexing is extensible too: implement `IPocoIndex<T>` to adapt an existing 
 structure. The Chalk.Sample.AkadeIndexedSet sample wraps Akade.IndexedSet and uses 
 PocoIndexConformance.Verify to check Chalk's range and ordering contract.
 
+An index that answers prefixes rather than ranges — a trie — declares `IndexKind.Prefix`,
+and `WHERE name LIKE 'p%'` is then a lookup on it rather than a predicate; an ordered
+string index serves the same query as the plain range `[p, next(p))`, with no adapter
+change at all. An index that can also be walked from its last matching row to its first
+implements `IReversiblePocoIndex<T>`, which is what lets `ORDER BY ts DESC LIMIT 1` be
+one walk and one row instead of a sort.
+
 Custom indexes participate in the same snapshot lifecycle as the rows they index.
 If the underlying structure is mutable, do not modify it while a published snapshot
 may still be executing; publish replacement data and indexes through `RefreshAsync`

@@ -355,6 +355,20 @@ public sealed class PocoTableBuilder<T>
         string name, IndexKind kind, bool unique,
         IReadOnlyList<SortDirection> directions,
         Func<IndexDescriptor, IReadOnlyCollection<T>, IPocoIndex<T>> factory,
+        params Expression<Func<T, object?>>[] keys) =>
+        Index(name, kind, unique, directions, Chalk.Ir.IndexReversal.Unspecified, factory, keys);
+
+    /// <summary>
+    /// The same, for a host index that can also be read from its last matching row to its first
+    /// (D283). The factory's product must be an <see cref="IReversiblePocoIndex{T}"/> declaring
+    /// exactly this reversal, or the snapshot is refused: a plan may already have been made on the
+    /// strength of the declaration.
+    /// </summary>
+    public PocoTableBuilder<T> Index(
+        string name, IndexKind kind, bool unique,
+        IReadOnlyList<SortDirection> directions,
+        Chalk.Ir.IndexReversal reversal,
+        Func<IndexDescriptor, IReadOnlyCollection<T>, IPocoIndex<T>> factory,
         params Expression<Func<T, object?>>[] keys)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -408,6 +422,7 @@ public sealed class PocoTableBuilder<T>
                 Columns = Array.ConvertAll(members, member => Index(byMember, member)),
                 Unique = unique,
                 Directions = declaredDirections,
+                Reversal = reversal,
             },
             factory));
 
@@ -502,12 +517,34 @@ public sealed class PocoTableBuilder<T>
     public PocoTableBuilder<T> Index(IPocoIndex<T> index)
     {
         ArgumentNullException.ThrowIfNull(index);
-        var descriptor = index.Descriptor;
+
+        // D283: the instance is here, so it says for itself which ranges it can be read backwards
+        // rather than the host saying so twice.
+        var descriptor = Reversible(index.Descriptor, index);
         _hostIndexDeclarations.Add(new HostIndexDeclaration(
             _ => descriptor,
             (_, _) => index));
         return this;
     }
+
+    /// <summary>
+    /// The descriptor an index instance's own reversal declares (D283). An index that does not
+    /// implement <see cref="IReversiblePocoIndex{T}"/> is read forwards only, so no existing adapter
+    /// changes behaviour.
+    /// </summary>
+    private static IndexDescriptor Reversible(IndexDescriptor descriptor, IPocoIndex<T> index) =>
+        index is IReversiblePocoIndex<T> reversible && reversible.Reversal != descriptor.Reversal
+            ? new IndexDescriptor
+            {
+                Name = descriptor.Name,
+                Kind = descriptor.Kind,
+                Columns = descriptor.Columns,
+                Unique = descriptor.Unique,
+                Directions = descriptor.Directions,
+                Covering = descriptor.Covering,
+                Reversal = reversible.Reversal,
+            }
+            : descriptor;
 
     /// <summary>
     /// Registers a host index made once per snapshot (F110): <paramref name="index"/> is called with
@@ -868,6 +905,10 @@ public sealed class PocoTableBuilder<T>
                 Unique = declaration.Unique,
                 Directions = declaration.Directions,
                 Covering = CoveringColumns(declaration, byMember, keyColumns),
+                // D283: the built-in index is a permutation, and a clustered one is a permutation
+                // with a copy beside it. The window a range resolves to is a contiguous slice, so
+                // walking it from its end costs exactly what walking it from its start does.
+                Reversal = Chalk.Ir.IndexReversal.Any,
             };
 
             // The backing decision remains exactly the existing semantic test:

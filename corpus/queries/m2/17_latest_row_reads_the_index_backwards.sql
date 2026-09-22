@@ -1,0 +1,12 @@
+-- D283: the latest row, which is the commonest ordered query there is. The index is ascending, so
+-- serving this order used to mean sorting the whole table; read from its last row to its first it
+-- delivers the order directly, and the row goal then makes it one seek and one row. Both keys are
+-- ordered because five rows share every timestamp, and "the latest row" has to name one of them.
+-- expect: has(IndexLookup)
+-- expect: has(Fetch)
+-- expect: not(Sort)
+-- expect: not(TopN)
+-- expect: index(ix_bars_ts_symbol)
+-- expect: plan_text(reverse)
+-- expect: rows_scanned_at_most=1
+SELECT ts, symbol FROM bars ORDER BY ts DESC, symbol DESC LIMIT 1

@@ -174,6 +174,8 @@ public sealed class AkadeCompoundIndexTests
                 Kind = IndexKind.Ordered,
                 Columns = [2, 3],
                 Directions = [SortDirection.AscNullsLast, SortDirection.AscNullsLast],
+                // D283: so the kit checks every one of these ranges backwards as well as forwards.
+                Reversal = Chalk.Ir.IndexReversal.OpenAbove,
             },
             set,
             x => (x.Ts, x.Price),

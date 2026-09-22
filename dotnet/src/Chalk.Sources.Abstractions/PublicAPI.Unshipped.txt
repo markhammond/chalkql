@@ -184,6 +184,8 @@ Chalk.Sources.IndexLookupRequest.Projection.get -> System.Collections.Generic.IR
 Chalk.Sources.IndexLookupRequest.Projection.init -> void
 Chalk.Sources.IndexLookupRequest.Ranges.get -> System.Collections.Generic.IReadOnlyList<Chalk.Sources.IndexKeyRange!>!
 Chalk.Sources.IndexLookupRequest.Ranges.init -> void
+Chalk.Sources.IndexLookupRequest.Reverse.get -> bool
+Chalk.Sources.IndexLookupRequest.Reverse.init -> void
 Chalk.Sources.IndexLookupRequest.RowGoal.get -> long?
 Chalk.Sources.IndexLookupRequest.RowGoal.init -> void
 Chalk.Sources.IndexLookupRequest.Table.get -> string!

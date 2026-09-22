@@ -797,6 +797,13 @@ internal sealed class ReferenceExecutor
                 })
                 .ToList();
             kept.Sort(new ReferenceRowComparer(order));
+
+            // D283: the same rows, from the last to the first. The oracle reverses the order it
+            // already put them in rather than knowing how to walk an index backwards.
+            if (lookup.Reverse)
+            {
+                kept.Reverse();
+            }
         }
 
         return kept;
@@ -834,12 +841,48 @@ internal sealed class ReferenceExecutor
             }
         }
 
+        // D282: the last lower bound is a LIKE pattern rather than a value. The oracle reads it as
+        // the predicate it stands for — the columns before it are equalities and the last starts
+        // with the prefix — rather than as the half-open range the client resolves it into, so it
+        // depends on nothing the engine under test does.
+        if (range.Prefix)
+        {
+            return InPrefix(row, keyFields, range, interpreter);
+        }
+
         if (!Side(row, keyFields, range.Lower, range.LowerInclusive, below: true, interpreter))
         {
             return false;
         }
 
         return Side(row, keyFields, range.Upper, range.UpperInclusive, below: false, interpreter);
+    }
+
+    /// <summary>A prefix range: an equality prefix, and then "starts with this text" (D282).</summary>
+    private static bool InPrefix(
+        object?[] row, IReadOnlyList<int> keyFields, IndexRange range, ReferenceInterpreter interpreter)
+    {
+        for (var i = 0; i + 1 < range.Lower.Count; i++)
+        {
+            var value = interpreter.Evaluate(range.Lower[i], row);
+            if (value is null || ReferenceValues.Compare(row[keyFields[i]]!, value) != 0)
+            {
+                return false;
+            }
+        }
+
+        var last = range.Lower.Count - 1;
+        var pattern = IndexPrefix.AsText(interpreter.Evaluate(range.Lower[last], row));
+        if (!IndexPrefix.IsBarePrefix(pattern))
+        {
+            throw new UnsupportedFeatureException(
+                $"LIKE '{pattern}' as a lookup",
+                "The lookup was planned for a LIKE prefix, and a prefix ends in one '%' and holds "
+                + "no other wildcard.");
+        }
+
+        return IndexPrefix.AsText(row[keyFields[last]]) is { } text
+            && text.StartsWith(IndexPrefix.Of(pattern!), StringComparison.Ordinal);
     }
 
     /// <summary>One side of a range, compared column by column until the first difference.</summary>

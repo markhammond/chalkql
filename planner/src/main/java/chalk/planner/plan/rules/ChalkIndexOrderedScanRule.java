@@ -82,8 +82,16 @@ public final class ChalkIndexOrderedScanRule extends RelRule<ChalkRuleConfig> {
 
       IndexMatcher.Range whole =
           new IndexMatcher.Range(ImmutableList.of(), true, ImmutableList.of(), true);
-      call.transformTo(
-          ChalkIndexLookup.create(scan, index, ImmutableList.of(whole), ChalkSelectivity.ALL));
+      ImmutableList<IndexMatcher.Range> ranges = ImmutableList.of(whole);
+      call.transformTo(ChalkIndexLookup.create(scan, index, ranges, ChalkSelectivity.ALL));
+
+      // D283: the whole index read from its last row to its first — which is what serves
+      // `ORDER BY ts DESC LIMIT 1` without a sort. The range is open above, so even an index that
+      // can only be read backwards from its top admits it.
+      if (ChalkIndexLookup.canReverse(index, ranges)) {
+        call.transformTo(
+            ChalkIndexLookup.create(scan, index, ranges, ChalkSelectivity.ALL, true));
+      }
     }
   }
 }

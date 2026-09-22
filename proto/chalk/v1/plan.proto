@@ -511,6 +511,11 @@ message IndexLookup {
   // stops, zero meaning nothing above said. A hint and never a bound, on exactly the terms
   // `Read.row_goal` sets out.
   int64 row_goal = 6;
+  // Read the matched rows from the last to the first: the same rows, in the reverse of the
+  // index's key order. Set only where the index's `reversal` admits the range's shape, and additive
+  // — false by default, so a lookup that reads forwards is byte-identical to one from before this
+  // field. It composes with `row_goal`: the latest row is one seek and one row backwards.
+  bool reverse = 7;
 }
 
 // Bounds over a prefix of the index's key columns. `lower` and `upper` are Literals or

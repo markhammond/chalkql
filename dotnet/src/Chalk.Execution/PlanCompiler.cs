@@ -592,9 +592,28 @@ internal static class PlanCompiler
             // `IndexLookup.row_goal` is a hint the source may size its first batch to (D276). Zero
             // on the wire means "nothing above said", which is null here.
             var rowGoal = lookup.RowGoal > 0 ? lookup.RowGoal : (long?)null;
+
+            // D283: a reversed lookup is a requirement, not a hint — the plan has no sort above it —
+            // so a plan that asks for one from an index that never declared it is refused here
+            // rather than answered forwards.
+            if (lookup.Reverse)
+            {
+                foreach (var range in lookup.Ranges)
+                {
+                    if (!index.CanReverse(range.Upper.Count == 0))
+                    {
+                        throw new InvalidPlanException(
+                            "I-IR-6",
+                            path,
+                            $"the lookup reads index '{index.Name}' backwards, and that index "
+                            + $"declares reversal {index.Reversal}");
+                    }
+                }
+            }
+
             return context => new IndexLookupOperator(
                 context, path, source, descriptor.Table.Name, index.Name, ranges, projection, schema,
-                columnTypes, rowGoal);
+                columnTypes, rowGoal, lookup.Reverse);
         }
 
         /// <summary>A range bound: a literal the planner wrote down, or a parameter slot.</summary>

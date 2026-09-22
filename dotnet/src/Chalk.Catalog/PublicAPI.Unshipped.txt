@@ -254,6 +254,7 @@ Chalk.Catalog.HistogramBucket.Upper.init -> void
 Chalk.Catalog.ICrossSourceJoinPolicy
 Chalk.Catalog.ICrossSourceJoinPolicy.Build(Chalk.Catalog.CatalogContext! catalog) -> Chalk.Catalog.CrossSourceJoinPolicy!
 Chalk.Catalog.IndexDescriptor
+Chalk.Catalog.IndexDescriptor.CanReverse(bool openAbove) -> bool
 Chalk.Catalog.IndexDescriptor.Columns.get -> System.Collections.Generic.IReadOnlyList<int>!
 Chalk.Catalog.IndexDescriptor.Columns.init -> void
 Chalk.Catalog.IndexDescriptor.Covering.get -> System.Collections.Generic.IReadOnlyList<int>!
@@ -268,6 +269,8 @@ Chalk.Catalog.IndexDescriptor.Kind.get -> Chalk.Ir.IndexKind
 Chalk.Catalog.IndexDescriptor.Kind.init -> void
 Chalk.Catalog.IndexDescriptor.Name.get -> string!
 Chalk.Catalog.IndexDescriptor.Name.init -> void
+Chalk.Catalog.IndexDescriptor.Reversal.get -> Chalk.Ir.IndexReversal
+Chalk.Catalog.IndexDescriptor.Reversal.init -> void
 Chalk.Catalog.IndexDescriptor.Unique.get -> bool
 Chalk.Catalog.IndexDescriptor.Unique.init -> void
 Chalk.Catalog.JoinStrategy
@@ -361,14 +364,14 @@ Chalk.Catalog.SourceCapabilities.PushablePredicates.init -> void
 Chalk.Catalog.SourceCapabilities.QueryLanguage.get -> Chalk.Ir.QueryLanguage
 Chalk.Catalog.SourceCapabilities.QueryLanguage.init -> void
 Chalk.Catalog.SourceCapabilities.SourceCapabilities() -> void
+Chalk.Catalog.SourceCapabilities.SupportsCase.get -> bool
+Chalk.Catalog.SourceCapabilities.SupportsCase.init -> void
 Chalk.Catalog.SourceCapabilities.SupportsDistinct.get -> bool
 Chalk.Catalog.SourceCapabilities.SupportsDistinct.init -> void
 Chalk.Catalog.SourceCapabilities.SupportsGroupBy.get -> bool
 Chalk.Catalog.SourceCapabilities.SupportsGroupBy.init -> void
 Chalk.Catalog.SourceCapabilities.SupportsHaving.get -> bool
 Chalk.Catalog.SourceCapabilities.SupportsHaving.init -> void
-Chalk.Catalog.SourceCapabilities.SupportsCase.get -> bool
-Chalk.Catalog.SourceCapabilities.SupportsCase.init -> void
 Chalk.Catalog.SourceCapabilities.SupportsInnerJoin.get -> bool
 Chalk.Catalog.SourceCapabilities.SupportsInnerJoin.init -> void
 Chalk.Catalog.SourceCapabilities.SupportsLimit.get -> bool

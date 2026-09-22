@@ -3,6 +3,7 @@ using Chalk.Catalog;
 using Chalk.Sources;
 using Chalk.Sources.Poco;
 using IndexKind = Chalk.Ir.IndexKind;
+using IndexReversal = Chalk.Ir.IndexReversal;
 
 namespace Chalk.Sources.Akade;
 
@@ -14,7 +15,7 @@ namespace Chalk.Sources.Akade;
 /// match Chalk's catalog contract. Computed, compound, nullable and comparer-sensitive keys are not
 /// registered here; they remain available to the host through Akade itself.
 /// </remarks>
-internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
+internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>, IReversiblePocoIndex<T>
     where TKey : notnull
 {
     private readonly IndexedSet<T> _set;
@@ -171,6 +172,102 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>
             !hasLower || range.LowerInclusive,
             !hasUpper || range.UpperInclusive,
             _akadeIndexName));
+    }
+
+    /// <summary>
+    /// A range with no upper bound, the whole index included (D283).
+    /// </summary>
+    /// <remarks>
+    /// That is what Akade's public surface serves backwards without a copy: <c>OrderByDescending</c>
+    /// starts at the last key and every row down to the lower bound is wanted, so nothing is skipped
+    /// and nothing is buffered. A range with an upper bound is not offered, because reaching it
+    /// backwards would mean skipping every row above it or buffering the matched range to reverse
+    /// it, which is the copy D277 removed; the planner sorts those instead.
+    /// </remarks>
+    public IndexReversal Reversal =>
+        Descriptor.Kind == IndexKind.Ordered ? IndexReversal.OpenAbove : IndexReversal.Unspecified;
+
+    /// <inheritdoc />
+    public IEnumerable<T> LookupReversed(IndexKeyRange range)
+    {
+        ArgumentNullException.ThrowIfNull(range);
+
+        if (Descriptor.Kind != IndexKind.Ordered || range.Upper.Count != 0)
+        {
+            throw new SourceContractException(
+                _sourceId,
+                _table,
+                $"Akade index '{_akadeIndexName}', behind the index '{Descriptor.Name}', was asked "
+                + $"for {range} backwards. Only a range with no upper bound is offered that way: "
+                + "reaching one backwards would mean skipping every row above it, or buffering the "
+                + "matched range to reverse it.");
+        }
+
+        var hasLower = range.Lower.Count != 0;
+        var lower = default(TKey)!;
+        if (hasLower && !TryKey(range.Lower[0], out lower))
+        {
+            return [];
+        }
+
+        // Akade documents OrderByDescending as the index's order, walked the other way. The rows
+        // above the bound are exactly the ones wanted, so the walk simply stops at the first key
+        // below it — no seek, no skipping, and a consumer that reads one row reads one row.
+        return InReverseKeyOrder(
+            _set.OrderByDescending(_key, 0, _akadeIndexName),
+            lower,
+            hasLower,
+            range.LowerInclusive);
+    }
+
+    /// <summary>
+    /// The guard, reversed (D283): the same one comparison per row and the same nothing allocated,
+    /// against the order this enumeration claims rather than the one the index is stored in.
+    /// </summary>
+    internal IEnumerable<T> InReverseKeyOrder(IEnumerable<T> rows) =>
+        InReverseKeyOrder(rows, default!, bounded: false, inclusive: true);
+
+    /// <summary>
+    /// The same, stopping at <paramref name="lower"/>: a descending walk reaches the rows above the
+    /// bound first and wants every one of them, so the first key below it ends the walk. The bound
+    /// and the order are checked from the same key, so the row path reads each key once.
+    /// </summary>
+    private IEnumerable<T> InReverseKeyOrder(
+        IEnumerable<T> rows, TKey lower, bool bounded, bool inclusive)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        var previous = default(TKey)!;
+        var hasPrevious = false;
+
+        foreach (var row in rows)
+        {
+            var key = _key(row);
+
+            if (bounded)
+            {
+                var toBound = _comparer.Compare(key, lower);
+                if (toBound < 0 || (toBound == 0 && !inclusive))
+                {
+                    yield break;
+                }
+            }
+
+            if (hasPrevious && _comparer.Compare(previous, key) < 0)
+            {
+                throw new SourceContractException(
+                    _sourceId,
+                    _table,
+                    $"Akade index '{_akadeIndexName}', behind the ORDERED index "
+                    + $"'{Descriptor.Name}', yielded key '{key}' after '{previous}' while being read "
+                    + "backwards. A reversed lookup must arrive in the reverse of the index's "
+                    + "declared key order.");
+            }
+
+            previous = key;
+            hasPrevious = true;
+            yield return row;
+        }
     }
 
     /// <summary>
