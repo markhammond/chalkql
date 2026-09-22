@@ -80,10 +80,17 @@ class PlanTextRedactionTest {
         .allMatch(hex -> pseudonyms(redacted.sql()).contains(hex));
   }
 
-  /** An index range's bounds are the statement's literals too, and a rel renders them itself. */
+  /**
+   * An index range's bounds are the statement's literals too, and a rel renders them itself.
+   *
+   * <p>No {@code LIMIT}: with one, the planner now offers a goaled scan (D276) and takes it, because
+   * fifteen rows read at a unit each beat a seek at seventeen. The statement that produces a lookup
+   * is the one with no limit at all, and a lookup is what this test is about. {@code LIMIT} in the
+   * plan text has its own case below.
+   */
   @Test
   void an_index_lookups_ranges_are_redacted() throws Exception {
-    Redacted redacted = redact("SELECT symbol, ts FROM bars WHERE symbol = 'BTCUSDT' LIMIT 3", true);
+    Redacted redacted = redact("SELECT symbol, ts FROM bars WHERE symbol = 'BTCUSDT'", true);
 
     assertThat(redacted.plain()).contains("ranges=[[[['BTCUSDT'");
     assertThat(redacted.physical()).contains("ranges=[[[[/*REDACTED-");

@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "4472158344057771914",
+  "planDigest": "2390699714894129204",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -41,73 +41,28 @@
       ]
     },
     "estRowCount": 1,
-    "project": {
+    "fetch": {
       "input": {
         "rowType": {
           "fields": [
             {
-              "name": "symbol",
+              "name": "a",
               "type": {
-                "kind": "TYPE_KIND_STRING"
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
               }
             },
             {
-              "name": "ts",
+              "name": "b",
               "type": {
-                "kind": "TYPE_KIND_TIMESTAMP",
-                "precision": 9
-              }
-            },
-            {
-              "name": "open",
-              "type": {
-                "kind": "TYPE_KIND_FP64"
-              }
-            },
-            {
-              "name": "high",
-              "type": {
-                "kind": "TYPE_KIND_FP64"
-              }
-            },
-            {
-              "name": "low",
-              "type": {
-                "kind": "TYPE_KIND_FP64"
-              }
-            },
-            {
-              "name": "close",
-              "type": {
-                "kind": "TYPE_KIND_FP64"
-              }
-            },
-            {
-              "name": "volume",
-              "type": {
-                "kind": "TYPE_KIND_I64"
-              }
-            },
-            {
-              "name": "vwap",
-              "type": {
-                "kind": "TYPE_KIND_DECIMAL",
-                "nullable": true,
-                "precision": 28,
-                "scale": 10
-              }
-            },
-            {
-              "name": "trade_count",
-              "type": {
-                "kind": "TYPE_KIND_I32",
+                "kind": "TYPE_KIND_FP64",
                 "nullable": true
               }
             }
           ]
         },
         "estRowCount": 1,
-        "fetch": {
+        "project": {
           "input": {
             "rowType": {
               "fields": [
@@ -172,7 +127,7 @@
                 }
               ]
             },
-            "estRowCount": 5000,
+            "estRowCount": 1,
             "collations": [
               {
                 "fields": [
@@ -216,59 +171,60 @@
                 6,
                 7,
                 8
-              ]
+              ],
+              "rowGoal": "1"
             }
           },
-          "count": "1"
+          "exprs": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              },
+              "literal": {
+                "isNull": true
+              }
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              },
+              "call": {
+                "args": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_FP64",
+                      "nullable": true
+                    },
+                    "literal": {
+                      "isNull": true
+                    }
+                  },
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_FP64"
+                    },
+                    "literal": {
+                      "fp64Value": 5
+                    }
+                  },
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_FP64"
+                    },
+                    "literal": {
+                      "fp64Value": 0
+                    }
+                  }
+                ],
+                "userFunction": "main.bucket_price"
+              }
+            }
+          ]
         }
       },
-      "exprs": [
-        {
-          "type": {
-            "kind": "TYPE_KIND_FP64",
-            "nullable": true
-          },
-          "literal": {
-            "isNull": true
-          }
-        },
-        {
-          "type": {
-            "kind": "TYPE_KIND_FP64",
-            "nullable": true
-          },
-          "call": {
-            "args": [
-              {
-                "type": {
-                  "kind": "TYPE_KIND_FP64",
-                  "nullable": true
-                },
-                "literal": {
-                  "isNull": true
-                }
-              },
-              {
-                "type": {
-                  "kind": "TYPE_KIND_FP64"
-                },
-                "literal": {
-                  "fp64Value": 5
-                }
-              },
-              {
-                "type": {
-                  "kind": "TYPE_KIND_FP64"
-                },
-                "literal": {
-                  "fp64Value": 0
-                }
-              }
-            ],
-            "userFunction": "main.bucket_price"
-          }
-        }
-      ]
+      "count": "1"
     }
   }
 }

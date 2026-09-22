@@ -1,0 +1,11 @@
+-- A goaled ordered lookup with a parameter bound. The order is the unique index's (symbol, ts) and
+-- not the table's declared (ts, symbol): a plain scan delivers the declared one for nothing, so a
+-- statement ordered by it never needs the index at all. With a goal of one the lookup seeks once
+-- and stops, where it used to be costed for half the table at a guessed selectivity and lose.
+-- expect: has(IndexLookup)
+-- expect: has(Fetch)
+-- expect: not(TopN)
+-- expect: index(ix_bars_symbol_ts)
+-- expect: plan_text(goal=[1])
+-- expect: rows_scanned_at_most=1
+SELECT symbol, ts FROM bars WHERE symbol >= ? ORDER BY symbol, ts LIMIT 1

@@ -1,6 +1,6 @@
 -- FULL
 ChalkLimit(offset=[3], fetch=[5])
-  ChalkTableScan(table=[[main, bars]], projection=[[0, 1]])
+  ChalkTableScan(table=[[main, bars]], projection=[[0, 1]], goal=[8])
 -- NONE
 ChalkProject(symbol=[$0], ts=[$1])
   ChalkLimit(offset=[3], fetch=[5])

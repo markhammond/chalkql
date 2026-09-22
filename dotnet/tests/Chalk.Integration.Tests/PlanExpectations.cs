@@ -221,6 +221,10 @@ public static class PlanExpectations
             case "parameters":
             case "accepts_list":
             case "rows_scanned":
+
+            // D276: what a row goal buys, stated as a bound on the rows the source read. Like
+            // `rows_scanned`, it is a fact about an execution, so CorpusDifferentialTests owns it.
+            case "rows_scanned_at_most":
                 break;
 
             default:

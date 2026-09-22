@@ -148,6 +148,22 @@ public sealed class CorpusDifferentialTests(SharedSidecar sidecar)
             && PlanWalker.Has(plan, Rel.KindOneofCase.SetOp);
         var floor = literalBranch ? 0 : produced;
 
+        // D276: a query whose leaf the planner goaled says how far the source was allowed to read,
+        // which is the batch ramp asserted structurally rather than by timing. A fact about an
+        // execution, like rows_scanned, so it lives here; and it is checked beside the branches
+        // below rather than instead of them, so both claims have to hold.
+        var atMost = query.Expectations.FirstOrDefault(
+            e => e.StartsWith("rows_scanned_at_most=", StringComparison.Ordinal));
+        if (atMost is not null)
+        {
+            var bound = long.Parse(
+                atMost["rows_scanned_at_most=".Length..],
+                System.Globalization.CultureInfo.InvariantCulture);
+            Assert.True(
+                stats.RowsScanned <= bound,
+                $"{name}: read {stats.RowsScanned} rows against a bound of {bound}");
+        }
+
         if (query.Expectations.Contains("rows_scanned=produced"))
         {
             Assert.True(lookup, $"{name}: rows_scanned=produced but the plan has no IndexLookup");

@@ -105,6 +105,20 @@ internal static class DifferentialRunner
             ["p0"] = Utf8String.FromString("XRPUSDT"),
             ["p1"] = new DateTime(2026, 1, 3, 12, 34, 0),
         },
+
+        // D276. The row goal only buys anything when the first rows the leaf is read for are rows
+        // the query wants, so both bindings are deliberately unselective: a bound below every
+        // symbol the generator emits, and a volume below every generated one but the smallest.
+        // What is asserted is how far the source read, so a binding that matched nothing would make
+        // the bound hold for the wrong reason.
+        "13_limit_over_ordered_lookup" => new Dictionary<string, object?>
+        {
+            ["p0"] = Utf8String.FromString("AAA"),
+        },
+        "14_limit_over_filtered_scan" => new Dictionary<string, object?>
+        {
+            ["p0"] = 1000L,
+        },
         _ => null,
     };
 

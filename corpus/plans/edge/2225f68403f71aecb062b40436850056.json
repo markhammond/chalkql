@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "5261202170478252650",
+  "planDigest": "17696903920647966601",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -63,7 +63,7 @@
         ]
       }
     ],
-    "sort": {
+    "fetch": {
       "input": {
         "rowType": {
           "fields": [
@@ -81,7 +81,7 @@
             }
           ]
         },
-        "estRowCount": 1,
+        "estRowCount": 4,
         "collations": [
           {
             "fields": [
@@ -93,11 +93,22 @@
                   "fieldRef": {}
                 },
                 "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
               }
             ]
           }
         ],
-        "fetch": {
+        "sort": {
           "input": {
             "rowType": {
               "fields": [
@@ -143,31 +154,31 @@
               ]
             }
           },
-          "offset": "4"
+          "fields": [
+            {
+              "expr": {
+                "type": {
+                  "kind": "TYPE_KIND_I32"
+                },
+                "fieldRef": {}
+              },
+              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+            },
+            {
+              "expr": {
+                "type": {
+                  "kind": "TYPE_KIND_STRING"
+                },
+                "fieldRef": {
+                  "index": 1
+                }
+              },
+              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+            }
+          ]
         }
       },
-      "fields": [
-        {
-          "expr": {
-            "type": {
-              "kind": "TYPE_KIND_I32"
-            },
-            "fieldRef": {}
-          },
-          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-        },
-        {
-          "expr": {
-            "type": {
-              "kind": "TYPE_KIND_STRING"
-            },
-            "fieldRef": {
-              "index": 1
-            }
-          },
-          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-        }
-      ]
+      "offset": "4"
     }
   }
 }

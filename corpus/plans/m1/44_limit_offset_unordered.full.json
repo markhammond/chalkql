@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "14352576137687320734",
+  "planDigest": "18145900435731966327",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -39,6 +39,33 @@
       ]
     },
     "estRowCount": 8,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
     "fetch": {
       "input": {
         "rowType": {
@@ -58,7 +85,7 @@
             }
           ]
         },
-        "estRowCount": 100800,
+        "estRowCount": 8,
         "collations": [
           {
             "fields": [
@@ -95,7 +122,8 @@
           "projection": [
             0,
             1
-          ]
+          ],
+          "rowGoal": "8"
         }
       },
       "offset": "3",

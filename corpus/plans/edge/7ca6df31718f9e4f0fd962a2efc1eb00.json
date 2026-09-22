@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "9945077043290440145",
+  "planDigest": "9162951072155361695",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -70,7 +70,7 @@
             }
           ]
         },
-        "estRowCount": 4,
+        "estRowCount": 2,
         "collations": [
           {
             "fields": [
@@ -95,7 +95,8 @@
           "projection": [
             0,
             1
-          ]
+          ],
+          "rowGoal": "2"
         }
       },
       "count": "2"
