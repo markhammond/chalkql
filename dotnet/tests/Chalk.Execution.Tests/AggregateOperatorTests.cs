@@ -411,6 +411,185 @@ public sealed class AggregateOperatorTests
         await Runner.AssertEnginesAgreeAsync(plan, source);
     }
 
+    /// <summary>
+    /// Two and three keys at once, chosen to break the compound image path of F115 if any part of a
+    /// key were trusted on its own: a string pair that agrees on its first sixteen bytes and differs
+    /// after them, the same string against two different fixed keys and the same fixed key against
+    /// two different strings, a NULL in each key position and in all of them at once, a repeat that
+    /// is adjacent to its group (the previous-row check) and one that is not (the probe), and the
+    /// empty string beside a zero.
+    /// </summary>
+    private static readonly TestTable CompoundKeys = new()
+    {
+        Name = "compound_keys",
+        Columns =
+        [
+            ("s", ChalkType.String(nullable: true)),
+            ("i", ChalkType.Int32(nullable: true)),
+            ("t", ChalkType.String(nullable: true)),
+            ("n", ChalkType.Int64()),
+        ],
+        Rows =
+        [
+            ["0123456789abcdefg", 1L, "a", 1L],
+            ["0123456789abcdefh", 1L, "a", 2L],      // differs only past the image
+            ["0123456789abcdefg", 2L, "a", 4L],      // the same string, another fixed key
+            ["0123456789abcdefg", 1L, "b", 8L],      // the same pair, another third key
+            [null, 1L, "a", 16L],                    // NULL first
+            ["0123456789abcdefg", null, "a", 32L],  // NULL second
+            ["0123456789abcdefg", 1L, null, 64L],    // NULL third
+            [null, null, null, 128L],
+            ["0123456789abcdefg", 1L, "a", 256L],    // a repeat the probe has to find
+            [null, null, null, 512L],
+            [string.Empty, 0L, string.Empty, 1024L],
+            ["0123456789abcdef", 1L, "a", 2048L],    // sixteen exactly, a prefix of the pair above
+            ["0123456789abcdefg", 1L, "a", 4096L],   // and two the previous-row check answers
+            ["0123456789abcdefg", 1L, "a", 8192L],
+        ],
+    };
+
+    private static Plan CompoundPlan(params int[] keys)
+    {
+        var row = CompoundKeys.RowType();
+        return IrBuilder.Plan(IrBuilder.HashAggregate(
+            IrBuilder.Read(CompoundKeys.Name, row),
+            keys,
+            [
+                ("n", IrBuilder.Agg(AggregateFunctionId.Count, IrBuilder.I64())),
+                ("s", IrBuilder.Agg(
+                    AggregateFunctionId.Sum, IrBuilder.I64(true), IrBuilder.Ref(row, 3))),
+            ]));
+    }
+
+    [Theory]
+    [MemberData(nameof(BatchSizes))]
+    public async Task A_string_key_and_a_fixed_key_group_on_both(int batchSize)
+    {
+        var rows = await Runner.RowsAsync(CompoundPlan(0, 1), TestData.Source(CompoundKeys), batchSize);
+
+        Assert.Equal(8, rows.Count);
+
+        // The pair that shares an image and nothing else: everything that is not the second row.
+        Assert.Equal(
+            12_617L,
+            rows.Single(r => (r[0] as string) == "0123456789abcdefg" && (r[1] as long?) == 1L)[3]);
+        Assert.Equal(
+            2L, rows.Single(r => (r[0] as string) == "0123456789abcdefh")[3]);
+
+        // A NULL in either position is a key of its own, and both NULL is one group.
+        Assert.Equal(16L, rows.Single(r => r[0] is null && r[1] is not null)[3]);
+        Assert.Equal(32L, rows.Single(r => r[0] is not null && r[1] is null)[3]);
+        Assert.Equal(640L, rows.Single(r => r[0] is null && r[1] is null)[3]);
+
+        // The empty string is not NULL, and the sixteen-byte key is not the seventeen-byte one.
+        Assert.Equal(1024L, rows.Single(r => (r[0] as string)?.Length == 0)[3]);
+        Assert.Equal(
+            2048L, rows.Single(r => (r[0] as string) == "0123456789abcdef")[3]);
+        Assert.Equal(16_383L, rows.Sum(r => (long)r[3]!));
+    }
+
+    [Theory]
+    [MemberData(nameof(BatchSizes))]
+    public async Task A_fixed_key_before_a_long_string_key_groups_on_both(int batchSize)
+    {
+        var rows = await Runner.RowsAsync(CompoundPlan(1, 0), TestData.Source(CompoundKeys), batchSize);
+
+        Assert.Equal(8, rows.Count);
+        Assert.Equal(
+            12_617L,
+            rows.Single(r => (r[0] as long?) == 1L && (r[1] as string) == "0123456789abcdefg")[3]);
+        Assert.Equal(16_383L, rows.Sum(r => (long)r[3]!));
+    }
+
+    [Theory]
+    [MemberData(nameof(BatchSizes))]
+    public async Task Three_keys_group_on_all_three(int batchSize)
+    {
+        var rows = await Runner.RowsAsync(
+            CompoundPlan(0, 1, 2), TestData.Source(CompoundKeys), batchSize);
+
+        Assert.Equal(10, rows.Count);
+        Assert.Equal(
+            12_545L,
+            rows.Single(r =>
+                (r[0] as string) == "0123456789abcdefg"
+                && (r[1] as long?) == 1L
+                && (r[2] as string) == "a")[4]);
+        Assert.Equal(8L, rows.Single(r => (r[2] as string) == "b")[4]);
+        Assert.Equal(64L, rows.Single(r => r[2] is null && r[0] is not null)[4]);
+        Assert.Equal(640L, rows.Single(r => r[0] is null && r[1] is null && r[2] is null)[4]);
+        Assert.Equal(16_383L, rows.Sum(r => (long)r[4]!));
+    }
+
+    [Theory]
+    [InlineData(new[] { 0, 1 })]
+    [InlineData(new[] { 1, 0 })]
+    [InlineData(new[] { 0, 2 })]
+    [InlineData(new[] { 0, 1, 2 })]
+    [InlineData(new[] { 2, 1, 0 })]
+    public async Task Compound_groups_agree_with_the_reference_engine(int[] keys) =>
+        await Runner.AssertEnginesAgreeAsync(CompoundPlan(keys), TestData.Source(CompoundKeys));
+
+    /// <summary>
+    /// The same over the layouts the string table does not reach: two reals together, where
+    /// grouping normalises every NaN to one and -0.0 to 0.0; a DECIMAL beside a string, which is
+    /// the two-word image beside the packed one; and a BOOL in the pair, which has no image at all
+    /// and keeps the whole aggregate on the generic path.
+    /// </summary>
+    [Theory]
+    [InlineData(new[] { 2, 3 })]
+    [InlineData(new[] { 4, 5 })]
+    [InlineData(new[] { 0, 1, 4 })]
+    [InlineData(new[] { 6, 0 })]
+    [InlineData(new[] { 5, 6, 0 })]
+    public async Task Compound_groups_over_every_layout_agree_with_the_reference_engine(int[] keys)
+    {
+        var table = TestData.Numbers;
+        var row = table.RowType();
+        var plan = IrBuilder.Plan(IrBuilder.HashAggregate(
+            IrBuilder.Read(table.Name, row),
+            keys,
+            [
+                ("n", IrBuilder.Agg(AggregateFunctionId.Count, IrBuilder.I64())),
+                ("s", IrBuilder.Agg(
+                    AggregateFunctionId.Sum, IrBuilder.I64(true), IrBuilder.Ref(row, 1))),
+            ]));
+
+        await Runner.AssertEnginesAgreeAsync(plan, TestData.Source(table));
+    }
+
+    /// <summary>A UUID beside a BINARY: sixteen fixed bytes beside a variable-length lane.</summary>
+    [Fact]
+    public async Task A_uuid_beside_a_binary_key_agrees_with_the_reference_engine()
+    {
+        var table = TestData.Assorted;
+        var row = table.RowType();
+        var plan = IrBuilder.Plan(IrBuilder.HashAggregate(
+            IrBuilder.Read(table.Name, row),
+            [5, 4],
+            [("n", IrBuilder.Agg(AggregateFunctionId.Count, IrBuilder.I64()))]));
+
+        await Runner.AssertEnginesAgreeAsync(plan, TestData.Source(table));
+    }
+
+    /// <summary>
+    /// The shape a <c>COUNT(DISTINCT x)</c> compiles to: a compound aggregate under a single-key
+    /// one, which is where the compound path is on the row loop of the whole query (F115).
+    /// </summary>
+    [Fact]
+    public async Task A_nested_distinct_aggregate_agrees_with_the_reference_engine()
+    {
+        var row = CompoundKeys.RowType();
+        var inner = IrBuilder.HashAggregate(IrBuilder.Read(CompoundKeys.Name, row), [0, 1], []);
+        var plan = IrBuilder.Plan(IrBuilder.HashAggregate(
+            inner,
+            [0],
+            [("d", IrBuilder.Agg(
+                AggregateFunctionId.Count, IrBuilder.I64(), IrBuilder.Ref(inner.RowType, 1)))]));
+
+        await Runner.AssertEnginesAgreeAsync(plan, TestData.Source(CompoundKeys));
+    }
+
     [Theory]
     [MemberData(nameof(BatchSizes))]
     public async Task Integer_sum_overflow_raises(int batchSize)

@@ -85,17 +85,41 @@ internal sealed class HashAggregateOperator : OperatorBase
     private readonly double _estimatedGroups;
 
     /// <summary>
-    /// True when the one grouping key has a layout the image path of D255 covers, so a row's key is
-    /// two words and a length rather than a lane read, a byte-at-a-time hash and a
+    /// True when <em>every</em> grouping key has a layout the image path of D255 covers, so a row's
+    /// key is two words and a length per key rather than a lane read, a byte-at-a-time hash and a
     /// <c>SequenceEqual</c>. BOOL is out because a bit-packed column is not a lane, and LIST has no
     /// equality at all.
     /// </summary>
+    private readonly bool _imageKeys;
+
+    /// <summary>
+    /// True when that is the whole of the grouping: one key, which is the shape nearly every
+    /// <c>GROUP BY</c> has and the one the perfect hash of D255 is built for. Two or more keys take
+    /// the compound path of F115, which is the same three ideas — a typed lane walk, an image per
+    /// group, and the previous row tried first — once per key.
+    /// </summary>
     private readonly bool _singleKey;
 
-    /// <summary>Each group's key as <see cref="KeyImage"/> words, parallel to the dense group ids.</summary>
+    /// <summary>How many keys a group has, which is the stride of the per-group image arrays.</summary>
+    private readonly int _keyCount;
+
+    /// <summary>
+    /// Each group's key images, <see cref="_keyCount"/> to a group and indexed by
+    /// <c>group * _keyCount + k</c>. One key is stride one, which is the array D255 wrote.
+    /// </summary>
     private ulong[] _groupLow = [];
     private ulong[] _groupHigh = [];
     private int[] _groupLengths = [];
+
+    /// <summary>
+    /// This batch's key images on the compound path, one row array per key, laid out key-major and
+    /// indexed by <c>k * _rowStride + i</c>: the hash pass walks one key column at a time and writes
+    /// its own run of them, and the probe pass reads across the keys of one row.
+    /// </summary>
+    private ulong[] _rowLow = [];
+    private ulong[] _rowHigh = [];
+    private int[] _rowLengths = [];
+    private int _rowStride;
 
     /// <summary>
     /// The group the row before this one landed in, or -1 at the start of a run (D255). Carried
@@ -152,9 +176,18 @@ internal sealed class HashAggregateOperator : OperatorBase
         _arguments = new Vector[measures.Length];
         _filters = new Vector[measures.Length];
         _orderKeys = new Vector[measures.Length];
-        _singleKey = keys.Length == 1
-            && _keyKinds[0] is not (ColumnKind.Boolean or ColumnKind.List)
-            && (ColumnKinds.IsVariableLength(_keyKinds[0]) || _keyWidths[0] is 1 or 2 or 4 or 8 or 16);
+        _keyCount = keys.Length;
+        var imageable = keys.Length > 0;
+        for (var k = 0; k < keys.Length; k++)
+        {
+            imageable = imageable
+                && _keyKinds[k] is not (ColumnKind.Boolean or ColumnKind.List)
+                && (ColumnKinds.IsVariableLength(_keyKinds[k])
+                    || _keyWidths[k] is 1 or 2 or 4 or 8 or 16);
+        }
+
+        _imageKeys = imageable;
+        _singleKey = imageable && keys.Length == 1;
         _variableKey = _singleKey && ColumnKinds.IsVariableLength(_keyKinds[0]);
         _declaredDistinct = _singleKey && declaredDistinct is >= 1 and <= PerfectKeys.MaxDistinct
             ? declaredDistinct
@@ -239,7 +272,16 @@ internal sealed class HashAggregateOperator : OperatorBase
         Resize(SlotsFor(groups));
         if (groups > 0)
         {
-            EnsureGroupCapacity(groups);
+            // The key images are the one buffer the estimate does not size for a compound key
+            // (F115). They are a word pair and a length *per key*, so reserving for an estimate
+            // costs the key count over — and a compound key's estimate has no statistic behind it,
+            // because the planner has no distinct count for a tuple and falls back to a fraction of
+            // the input. Reserving that many times over was measured to push a ten-million-row
+            // two-key aggregate past the arena's retention, for per-group state it never used: the
+            // arena then trimmed the reservation and the next execution allocated it again. One
+            // key's estimate is the count a source declares — the same one the perfect hash is
+            // built from — and is reserved exactly as D258.3 says.
+            EnsureGroupCapacity(groups, images: _singleKey ? groups : 0);
             foreach (var store in _keyStores)
             {
                 store.Reserve(groups);
@@ -289,6 +331,9 @@ internal sealed class HashAggregateOperator : OperatorBase
         arena.Return(_groupLow);
         arena.Return(_groupHigh);
         arena.Return(_groupLengths);
+        arena.Return(_rowLow);
+        arena.Return(_rowHigh);
+        arena.Return(_rowLengths);
         arena.Return(_perfectSlots);
         _perfectSlots = [];
         _perfectSlotCount = 0;
@@ -302,6 +347,10 @@ internal sealed class HashAggregateOperator : OperatorBase
         _groupLow = [];
         _groupHigh = [];
         _groupLengths = [];
+        _rowLow = [];
+        _rowHigh = [];
+        _rowLengths = [];
+        _rowStride = 0;
         _slotCount = 0;
         _mask = 0;
         _previousGroup = -1;
@@ -428,17 +477,26 @@ internal sealed class HashAggregateOperator : OperatorBase
             return _rowGroups;
         }
 
-        // One key of a layout the image path covers is the case worth specialising, and it is the
-        // shape nearly every GROUP BY has (D255). Everything else goes down the two-pass path below.
-        if (_singleKey && !keyVectors[0].IsScalar)
+        // Keys whose layouts the image path covers, and that arrived as columns: one of them is the
+        // shape nearly every GROUP BY has (D255) and more of them is F115's, which is the same three
+        // ideas once per key. A BOOL or LIST key, or a key an expression folded to a constant, goes
+        // down the generic two-pass path below.
+        if (_imageKeys && NoScalarKey(keyVectors))
         {
-            if (ColumnKinds.IsVariableLength(_keyKinds[0]))
+            if (_singleKey)
             {
-                ResolveVariableKey(keyVectors[0].View, batch, length);
+                if (ColumnKinds.IsVariableLength(_keyKinds[0]))
+                {
+                    ResolveVariableKey(keyVectors[0].View, batch, length);
+                }
+                else
+                {
+                    ResolveFixedKey(keyVectors[0], batch, length);
+                }
             }
             else
             {
-                ResolveFixedKey(keyVectors[0], batch, length);
+                ResolveCompoundKeys(keyVectors, batch, length);
             }
 
             return _rowGroups;
@@ -479,10 +537,30 @@ internal sealed class HashAggregateOperator : OperatorBase
         : ColumnKinds.IsVariableLength(kind) ? KeyImage.OfBytes(lane)
         : KeyImage.OfFixed(lane, width);
 
+    /// <summary>
+    /// Whether every key arrived as a column. A scalar key vector — a key the expression folded to a
+    /// constant — has no lanes to walk, so a batch with one in it takes the generic path and the
+    /// groups it creates get their images from <see cref="Insert"/> instead.
+    /// </summary>
+    private static bool NoScalarKey(Vector[] keyVectors)
+    {
+        for (var k = 0; k < keyVectors.Length; k++)
+        {
+            if (keyVectors[k].IsScalar)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>Rents this batch's per-row working arrays, which scale with the batch and not the data.</summary>
     private void EnsureRowCapacity(int length)
     {
-        if (_rowGroups.Length >= length && _rowHashes.Length >= length && _rowMask.Length >= length)
+        var compound = _imageKeys && !_singleKey;
+        if (_rowGroups.Length >= length && _rowHashes.Length >= length && _rowMask.Length >= length
+            && (!compound || _rowStride >= length))
         {
             return;
         }
@@ -497,6 +575,237 @@ internal sealed class HashAggregateOperator : OperatorBase
         _rowHashes = hashes;
         _rowGroups = groups;
         _rowMask = mask;
+
+        if (!compound)
+        {
+            return;
+        }
+
+        // Key-major, so each key's pass over the batch writes one contiguous run. The stride is the
+        // length asked for and not the rental's own, because a rental may come back longer than it
+        // was asked for and the three arrays need not round the same way.
+        var wanted = length * _keyCount;
+        var low = arena.Rent<ulong>(wanted);
+        var high = arena.Rent<ulong>(wanted);
+        var lengths = arena.Rent<int>(wanted);
+        arena.Return(_rowLow);
+        arena.Return(_rowHigh);
+        arena.Return(_rowLengths);
+        _rowLow = low;
+        _rowHigh = high;
+        _rowLengths = lengths;
+        _rowStride = length;
+    }
+
+    /// <summary>
+    /// The compound path (F115): the single-key path of D255, once per key.
+    ///
+    /// <para>
+    /// One typed walk per key column writes that key's per-row image and folds its hash into the
+    /// row's — the same fold the generic path does, so a run that takes both paths for one group
+    /// records one hash for it either way. Then one pass over the rows probes, trying the previous
+    /// row's group first and comparing images rather than reading every key's lane again.
+    /// </para>
+    /// </summary>
+    private void ResolveCompoundKeys(Vector[] keyVectors, ColumnarBatch batch, int length)
+    {
+        var selection = batch.Selection;
+        for (var k = 0; k < _keyCount; k++)
+        {
+            if (ColumnKinds.IsVariableLength(_keyKinds[k]))
+            {
+                HashVariableKey(k, keyVectors[k].View, selection, length);
+            }
+            else
+            {
+                HashFixedKey(k, keyVectors[k], selection, length);
+            }
+        }
+
+        var groups = _rowGroups;
+        var previous = _previousGroup;
+        for (var i = 0; i < length; i++)
+        {
+            var row = selection.Length == 0 ? i : selection[i];
+            previous = LookupCompound(previous, i, row, keyVectors);
+            groups[i] = previous;
+        }
+
+        _previousGroup = previous;
+    }
+
+    /// <summary>One fixed-width key column's images for this batch, and its share of each row's hash.</summary>
+    private void HashFixedKey(int key, in Vector keyVector, ReadOnlySpan<int> selection, int length)
+    {
+        var kind = _keyKinds[key];
+        var width = _keyWidths[key];
+        var lanes = RawLanes.From(keyVector, width);
+        var real = kind is ColumnKind.Float or ColumnKind.Double;
+        Span<byte> scratch = _laneScratch;
+        var low = _rowLow;
+        var high = _rowHigh;
+        var lengths = _rowLengths;
+        var hashes = _rowHashes;
+        var at = key * _rowStride;
+
+        for (var i = 0; i < length; i++)
+        {
+            var row = selection.Length == 0 ? i : selection[i];
+            KeyImage image;
+            if (lanes.IsValid(row))
+            {
+                scoped ReadOnlySpan<byte> lane = lanes[row];
+                if (real)
+                {
+                    // Grouping compares reals by value: one NaN, one zero (LaneAccess.Normalise).
+                    lane.CopyTo(scratch);
+                    lane = LaneAccess.Normalise(kind, scratch[..width]);
+                }
+
+                image = KeyImage.OfFixed(lane, width);
+            }
+            else
+            {
+                image = KeyImage.Null;
+            }
+
+            low[at + i] = image.Low;
+            high[at + i] = image.High;
+            lengths[at + i] = image.Length;
+            var hash = image.Hash();
+            hashes[i] = key == 0 ? hash : Hashing.Combine(hashes[i], hash);
+        }
+    }
+
+    /// <summary>The same for a STRING or BINARY key column, whose image is its first sixteen bytes.</summary>
+    private void HashVariableKey(int key, in ColumnView view, ReadOnlySpan<int> selection, int length)
+    {
+        var lanes = VarLanes.FromView(view);
+        var low = _rowLow;
+        var high = _rowHigh;
+        var lengths = _rowLengths;
+        var hashes = _rowHashes;
+        var at = key * _rowStride;
+
+        for (var i = 0; i < length; i++)
+        {
+            var row = selection.Length == 0 ? i : selection[i];
+            var image = lanes.IsValid(row) ? KeyImage.OfBytes(lanes[row]) : KeyImage.Null;
+            low[at + i] = image.Low;
+            high[at + i] = image.High;
+            lengths[at + i] = image.Length;
+            var hash = image.Hash();
+            hashes[i] = key == 0 ? hash : Hashing.Combine(hashes[i], hash);
+        }
+    }
+
+    /// <summary>
+    /// One row's group on the compound path: the previous row's group, then the probe table,
+    /// creating the group if it is new. The perfect table stays single-key — it is built from the
+    /// declared distinct count of one column, and no source declares one for a tuple.
+    /// </summary>
+    private int LookupCompound(int previous, int i, int row, Vector[] keyVectors)
+    {
+        if (previous >= 0 && SameGroupCompound(previous, i, row, keyVectors))
+        {
+            return previous;
+        }
+
+        var hash = _rowHashes[i];
+        var slot = (int)(hash & (ulong)_mask);
+        while (true)
+        {
+            var group = _slots[slot];
+            if (group < 0)
+            {
+                return InsertCompound(i, row, keyVectors, hash, slot);
+            }
+
+            if (_groupHashes[group] == hash && SameGroupCompound(group, i, row, keyVectors))
+            {
+                return group;
+            }
+
+            slot = (slot + 1) & _mask;
+        }
+    }
+
+    /// <summary>
+    /// Whether a group holds this row's keys, key by key and image first — the length, which a NULL
+    /// gives a value no real key can take, then the two words. A key longer than its image can only
+    /// meet another of the same length, and that is the one case where the key store's full compare
+    /// is asked for and the lane is read again; a fixed-width key is never that long.
+    /// </summary>
+    private bool SameGroupCompound(int group, int i, int row, Vector[] keyVectors)
+    {
+        var at = group * _keyCount;
+        var stride = _rowStride;
+        for (var k = 0; k < _keyCount; k++)
+        {
+            var rowAt = (k * stride) + i;
+            var length = _groupLengths[at + k];
+            if (length != _rowLengths[rowAt])
+            {
+                return false;
+            }
+
+            if (length <= KeyImage.MaxInline)
+            {
+                if (_groupLow[at + k] != _rowLow[rowAt] || _groupHigh[at + k] != _rowHigh[rowAt])
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            Span<byte> scratch = _laneScratch;
+            var lane = LaneAccess.Read(keyVectors[k], row, _keyKinds[k], _keyWidths[k], scratch);
+            if (!_keyStores[k].Matches(group, lane, valid: true))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Creates the group this row's keys start, on the compound path. The lane is read once per key
+    /// here — once per group over the whole run — because the key store keeps the whole key and the
+    /// image is only its first sixteen bytes.
+    /// </summary>
+    private int InsertCompound(int i, int row, Vector[] keyVectors, ulong hash, int slot)
+    {
+        var group = _groupCount++;
+        EnsureGroupCapacity(_groupCount);
+        Span<byte> scratch = _laneScratch;
+        var at = group * _keyCount;
+        var stride = _rowStride;
+        for (var k = 0; k < _keyCount; k++)
+        {
+            var rowAt = (k * stride) + i;
+            var length = _rowLengths[rowAt];
+            var valid = length != KeyImage.NullLength;
+            var lane = valid
+                ? LaneAccess.Read(keyVectors[k], row, _keyKinds[k], _keyWidths[k], scratch)
+                : default;
+            _keyStores[k].Append(lane, valid);
+            _groupLow[at + k] = _rowLow[rowAt];
+            _groupHigh[at + k] = _rowHigh[rowAt];
+            _groupLengths[at + k] = length;
+        }
+
+        _groupHashes[group] = hash;
+        _slots[slot] = group;
+
+        // Load factor 0.7 (§6.6); growing by doubling keeps the dense group ids untouched.
+        if (_groupCount * 10 >= _slotCount * 7)
+        {
+            Resize(_slotCount * 2);
+        }
+
+        return group;
     }
 
     /// <summary>
@@ -761,27 +1070,34 @@ internal sealed class HashAggregateOperator : OperatorBase
         var group = _groupCount++;
         EnsureGroupCapacity(_groupCount);
         Span<byte> scratch = _laneScratch;
+        var at = group * _keyCount;
         for (var k = 0; k < _keys.Length; k++)
         {
             var valid = LaneAccess.IsValid(keyVectors[k], row);
             var lane = LaneAccess.Read(keyVectors[k], row, _keyKinds[k], _keyWidths[k], scratch);
             _keyStores[k].Append(lane, valid);
 
-            // A single-key run may come through here — a scalar key vector has no lanes — and the
-            // image arrays have to hold for every group however it was created.
-            if (_singleKey)
+            // A run whose keys all have images may still come through here — a scalar key vector
+            // has no lanes — and the image arrays have to hold for every group however it was
+            // created.
+            if (!_imageKeys)
             {
-                var image = Image(lane, valid, _keyKinds[k], _keyWidths[k]);
-                _groupLow[group] = image.Low;
-                _groupHigh[group] = image.High;
-                _groupLengths[group] = image.Length;
-                if (valid)
+                continue;
+            }
+
+            var image = Image(lane, valid, _keyKinds[k], _keyWidths[k]);
+            _groupLow[at + k] = image.Low;
+            _groupHigh[at + k] = image.High;
+            _groupLengths[at + k] = image.Length;
+
+            // The perfect table counts the keys of one column, and only one column ever declared a
+            // distinct count for it to be built from.
+            if (_singleKey && valid)
+            {
+                _perfectKeys++;
+                if (_perfectSlotCount != 0)
                 {
-                    _perfectKeys++;
-                    if (_perfectSlotCount != 0)
-                    {
-                        RetirePerfect();
-                    }
+                    RetirePerfect();
                 }
             }
         }
@@ -856,33 +1172,54 @@ internal sealed class HashAggregateOperator : OperatorBase
         }
     }
 
-    private void EnsureGroupCapacity(int groups)
+    private void EnsureGroupCapacity(int groups) => EnsureGroupCapacity(groups, groups);
+
+    /// <summary>
+    /// Makes room for <paramref name="groups"/> groups.
+    /// </summary>
+    /// <param name="images">
+    /// How many groups the per-key images are made room for. The same number everywhere but in
+    /// <see cref="Restart"/>'s reservation, which says there why (F115).
+    /// </param>
+    private void EnsureGroupCapacity(int groups, int images)
     {
-        // The image arrays are parallel to the dense group ids, so they grow with them and a group id
-        // is an index into all four. A rental may come back longer than it was asked for and the four
-        // pools need not round the same way, so the shortest of them is what the capacity is.
-        var held = _groupHashes.Length;
-        if (_singleKey)
+        if (_groupHashes.Length < groups)
         {
-            held = Math.Min(held, Math.Min(_groupLow.Length, Math.Min(_groupHigh.Length, _groupLengths.Length)));
+            _groupHashes = GrowGroups(
+                _groupHashes, Math.Max(groups, Math.Max(16, _groupHashes.Length * 2)));
         }
 
-        if (held < groups)
+        if (_imageKeys)
         {
-            var size = Math.Max(groups, Math.Max(16, held * 2));
-            _groupHashes = GrowGroups(_groupHashes, size);
-            if (_singleKey)
-            {
-                _groupLow = GrowGroups(_groupLow, size);
-                _groupHigh = GrowGroups(_groupHigh, size);
-                _groupLengths = GrowGroups(_groupLengths, size);
-            }
+            EnsureImageCapacity(images);
         }
 
         foreach (var measure in _measures)
         {
             measure.Accumulator.EnsureCapacity(Math.Max(groups, 16));
         }
+    }
+
+    /// <summary>
+    /// Grows the per-group images, which are parallel to the dense group ids with one image per key
+    /// — strided by the key count, so a group id indexes all three and for one key this is the
+    /// plain indexing D255 wrote. A rental may come back longer than it was asked for and the three
+    /// pools need not round the same way, so the shortest of them is what the capacity is.
+    /// </summary>
+    private void EnsureImageCapacity(int groups)
+    {
+        var held =
+            Math.Min(_groupLow.Length, Math.Min(_groupHigh.Length, _groupLengths.Length))
+            / _keyCount;
+        if (held >= groups)
+        {
+            return;
+        }
+
+        var size = Math.Max(groups, Math.Max(16, held * 2));
+        _groupLow = GrowGroups(_groupLow, size * _keyCount);
+        _groupHigh = GrowGroups(_groupHigh, size * _keyCount);
+        _groupLengths = GrowGroups(_groupLengths, size * _keyCount);
     }
 
     /// <summary>Grows one per-group rental, keeping what is in it (ADR 0012).</summary>

@@ -1043,27 +1043,94 @@ internal static class Program
             + $"{largeRows}, the same batches either way = {perRow:F6} bytes/row "
             + (perRowPass ? "PASS (<= 0.01)" : "FAIL (<= 0.01)"));
 
-        return fixedPass && perRowPass;
+        var compoundPass = await MeasureCompoundKeyGateAsync(benchmarks, arena).ConfigureAwait(false);
+
+        return fixedPass && perRowPass && compoundPass;
+    }
+
+    /// <summary>
+    /// The same claim for two grouping keys (F115), which is the path that until then read every
+    /// key's lane again on every probe and kept no image per group.
+    /// </summary>
+    /// <remarks>
+    /// The pair is chosen so that both statements fold their rows into the <em>same</em>
+    /// <c>(symbol, trade_count)</c> keys — the two columns are independent in the fixture and every
+    /// pair survives the narrower predicate — so the per-group state is the same size in both and
+    /// what is left between them is the per-row cost. A pair that did not would be measuring group
+    /// state, so it fails the gate rather than being quietly skipped.
+    /// </remarks>
+    private static async Task<bool> MeasureCompoundKeyGateAsync(
+        ExecutionBenchmarks benchmarks, ExecutionArena arena)
+    {
+        const string few =
+            "SELECT symbol, trade_count, COUNT(*) AS n, SUM(volume) AS vol FROM bars "
+            + "WHERE volume > 9000 GROUP BY symbol, trade_count";
+        const string many =
+            "SELECT symbol, trade_count, COUNT(*) AS n, SUM(volume) AS vol FROM bars "
+            + "WHERE volume > 1000 GROUP BY symbol, trade_count";
+
+        var smallPlan = await (await benchmarks.Engine.PrepareAsync(few).ConfigureAwait(false))
+            .CompiledAsync(CancellationToken.None).ConfigureAwait(false);
+        var largePlan = await (await benchmarks.Engine.PrepareAsync(many).ConfigureAwait(false))
+            .CompiledAsync(CancellationToken.None).ConfigureAwait(false);
+
+        // The count column is the third: two keys come before the measures.
+        var (smallRows, smallGroups) =
+            await FoldedAsync(smallPlan, arena, countColumn: 2).ConfigureAwait(false);
+        var (largeRows, largeGroups) =
+            await FoldedAsync(largePlan, arena, countColumn: 2).ConfigureAwait(false);
+        if (smallGroups != largeGroups || largeRows <= smallRows || smallRows == 0)
+        {
+            Console.WriteLine(
+                $"group by two keys, per folded row: FAIL (the pair must fold different row counts "
+                + $"into the same groups; it folded {smallRows} rows into {smallGroups} groups and "
+                + $"{largeRows} into {largeGroups})");
+            return false;
+        }
+
+        var smallBytes = await MeasureAsync(
+            () => DrainPipelineAsync(smallPlan, arena)).ConfigureAwait(false);
+        var largeBytes = await MeasureAsync(
+            () => DrainPipelineAsync(largePlan, arena)).ConfigureAwait(false);
+        var perRow = (largeBytes - smallBytes) / (double)(largeRows - smallRows);
+        var pass = Math.Abs(perRow) <= 0.01;
+        Console.WriteLine(
+            $"group by two keys, per folded row: {smallBytes} bytes over {smallRows} rows, "
+            + $"{largeBytes} over {largeRows}, {smallGroups} groups either way = {perRow:F6} bytes/row "
+            + (pass ? "PASS (<= 0.01)" : "FAIL (<= 0.01)"));
+
+        return pass;
     }
 
     /// <summary>
     /// How many rows a filtered aggregate's fold actually saw, which is the sum of its own
     /// <c>COUNT(*)</c> column — the second, because the key comes first.
     /// </summary>
-    private static async Task<long> FoldedRowsAsync(CompiledPlan compiled, ExecutionArena arena)
+    private static async Task<long> FoldedRowsAsync(CompiledPlan compiled, ExecutionArena arena) =>
+        (await FoldedAsync(compiled, arena, countColumn: 1).ConfigureAwait(false)).Rows;
+
+    /// <summary>
+    /// The same, with the groups those rows folded into: a per-row figure taken from two runs is
+    /// only a per-row figure when both runs hold the same amount of per-group state.
+    /// </summary>
+    private static async Task<(long Rows, long Groups)> FoldedAsync(
+        CompiledPlan compiled, ExecutionArena arena, int countColumn)
     {
         long folded = 0;
+        long groups = 0;
         await foreach (var batch in compiled.ExecuteColumnarAsync(
             [], new ExecutionStats(), arena, CancellationToken.None))
         {
-            var counts = batch.Column(1).Lanes<long>();
+            var counts = batch.Column(countColumn).Lanes<long>();
             for (var i = 0; i < batch.Count; i++)
             {
                 folded += counts[batch.RowAt(i)];
             }
+
+            groups += batch.Count;
         }
 
-        return folded;
+        return (folded, groups);
     }
 
     /// <summary>
