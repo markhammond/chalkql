@@ -1,4 +1,4 @@
-# ChalkQL
+# ChalkQL — SQL, safely.
 
 Federated SQL query planning and execution for .NET, powered by
 [Apache Calcite](https://calcite.apache.org/). Query application-owned data and remote
@@ -114,7 +114,7 @@ request rather than the statement:
   a folded context value's pseudonym names the entry it came from, and a parameter written as
   `@name` reads as `@name`.
 
-### Access control you can reason about.
+## Access control you can reason about.
 
 ChalkQL’s entitlement layer is entirely optional. When used, policy is explicit and inspectable rather than reconstructed from views, predicates, ORMs or application code.
 
@@ -128,20 +128,18 @@ Entitlements may draw on application state, relationships, roles, resource scope
 
 ## Choose your own topology
 
-For development and co-located deployment, the simplest form owns a local JVM sidecar:
+For development and co-located deployment, the simplest arrangement lets ChalkQL own a local JVM planner sidecar:
 
 ```csharp
 await using var sidecar = await PlannerProcess.StartAsync();
 var planner = sidecar.CreatePlanner();
 ```
 
-The matching planner JAR is embedded in `Chalk.Client.dll`. It is materialised lazily
-into a content-addressed per-user cache the first time a local planner is required and
-reused thereafter.
+The matching planner JAR is embedded in `Chalk.Client.dll`, materialised lazily into a content-addressed per-user cache the first time it is needed, and reused thereafter.
 
-Resolution is explicit before falling back to the embedded artefact:
+Planner resolution is explicit before falling back to the embedded artefact:
 
-```
+```text
 PlannerProcessOptions.JarPath
     ↓
 CHALK_PLANNER_JAR
@@ -149,28 +147,13 @@ CHALK_PLANNER_JAR
 embedded planner → per-user content-addressed cache
 ```
 
-An explicitly configured path that does not exist is an error; it is never silently
-replaced by the embedded planner.
+An explicitly configured path that does not exist is an error; it is never silently replaced by the embedded planner.
 
-Production deployments may instead run the same planner independently on another host
-and connect to it over gRPC. In that topology no local planner process is started and
-the embedded JAR is never materialised.
+Production deployments may instead run the same planner independently — including on another host — and connect over gRPC. In that topology no local planner process is started and the embedded JAR is never materialised. `PlannerArtifact` exposes the matching embedded artefact for deployment tooling without requiring callers to know its manifest-resource name.
 
-`PlannerArtifact` exposes the matching embedded artefact for deployment tooling without
-requiring callers to know its manifest-resource name.
+A host may create multiple `ChalkEngine` contexts while planner sidecars are shared independently of them. Engines and planners have a many-to-many relationship: planning workloads can be partitioned by application-defined instance name and governed through priorities, deadlines, time-slicing and compute budgets, while vectorised query execution remains inside the .NET host.
 
-## Choose your own topology
-
-A host may create multiple `ChalkEngine` contexts while planner sidecars are shared
-independently of them.
-
-Engine instances and planners have a many-to-many relationship. Planning workloads can
-be partitioned by application-defined instance name and governed through priorities,
-deadlines, time-slicing and compute budgets, while vectorised query execution remains
-inside the .NET host.
-
-The JVM process boundary is intentional: it preserves Apache Calcite's planner
-extensibility while isolating its memory and resource usage from the application.
+The JVM process boundary is intentional. It preserves Apache Calcite's planner extensibility while isolating planner memory and resource usage from the application.
 
 ## Things that will bite you
 
