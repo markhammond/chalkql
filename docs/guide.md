@@ -20,6 +20,7 @@ host application · .NET
   Chalk.Sources.Poco          in-process POCO tables
   Chalk.Sources.Ado           any DbProviderFactory, with pushdown per declared capability
   Chalk.Sources.DuckDb        the same source, reading DuckDB's data chunks natively
+  Chalk.Sources.Akade         an Akade.IndexedSet as a table, its indexes discovered and served
   Chalk.Sources.Conformance   checks a source's descriptor against the source itself
         │ gRPC — UDS or TCP
 planner sidecar · JVM 21
@@ -60,7 +61,7 @@ The stock source adapters and their conformance tooling are packaged separately:
 dotnet add package ChalkQL.Sources
 ```
 
-`ChalkQL.Sources` adds the POCO, ADO.NET and DuckDB sources and depends on the matching
+`ChalkQL.Sources` adds the POCO, ADO.NET, DuckDB and Akade sources and depends on the matching
 version of `ChalkQL`.
 
 For the common co-located case, starting the planner requires no path or port
@@ -276,9 +277,14 @@ var source = new PocoSourceBuilder("mem")
 It has no default: a key nobody checked is a claim, and the planner acts on it —
 a join to a parent nothing reads on a key that parent is unique in is *deleted*.
 
-POCO indexing is extensible too: implement `IPocoIndex<T>` to adapt an existing index 
-structure. The Chalk.Sample.AkadeIndexedSet sample wraps Akade.IndexedSet and uses 
-PocoIndexConformance.Verify to check Chalk's range and ordering contract.
+POCO indexing is extensible too: implement `IPocoIndex<T>` to adapt an existing index
+structure, and run the test kit's `PocoIndexConformance.Verify` against it to assert Chalk's
+range and ordering contract — a full-scan comparison over a battery of ranges, which is what
+makes an adapter's claims checked rather than trusted. [`Chalk.Sources.Akade`](../dotnet/src/Chalk.Sources.Akade/) is that seam used
+in earnest: `AkadeSource.From` publishes an
+[Akade.IndexedSet](https://github.com/akade/Akade.IndexedSet) as a table and discovers its
+indexes — hash, ordered, compound and prefix — with no adapter written by the host; its [`README`](../dotnet/src/Chalk.Sources.Akade/)
+says what each Akade index becomes and how to modify a published set safely.
 
 An index that answers prefixes rather than ranges — a trie — declares `IndexKind.Prefix`,
 and `WHERE name LIKE 'p%'` is then a lookup on it rather than a predicate; an ordered
@@ -1472,3 +1478,4 @@ is not a NULL; and a column whose provider type the declared one cannot hold is 
 ## Licence
 
 Apache-2.0. See `LICENSE` and `NOTICE`.
+]()

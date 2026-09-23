@@ -61,12 +61,13 @@
     <PackageReference Include="ChalkQL" Version="[$(PackageVersion)]" />
   </ItemGroup>
 
-  <!-- Direct third-party dependencies of Ado/Conformance/DuckDb/Poco. -->
+  <!-- Direct third-party dependencies of Ado/Akade/Conformance/DuckDb/Poco. -->
   <Import Project="../generated/ChalkQL.Sources.Dependencies.props"
           Condition="Exists('../generated/ChalkQL.Sources.Dependencies.props')" />
   
   <ItemGroup>
     <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Sources.Ado/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Ado.dll" />
+    <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Sources.Akade/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Akade.dll" />
     <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Sources.Conformance/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Conformance.dll" />
     <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Sources.DuckDb/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.DuckDb.dll" />
     <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Sources.Poco/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Poco.dll" />
@@ -78,6 +79,9 @@
     <None Include="$(RepoRoot)dotnet/src/Chalk.Sources.Ado/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Ado.xml"
           Pack="true" PackagePath="lib/$(PackageTfm)/"
           Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Sources.Ado/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Ado.xml')" />
+    <None Include="$(RepoRoot)dotnet/src/Chalk.Sources.Akade/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Akade.xml"
+          Pack="true" PackagePath="lib/$(PackageTfm)/"
+          Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Sources.Akade/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Akade.xml')" />
     <None Include="$(RepoRoot)dotnet/src/Chalk.Sources.Conformance/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Conformance.xml"
           Pack="true" PackagePath="lib/$(PackageTfm)/"
           Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Sources.Conformance/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Conformance.xml')" />

@@ -23,8 +23,7 @@ internal static class Program
         var purchases = AkadeReadmeExamples.BuildPurchases(rows);
 
         var source = AkadeSource
-            .From("mem", purchases)
-            .TableName("purchases")
+            .From("purchases", purchases)
             .NamingPolicy(PocoNamingPolicy.SnakeCase)
             // Optional. This is required only for RefreshBuilder.Replace/Append, not ordinary
             // host mutation or Refresh(source/table).

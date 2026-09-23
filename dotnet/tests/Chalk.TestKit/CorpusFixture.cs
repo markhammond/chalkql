@@ -243,10 +243,10 @@ public sealed class CorpusFixture
 
             // D282: the one table here whose index is the host's own, because a prefix index is a
             // trie and this source builds permutations. The structure comes from
-            // samples/Chalk.Sample.AkadeIndexedSet, exactly as `bars` indexes do in the
+            // the test kit's host index over an Akade trie, exactly as `bars` indexes do in the
             // `bars-akade` configuration.
             .AddTable("terms", searchRows, t => t
-                .Index(SearchIndex, _ => new AkadePrefixIndex<SearchRow>(
+                .Index(SearchIndex, _ => new HostAkadePrefixIndex<SearchRow>(
                     SearchIndex, searchSet, SearchName, SearchAccessor)))
             .Build();
 

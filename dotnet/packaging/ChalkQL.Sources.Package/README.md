@@ -15,9 +15,10 @@ dotnet add package ChalkQL.Sources
 Included source implementations:
 
 | Source                      |                                                                     |
-| --------------------------- | ------------------------------------------------------------------- |
+|-----------------------------|---------------------------------------------------------------------|
 | `Chalk.Sources.Poco`        | application-owned POCO collections exposed as relational tables     |
 | `Chalk.Sources.Ado`         | ADO.NET sources with capability-aware SQL pushdown                  |
+| `Chalk.Sources.Akade`       | Akade IndexedSet collections exposed as relational tables           |
 | `Chalk.Sources.DuckDb`      | DuckDB integration with native data-chunk reading                   |
 | `Chalk.Sources.Conformance` | verifies a source's declared capabilities against the source itself |
 
@@ -34,6 +35,42 @@ var source = new PocoSourceBuilder("mem")
         .ThenBy(r => r.Currency)
         .UniqueKey(r => r.Ts, r => r.Currency))
     .Build();
+```
+
+## [Akade.IndexedSet](../../src/Chalk.Sources.Akade) sources
+
+Application-owned collections can be exposed directly without copying their rows into another store.
+
+Tables may declare keys, collations, statistics and indexes so the planner can make use of structure the application already knows about.
+
+```csharp
+var set = rows.ToIndexedSet(x => x.Id)
+    .WithIndex(x => x.ProductId)
+    .WithRangeIndex(x => x.Amount)
+    .WithRangeIndex(x => x.UnitPrice)
+    .Build();
+
+var source = AkadeSource.From("purchases", set)
+            .TableName("purchases")
+            .NamingPolicy(PocoNamingPolicy.SnakeCase)
+            .Build();
+
+        _sidecar = await SidecarFixture.StartAsync();
+        if (!_sidecar.IsAvailable)
+        {
+            throw new InvalidOperationException(_sidecar.SkipReason);
+        }
+
+        _engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+        {
+            ContextId = "akade-source",
+            Sources = [source],
+            Planner = _sidecar.CreatePlanner(),
+            Execution = new ExecutionOptions { BatchSize = 4096, OutputMemory = OutputMemory.Pooled },
+        });
+
+        _point = await _engine.PrepareAsync("SELECT id, amount FROM purchases WHERE product_id = ?");
+
 ```
 
 ## Remote SQL sources

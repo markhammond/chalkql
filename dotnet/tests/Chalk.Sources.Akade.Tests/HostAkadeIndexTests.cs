@@ -1,15 +1,15 @@
 using Akade.IndexedSet;
 using Chalk.Catalog;
-using Chalk.Sample.AkadeIndexedSet;
+using Chalk.TestKit;
 using IndexKind = Chalk.Ir.IndexKind;
 
 namespace Chalk.Sources.Akade.Tests;
 
 /// <summary>
-/// The sample adapter's ordered path: yielded as Akade produces it, in key order, a consumer that
+/// The test kit's host index adapter's ordered path: yielded as Akade produces it, in key order, a consumer that
 /// stops early paying only for what it read, and an out-of-order row refused by name.
 /// </summary>
-public sealed class SampleAkadeIndexTests
+public sealed class HostAkadeIndexTests
 {
     private sealed record Row(int Id, int Key);
 
@@ -30,7 +30,7 @@ public sealed class SampleAkadeIndexTests
         Columns = [1],
     };
 
-    private static readonly AkadeKey<Row, int> Bounds = new((bounds, _) => (int)bounds[0]!);
+    private static readonly HostAkadeKey<Row, int> Bounds = new((bounds, _) => (int)bounds[0]!);
 
     private static IReadOnlyList<Row> Shuffled(int count)
     {
@@ -44,7 +44,7 @@ public sealed class SampleAkadeIndexTests
     public void A_bounded_lookup_arrives_in_key_order()
     {
         var set = Shuffled(1_000).ToIndexedSet().WithRangeIndex(KeyOf).Build();
-        var index = new AkadeIndex<Row, int>(Descriptor, set, KeyOf, "KeyOf", Bounds, Comparer<int>.Default);
+        var index = new HostAkadeIndex<Row, int>(Descriptor, set, KeyOf, "KeyOf", Bounds, Comparer<int>.Default);
 
         var keys = index.Lookup(From(500)).Select(r => r.Key).ToList();
 
@@ -55,7 +55,7 @@ public sealed class SampleAkadeIndexTests
     public void An_unbounded_lookup_is_the_whole_table_in_key_order()
     {
         var set = Shuffled(1_000).ToIndexedSet().WithRangeIndex(KeyOf).Build();
-        var index = new AkadeIndex<Row, int>(Descriptor, set, KeyOf, "KeyOf", Bounds, Comparer<int>.Default);
+        var index = new HostAkadeIndex<Row, int>(Descriptor, set, KeyOf, "KeyOf", Bounds, Comparer<int>.Default);
 
         var keys = index.Lookup(IndexKeyRange.All).Select(r => r.Key).ToList();
 
@@ -66,7 +66,7 @@ public sealed class SampleAkadeIndexTests
     public void A_consumer_that_stops_after_one_row_pays_for_one_row()
     {
         var set = Shuffled(100_000).ToIndexedSet().WithRangeIndex(CountingKeyOf).Build();
-        var index = new AkadeIndex<Row, int>(
+        var index = new HostAkadeIndex<Row, int>(
             Descriptor, set, CountingKeyOf, "CountingKeyOf", Bounds, Comparer<int>.Default);
         _keyCalls = 0;
 
@@ -87,7 +87,7 @@ public sealed class SampleAkadeIndexTests
         // one is a Range between the index's own extremes, and those come back in Akade's order.
         var descending = Comparer<int>.Create((a, b) => b.CompareTo(a));
         var set = Shuffled(10).ToIndexedSet().WithRangeIndex(KeyOf).Build();
-        var index = new AkadeIndex<Row, int>(Descriptor, set, KeyOf, "KeyOf", Bounds, descending);
+        var index = new HostAkadeIndex<Row, int>(Descriptor, set, KeyOf, "KeyOf", Bounds, descending);
 
         var refusal = Assert.Throws<SourceContractException>(
             () => index.Lookup(IndexKeyRange.All).ToList());

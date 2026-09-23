@@ -28,6 +28,24 @@ public sealed class IndexedSetSourceTests
         Assert.Equal(4, source.DescribeSchema().Tables[0].RowCount);
     }
 
+    /// <summary>
+    /// One set is one table, so the table takes the source's name unless the host says otherwise.
+    /// </summary>
+    [Fact]
+    public void The_table_is_named_after_the_source_unless_told_otherwise()
+    {
+        var set = AkadeReadmeExamples.BuildPurchases(AkadeReadmeExamples.Purchases);
+
+        var byDefault = AkadeSource.From("purchases", set).Build();
+        Assert.Equal("purchases", byDefault.Table.Table);
+        Assert.Equal("purchases", byDefault.DescribeSchema().Tables[0].Name);
+
+        var overridden = AkadeSource.From("sales", set).TableName("purchases").Build();
+        Assert.Equal("sales", overridden.SourceId);
+        Assert.Equal("purchases", overridden.Table.Table);
+        Assert.Equal("purchases", overridden.DescribeSchema().Tables[0].Name);
+    }
+
     [Fact]
     public async Task Table_refresh_recomputes_metadata_after_live_mutation_of_same_set()
     {

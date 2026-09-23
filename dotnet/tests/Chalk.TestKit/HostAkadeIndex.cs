@@ -5,7 +5,7 @@ using Chalk.Sources.Poco;
 using IndexKind = Chalk.Ir.IndexKind;
 using SortDirection = Chalk.Ir.SortDirection;
 
-namespace Chalk.Sample.AkadeIndexedSet;
+namespace Chalk.TestKit;
 
 /// <summary>
 /// One <see href="https://github.com/akade/Akade.IndexedSet">Akade.IndexedSet</see> index, wrapped
@@ -14,7 +14,8 @@ namespace Chalk.Sample.AkadeIndexedSet;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The point of this sample is that Chalk asks an index exactly two things — "which rows does this
+/// A test-kit host index, kept as the corpus's exercise of the POCO source's host-supplied index seam
+/// now that <c>Chalk.Sources.Akade</c> discovers these indexes itself. The point of it is that Chalk asks an index exactly two things — "which rows does this
 /// range match" and "in what order" — and that a structure Chalk knows nothing about can answer
 /// both. Everything below is the translation between Chalk's <see cref="IndexKeyRange"/> and
 /// Akade's <c>Range</c> / <c>GreaterThanOrEqual</c> / <c>LessThan</c> / <c>OrderBy</c>, yielded as
@@ -71,13 +72,13 @@ namespace Chalk.Sample.AkadeIndexedSet;
 /// when it may be reclaimed or reused, its indexes with it.
 /// </para>
 /// </remarks>
-public sealed class AkadeIndex<T, TKey> : IPocoIndex<T>
+public sealed class HostAkadeIndex<T, TKey> : IPocoIndex<T>
     where TKey : notnull
 {
     private readonly IndexedSet<T> _set;
     private readonly Func<T, TKey> _key;
     private readonly string _akadeIndexName;
-    private readonly AkadeKey<T, TKey> _bounds;
+    private readonly HostAkadeKey<T, TKey> _bounds;
     private readonly IComparer<TKey> _comparer;
 
     /// <param name="descriptor">What the catalog will say about this index. Trusted as declared.</param>
@@ -90,12 +91,12 @@ public sealed class AkadeIndex<T, TKey> : IPocoIndex<T>
     /// <param name="akadeIndexName">The accessor's source text, as Akade recorded it.</param>
     /// <param name="bounds">How a Chalk range's bound values become a key of this index.</param>
     /// <param name="comparer">The key ordering — Chalk's, not the CLR's default.</param>
-    public AkadeIndex(
+    public HostAkadeIndex(
         IndexDescriptor descriptor,
         IndexedSet<T> set,
         Func<T, TKey> key,
         string akadeIndexName,
-        AkadeKey<T, TKey> bounds,
+        HostAkadeKey<T, TKey> bounds,
         IComparer<TKey> comparer)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
@@ -251,7 +252,7 @@ public sealed class AkadeIndex<T, TKey> : IPocoIndex<T>
 /// How a Chalk range's bound values become a key of an Akade index, filling the components the
 /// range does not bound with the smallest or the largest value of their type.
 /// </summary>
-public sealed class AkadeKey<T, TKey>
+public sealed class HostAkadeKey<T, TKey>
     where TKey : notnull
 {
     private readonly Func<IReadOnlyList<object?>, bool, TKey> _fill;
@@ -260,7 +261,7 @@ public sealed class AkadeKey<T, TKey>
     /// Bound values, and whether the components they do not cover take their type's maximum rather
     /// than its minimum, to a key.
     /// </param>
-    public AkadeKey(Func<IReadOnlyList<object?>, bool, TKey> fill)
+    public HostAkadeKey(Func<IReadOnlyList<object?>, bool, TKey> fill)
     {
         ArgumentNullException.ThrowIfNull(fill);
         _fill = fill;
@@ -274,14 +275,14 @@ public sealed class AkadeKey<T, TKey>
 /// Chalk's ordering, as an <see cref="IComparer{T}"/> Akade can be built with: strings by code
 /// point, NaN last, NULLs where the declared direction puts them.
 /// </summary>
-public sealed class AkadeKeyComparer<TKey> : IComparer<TKey>
+public sealed class HostAkadeKeyComparer<TKey> : IComparer<TKey>
 {
     private readonly Func<TKey, object?[]> _components;
     private readonly SortDirection[] _directions;
 
     /// <param name="components">The key's components, in key order.</param>
     /// <param name="directions">One direction per component.</param>
-    public AkadeKeyComparer(Func<TKey, object?[]> components, params SortDirection[] directions)
+    public HostAkadeKeyComparer(Func<TKey, object?[]> components, params SortDirection[] directions)
     {
         ArgumentNullException.ThrowIfNull(components);
         ArgumentNullException.ThrowIfNull(directions);
@@ -319,11 +320,11 @@ public sealed class AkadeKeyComparer<TKey> : IComparer<TKey>
 /// interface of its own, which is exactly the case <c>AddTable(name, IReadOnlyCollection&lt;T&gt;)</c>
 /// exists for: scans stage a batch of rows at a time instead of indexing into a list.
 /// </summary>
-public sealed class AkadeRows<T> : IReadOnlyCollection<T>
+public sealed class HostAkadeRows<T> : IReadOnlyCollection<T>
 {
     private readonly IndexedSet<T> _set;
 
-    public AkadeRows(IndexedSet<T> set)
+    public HostAkadeRows(IndexedSet<T> set)
     {
         ArgumentNullException.ThrowIfNull(set);
         _set = set;

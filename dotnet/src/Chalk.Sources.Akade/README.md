@@ -1,217 +1,438 @@
-# ChalkQL Akade source
+# ChalkQL source for [Akade.IndexedSet](https://github.com/akade/Akade.IndexedSet)
 
-This implementation uses the agreed model:
+For maximum convenience ChalkQL lets you query an [Akade.IndexedSet](https://github.com/akade/Akade.IndexedSet) with ordinary SQL.
 
-> one `IndexedSet<T>` -> one Chalk source -> one logical table
+Supported Akade indexes are discovered automatically and exposed to the ChalkQL planner, so hash, range, ordered and prefix lookups can be selected without query hints or adapter-specific SQL.
 
-`AkadeSource.From(...)` infers `T` and returns either `IndexedSetSourceBuilder<T>` or
-`ConcurrentIndexedSetSourceBuilder<T>`. `Build()` returns the corresponding typed source, whose
-`Table` is an `ITableTarget<T>`.
+One `IndexedSet<T>` becomes one ChalkQL source containing one logical table.
 
-## Supported indexes at a glance
-
-One `IndexedSet<T>` index becomes one Chalk index when Chalk can describe it truthfully. What you
-build, what the planner sees, and what that serves:
-
-| You build | Chalk sees | It serves |
-|---|---|---|
-| `.WithUniqueIndex(x => x.M)` or `.WithIndex(x => x.M)` | a `HASH` index on `M`, `Unique` when it is; its exact distinct key count | `= ?` and `IN (…)` lookups |
-| `.WithIndex(x => (x.A, x.B))`, or `.WithIndex(Keys.Method)` plus `.CompoundIndex(Keys.Method, x => x.A, x => x.B)` | a `HASH` index on a tuple of two to four members | equality on every component; a scan that does not project the whole key is never offered the index |
-| `.WithRangeIndex(x => x.M)` on an integer, decimal or temporal key | an `ORDERED` index on `M` | `=`, `<`, `>`, `BETWEEN`; `ORDER BY M` without a sort; a `LIMIT` above it stopping early; `ORDER BY M DESC` read from the last row down for a range with no upper bound |
-| `.WithRangeIndex(x => x.M)` on a `float`, `double`, `string` or `Utf8String` key, plus `.Comparer(x => x.M, ChalkComparers.For<T>())` — or `StringComparer.Ordinal` | the same `ORDERED` index, once the order the index was built with is declared; undisclosed until then | the same; `ChalkComparers.For<T>(descending: true)` declares a descending index, which serves `ORDER BY M DESC` |
-| `.WithRangeIndex(x => (x.A, x.B))`, a tuple of two to four members | an `ORDERED` index on the tuple | equality on a leading run of components and a range on the next, in tuple order |
-| `.WithPrefixIndex(x => x.Text)` — a trie | a `PREFIX` index | `LIKE 'p%'`; nothing else, and no order |
-| `.WithFullTextIndex(…)`, spatial and vector indexes, a computed key such as `x => x.End - x.Start` | nothing, deliberately | the structure stays usable through Akade itself and is not advertised to the planner |
-
-Everything in the table is checked at registration rather than trusted: a tuple accessor of the wrong
-arity, a comparer Chalk cannot classify and a compound declaration that does not match its accessor
-are each refused by name. The sections below say why each line reads as it does.
-
-## Measuring the overhead
-
-`dotnet/bench/Chalk.Benchmarks.Akade` asks the same four questions of a two-hundred-thousand-row set
-twice — once of Akade directly, once as a prepared ChalkQL statement executed with the same values —
-so that what ChalkQL's execution costs over the raw set is a number: a point lookup through the hash
-index, a band through an ordered index, the cheapest row through the other ordered index, and a sum
-over every row. The statements are prepared once, so nothing in it measures the planner.
-
-```
-dotnet run -c Release --project dotnet/bench/Chalk.Benchmarks.Akade
-dotnet run -c Release --project dotnet/bench/Chalk.Benchmarks.Akade -- --job short   # a quick look
+```bash
+dotnet add package ChalkQL.Sources.Akade
 ```
 
-Read `Ratio` and `Allocated`: the ratio is what a request pays for going through the engine, and the
-allocation is what says the per-row path costs nothing on the heap. One short job on a laptop with
-other work running, for the shape of the numbers rather than the numbers:
+See the [ChalkQL guide](../../../docs/guide.md) for engine configuration, SQL behaviour, federation and the broader source lifecycle.
 
-| case | rows | Akade directly | through ChalkQL | ratio | allocated per execution |
-|---|---|---|---|---|---|
-| the cheapest row, `ORDER BY unit_price LIMIT 1` | 1 | 19 ns | 2.2 µs | 115× | 2.8 KB |
-| a point lookup, `WHERE product_id = ?` | 400 | 450 ns | 6.7 µs | 15× | 3.3 KB |
-| a band, `WHERE amount BETWEEN ? AND ?` | 1,000 | 1.9 µs | 14.3 µs | 7.5× | 3.3 KB |
-| a sum over every row | 200,000 | 207 µs | 3.5 ms | 17× | 2.6 KB |
+## Quick start
 
-Two things to take from it. An execution has a floor of about two microseconds and three kilobytes
-— the pipeline, the batches and the arena's bookkeeping — which is what the one-row case is made of
-and is paid once per request, never per row. Above the floor a row costs on the order of ten to
-fifteen nanoseconds to stream through a filter or an aggregate, against one or two for Akade's own
-enumeration, and the allocation does not move with the row count: two hundred thousand rows allocate
-less than one does, because a wider batch is a cheaper one.
-
-## Modifying the set safely
-
-ChalkQL never mutates a published set; the host does, and one rule governs how. **No mutation may
-overlap a ChalkQL execution, a scoped refresh, or the preparation of a transactional refresh that
-reads the set.** An execution streams rows from the set it captured when it started, outside any lock
-Akade holds, so a row added while a scan is half way through is neither reliably seen nor reliably
-unseen. Three patterns keep the rule, and they are the only three.
-
-**Between requests, in place.** When the host can bracket its own writes — a single writer, an
-application lock, a request queue — it mutates the set directly and then tells ChalkQL that the
-table's metadata moved:
+Build an `IndexedSet<T>` as usual:
 
 ```csharp
-// Nothing is executing against `orders` while this runs: that is the host's guarantee.
+var purchases = rows
+    .ToIndexedSet()
+    .WithUniqueIndex(x => x.Id)
+    .WithIndex(x => x.ProductId)
+    .WithRangeIndex(x => x.UnitPrice)
+    .Build();
+```
+
+Expose it to ChalkQL:
+
+```csharp
+var source = AkadeSource
+    .From("purchases", purchases)
+    .Build();
+```
+
+The source contains a single table named `purchases` by default. Override it only when the source and table names should differ:
+
+```csharp
+var source = AkadeSource
+.From("sales", purchases)
+.TableName("purchases")
+.Build();
+````
+
+Add the source to the engine and query it normally:
+
+```csharp
+await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+{
+    ContextId = "app",
+    Sources = [source],
+    Planner = planner,
+});
+
+var query = await engine.PrepareAsync("""
+    SELECT id, product_id, unit_price
+    FROM purchases
+    WHERE product_id = ?
+    ORDER BY unit_price
+    LIMIT 20
+    """);
+
+await using var execution =
+    await engine.ExecuteAsync(query, [productId]);
+
+await foreach (var batch in execution.Batches)
+{
+    // Apache.Arrow.RecordBatch
+}
+```
+
+There is no index syntax in the SQL. ChalkQL costs the access paths and defers to the appropriate Akade index.
+
+For example:
+
+```sql
+WHERE product_id = ?                         -- HASH
+WHERE unit_price BETWEEN ? AND ?             -- ORDERED
+ORDER BY unit_price LIMIT 10                 -- ORDERED, early exit
+WHERE name LIKE 'Int%'                       -- PREFIX or ordered string index
+```
+
+## Supported indexes
+
+One Akade index becomes one ChalkQL index when ChalkQL can describe its semantics faithfully.
+
+| You build                                                                                                       | ChalkQL sees                                                       | It can serve                                           |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------ |
+| `.WithUniqueIndex(x => x.M)` or `.WithIndex(x => x.M)`                                                          | `HASH` on `M`; `Unique` where applicable; exact distinct-key count | `= ?`, `IN (...)`                                      |
+| `.WithIndex(x => (x.A, x.B))`                                                                                   | compound `HASH`                                                    | equality on every component                            |
+| `.WithRangeIndex(x => x.M)` on an integer, decimal or temporal key                                              | `ORDERED` on `M`                                                   | `=`, `<`, `>`, `BETWEEN`, `ORDER BY`, early `LIMIT`    |
+| `.WithRangeIndex(x => x.M)` on `float`, `double`, `string` or `Utf8String`, with a declared compatible comparer | `ORDERED` on `M`                                                   | the same                                               |
+| `.WithRangeIndex(x => (x.A, x.B))`                                                                              | compound `ORDERED`                                                 | equality on leading components and a range on the next |
+| `.WithPrefixIndex(x => x.Text)`                                                                                 | `PREFIX`                                                           | `LIKE 'prefix%'`                                       |
+| full-text, spatial, vector or computed-key indexes                                                              | not advertised                                                     | remain available through Akade directly                |
+
+Supported compound keys contain two to four direct members.
+
+Unsupported index families are deliberately invisible to the planner rather than being represented approximately.
+
+Registration validates every advertised claim. A tuple accessor with the wrong arity, an unrecognised comparer, or a compound declaration inconsistent with its accessor is refused by name.
+
+## Compound indexes
+
+An ordinary tuple accessor needs no additional description:
+
+```csharp
+var set = rows
+    .ToIndexedSet()
+    .WithIndex(x => (x.ProductId, x.UnitPrice))
+    .Build();
+```
+
+A method accessor does not expose its component members in the expression text, so name them when registering the source:
+
+```csharp
+var set = rows
+    .ToIndexedSet()
+    .WithIndex(PurchaseKeys.ProductAndUnitPrice)
+    .Build();
+
+var source = AkadeSource
+    .From("purchases", set)
+    .CompoundIndex(
+        PurchaseKeys.ProductAndUnitPrice,
+        x => x.ProductId,
+        x => x.UnitPrice)
+    .Build();
+```
+
+The accessor must return a `ValueTuple` containing exactly those member types in that order.
+
+A compound ordered index may constrain only a leading run of its components. For example, an index on:
+
+```text
+(product_id, unit_price)
+```
+
+can serve equality on `product_id`, optionally followed by a range on `unit_price`.
+
+A hash index requires equality on every indexed component.
+
+## Computed keys
+
+Expression-valued Akade keys are not currently advertised:
+
+```csharp
+.WithIndex(x => x.End - x.Start)
+.WithIndex(ComputedKey.SomeStaticMethod)
+```
+
+ChalkQL's current index descriptor represents an index key using base-table columns. Until index keys can be represented as scalar expressions, a computed Akade key cannot be described to the planner truthfully.
+
+The index remains usable through Akade itself.
+
+## Ordered indexes and comparers
+
+An `ORDERED` index is more than an efficient lookup. It tells the planner that rows arrive in ChalkQL's SQL order, which may allow an explicit sort to disappear.
+
+For example:
+
+```sql
+SELECT *
+FROM purchases
+ORDER BY unit_price
+LIMIT 1
+```
+
+can become one ordered lookup and one row rather than a scan and sort.
+
+That makes the comparer used to build the Akade index part of the contract.
+
+### Keys whose default order is compatible
+
+Integer, decimal and temporal keys may be advertised directly because their CLR default order agrees with ChalkQL's order:
+
+* integer types;
+* decimal;
+* `DateTime`;
+* `DateTimeOffset`;
+* `DateOnly`;
+* `TimeOnly`;
+* `TimeSpan`.
+
+### Keys that require an explicit comparer
+
+For these key types, ChalkQL needs to know what ordering the Akade index was built with:
+
+* `float`;
+* `double`;
+* `string`;
+* `Utf8String`.
+
+Use `ChalkComparers.For<T>()` to build and declare the index in ChalkQL's order:
+
+```csharp
+var set = rows
+    .ToIndexedSet()
+    .WithRangeIndex(
+        x => x.Symbol,
+        ChalkComparers.For<string>())
+    .Build();
+
+var source = AkadeSource
+    .From("bars", set)
+    .Comparer(
+        x => x.Symbol,
+        ChalkComparers.For<string>())
+    .Build();
+```
+
+ChalkQL classifies the declared comparer rather than trusting an arbitrary implementation.
+
+Accepted comparers include ChalkQL's own comparer, CLR defaults where they are compatible, and `StringComparer.Ordinal` where applicable.
+
+`Guid` remains equality-only because CLR `Guid` comparison does not match ChalkQL's UUID byte ordering.
+
+Nullable range-index keys are not currently advertised.
+
+### Strings and `StringComparer.Ordinal`
+
+`StringComparer.Ordinal` compares UTF-16 code units while ChalkQL orders strings by Unicode code point.
+
+Those orders agree except around supplementary Unicode characters represented as surrogate pairs.
+
+The adapter verifies the order emitted by an ordered index as it is consumed. If an index produces rows out of its declared ChalkQL order, execution fails with a `SourceContractException` naming the index and offending keys rather than silently returning a wrongly ordered result.
+
+For an exact match to ChalkQL ordering, prefer:
+
+```csharp
+ChalkComparers.For<string>()
+```
+
+### Descending indexes
+
+A descending Akade range index can be declared with:
+
+```csharp
+ChalkComparers.For<T>(descending: true)
+```
+
+ChalkQL then advertises the physical ordering as descending.
+
+For example:
+
+```sql
+SELECT *
+FROM bars
+ORDER BY ts DESC
+LIMIT 1
+```
+
+can be satisfied directly by the index without inserting a sort.
+
+## Prefix indexes and `LIKE`
+
+An Akade prefix index:
+
+```csharp
+.WithPrefixIndex(x => x.Name)
+```
+
+becomes a ChalkQL `PREFIX` index.
+
+A bare SQL prefix pattern can use it:
+
+```sql
+WHERE name LIKE 'Int%'
+```
+
+A prefix pattern means:
+
+* one trailing `%`;
+* no other `%`;
+* no `_`;
+* no `ESCAPE`.
+
+More general patterns remain ordinary predicates:
+
+```sql
+WHERE name LIKE '%USDT'
+WHERE name LIKE 'a%b%'
+WHERE name LIKE 'A_'
+```
+
+An ordered string index can also serve a bare prefix query. ChalkQL converts the prefix into the corresponding half-open string range.
+
+A prefix trie itself claims no ordering.
+
+Akade's fuzzy trie search is not advertised because ChalkQL's current index access paths express equality, ranges and prefixes, not edit distance.
+
+## Lifecycle and mutation
+
+ChalkQL reads the published `IndexedSet<T>` directly. It does not make a private copy for every execution.
+
+**Do not mutate a published set while ChalkQL may be reading it.**
+
+Mutation must not overlap:
+
+* query execution against the source;
+* a scoped refresh reading the set; or
+* preparation of a transactional refresh that reads the current rows.
+
+`ConcurrentIndexedSet<T>` does not relax this rule.
+
+There are three supported update patterns.
+
+### 1. Mutate between requests
+
+When the host can guarantee a quiescent period, it may modify the existing set directly:
+
+```csharp
+// Host guarantee: nothing is currently reading `orders`.
 lock (ordersGate)
 {
     set.Add(order);
     set.Update(changed);
 }
 
-await engine.RefreshAsync(r => r.Refresh(source.Table));   // row count and statistics; no rebuild
+await engine.RefreshAsync(
+    r => r.Refresh(source.Table));
 ```
 
-The refresh is cheap and asks nothing of Akade beyond a re-count; it exists so the planner's
-estimates follow the data. Reads that begin after it see the new rows; reads that begin before the
-`lock` is released are the ones the rule forbids.
+The table refresh recomputes row count and statistics. It does not rebuild the Akade collection.
 
-**Swapping the whole set.** When the set is rebuilt rather than edited, register it through a
-delegate and refresh the source, which also rediscovers the index topology:
+This is appropriate when the host already serialises access through a request queue, application lock, single writer or equivalent mechanism.
 
-```csharp
-IndexedSet<Order> current = BuildIndexedSet(initialRows);
-var source = AkadeSource.From("orders", () => current).TableName("orders").Build();
+The lock shown above is illustrative: the important contract is that no ChalkQL execution or refresh is using the set while it is modified.
 
-current = BuildIndexedSet(nextRows);                      // built off to the side, then published
-await engine.RefreshAsync(r => r.Refresh(source));
-```
+### 2. Swap the whole set
 
-**While requests are in flight.** When the host cannot promise a quiet moment, it uses the
-transactional refresh, and ChalkQL keeps the promise for it: an execution already reading `orders`
-finishes against the set it started on, and one started after the commit sees the successor. The
-successor is built by the host's `RebuildWith` from the rows ChalkQL hands it, never by editing the
-published set:
+When the host rebuilds a complete set, register it through a delegate:
 
 ```csharp
-var source = AkadeSource.From("orders", set)
-    .TableName("orders")
-    .RebuildWith(rows => BuildIndexedSet(rows))
-    .Build();
-
-await engine.RefreshAsync(r => r.Append(source.Table, batch));   // or r.Replace(source.Table, rows)
-```
-
-This is the pattern to reach for by default in a server: it costs a rebuild per commit, and buys the
-one thing the other two cannot, a snapshot per execution.
-
-**On `ConcurrentIndexedSet<T>`.** Akade's concurrent set protects each of its *own* operations with
-a lock, and that is all it protects. It does not make a ChalkQL execution a point-in-time read: the
-adapter captures the wrapped set once and streams from it after Akade's reader lock has been
-released, so the host must still exclude mutation for the whole of an execution — exactly what the
-rule above already requires of a plain `IndexedSet<T>`. With the rule kept, the concurrent wrapper
-adds locking that nothing needs; without it, the wrapper does not save the read. Its practical
-utility under ChalkQL's lifecycle is therefore limited, which is why the `From(...)` overloads that
-take one are marked experimental (`CHALK002`, below): they exist for a host that already holds a
-concurrent set and wants to publish it as it is, not as a way around the rule.
-
-## The two consistency modes
-
-The source deliberately supports both the cheap in-memory mode and Chalk's stronger transactional
-refresh protocol.
-
-### 1. Live host mutation
-
-`RebuildWith(...)` is optional:
-
-```csharp
-var set = BuildIndexedSet(initialRows);
+IndexedSet<Order> current =
+    BuildIndexedSet(initialRows);
 
 var source = AkadeSource
-    .From("orders", set)
+    .From("orders", () => current)
     .TableName("orders")
     .Build();
-
-set.Add(order);
-
-await engine.ExecuteAsync(...);
 ```
 
-Chalk never mutates the published set itself. The host is nevertheless free to do so.
+Build the replacement away from the published state, swap the reference, then refresh the source:
 
-For ordinary `IndexedSet<T>`, the host is responsible for not mutating concurrently with a read if
-Akade itself cannot tolerate that concurrency.
+```csharp
+current = BuildIndexedSet(nextRows);
 
-For `ConcurrentIndexedSet<T>`, Akade protects individual operations with its concurrent
-implementation. That still does **not** turn a whole Chalk SQL execution into a point-in-time
-snapshot: two scans/lookups performed at different moments can observe different host mutations.
+await engine.RefreshAsync(
+    r => r.Refresh(source));
+```
 
-Direct mutation also means catalog statistics can lag the live collection until a scoped refresh.
+A source-scoped refresh re-reads the delegate and rediscovers supported index topology as well as statistics.
 
-### 2. Transactional `Replace` / `Append`
+### 3. Replace or append while requests are in flight
 
-`RefreshBuilder.Replace` and `RefreshBuilder.Append` promise stronger semantics: an execution already
-reading the table keeps the old logical state, while one started after commit sees the new state.
+When reads and writes may overlap, use ChalkQL's transactional refresh mechanism.
 
-Those operations therefore require a fresh Akade set:
+Configure the source with a function capable of rebuilding the Akade set:
 
 ```csharp
 var source = AkadeSource
     .From("orders", set)
-    .TableName("orders")
     .RebuildWith(rows => BuildIndexedSet(rows))
     .Build();
+```
 
+Then publish changes through `Append` or `Replace`:
+
+```csharp
 await engine.RefreshAsync(refresh =>
 {
     refresh.Append(source.Table, batch);
 });
 ```
 
-`RebuildWith` / `Editor` is **only** the mechanism for building that unpublished successor. The
-editor never receives the currently published set. Returning the published set is refused.
+or:
 
-`Append` first materialises:
+```csharp
+await engine.RefreshAsync(refresh =>
+{
+    refresh.Replace(source.Table, rows);
+});
+```
+
+`RebuildWith` receives the rows for an unpublished successor. It never receives the currently published set.
+
+For `Append`, ChalkQL materialises:
 
 ```text
 current rows + appended rows
 ```
 
-and asks the editor to construct a fresh set containing exactly that sequence.
+and asks the callback to build a fresh set containing that sequence.
 
-`Replace` asks the editor to construct a fresh set containing exactly the supplied rows.
+For `Replace`, the callback receives exactly the replacement rows.
 
-`Commit()` performs only the final publish.
+Only after the successor has been built and validated does commit publish it.
 
-## Scoped refresh semantics
+An execution already reading the old set finishes against that set. An execution beginning after commit sees the new one.
 
-The two `RefreshBuilder.Refresh(...)` scopes are intentionally different.
+For a server where requests may be in flight when data changes, this is the recommended default.
+
+## `ConcurrentIndexedSet<T>`
+
+The `AkadeSource.From(...)` overloads accepting `ConcurrentIndexedSet<T>` are experimental under diagnostic ID `CHALK002`.
+
+Akade's concurrent wrapper protects individual Akade operations with its own locking. That does not make a complete ChalkQL execution a point-in-time read.
+
+For execution, ChalkQL captures the wrapped `IndexedSet<T>` and then streams from it after Akade's reader lock has been released. Holding the Akade reader lock for an entire scan would require materialising the scan result before ChalkQL could stream it.
+
+The host must therefore still guarantee:
+
+> no mutation overlaps an execution, scoped refresh, or transactional-refresh preparation that reads the set.
+
+`ConcurrentIndexedSet<T>` is useful when an application already owns one and wants to publish it through ChalkQL. It is not a mechanism for allowing host mutation to race ChalkQL reads.
+
+## Scoped refresh
+
+There are two deliberately different refresh scopes.
 
 ### `Refresh(source)`
 
-Source-scoped refresh:
+A source-scoped refresh:
 
-1. re-reads the `Func<TSet>` registration;
-2. rediscovers supported Akade index topology;
-3. rebuilds row count and statistics;
-4. publishes the new Chalk source snapshot.
+1. re-reads the registered `Func<TSet>`;
+2. rediscovers supported Akade indexes;
+3. recomputes row count and statistics;
+4. publishes the resulting ChalkQL source snapshot.
 
-It always re-describes even if the registration returns the same object, because a live set can have
-been mutated in place.
-
-Use the delegate registration when the host may swap the entire set:
+For example:
 
 ```csharp
-IndexedSet<Order> current = BuildIndexedSet(initialRows);
+IndexedSet<Order> current =
+    BuildIndexedSet(initialRows);
 
 var source = AkadeSource
     .From("orders", () => current)
@@ -219,272 +440,253 @@ var source = AkadeSource
 
 current = BuildIndexedSet(nextRows);
 
-await engine.RefreshAsync(r => r.Refresh(source));
+await engine.RefreshAsync(
+    r => r.Refresh(source));
 ```
+
+Use this form when the physical set or its supported index topology may have changed.
 
 ### `Refresh(source.Table)`
 
-Table-scoped refresh:
+A table-scoped refresh:
 
 1. re-reads the registration;
-2. re-describes the single table and recomputes statistics;
-3. does **not** discover new Akade indexes.
+2. recomputes the table's statistics;
+3. does not rediscover Akade index topology.
 
-The newly returned set must therefore have the same supported Akade topology. If topology changed,
-the table refresh is refused and the host must use `Refresh(source)`.
-
-For the common live-mutation case this is the inexpensive conceptual operation:
+For the common quiescent-mutation case:
 
 ```csharp
 set.Add(...);
 set.Update(...);
 
-await engine.RefreshAsync(r => r.Refresh(source.Table));
+await engine.RefreshAsync(
+    r => r.Refresh(source.Table));
 ```
 
-It refreshes planner metadata without asking Chalk to rebuild the physical Akade collection.
+The supported index topology must remain the same.
 
-A host that continues mutating while a scoped refresh is collecting statistics accepts correspondingly
-live/fuzzy metadata. Scoped refresh cannot manufacture snapshot isolation around mutations performed
-outside Chalk.
+If it has changed, the table refresh is refused and the host must refresh the source instead.
 
-## `StatisticsRefresh.Defer`
+A scoped refresh cannot create snapshot isolation around mutation occurring outside ChalkQL. If the host modifies the set while statistics are being collected, those statistics are correspondingly live or fuzzy.
 
-For transactional `Append`/`Replace`, `StatisticsRefresh.Defer` carries the previous column value
-distributions forward but never the row count. The successor's row count and physical/table shape are
-fresh; only distributions age.
+## Topology and transactional refresh
 
-The next scoped refresh recomputes them.
+Supported Akade index topology forms part of the published table shape.
 
-## Topology rules
+The rules are:
 
-Supported Akade index topology is part of the published table shape.
+| Operation               | May index topology change? |
+| ----------------------- | -------------------------: |
+| `Refresh(source)`       |                        yes |
+| `Refresh(source.Table)` |                         no |
+| `Replace`               |                         no |
+| `Append`                |                         no |
 
-- `Refresh(source)` may rediscover it.
-- `Refresh(table)` must preserve it.
-- `Replace` / `Append` must preserve it.
+The adapter fingerprints supported indexes using properties including:
 
-The reflection adapter fingerprints supported indexes by Akade index name, physical kind, key type,
-accessor method identity and key members. A successor rebuilt with different supported topology is
-rejected rather than silently changing the planner's access paths.
+* Akade index name;
+* physical index kind;
+* key type;
+* accessor method identity;
+* key members.
 
-Unsupported Akade index families remain invisible to Chalk until there is a matching planner/runtime
-access-path representation.
+A transactional successor with different supported topology is rejected instead of silently changing the access paths available to an existing prepared plan.
+
+## Deferred statistics
+
+For transactional `Append` and `Replace`, `StatisticsRefresh.Defer` carries the previous column-value distributions forward.
+
+It never carries the old row count forward.
+
+The successor therefore always has its actual row count and physical shape, while potentially retaining older distribution statistics until the next scoped refresh.
+
+## Ordered-index execution
+
+Akade documents range indexes as supporting ordered access, but not every detail of the enumeration order of every individual range API is part of its public contract.
+
+The adapter therefore verifies an ordered result as it streams it.
+
+Each row's key is compared with the preceding key. This adds one key comparison per row and no per-row allocation.
+
+If the sequence violates the ordering ChalkQL advertised to the planner, execution fails immediately with a `SourceContractException` naming the Akade index and the conflicting keys.
+
+The adapter deliberately does not repair such a result by sorting it.
+
+Once the planner has relied on the physical index's declared ordering, it may have removed the logical sort entirely. Silently sorting inside the adapter would also defeat the early-exit property that makes queries such as:
+
+```sql
+ORDER BY amount
+LIMIT 1
+```
+
+worth serving through an ordered index.
+
+### Akade range operations
+
+Against Akade 1.5.0, `Range(...)`, `Min()`, `Max()` and `OrderBy(...)` honour the comparer used to build a range index.
+
+The one-sided `GreaterThan[OrEqual](...)` and `LessThan[OrEqual](...)` operations do not reliably honour a non-default comparer.
+
+The adapter therefore expresses a one-sided ChalkQL range using `Range(...)` against the physical index's appropriate extreme rather than relying on those one-sided APIs.
+
+## Reading an ordered index backwards
+
+A common query is:
+
+```sql
+SELECT *
+FROM bars
+ORDER BY ts DESC
+LIMIT 1
+```
+
+An ascending Akade index can serve this efficiently by walking from its last row towards its first.
+
+ChalkQL offers the reverse access path when the requested range has no upper bound.
+
+That includes an unbounded lookup over the whole index and a lower-bounded range. Akade can begin at the highest key and stop when it passes the lower bound without copying or buffering rows.
+
+A bounded range with an upper bound is not currently offered backwards. Reaching the upper bound would require either skipping rows above it or buffering the matched range before reversing it.
+
+Those plans retain an explicit sort.
+
+For example, a compound query such as:
+
+```sql
+WHERE symbol = ?
+ORDER BY ts DESC
+```
+
+may still require sorting if satisfying the compound bound would require a bounded reverse enumeration that Akade does not expose without buffering.
+
+The same order verification used for forward walks is applied to reverse walks.
 
 ## Execution backend
 
-Each Akade snapshot owns an internal one-table `PocoSource`, which reuses Chalk's existing POCO column
-inference, statistics and Arrow/columnar scan machinery. Akade-specific index lookup remains the
-physical-index seam.
+Each published Akade snapshot owns an internal one-table POCO source.
 
-This means transactional publication preserves the existing POCO pattern:
+That lets the adapter reuse ChalkQL's existing:
+
+* POCO column inference;
+* statistics;
+* Arrow/columnar scan machinery;
+* table metadata;
+* execution pipeline.
+
+Akade-specific lookup remains the physical-index integration point.
+
+A transactional refresh therefore follows the same publication pattern as the rest of ChalkQL:
 
 ```text
 PrepareRefreshAsync
     build complete successor
-    validate topology/statistics
+    validate topology and statistics
     return commit
 
 Commit
-    atomic source-snapshot publish only
+    atomically publish source snapshot
 ```
 
-while live host mutation deliberately bypasses those snapshot guarantees.
+Quiescent host mutation is the explicit exception: it edits the live Akade structure outside that snapshot protocol and relies on the host to prevent overlapping readers.
 
-## Current catalogue boundary
+## Declaring functions on the source
 
-Member indexes — one member, or a tuple of two to four — are registered through
-`PocoTableBuilder<T>`'s late-bound host-index API, so the POCO builder resolves each member to its
-final catalog column ordinal after naming rules have been applied. The per-snapshot factory closes
-over the exact `IndexedSet<T>` used by that Akade snapshot; scan rows and index lookups therefore
-address the same physical set.
-
-A compound key is written in one of two ways, and Chalk reads both:
+An Akade source declares scalar, aggregate and table functions exactly as a POCO source does, with
+`AddFunction`. The one worth knowing for an `IndexedSet<T>` of integers is a widened sum: `SUM` keeps
+its argument's type, so a `SUM(amount)` over a large set refuses with an overflow where a `long` would
+have done. Declare the widened form once and the statement stops carrying a cast:
 
 ```csharp
-.WithIndex(x => (x.ProductId, x.UnitPrice))     // the members are in the text Akade files it under
-.WithIndex(PurchaseKeys.ProductAndUnitPrice)    // the text names no members, so the host says
-```
-
-For the second, the host names them once, against the same accessor:
-
-```csharp
-AkadeSource.From("purchases", set)
-    .CompoundIndex(PurchaseKeys.ProductAndUnitPrice, x => x.ProductId, x => x.UnitPrice)
-```
-
-The accessor must return a `ValueTuple` of exactly those members' types, in that order; anything else
-is refused at registration, by name, rather than becoming a key claim the planner would act on.
-
-Expression-valued Akade keys remain deliberately undisclosed. The current `IndexDescriptor`
-represents keys as base-table `Columns`, so these cannot yet be described truthfully:
-
-```csharp
-.WithIndex(x => x.End - x.Start)
-.WithIndex(ComputedKey.SomeStaticMethod)
-```
-
-A future catalogue change can make index keys expression-valued using Chalk's scalar IR. Until then,
-computed and multi-key Akade structures remain usable through Akade itself but are not advertised to
-Calcite.
-
-
-## CHALK002: ConcurrentIndexedSet
-
-The `ConcurrentIndexedSet<T>` overloads of `AkadeSource.From(...)` are marked
-`[Experimental("CHALK002")]`.
-
-Akade's `Read(...)` contract materialises the returned sequence while its reader lock is held. Chalk
-does not use that path for execution because a full scan would incur an O(n) copy before streaming.
-
-Instead `ConcurrentIndexedSetAccess.CaptureForQuiescentRead` uses the public stateful `Read(...)`
-overload to capture the wrapped `IndexedSet<T>` and returns `Array.Empty<T>()` from the callback.
-Akade therefore materialises only an empty result during capture. Chalk subsequently streams directly
-from the captured set.
-
-The reference deliberately outlives Akade's reader lock. The host must guarantee that no mutation
-overlaps any Chalk execution, scoped refresh, or transactional-refresh preparation reading that
-source.
-
-Index discovery uses the same capture helper, so Chalk no longer reflects into
-`ConcurrentIndexedSet<T>` itself. Reflection remains only for Akade's private index registries and
-selector metadata.
-
-
-## Planner-visible Akade indexes
-
-The adapter now uses `PocoTableBuilder<T>`'s late-bound host-index registration overload. Akade
-supplies the member selector and physical index; `PocoTableBuilder` resolves that selector to the
-final POCO column ordinal after naming/ignore rules have been applied.
-
-What is supported:
-
-- unique and non-unique Akade indexes become Chalk `HASH` indexes;
-- Akade range indexes become Chalk `ORDERED` indexes;
-- Akade prefix indexes — tries — become Chalk `PREFIX` indexes;
-- unique Akade indexes carry `Unique = true`;
-- the key is one direct member, or a tuple of two to four of them, in tuple order;
-- a hash index reports its own distinct key count, which the planner would otherwise guess;
-- computed, multi-key, nullable and specialised full-text/spatial/vector access paths remain
-  undisclosed until Chalk can represent and verify their semantics faithfully.
-
-## `LIKE 'p%'` and the prefix index
-
-`WHERE name LIKE 'Int%'` is a range, not a predicate: one trailing `%`, no other wildcard and no
-`ESCAPE`. The planner turns such a pattern on a STRING key column into a **prefix range**, and what
-the source is finally asked for depends on the index's kind:
-
-- an **ordered** string index is sent the plain half-open range `[Int, Inu)` — the prefix and the
-  smallest text above everything it matches — so it serves a `LIKE` with no change at all;
-- a **prefix** index is sent the prefix itself, and Akade's trie walks straight to it.
-
-A pattern with more than a prefix in it — `'%USDT'`, `'a%b%'`, anything with `_`, anything with an
-`ESCAPE` — is left where it was, as a predicate evaluated per row. A parameter's text is the one
-thing the plan could not know, so it is checked when it is bound and refused by name if it turns out
-not to be a bare prefix.
-
-A trie's fuzzy search is deliberately not an access path: Chalk's ranges say "between these bounds"
-and "starting with this text", and there is no range that says "within one edit of".
-
-For the README `Purchase` example this means the planner sees `Id`, `ProductId`, `Amount` and
-`UnitPrice`, and `PurchaseKeys.ProductAndUnitPrice` as soon as the host names its two members;
-`PurchaseKeys.Total` is a computed key and remains Akade-native only.
-
-A compound key's bounds become a tuple. Chalk may bound only a prefix of the key, and a tuple cannot
-say "anything" for the rest, so the components a range does not reach take their type's minimum or
-maximum according to the bound's inclusivity: `product_id >= 4` is `(4, min)`, and `product_id > 4`
-is `(4, max)`, because filling with the minimum there would keep every row whose `product_id` *is*
-4. Tuples are structs and the key order is compiled over their fields, so the check below still
-costs one comparison and no allocation per row.
-
-Registration closes each `IPocoIndex<T>` factory over the exact `IndexedSet<T>` used by the enclosing
-Akade source snapshot. The concurrent source captures its inner `IndexedSet<T>` once and gives that
-same instance to both the row wrapper and every registered index, so a scan and an index lookup
-cannot accidentally address different Akade states.
-
-## Key types and the comparer an index was built with
-
-An `ORDERED` index is a claim that its keys arrive in Chalk's order — numbers and temporals by
-value, NaN above every number, strings by code point — and the planner deletes sorts on the strength
-of it. So the key type decides what Chalk will claim:
-
-- the integer, decimal and temporal types (`DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly`,
-  `TimeSpan`) are ordered access paths on the strength of the type alone, because the CLR's default
-  order for them already is Chalk's;
-- `float`, `double`, `string` and `Utf8String` are not, until the host says what the index was built
-  with — `Comparer<double>.Default` puts NaN first where Chalk puts it last, and
-  `Comparer<string>.Default` is culture-aware where Chalk compares by code point;
-- `Guid` stays equality-only: its CLR comparison is not the byte order Chalk sorts UUIDs by;
-- nullable keys stay excluded altogether.
-
-`ChalkComparers.For<T>()` is Chalk's order as an `IComparer<T>`, for every type above and for a
-tuple of them; the host builds the index with it and declares it:
-
-```csharp
-var set = rows.ToIndexedSet()
-    .WithRangeIndex(x => x.Symbol, ChalkComparers.For<string>())
+var source = AkadeSource
+    .From("purchases", purchases)
+    .AddFunction("accumulate", f => f
+        .Aggregate<int, long>("v")
+        .Sql("SUM(CAST(v AS BIGINT))"))
     .Build();
 
-AkadeSource.From("bars", set)
-    .Comparer(x => x.Symbol, ChalkComparers.For<string>());
+// SELECT product_id, accumulate(amount) AS total FROM purchases GROUP BY product_id
 ```
 
-The declaration is matched to the index by the text the compiler records for the accessor, which is
-the text Akade files the index under, or by the accessor's method identity. Chalk then classifies
-the comparer rather than trusting it: `Comparer<T>.Default` where that is Chalk's order, the
-comparers above, and `StringComparer.Ordinal`. Anything else is refused at registration, by name,
-with the accepted ones listed.
+A SQL-bodied aggregate is inlined by the planner into the built-in aggregates it is written over, so
+`accumulate(amount)` plans to exactly the sum-over-a-cast plan: the typed sum kernel, and pushable
+wherever `SUM` is. The result is nullable by declaration, so an empty group answers `NULL` as `SUM`
+does.
 
-`StringComparer.Ordinal` comes with a caveat worth stating. It compares UTF-16 code *units*, and
-Chalk's STRING order is by code point; the two agree everywhere except across the surrogate range,
-where a code point above U+FFFF is stored as a pair of units below U+E000. A key from that range
-makes the index arrive out of Chalk's order, and the order check below reports it by name at that
-row rather than answering wrongly.
+An aggregate SQL cannot express is implemented in the host process instead. Declare it with
+`.Client()` and register the body where the engine looks for host functions; the state is a struct
+held in arena memory, `Add` runs once per non-`NULL` row, and nothing is allocated per row or per
+group:
 
-`ChalkComparers.For<T>(descending: true)` makes a descending index. Chalk registers it as one, and
-the planner then serves `ORDER BY … DESC` from it without a sort — which, under a `LIMIT`, is one
-seek and one row where it used to be a sort of the whole table.
+```csharp
+.AddFunction("accumulate", f => f.Aggregate<int, long>("v").Client())
 
-## What the adapter asks Akade, and why only that
+public struct AccumulateState { public long Sum; public bool Seen; }
 
-Akade's public documentation describes range indexes as supporting range predicates and ordered
-access, and documents `OrderBy(...)` as the order the index defines — but it does not make the
-enumeration order of `Range(...)`, `GreaterThan[OrEqual](...)` or `LessThan[OrEqual](...)` part of
-the public contract.
+Functions = registry => registry.AddAggregate("accumulate",
+    new AggregateSpec<AccumulateState, int, long?>
+    {
+        Init = static () => default,
+        Add = static (ref s, v) => { s.Sum += v; s.Seen = true; },
+        Remove = static (ref s, v) => s.Sum -= v,        // optional: an exact inverse, for sliding frames
+        Merge = static (a, b) => new AccumulateState      // optional: partial states combine
+            { Sum = a.Sum + b.Sum, Seen = a.Seen || b.Seen },
+        Finish = static s => s.Seen ? s.Sum : null,       // no rows answer NULL, as SUM does
+    }),
+```
 
-Measured against Akade 1.5.0, there is a sharper reason than order to be careful here:
-`GreaterThan[OrEqual](...)` and `LessThan[OrEqual](...)` do not honour the comparer the index was
-built with. On an index whose order is not the CLR's default for the key type they return the wrong
-rows, and usually none at all. `Range(...)`, `Min()`, `Max()` and `OrderBy(...)` do honour it. So a
-half-open Chalk range becomes a `Range` from the bound to the index's own extreme on the open side,
-and the adapter calls none of the one-sided shapes. An adapter of your own should do the same.
+A client aggregate runs one delegate call per row rather than the typed kernel and is never pushed
+to a source; declare `.Window()` before `.Client()` if it is to be used with `OVER`.
 
-Chalk used to sort the matched rows before publishing any of them through an `ORDERED` index. It no
-longer does: a consumer that reads one row and stops — `ORDER BY amount LIMIT 1` over an ordered
-index — would have paid for the whole range before seeing it. The adapter now yields Akade's
-enumeration as it comes and **verifies it as it yields**: one key comparison per row against the
-previous key, nothing allocated per row, and a `SourceContractException` naming the Akade index and
-the two keys the moment a row arrives out of ascending order. An unbounded ordered lookup uses
-Akade's documented `OrderBy(...)`.
+## Measuring the overhead
 
-Failing by name is deliberate. A silently re-sorted lookup would be a wrong answer already relied
-on, because the declared ordered index is why there is no sort above it in the plan at all; and a
-defensive sort would give back exactly the early exit the ordered index is worth having for.
+`dotnet/bench/Chalk.Benchmarks.Akade` runs equivalent operations directly against Akade and through a prepared ChalkQL statement using the same values.
 
-## Reading an ordered index backwards
+It measures execution overhead rather than planning.
 
-`ORDER BY ts DESC LIMIT 1` — the latest row — is the commonest ordered query there is, and an
-ascending index used to serve it by sorting everything it matched. An ordered Akade index now says
-it can be read from its last row to its first, and the planner offers that beside the forward
-lookup; a `LIMIT` above it then makes the whole thing one walk and one row.
+```bash
+dotnet run -c Release --project dotnet/bench/Chalk.Benchmarks.Akade
 
-What is offered is a range with **no upper bound**, the whole index included. That is what Akade's
-public surface serves without a copy: `OrderByDescending` starts at the top, every row down to the
-lower bound is wanted, and the walk simply stops at the first key below it — no skipping and no
-buffering. A range with an upper bound is not offered backwards, because reaching it would mean
-skipping every row above it or buffering the matched range to reverse it, which is exactly the copy
-this adapter exists without; the planner sorts those instead. So `symbol = ? ORDER BY ts DESC` over
-a compound index still sorts, and will until Akade grows a descending bounded enumeration.
+# quicker indicative run
+dotnet run -c Release --project dotnet/bench/Chalk.Benchmarks.Akade -- --job short
+```
 
-The order check runs on the reversed walk too, against the order that walk claims — the bound and
-the order are read from the same key, so it is still one key read and one comparison per row.
+The benchmark covers:
+
+* a hash-index point lookup;
+* a band through an ordered index;
+* the cheapest row through another ordered index;
+* `accumulate(amount)`, a declared widened sum over the complete set.
+
+One short run over a 200,000-row set produced:
+
+| Case                           |    Rows | Akade directly | Through ChalkQL | Ratio | Allocated per execution |
+| ------------------------------ | ------: | -------------: | --------------: | ----: | ----------------------: |
+| `ORDER BY unit_price LIMIT 1`  |       1 |          19 ns |          2.2 µs |  115× |                  2.8 KB |
+| `WHERE product_id = ?`         |     400 |         450 ns |          6.7 µs |   15× |                  3.3 KB |
+| `WHERE amount BETWEEN ? AND ?` |   1,000 |         1.9 µs |         14.3 µs |  7.5× |                  3.3 KB |
+| `accumulate(amount)` over every row | 200,000 |         207 µs |          3.5 ms |   17× |                  2.6 KB |
+
+Treat a short benchmark run as indicative rather than a performance guarantee.
+
+The useful shape of the result is that ChalkQL execution has a roughly fixed request-level floor — the execution pipeline, Arrow batches and arena bookkeeping — while allocation does not grow with the number of rows streamed.
+
+The cost is paid for SQL planning integration, vectorised execution, federation and the rest of the ChalkQL execution model rather than for a direct replacement of Akade's native API.
+
+When the application already knows exactly which Akade operation it wants, calling Akade directly remains the shortest path.
+
+## Summary
+
+Use an Akade source when application-owned data already benefits from `IndexedSet<T>` and also needs to participate in ChalkQL queries.
+
+ChalkQL:
+
+* exposes the set as an ordinary SQL table;
+* discovers the Akade indexes it can represent faithfully;
+* lets the planner choose those access paths;
+* preserves ordered-index early exit where Akade can stream it;
+* verifies ordering claims as rows are consumed;
+* supports quiescent in-place mutation when the host can exclude readers;
+* supports atomic replacement snapshots when it cannot.
+
+And, for maximum convenience and enjoyment, the SQL remains SQL.

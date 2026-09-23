@@ -72,8 +72,13 @@ public class AkadeSourceBenchmarks
             .Build();
 
         var source = AkadeSource.From("purchases", _set)
-            .TableName("purchases")
             .NamingPolicy(PocoNamingPolicy.SnakeCase)
+            // A widened sum, declared once: SUM keeps its argument's type, and the sum of two
+            // hundred thousand row numbers does not fit an INTEGER. The planner inlines the body,
+            // so the statement plans to the sum-over-a-cast plan without carrying the cast.
+            .AddFunction("accumulate", f => f
+                .Aggregate<int, long>("v")
+                .Sql("SUM(CAST(v AS BIGINT))"))
             .Build();
 
         _sidecar = await SidecarFixture.StartAsync();
@@ -84,7 +89,7 @@ public class AkadeSourceBenchmarks
 
         _engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
         {
-            ContextId = "akade-overhead",
+            ContextId = "akade-source",
             Sources = [source],
             Planner = _sidecar.CreatePlanner(),
             Execution = new ExecutionOptions { BatchSize = 4096, OutputMemory = OutputMemory.Pooled },
@@ -94,9 +99,7 @@ public class AkadeSourceBenchmarks
         _band = await _engine.PrepareAsync("SELECT id, amount FROM purchases WHERE amount BETWEEN ? AND ?");
         _cheapest = await _engine.PrepareAsync(
             "SELECT id, unit_price FROM purchases ORDER BY unit_price LIMIT 1");
-        // The sum of two hundred thousand row numbers does not fit an INTEGER, and SUM keeps its
-        // argument's type, so the accumulator is widened by hand rather than overflowing by name.
-        _sum = await _engine.PrepareAsync("SELECT SUM(CAST(amount AS BIGINT)) FROM purchases");
+        _sum = await _engine.PrepareAsync("SELECT accumulate(amount) FROM purchases");
     }
 
     [GlobalCleanup]
@@ -170,7 +173,7 @@ public class AkadeSourceBenchmarks
     }
 
     [BenchmarkCategory("sum")]
-    [Benchmark(Description = "chalkql SUM(CAST(amount AS BIGINT))")]
+    [Benchmark(Description = "chalkql accumulate(amount)")]
     public Task<long> ChalkSum() => ReadSumAsync(_sum);
 
     // ---- support ----

@@ -4,11 +4,13 @@ using Chalk.Sources;
 using Chalk.Sources.Poco;
 using IndexKind = Chalk.Ir.IndexKind;
 
-namespace Chalk.Sample.AkadeIndexedSet;
+namespace Chalk.TestKit;
 
 /// <summary>
 /// One <see href="https://github.com/akade/Akade.IndexedSet">Akade.IndexedSet</see> prefix index — a
-/// trie over a text column — wrapped as an <see cref="IPocoIndex{T}"/> of the PREFIX kind.
+/// trie over a text column — wrapped as an <see cref="IPocoIndex{T}"/> of the PREFIX kind. A test-kit host
+/// index: the corpus's <c>terms</c> table exercises the POCO source's host-supplied index seam with it, now that
+/// <c>Chalk.Sources.Akade</c> discovers a trie itself.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -31,7 +33,7 @@ namespace Chalk.Sample.AkadeIndexedSet;
 /// register a factory so each snapshot builds its own index over that snapshot's rows.
 /// </para>
 /// </remarks>
-public sealed class AkadePrefixIndex<T> : IPocoIndex<T>
+public sealed class HostAkadePrefixIndex<T> : IPocoIndex<T>
 {
     private readonly IndexedSet<T> _set;
     private readonly Func<T, string> _key;
@@ -41,7 +43,7 @@ public sealed class AkadePrefixIndex<T> : IPocoIndex<T>
     /// <param name="set">The set this index lives in.</param>
     /// <param name="key">The key selector, written exactly as it was at registration.</param>
     /// <param name="akadeIndexName">The accessor's source text, as Akade recorded it.</param>
-    public AkadePrefixIndex(
+    public HostAkadePrefixIndex(
         IndexDescriptor descriptor,
         IndexedSet<T> set,
         Func<T, string> key,

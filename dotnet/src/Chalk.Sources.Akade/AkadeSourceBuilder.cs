@@ -35,7 +35,7 @@ public abstract class AkadeSourceBuilder<T, TSelf>
     private readonly List<AkadeComparerBinding<T>> _comparers = [];
 
     private string _schemaName = "main";
-    private string _tableName = "data";
+    private string _tableName;
     private PocoNamingPolicy _namingPolicy = PocoNamingPolicy.AsIs;
     private int _decimalScale = 10;
     private Action<PocoTableBuilder<T>>? _configureTable;
@@ -46,6 +46,8 @@ public abstract class AkadeSourceBuilder<T, TSelf>
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceId);
         SourceId = sourceId;
+        // One set is one table, so the table takes the source's name unless the host says otherwise.
+        _tableName = sourceId;
     }
 
     protected string SourceId { get; }
@@ -59,6 +61,10 @@ public abstract class AkadeSourceBuilder<T, TSelf>
         return Self;
     }
 
+    /// <summary>
+    /// The table's name. By default it is the source's own name, which is the common case for a
+    /// source that holds one set; call this only when the two should differ.
+    /// </summary>
     public TSelf TableName(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);

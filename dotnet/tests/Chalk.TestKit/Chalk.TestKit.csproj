@@ -16,6 +16,7 @@
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
     <PackageReference Include="DuckDB.NET.Data.Full" />
+    <PackageReference Include="Akade.IndexedSet" />
   </ItemGroup>
 
   <ItemGroup>

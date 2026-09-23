@@ -10,7 +10,7 @@ namespace Chalk.TestKit;
 
 /// <summary>
 /// The <c>bars-akade</c> configuration (D35, D40): the same corpus data, with <c>bars</c>'s two
-/// indexes supplied by <c>samples/Chalk.Sample.AkadeIndexedSet</c> and its rows registered as an
+/// indexes supplied by the test kit's host index over an Akade set and its rows registered as an
 /// <see cref="IReadOnlyCollection{T}"/> — an <c>IndexedSet&lt;Bar&gt;</c> implements no collection
 /// interface at all, which is the case that overload exists for.
 /// </summary>
@@ -93,7 +93,7 @@ public sealed class AkadeCorpusFixture
             .NamingPolicy(PocoNamingPolicy.SnakeCase)
             .AddTable(
                 "bars",
-                new AkadeRows<Bar>(set),
+                new HostAkadeRows<Bar>(set),
                 t => t
                     .UniqueKey(b => b.Ts, b => b.Symbol)
                     .Index(SymbolTsIndex(set).Descriptor, rows => SymbolTsIndex(SetOf(rows)))
@@ -208,7 +208,7 @@ public sealed class AkadeCorpusFixture
             // D282's table, declared exactly as the built-in configuration declares it: this
             // configuration is about `bars`' indexes and every other table is a control.
             .AddTable("terms", searchRows, t => t
-                .Index(CorpusFixture.SearchIndex, _ => new AkadePrefixIndex<SearchRow>(
+                .Index(CorpusFixture.SearchIndex, _ => new HostAkadePrefixIndex<SearchRow>(
                     CorpusFixture.SearchIndex,
                     searchSet,
                     CorpusFixture.SearchName,
@@ -251,7 +251,7 @@ public sealed class AkadeCorpusFixture
     /// <summary>TIMESTAMP(9) storage — nanoseconds since the epoch, which is what a bound carries.</summary>
     private static long Nanoseconds(DateTime value) => (value.Ticks - DateTime.UnixEpoch.Ticks) * 100L;
 
-    public static AkadeIndex<Bar, (Utf8String Symbol, long Ts)> SymbolTsIndex(IndexedSet<Bar> set) =>
+    public static HostAkadeIndex<Bar, (Utf8String Symbol, long Ts)> SymbolTsIndex(IndexedSet<Bar> set) =>
         new(
             new IndexDescriptor
             {
@@ -263,7 +263,7 @@ public sealed class AkadeCorpusFixture
             set,
             SymbolTs,
             "SymbolTs",
-            new AkadeKey<Bar, (Utf8String, long)>(
+            new HostAkadeKey<Bar, (Utf8String, long)>(
                 (bounds, max) => (
                     bounds[0].ToUtf8String(),
                     bounds.Count > 1 ? (long)bounds[1]! : max ? long.MaxValue : long.MinValue)),
@@ -280,7 +280,7 @@ public sealed class AkadeCorpusFixture
     /// used by the indexed source; for example SQL STRING may arrive as either
     /// string or Utf8String.
     /// </remarks>
-    private static AkadeIndex<Bar, (long Ts, Utf8String Symbol)> TsSymbolIndex(
+    private static HostAkadeIndex<Bar, (long Ts, Utf8String Symbol)> TsSymbolIndex(
         IndexedSet<Bar> set) =>
         new(
             new IndexDescriptor
@@ -293,7 +293,7 @@ public sealed class AkadeCorpusFixture
             set,
             TsSymbol,
             "TsSymbol",
-            new AkadeKey<Bar, (long, Utf8String)>(
+            new HostAkadeKey<Bar, (long, Utf8String)>(
                 (bounds, max) => (
                     (long)bounds[0]!,
                     bounds.Count > 1
@@ -312,10 +312,10 @@ public sealed class AkadeCorpusFixture
     private static readonly Func<Bar, (long Ts, Utf8String Symbol)> TsSymbol =
         bar => (Nanoseconds(bar.Ts), bar.Symbol);
 
-    private static readonly AkadeKeyComparer<(Utf8String Symbol, long Ts)> SymbolTsComparer =
+    private static readonly HostAkadeKeyComparer<(Utf8String Symbol, long Ts)> SymbolTsComparer =
         new(key => [key.Symbol, key.Ts]);
 
-    private static readonly AkadeKeyComparer<(long Ts, Utf8String Symbol)> TsSymbolComparer =
+    private static readonly HostAkadeKeyComparer<(long Ts, Utf8String Symbol)> TsSymbolComparer =
         new(key => [key.Ts, key.Symbol]);
 
     private static readonly Lazy<AkadeCorpusFixture> SharedLazy = new(() => Create());
@@ -325,7 +325,7 @@ public sealed class AkadeCorpusFixture
     /// never appends to <c>bars</c>, so rows of Chalk's own are a fixture error, not a case.
     /// </summary>
     private static IndexedSet<Bar> SetOf(IReadOnlyCollection<Bar> rows) =>
-        rows is AkadeRows<Bar> registered
+        rows is HostAkadeRows<Bar> registered
             ? registered.Set
             : throw new InvalidOperationException("the corpus fixture's bars are never appended to");
 
