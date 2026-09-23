@@ -277,7 +277,19 @@ public sealed class RenderedBoundTests
         var remote = new FakeRemoteSource("far", table);
         var catalog = FakeRemoteSource.Catalog(local, remote);
 
-        var rendered = Compile(
+        // On the pipeline's own thread, deliberately. A remote stream normally runs ahead on a
+        // pool thread, and this gate counts what the measuring thread allocates: with the fetch
+        // elsewhere, how much of the fake source's row materialisation lands in the count is a
+        // matter of scheduling, and the difference between the two plans becomes whatever the
+        // scheduler did that day rather than what rendering a bound costs. Read directly, both
+        // plans materialise their rows on this thread and the difference is the rendering's own.
+        var onThisThread = new ExecutionSettings
+        {
+            BatchSize = 4096,
+            PooledOutput = true,
+            RemotePrefetchDepth = 0,
+        };
+        var rendered = PlanCompiler.Compile(
             IrBuilder.Plan(
                 IrBuilder.RemoteQuery(
                     "far",
@@ -287,15 +299,15 @@ public sealed class RenderedBoundTests
                     renderedBounds: [0]),
                 parameterTypes: IrBuilder.I64(nullable: true)),
             catalog,
-            local,
-            remote);
-        var literal = Compile(
+            Sources(local, remote),
+            onThisThread);
+        var literal = PlanCompiler.Compile(
             IrBuilder.Plan(
                 IrBuilder.RemoteQuery("far", "SELECT k, v FROM facts LIMIT 25", table.RowType()),
                 parameterTypes: IrBuilder.I64(nullable: true)),
             catalog,
-            local,
-            remote);
+            Sources(local, remote),
+            onThisThread);
 
         using var arena = new ExecutionArena();
         Assert.Equal(rows, await ConsumeAsync(rendered, arena));

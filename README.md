@@ -36,15 +36,15 @@ The [tutorial](docs/tutorial.md) develops this step by step, culminating in a li
 
 ### Access control you can reason about.
 
-ChalkQL separates application-defined entitlements from individual queries and physical sources. That makes the access model explicit: entitlements can be inspected and reasoned about without reconstructing them from views, predicates, ORMs or application code.
+ChalkQL’s entitlement layer is entirely optional. When used, policy is explicit and inspectable rather than reconstructed from views, predicates, ORMs or application code.
 
 Entitlements may draw on application state, relationships, roles, resource scopes, or other domain-specific context to govern what a principal may access or derive:
 
 * **Row and column access** — restrict which rows and columns a principal may access.
 * **Value disclosure** — allow direct access, masked values, or testing the presence of a value without revealing it.
-* **Tenancy** — constrain access to the appropriate tenant or resource scope, including transitive relationships.
-* **Aggregate disclosure** — allow approved statistical aggregates over restricted values without direct access.
-* **Multiple resource scopes** — resolve access through different relationships to the same resource; for example, a franchise owner may access their stores while an auditor accesses stores within their region.
+* **Tenant isolation** — constrain access to the appropriate tenant or resource scope, including through transitive relationships.
+* **Aggregate disclosure** — permit approved statistical aggregates over protected values without granting direct access to those values.
+* **Relationship-aware scopes** — resolve access through multiple declared relationships while preserving the scope that confines a grant; for example, a franchise owner may access their stores while an auditor accesses stores within their region.
 
 ### Federation for (almost) everyone.
 
@@ -60,6 +60,16 @@ ChalkQL introduces no persistence layer: data is queried on demand, wherever it 
 * Indexed in-memory virtual tables.
 * SQL-defined, host-language, and native UDFs, with pushdown where supported.
 * Host-controlled resource usage during query execution.
+
+### Hints for better planning
+
+Prepared statements with representative parameter values let ChalkQL plan ahead for the expected workload.
+
+`PrepareAsync(sql, parameterValueHints)` supplies those expected values without constraining later executions.
+
+`LIMIT ?` and `OFFSET ?` remain ordinary execution parameters and may still be pushed to a source in that source's own dialect.
+
+Parameter hints influence the plan. Execution parameters determine the result.
 
 ### Security, meet first principles.
 
@@ -124,8 +134,8 @@ A handful of open-source projects overlap with parts of ChalkQL’s capability s
 | **Row- and column-level access control**               |              ✅              |            ✅             |         ✅         |         ✅        |
 | **Tenant isolation**                                   |              ✅              |            ✅             |    ◐<br>policy     |         ✅         |
 | **Multi-dimensional entitlements**                     |    **✅<br>first-class**     |    ◐<br>policy / ABAC     |    ◐<br>policy     | ◐<br>policy / ABAC |
-| **Reachability-based entitlements**                    |            **✅**            | ✅<br>explicit FK anchors |         —          |         —          |
-| **Aggregate disclosure controls**                      |            **✅**            |            —             |         —           |          —          |
+| **Relationship-aware scopes**                          |            **✅**            | ✅<br>explicit FK anchors |         —          |         —          |
+| **Aggregate disclosure**                               |            **✅**            |            —             |         —           |          —          |
 | Logical-plan policy rewriting                          |              ✅              |            ✅            |         ✅          |         ◐          |
 | Policy enforcement before optimisation                 |              ✅              |            ✅            |         ✅          |         —          |
 | JOIN / CTE / subquery bypass resistance                |              ✅              |            ✅            |         ✅          |         ◐          |
