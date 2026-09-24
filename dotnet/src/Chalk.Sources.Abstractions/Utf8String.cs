@@ -27,11 +27,13 @@ namespace Chalk;
 /// and <c>LIKE</c> with non-ASCII folding stay on the existing kernels, which decode when they must.
 /// </para>
 /// <para>
-/// <b>Lifetime.</b> A <see cref="Utf8String"/> handed out of a batch or a lane points into that
-/// batch's buffers and is valid until the batch is disposed or the arena reuses it — exactly the
-/// rule <c>ColumnView</c> states. A <see cref="Utf8String"/> the host constructs is the host's own
-/// memory and outlives anything. A host that keeps a lent value past the batch calls
-/// <see cref="ToArray"/> or <see cref="ToString"/>. Every member that hands one out repeats the rule.
+/// <b>Lifetime.</b> A result batch never hands out a <see cref="Utf8String"/>: a STRING cell is
+/// read as a <c>ReadOnlySpan&lt;byte&gt;</c> through <c>GetUtf8</c>, which the compiler keeps inside
+/// the batch's lifetime, and a value to keep is copied out of it with <c>ToUtf8String()</c>. The
+/// one borrowed <see cref="Utf8String"/> is the lane lent to a Tier 1 delegate, valid for that call
+/// and no longer — exactly the rule <c>ColumnView</c> states — and a delegate that keeps it calls
+/// <see cref="ToArray"/> or <see cref="ToString"/>. A <see cref="Utf8String"/> the host constructs is
+/// the host's own memory and outlives anything.
 /// </para>
 /// <para>
 /// <b>One trap, and it is the price of the implicit conversions.</b> Because a
@@ -244,74 +246,29 @@ public readonly struct Utf8String : IEquatable<Utf8String>, IComparable<Utf8Stri
 
     public static bool operator !=(ReadOnlySpan<byte> left, Utf8String right) => !right.Equals(left);
 
-    public bool TextEquals(string? other)
-    {
-        if (other is null)
-            return false;
-
-        var utf8 = AsSpan();
-
-        //
-        // For valid Unicode:
-        //
-        // UTF-8 byte count >= UTF-16 char count.
-        //
-        // Therefore equal lengths can only match if every character
-        // is ASCII. This is the important fast path for symbols,
-        // identifiers, etc.
-        //
-        if (utf8.Length == other.Length)
-        {
-            for (var i = 0; i < utf8.Length; i++)
-            {
-                if (utf8[i] != other[i])
-                    return false;
-            }
-
-            return true;
-        }
-
-        //
-        // Too few UTF-8 bytes to represent this many UTF-16 code units.
-        //
-        if (utf8.Length < other.Length)
-            return false;
-
-        const int stackLimit = 256;
-
-        byte[]? rented = null;
-
-        var encoded =
-            utf8.Length <= stackLimit
-                ? stackalloc byte[utf8.Length]
-                : (rented = ArrayPool<byte>.Shared.Rent(utf8.Length))
-                .AsSpan(0, utf8.Length);
-
-        try
-        {
-            var status =
-                Utf8.FromUtf16(
-                    other.AsSpan(),
-                    encoded,
-                    out _,
-                    out var bytesWritten,
-                    replaceInvalidSequences: false,
-                    isFinalBlock: true);
-
-            return status == OperationStatus.Done
-                   && bytesWritten == utf8.Length
-                   && encoded[..bytesWritten].SequenceEqual(utf8);
-        }
-        finally
-        {
-            if (rented is not null)
-                ArrayPool<byte>.Shared.Return(rented);
-        }
-    }
+    /// <summary>
+    /// Whether this value spells <paramref name="other"/>: the string transcoded into a stack
+    /// buffer and compared byte for byte, allocating nothing. A null string equals nothing, and so
+    /// does a string that is not valid UTF-16.
+    /// </summary>
+    public bool TextEquals(string? other) => Utf8Ordinal.Equals(AsSpan(), other);
 }
 
 public static class Utf8StringExtensions
 {
+    /// <summary>
+    /// Whether a run of UTF-8 bytes — one cell of a STRING column read through <c>GetUtf8</c>, say —
+    /// spells <paramref name="text"/>, without making a string of either. See
+    /// <see cref="Utf8String.TextEquals"/>.
+    /// </summary>
+    public static bool TextEquals(this ReadOnlySpan<byte> utf8, string? text) => Utf8Ordinal.Equals(utf8, text);
+
+    /// <summary>
+    /// <see cref="Utf8String.Hash"/> of a run of UTF-8 bytes: the hash a <see cref="Utf8String"/> of
+    /// the same bytes has, and the one <see cref="Utf8StringComparer"/> uses for every spelling.
+    /// </summary>
+    public static int Utf8Hash(this ReadOnlySpan<byte> utf8) => Utf8String.Hash(utf8);
+
     public static Utf8String ToUtf8String(this ReadOnlySpan<byte> value)
     {
         if (!Utf8String.IsValidUtf8(value)) throw new ArgumentException("Input is not valid UTF-8.", nameof(value));

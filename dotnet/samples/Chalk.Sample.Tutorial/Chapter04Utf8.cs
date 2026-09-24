@@ -1,5 +1,6 @@
 using System.Text;
 using Apache.Arrow;
+using Chalk.Arrow;
 using Chalk.Client;
 using Chalk.Sources.Poco;
 
@@ -38,10 +39,11 @@ public static class Chapter04Utf8
                 var supplier = (StringViewArray)batch.Column(1);
                 for (var row = 0; row < Math.Min(batch.Length, 8); row++)
                 {
-                    // GetUtf8 hands back a Utf8String over the batch's own buffer: no copy, no
-                    // decode, valid until the batch is disposed. Encoding.UTF8.GetString below is
-                    // the host deciding to make a string, on the last line, to print it.
-                    ReadOnlySpan<byte> bytes = name.GetUtf8(row).AsSpan();
+                    // GetUtf8 hands back the bytes over the batch's own buffer as a
+                    // ReadOnlySpan<byte>: no copy, no decode, and the compiler keeps it inside the
+                    // batch's lifetime. Encoding.UTF8.GetString below is the host deciding to make
+                    // a string, on the last line, to print it.
+                    ReadOnlySpan<byte> bytes = name.GetUtf8(row);
                     Console.WriteLine(
                         $"    {Encoding.UTF8.GetString(bytes),-18} {bytes.Length,2} bytes  "
                         + $"supplier={supplier.GetString(row)}");

@@ -439,7 +439,7 @@ Arrow buffer: nothing is transcoded on the way in and nothing is decoded on the 
 ```csharp
 public sealed record Product(int ProductId, string SupplierId, Utf8String ProductName, decimal UnitPrice);
 
-ReadOnlySpan<byte> bytes = name.GetUtf8(row).AsSpan();   // over the batch's own buffer: no copy, no decode
+ReadOnlySpan<byte> bytes = name.GetUtf8(row);            // over the batch's own buffer: no copy, no decode
 Console.WriteLine(Encoding.UTF8.GetString(bytes));       // the host deciding to make a string, to print it
 ```
 

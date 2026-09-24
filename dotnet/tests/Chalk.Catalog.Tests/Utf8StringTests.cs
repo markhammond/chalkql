@@ -102,7 +102,7 @@ public sealed class Utf8StringTests
 
         var byCompareTo = words.OrderBy(Utf8String.FromString, Comparer<Utf8String>.Default).ToArray();
         var byArrowBytes = Enumerable.Range(0, array.Length)
-            .OrderBy(i => array.GetUtf8(i), Comparer<Utf8String>.Default)
+            .OrderBy(i => Utf8String.Copy(array.GetBytes(i)), Comparer<Utf8String>.Default)
             .Select(i => array.GetString(i))
             .ToArray();
 
@@ -127,11 +127,12 @@ public sealed class Utf8StringTests
         builder.Append(string.Empty);
         using var array = builder.Build();
 
-        Assert.Equal(Utf8String.FromString("café"), array.GetUtf8(0));
-        Assert.Equal("café", array.GetUtf8(0).ToString());
-        Assert.True(array.GetUtf8(1).IsEmpty);
-        Assert.True(array.GetUtf8(2).IsEmpty);
-        Assert.Throws<ArgumentNullException>(() => ((StringArray)null!).GetUtf8(0));
+        // A batch hands out bytes, never a borrowed Utf8String: the span is read in place, and a
+        // value to keep is copied out of it.
+        Assert.Equal(Utf8String.FromString("café"), Utf8String.Copy(array.GetBytes(0)));
+        Assert.Equal("café", Encoding.UTF8.GetString(array.GetBytes(0)));
+        Assert.True(array.GetBytes(1).IsEmpty);
+        Assert.True(array.GetBytes(2).IsEmpty);
     }
 
     /// <summary>

@@ -1,6 +1,7 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Running;
+using Chalk.Arrow;
 using Chalk.Client;
 using Chalk.Execution;
 using Chalk.Sources;
@@ -1340,6 +1341,9 @@ internal static class Program
         passed &= await Utf8PerBatchAsync(
             engine, arena, "Tier 1 byte_length(Utf8String) -> I64",
             "SELECT byte_length(symbol) AS n FROM utf8_quotes WHERE price > 10").ConfigureAwait(false);
+        passed &= await Utf8HostReadAsync(
+            engine, "host reads symbol as ReadOnlySpan<byte> and looks it up in a string-keyed dictionary",
+            "SELECT symbol FROM utf8_quotes WHERE price > 10").ConfigureAwait(false);
 
         Console.WriteLine($"arena outstanding after the runs: {arena.OutstandingBytes} bytes");
         return passed;
@@ -1380,6 +1384,59 @@ internal static class Program
             + $"either way = {perRow:F4} bytes/row "
             + (pass ? "PASS (<= 0.01)" : "FAIL (<= 0.01)"));
         return pass;
+    }
+
+    /// <summary>
+    /// The consumption gate: the host's own loop over a result, reading every STRING cell as a
+    /// <c>ReadOnlySpan&lt;byte&gt;</c> through <c>GetUtf8</c> and looking it up in a dictionary
+    /// keyed by <c>string</c> through <c>Utf8StringComparer.ForString</c>, allocates nothing. Only
+    /// the loop is inside the window — each batch has arrived before it opens — so what is measured
+    /// is the host's reading, not the engine's producing.
+    /// </summary>
+    private static async Task<bool> Utf8HostReadAsync(ChalkEngine engine, string what, string sql)
+    {
+        var weights = new Dictionary<string, int>(Utf8StringComparer.ForString);
+        for (var i = 0; i < Utf8Fixture.Bases.Count; i++)
+        {
+            weights[Utf8Fixture.Bases[i] + "USDT"] = i;
+        }
+
+        var query = await engine.PrepareAsync(sql).ConfigureAwait(false);
+        await ReadAsync(engine, query, weights).ConfigureAwait(false);
+        var (rows, found, bytes) = await ReadAsync(engine, query, weights).ConfigureAwait(false);
+
+        var pass = bytes == 0 && found == rows && rows > 0;
+        Console.WriteLine(
+            $"{what}: {bytes} bytes over {rows} rows, {found} found "
+            + (pass ? "PASS (0 bytes)" : "FAIL (0 bytes)"));
+        return pass;
+
+        static async Task<(long Rows, long Found, long Bytes)> ReadAsync(
+            ChalkEngine engine, PreparedQuery query, Dictionary<string, int> weights)
+        {
+            var lookup = weights.GetAlternateLookup<ReadOnlySpan<byte>>();
+            long rows = 0, found = 0, bytes = 0;
+            await using var execution = await engine.ExecuteAsync(query).ConfigureAwait(false);
+            await foreach (var batch in execution.Batches.ConfigureAwait(false))
+            {
+                var symbols = batch.Column(0);
+                var before = GC.GetAllocatedBytesForCurrentThread();
+                for (var row = 0; row < batch.Length; row++)
+                {
+                    if (lookup.TryGetValue(symbols.GetUtf8(row), out _))
+                    {
+                        found++;
+                    }
+
+                    rows++;
+                }
+
+                bytes += GC.GetAllocatedBytesForCurrentThread() - before;
+                batch.Dispose();
+            }
+
+            return (rows, found, bytes);
+        }
     }
 
     /// <summary>Bytes per batch over the same rows, which is the Tier 1 gate of §4.</summary>

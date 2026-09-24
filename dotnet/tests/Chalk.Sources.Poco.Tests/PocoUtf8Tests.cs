@@ -1,3 +1,4 @@
+using System.Text;
 using Apache.Arrow;
 using Chalk.Catalog;
 using Chalk.Ir;
@@ -101,9 +102,9 @@ public sealed class PocoUtf8Tests
                 var label = (StringArray)batch.Column(1);
                 for (var i = 0; i < batch.Length; i++)
                 {
-                    // Read as bytes rather than as a string: GetUtf8 is what a host now has.
-                    symbols.Add(symbol.GetUtf8(i).ToString());
-                    labels.Add(label.IsNull(i) ? null : label.GetUtf8(i).ToString());
+                    // Read as bytes rather than through a string: the span is what a host reads.
+                    symbols.Add(Encoding.UTF8.GetString(symbol.GetBytes(i)));
+                    labels.Add(label.IsNull(i) ? null : Encoding.UTF8.GetString(label.GetBytes(i)));
                 }
             }
 
@@ -377,7 +378,7 @@ public sealed class PocoUtf8Tests
             var symbol = (StringArray)batch.Column(0);
             for (var i = 0; i < batch.Length; i++)
             {
-                found.Add(symbol.GetUtf8(i).ToString());
+                found.Add(Encoding.UTF8.GetString(symbol.GetBytes(i)));
             }
 
             batch.Dispose();

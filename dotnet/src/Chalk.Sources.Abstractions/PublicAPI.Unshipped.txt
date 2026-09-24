@@ -1,5 +1,4 @@
 #nullable enable
-Chalk.ArrowUtf8Extensions
 Chalk.Sources.Accumulate<TState, TIn>
 Chalk.Sources.AdaptiveBranch
 Chalk.Sources.AdaptiveBranch.Local = 1 -> Chalk.Sources.AdaptiveBranch
@@ -421,8 +420,6 @@ override Chalk.Sources.SourceFetchStats.ToString() -> string!
 override Chalk.Utf8String.Equals(object? obj) -> bool
 override Chalk.Utf8String.GetHashCode() -> int
 override Chalk.Utf8String.ToString() -> string!
-static Chalk.ArrowUtf8Extensions.GetUtf8(this Apache.Arrow.StringArray! array, int index) -> Chalk.Utf8String
-static Chalk.ArrowUtf8Extensions.GetUtf8(this Apache.Arrow.StringViewArray! array, int index) -> Chalk.Utf8String
 static Chalk.Sources.ArrowTypeMapping.AreEquivalent(Apache.Arrow.Field! left, Apache.Arrow.Field! right) -> bool
 static Chalk.Sources.ArrowTypeMapping.AreEquivalent(Apache.Arrow.Schema! left, Apache.Arrow.Schema! right) -> bool
 static Chalk.Sources.ArrowTypeMapping.AreEquivalent(Apache.Arrow.Types.IArrowType! left, Apache.Arrow.Types.IArrowType! right) -> bool
@@ -488,3 +485,26 @@ static Chalk.Utf8StringExtensions.TryGetUtf8String(System.ReadOnlyMemory<byte> v
 static Chalk.Utf8StringExtensions.TryGetUtf8String(System.ReadOnlySpan<byte> value, out Chalk.Utf8String text) -> bool
 static Chalk.Utf8StringExtensions.TryGetUtf8String(byte[]? value, out Chalk.Utf8String text) -> bool
 virtual Chalk.Sources.Accumulate<TState, TIn>.Invoke(ref TState state, TIn value) -> void
+Chalk.Utf8StringComparer
+Chalk.Utf8StringComparer.Compare(Chalk.Utf8String x, Chalk.Utf8String y) -> int
+Chalk.Utf8StringComparer.Create(System.ReadOnlySpan<byte> alternate) -> Chalk.Utf8String
+Chalk.Utf8StringComparer.Create(string! alternate) -> Chalk.Utf8String
+Chalk.Utf8StringComparer.Equals(Chalk.Utf8String x, Chalk.Utf8String y) -> bool
+Chalk.Utf8StringComparer.Equals(System.ReadOnlySpan<byte> alternate, Chalk.Utf8String other) -> bool
+Chalk.Utf8StringComparer.Equals(string! alternate, Chalk.Utf8String other) -> bool
+Chalk.Utf8StringComparer.GetHashCode(Chalk.Utf8String obj) -> int
+Chalk.Utf8StringComparer.GetHashCode(System.ReadOnlySpan<byte> alternate) -> int
+Chalk.Utf8StringComparer.GetHashCode(string! alternate) -> int
+Chalk.Utf8StringComparer.StringKeyComparer
+Chalk.Utf8StringComparer.StringKeyComparer.Create(Chalk.Utf8String alternate) -> string!
+Chalk.Utf8StringComparer.StringKeyComparer.Create(System.ReadOnlySpan<byte> alternate) -> string!
+Chalk.Utf8StringComparer.StringKeyComparer.Equals(Chalk.Utf8String alternate, string! other) -> bool
+Chalk.Utf8StringComparer.StringKeyComparer.Equals(System.ReadOnlySpan<byte> alternate, string! other) -> bool
+Chalk.Utf8StringComparer.StringKeyComparer.Equals(string? x, string? y) -> bool
+Chalk.Utf8StringComparer.StringKeyComparer.GetHashCode(Chalk.Utf8String alternate) -> int
+Chalk.Utf8StringComparer.StringKeyComparer.GetHashCode(System.ReadOnlySpan<byte> alternate) -> int
+Chalk.Utf8StringComparer.StringKeyComparer.GetHashCode(string! obj) -> int
+static Chalk.Utf8StringComparer.ForString.get -> Chalk.Utf8StringComparer.StringKeyComparer!
+static Chalk.Utf8StringComparer.Ordinal.get -> Chalk.Utf8StringComparer!
+static Chalk.Utf8StringExtensions.TextEquals(this System.ReadOnlySpan<byte> utf8, string? text) -> bool
+static Chalk.Utf8StringExtensions.Utf8Hash(this System.ReadOnlySpan<byte> utf8) -> int

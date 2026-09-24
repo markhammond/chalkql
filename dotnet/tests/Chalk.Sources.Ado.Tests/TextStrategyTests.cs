@@ -222,7 +222,7 @@ public sealed class TextStrategyTests
                 var first = (StringArray)batch.Column(0);
                 for (var i = 0; i < batch.Length; i++)
                 {
-                    joined.Add(first.GetUtf8(i).ToString());
+                    joined.Add(Encoding.UTF8.GetString(first.GetBytes(i)));
                 }
             }
         }
@@ -252,7 +252,7 @@ public sealed class TextStrategyTests
                 var column = (StringArray)batch.Column(0);
                 for (var i = 0; i < batch.Length; i++)
                 {
-                    values.Add(column.IsNull(i) ? null : column.GetUtf8(i).ToString());
+                    values.Add(column.IsNull(i) ? null : Encoding.UTF8.GetString(column.GetBytes(i)));
                 }
             }
         }

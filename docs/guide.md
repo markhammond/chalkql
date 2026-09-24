@@ -687,13 +687,20 @@ is the same order as Chalk's binary collation and as Arrow's:
 ```csharp
 public sealed record Symbol(Utf8String Ticker, Utf8String? Label, long Rank);
 
-// Reading a result without decoding anything you did not ask to decode.
+// Reading a result without decoding anything you did not ask to decode. The convention is the
+// span: GetUtf8 gives one cell as a ReadOnlySpan<byte> over the batch's own buffer, whichever
+// layout the column arrived in, and the compiler keeps it inside the batch's lifetime.
+var watched = new Dictionary<string, double>(Utf8StringComparer.ForString) { ["BTCUSDT"] = 0.4 };
+var byBytes = watched.GetAlternateLookup<ReadOnlySpan<byte>>();
+
 await foreach (var batch in engine.QueryAsync("SELECT ticker FROM symbols"))
 {
-    var column = (StringViewArray)batch.Column(0);   // utf8view by default
+    var column = batch.Column(0);
     for (var i = 0; i < batch.Length; i++)
     {
-        ReadOnlySpan<byte> bytes = column.GetUtf8(i).Span;   // no string
+        ReadOnlySpan<byte> ticker = column.GetUtf8(i);            // no copy, no string
+        if (byBytes.TryGetValue(ticker, out var weight)) { … }   // a string-keyed dictionary, asked in bytes
+        if (ticker.TextEquals("ETHUSDT")) { … }                  // compared with a string, without making one
     }
 }
 ```
@@ -709,17 +716,30 @@ still costs what it always did:
 - **A Tier 1 user function** may take and return `Utf8String`, in which case a
   lane is lent to it without a copy and its answer is copied straight into the
   result column.
-- **Reading a result**: `GetUtf8(int)` on Arrow's `StringViewArray` — the layout a
-  STRING column arrives in by default — or on its `StringArray` where
-  the host asked for the classic layout with
-  `ChalkEngineOptions.Output.Strings`, and `ColumnView.Utf8(row)` inside a
-  Tier 2 kernel.
+- **Reading a result**: `GetUtf8(int)` on any Arrow string array — the view
+  layout a STRING column arrives in by default, the classic one the host asks
+  for with `ChalkEngineOptions.Output.Strings`, or the large one a batch of the
+  host's own may carry — gives the cell as a `ReadOnlySpan<byte>`;
+  `TryGetUtf8` says whether it was NULL. A batch never hands out a borrowed
+  `Utf8String`: the span cannot outlive the batch, and `ToUtf8String()` on it
+  copies, for a value to keep. Inside a Tier 2 kernel it is `ColumnView.Utf8(row)`.
+- **Looking a result up**: `Utf8StringComparer.ForString` for a dictionary keyed
+  by `string` and `Utf8StringComparer.Ordinal` for one keyed by `Utf8String`
+  implement .NET's alternate-key contracts, so the collection's
+  `GetAlternateLookup<ReadOnlySpan<byte>>()` answers a batch's bytes with no
+  string made and nothing allocated. A `string` key costs a transcode on every
+  insert and lookup by `string`, which is the price of meeting bytes; a lookup
+  by bytes costs nothing. `TextEquals` compares a span with a `string` the same
+  way, and `Utf8Hash` is the hash every spelling shares.
 
-**The lifetime rule.** A `Utf8String` handed out of a batch or a lane points
-into that batch's buffers and is valid until the batch is disposed or the arena
-reuses it — exactly the rule a `ColumnView` has. Keep one past its batch by
-calling `ToArray()` or `ToString()`. A `Utf8String` you construct yourself is
-your own memory and outlives everything.
+**The lifetime rule.** A span from `GetUtf8` cannot outlive its batch: the
+compiler refuses to store or capture it, which is why a batch hands out bytes
+and never a borrowed `Utf8String` — a value that could be kept past the
+buffer it points into, and read again after the arena had reused it. The one
+borrowed `Utf8String` is the lane lent to a Tier 1 delegate, valid for that
+call — exactly the rule a `ColumnView` has — and a delegate that keeps it calls
+`ToArray()` or `ToString()`. A `Utf8String` you construct yourself, or copy
+out of a span with `ToUtf8String()`, is your own memory and outlives everything.
 
 `ToString()` is the one place a .NET string is made, and you are the one who
 calls it. Two things it is deliberately not: it is not culture-aware — casing,

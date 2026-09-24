@@ -31,6 +31,23 @@ public static class RecordBatchExtensions
                    array.Offset + index);
     }
 
+    /// <summary>
+    /// One cell of a STRING column as the bytes themselves: a <see cref="ReadOnlySpan{T}"/> over the
+    /// batch's own buffer, whichever layout the column arrived in — the view layout a STRING column
+    /// has by default, the classic one a host asks for, or the large one a host's own batch may
+    /// carry. No copy and no decode. This is the convention for reading text out of a batch.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The span is valid until the batch is disposed, and the compiler keeps it there: a span cannot
+    /// be stored in a field or captured, so nothing read this way can outlive its batch by accident.
+    /// To keep a value, copy it — <c>ToUtf8String()</c> for a <see cref="Utf8String"/> of its own,
+    /// <c>Encoding.UTF8.GetString</c> or <see cref="GetUtf8String"/> for a <see cref="string"/>. To
+    /// compare it with a <see cref="string"/> without making one, <c>TextEquals</c>; to look it up in
+    /// a dictionary, <see cref="Utf8StringComparer"/> and the collection's alternate lookup.
+    /// </para>
+    /// <para>A NULL cell reads as the empty span; <see cref="TryGetUtf8"/> tells the two apart.</para>
+    /// </remarks>
     public static ReadOnlySpan<byte> GetUtf8(
         this IArrowArray array,
         int index)
@@ -45,6 +62,9 @@ public static class RecordBatchExtensions
             StringViewArray strings =>
                 strings.GetBytes(index),
 
+            LargeStringArray strings =>
+                strings.GetBytes(index),
+
             _ =>
                 throw new ArgumentException(
                     $"Expected Arrow UTF-8 array, got "
@@ -53,6 +73,43 @@ public static class RecordBatchExtensions
         };
     }
 
+    /// <summary>
+    /// <see cref="GetUtf8(IArrowArray, int)"/> that says whether the cell was NULL: false, and the
+    /// empty span, for a NULL; true and the bytes otherwise.
+    /// </summary>
+    public static bool TryGetUtf8(
+        this IArrowArray array,
+        int index,
+        out ReadOnlySpan<byte> utf8)
+    {
+        if (array.IsNullAt(index))
+        {
+            utf8 = default;
+            return false;
+        }
+
+        utf8 = array.GetUtf8(index);
+        return true;
+    }
+
+    /// <summary>
+    /// <see cref="GetUtf8(IArrowArray, int)"/> addressed by column and row, for the host reading a
+    /// batch it did not take apart first.
+    /// </summary>
+    public static ReadOnlySpan<byte> GetUtf8(
+        this RecordBatch batch,
+        int column,
+        int row)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+
+        return batch.Column(column).GetUtf8(row);
+    }
+
+    /// <summary>
+    /// One cell decoded into a <see cref="string"/>, or null for a NULL cell: the one place a string
+    /// is made, and the host is the one who asked. For reading without one, <see cref="GetUtf8(IArrowArray, int)"/>.
+    /// </summary>
     public static string? GetUtf8String(
         this IArrowArray array,
         int index)
