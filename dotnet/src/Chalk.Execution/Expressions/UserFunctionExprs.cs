@@ -23,13 +23,10 @@ namespace Chalk.Execution.Expressions;
 /// that answers on a NULL lane cannot make one appear.
 /// </para>
 /// <para>
-/// A node the compiler <em>shares</em> (D293) — one call of an <c>IMMUTABLE</c> or <c>STABLE</c>
-/// function that several expressions of one operator name — answers once per batch: it remembers
-/// the batch it last answered, by the context's batch sequence, and hands the same vector to every
-/// expression that asks within it. The batch is a sufficient key because an operator evaluates all
-/// of its expressions under the batch's one selection: no expression narrows the context for a
-/// sub-expression (a CASE evaluates every branch over the whole batch). One that did would have to
-/// make the selection part of the key. A <c>VOLATILE</c> call is never shared.
+/// A call of an <c>IMMUTABLE</c> or <c>STABLE</c> function that several expressions of one operator
+/// name is compiled once and answers once per batch (D293); the compiler does that for every
+/// non-trivial subtree now, through <see cref="SharedExpr"/> (D299). A <c>VOLATILE</c> call is never
+/// shared, nor is any subtree that holds one.
 /// </para>
 /// </remarks>
 internal sealed class UserScalarExpr : VectorExprBase
@@ -43,17 +40,6 @@ internal sealed class UserScalarExpr : VectorExprBase
     private readonly VectorScratch?[] _broadcast;
     private readonly VectorScratch? _stableScratch;
     private int _stableGeneration = -1;
-
-    /// <summary>Whether the compiler hands this node to more than one expression (D293).</summary>
-    private bool _shared;
-
-    /// <summary>
-    /// The execution and batch the shared node last answered, and what it answered. The execution
-    /// too, so that a context no operator ever pointed at a batch cannot carry an answer over.
-    /// </summary>
-    private long _answeredBatch = -1;
-    private int _answeredGeneration = -1;
-    private Vector _answer;
 
     public UserScalarExpr(
         ChalkType type,
@@ -73,33 +59,12 @@ internal sealed class UserScalarExpr : VectorExprBase
         _stableScratch = _stable && _constant ? new VectorScratch(type) : null;
     }
 
-    /// <summary>
-    /// Marks this node as answering for more than one expression of its operator (D293). Only the
-    /// compiler calls it, and only for a call whose function is not <c>VOLATILE</c>.
-    /// </summary>
-    public void Share() => _shared = true;
-
     public override Vector Evaluate(EvalContext context)
     {
-        if (_shared
-            && _answeredBatch == context.BatchSequence
-            && _answeredGeneration == context.Generation)
-        {
-            return _answer;
-        }
-
         var length = context.Length;
-        var answer = _stableScratch is not null
+        return _stableScratch is not null
             ? Broadcast(context, length)
             : Run(context, length, Scratch);
-        if (_shared)
-        {
-            _answeredBatch = context.BatchSequence;
-            _answeredGeneration = context.Generation;
-            _answer = answer;
-        }
-
-        return answer;
     }
 
     /// <summary>Evaluates the kernel over <paramref name="length"/> lanes into <paramref name="into"/>.</summary>

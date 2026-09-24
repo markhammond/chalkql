@@ -22,13 +22,20 @@ internal sealed class ExpressionCompiler
     private readonly IReadOnlyDictionary<string, int> _boundSlots;
 
     /// <summary>
-    /// The user calls this compiler has already compiled, by the <c>Expr</c> message that names them
-    /// (D293): a second occurrence of an <c>IMMUTABLE</c> or <c>STABLE</c> call compiles to the same
-    /// node, which answers once per batch. One compiler per operator, so this is the operator's
-    /// expression list and no wider. Messages compare structurally, which is what makes two spellings
-    /// of the same call one key.
+    /// The non-trivial subtrees this compiler has compiled, by the <c>Expr</c> message that spells
+    /// them (D293, D299): a second occurrence of a built-in call, a cast, a <c>CASE</c>, an
+    /// <c>IN</c>, a field access or a user call compiles to the same node, which from then on answers
+    /// once per batch. One compiler per operator, so this is the operator's expression list and no
+    /// wider. Messages compare structurally, which is what makes two spellings of one subtree one key;
+    /// a subtree holding a <c>VOLATILE</c> call is never entered.
     /// </summary>
-    private readonly Dictionary<Expr, UserScalarExpr> _shared = [];
+    private readonly Dictionary<Expr, SharedExpr> _memo = [];
+
+    /// <summary>Whether each user function this compiler has met is <c>VOLATILE</c>, by name.</summary>
+    private readonly Dictionary<string, bool> _volatile = new(StringComparer.Ordinal);
+
+    /// <summary>Where this operator's sharing is counted, for tests; null when nothing counts it.</summary>
+    private readonly SharingTally? _tally;
 
     /// <summary>A compiler for a plan that cannot name a user function — every test before step 22.</summary>
     public ExpressionCompiler()
@@ -40,15 +47,138 @@ internal sealed class ExpressionCompiler
     public ExpressionCompiler(
         CatalogContext? catalog,
         HostFunctionSet functions,
-        IReadOnlyDictionary<string, int>? boundSlots = null)
+        IReadOnlyDictionary<string, int>? boundSlots = null,
+        SharingTally? tally = null)
     {
         _catalog = catalog;
         _functions = functions;
         _boundSlots = boundSlots ?? BoundSlots.None;
+        _tally = tally;
     }
 
-    /// <summary>Compiles one expression. Every "unsupported" surfaces from here (§6.8).</summary>
+    /// <summary>Distinct nodes this compiler has handed to more than one occurrence (D299).</summary>
+    public int SharedNodes { get; private set; }
+
+    /// <summary>
+    /// Compiles one expression. Every "unsupported" surfaces from here (§6.8). A non-trivial subtree
+    /// this compiler has met before is the node it compiled then (D299).
+    /// </summary>
     public IVectorExpr Compile(Expr expr)
+    {
+        if (!Memoisable(expr))
+        {
+            return CompileNode(expr);
+        }
+
+        if (_memo.TryGetValue(expr, out var known))
+        {
+            if (!known.IsShared)
+            {
+                known.Share();
+                SharedNodes++;
+                _tally?.Observe(SharedNodes);
+            }
+
+            return known;
+        }
+
+        var node = CompileNode(expr);
+
+        // A VOLATILE call answers per lane per occurrence and is never de-duplicated (D79), and a
+        // subtree holding one would de-duplicate it (D299).
+        if (ContainsVolatile(expr))
+        {
+            return node;
+        }
+
+        var shared = new SharedExpr(node, _tally);
+        _memo[expr] = shared;
+        return shared;
+    }
+
+    /// <summary>
+    /// Whether a subtree is worth a memo entry: an expression that computes something. A field
+    /// reference, a literal or a parameter is already a view or a constant, and sharing one would
+    /// cost more than it saves (D299).
+    /// </summary>
+    private static bool Memoisable(Expr expr) => expr.KindCase is Expr.KindOneofCase.Call
+        or Expr.KindOneofCase.Cast
+        or Expr.KindOneofCase.IfThen
+        or Expr.KindOneofCase.InList
+        or Expr.KindOneofCase.FieldAccess;
+
+    /// <summary>Whether <paramref name="expr"/> calls a <c>VOLATILE</c> user function anywhere in it.</summary>
+    private bool ContainsVolatile(Expr expr)
+    {
+        switch (expr.KindCase)
+        {
+            case Expr.KindOneofCase.Call:
+                if (expr.Call.UserFunction.Length > 0 && IsVolatile(expr.Call.UserFunction))
+                {
+                    return true;
+                }
+
+                foreach (var arg in expr.Call.Args)
+                {
+                    if (ContainsVolatile(arg))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            case Expr.KindOneofCase.Cast:
+                return ContainsVolatile(expr.Cast.Input);
+            case Expr.KindOneofCase.IfThen:
+                foreach (var clause in expr.IfThen.Clauses)
+                {
+                    if (ContainsVolatile(clause.Condition) || ContainsVolatile(clause.Result))
+                    {
+                        return true;
+                    }
+                }
+
+                return ContainsVolatile(expr.IfThen.ElseBranch);
+            case Expr.KindOneofCase.InList:
+                if (ContainsVolatile(expr.InList.Value))
+                {
+                    return true;
+                }
+
+                foreach (var option in expr.InList.Options)
+                {
+                    if (ContainsVolatile(option))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            case Expr.KindOneofCase.FieldAccess:
+                return ContainsVolatile(expr.FieldAccess.Input);
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>Whether the user function <paramref name="name"/> is declared <c>VOLATILE</c>.</summary>
+    private bool IsVolatile(string name)
+    {
+        if (_volatile.TryGetValue(name, out var known))
+        {
+            return known;
+        }
+
+        // Resolved as the call itself resolves it, which has already happened by the time a subtree
+        // holding the call is asked about: a name the catalog does not declare never gets this far.
+        var answer = _catalog is not null
+            && UserFunctionBinding.Resolve(_catalog, name).Volatility == Volatility.Volatile;
+        _volatile[name] = answer;
+        return answer;
+    }
+
+    /// <summary>Compiles one node, its children through <see cref="Compile"/>.</summary>
+    private IVectorExpr CompileNode(Expr expr)
     {
         var type = expr.KindCase == Expr.KindOneofCase.EnumArg
             ? default
@@ -86,12 +216,6 @@ internal sealed class ExpressionCompiler
     /// </summary>
     private IVectorExpr UserCall(Expr expr, ChalkType type)
     {
-        if (_shared.TryGetValue(expr, out var shared))
-        {
-            shared.Share();
-            return shared;
-        }
-
         var name = expr.Call.UserFunction;
         if (_catalog is null)
         {
@@ -111,20 +235,14 @@ internal sealed class ExpressionCompiler
             args[i] = Compile(expr.Call.Args[i]);
         }
 
-        var node = new UserScalarExpr(
+        // Shared, when an IMMUTABLE or STABLE call is named twice, by Compile's memo like any other
+        // subtree (D293, D299).
+        return new UserScalarExpr(
             type,
             UserFunctionBinding.ScalarKernel(descriptor, host!),
             args,
             descriptor.Strict,
             descriptor.Volatility);
-
-        // A VOLATILE call answers per lane per occurrence and is never de-duplicated (D79, D293).
-        if (descriptor.Volatility != Volatility.Volatile)
-        {
-            _shared[expr] = node;
-        }
-
-        return node;
     }
 
     private IVectorExpr IfThen(Expr expr, ChalkType type)

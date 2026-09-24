@@ -54,6 +54,14 @@ internal sealed class CompiledPlan
     private readonly ChalkType[] _boundTypes;
 
     /// <summary>
+    /// How each expression-evaluating operator's subtrees were shared (D299), by operator path — for
+    /// tests, which read how many nodes an operator shares and how often they ran. Empty for a plan
+    /// that evaluates no expression.
+    /// </summary>
+    internal IReadOnlyDictionary<string, Expressions.SharingTally> Sharing { get; init; } =
+        new Dictionary<string, Expressions.SharingTally>();
+
+    /// <summary>
     /// The context scalars this plan reads at execution, in slot order after
     /// <see cref="ParameterTypes"/> Empty under prepare-time binding.
     /// </summary>
@@ -227,7 +235,10 @@ internal sealed class CompiledPlan
 
         return new CompiledPlan(
             Plan, outputSchema, ParameterTypes, BoundScalars, _outputTypes, _root, _catalog, _sources,
-            _settings);
+            _settings)
+        {
+            Sharing = Sharing,
+        };
     }
 
     /// <summary>
@@ -254,7 +265,10 @@ internal sealed class CompiledPlan
             TimeProvider = _settings.TimeProvider,
             ValidateBatchLifetimes = _settings.ValidateBatchLifetimes,
             SelectionCompactionThreshold = _settings.SelectionCompactionThreshold,
-        });
+        })
+    {
+        Sharing = Sharing,
+    };
 
     /// <summary>Builds the immutable half of an execution context.</summary>
     internal OperatorContext NewContext() => new()

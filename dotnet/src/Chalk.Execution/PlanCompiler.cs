@@ -136,7 +136,10 @@ internal static class PlanCompiler
             root,
             catalog,
             sourcesBySourceId,
-            settings);
+            settings)
+        {
+            Sharing = compilation.Tallies,
+        };
 
         // Build the tree once and discard, so that a missing kernel, an unbindable source or an
         // unsupported aggregate throws here. Every unsupported surfaces at PrepareAsync, never mid-stream.
@@ -194,7 +197,18 @@ internal static class PlanCompiler
         /// The expression compiler for this plan. It carries the catalog and the host's
         /// registrations, because a client-bodied call names a function rather than an id (D78).
         /// </summary>
-        private ExpressionCompiler Expressions() => new(_catalog, _functions, _boundSlots);
+        private ExpressionCompiler Expressions(string path) =>
+            new(_catalog, _functions, _boundSlots, _tallies.GetOrAdd(path, static _ => new SharingTally()));
+
+        /// <summary>
+        /// Each expression-evaluating operator's sharing (D299), by operator path, for tests. Every
+        /// tally is made while the plan compiles; an execution's compilers only look theirs up.
+        /// </summary>
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SharingTally> _tallies =
+            new(StringComparer.Ordinal);
+
+        /// <summary>What <see cref="_tallies"/> holds, for the compiled plan to expose.</summary>
+        public IReadOnlyDictionary<string, SharingTally> Tallies => _tallies;
 
         /// <summary>
         /// The buffer a <c>MaterialisedInput</c> in the subtree being compiled replays (D97). Set
@@ -800,7 +814,7 @@ internal static class PlanCompiler
             var types = Types(rel.RowType);
             var condition = rel.Filter.Condition;
             return context => new FilterOperator(
-                context, path, schema, types, input(context), Expressions().Compile(condition));
+                context, path, schema, types, input(context), Expressions(path).Compile(condition));
         }
 
         public OperatorFactory Project(Rel rel, string path)
@@ -811,7 +825,7 @@ internal static class PlanCompiler
             var types = Types(rel.RowType);
             return context =>
             {
-                var compiler = Expressions();
+                var compiler = Expressions(path);
                 return new ProjectOperator(
                     context, path, schema, types, input(context), [.. exprs.Select(compiler.Compile)]);
             };
@@ -930,7 +944,7 @@ internal static class PlanCompiler
                 shape.Left(context),
                 shape.Right(context),
                 join.Type,
-                residual is null ? null : Expressions().Compile(residual),
+                residual is null ? null : Expressions(path).Compile(residual),
                 leftKeys,
                 rightKeys,
                 shape.RightRows);
@@ -957,7 +971,7 @@ internal static class PlanCompiler
                 shape.Left(context),
                 shape.Right(context),
                 join.Type,
-                residual is null ? null : Expressions().Compile(residual),
+                residual is null ? null : Expressions(path).Compile(residual),
                 leftKeys,
                 rightKeys,
                 order,
@@ -979,7 +993,7 @@ internal static class PlanCompiler
                 shape.Left(context),
                 shape.Right(context),
                 join.Type,
-                condition is null ? null : Expressions().Compile(condition),
+                condition is null ? null : Expressions(path).Compile(condition),
                 shape.RightRows);
         }
 
@@ -1298,7 +1312,7 @@ internal static class PlanCompiler
             var declaredDistinct = DeclaredDistinct(aggregate, keys);
             return context =>
             {
-                var compiler = Expressions();
+                var compiler = Expressions(path);
                 var keyExprs = keys
                     .Select(k => compiler.Compile(IrBuilders.FieldRef(k, inputRow.Fields[k].Type)))
                     .ToArray();
