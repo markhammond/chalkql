@@ -397,7 +397,7 @@ public static class PlanExtensions
                     .Append('>');
                 break;
             case Expr.KindOneofCase.KeySetMatch:
-                // `(a, b) IN <key set 0>` — the composite twin of an InList over a KeySetParam
+                // `(a, b) IN <key set 0>` — the row-valued twin of an InList over a KeySetParam
                 // (F50), printed the way the generated SQL spells it.
                 sb.Append('(');
                 for (var i = 0; i < expr.KeySetMatch.Columns.Count; i++)

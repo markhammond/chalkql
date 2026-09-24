@@ -55,7 +55,7 @@ internal sealed class MergeJoinOperator : PairJoinOperator
     {
         _leftKeys = [.. leftKeys];
         _rightKeys = [.. rightKeys];
-        _keys = new JoinKeys([.. leftKeys.Select(k => leftTypes[k])]);
+        _keys = JoinKeys.Bind(leftTypes, leftKeys, rightTypes, rightKeys);
         _order = order;
         _rightKeyVectors = new Vector[rightKeys.Count];
         _leftKeyVectors = new Vector[leftKeys.Count];

@@ -41,7 +41,7 @@ internal sealed class HashJoinOperator : PairJoinOperator
     {
         _leftKeys = [.. leftKeys];
         _rightKeys = [.. rightKeys];
-        _keys = new JoinKeys([.. leftKeys.Select(k => leftTypes[k])]);
+        _keys = JoinKeys.Bind(leftTypes, leftKeys, rightTypes, rightKeys);
         _table = new JoinHashTable(_keys);
         _probeKeys = new Vector[leftKeys.Count];
         _buildKeys = new Vector[rightKeys.Count];

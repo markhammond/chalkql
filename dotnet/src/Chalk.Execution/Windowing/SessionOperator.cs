@@ -52,6 +52,12 @@ internal sealed class SessionOperator : OperatorBase
         ScalarValue gap)
         : base(context, schema, outputTypes, path)
     {
+        // D297: the partition keys are compared to find where one partition ends.
+        foreach (var key in partitionKeys)
+        {
+            ColumnKinds.RequireComparable(inputTypes[key], "a session partition key");
+        }
+
         _input = input;
         _partitionKeys = [.. partitionKeys];
         _timeColumn = timeColumn;

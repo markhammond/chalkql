@@ -115,6 +115,15 @@ internal sealed class HashSetOperator : OperatorBase
         double estimatedRows = 0)
         : base(context, schema, columnTypes, path)
     {
+        // D297: every form but UNION ALL hashes and compares whole rows, so every column is a key.
+        // A v1 LIST has no equality (D58) and neither has a composite (D291); UNION ALL, which
+        // compares nothing, is not built on this operator and carries either.
+        for (var c = 0; c < columnTypes.Count; c++)
+        {
+            ColumnKinds.RequireComparable(
+                columnTypes[c], $"the column '{schema.GetFieldByIndex(c).Name}' of a row {Named(kind)} compares");
+        }
+
         _inputs = inputs;
         _kind = kind;
         _columnTypes = [.. columnTypes];
@@ -134,6 +143,17 @@ internal sealed class HashSetOperator : OperatorBase
             await input.DisposeAsync().ConfigureAwait(false);
         }
     }
+
+    /// <summary>The set operation as SQL spells it, for a refusal.</summary>
+    private static string Named(Ir.SetOpKind kind) => kind switch
+    {
+        Ir.SetOpKind.UnionDistinct => "UNION",
+        Ir.SetOpKind.IntersectAll => "INTERSECT ALL",
+        Ir.SetOpKind.IntersectDistinct => "INTERSECT",
+        Ir.SetOpKind.ExceptAll => "EXCEPT ALL",
+        Ir.SetOpKind.ExceptDistinct => "EXCEPT",
+        _ => kind.ToString(),
+    };
 
     private bool IsUnion => _kind == Ir.SetOpKind.UnionDistinct;
 

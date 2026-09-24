@@ -24,10 +24,18 @@ internal static class WindowCompiler
                 + "(docs/design/13-window-functions.md §9, ADR 0017 V16).");
         }
 
+        // D297: the partition and order keys are bound here, for the buffered and the streaming
+        // operator alike, so the executor's own refusal of a key it cannot compare is here too.
+        foreach (var key in window.PartitionKeys)
+        {
+            ColumnKinds.RequireComparable(inputTypes[(int)key], "a window partition key");
+        }
+
         var order = new WindowOrderKey[window.Order.Count];
         for (var i = 0; i < order.Length; i++)
         {
             var field = window.Order[i];
+            ColumnKinds.RequireComparable(inputTypes[(int)field.Expr.FieldRef.Index], "a window order key");
             order[i] = new WindowOrderKey(
                 (int)field.Expr.FieldRef.Index,
                 field.Direction is SortDirection.DescNullsFirst or SortDirection.DescNullsLast,
@@ -423,8 +431,10 @@ internal static class WindowCompiler
                     "I-IR-11", path, "COUNT(DISTINCT) needs an argument");
             }
 
-            return new WindowDistinctEvaluator(
-                result, call.Aggregate, Field(call, 0, inputTypes, path));
+            // D297: the counted multiset hashes and compares the argument.
+            var distinct = Field(call, 0, inputTypes, path);
+            ColumnKinds.RequireComparable(inputTypes[distinct], "a DISTINCT window aggregate's argument");
+            return new WindowDistinctEvaluator(result, call.Aggregate, distinct);
         }
 
         switch (call.Aggregate)

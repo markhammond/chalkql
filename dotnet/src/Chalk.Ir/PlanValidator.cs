@@ -437,6 +437,17 @@ public static class PlanValidator
 
                     RequireIndex(rel.AsOfJoin.LeftTime, left, "I-IR-3", $"{kindPath}.left_time");
                     RequireIndex(rel.AsOfJoin.RightTime, right, "I-IR-3", $"{kindPath}.right_time");
+
+                    // The time columns are compared as an ordering, which neither a list nor a
+                    // composite has (I-IR-12, I-IR-23; found by the executor's backstop, D297).
+                    RefuseNonScalar(
+                        left.Fields[(int)rel.AsOfJoin.LeftTime].Type,
+                        $"{kindPath}.left_time",
+                        "an as-of join's time column");
+                    RefuseNonScalar(
+                        right.Fields[(int)rel.AsOfJoin.RightTime].Type,
+                        $"{kindPath}.right_time",
+                        "an as-of join's time column");
                     RequireSameKind(
                         left.Fields[(int)rel.AsOfJoin.LeftTime].Type,
                         right.Fields[(int)rel.AsOfJoin.RightTime].Type,

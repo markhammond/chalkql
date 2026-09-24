@@ -123,7 +123,11 @@ internal sealed class SortOrdering
                 is SortDirection.DescNullsFirst or SortDirection.DescNullsLast;
             _nullsFirst[i] = fields[i].Direction
                 is SortDirection.AscNullsFirst or SortDirection.DescNullsFirst;
-            _comparers[i] = ColumnComparer.For(ChalkType.FromProto(inputRow.Fields[column].Type));
+            var type = ChalkType.FromProto(inputRow.Fields[column].Type);
+
+            // D297: a sort or TopN key is bound here, so the executor's own refusal is here too.
+            ColumnKinds.RequireComparable(type, "a sort key");
+            _comparers[i] = ColumnComparer.For(type);
         }
     }
 

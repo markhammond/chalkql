@@ -45,7 +45,7 @@ message KeySetParam {
   uint32 slot = 1;
 }
 
-// The composite twin of `InList(column, [KeySetParam])`: the tuple `(a, b, …)` is one of the
+// The row-valued twin of `InList(column, [KeySetParam])`: the tuple `(a, b, …)` is one of the
 // key *rows* this lookup call carries. Appears in exactly the two places a single-column key set
 // does — in the pushed predicate, and as the one entry of the enclosing RemoteQuery's `parameters`
 // that marks where the key rows go — and is bound only by the executor.

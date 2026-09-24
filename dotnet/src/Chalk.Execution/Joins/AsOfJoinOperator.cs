@@ -77,8 +77,12 @@ internal sealed class AsOfJoinOperator : PairJoinOperator
         _rightTime = rightTime;
         _match = match;
         _rightPreSorted = rightPreSorted;
-        _keys = new JoinKeys([.. leftKeys.Select(k => leftTypes[k])]);
+        _keys = JoinKeys.Bind(leftTypes, leftKeys, rightTypes, rightKeys);
         _table = new JoinHashTable(_keys);
+
+        // D297: the time columns are compared as an ordering, so they are keys too.
+        ColumnKinds.RequireComparable(leftTypes[leftTime], "an as-of join's time column");
+        ColumnKinds.RequireComparable(rightTypes[rightTime], "an as-of join's time column");
         _timeKind = ColumnKinds.Of(leftTypes[leftTime]);
         _timeWidth = ColumnKinds.Width(_timeKind);
         _probeKeys = new Vector[leftKeys.Count];

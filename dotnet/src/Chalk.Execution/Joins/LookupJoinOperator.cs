@@ -119,7 +119,7 @@ internal sealed class LookupJoinOperator : OperatorBase
         _buildKey = new Vector[_drivingKeys.Length];
         _probeKey = new Vector[_lookupKeys.Length];
         _buffered = new JoinRows(drivingTypes);
-        _keys = new JoinKeys(_keyTypes);
+        _keys = JoinKeys.Bind(drivingTypes, drivingKeys, lookupTypes, lookupKeys);
         _hash = new JoinHashTable(_keys);
         _assembler = new JoinAssembler(
             outputTypes,

@@ -96,6 +96,15 @@ internal static class ColumnKinds
     /// produced, carried, projected and indexed into (D58), and a composite produced by a function,
     /// carried and taken apart by field access (D291), and neither anything else.
     /// </summary>
+    /// <remarks>
+    /// Called wherever an operator binds a key (D297): sort and <c>TopN</c> keys
+    /// (<c>SortOrdering</c>), grouping keys and a <c>DISTINCT</c> or ordered measure's operand
+    /// (<c>HashAggregateOperator</c>), hash, merge, as-of and lookup join keys (<c>JoinKeys.Bind</c>),
+    /// an adaptive join's key, a set operation's row (<c>HashSetOperator</c>), and window and session
+    /// partition and order keys and a <c>DISTINCT</c> window aggregate's argument. The IR validator
+    /// refuses every one of these first (I-IR-12, I-IR-23), so a plan that reaches the executor
+    /// validated never meets this; a plan compiled without validating does.
+    /// </remarks>
     public static void RequireComparable(ChalkType type, string what)
     {
         if (type.Kind == TypeKind.List)

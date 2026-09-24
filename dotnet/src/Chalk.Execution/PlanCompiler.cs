@@ -71,7 +71,29 @@ internal static class PlanCompiler
         CatalogContext catalog,
         IReadOnlyDictionary<string, ISourceRuntime> sourcesBySourceId,
         ExecutionSettings settings,
-        IReadOnlyDictionary<string, string>? redactedQueryText = null)
+        IReadOnlyDictionary<string, string>? redactedQueryText = null) =>
+        Compile(plan, catalog, sourcesBySourceId, settings, redactedQueryText, validate: true);
+
+    /// <summary>
+    /// The same without the IR validator, for the tests of the executor's own backstops and for
+    /// nothing else (D297). Every plan one of those backstops refuses is one the validator refuses
+    /// first, so a test can only reach the executor's refusal by not validating; a host's plan is
+    /// always validated, here and again by the client before it gets this far.
+    /// </summary>
+    internal static CompiledPlan CompileUnvalidatedForTests(
+        Plan plan,
+        CatalogContext catalog,
+        IReadOnlyDictionary<string, ISourceRuntime> sourcesBySourceId,
+        ExecutionSettings settings) =>
+        Compile(plan, catalog, sourcesBySourceId, settings, redactedQueryText: null, validate: false);
+
+    private static CompiledPlan Compile(
+        Plan plan,
+        CatalogContext catalog,
+        IReadOnlyDictionary<string, ISourceRuntime> sourcesBySourceId,
+        ExecutionSettings settings,
+        IReadOnlyDictionary<string, string>? redactedQueryText,
+        bool validate)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -83,7 +105,10 @@ internal static class PlanCompiler
                 nameof(settings), settings.BatchSize, "BatchSize must be at least one row.");
         }
 
-        PlanValidator.Validate(plan);
+        if (validate)
+        {
+            PlanValidator.Validate(plan);
+        }
 
         // The context scalars this plan reads at execution, and the slots they take after the
         // statement's own parameters (16-entitlements.md §2, D209). Empty under prepare-time binding.
@@ -473,6 +498,10 @@ internal static class PlanCompiler
         {
             var adaptive = rel.AdaptiveJoin;
             var smallTypes = Types(adaptive.Small.RowType);
+
+            // D297: the small side's distinct keys are counted by hashing this column, and both
+            // branches join on it — refused here, ahead of either branch's own join keys.
+            ColumnKinds.RequireComparable(smallTypes[(int)adaptive.Key], "an adaptive join's key");
             var materialisation = new Materialisation(smallTypes);
             var small = Node(adaptive.Small, path + "/small");
 
@@ -722,34 +751,10 @@ internal static class PlanCompiler
                     "I-IR-4", path, "the SetOp kind is unspecified");
             }
 
-            // Every form but UNION ALL compares whole rows, and a v1 LIST has no equality (D58). The
-            // planner refuses this too; the check is repeated here because the IR is the trust
-            // boundary and a plan need not have come from Chalk's own planner.
-            if (kind != SetOpKind.UnionAll)
-            {
-                for (var i = 0; i < types.Length; i++)
-                {
-                    if (types[i].Kind == TypeKind.List)
-                    {
-                        throw new UnsupportedFeatureException(
-                            $"{kind} over the LIST column '{rel.RowType.Fields[i].Name}'",
-                            "v1 lists have no ordering or equality, so a set operation that compares "
-                            + "rows cannot have one in its row (docs/design/14-windows-ii.md §5). "
-                            + "UNION ALL, which compares nothing, is allowed.");
-                    }
-
-                    // D291: the same of a composite value, which UNION ALL carries.
-                    if (types[i].Kind == TypeKind.Composite)
-                    {
-                        throw new UnsupportedFeatureException(
-                            $"{kind} over the COMPOSITE column '{rel.RowType.Fields[i].Name}'",
-                            "a composite value has no equality, so a set operation that compares rows cannot "
-                            + "have one in its row. UNION ALL, which compares nothing, carries one "
-                            + "(docs/design/51-structured-function-results.md §1).");
-                    }
-                }
-            }
-
+            // Every form but UNION ALL compares whole rows, and neither a v1 LIST (D58) nor a
+            // composite (D291) has an equality. The planner and the IR validator refuse such a row
+            // first; the executor's own refusal is where the rows are hashed, in HashSetOperator
+            // (D297), which the build below constructs at prepare.
             return context =>
             {
                 var built = new IBatchOperator[inputs.Length];
@@ -1324,6 +1329,19 @@ internal static class PlanCompiler
                     var keyExpr = measure.UserFunction.Length == 0
                         && Aggregates.IsPercentile(measure.Function) ? null : ordered?.Expr;
                     var key = keyExpr is null ? null : compiler.Compile(keyExpr);
+
+                    // D297: a DISTINCT measure hashes its operand and an ordered one sorts by its
+                    // WITHIN GROUP key — a percentile's own value — so both are keys, bound here
+                    // before the accumulator that reads them.
+                    if (measure.Distinct && argumentType is { } distinctType)
+                    {
+                        ColumnKinds.RequireComparable(distinctType, "a DISTINCT aggregate's argument");
+                    }
+
+                    if (ordered is not null && (key ?? argument) is { } orderedBy)
+                    {
+                        ColumnKinds.RequireComparable(orderedBy.Type, "an aggregate's ORDER BY key");
+                    }
 
                     plans[m] = new MeasurePlan
                     {

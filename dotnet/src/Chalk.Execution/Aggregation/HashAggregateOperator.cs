@@ -161,6 +161,14 @@ internal sealed class HashAggregateOperator : OperatorBase
         long declaredDistinct = -1)
         : base(context, schema, outputTypes, path)
     {
+        // D297: the grouping keys are bound here — hashed, compared and stored per group — so the
+        // executor's own refusal of a key it cannot compare is here too. SELECT DISTINCT is a
+        // grouping with no measure, so it is refused here as well.
+        foreach (var key in keys)
+        {
+            ColumnKinds.RequireComparable(key.Type, "a grouping key");
+        }
+
         _input = input;
         _keys = keys;
         _measures = measures;

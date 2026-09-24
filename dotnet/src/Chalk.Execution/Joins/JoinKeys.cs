@@ -30,6 +30,31 @@ internal sealed class JoinKeys
         _widths = [.. _kinds.Select(ColumnKinds.Width)];
     }
 
+    /// <summary>
+    /// The keys of an equi-join, bound: <paramref name="leftKeys"/> of the left row against
+    /// <paramref name="rightKeys"/> of the right, read in the left side's layouts. Every key column
+    /// on either side is one the engine hashes and compares, so a LIST or a COMPOSITE is refused by
+    /// name here (D297) — the hash, merge, as-of and lookup joins all bind their keys through this.
+    /// </summary>
+    public static JoinKeys Bind(
+        IReadOnlyList<ChalkType> leftTypes,
+        IReadOnlyList<int> leftKeys,
+        IReadOnlyList<ChalkType> rightTypes,
+        IReadOnlyList<int> rightKeys)
+    {
+        foreach (var key in leftKeys)
+        {
+            ColumnKinds.RequireComparable(leftTypes[key], "a join key");
+        }
+
+        foreach (var key in rightKeys)
+        {
+            ColumnKinds.RequireComparable(rightTypes[key], "a join key");
+        }
+
+        return new JoinKeys([.. leftKeys.Select(k => leftTypes[k])]);
+    }
+
     public int Count => _kinds.Length;
 
     /// <summary>
