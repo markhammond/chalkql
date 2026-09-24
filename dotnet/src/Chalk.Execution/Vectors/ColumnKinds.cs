@@ -36,6 +36,12 @@ internal enum ColumnKind
     List,
     
     StringView,
+
+    /// <summary>
+    /// One child column per field, each in the field's own layout, and one validity for the struct
+    /// (D291): a LIST with N children and no offsets. The struct has no values of its own.
+    /// </summary>
+    Struct,
 }
 
 /// <summary>The layout of each logical type, and the small facts kernels ask about it.</summary>
@@ -57,6 +63,7 @@ internal static class ColumnKinds
         TypeKind.Decimal => ColumnKind.Decimal128,
         TypeKind.Uuid => ColumnKind.Bytes16,
         TypeKind.List => ColumnKind.List,
+        TypeKind.Struct => ColumnKind.Struct,
         _ => throw new UnsupportedFeatureException(
             $"type kind {kind}",
             "The execution engine has no memory layout for it; see docs/design/02-ir.md §3."),
@@ -85,8 +92,9 @@ internal static class ColumnKinds
     public static bool IsFloatingPoint(TypeKind kind) => kind is TypeKind.Fp32 or TypeKind.Fp64;
 
     /// <summary>
-    /// Refuses a type the engine cannot compare, order or hash. Only <c>LIST</c> is such a type
-    /// (D58): a list can be produced, carried, projected and indexed into, and nothing else.
+    /// Refuses a type the engine cannot compare, order or hash: the two composites. A list can be
+    /// produced, carried, projected and indexed into (D58), and a struct produced by a function,
+    /// carried and taken apart by field access (D291), and neither anything else.
     /// </summary>
     public static void RequireComparable(ChalkType type, string what)
     {
@@ -96,6 +104,14 @@ internal static class ColumnKinds
                 $"{what} on a LIST",
                 "v1 lists have no ordering or equality; they can be produced, projected and indexed "
                 + "into (docs/design/14-windows-ii.md §5).");
+        }
+
+        if (type.Kind == TypeKind.Struct)
+        {
+            throw new UnsupportedFeatureException(
+                $"{what} on a STRUCT",
+                "a struct has no ordering or equality; it is produced by a user function, carried, "
+                + "and taken apart by field access (docs/design/51-structured-function-results.md §1).");
         }
     }
 }

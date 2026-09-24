@@ -737,6 +737,16 @@ internal static class PlanCompiler
                             + "rows cannot have one in its row (docs/design/14-windows-ii.md §5). "
                             + "UNION ALL, which compares nothing, is allowed.");
                     }
+
+                    // D291: the same of a struct, which UNION ALL carries.
+                    if (types[i].Kind == TypeKind.Struct)
+                    {
+                        throw new UnsupportedFeatureException(
+                            $"{kind} over the STRUCT column '{rel.RowType.Fields[i].Name}'",
+                            "a struct has no equality, so a set operation that compares rows cannot "
+                            + "have one in its row. UNION ALL, which compares nothing, carries one "
+                            + "(docs/design/51-structured-function-results.md §1).");
+                    }
                 }
             }
 

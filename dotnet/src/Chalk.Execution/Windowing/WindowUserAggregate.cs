@@ -1,5 +1,6 @@
 using Chalk.Catalog;
 using Chalk.Execution.Expressions;
+using Chalk.Execution.Vectors;
 using Chalk.Sources;
 
 namespace Chalk.Execution.Windowing;
@@ -28,12 +29,57 @@ internal sealed class WindowUserAggregateEvaluator<TState, TIn, TOut> : WindowVa
     private readonly AggregateSpec<TState, TIn, TOut> _spec;
     private readonly int _valueColumn;
 
+    /// <summary>
+    /// A STRUCT result (D291, D294): the compiled writer of <c>Finish</c>'s record, and the column the
+    /// frames' records are appended to as they are computed — in row order, which is the order the
+    /// operator computes partitions in — and emitted from row by row. Null for a scalar result, whose
+    /// answers are the base class's raw lanes.
+    /// </summary>
+    private readonly StructEmitter<TOut>? _struct;
+    private readonly ColumnCopier? _records;
+    private ColumnView _recordView;
+    private bool _recordsFinished;
+    private int _written;
+
     public WindowUserAggregateEvaluator(
         ChalkType resultType, AggregateSpec<TState, TIn, TOut> spec, int valueColumn)
         : base(resultType)
     {
         _spec = spec;
         _valueColumn = valueColumn;
+        if (resultType.Kind == Ir.TypeKind.Struct)
+        {
+            _struct = StructEmitters.For<TOut>(resultType);
+            _records = new ColumnCopier(resultType);
+        }
+    }
+
+    public override void Begin(ExecutionArena arena, int rows)
+    {
+        base.Begin(arena, rows);
+        if (_records is not null)
+        {
+            _records.Begin(rows);
+            _recordsFinished = false;
+            _written = 0;
+        }
+    }
+
+    public override void Emit(ColumnCopier copier, WindowRun run, int row)
+    {
+        if (_records is null)
+        {
+            base.Emit(copier, run, row);
+            return;
+        }
+
+        if (!_recordsFinished)
+        {
+            _recordView = _records.FinishView();
+            _recordsFinished = true;
+        }
+
+        copier.AppendRow(_recordView, row);
     }
 
     public override void Compute(WindowRun run, int start, int end)
@@ -123,8 +169,26 @@ internal sealed class WindowUserAggregateEvaluator<TState, TIn, TOut> : WindowVa
         }
     }
 
-    private void Write(int row, TState state) =>
-        Valid[row] = LaneCodec.WriteRaw(Lane(row), _spec.Finish(state));
+    private void Write(int row, TState state)
+    {
+        if (_struct is null)
+        {
+            Valid[row] = LaneCodec.WriteRaw(Lane(row), _spec.Finish(state));
+            return;
+        }
+
+        // The records column is appended to, so it is only right if rows arrive in order; the operator
+        // computes its partitions front to back and each one's rows in order, and this says so.
+        if (row != _written)
+        {
+            throw new InvalidOperationException(
+                $"a struct-valued window aggregate computed row {row} after {_written} rows; its "
+                + "frames are written in row order.");
+        }
+
+        _struct.Emit(_records!, _spec.Finish(state));
+        _written++;
+    }
 }
 
 /// <summary>Builds the frame evaluator for one registered aggregate, types known statically.</summary>

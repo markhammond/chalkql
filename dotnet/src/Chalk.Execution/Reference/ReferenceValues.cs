@@ -170,6 +170,21 @@ internal static class ReferenceValues
                         16),
                     type.Scale);
 
+            // D291: the struct value, its fields read at the struct's own row.
+            case TypeKind.Struct:
+            {
+                var fields = new object?[type.Fields.Count];
+                for (var i = 0; i < fields.Length; i++)
+                {
+                    fields[i] = Read(
+                        ArrowArrayFactory.BuildArray(array.Data.Children[i]),
+                        index,
+                        type.Fields[i].Type);
+                }
+
+                return fields;
+            }
+
             default:
                 throw new NotSupportedException(
                     $"ReferenceValues cannot read {type.Kind}.");
@@ -310,6 +325,40 @@ internal static class ReferenceValues
         }
 
         var nullBuffer = nulls == 0 ? ArrowBuffer.Empty : validity.Build(allocator);
+
+        // D291: one child column per field, each built the same way from the struct values' fields;
+        // a NULL struct's fields are NULL here, which the struct's own validity says to ignore.
+        if (type.Kind == TypeKind.Struct)
+        {
+            var structType = (StructType)arrowType;
+            var children = new ArrayData[type.Fields.Count];
+            for (var f = 0; f < children.Length; f++)
+            {
+                var fieldRows = new List<object?[]>(count);
+                for (var i = 0; i < count; i++)
+                {
+                    fieldRows.Add([rows[start + i][column] is object?[] fields ? fields[f] : null]);
+                }
+
+                children[f] = BuildColumn(
+                        fieldRows,
+                        0,
+                        count,
+                        0,
+                        type.Fields[f].Type,
+                        structType.Fields[f].DataType,
+                        allocator)
+                    .Data;
+            }
+
+            return new StructArray(new ArrayData(
+                arrowType,
+                count,
+                nulls,
+                0,
+                [nullBuffer],
+                children));
+        }
 
         if (type.Kind == TypeKind.List)
         {

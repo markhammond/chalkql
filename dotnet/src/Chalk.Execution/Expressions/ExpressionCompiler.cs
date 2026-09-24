@@ -61,6 +61,10 @@ internal sealed class ExpressionCompiler
                 type,
                 Compile(expr.InList.Value),
                 [.. expr.InList.Options.Select(Compile)]),
+
+            // D291: a field of a struct, a view of the struct's field column.
+            Expr.KindOneofCase.FieldAccess => new FieldAccessExpr(
+                type, Compile(expr.FieldAccess.Input), (int)expr.FieldAccess.Index),
             _ => throw new UnsupportedFeatureException(
                 $"expression kind {expr.KindCase}",
                 "The execution engine does not know how to evaluate it."),

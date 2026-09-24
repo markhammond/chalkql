@@ -117,6 +117,20 @@ public sealed class ColumnWriter
 
     /// <summary>Appends a NULL to a variable-length result.</summary>
     public void AppendNull() => _sink.AppendNull();
+
+    /// <summary>
+    /// The writer for field <paramref name="index"/> of a STRUCT result (D291), in field order. A
+    /// struct's own validity is this writer's <see cref="BeginValidity"/>; each field is written
+    /// through its child exactly as a result of the field's type would be, one row per struct row.
+    /// </summary>
+    public ColumnWriter Child(int index) => _sink.Child(index);
+
+    /// <summary>
+    /// Marks row <paramref name="row"/> of a fixed-width result as holding a value, in a bitmap
+    /// <see cref="BeginValidity"/> has already started. For a writer that cannot keep the bitmap's
+    /// span across rows — the engine's own struct writer, one field at a time.
+    /// </summary>
+    internal void SetValid(int row) => _sink.SetValid(row);
 }
 
 /// <summary>
@@ -139,6 +153,12 @@ internal interface IColumnSink
     void AppendValue(ReadOnlySpan<byte> bytes);
 
     void AppendNull();
+
+    /// <summary>A STRUCT result's field writer (D291). Throws for any other kind.</summary>
+    ColumnWriter Child(int index);
+
+    /// <summary>Sets one bit of a validity bitmap already begun.</summary>
+    void SetValid(int row);
 }
 
 /// <summary>Builds a <see cref="ColumnWriter"/> over an engine-owned sink.</summary>

@@ -506,6 +506,110 @@ internal static class LaneCodec
         }
     }
 
+    /// <summary>
+    /// Writes one fixed-width value into a raw lane without boxing it, and says whether it was a value
+    /// at all — how a struct field reaches an aggregate's output copier (D294). A NULL clears the lane.
+    /// Every branch is a <c>typeof</c> test the JIT folds away per instantiation.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool WriteLane<T>(Span<byte> lane, T value)
+    {
+        if (typeof(T) == typeof(double))
+        {
+            System.Runtime.InteropServices.MemoryMarshal.Write(lane, in Unsafe.As<T, double>(ref value));
+            return true;
+        }
+
+        if (typeof(T) == typeof(long))
+        {
+            System.Runtime.InteropServices.MemoryMarshal.Write(lane, in Unsafe.As<T, long>(ref value));
+            return true;
+        }
+
+        if (typeof(T) == typeof(int))
+        {
+            System.Runtime.InteropServices.MemoryMarshal.Write(lane, in Unsafe.As<T, int>(ref value));
+            return true;
+        }
+
+        if (typeof(T) == typeof(float))
+        {
+            System.Runtime.InteropServices.MemoryMarshal.Write(lane, in Unsafe.As<T, float>(ref value));
+            return true;
+        }
+
+        if (typeof(T) == typeof(short))
+        {
+            System.Runtime.InteropServices.MemoryMarshal.Write(lane, in Unsafe.As<T, short>(ref value));
+            return true;
+        }
+
+        if (typeof(T) == typeof(sbyte))
+        {
+            System.Runtime.InteropServices.MemoryMarshal.Write(lane, in Unsafe.As<T, sbyte>(ref value));
+            return true;
+        }
+
+        if (typeof(T) == typeof(bool))
+        {
+            lane[0] = (byte)(Unsafe.As<T, bool>(ref value) ? 1 : 0);
+            return true;
+        }
+
+        if (typeof(T) == typeof(double?))
+        {
+            return WriteLane(lane, Unsafe.As<T, double?>(ref value));
+        }
+
+        if (typeof(T) == typeof(long?))
+        {
+            return WriteLane(lane, Unsafe.As<T, long?>(ref value));
+        }
+
+        if (typeof(T) == typeof(int?))
+        {
+            return WriteLane(lane, Unsafe.As<T, int?>(ref value));
+        }
+
+        if (typeof(T) == typeof(float?))
+        {
+            return WriteLane(lane, Unsafe.As<T, float?>(ref value));
+        }
+
+        if (typeof(T) == typeof(short?))
+        {
+            return WriteLane(lane, Unsafe.As<T, short?>(ref value));
+        }
+
+        if (typeof(T) == typeof(sbyte?))
+        {
+            return WriteLane(lane, Unsafe.As<T, sbyte?>(ref value));
+        }
+
+        if (typeof(T) == typeof(bool?))
+        {
+            return WriteLane(lane, Unsafe.As<T, bool?>(ref value));
+        }
+
+        throw new UnsupportedFeatureException(
+            $"a struct field of CLR type {typeof(T).Name}",
+            "A struct's fields are bool, sbyte, short, int, long, float, double, Utf8String or "
+            + "string, or a nullable form of one (docs/design/51-structured-function-results.md §1).");
+    }
+
+    /// <summary>The nullable forms: no value clears the lane.</summary>
+    private static bool WriteLane<T>(Span<byte> lane, T? value)
+        where T : struct
+    {
+        if (!value.HasValue)
+        {
+            lane.Clear();
+            return false;
+        }
+
+        return WriteLane(lane, value.GetValueOrDefault());
+    }
+
     /// <summary>Whether <typeparamref name="T"/> is written by appending rather than by lane.</summary>
     public static bool IsVariableLength<T>() =>
         typeof(T) == typeof(string)

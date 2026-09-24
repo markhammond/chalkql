@@ -84,6 +84,12 @@ public static class BatchReader
             return null;
         }
 
+        // A struct has no value buffer of its own, only its fields (D291).
+        if (type.Kind == TypeKind.Struct)
+        {
+            return Struct(array, physicalIndex, type);
+        }
+
         var values = array.Data.Buffers[1].Span;
         return type.Kind switch
         {
@@ -138,6 +144,23 @@ public static class BatchReader
     //         _ => MemoryMarshal.Cast<byte, long>(values)[index],
     //     };
     // }
+
+    /// <summary>
+    /// A STRUCT cell, as the <c>object?[]</c> of its fields in order (D291) — what the reference
+    /// executor holds one as. The struct's physical row is each field's logical row, as Arrow aligns a
+    /// struct's children.
+    /// </summary>
+    private static object?[] Struct(IArrowArray array, int index, ChalkType type)
+    {
+        var values = new object?[type.Fields.Count];
+        for (var i = 0; i < values.Length; i++)
+        {
+            var child = ArrowArrayFactory.BuildArray(array.Data.Children[i]);
+            values[i] = ToStorage(child, index, type.Fields[i].Type);
+        }
+
+        return values;
+    }
 
     /// <summary>A LIST cell, as the <c>object?[]</c> of its elements (D58).</summary>
     private static object?[] List(IArrowArray array, int index, ChalkType element)
@@ -236,6 +259,8 @@ public static class BatchReader
             _ => value,
         },
         byte[] bytes when type.Kind == TypeKind.Uuid => new Guid(bytes, bigEndian: true),
+        object?[] fields when type.Kind == TypeKind.Struct =>
+            fields.Select((field, i) => Host(field, type.Fields[i].Type)).ToArray(),
         _ => storage,
     };
 

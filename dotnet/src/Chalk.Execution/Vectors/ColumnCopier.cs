@@ -62,6 +62,15 @@ internal sealed class ColumnCopier : IArenaScratch
     /// <summary>A LIST's element copier (D58), and null for every other kind.</summary>
     private readonly ColumnCopier? _children;
 
+    /// <summary>
+    /// A STRUCT's field copiers, one per field in order (D291), and null for every other kind. Every
+    /// append walks them at the struct's own row, so each field has exactly the struct's rows.
+    /// </summary>
+    private readonly ColumnCopier[]? _fields;
+
+    /// <summary>The finished field views a struct view points at, reused batch after batch.</summary>
+    private readonly ColumnView[]? _fieldViews;
+
     private int _rows;
     private int _nulls;
     private int _dataUsed;
@@ -103,6 +112,12 @@ internal sealed class ColumnCopier : IArenaScratch
                     "docs/design/02-ir.md §3 requires Type.element on a LIST."),
                 strings)
             : null;
+        if (_kind == ColumnKind.Struct)
+        {
+            _fields = [.. type.Fields.Select(f => new ColumnCopier(f.Type, strings))];
+            _fieldViews = new ColumnView[_fields.Length];
+        }
+
         ScratchScope.Register(this);
     }
 
@@ -121,6 +136,10 @@ internal sealed class ColumnCopier : IArenaScratch
         _data.Acquire(arena);
         _packed.Acquire(arena);
         _children?.Acquire(arena);
+        foreach (var field in _fields ?? [])
+        {
+            field.Acquire(arena);
+        }
     }
 
     public void Release()
@@ -131,6 +150,10 @@ internal sealed class ColumnCopier : IArenaScratch
         _data.Release();
         _packed.Release();
         _children?.Release();
+        foreach (var field in _fields ?? [])
+        {
+            field.Release();
+        }
 
         if (_viewBuffers.Length != 0)
         {
@@ -155,6 +178,10 @@ internal sealed class ColumnCopier : IArenaScratch
         Begin();
         _capacityHint = capacityHint > 0 ? capacityHint : 0;
         _children?.Begin(capacityHint);
+        foreach (var field in _fields ?? [])
+        {
+            field.Begin(capacityHint);
+        }
     }
 
     /// <summary>Starts a new column.</summary>
@@ -177,6 +204,11 @@ internal sealed class ColumnCopier : IArenaScratch
         }
 
         _children?.Begin();
+        foreach (var field in _fields ?? [])
+        {
+            field.Begin();
+        }
+
         if (_variable || _kind == ColumnKind.List)
         {
             EnsureOffsets(1);
@@ -238,6 +270,23 @@ internal sealed class ColumnCopier : IArenaScratch
     /// <summary>Appends <paramref name="count"/> NULLs.</summary>
     public void AppendNulls(int count)
     {
+        if (_kind == ColumnKind.Struct)
+        {
+            // D291: a NULL struct still has a row in every field, NULL where the field may be and
+            // its type's default where it may not.
+            foreach (var field in _fields!)
+            {
+                field.AppendUndefined(count);
+            }
+
+            for (var i = 0; i < count; i++)
+            {
+                EndStruct(valid: false);
+            }
+
+            return;
+        }
+
         if (_kind == ColumnKind.List)
         {
             for (var i = 0; i < count; i++)
@@ -378,9 +427,64 @@ internal sealed class ColumnCopier : IArenaScratch
         EndList(valid: true);
     }
 
+    // ---- STRUCT (D291) -----------------------------------------------------------------------
+
+    /// <summary>The copier field <paramref name="index"/> of a STRUCT is appended through.</summary>
+    public ColumnCopier Field(int index) => _fields?[index]
+        ?? throw new InvalidOperationException("This column is not a STRUCT.");
+
+    /// <summary>
+    /// Closes the struct row under construction: each field has had exactly one row appended since
+    /// the previous close. A row closed as invalid is a NULL struct.
+    /// </summary>
+    public void EndStruct(bool valid)
+    {
+        SetValidity(_rows, valid);
+        _rows++;
+        if (!valid)
+        {
+            _nulls++;
+        }
+    }
+
+    /// <summary>
+    /// Appends <paramref name="count"/> rows of a NULL struct's field: NULL when this column's type
+    /// may be NULL, and the type's default when it may not, so a non-nullable field never holds one.
+    /// </summary>
+    public void AppendUndefined(int count)
+    {
+        if (Type.Nullable)
+        {
+            AppendNulls(count);
+            return;
+        }
+
+        Span<byte> zero = stackalloc byte[16];
+        zero.Clear();
+        for (var i = 0; i < count; i++)
+        {
+            AppendRaw(_variable ? default : zero, valid: true);
+        }
+    }
+
     /// <summary>Appends <paramref name="count"/> copies of one constant.</summary>
     public void AppendConstant(ScalarValue value, int count)
     {
+        if (_kind == ColumnKind.Struct)
+        {
+            // A struct is produced by a function and never written as a constant (D291), so the only
+            // constant of this type is a typed NULL — an outer join's padding, say.
+            if (!value.IsNull)
+            {
+                throw new UnsupportedFeatureException(
+                    "a STRUCT constant",
+                    "A struct comes from a function and has no literal (docs/design/51-structured-function-results.md §1).");
+            }
+
+            AppendNulls(count);
+            return;
+        }
+
         if (_kind == ColumnKind.List)
         {
             for (var i = 0; i < count; i++)
@@ -576,6 +680,13 @@ internal sealed class ColumnCopier : IArenaScratch
         ReadOnlySpan<byte> lane,
         bool valid)
     {
+        if (_kind == ColumnKind.Struct)
+        {
+            throw new InvalidOperationException(
+                "A STRUCT has no lane of its own: append its fields through Field(i) and close the "
+                + "row with EndStruct.");
+        }
+
         if (_kind == ColumnKind.Utf8 &&
             !valid)
         {
@@ -722,6 +833,23 @@ internal sealed class ColumnCopier : IArenaScratch
     /// </summary>
     public ColumnView FinishView()
     {
+        if (_kind == ColumnKind.Struct)
+        {
+            for (var i = 0; i < _fields!.Length; i++)
+            {
+                _fieldViews![i] = _fields[i].FinishView();
+            }
+
+            return new ColumnView
+            {
+                Type = Type,
+                Length = _rows,
+                Validity = ValidityMemory(),
+                NullCount = _nulls,
+                Children = _fieldViews,
+            };
+        }
+
         if (_kind == ColumnKind.List)
         {
             _child[0] = Elements.FinishView();
@@ -798,6 +926,35 @@ internal sealed class ColumnCopier : IArenaScratch
 
     public IArrowArray FinishManaged()
     {
+        if (_kind == ColumnKind.Struct)
+        {
+            var fields = new IArrowArray?[_fields!.Length];
+            var structBuffers = new ArrowBuffer[1];
+            var structBuilt = 0;
+            try
+            {
+                for (var i = 0; i < fields.Length; i++)
+                {
+                    fields[i] = _fields[i].FinishManaged();
+                }
+
+                structBuffers[0] = _nulls == 0
+                    ? ArrowBuffer.Empty
+                    : DetachManaged(ref _validity, Validity.ByteCount(_rows));
+                structBuilt = 1;
+
+                return new StructArray(
+                    new ArrayData(
+                        _arrowType, _rows, _nulls, 0, structBuffers, fields.Select(f => f!.Data)));
+            }
+            catch
+            {
+                Release(structBuffers, structBuilt);
+                DisposeAll(fields);
+                throw;
+            }
+        }
+
         if (_kind == ColumnKind.List)
         {
             IArrowArray? child = null;
@@ -1191,6 +1348,35 @@ internal sealed class ColumnCopier : IArenaScratch
     public IArrowArray FinishPooled(
         ref PooledBatchRentalCollector rentals)
     {
+        if (_kind == ColumnKind.Struct)
+        {
+            var fields = new IArrowArray?[_fields!.Length];
+            var structBuffers = new ArrowBuffer[1];
+            var structBuilt = 0;
+            try
+            {
+                for (var i = 0; i < fields.Length; i++)
+                {
+                    fields[i] = _fields[i].FinishPooled(ref rentals);
+                }
+
+                structBuffers[0] = _nulls == 0
+                    ? ArrowBuffer.Empty
+                    : rentals.Adopt(ref _validity, Validity.ByteCount(_rows));
+                structBuilt = 1;
+
+                return new StructArray(
+                    new ArrayData(
+                        _arrowType, _rows, _nulls, 0, structBuffers, fields.Select(f => f!.Data)));
+            }
+            catch
+            {
+                Release(structBuffers, structBuilt);
+                DisposeAll(fields);
+                throw;
+            }
+        }
+
         if (_kind == ColumnKind.List)
         {
             IArrowArray? child = null;
@@ -1515,6 +1701,32 @@ internal sealed class ColumnCopier : IArenaScratch
                 + "copy it through a ColumnCopier first.");
         }
 
+        if (_kind == ColumnKind.Struct)
+        {
+            var fields = new IArrowArray?[_fields!.Length];
+            var structBuffers = new ArrowBuffer[1];
+            try
+            {
+                for (var i = 0; i < fields.Length; i++)
+                {
+                    fields[i] = _fields[i].ToArrow(view.Children![i], arena);
+                }
+
+                structBuffers[0] = view.NullCount == 0
+                    ? ArrowBuffer.Empty
+                    : Owned(view.Validity.Span[..Validity.ByteCount(view.Length)], arena);
+            }
+            catch
+            {
+                DisposeAll(fields);
+                throw;
+            }
+
+            return new StructArray(
+                new ArrayData(
+                    _arrowType, view.Length, view.NullCount, 0, structBuffers, fields.Select(f => f!.Data)));
+        }
+
         if (_kind == ColumnKind.List)
         {
             var child = Elements.ToArrow(view.Child, arena);
@@ -1599,6 +1811,35 @@ internal sealed class ColumnCopier : IArenaScratch
             throw new InvalidOperationException(
                 "A column view with a row offset cannot be converted "
                 + "directly; normalise it through a ColumnCopier first.");
+        }
+
+        if (_kind == ColumnKind.Struct)
+        {
+            var fields = new IArrowArray?[_fields!.Length];
+            var structBuffers = new ArrowBuffer[1];
+            var structBuilt = 0;
+            try
+            {
+                for (var i = 0; i < fields.Length; i++)
+                {
+                    fields[i] = _fields[i].ToArrowPooled(view.Children![i], ref rentals);
+                }
+
+                structBuffers[0] = view.NullCount == 0
+                    ? ArrowBuffer.Empty
+                    : rentals.CopyFrom(view.Validity.Span[..Validity.ByteCount(view.Length)]);
+                structBuilt = 1;
+
+                return new StructArray(
+                    new ArrayData(
+                        _arrowType, view.Length, view.NullCount, 0, structBuffers, fields.Select(f => f!.Data)));
+            }
+            catch
+            {
+                Release(structBuffers, structBuilt);
+                DisposeAll(fields);
+                throw;
+            }
         }
 
         if (_kind == ColumnKind.List)
@@ -1743,6 +1984,15 @@ internal sealed class ColumnCopier : IArenaScratch
         }
     }
 
+    /// <summary>Disposes the field arrays a failed STRUCT build had already made.</summary>
+    private static void DisposeAll(IArrowArray?[] arrays)
+    {
+        foreach (var array in arrays)
+        {
+            array?.Dispose();
+        }
+    }
+
     /// <summary>Bit-packs a byte-per-row boolean into Arrow's representation.</summary>
     private ArrowBuffer PackBits(in ColumnView view, ExecutionArena? arena)
     {
@@ -1799,6 +2049,28 @@ internal sealed class ColumnCopier : IArenaScratch
 
         if (count == 0)
             return;
+
+        if (_kind == ColumnKind.Struct)
+        {
+            // D291: the struct's own validity, then every field at the same rows — a field of the
+            // source seen through the source's offset, as Arrow aligns them.
+            CopyValidity(source, indices, identity, _rows, count);
+            _rows += count;
+            for (var i = 0; i < _fields!.Length; i++)
+            {
+                var field = source.StructField(i);
+                if (identity)
+                {
+                    _fields[i].Append(field, count);
+                }
+                else
+                {
+                    _fields[i].AppendGather(field, indices);
+                }
+            }
+
+            return;
+        }
 
         if (_kind == ColumnKind.List)
         {

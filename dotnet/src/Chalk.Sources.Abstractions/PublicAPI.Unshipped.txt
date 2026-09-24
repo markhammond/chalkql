@@ -389,6 +389,7 @@ Chalk.Utf8StringExtensions
 [CHALK001]Chalk.Sources.ColumnWriter.AppendValue(System.ReadOnlySpan<byte> bytes) -> void
 [CHALK001]Chalk.Sources.ColumnWriter.BeginValidity(int length) -> System.Span<byte>
 [CHALK001]Chalk.Sources.ColumnWriter.BeginVarLength(int length, bool nullable) -> void
+[CHALK001]Chalk.Sources.ColumnWriter.Child(int index) -> Chalk.Sources.ColumnWriter!
 [CHALK001]Chalk.Sources.ColumnWriter.NoValidity() -> void
 [CHALK001]Chalk.Sources.ColumnWriter.Type.get -> Chalk.Catalog.ChalkType
 [CHALK001]Chalk.Sources.ColumnWriter.Values<T>(int length) -> System.Span<T>

@@ -26,6 +26,28 @@ internal static class ColumnarBoundary
         var data = array.Data;
         var packed = data.DataType.TypeId == ArrowTypeId.Boolean;
 
+        // D291: one view per field, over the array's child arrays; the struct's offset applies to
+        // them as the view's own, as Arrow's does. No source produces one today — a struct comes from
+        // a function — so this is the boundary being total rather than a path anything takes.
+        if (type.Kind == Ir.TypeKind.Struct)
+        {
+            var holder = child ?? new ColumnView[type.Fields.Count];
+            for (var i = 0; i < holder.Length; i++)
+            {
+                holder[i] = Wrap(ArrowArrayFactory.BuildArray(data.Children[i]), type.Fields[i].Type);
+            }
+
+            return new ColumnView
+            {
+                Type = type,
+                Length = array.Length,
+                Validity = Buffer(data, 0),
+                NullCount = data.NullCount,
+                Offset = array.Offset,
+                Children = holder,
+            };
+        }
+
         if (type.Kind == Ir.TypeKind.List)
         {
             var elements = data.Children[0];

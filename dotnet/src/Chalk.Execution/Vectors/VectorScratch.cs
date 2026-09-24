@@ -36,11 +36,23 @@ internal sealed class VectorScratch : IArenaScratch, IColumnSink
     private int _varUsed;
     private int _varNulls;
 
+    /// <summary>A STRUCT's field scratch, one per field in order (D291), and null for every other kind.</summary>
+    private readonly VectorScratch[]? _fields;
+
+    /// <summary>The finished field views a struct view points at, reused batch after batch.</summary>
+    private readonly ColumnView[]? _fieldViews;
+
     public VectorScratch(ChalkType type)
     {
         Type = type;
         _kind = ColumnKinds.Of(type);
         _width = ColumnKinds.Width(_kind);
+        if (_kind == ColumnKind.Struct)
+        {
+            _fields = [.. type.Fields.Select(f => new VectorScratch(f.Type))];
+            _fieldViews = new ColumnView[_fields.Length];
+        }
+
         ScratchScope.Register(this);
     }
 
@@ -54,6 +66,10 @@ internal sealed class VectorScratch : IArenaScratch, IColumnSink
         _validity.Acquire(arena);
         _data.Acquire(arena);
         _offsets.Acquire(arena);
+        foreach (var field in _fields ?? [])
+        {
+            field.Acquire(arena);
+        }
     }
 
     public void Release()
@@ -63,7 +79,15 @@ internal sealed class VectorScratch : IArenaScratch, IColumnSink
         _data.Release();
         _offsets.Release();
         _useValidity = false;
+        foreach (var field in _fields ?? [])
+        {
+            field.Release();
+        }
     }
+
+    /// <summary>Field <paramref name="index"/>'s scratch, for a STRUCT (D291).</summary>
+    public VectorScratch Field(int index) =>
+        _fields?[index] ?? throw new InvalidOperationException("This scratch is not a STRUCT's.");
 
     /// <summary>The typed value lanes for a batch of <paramref name="length"/> rows.</summary>
     public Span<T> Values<T>(int length)
@@ -110,23 +134,154 @@ internal sealed class VectorScratch : IArenaScratch, IColumnSink
         _useValidity ? _validity.Bytes.AsSpan(0, Validity.ByteCount(length)) : default;
 
     /// <summary>Wraps the scratch as a column view. No Arrow object, no allocation (D61).</summary>
-    public Vector Finish(int length, int nullCount) => Vector.Transient(
-        new ColumnView
+    public Vector Finish(int length, int nullCount)
+    {
+        if (_fields is not null)
         {
-            Type = Type,
-            Length = length,
-            Values = _values.Bytes.AsMemory(0, length * _width),
-            Validity = _useValidity
-                ? _validity.Bytes.AsMemory(0, Validity.ByteCount(length))
-                : default,
-            NullCount = nullCount,
-        },
-        length);
+            return FinishStruct(length, nullCount);
+        }
+
+        return Vector.Transient(
+            new ColumnView
+            {
+                Type = Type,
+                Length = length,
+                Values = _values.Bytes.AsMemory(0, length * _width),
+                Validity = _useValidity
+                    ? _validity.Bytes.AsMemory(0, Validity.ByteCount(length))
+                    : default,
+                NullCount = nullCount,
+            },
+            length);
+    }
+
+    /// <summary>
+    /// A STRUCT's view (D291): its own validity over <paramref name="length"/> rows and each field's
+    /// view as that field's scratch finishes it — every field written for every row, whatever the
+    /// struct's own validity says.
+    /// </summary>
+    private Vector FinishStruct(int length, int nullCount)
+    {
+        for (var i = 0; i < _fields!.Length; i++)
+        {
+            _fieldViews![i] = _fields[i].FinishWritten(length);
+        }
+
+        return Vector.Transient(
+            new ColumnView
+            {
+                Type = Type,
+                Length = length,
+                Validity = _useValidity
+                    ? _validity.Bytes.AsMemory(0, Validity.ByteCount(length))
+                    : default,
+                NullCount = nullCount,
+                Children = _fieldViews,
+            },
+            length);
+    }
+
+    /// <summary>
+    /// This scratch as a finished view of <paramref name="length"/> rows, whatever wrote it: the
+    /// appended rows of a variable-length one, or the lanes and bitmap of a fixed one, sized first so
+    /// that a field no row wrote — every struct NULL — is still a view of the right length.
+    /// </summary>
+    public ColumnView FinishWritten(int length)
+    {
+        if (_fields is not null)
+        {
+            var validity = MutableValidity(length);
+            return FinishStruct(length, validity.IsEmpty ? 0 : Validity.CountNulls(validity, length)).View;
+        }
+
+        if (ColumnKinds.IsVariableLength(_kind))
+        {
+            return FinishVarLen().View;
+        }
+
+        _ = RawValues(length);
+        var bits = MutableValidity(length);
+        return Finish(length, bits.IsEmpty ? 0 : Validity.CountNulls(bits, length)).View;
+    }
+
+    /// <summary>
+    /// Spreads row 0 of <paramref name="one"/> over <paramref name="length"/> rows of this scratch —
+    /// the STABLE broadcast (D79), field by field for a STRUCT (D291). The row's validity is the
+    /// broadcast's, narrowed to <paramref name="selection"/> at the top level only: a field's own
+    /// validity is its own.
+    /// </summary>
+    public Vector BroadcastRow(in ColumnView one, int length, ReadOnlySpan<byte> selection)
+    {
+        var view = BroadcastInto(one, length, selection);
+        return Vector.Transient(view, length);
+    }
+
+    private ColumnView BroadcastInto(in ColumnView one, int length, ReadOnlySpan<byte> selection)
+    {
+        var valid = one.IsValid(0);
+        if (_fields is not null)
+        {
+            for (var i = 0; i < _fields.Length; i++)
+            {
+                _fields[i].BroadcastInto(one.StructField(i), length, default);
+            }
+        }
+        else if (ColumnKinds.IsVariableLength(_kind))
+        {
+            BeginVarLen(length, nullable: !valid || !selection.IsEmpty);
+            var bytes = valid ? one.VarValue(0) : default;
+            for (var row = 0; row < length; row++)
+            {
+                if (valid && (selection.IsEmpty || BitUtility.GetBit(selection, row)))
+                {
+                    AppendValue(bytes);
+                }
+                else
+                {
+                    AppendNull();
+                }
+            }
+
+            return FinishVarLen().View;
+        }
+        else
+        {
+            var lanes = RawValues(length);
+            var source = one.RawLanes(_width);
+            for (var row = 0; row < length; row++)
+            {
+                source[.._width].CopyTo(lanes[(row * _width)..]);
+            }
+        }
+
+        var bits = BeginValidity(length);
+        if (valid)
+        {
+            Validity.SetAll(bits, length);
+        }
+
+        if (!selection.IsEmpty)
+        {
+            for (var b = 0; b < Validity.ByteCount(length); b++)
+            {
+                bits[b] &= selection[b];
+            }
+        }
+
+        var nulls = Validity.CountNulls(bits, length);
+        return _fields is not null
+            ? FinishStruct(length, nulls).View
+            : Finish(length, nulls).View;
+    }
 
     /// <summary>The public writer over this scratch, for a Tier 2 kernel (D79).</summary>
     public ColumnWriter Writer => _writer ??= ColumnWriters.Over(this);
 
     private ColumnWriter? _writer;
+
+    ColumnWriter IColumnSink.Child(int index) => Field(index).Writer;
+
+    void IColumnSink.SetValid(int row) => BitUtility.SetBit(_validity.Bytes.AsSpan(), row);
 
     void IColumnSink.BeginVarLength(int length, bool nullable) => BeginVarLen(length, nullable);
 

@@ -63,7 +63,12 @@ internal sealed class ReferenceInterpreter
             _catalog ?? throw NoCatalog(name), name);
         var host = Expressions.UserFunctionBinding.Find(_functions, descriptor);
         Expressions.UserFunctionBinding.Check(descriptor, host, $"aggregate {name}");
-        return ((Chalk.Sources.HostAggregate)host!).NewBoxed();
+        var boxed = ((Chalk.Sources.HostAggregate)host!).NewBoxed();
+
+        // D291: a record Finish answered is held as the reference's struct value.
+        return descriptor.ReturnType?.Kind == TypeKind.Struct
+            ? new ReferenceStructs.Aggregate(boxed)
+            : boxed;
     }
 
     /// <summary>The row reader for a client-bodied table function, shared with the vectorised engine.</summary>
@@ -113,7 +118,13 @@ internal sealed class ReferenceInterpreter
             return reference.Invoke(arguments, _now);
         }
 
-        return ((Chalk.Sources.HostScalar)host!).InvokeBoxed(arguments);
+        var answer = ((Chalk.Sources.HostScalar)host!).InvokeBoxed(arguments);
+
+        // D291: a record is held as the reference's struct value, read through the same properties
+        // the vectorised engine writes from.
+        return descriptor.ReturnType?.Kind == TypeKind.Struct
+            ? ReferenceStructs.FromRecord(answer)
+            : answer;
     }
 
     private readonly Dictionary<string, ReferenceKernel> _kernels = new(StringComparer.Ordinal);
@@ -131,6 +142,12 @@ internal sealed class ReferenceInterpreter
         Expr.KindOneofCase.IfThen => IfThen(expr, row),
         Expr.KindOneofCase.InList => InList(expr, row),
         Expr.KindOneofCase.Call => Call(expr, row),
+
+        // D291: a field of the struct value, which a NULL struct answers NULL for.
+        Expr.KindOneofCase.FieldAccess =>
+            Evaluate(expr.FieldAccess.Input, row) is object?[] fields
+                ? fields[(int)expr.FieldAccess.Index]
+                : null,
         _ => throw new UnsupportedFeatureException(
             $"expression kind {expr.KindCase}", "The reference executor cannot evaluate it."),
     };

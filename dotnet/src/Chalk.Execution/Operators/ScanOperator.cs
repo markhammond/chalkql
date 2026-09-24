@@ -106,13 +106,21 @@ internal sealed class ScanOperator : OperatorBase
 /// <summary>Wrapping a source's Arrow batch as this operator's views, with no copy (§1).</summary>
 internal static class ArrowBatchViews
 {
-    /// <summary>One reusable element-view holder per LIST column, so wrapping one allocates nothing.</summary>
+    /// <summary>
+    /// One reusable child-view holder per LIST column — its element — and per STRUCT column — one per
+    /// field (D291) — so wrapping one allocates nothing.
+    /// </summary>
     public static ColumnView[]?[] ChildHolders(IReadOnlyList<ChalkType> types)
     {
         var holders = new ColumnView[]?[types.Count];
         for (var i = 0; i < types.Count; i++)
         {
-            holders[i] = types[i].Kind == Ir.TypeKind.List ? new ColumnView[1] : null;
+            holders[i] = types[i].Kind switch
+            {
+                Ir.TypeKind.List => new ColumnView[1],
+                Ir.TypeKind.Struct => new ColumnView[types[i].Fields.Count],
+                _ => null,
+            };
         }
 
         return holders;

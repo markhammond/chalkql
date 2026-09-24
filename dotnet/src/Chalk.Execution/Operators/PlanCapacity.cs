@@ -61,14 +61,32 @@ internal static class PlanCapacity
         long total = 0;
         for (var i = 0; i < columns.Count; i++)
         {
-            var kind = ColumnKinds.Of(columns[i]);
-            var width = ColumnKinds.Width(kind);
-
-            // A LIST is an offset per row plus a child column whose length is not a row count at
-            // all; four bytes is the part of it this test can honestly name.
-            total += width != 0 ? width : kind == ColumnKind.List ? sizeof(int) : VariableRowBytes;
+            total += BytesPerRow(columns[i]);
         }
 
         return total >= int.MaxValue ? int.MaxValue : (int)total;
+    }
+
+    private static long BytesPerRow(ChalkType column)
+    {
+        var kind = ColumnKinds.Of(column);
+        var width = ColumnKinds.Width(kind);
+
+        // A STRUCT is one row of every field per row (D291), each at its own width, and a bit of
+        // validity this test rounds away.
+        if (kind == ColumnKind.Struct)
+        {
+            long fields = 0;
+            foreach (var field in column.Fields)
+            {
+                fields += BytesPerRow(field.Type);
+            }
+
+            return fields;
+        }
+
+        // A LIST is an offset per row plus a child column whose length is not a row count at
+        // all; four bytes is the part of it this test can honestly name.
+        return width != 0 ? width : kind == ColumnKind.List ? sizeof(int) : VariableRowBytes;
     }
 }

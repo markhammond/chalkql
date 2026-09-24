@@ -15,10 +15,17 @@ namespace Chalk.Execution.Expressions;
 /// </remarks>
 internal abstract class Tier1Kernel : IVectorFunction
 {
-    protected Tier1Kernel(FunctionSignature signature, bool strict)
+    /// <summary>
+    /// The compiled writer of a STRUCT result (D294), a <c>StructWriter&lt;TOut&gt;</c> built once at
+    /// binding; null for every scalar result.
+    /// </summary>
+    private readonly object? _struct;
+
+    protected Tier1Kernel(FunctionSignature signature, bool strict, object? structWriter = null)
     {
         Signature = signature;
         Strict = strict;
+        _struct = structWriter;
     }
 
     public FunctionSignature Signature { get; }
@@ -48,6 +55,12 @@ internal abstract class Tier1Kernel : IVectorFunction
     protected void Run<TOut>(
         ReadOnlySpan<ColumnView> args, ColumnWriter result, int length, LaneProducer<TOut> produce)
     {
+        if (_struct is StructWriter<TOut> record)
+        {
+            RunStruct(args, result, length, produce, record);
+            return;
+        }
+
         if (LaneCodec.IsVariableLength<TOut>())
         {
             result.BeginVarLength(length, nullable: true);
@@ -84,6 +97,41 @@ internal abstract class Tier1Kernel : IVectorFunction
         }
     }
 
+    /// <summary>
+    /// The lane loop of a STRUCT result (D294): one delegate call per lane, one write per field, and
+    /// the struct's own validity. A strict lane is skipped as a scalar's is, and still gets its row in
+    /// every field, which is what keeps the fields aligned with the struct.
+    /// </summary>
+    private void RunStruct<TOut>(
+        ReadOnlySpan<ColumnView> args,
+        ColumnWriter result,
+        int length,
+        LaneProducer<TOut> produce,
+        StructWriter<TOut> record)
+    {
+        var validity = result.BeginValidity(length);
+        record.Begin(result, length);
+        for (var row = 0; row < length; row++)
+        {
+            if (Strict && !AllValid(args, row))
+            {
+                record.WriteNull(row);
+                continue;
+            }
+
+            if (record.Write(produce(row), row))
+            {
+                Apache.Arrow.BitUtility.SetBit(validity, row);
+            }
+        }
+    }
+
+    /// <summary>The struct writer a kernel of this result type needs, or null for a scalar result.</summary>
+    protected static object? StructWriterFor<TOut>(FunctionSignature signature) =>
+        signature.ReturnType.Kind == Ir.TypeKind.Struct
+            ? StructWriters.For<TOut>(signature.ReturnType)
+            : null;
+
     /// <summary>One row's answer. A struct-free delegate: it closes over nothing this code allocates.</summary>
     protected delegate TOut LaneProducer<out TOut>(int row);
 }
@@ -94,7 +142,7 @@ internal sealed class Tier1Kernel0<TOut> : Tier1Kernel
     private readonly LaneProducer<TOut> _produce;
 
     public Tier1Kernel0(FunctionSignature signature, bool strict, Func<TOut> f)
-        : base(signature, strict)
+        : base(signature, strict, StructWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = _ => _f();
@@ -111,7 +159,7 @@ internal sealed class Tier1Kernel1<T1, TOut> : Tier1Kernel
     private ColumnView _a1;
 
     public Tier1Kernel1(FunctionSignature signature, bool strict, Func<T1, TOut> f)
-        : base(signature, strict)
+        : base(signature, strict, StructWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
@@ -134,7 +182,7 @@ internal sealed class Tier1Kernel2<T1, T2, TOut> : Tier1Kernel
     private ColumnView _a2;
 
     public Tier1Kernel2(FunctionSignature signature, bool strict, Func<T1, T2, TOut> f)
-        : base(signature, strict)
+        : base(signature, strict, StructWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
@@ -159,7 +207,7 @@ internal sealed class Tier1Kernel3<T1, T2, T3, TOut> : Tier1Kernel
     private ColumnView _a3;
 
     public Tier1Kernel3(FunctionSignature signature, bool strict, Func<T1, T2, T3, TOut> f)
-        : base(signature, strict)
+        : base(signature, strict, StructWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
@@ -187,7 +235,7 @@ internal sealed class Tier1Kernel4<T1, T2, T3, T4, TOut> : Tier1Kernel
     private ColumnView _a4;
 
     public Tier1Kernel4(FunctionSignature signature, bool strict, Func<T1, T2, T3, T4, TOut> f)
-        : base(signature, strict)
+        : base(signature, strict, StructWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
@@ -220,7 +268,7 @@ internal sealed class Tier1Kernel5<T1, T2, T3, T4, T5, TOut> : Tier1Kernel
     private ColumnView _a5;
 
     public Tier1Kernel5(FunctionSignature signature, bool strict, Func<T1, T2, T3, T4, T5, TOut> f)
-        : base(signature, strict)
+        : base(signature, strict, StructWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
@@ -257,7 +305,7 @@ internal sealed class Tier1Kernel6<T1, T2, T3, T4, T5, T6, TOut> : Tier1Kernel
 
     public Tier1Kernel6(
         FunctionSignature signature, bool strict, Func<T1, T2, T3, T4, T5, T6, TOut> f)
-        : base(signature, strict)
+        : base(signature, strict, StructWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;

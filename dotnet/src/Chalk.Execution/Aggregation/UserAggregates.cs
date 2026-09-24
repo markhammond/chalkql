@@ -22,8 +22,18 @@ internal sealed class UserAggregateAccumulator<TState, TIn, TOut> : MeasureAccum
     private TState[] _states = [];
     private int _initialised;
 
+    /// <summary>
+    /// The compiled writer of a STRUCT result into the measure column's fields (D294), and null for a
+    /// scalar result.
+    /// </summary>
+    private readonly StructEmitter<TOut>? _struct;
+
     public UserAggregateAccumulator(ChalkType resultType, AggregateSpec<TState, TIn, TOut> spec)
-        : base(resultType) => _spec = spec;
+        : base(resultType)
+    {
+        _spec = spec;
+        _struct = resultType.Kind == Ir.TypeKind.Struct ? StructEmitters.For<TOut>(resultType) : null;
+    }
 
     public override void EnsureCapacity(int groups)
     {
@@ -59,6 +69,13 @@ internal sealed class UserAggregateAccumulator<TState, TIn, TOut> : MeasureAccum
     public override void Emit(ColumnCopier copier, int group)
     {
         var state = group < _initialised ? _states[group] : _spec.Init();
+        if (_struct is not null)
+        {
+            // D291: Finish's record, field by field into the measure column's children.
+            _struct.Emit(copier, _spec.Finish(state));
+            return;
+        }
+
         Span<byte> lane = stackalloc byte[ResultWidth];
         var valid = LaneCodec.WriteRaw(lane, _spec.Finish(state));
         copier.AppendRaw(lane, valid);
