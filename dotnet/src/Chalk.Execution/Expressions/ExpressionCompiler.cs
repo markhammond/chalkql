@@ -21,6 +21,15 @@ internal sealed class ExpressionCompiler
     /// </summary>
     private readonly IReadOnlyDictionary<string, int> _boundSlots;
 
+    /// <summary>
+    /// The user calls this compiler has already compiled, by the <c>Expr</c> message that names them
+    /// (D293): a second occurrence of an <c>IMMUTABLE</c> or <c>STABLE</c> call compiles to the same
+    /// node, which answers once per batch. One compiler per operator, so this is the operator's
+    /// expression list and no wider. Messages compare structurally, which is what makes two spellings
+    /// of the same call one key.
+    /// </summary>
+    private readonly Dictionary<Expr, UserScalarExpr> _shared = [];
+
     /// <summary>A compiler for a plan that cannot name a user function — every test before step 22.</summary>
     public ExpressionCompiler()
         : this(null, HostFunctionSet.Empty)
@@ -77,6 +86,12 @@ internal sealed class ExpressionCompiler
     /// </summary>
     private IVectorExpr UserCall(Expr expr, ChalkType type)
     {
+        if (_shared.TryGetValue(expr, out var shared))
+        {
+            shared.Share();
+            return shared;
+        }
+
         var name = expr.Call.UserFunction;
         if (_catalog is null)
         {
@@ -96,12 +111,20 @@ internal sealed class ExpressionCompiler
             args[i] = Compile(expr.Call.Args[i]);
         }
 
-        return new UserScalarExpr(
+        var node = new UserScalarExpr(
             type,
             UserFunctionBinding.ScalarKernel(descriptor, host!),
             args,
             descriptor.Strict,
             descriptor.Volatility);
+
+        // A VOLATILE call answers per lane per occurrence and is never de-duplicated (D79, D293).
+        if (descriptor.Volatility != Volatility.Volatile)
+        {
+            _shared[expr] = node;
+        }
+
+        return node;
     }
 
     private IVectorExpr IfThen(Expr expr, ChalkType type)

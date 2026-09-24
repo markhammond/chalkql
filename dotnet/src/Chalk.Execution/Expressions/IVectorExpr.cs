@@ -80,9 +80,17 @@ internal sealed class EvalContext : Vectors.IArenaScratch
     /// <summary>Changes with every execution, so a cache built from the parameters knows to rebuild.</summary>
     public int Generation => _execution.Generation;
 
+    /// <summary>
+    /// Changes with every batch this context is pointed at, so a node shared by several expressions
+    /// of one operator knows whether it has already answered for this one (D293). It starts at zero,
+    /// which is also the answer for evaluation that never points the context at a batch at all.
+    /// </summary>
+    public long BatchSequence { get; private set; }
+
     /// <summary>Points the context at the next batch. Cheap: an operator does this per batch.</summary>
     public void SetBatch(ColumnarBatch? batch, int length)
     {
+        BatchSequence++;
         Batch = batch;
         Length = length;
         _selected = batch is { HasSelection: true };

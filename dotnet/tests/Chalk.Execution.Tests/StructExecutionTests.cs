@@ -15,10 +15,10 @@ using IrType = Chalk.Ir.Type;
 namespace Chalk.Execution.Tests;
 
 /// <summary>
-/// The executor's half of structured results (D291, D294; ADR 0077): a struct result written by a
-/// Tier 1 delegate and taken apart by field access, nullable and strict; a struct-valued aggregate
-/// grouped and over a frame; how often a call runs; what a struct costs per batch; and the
-/// reference executor agreeing with all of it.
+/// The executor's half of structured results (D291, D293, D294; ADR 0077): a struct result written
+/// by a Tier 1 delegate and taken apart by field access, nullable and strict; a struct-valued
+/// aggregate grouped and over a frame; how often a shared call runs; what a struct costs per batch;
+/// and the reference executor agreeing with all of it.
 /// </summary>
 [Experimental("CHALK001")]
 public sealed class StructExecutionTests
@@ -436,7 +436,118 @@ public sealed class StructExecutionTests
         }
     }
 
-    // ---- how often a call runs ----
+    // ---- D293: how often a call runs ----
+
+    [Fact]
+    public async Task Two_fields_of_one_call_run_it_once_per_row()
+    {
+        var counter = new Counter();
+        var plan = IrBuilder.Plan(Project(
+            TxnRead(),
+            [("category", FieldAccess(ClassifyCall(), 0)), ("confidence", FieldAccess(ClassifyCall(), 1))]));
+
+        await RunAsync(Compile(plan, [ClassifyDeclaration()], [ClassifyHost(counter)]));
+
+        Assert.Equal(Rows - (Rows / 4), counter.Calls);
+    }
+
+    [Fact]
+    public async Task The_whole_value_beside_its_fields_runs_the_call_once_per_row()
+    {
+        var counter = new Counter();
+        var plan = IrBuilder.Plan(Project(
+            TxnRead(),
+            [
+                ("id", Ref(TxnRow, 0)),
+                ("move", FieldAccess(ClassifyCall(), 1)),
+                ("c", ClassifyCall()),
+                ("category", FieldAccess(ClassifyCall(), 0)),
+            ]));
+
+        var rows = await RunAsync(Compile(plan, [ClassifyDeclaration()], [ClassifyHost(counter)]));
+
+        Assert.Equal(Rows - (Rows / 4), counter.Calls);
+
+        // One answer, three readers: the column and its two fields agree on every row.
+        Assert.All(rows, row =>
+        {
+            if ((long)row[0]! % 4 == 3)
+            {
+                Assert.Equal([null, null, null], row[1..]);
+                return;
+            }
+
+            var whole = Assert.IsType<object?[]>(row[2]);
+            Assert.Equal(whole[1], row[1]);
+            Assert.Equal(whole[0], row[3]);
+        });
+    }
+
+    [Fact]
+    public async Task The_subquery_spelling_after_calcite_merges_it_runs_the_call_once_per_row()
+    {
+        // `SELECT (c).confidence, s.c.* FROM (SELECT classify(amount) AS c FROM txn) s`, as the
+        // planner hands it over: one projection of field accesses over the call itself.
+        var counter = new Counter();
+        var plan = IrBuilder.Plan(Project(
+            TxnRead(),
+            [
+                ("confidence", FieldAccess(ClassifyCall(), 1)),
+                ("Category", FieldAccess(ClassifyCall(), 0)),
+                ("Confidence", FieldAccess(ClassifyCall(), 1)),
+            ]));
+
+        await RunAsync(Compile(plan, [ClassifyDeclaration()], [ClassifyHost(counter)]));
+
+        Assert.Equal(Rows - (Rows / 4), counter.Calls);
+    }
+
+    [Fact]
+    public async Task A_shared_call_answers_afresh_in_every_batch_and_every_execution()
+    {
+        // Eight batches and two executions of one compiled plan: the shared node's remembered answer
+        // is for one batch of one execution, never carried into the next.
+        var counter = new Counter();
+        var plan = IrBuilder.Plan(Project(
+            TxnRead(),
+            [("id", Ref(TxnRow, 0)), ("category", FieldAccess(ClassifyCall(), 0)), ("confidence", FieldAccess(ClassifyCall(), 1))]));
+        var compiled = Compile(plan, [ClassifyDeclaration()], [ClassifyHost(counter)], batchSize: Rows / 8);
+
+        for (var execution = 1; execution <= 2; execution++)
+        {
+            var rows = await RunAsync(compiled);
+
+            Assert.Equal(Rows, rows.Count);
+            foreach (var row in rows)
+            {
+                var id = (long)row[0]!;
+                var amount = (double)(id % 250);
+                Assert.Equal(id % 4 == 3 ? null : amount >= 100 ? "large" : "small", row[1]);
+                Assert.Equal(id % 4 == 3 ? null : amount / 1000, (double?)row[2]);
+            }
+
+            Assert.Equal(execution * (Rows - (Rows / 4)), counter.Calls);
+        }
+    }
+
+    [Fact]
+    public async Task Two_fields_in_one_predicate_run_the_call_once_per_row()
+    {
+        var counter = new Counter();
+        var predicate = Call(
+            FunctionId.And,
+            Bool(nullable: true),
+            Call(FunctionId.Eq, Bool(nullable: true), FieldAccess(ClassifyCall(), 0), Lit("large")),
+            Call(FunctionId.Gt, Bool(nullable: true), FieldAccess(ClassifyCall(), 1), Lit(0.2)));
+        var plan = IrBuilder.Plan(Filter(TxnRead(), predicate));
+
+        var rows = await RunAsync(Compile(plan, [ClassifyDeclaration()], [ClassifyHost(counter)]));
+
+        Assert.Equal(Rows - (Rows / 4), counter.Calls);
+        Assert.Equal(
+            Enumerable.Range(0, Rows).Count(i => i % 4 != 3 && i % 250 > 200),
+            rows.Count);
+    }
 
     [Fact]
     public async Task A_volatile_call_runs_once_per_occurrence()
@@ -462,9 +573,9 @@ public sealed class StructExecutionTests
 
         var rows = await RunAsync(Compile(plan, [TodayDeclaration()], [TodayHost(counter)], batchSize: 512));
 
-        // Once per execution for each of the three occurrences, over eight batches: each is broadcast
-        // child by child from the one row it answered.
-        Assert.Equal(3, counter.Calls);
+        // Once per execution over eight batches, although the projection names the call three
+        // times: the three occurrences are one shared node, broadcast field by field.
+        Assert.Equal(1, counter.Calls);
         Assert.Equal(Rows, rows.Count);
         Assert.All(rows, r => Assert.Equal("large", r[0]));
         Assert.All(rows, r => Assert.Equal(["large", 1.0], (object?[])r[2]!));
