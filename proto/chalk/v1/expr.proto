@@ -24,7 +24,16 @@ message Expr {
     EnumArg enum_arg = 9;
     KeySetParam key_set = 10;
     KeySetMatch key_set_match = 11;
+    FieldAccess field_access = 12;
   }
+}
+
+// One field of a STRUCT-typed input, by its position in the struct's `Type.fields`. Expr.type is
+// that field's type, made nullable when the struct is: a NULL struct reads as NULL in every field,
+// whatever the field itself declares.
+message FieldAccess {
+  Expr input = 1;
+  uint32 index = 2;
 }
 
 // A set of key values bound once per lookup call. Appears only inside a LookupJoin's

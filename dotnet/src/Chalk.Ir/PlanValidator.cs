@@ -4,9 +4,9 @@ using Google.Protobuf;
 namespace Chalk.Ir;
 
 /// <summary>
-/// Checks the structural invariants I-IR-1 … I-IR-20 (<c>docs/design/02-ir.md</c> §8, and the ADRs
-/// that added the later ones: I-IR-16 in ADR 0021, I-IR-17 … I-IR-20 in ADR 0022) on every plan
-/// the client receives. A failure is a contract bug in whoever produced the plan
+/// Checks the structural invariants I-IR-1 … I-IR-23 (<c>docs/design/02-ir.md</c> §8, and the ADRs
+/// that added the later ones: I-IR-16 in ADR 0021, I-IR-17 … I-IR-20 in ADR 0022, I-IR-21 … I-IR-23
+/// in ADR 0077) on every plan the client receives. A failure is a contract bug in whoever produced the plan
 /// (<see cref="InvalidPlanException"/>), or a version skew (<see cref="IrVersionMismatchException"/>) —
 /// never a user error.
 /// </summary>
@@ -69,6 +69,7 @@ public static class PlanValidator
             foreach (var (type, i) in plan.ParameterTypes.Select((t, i) => (t, i)))
             {
                 CheckType(type, $"plan.parameter_types[{i}]");
+                RefuseStruct(type, $"plan.parameter_types[{i}]", "a parameter's type");
             }
 
             var rootType = Rel(plan.Root, "root");
@@ -222,10 +223,12 @@ public static class PlanValidator
             {
                 case Chalk.Ir.Rel.KindOneofCase.Read:
                     Read(rel, kindPath);
+                    RefuseStructColumns(output, kindPath, "a table column");
                     break;
 
                 case Chalk.Ir.Rel.KindOneofCase.VirtualTable:
                     VirtualTable(rel, kindPath);
+                    RefuseStructColumns(output, kindPath, "a VALUES column");
                     break;
 
                 // A relation the host bound by name (step 26, 16-entitlements.md §2, §4). Its rows
@@ -246,6 +249,7 @@ public static class PlanValidator
                             + "executor binds the host's rows against this row type");
                     }
 
+                    RefuseStructColumns(output, kindPath, "a bound table's column");
                     break;
 
                 case Chalk.Ir.Rel.KindOneofCase.Filter:
@@ -459,6 +463,19 @@ public static class PlanValidator
                         RequireSetOpRow(output, input, $"{kindPath}.inputs[{i}]");
                     }
 
+                    // Every form but UNION ALL compares whole rows, which makes each column a
+                    // DISTINCT key: a composite has no equality to compare them by (I-IR-23).
+                    if (rel.SetOp.Kind != SetOpKind.UnionAll)
+                    {
+                        for (var i = 0; i < output.Fields.Count; i++)
+                        {
+                            RefuseComposite(
+                                output.Fields[i].Type,
+                                $"{kindPath}.row_type[{i}] ({output.Fields[i].Name})",
+                                $"compared by {SetOpName(rel.SetOp.Kind)}");
+                        }
+                    }
+
                     break;
                 }
 
@@ -490,6 +507,10 @@ public static class PlanValidator
                             input,
                             "I-IR-3",
                             $"{kindPath}.partition_keys[{i}]");
+                        RefuseComposite(
+                            input.Fields[(int)rel.Session.PartitionKeys[i]].Type,
+                            $"{kindPath}.partition_keys[{i}]",
+                            "partitioned by");
                     }
 
                     RequireIndex(rel.Session.TimeColumn, input, "I-IR-3", $"{kindPath}.time_column");
@@ -504,10 +525,12 @@ public static class PlanValidator
 
                 case Chalk.Ir.Rel.KindOneofCase.TableFunctionScan:
                     TableFunctionScanNode(rel.TableFunctionScan, output, kindPath);
+                    RefuseStructColumns(output, kindPath, "a table function's column");
                     break;
 
                 case Chalk.Ir.Rel.KindOneofCase.IndexLookup:
                     IndexLookup(rel, kindPath);
+                    RefuseStructColumns(output, kindPath, "a table column");
                     break;
 
                 case Chalk.Ir.Rel.KindOneofCase.RemoteQuery:
@@ -529,6 +552,7 @@ public static class PlanValidator
                     }
 
                     RenderedBounds(rel.RemoteQuery, kindPath);
+                    RefuseStructColumns(output, kindPath, "a column a source returns");
                     break;
 
                 case Chalk.Ir.Rel.KindOneofCase.LookupJoin:
@@ -792,7 +816,7 @@ public static class PlanValidator
             for (var i = 0; i < keys.Count; i++)
             {
                 RequireIndex(keys[i], input, "I-IR-3", $"{path}.groupings[0].keys[{i}]");
-                RefuseList(
+                RefuseComposite(
                     input.Fields[(int)keys[i]].Type,
                     $"{path}.groupings[0].keys[{i}]",
                     "grouped by");
@@ -824,6 +848,17 @@ public static class PlanValidator
                 for (var a = 0; a < measure.Args.Count; a++)
                 {
                     Expression(measure.Args[a], input, $"{measurePath}.args[{a}]");
+                    RefuseStruct(
+                        measure.Args[a].Type,
+                        $"{measurePath}.args[{a}]",
+                        measure.UserFunction.Length > 0
+                            ? "a function's argument"
+                            : "a built-in aggregate's argument");
+                }
+
+                if (measure.UserFunction.Length == 0)
+                {
+                    RefuseStruct(measure.Type, $"{measurePath}.type", "a built-in aggregate's result");
                 }
 
                 if (measure.Filter is not null)
@@ -903,6 +938,10 @@ public static class PlanValidator
             for (var i = 0; i < window.PartitionKeys.Count; i++)
             {
                 RequireIndex(window.PartitionKeys[i], input, "I-IR-3", $"{path}.partition_keys[{i}]");
+                RefuseComposite(
+                    input.Fields[(int)window.PartitionKeys[i]].Type,
+                    $"{path}.partition_keys[{i}]",
+                    "partitioned by");
             }
 
             SortFields(window.Order, input, $"{path}.order");
@@ -986,6 +1025,17 @@ public static class PlanValidator
                 for (var a = 0; a < call.Args.Count; a++)
                 {
                     Expression(call.Args[a], input, $"{callPath}.args[{a}]");
+                    RefuseStruct(
+                        call.Args[a].Type,
+                        $"{callPath}.args[{a}]",
+                        call.UserFunction.Length > 0
+                            ? "a function's argument"
+                            : "a built-in window function's argument");
+                }
+
+                if (call.UserFunction.Length == 0)
+                {
+                    RefuseStruct(call.Type, $"{callPath}.type", "a built-in window function's result");
                 }
 
                 if (call.IgnoreNulls
@@ -1305,6 +1355,8 @@ public static class PlanValidator
             {
                 RequireIndex(leftKeys[i], left, "I-IR-3", $"{path}.left_keys[{i}]");
                 RequireIndex(rightKeys[i], right, "I-IR-3", $"{path}.right_keys[{i}]");
+                RefuseComposite(left.Fields[(int)leftKeys[i]].Type, $"{path}.left_keys[{i}]", "joined on");
+                RefuseComposite(right.Fields[(int)rightKeys[i]].Type, $"{path}.right_keys[{i}]", "joined on");
             }
 
             if (residual is not null)
@@ -1390,6 +1442,7 @@ public static class PlanValidator
 
             var small = Rel(adaptive.Small, $"{path}.small");
             RequireIndex(adaptive.Key, small, "I-IR-18", $"{path}.key");
+            RefuseComposite(small.Fields[(int)adaptive.Key].Type, $"{path}.key", "joined on");
             if (adaptive.MaxKeys <= 0)
             {
                 throw Invalid(
@@ -1573,7 +1626,7 @@ public static class PlanValidator
                 }
 
                 Expression(field.Expr, input, fieldPath);
-                RefuseList(field.Expr.Type, fieldPath, "sorted on");
+                RefuseComposite(field.Expr.Type, fieldPath, "sorted on");
             }
         }
 
@@ -1617,11 +1670,16 @@ public static class PlanValidator
                     break;
 
                 case Expr.KindOneofCase.Literal:
+                    // A struct is produced by a function and by nothing else: there is no struct
+                    // literal, not even a typed NULL one (I-IR-23).
+                    RefuseStruct(expr.Type, path, "a literal");
                     LiteralValue(expr, path);
                     break;
 
                 case Expr.KindOneofCase.Param:
                 {
+                    RefuseStruct(expr.Type, path, "a parameter's type");
+
                     // A named bound value is not one of the statement's parameters and has no index
                     // into their types: its type is its own, and execution binds it by name from the
                     // request's context (16-entitlements.md §2, D209).
@@ -1645,6 +1703,8 @@ public static class PlanValidator
 
                 case Expr.KindOneofCase.Cast:
                     Expression(expr.Cast.Input, input, $"{path}.input");
+                    RefuseStruct(expr.Cast.Input.Type, $"{path}.input", "cast");
+                    RefuseStruct(expr.Type, path, "a cast's target");
                     break;
 
                 case Expr.KindOneofCase.IfThen:
@@ -1661,6 +1721,8 @@ public static class PlanValidator
                             path,
                             "CASE has no ELSE; the planner emits a typed NULL literal when SQL omits it");
                     }
+
+                    RefuseStruct(expr.Type, path, "a CASE result");
 
                     for (var i = 0; i < expr.IfThen.Clauses.Count; i++)
                     {
@@ -1679,6 +1741,7 @@ public static class PlanValidator
                 case Expr.KindOneofCase.InList:
                 {
                     Expression(expr.InList.Value, input, $"{path}.value");
+                    RefuseStruct(expr.InList.Value.Type, $"{path}.value", "an IN value");
                     if (expr.InList.Options.Count == 0)
                     {
                         throw Invalid("I-IR-4", path, "IN has no options");
@@ -1736,10 +1799,60 @@ public static class PlanValidator
                     KeySetMatch(expr, input, path);
                     break;
 
+                case Expr.KindOneofCase.FieldAccess:
+                    FieldAccess(expr, input, path);
+                    break;
+
                 case Expr.KindOneofCase.EnumArg:
                 case Expr.KindOneofCase.None:
                 default:
                     throw Invalid("I-IR-1", path, $"unhandled expression kind {expr.KindCase}");
+            }
+        }
+
+        /// <summary>
+        /// <c>I-IR-22</c> (D291): one field of a STRUCT-typed input, by position, typed as the field is —
+        /// made nullable when the struct is, because a NULL struct reads as NULL in every field
+        /// whatever the field declares.
+        /// </summary>
+        private void FieldAccess(Expr expr, RowType input, string path)
+        {
+            var access = expr.FieldAccess;
+            if (access.Input is null)
+            {
+                throw Invalid("I-IR-22", path, "a FieldAccess has no input");
+            }
+
+            Expression(access.Input, input, $"{path}.input");
+            var composite = access.Input.Type!;
+            if (composite.Kind != TypeKind.Struct)
+            {
+                throw Invalid(
+                    "I-IR-22",
+                    $"{path}.input",
+                    $"the input is {IrTypes.Describe(composite)}; a FieldAccess reads a field of a STRUCT");
+            }
+
+            if (access.Index >= (uint)composite.Fields.Count)
+            {
+                throw Invalid(
+                    "I-IR-22",
+                    path,
+                    $"field index {access.Index} is out of range for a STRUCT of "
+                    + $"{composite.Fields.Count} field{(composite.Fields.Count == 1 ? string.Empty : "s")}");
+            }
+
+            var field = composite.Fields[(int)access.Index];
+            var expected = field.Type.Clone();
+            expected.Nullable |= composite.Nullable;
+            if (!expected.Equals(expr.Type))
+            {
+                throw Invalid(
+                    "I-IR-22",
+                    path,
+                    $"the access is typed {IrTypes.Describe(expr.Type)}, and field '{field.Name}' of "
+                    + $"{IrTypes.Describe(composite)} reads as {IrTypes.Describe(expected)}: the field's "
+                    + "own type, made nullable when the struct is");
             }
         }
 
@@ -1793,6 +1906,9 @@ public static class PlanValidator
                 for (var i = 0; i < call.Args.Count; i++)
                 {
                     Expression(call.Args[i], input, $"{path}.args[{i}]");
+
+                    // A struct is never a parameter type (D294), so no declared function takes one.
+                    RefuseStruct(call.Args[i].Type, $"{path}.args[{i}]", "a function's argument");
                 }
 
                 return;
@@ -1830,6 +1946,10 @@ public static class PlanValidator
                 }
 
                 Expression(arg, input, argPath);
+                if (arg.Type?.Kind == TypeKind.Struct && !TakesStruct(call.Function))
+                {
+                    RefuseStruct(arg.Type, argPath, StructRole(call.Function));
+                }
             }
 
             if (call.Function is FunctionId.And or FunctionId.Or)
@@ -1854,8 +1974,39 @@ public static class PlanValidator
                 RequireKind(call.Args[0], TypeKind.Bool, $"{path}.args[0]");
             }
 
+            RefuseStruct(expr.Type, path, $"the result of {call.Function}");
             CheckHomogeneity(call, path, expr.Type);
         }
+
+        /// <summary>A set operation as SQL spells it, for a refusal.</summary>
+        private static string SetOpName(SetOpKind kind) => kind switch
+        {
+            SetOpKind.UnionDistinct => "UNION",
+            SetOpKind.IntersectAll => "INTERSECT ALL",
+            SetOpKind.IntersectDistinct => "INTERSECT",
+            SetOpKind.ExceptAll => "EXCEPT ALL",
+            SetOpKind.ExceptDistinct => "EXCEPT",
+            _ => kind.ToString(),
+        };
+
+        /// <summary>
+        /// The built-ins a STRUCT may be an argument of: the two null tests, which read a value's
+        /// validity and nothing else (D291). Every other built-in compares, computes or converts.
+        /// </summary>
+        private static bool TakesStruct(FunctionId function) =>
+            function is FunctionId.IsNull or FunctionId.IsNotNull;
+
+        /// <summary>What a STRUCT argument of <paramref name="function"/> would be, for the refusal.</summary>
+        private static string StructRole(FunctionId function) => function switch
+        {
+            FunctionId.Eq or FunctionId.Ne or FunctionId.Lt or FunctionId.Le or FunctionId.Gt
+                or FunctionId.Ge or FunctionId.IsDistinctFrom or FunctionId.IsNotDistinctFrom
+                or FunctionId.Nullif => "compared",
+            FunctionId.Add or FunctionId.Subtract or FunctionId.Multiply or FunctionId.Divide
+                or FunctionId.Modulus or FunctionId.Negate or FunctionId.Abs or FunctionId.Power
+                => "an arithmetic operand",
+            _ => $"an argument of {function}",
+        };
 
         /// <summary>
         /// I-IR-2: value operands of comparisons, arithmetic, NULLIF and COALESCE share a TypeKind
@@ -2034,6 +2185,15 @@ public static class PlanValidator
                         "a LIST's element is itself a LIST; v1 lists are exactly one level deep");
                 }
 
+                if (type.Element.Kind == TypeKind.Struct)
+                {
+                    throw Invalid(
+                        "I-IR-12",
+                        path,
+                        "a LIST's element is a STRUCT; a list holds scalars and a composite is never "
+                        + "nested in another");
+                }
+
                 CheckType(type.Element, $"{path}.element");
             }
             else if (type.Element is not null)
@@ -2042,6 +2202,19 @@ public static class PlanValidator
                     "I-IR-12",
                     path,
                     $"{type.Kind} carries an element type; only a LIST has one");
+            }
+
+            // I-IR-21 (D291): a STRUCT carries its fields, one level deep, and nothing else carries any.
+            if (type.Kind == TypeKind.Struct)
+            {
+                StructFields(type, path);
+            }
+            else if (type.Fields.Count > 0)
+            {
+                throw Invalid(
+                    "I-IR-21",
+                    path,
+                    $"{type.Kind} carries {type.Fields.Count} field(s); only a STRUCT has fields");
             }
 
             if (type.Kind == TypeKind.Decimal)
@@ -2091,11 +2264,63 @@ public static class PlanValidator
         }
 
         /// <summary>
-        /// I-IR-12: a <c>LIST</c> can be produced, carried, projected and indexed into, but never
-        /// compared, grouped or sorted (D58). The places where a type is used that way say so here
-        /// rather than each rediscovering it.
+        /// <c>I-IR-21</c> (D291): a STRUCT has at least one field; every field has a name, no two names
+        /// are equal ignoring case — SQL resolves a field that way — and every field is a scalar, so a
+        /// struct is exactly one level deep.
         /// </summary>
-        private void RefuseList(Type? type, string path, string what)
+        private void StructFields(Type type, string path)
+        {
+            if (type.Fields.Count == 0)
+            {
+                throw Invalid("I-IR-21", path, "a STRUCT has no fields; it has at least one");
+            }
+
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < type.Fields.Count; i++)
+            {
+                var field = type.Fields[i];
+                var fieldPath = $"{path}.fields[{i}]";
+                if (string.IsNullOrEmpty(field.Name))
+                {
+                    throw Invalid("I-IR-21", fieldPath, "a STRUCT field has no name");
+                }
+
+                fieldPath = $"{fieldPath} ({field.Name})";
+                if (!names.Add(field.Name))
+                {
+                    throw Invalid(
+                        "I-IR-21",
+                        fieldPath,
+                        $"field name '{field.Name}' is used twice ignoring case; a field is resolved "
+                        + "by name ignoring case, so two such names would be one field");
+                }
+
+                if (field.Type is null)
+                {
+                    throw Invalid("I-IR-21", fieldPath, "the field has no type");
+                }
+
+                if (IrTypes.IsComposite(field.Type.Kind))
+                {
+                    throw Invalid(
+                        "I-IR-21",
+                        fieldPath,
+                        $"the field is a {field.Type.Kind.ToString().ToUpperInvariant()}; a STRUCT is "
+                        + "one level deep and its fields are scalars");
+                }
+
+                CheckType(field.Type, fieldPath);
+            }
+        }
+
+        /// <summary>
+        /// The composite rule: a <c>LIST</c> can be produced, carried, projected and indexed into, and a
+        /// <c>STRUCT</c> produced by a user function, carried and taken apart by field access — but
+        /// neither is ever compared, grouped, sorted, partitioned or joined on. I-IR-12 says so for a
+        /// list (D58), in the words it always has, and I-IR-23 for a struct (D291). The places where a
+        /// type is used that way say so here rather than each rediscovering it.
+        /// </summary>
+        private void RefuseComposite(Type? type, string path, string what)
         {
             if (type?.Kind == TypeKind.List)
             {
@@ -2103,6 +2328,37 @@ public static class PlanValidator
                     "I-IR-12",
                     path,
                     $"a LIST cannot be {what}; v1 lists are produced, projected and indexed into only");
+            }
+
+            RefuseStruct(type, path, what);
+        }
+
+        /// <summary>
+        /// <c>I-IR-23</c> (D291): the places a STRUCT may never be — a key, an operand, a literal, a
+        /// parameter, a cast, a CASE result, a built-in's argument or result, a table's column.
+        /// </summary>
+        private void RefuseStruct(Type? type, string path, string what)
+        {
+            if (type?.Kind == TypeKind.Struct)
+            {
+                throw Invalid(
+                    "I-IR-23",
+                    path,
+                    $"a STRUCT cannot be {what}; a struct is produced by a user function and is only "
+                    + "carried, or taken apart by field access");
+            }
+        }
+
+        /// <summary>
+        /// <c>I-IR-23</c> for a leaf's row: a struct exists only between the function that produced it
+        /// and the row that takes it apart or carries it out, so no table, source or bound relation
+        /// ever holds one.
+        /// </summary>
+        private void RefuseStructColumns(RowType row, string path, string what)
+        {
+            for (var i = 0; i < row.Fields.Count; i++)
+            {
+                RefuseStruct(row.Fields[i].Type, $"{path}.row_type[{i}] ({row.Fields[i].Name})", what);
             }
         }
 

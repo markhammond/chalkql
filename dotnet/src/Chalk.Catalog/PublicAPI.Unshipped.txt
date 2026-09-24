@@ -39,6 +39,12 @@ Chalk.Catalog.CatalogVerificationException.CatalogVerificationException(string! 
 Chalk.Catalog.CatalogVerificationException.Declaration.get -> string!
 Chalk.Catalog.CatalogVerificationException.RowIndex.get -> long
 Chalk.Catalog.CatalogVerificationException.Table.get -> string!
+Chalk.Catalog.ChalkField
+Chalk.Catalog.ChalkField.ChalkField() -> void
+Chalk.Catalog.ChalkField.ChalkField(string! name, Chalk.Catalog.ChalkType type) -> void
+Chalk.Catalog.ChalkField.Equals(Chalk.Catalog.ChalkField other) -> bool
+Chalk.Catalog.ChalkField.Name.get -> string!
+Chalk.Catalog.ChalkField.Type.get -> Chalk.Catalog.ChalkType
 Chalk.Catalog.ChalkType
 Chalk.Catalog.ChalkType.ChalkType() -> void
 Chalk.Catalog.ChalkType.ChalkType(Chalk.Ir.TypeKind Kind, bool Nullable, int Precision = 0, int Scale = 0) -> void
@@ -46,6 +52,8 @@ Chalk.Catalog.ChalkType.Deconstruct(out Chalk.Ir.TypeKind Kind, out bool Nullabl
 Chalk.Catalog.ChalkType.Element.get -> Chalk.Catalog.ChalkType?
 Chalk.Catalog.ChalkType.Element.init -> void
 Chalk.Catalog.ChalkType.Equals(Chalk.Catalog.ChalkType other) -> bool
+Chalk.Catalog.ChalkType.Fields.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ChalkField>!
+Chalk.Catalog.ChalkType.Fields.init -> void
 Chalk.Catalog.ChalkType.Kind.get -> Chalk.Ir.TypeKind
 Chalk.Catalog.ChalkType.Kind.init -> void
 Chalk.Catalog.ChalkType.Nullable.get -> bool
@@ -560,6 +568,9 @@ Chalk.Entitlements.VisibilityStepDescriptor.ToColumn.get -> int
 Chalk.Entitlements.VisibilityStepDescriptor.ToColumn.init -> void
 Chalk.Entitlements.VisibilityStepDescriptor.VisibilityStepDescriptor() -> void
 override Chalk.Catalog.AssociationDescriptor.ToString() -> string!
+override Chalk.Catalog.ChalkField.Equals(object? obj) -> bool
+override Chalk.Catalog.ChalkField.GetHashCode() -> int
+override Chalk.Catalog.ChalkField.ToString() -> string!
 override Chalk.Catalog.ChalkType.GetHashCode() -> int
 override Chalk.Catalog.ChalkType.ToString() -> string!
 override Chalk.Catalog.KeyOrder.GetHashCode() -> int
@@ -570,6 +581,8 @@ static Chalk.Catalog.CatalogSerialization.ToProto(Chalk.Catalog.ColumnStatistics
 static Chalk.Catalog.CatalogSerialization.ToProto(Chalk.Catalog.CrossSourceJoinPolicy! policy) -> Chalk.Ir.CrossSourceJoinPolicy!
 static Chalk.Catalog.CatalogValidator.Validate(Chalk.Catalog.CatalogContext! catalog) -> void
 static Chalk.Catalog.CatalogValidator.Validate(Chalk.Catalog.CatalogContext! catalog, Chalk.Entitlements.CatalogOptions! options) -> void
+static Chalk.Catalog.ChalkField.operator !=(Chalk.Catalog.ChalkField left, Chalk.Catalog.ChalkField right) -> bool
+static Chalk.Catalog.ChalkField.operator ==(Chalk.Catalog.ChalkField left, Chalk.Catalog.ChalkField right) -> bool
 static Chalk.Catalog.ChalkType.Binary(bool nullable = false) -> Chalk.Catalog.ChalkType
 static Chalk.Catalog.ChalkType.Bool(bool nullable = false) -> Chalk.Catalog.ChalkType
 static Chalk.Catalog.ChalkType.Date(bool nullable = false) -> Chalk.Catalog.ChalkType
@@ -585,6 +598,8 @@ static Chalk.Catalog.ChalkType.IntervalDay(bool nullable = false) -> Chalk.Catal
 static Chalk.Catalog.ChalkType.IntervalYear(bool nullable = false) -> Chalk.Catalog.ChalkType
 static Chalk.Catalog.ChalkType.List(Chalk.Catalog.ChalkType element, bool nullable = false) -> Chalk.Catalog.ChalkType
 static Chalk.Catalog.ChalkType.String(bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.Struct(System.Collections.Generic.IEnumerable<Chalk.Catalog.ChalkField>! fields, bool nullable = false) -> Chalk.Catalog.ChalkType
+static Chalk.Catalog.ChalkType.Struct(params Chalk.Catalog.ChalkField[]! fields) -> Chalk.Catalog.ChalkType
 static Chalk.Catalog.ChalkType.Time(int precision = 6, bool nullable = false) -> Chalk.Catalog.ChalkType
 static Chalk.Catalog.ChalkType.Timestamp(int precision = 9, bool nullable = false) -> Chalk.Catalog.ChalkType
 static Chalk.Catalog.ChalkType.TimestampTz(int precision = 9, bool nullable = false) -> Chalk.Catalog.ChalkType

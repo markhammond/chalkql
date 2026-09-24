@@ -762,6 +762,52 @@ public static class IrBuilder
     public static IrType List(IrType element, bool nullable = true) =>
         new() { Kind = TypeKind.List, Nullable = nullable, Element = element };
 
+    /// <summary>
+    /// A STRUCT type of <paramref name="fields"/>, in order, one level deep (D291). Each field keeps
+    /// its own nullability; <paramref name="nullable"/> is the struct's own.
+    /// </summary>
+    public static IrType Struct(bool nullable, params Field[] fields)
+    {
+        var type = new IrType { Kind = TypeKind.Struct, Nullable = nullable };
+        type.Fields.AddRange(fields);
+        return type;
+    }
+
+    /// <summary>The same, non-nullable as a whole.</summary>
+    public static IrType Struct(params Field[] fields) => Struct(nullable: false, fields);
+
+    /// <summary>
+    /// Field <paramref name="index"/> of a STRUCT-typed <paramref name="input"/> (D291), typed as
+    /// I-IR-22 says: the field's own type, made nullable when the struct is.
+    /// </summary>
+    public static Expr FieldAccess(Expr input, int index)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        var type = input.Type.Fields[index].Type.Clone();
+        type.Nullable |= input.Type.Nullable;
+        return new Expr
+        {
+            Type = type,
+            FieldAccess = new FieldAccess { Input = input, Index = (uint)index },
+        };
+    }
+
+    /// <summary>A call to a client-bodied user function, named <c>schema.name</c> (D78).</summary>
+    public static Expr UserCall(string qualifiedName, IrType type, params Expr[] args)
+    {
+        var call = new ScalarCall { UserFunction = qualifiedName };
+        call.Args.AddRange(args);
+        return new Expr { Type = type, Call = call };
+    }
+
+    /// <summary>A measure over a client-bodied user aggregate, named <c>schema.name</c> (D80).</summary>
+    public static Measure UserAgg(string qualifiedName, IrType type, params Expr[] args)
+    {
+        var measure = new Measure { UserFunction = qualifiedName, Type = type };
+        measure.Args.AddRange(args);
+        return measure;
+    }
+
     /// <summary>A LIST literal (D58).</summary>
     public static Expr LitList(IrType element, params Expr[] elements)
     {

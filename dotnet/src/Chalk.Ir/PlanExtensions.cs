@@ -464,6 +464,20 @@ public static class PlanExtensions
 
                 sb.Append(" END");
                 break;
+            case Expr.KindOneofCase.FieldAccess:
+                // D291: printed as Calcite prints one — `classify_transaction($1, $2).category`,
+                // `$1.total` — with the field named from the struct's own type.
+                if (expr.FieldAccess.Input is null)
+                {
+                    sb.Append("<none>");
+                }
+                else
+                {
+                    Append(sb, expr.FieldAccess.Input);
+                }
+
+                sb.Append('.').Append(FieldName(expr.FieldAccess));
+                break;
             case Expr.KindOneofCase.InList:
                 Append(sb, expr.InList.Value);
                 sb.Append(" IN (");
@@ -487,6 +501,18 @@ public static class PlanExtensions
     }
 
     private static string Name(FunctionId function) => function.ToString().ToUpperInvariant();
+
+    /// <summary>
+    /// The name of the field a <c>FieldAccess</c> reads, or <c>#index</c> when the struct's type does
+    /// not say — a malformed plan, which the printer still prints rather than throws on.
+    /// </summary>
+    private static string FieldName(FieldAccess access)
+    {
+        var fields = access.Input?.Type?.Fields;
+        return fields is not null && access.Index < (uint)fields.Count
+            ? fields[(int)access.Index].Name
+            : "#" + access.Index.ToString(CultureInfo.InvariantCulture);
+    }
 
     /// <summary>A field index as the plan text writes one: <c>$3</c>.</summary>
     private static string Ref(uint index) => "$" + index.ToString(CultureInfo.InvariantCulture);

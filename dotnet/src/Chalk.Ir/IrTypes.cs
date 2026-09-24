@@ -29,11 +29,15 @@ public static class IrTypes
         kind is TypeKind.IntervalDay or TypeKind.IntervalYear;
 
     /// <summary>
-    /// True for the kinds a v1 <c>LIST</c> may hold, compare, group or sort by: everything but
-    /// <c>LIST</c> itself, which is what makes lists exactly one level deep (D58).
+    /// True for the kinds a v1 <c>LIST</c> or <c>STRUCT</c> may hold, and a plan may compare, group
+    /// or sort by: everything but the two composites, which is what makes both exactly one level deep
+    /// (D58, D291).
     /// </summary>
     public static bool IsScalar(TypeKind kind) =>
-        kind is not (TypeKind.List or TypeKind.Unspecified);
+        kind is not (TypeKind.List or TypeKind.Struct or TypeKind.Unspecified);
+
+    /// <summary>True for the two composite kinds, <c>LIST</c> and <c>STRUCT</c> (D58, D291).</summary>
+    public static bool IsComposite(TypeKind kind) => kind is TypeKind.List or TypeKind.Struct;
 
     /// <summary>
     /// The number of time units per second at a TIMESTAMP / TIMESTAMP_TZ precision: precision 0–3
@@ -75,6 +79,7 @@ public static class IrTypes
             TypeKind.IntervalDay => "INTERVAL_DAY",
             TypeKind.IntervalYear => "INTERVAL_YEAR",
             TypeKind.List => "LIST",
+            TypeKind.Struct => "STRUCT",
             _ => $"KIND_{(int)type.Kind}",
         };
 
@@ -85,6 +90,11 @@ public static class IrTypes
             TypeKind.Time or TypeKind.Timestamp or TypeKind.TimestampTz =>
                 string.Create(CultureInfo.InvariantCulture, $"({type.Precision})"),
             TypeKind.List => "<" + Describe(type.Element) + ">",
+
+            // `STRUCT<category:STRING, confidence:FP64>`, the fields as a row type spells its own.
+            TypeKind.Struct => "<"
+                + string.Join(", ", type.Fields.Select(f => $"{f.Name}:{Describe(f.Type)}"))
+                + ">",
             _ => string.Empty,
         };
 

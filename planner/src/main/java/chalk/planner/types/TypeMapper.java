@@ -71,6 +71,10 @@ public final class TypeMapper {
             }
             yield typeFactory.createArrayType(toCalcite(type.getElement()), -1);
           }
+          // The IR has the kind (D291); the planner maps it once it can plan one.
+          case TYPE_KIND_STRUCT ->
+              throw new UnsupportedFeatureException(
+                  "STRUCT type", "This planner does not map a STRUCT to Calcite yet.");
           case TYPE_KIND_UNSPECIFIED, UNRECOGNIZED ->
               throw new UnsupportedFeatureException(
                   "type kind " + type.getKind(),
