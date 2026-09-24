@@ -46,6 +46,7 @@ was handed, and what the tree does with a statement that spells `@ctx` itself.
 | 3 | Set operations | 29–33 (5) | §3.1, §3.12 the reported disclosure of a union |
 | 4 | Indirection | 34–39 (6) | §3.1 the rewrite is at the leaf; §7 SQL and client bodies |
 | — | D253's known limit | 40 (1) | not defended, and recorded as such |
+| 8 | Composite values | 60–65 (6) | §7 a client body is handed the disclosed value; §3.1 through a field; §3.4 the allow-list (ADR 0077) |
 
 ## D253 — the limit this family records rather than defends
 
@@ -100,6 +101,25 @@ joins through `members` back to `orders` to reach an order outside the confineme
 member who placed one inside it; `members` resolves no region, so a confined grant reaches no member
 row and the correlation has nothing to stand on. All three answer with exactly the rows the
 principal was already entitled to, and the detector reads every word of each answer.
+
+**Composite values (D291, ADR 0077).** Statements 60–65 are class 8: a client-bodied function that
+answers a composite value, over the masked `first_name`. `echo_with_length` answers the string it was
+handed and its length, so a field of it says what the host received. 60 takes the two fields, 61
+the whole value, 62 the alias spellings `(s.d).echo` and `s.d.*`, and 63 a field in `WHERE`,
+`GROUP BY` and `ORDER BY`. In every one, every field is what the function made of the *disclosed*
+value: the name for a manager, the initial and a length of one for an agent, the fingerprint for an
+auditor, and a NULL composite where the principal gets the placeholder, because the function is
+strict and is never called. The oracle computes each row by applying the same function to the
+value it discloses, and the rows render a composite element by element, so the detector reads a
+canary inside one. 64 and 65 are the population-only columns. A composite-valued aggregate is an
+aggregate like any other to an allow-list, and `amount_summary` is on neither `amount`'s nor
+`national_id`'s, so the three auditors and the counter are refused by name. No host can put it on
+one either, because registration refuses a user-defined aggregate in an allow-list (D190). The
+battery's own facts beside these (`EntitlementSubversionTests`) cover four more things. The function
+is handed the mask. The composite columns are reported, and derived by the client, as the column
+they come from. A user-defined aggregate cannot be allow-listed. And a mask written as a field of a
+composite-valued function, `echo_with_length(SUBSTRING(first_name, 1, 1)).echo`, is applied at the
+leaf and seen by a plain select, a predicate and a join key exactly as the plain mask is.
 
 Three statements are not run in one place or another, each for a reason that is not about this
 family's subject and each named in the theory that skips it. `49` and `23` are no longer among

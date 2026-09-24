@@ -1,0 +1,57 @@
+-- u1
+report org_id:Full, tally:Redacted, members:Some
+1|<null>
+2|<null>
+
+-- u2
+report org_id:Full, tally:Redacted, members:Some
+1|<null>
+
+-- u3
+report org_id:Full, tally:Redacted, members:Some
+2|<null>
+
+-- u3-in-o1
+report org_id:Full, tally:Redacted, members:Some
+
+-- u4
+report org_id:Full, tally:Redacted, members:All
+1|<null>
+2|<null>
+3|<null>
+
+-- u5
+report org_id:Full, tally:Redacted, members:None
+
+-- u6
+report org_id:Full, tally:Redacted, members:Some
+1|<null>
+
+-- u6-two-orgs
+report org_id:Full, tally:Redacted, members:Some
+1|<null>
+2|<null>
+
+-- u7
+report org_id:Full, tally:Redacted, members:None
+
+-- u8
+report org_id:Full, tally:Tested, members:Some
+1|<null>
+
+-- u9
+POLICY Refused by the entitlements: main.members.national_id is population-only for this principal and an aggregate outside this column's allow-list is not one of the aggregates it permits; the function is AMOUNT_SUMMARY.
+
+-- u10-in-a-region
+report org_id:Full, tally:Redacted, members:None
+
+-- u11-subject-in-a-region
+report org_id:Full, tally:Redacted, members:None
+
+-- u14-a-vendor
+report org_id:Full, tally:Redacted, members:None
+
+-- u15-a-vendor-and-an-org
+report org_id:Full, tally:Redacted, members:Some
+1|<null>
+

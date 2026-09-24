@@ -1,0 +1,76 @@
+-- u1
+report id:Full, d:PerRow, members:Some
+1|[Tara CANARY-FIRST-01, 20]
+2|[Bo CANARY-FIRST-02, 18]
+3|[T, 1]
+4|[A, 1]
+7|[T, 1]
+
+-- u2
+report id:Full, d:Masked, members:Some
+1|[T, 1]
+2|[B, 1]
+
+-- u3
+report id:Full, d:Redacted, members:Some
+3|<null>
+
+-- u3-in-o1
+report id:Full, d:Redacted, members:Some
+
+-- u4
+report id:Full, d:Full, members:All
+1|[Tara CANARY-FIRST-01, 20]
+2|[Bo CANARY-FIRST-02, 18]
+3|[Tomas CANARY-FIRST-03, 21]
+4|[Ada CANARY-FIRST-04, 19]
+5|[Kim CANARY-FIRST-05, 19]
+6|[Lea CANARY-FIRST-06, 19]
+7|[Tara CANARY-FIRST-01, 20]
+
+-- u5
+report id:Full, d:Redacted, members:None
+
+-- u6
+report id:Full, d:Masked, members:Some
+1|[ed23bc5f944a7ec955ace055dba31f68, 32]
+2|[6657767d30a1fb0444393493e42f5527, 32]
+
+-- u6-two-orgs
+report id:Full, d:Masked, members:Some
+1|[ed23bc5f944a7ec955ace055dba31f68, 32]
+2|[6657767d30a1fb0444393493e42f5527, 32]
+3|[0b10f954b1c6bb233d8dd8d63a220460, 32]
+4|[13ef6532594dde74d242c703fa652ecb, 32]
+7|[ed23bc5f944a7ec955ace055dba31f68, 32]
+
+-- u7
+report id:Full, d:Redacted, members:None
+
+-- u8
+report id:Full, d:Redacted, members:Some
+1|<null>
+2|<null>
+
+-- u9
+report id:Full, d:Redacted, members:Some
+1|<null>
+2|<null>
+3|<null>
+4|<null>
+7|<null>
+
+-- u10-in-a-region
+report id:Full, d:Redacted, members:None
+
+-- u11-subject-in-a-region
+report id:Full, d:Redacted, members:None
+
+-- u14-a-vendor
+report id:Full, d:Redacted, members:None
+
+-- u15-a-vendor-and-an-org
+report id:Full, d:Full, members:Some
+1|[Tara CANARY-FIRST-01, 20]
+2|[Bo CANARY-FIRST-02, 18]
+

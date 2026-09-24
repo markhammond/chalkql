@@ -1,0 +1,61 @@
+-- u1
+report org_id:Full, total:PerRow, tally:PerRow, orders:Some
+1|24614431|3
+2|<null>|<null>
+3|8811119|1
+
+-- u2
+report org_id:Full, total:PerRow, tally:PerRow, orders:Some
+1|8427761|1
+
+-- u3
+report org_id:Full, total:PerRow, tally:PerRow, orders:Some
+2|17227716|2
+
+-- u3-in-o1
+report org_id:Full, total:PerRow, tally:PerRow, orders:Some
+2|17227716|2
+
+-- u4
+report org_id:Full, total:PerRow, tally:PerRow, orders:All
+1|<null>|<null>
+2|<null>|<null>
+3|<null>|<null>
+
+-- u5
+report org_id:Full, total:Full, tally:Full, orders:Some
+
+-- u6
+POLICY Refused by the entitlements: main.orders.amount is population-only for this principal and an aggregate outside this column's allow-list is not one of the aggregates it permits; the function is AMOUNT_SUMMARY.
+
+-- u6-two-orgs
+POLICY Refused by the entitlements: main.orders.amount is population-only for this principal and an aggregate outside this column's allow-list is not one of the aggregates it permits; the function is AMOUNT_SUMMARY.
+
+-- u7
+report org_id:Full, total:Full, tally:Full, orders:Some
+
+-- u8
+report org_id:Full, total:PerRow, tally:PerRow, orders:Some
+1|<null>|<null>
+
+-- u9
+report org_id:Full, total:PerRow, tally:PerRow, orders:Some
+1|<null>|<null>
+2|<null>|<null>
+
+-- u10-in-a-region
+POLICY Refused by the entitlements: main.orders.amount is population-only for this principal and an aggregate outside this column's allow-list is not one of the aggregates it permits; the function is AMOUNT_SUMMARY.
+
+-- u11-subject-in-a-region
+report org_id:Full, total:PerRow, tally:PerRow, orders:Some
+1|<null>|<null>
+
+-- u14-a-vendor
+report org_id:PerRow, total:PerRow, tally:PerRow, orders:Some
+<null>|<null>|<null>
+
+-- u15-a-vendor-and-an-org
+report org_id:PerRow, total:PerRow, tally:PerRow, orders:Some
+1|<null>|<null>
+<null>|<null>|<null>
+

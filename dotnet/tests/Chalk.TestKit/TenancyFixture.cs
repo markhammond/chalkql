@@ -417,10 +417,10 @@ public sealed class TenancyFixture
     /// fingerprint token where they audit, and nothing anywhere else (D196, first match wins).
     /// </summary>
     private static ColumnEntitlementDescriptor Protected(
-        int column, string name, bool statistical = false, int floor = 0) => new()
+        int column, string name, bool statistical = false, int floor = 0, string? mask = null) => new()
     {
         Column = column,
-        Mask = $"SUBSTRING({name}, 1, 1)",
+        Mask = mask ?? $"SUBSTRING({name}, 1, 1)",
         Statistical = statistical,
         MinGroupSize = floor,
         Rules =
@@ -449,13 +449,18 @@ public sealed class TenancyFixture
     };
 
 /// <summary>The descriptor, so the ADO variant of the fixture attaches exactly the same one.</summary>
+    /// <param name="firstNameMask">
+    /// The agent's mask for <c>first_name</c>, in place of the initial written as <c>SUBSTRING</c>.
+    /// The adversarial battery writes the same initial as a field of a composite-valued function
+    /// (ADR 0077), which is a mask a consumer can only see if the leaf applied it.
+    /// </param>
     public static TableEntitlementDescriptor MembersEntitlement(
-        bool statisticalFirstName = false, int floor = 0) => new()
+        bool statisticalFirstName = false, int floor = 0, string? firstNameMask = null) => new()
     {
         RowPredicate = MemberRows,
         Columns =
         [
-            Protected(2, "first_name", statisticalFirstName, floor),
+            Protected(2, "first_name", statisticalFirstName, floor, firstNameMask),
             Protected(3, "last_name"),
             // `restricted`: NOT NULL in the catalog and disclosed to nobody — which is what makes
             // the placeholder widen an output type — and, for two roles, testable without being
@@ -504,7 +509,13 @@ public sealed class TenancyFixture
     /// the endpoint in process — and the planner then reaches the endpoint's keys through M5's
     /// strategies rather than through one remote query (§5, D229).
     /// </param>
-    public static TableEntitlementDescriptor OrdersEntitlement(string itemSchema = "") => new()
+    /// <param name="amountAggregates">
+    /// Population aggregates <c>amount</c> would permit beyond the four built-ins. Empty for every
+    /// fixture; the adversarial battery names a composite-valued aggregate here to show that
+    /// registration refuses a user-defined aggregate in an allow-list (D190, ADR 0077).
+    /// </param>
+    public static TableEntitlementDescriptor OrdersEntitlement(
+        string itemSchema = "", IReadOnlyList<string>? amountAggregates = null) => new()
     {
         RowPredicate = OrderRows,
         Inherited =
@@ -575,7 +586,7 @@ public sealed class TenancyFixture
             new ColumnEntitlementDescriptor
             {
                 Column = 3,
-                AggregateOnlyFunctions = ["COUNT", "SUM", "SUM0", "AVG"],
+                AggregateOnlyFunctions = ["COUNT", "SUM", "SUM0", "AVG", .. amountAggregates ?? []],
                 MinGroupSize = MinGroupSize,
                 // D216: `amount` is protected — a rule names it — so a role that says nothing
                 // about it grants nothing. The owner sees what they wrote, the auditor gets the
@@ -1013,7 +1024,9 @@ public sealed class TenancyFixture
         bool entitled = true,
         bool creatorSeesFull = true,
         bool subversionFunctions = false,
-        string itemSchema = "")
+        string itemSchema = "",
+        IReadOnlyList<string>? amountAggregates = null,
+        string? firstNameMask = null)
     {
         var builder = new PocoSourceBuilder("mem").NamingPolicy(PocoNamingPolicy.SnakeCase);
 
@@ -1027,7 +1040,7 @@ public sealed class TenancyFixture
                 .References<Org>(o => o.Id, verify: true);
             if (entitled)
             {
-                t.Entitlement(MembersEntitlement());
+                t.Entitlement(MembersEntitlement(firstNameMask: firstNameMask));
             }
         });
 
@@ -1038,7 +1051,7 @@ public sealed class TenancyFixture
                 .ForeignKey(o => o.RegionId).References<Region>(r => r.Id, verify: true);
             if (entitled)
             {
-                t.Entitlement(OrdersEntitlement(itemSchema));
+                t.Entitlement(OrdersEntitlement(itemSchema, amountAggregates));
             }
         });
 
@@ -1105,7 +1118,8 @@ public sealed class TenancyFixture
     /// The two functions the adversarial corpus reaches an entitled table through (D251 class 4,
     /// <c>16-entitlements.md</c> §7): a SQL body whose statement names <c>members</c>, inlined
     /// before the rewrite so the reference is entitled like any other, and a client body that is
-    /// handed a protected column and can therefore say what it was given.
+    /// handed a protected column and can therefore say what it was given. Class 8 adds two that
+    /// answer a composite value (ADR 0077): the same client body as a record, and an aggregate.
     /// </summary>
     /// <remarks>
     /// Declared on every fixture the family runs against — this one, the oracle's disclosed source
@@ -1126,7 +1140,37 @@ public sealed class TenancyFixture
             .AddFunction("echo", f => f
                 .Scalar<string, string>("s")
                 .Strict()
+                .Client())
+            // Composite results (ADR 0077): a function whose fields say what it was handed, and a
+            // population aggregate that answers a record, so a masked column and a population-only
+            // column's allow-list each meet a composite value.
+            .AddFunction("echo_with_length", f => f
+                .Scalar<string, Echoed>("s")
+                .Strict()
+                .Client())
+            .AddFunction("amount_summary", f => f
+                .Aggregate<long, AmountSummary>("x")
                 .Client());
+    }
+
+    /// <summary>
+    /// What <c>echo_with_length</c> answers: the string it was handed and its length. <c>Echo</c> is a
+    /// nullable field, because a <c>string</c> property is one.
+    /// </summary>
+    public sealed record Echoed(string Echo, long Len);
+
+    /// <summary>
+    /// What <c>amount_summary</c> answers: a population's total and how many values made it — the
+    /// two things <c>SUM</c> and <c>COUNT</c> answer apart, and nothing a single row could be read
+    /// back out of.
+    /// </summary>
+    public readonly record struct AmountSummary(long Total, long Tally);
+
+    /// <summary><c>amount_summary</c>'s state.</summary>
+    public struct AmountSummaryState
+    {
+        public long Total;
+        public long Tally;
     }
 
     // ---------------------------------------------------------------- the principals

@@ -1102,6 +1102,13 @@ The two fields in the select list above cost one classification per row, not
 two. The `WHERE` clause is a step of its own and classifies the rows it filters
 once more. A `Volatile()` function still runs once per occurrence.
 
+Under entitlements a composite-valued function is a client body like any other:
+it is handed each column as the principal may see it, the mask or the
+placeholder included, and the composite and each of its fields are reported as
+disclosing what that column does. A composite-valued aggregate cannot be
+allow-listed for a population-only column, because no user-defined aggregate
+can.
+
 The limits:
 
 - A field is a `bool`, `sbyte`, `short`, `int`, `long`, `float`, `double`,

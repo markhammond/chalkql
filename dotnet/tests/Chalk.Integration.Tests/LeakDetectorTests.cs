@@ -97,6 +97,34 @@ public sealed class LeakDetectorTests(SharedSidecar sidecar)
         Assert.Contains("planted", caught.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A canary nested in a composite or a LIST is a token like any other (ADR 0077). Each row is
+    /// rendered through <see cref="LeakScan.Row"/>, element by element, where <c>ToString</c> would
+    /// have given the array's type name and hidden the token inside it.
+    /// </summary>
+    [Fact]
+    public void A_canary_inside_a_composite_or_a_list_is_found()
+    {
+        var name = TenancyFixture.Members[0].FirstName;
+        object?[] composite = [1, new object?[] { name, (long)name.Length }];
+        object?[] list = [1, new object?[] { "T", name }];
+
+        foreach (var row in new[] { composite, list })
+        {
+            var caught = Assert.Throws<Xunit.Sdk.FailException>(() => Agent.Inspect(new LeakScan
+            {
+                Statement = "a canary nested in a value",
+                Rows = [LeakScan.Row(row)],
+                Columns = ["id", "nested"],
+            }));
+            Assert.Contains(TenancyCanaries.Token("FIRST", 1), caught.Message, StringComparison.Ordinal);
+            Assert.Contains("nested", caught.Message, StringComparison.Ordinal);
+        }
+
+        Assert.Equal($"1|[{name}, {name.Length}]", LeakScan.Row(composite));
+        Assert.Equal("7|[<null>, 1]|<null>", LeakScan.Row([7, new object?[] { null, 1L }, null]));
+    }
+
     /// <summary>What a principal is entitled to passes, which is the other half of a detector.</summary>
     [Fact]
     public void A_value_the_oracle_discloses_is_not_a_leak()
@@ -172,7 +200,7 @@ public sealed class LeakDetectorTests(SharedSidecar sidecar)
             using (batch)
             {
                 rows.AddRange(BatchReader.ToRows(batch).Select(
-                    r => string.Join("|", r.Select(v => v?.ToString() ?? "<null>"))));
+                    r => LeakScan.Row(r)));
             }
         }
 

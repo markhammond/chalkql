@@ -288,7 +288,7 @@ public sealed class TenancyRemoteBindingTests(SharedSidecar sidecar)
             using (batch)
             {
                 rows.AddRange(BatchReader.ToRows(batch).Select(
-                    r => string.Join("|", r.Select(v => v?.ToString() ?? ""))));
+                    r => LeakScan.Row(r, string.Empty)));
             }
         }
 
@@ -420,7 +420,7 @@ public sealed class TenancyRemoteBindingTests(SharedSidecar sidecar)
                     using (batch)
                     {
                         rows.AddRange(BatchReader.ToRows(batch).Select(
-                            r => string.Join("|", r.Select(v => v?.ToString() ?? "<null>"))));
+                            r => LeakScan.Row(r)));
                     }
                 }
             }
@@ -508,7 +508,7 @@ public sealed class TenancyRemoteBindingTests(SharedSidecar sidecar)
                     using (batch)
                     {
                         rows.AddRange(BatchReader.ToRows(batch).Select(
-                            r => string.Join("|", r.Select(v => v?.ToString() ?? "<null>"))));
+                            r => LeakScan.Row(r)));
                     }
                 }
 

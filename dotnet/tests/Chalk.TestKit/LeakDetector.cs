@@ -224,6 +224,30 @@ public sealed class LeakDetector
 /// <summary>Everything one run of one statement handed one principal (D252).</summary>
 public sealed class LeakScan
 {
+    /// <summary>
+    /// One result row as a scan reads it: the cells joined by <c>'|'</c>, each rendered by
+    /// <see cref="Cell"/>. Every test that builds a scan renders its rows through here, so a value
+    /// nested in a LIST or a composite is read the same way wherever it turns up.
+    /// </summary>
+    public static string Row(IEnumerable<object?> cells, string nullText = "<null>")
+    {
+        ArgumentNullException.ThrowIfNull(cells);
+        return string.Join("|", cells.Select(cell => Cell(cell, nullText)));
+    }
+
+    /// <summary>
+    /// One cell. A LIST or a composite arrives as an <c>object?[]</c>, and is rendered element by
+    /// element, <c>[a, b]</c>, so a canary inside one is a token the detector reads. The CLR type
+    /// name, which is what <c>ToString</c> gives an array, would hide it (ADR 0077). Every scalar is
+    /// its own <c>ToString</c>, as it always was.
+    /// </summary>
+    public static string Cell(object? value, string nullText = "<null>") => value switch
+    {
+        null => nullText,
+        object?[] items => "[" + string.Join(", ", items.Select(item => Cell(item, nullText))) + "]",
+        _ => value.ToString() ?? nullText,
+    };
+
     /// <summary>What the failure names: the statement, and which configuration ran it.</summary>
     public required string Statement { get; init; }
 

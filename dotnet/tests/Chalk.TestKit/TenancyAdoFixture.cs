@@ -255,7 +255,9 @@ public sealed class TenancyAdoFixture : IDisposable
                 .Column("id", ChalkType.Int32())
                 .Column("first_name", ChalkType.String(nullable: true))
                 .Sql("SELECT id, first_name FROM members WHERE org_id = org"))
-            .AddFunction("echo", f => f.Scalar<string, string>("s").Strict().Client());
+            .AddFunction("echo", f => f.Scalar<string, string>("s").Strict().Client())
+            .AddFunction("echo_with_length", f => f.Scalar<string, TenancyFixture.Echoed>("s").Strict().Client())
+            .AddFunction("amount_summary", f => f.Aggregate<long, TenancyFixture.AmountSummary>("x").Client());
 
         // §3.13: the child and — unless the caller wants them apart — its parent, both here, so the
         // join, the parent's folded predicate and the markers push as one remote query.
@@ -411,7 +413,9 @@ public sealed class TenancyAdoFixture : IDisposable
             // to no source and can never be pushed, so the filter has to split or the whole table
             // comes back — which is the case the residual rule exists for.
             .AddFunction("is_vip", f => f.Scalar<int, bool>("id").Strict().Client())
-            .AddFunction("echo", f => f.Scalar<string, string>("s").Strict().Client());
+            .AddFunction("echo", f => f.Scalar<string, string>("s").Strict().Client())
+            .AddFunction("echo_with_length", f => f.Scalar<string, TenancyFixture.Echoed>("s").Strict().Client())
+            .AddFunction("amount_summary", f => f.Aggregate<long, TenancyFixture.AmountSummary>("x").Client());
 
         // The cross-source half of §3.13: the parent here and the child in the database, so the
         // planner has to reach the parent's visible keys through M5's strategies (D229, F52).
@@ -474,6 +478,43 @@ public sealed class TenancyAdoFixture : IDisposable
         ArgumentNullException.ThrowIfNull(registry);
         registry.AddScalar<int, bool>("is_vip", static id => id % 2 == 1);
         registry.AddScalar<string, string>("echo", static s => s);
+        RegisterComposites(registry);
+    }
+
+    /// <summary>
+    /// The composite-valued pair (ADR 0077): <c>echo_with_length</c>, whose fields are what it was handed
+    /// and its length, and <c>amount_summary</c>, a population's total and size as one record.
+    /// </summary>
+    public static void RegisterComposites(Chalk.Client.IFunctionRegistry registry)
+    {
+        ArgumentNullException.ThrowIfNull(registry);
+        registry.AddScalar<string, TenancyFixture.Echoed>(
+            "echo_with_length", static s => new TenancyFixture.Echoed(s, s.Length));
+        RegisterAmountSummary(registry);
+    }
+
+    /// <summary><c>amount_summary</c> alone, for a run that registers its own <c>echo_with_length</c>.</summary>
+    public static void RegisterAmountSummary(Chalk.Client.IFunctionRegistry registry)
+    {
+        ArgumentNullException.ThrowIfNull(registry);
+        registry.AddAggregate(
+            "amount_summary",
+            new Chalk.Sources.AggregateSpec<
+                TenancyFixture.AmountSummaryState, long, TenancyFixture.AmountSummary?>
+            {
+                Init = static () => default,
+                Add = static (ref s, x) =>
+                {
+                    s.Total += x;
+                    s.Tally++;
+                },
+                Merge = static (a, b) => new TenancyFixture.AmountSummaryState
+                {
+                    Total = a.Total + b.Total,
+                    Tally = a.Tally + b.Tally,
+                },
+                Finish = static s => s.Tally == 0 ? null : new TenancyFixture.AmountSummary(s.Total, s.Tally),
+            });
     }
 
     private static void Load(

@@ -247,7 +247,7 @@ public sealed class TwoSourcePathTests(SharedSidecar sidecar)
             using (batch)
             {
                 rows.AddRange(BatchReader.ToRows(batch).Select(
-                    r => string.Join("|", r.Select(v => v?.ToString() ?? "<null>"))));
+                    r => LeakScan.Row(r)));
             }
         }
 

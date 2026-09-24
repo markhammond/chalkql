@@ -280,6 +280,7 @@ public sealed class EntitlementSubversionTests(SharedSidecar sidecar)
                     seen.Add(s);
                     return s;
                 });
+                TenancyAdoFixture.RegisterComposites(registry);
             },
         });
 
@@ -297,6 +298,240 @@ public sealed class EntitlementSubversionTests(SharedSidecar sidecar)
             Rows = [.. seen],
             Columns = ["what the host was handed"],
         });
+    }
+
+    // ---------------------------------------------------------------- composite values (ADR 0077)
+
+    /// <summary>
+    /// §7 through a composite: <c>echo_with_length</c> answers a record whose first field is what it was
+    /// handed, so a field of the call says what the host received — and what it received is the
+    /// mask, for the whole value as for each field of it.
+    /// </summary>
+    [Fact]
+    public async Task A_composite_function_is_handed_the_masked_value_and_its_fields_say_so()
+    {
+        var seen = new ConcurrentBag<string>();
+        await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+        {
+            ContextId = TenancyFixture.ContextId,
+            Sources = [TenancyFixture.Subversion.Source],
+            Planner = sidecar.CreatePlanner(),
+            Functions = registry =>
+            {
+                registry.AddScalar<int, bool>("is_vip", static id => id % 2 == 1);
+                registry.AddScalar<string, string>("echo", static s => s);
+                registry.AddScalar<string, TenancyFixture.Echoed>("echo_with_length", s =>
+                {
+                    seen.Add(s);
+                    return new TenancyFixture.Echoed(s, s.Length);
+                });
+                TenancyAdoFixture.RegisterAmountSummary(registry);
+            },
+        });
+
+        // u2 is an agent in organisation 1: every name they can see is initial-masked.
+        var prepared = await engine.WithEntitlements().PrepareAsync(
+            "SELECT id, echo_with_length(first_name).echo AS echo, echo_with_length(first_name).len AS len,"
+            + " echo_with_length(first_name) AS d FROM members ORDER BY id",
+            TenancyFixture.U2);
+        var rows = await RowsAsync(engine, prepared, TenancyFixture.U2);
+
+        Assert.Equal(["1|T|1|[T, 1]", "2|B|1|[B, 1]"], rows);
+
+        // One call per row for the three occurrences, which share it (D293), and each call was
+        // handed the initial.
+        Assert.Equal(["B", "T"], [.. seen.Order(StringComparer.Ordinal)]);
+        LeakDetector.For("u2", TenancyFixture.U2).Inspect(new LeakScan
+        {
+            Statement = "a composite function over a masked column",
+            Rows = [.. rows, .. seen],
+            Columns = ["id", "echo", "len", "d"],
+        });
+    }
+
+    /// <summary>
+    /// The report through a composite (D202's meet over origins): a field of a call over a masked
+    /// column, and the whole composite, disclose what the call was handed, which is exactly what
+    /// <c>echo</c> of the same column is labelled. The per-row siblings say the same row by row, and
+    /// the client's own I-IR-E walk, which re-derives each label from the reads, reaches the masked
+    /// origin through the call and the field access: told the composite columns were full, it
+    /// refuses the plan.
+    /// </summary>
+    [Fact]
+    public async Task A_field_and_the_whole_composite_derive_from_the_masked_origin()
+    {
+        // `mixed` reads a full column beside the masked one: the meet over its origins is the
+        // masked column's label, which is D202's rule for any value of more than one column.
+        const string Sql =
+            "SELECT id, echo(first_name) AS plain, echo_with_length(first_name).echo AS field,"
+            + " echo_with_length(first_name) AS whole,"
+            + " echo_with_length(first_name || CAST(id AS VARCHAR)).len AS mixed"
+            + " FROM members ORDER BY id";
+        await using var engine = await EngineAsync();
+
+        foreach (var (principal, context) in TenancyFixture.Principals)
+        {
+            var detector = LeakDetector.For(principal, context);
+            var prepared = await engine.WithEntitlements().PrepareAsync(Sql, context);
+            var labels = prepared.Columns.Select(c => c.Disclosure).ToArray();
+            Assert.Equal(labels[1], labels[2]);
+            Assert.Equal(labels[1], labels[3]);
+            Assert.Equal(labels[1], labels[4]);
+
+            var siblings = await engine
+                .WithEntitlements(new EntitlementsOptions { IncludeDisclosureColumns = true })
+                .PrepareAsync(Sql, context);
+            var rows = await RowsAsync(engine, siblings, context);
+            var names = siblings.Columns.Select(c => c.Name).ToList();
+            var plain = names.IndexOf("plain__disclosure");
+            var field = names.IndexOf("field__disclosure");
+            var whole = names.IndexOf("whole__disclosure");
+            var mixed = names.IndexOf("mixed__disclosure");
+            Assert.True(plain >= 0 && field >= 0 && whole >= 0 && mixed >= 0, string.Join(", ", names));
+            foreach (var row in rows)
+            {
+                var cells = row.Split('|');
+                Assert.Equal(cells[plain], cells[field]);
+                Assert.Equal(cells[plain], cells[whole]);
+                Assert.Equal(cells[plain], cells[mixed]);
+            }
+
+            detector.Inspect(new LeakScan
+            {
+                Statement = $"the composite's disclosure siblings for {principal}",
+                Rows = rows,
+                Columns = names,
+                Report = string.Join(", ", siblings.Columns.Select(c => $"{c.Name}:{c.Disclosure}")),
+            });
+
+            if (labels[1] is not (ReportedDisclosure.Masked or ReportedDisclosure.PerRow))
+            {
+                // A full column has nothing more to claim, and a withheld one is a constant by the
+                // time there is a plan, with no column origin for the walk to recompute a label from
+                // (ADR 0025 V64); clause (c) is what guards that direction.
+                continue;
+            }
+
+            // The client's walk, told the two composite columns disclose the value in full.
+            var claimed = labels.Select(ToOutcome).ToArray();
+            claimed[2] = Chalk.Ir.DisclosureOutcome.Full;
+            claimed[3] = Chalk.Ir.DisclosureOutcome.Full;
+            claimed[4] = Chalk.Ir.DisclosureOutcome.Full;
+            var refusal = Assert.Throws<Chalk.Ir.InvalidPlanException>(
+                () => Chalk.Ir.PlanValidator.Validate(
+                    prepared.Query.Plan,
+                    new Chalk.Ir.PlanValidationOptions
+                    {
+                        EntitledTables = EntitledColumnCount,
+                        ReportedDisclosures = claimed,
+                    }));
+            Assert.Equal("I-IR-E", refusal.Invariant);
+            Assert.Contains("claims more disclosure", refusal.Message, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// A composite-valued aggregate cannot be allow-listed for a population-only column at all.
+    /// Registration refuses any user-defined aggregate in <c>AggregateOnlyFunctions</c>, naming it,
+    /// because a host's aggregate may report an individual row's value and nothing the engine can
+    /// check says it does not (D190). So what statement 64 is refused for is not something a host
+    /// can permit either, and the group-size guard never meets a composite measure (ADR 0077).
+    /// </summary>
+    [Fact]
+    public void A_composite_aggregate_cannot_be_allow_listed_for_a_population_only_column()
+    {
+        var refusal = Assert.Throws<CatalogValidationException>(
+            () => TenancyFixture.Create(
+                entitled: true, subversionFunctions: true, amountAggregates: ["AMOUNT_SUMMARY"]));
+
+        Assert.Contains("(amount).aggregate_only_functions[4]", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            "'AMOUNT_SUMMARY' is not a population aggregate", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("any user-defined aggregate", refusal.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Column masking through a composite: the agent's mask for <c>first_name</c> written as a field
+    /// of a composite-valued function over the column, <c>echo_with_length(SUBSTRING(first_name, 1, 1)).echo</c>
+    /// — the same initial the fixture's own mask is. It is applied at the leaf, so every consumer
+    /// above it sees the initial — a plain SELECT, a predicate and a join key — and each answers
+    /// exactly what the fixture with the plain mask answers, as every principal.
+    /// </summary>
+    [Fact]
+    public async Task A_mask_written_through_a_composite_is_applied_at_the_leaf()
+    {
+        string[] statements =
+        [
+            "SELECT id, first_name FROM members ORDER BY id",
+            "SELECT id FROM members WHERE first_name = 'T' ORDER BY id",
+            "SELECT a.id AS a, b.id AS b FROM members a JOIN members b"
+                + " ON a.first_name = b.first_name AND a.id < b.id ORDER BY a.id, b.id",
+        ];
+        var fixture = TenancyFixture.Create(
+            entitled: true,
+            subversionFunctions: true,
+            firstNameMask: "echo_with_length(SUBSTRING(first_name, 1, 1)).echo");
+        await using var composite = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+        {
+            ContextId = TenancyFixture.ContextId,
+            Sources = [fixture.Source],
+            Planner = sidecar.CreatePlanner(),
+            Functions = TenancyAdoFixture.RegisterFunctions,
+        });
+        await using var plain = await EngineAsync();
+
+        foreach (var sql in statements)
+        {
+            foreach (var (principal, context) in TenancyFixture.Principals)
+            {
+                var detector = LeakDetector.For(principal, context);
+                var expected = await RowsAsync(
+                    plain, await plain.WithEntitlements().PrepareAsync(sql, context), context);
+                foreach (var level in Levels)
+                {
+                    var prepared = await composite.WithEntitlements().PrepareAsync(
+                        sql, context, new PrepareOptions { Pushdown = level, IncludePlanText = true });
+                    var rows = await RowsAsync(composite, prepared, context);
+                    detector.Inspect(new LeakScan
+                    {
+                        Statement = $"a mask through a composite under {level}: {sql} for {principal}",
+                        Rows = rows,
+                        Columns = [.. prepared.Columns.Select(c => c.Name)],
+                        PlanText = prepared.Query.PlanText,
+                        Report = string.Join(
+                            ", ", prepared.Columns.Select(c => $"{c.Name}:{c.Disclosure}")),
+                    });
+                    Assert.Equal(expected, rows);
+                }
+            }
+        }
+    }
+
+    private static Chalk.Ir.DisclosureOutcome ToOutcome(ReportedDisclosure disclosure) => disclosure switch
+    {
+        ReportedDisclosure.Masked => Chalk.Ir.DisclosureOutcome.Masked,
+        ReportedDisclosure.Redacted => Chalk.Ir.DisclosureOutcome.Redacted,
+        ReportedDisclosure.PerRow => Chalk.Ir.DisclosureOutcome.PerRow,
+        ReportedDisclosure.Aggregate => Chalk.Ir.DisclosureOutcome.Aggregate,
+        _ => Chalk.Ir.DisclosureOutcome.Full,
+    };
+
+    /// <summary>The client catalog's answer to I-IR-E's one question, for the battery's fixture.</summary>
+    private static int? EntitledColumnCount(Chalk.Ir.TableRef table)
+    {
+        foreach (var schema in TenancyFixture.Subversion.Catalog.Schemas)
+        {
+            foreach (var declared in schema.Tables)
+            {
+                if (string.Equals(schema.SourceId, table.SourceId, StringComparison.Ordinal)
+                    && string.Equals(declared.Name, table.Table, StringComparison.OrdinalIgnoreCase))
+                {
+                    return declared.Entitlement is null ? null : declared.Columns.Count;
+                }
+            }
+        }
+
+        return null;
     }
 
     // ---------------------------------------------------------------- @ctx in a statement
@@ -398,7 +633,7 @@ public sealed class EntitlementSubversionTests(SharedSidecar sidecar)
             using (batch)
             {
                 rows.AddRange(BatchReader.ToRows(batch).Select(
-                    r => string.Join("|", r.Select(v => v?.ToString() ?? "<null>"))));
+                    r => LeakScan.Row(r)));
             }
         }
 

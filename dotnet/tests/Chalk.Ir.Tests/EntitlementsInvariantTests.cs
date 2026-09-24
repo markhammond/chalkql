@@ -400,6 +400,68 @@ public sealed class EntitlementsInvariantTests
         Assert.Contains("a CASE condition", error.Message, StringComparison.Ordinal);
     }
 
+    // ---- a composite value: provenance through the call and the field access (ADR 0077) ----
+
+    /// <summary>
+    /// A field of a composite-valued call over a masked column, and the whole composite, are values
+    /// of that column: the walk descends through the <c>FieldAccess</c> into the call and through
+    /// the call into its argument, as it does through any call, and meets the read's verdict. So a
+    /// report that labels them masked validates and one that labels them full is refused.
+    /// </summary>
+    [Fact]
+    public void A_field_and_the_whole_composite_of_a_call_over_a_masked_column_derive_from_it()
+    {
+        var described = Composite(nullable: true, F("echo", Str(true)), F("len", I64()));
+        var call = UserCall("main.describe", described, Ref(2, Str()));
+        var plan = PlanOf(new Rel
+        {
+            RowType = Row(F("echo", Str(true)), F("d", described)),
+            Project = new Project { Input = EntitledRead(), Exprs = { FieldAccess(call, 0), call } },
+        });
+
+        PlanValidator.Validate(plan, Catalog([DisclosureOutcome.Masked, DisclosureOutcome.Masked]));
+
+        foreach (var claimed in new[]
+        {
+            new[] { DisclosureOutcome.Full, DisclosureOutcome.Masked },
+            new[] { DisclosureOutcome.Masked, DisclosureOutcome.Full },
+        })
+        {
+            var error = Refused(plan, Catalog(claimed));
+            Assert.Equal("I-IR-E", error.Invariant);
+            Assert.Contains("claims more disclosure", error.Message, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// And a population-only column read through a composite is still a value use of the raw
+    /// column: clause (b) walks through the field access and the call to the reference.
+    /// </summary>
+    [Fact]
+    public void A_population_only_column_read_through_a_composite_field_is_refused()
+    {
+        var pass = new Rel
+        {
+            RowType = Row(F("amount", I64())),
+            Project = new Project { Input = EntitledRead(), Exprs = { Ref(4, I64()) } },
+        };
+        var summarised = Composite(nullable: true, F("total", I64()), F("tally", I64()));
+        var plan = PlanOf(new Rel
+        {
+            RowType = Row(F("total", I64(true))),
+            Project = new Project
+            {
+                Input = pass,
+                Exprs = { FieldAccess(UserCall("main.summarise", summarised, Ref(0, I64())), 0) },
+            },
+        });
+
+        var error = Refused(plan, Catalog());
+
+        Assert.Equal("I-IR-E", error.Invariant);
+        Assert.Contains("population-only", error.Message, StringComparison.Ordinal);
+    }
+
     /// <summary>And a plan that says what it does passes, so none of the above is vacuous.</summary>
     [Fact]
     public void A_well_formed_entitled_plan_validates()
