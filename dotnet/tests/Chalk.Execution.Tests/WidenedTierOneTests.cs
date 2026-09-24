@@ -41,6 +41,9 @@ public sealed class WidenedTierOneTests
     /// <summary>A composite whose fields are widened kinds.</summary>
     public readonly record struct Stamped(DateOnly Day, decimal Amount, Guid Key, TimeSpan Span);
 
+    /// <summary>A record whose <c>decimal</c> and <c>DateTime</c> serve narrower declared fields.</summary>
+    public readonly record struct Priced(decimal Amount, DateTime Stamp);
+
     public struct SumState
     {
         public decimal Total;
@@ -346,6 +349,66 @@ public sealed class WidenedTierOneTests
             var whole = Assert.IsType<object?[]>(row[3]);
             Assert.Equal(entry.Key, new Guid((byte[])whole[2]!, bigEndian: true));
             Assert.Equal(entry.Span.Ticks / 10, Convert.ToInt64(whole[3], null));
+        }
+    }
+
+    /// <summary>
+    /// A composite field is spelled as a parameter is: a record's <c>decimal</c> serves a declared
+    /// DECIMAL(18, 2) field and its <c>DateTime</c> a TIMESTAMP(6) one, although the record read on its
+    /// own infers DECIMAL(28, 10) and TIMESTAMP(9). The value is written at the declared type, and one
+    /// that type cannot hold is refused per value in its words.
+    /// </summary>
+    [Fact]
+    public async Task A_composite_field_is_served_by_any_clr_spelling_its_kind_accepts()
+    {
+        var priced = ChalkType.Composite(
+            [new CompositeField("Amount", ChalkType.Decimal(18, 2)), new CompositeField("Stamp", ChalkType.Timestamp(6))]);
+        FunctionDescriptor Declaration(string name) => new FunctionBuilder(name).Scalar()
+            .Parameter("x", ChalkType.Decimal(18, 2))
+            .Parameter("t", ChalkType.Timestamp(9))
+            .Returns(priced)
+            .Client()
+            .Build();
+
+        var host = new HostScalar2<decimal, DateTime, Priced>(
+            "price_at", static (x, t) => new Priced(x * 2, t.AddTicks(-(t.Ticks % 10))));
+        var call = Fn("price_at", priced.ToProto(), Col("Amount"), Col("Stamp"));
+        var plan = IrBuilder.Plan(Project(
+            EntryRead(), [("id", Col("Id")), ("amount", FieldAccess(call, 0)), ("stamp", FieldAccess(call, 1))]));
+
+        var rows = await BothAsync(plan, [Declaration("price_at")], [host]);
+
+        var entries = Entries();
+        foreach (var row in rows)
+        {
+            var entry = entries[(int)(long)row[0]!];
+            Assert.Equal(entry.Amount * 2, (decimal)row[1]!);
+            Assert.Equal((entry.Stamp.Ticks - DateTime.UnixEpoch.Ticks) / 10, Convert.ToInt64(row[2], null));
+        }
+
+        // A third of an amount has more scale than DECIMAL(18, 2) holds: refused, never rounded.
+        var thirds = new HostScalar2<decimal, DateTime, Priced>(
+            "price_at", static (x, t) => new Priced(x / 3, t.AddTicks(-(t.Ticks % 10))));
+        foreach (var reference in new[] { false, true })
+        {
+            var error = await Record.ExceptionAsync(
+                () => RunAsync(Compile(plan, [Declaration("price_at")], [thirds], reference)));
+            Assert.NotNull(error);
+            var innermost = error!;
+            while (innermost.InnerException is not null)
+            {
+                innermost = innermost.InnerException;
+            }
+
+            Assert.IsType<InvalidOperationException>(innermost);
+            Assert.StartsWith(
+                "field 'Amount' of the result of 'price_at' is DECIMAL(18,2) and the delegate answered ",
+                innermost.Message,
+                StringComparison.Ordinal);
+            Assert.EndsWith(
+                ", which needs scale 28. Round the value in the function, or declare a type that holds it.",
+                innermost.Message,
+                StringComparison.Ordinal);
         }
     }
 

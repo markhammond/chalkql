@@ -188,7 +188,7 @@ internal static class ClrStorage
     /// lane, or says why it cannot be: more fractional digits than the scale is never rounded (D16),
     /// and more digits than the precision never fits. The lane is untouched when it answers false.
     /// </summary>
-    /// <returns>Null when written; otherwise what is wrong, in words a refusal can quote.</returns>
+    /// <returns>Null when written; otherwise the clause that says why — "which needs scale 3" — for a refusal to quote.</returns>
     public static string? TryWriteDecimal(decimal value, int precision, int scale, Span<byte> destination) =>
         SourceEncoding.TryWriteDecimal(value, precision, scale, destination);
 }

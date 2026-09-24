@@ -245,9 +245,11 @@ internal static class UserFunctionBinding
     /// <summary>
     /// D294: a declared COMPOSITE is served by a record the engine reads exactly as the declaration read
     /// one — the same properties, in the same order — and the two must agree field by field: names
-    /// ignoring case, types exact. The composite's own nullability is not compared, as a scalar result's
-    /// is not: a record that never answers NULL serves a nullable declaration, and one that does
-    /// answers NULL for the whole composite.
+    /// ignoring case, and each field's type the declared one, or one of its kind the property's CLR
+    /// type serves as a delegate's parameter would (D298): a <c>decimal</c> any DECIMAL of up to 28
+    /// digits, a <c>DateTime</c> any TIMESTAMP — nullability exactly as declared. The composite's own
+    /// nullability is not compared, as a scalar result's is not: a record that never answers NULL
+    /// serves a nullable declaration, and one that does answers NULL for the whole composite.
     /// </summary>
     private static void RequireCompositeType(Type clr, ChalkType declared, string what, string key)
     {
@@ -266,7 +268,8 @@ internal static class UserFunctionBinding
                 + $"'{key}' uses {CompositeInference.Describe(clr)}, which is not one: {refusal}.");
         }
 
-        var mismatch = CompositeMismatch(declared, registered);
+        var mismatch = CompositeMismatch(
+            declared, registered, CompositeInference.Properties(Nullable.GetUnderlyingType(clr) ?? clr));
         if (mismatch is not null)
         {
             throw new InvalidOperationException(
@@ -276,8 +279,12 @@ internal static class UserFunctionBinding
         }
     }
 
-    /// <summary>Where two composite values part company, or null when they agree field by field.</summary>
-    private static string? CompositeMismatch(ChalkType declared, ChalkType registered)
+    /// <summary>
+    /// Where two composite values part company, or null when they agree field by field.
+    /// <paramref name="properties"/> are the record's, in the order its fields were read.
+    /// </summary>
+    private static string? CompositeMismatch(
+        ChalkType declared, ChalkType registered, IReadOnlyList<System.Reflection.PropertyInfo> properties)
     {
         if (declared.Fields.Count != registered.Fields.Count)
         {
@@ -294,7 +301,7 @@ internal static class UserFunctionBinding
                 return $"field {i + 1} is '{want.Name}' declared and '{have.Name}' registered";
             }
 
-            if (!want.Type.Equals(have.Type))
+            if (!want.Type.Equals(have.Type) && !Serves(want.Type, have.Type, properties[i].PropertyType))
             {
                 return $"field '{want.Name}' is {want.Type} declared and {have.Type} registered";
             }
@@ -302,6 +309,17 @@ internal static class UserFunctionBinding
 
         return null;
     }
+
+    /// <summary>
+    /// D298: whether a property that reads as <paramref name="inferred"/> serves the declared field
+    /// type: the same kind and nullability, and a CLR type the lane codec accepts for the declared
+    /// type — which is what lets a <c>decimal</c> write a DECIMAL(18, 2) field, per value and refused
+    /// when the value does not fit, as it writes a DECIMAL(18, 2) result.
+    /// </summary>
+    private static bool Serves(ChalkType declared, ChalkType inferred, Type property) =>
+        declared.Kind == inferred.Kind
+        && declared.Nullable == inferred.Nullable
+        && LaneCodec.Accepts(property, declared);
 
     private static InvalidOperationException Mismatch(
         string where, string key, string expected, HostFunction host) =>

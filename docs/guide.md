@@ -1085,7 +1085,10 @@ under the names it gives them, so `Classification` is
 `string` property. A `Classification?` result makes the composite itself
 nullable. An aggregate's `Finish` may answer a record the same way, grouped or
 over a window. When the engine is created, the registered delegate's record is
-checked against the declaration field by field, and a mismatch names both.
+checked against the declaration field by field, and a mismatch names both. A
+field may be declared narrower than the record reads, as a parameter may: a
+`decimal` property serves a DECIMAL(18, 2) field and a `DateTime` a
+TIMESTAMP(6), and a value the field cannot hold is refused when it is written.
 
 A field is `.name`, matched ignoring case like any identifier:
 

@@ -41,18 +41,23 @@ public static class SourceEncoding
         var refusal = TryWriteDecimal(value, precision, scale, destination);
         if (refusal is not null)
         {
+            // What a source is told to do about it; a function's answer is told in the engine's words.
+            var remedy = refusal.StartsWith("which needs scale", StringComparison.Ordinal)
+                ? "Widen the scale, or round the value in the source."
+                : "Widen the precision.";
             throw new SourceContractException(
                 sourceId,
                 table,
                 $"column '{column}' is DECIMAL({precision},{scale}) but a row holds "
-                + $"{value.ToString(CultureInfo.InvariantCulture)}, {refusal}");
+                + $"{value.ToString(CultureInfo.InvariantCulture)}, {refusal}. {remedy}");
         }
     }
 
     /// <summary>
     /// The same check and encoding, answering what is wrong instead of throwing it, so a caller
     /// that is not a source — the engine writing a function's answer (D298) — refuses in its own
-    /// words. Null when the value was written; the destination is untouched otherwise.
+    /// words. Null when the value was written; the destination is untouched otherwise. The answer is
+    /// the clause that says why — "which needs scale 3" — and the caller says what to do about it.
     /// </summary>
     internal static string? TryWriteDecimal(decimal value, int precision, int scale, Span<byte> destination)
     {
@@ -74,14 +79,14 @@ public static class SourceEncoding
 
         if (valueScale > scale)
         {
-            return $"which needs scale {valueScale}. Widen the scale, or round the value in the source.";
+            return $"which needs scale {valueScale}";
         }
 
         var factor = PowersOfTen[scale - valueScale];
         var limit = PowersOfTen[precision];
         if (magnitude > UInt128.MaxValue / factor || magnitude * factor >= limit)
         {
-            return $"which needs more than {precision} digits. Widen the precision.";
+            return $"which needs more than {precision} digits";
         }
 
         magnitude *= factor;
