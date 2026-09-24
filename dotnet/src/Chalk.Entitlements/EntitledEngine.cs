@@ -145,6 +145,7 @@ public sealed class EntitledQuery
                 new Chalk.Ir.PlanValidationOptions
                 {
                     EntitledTables = engine.Engine.EntitledColumnCount,
+                    PopulationAggregates = engine.Engine.IsPopulationAggregate,
                     ReportedDisclosures = Disclosures.Outcomes(prepared),
                     ReportedDescriptorHashes = DescriptorHashOf,
                 });

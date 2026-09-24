@@ -31,6 +31,9 @@ import org.apache.calcite.util.ImmutableBitSet;
  * {@code COUNT} into the source and the guard stays local. {@code COUNT(*)} is not over the column
  * and is not guarded; {@code COUNT(c)} is, its own count included.
  *
+ * <p>A composite measure — a user aggregate its host declared {@code Population()} (D295) — is
+ * guarded the same way and NULLed as one composite: a {@code CASE} of the composite's own type.
+ *
  * <p>This is query-set-size control and the README says so: a group of k rows reveals its aggregate,
  * whatever the k rows are.
  */
@@ -124,6 +127,21 @@ final class GroupSizeGuard {
               SqlStdOperatorTable.GREATER_THAN_OR_EQUAL,
               rexBuilder.makeInputRef(produced.getFieldList().get(countAt).getType(), countAt),
               rexBuilder.makeExactLiteral(java.math.BigDecimal.valueOf(guard.floor())));
+      if (value.getType().isStruct()) {
+        // D295: a composite measure — a user aggregate declared Population() — is NULLed whole, as
+        // one composite. The CASE is typed explicitly as the measure's own composite made nullable,
+        // every field as declared: Calcite would infer it through createTypeWithNullability, which
+        // copies a record with every field nullable, and the IR's CASE chooses between composites
+        // of one type (I-IR-23).
+        RelDataType whole =
+            rexBuilder.getTypeFactory().enforceTypeWithNullability(value.getType(), true);
+        projects.add(
+            rexBuilder.makeCall(
+                whole,
+                SqlStdOperatorTable.CASE,
+                List.of(enough, value, rexBuilder.makeNullLiteral(whole))));
+        continue;
+      }
       // The NULL is a redacted value and the report says so (`Aggregate`, D202): a grid that read it
       // as "no rows" would be wrong twice.
       RexNode redacted =

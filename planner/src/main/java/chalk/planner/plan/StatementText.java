@@ -92,6 +92,28 @@ public final class StatementText {
     return span != null ? span : node.toString();
   }
 
+  /**
+   * The construct the statement wrote at {@code node}, upper-cased: for a {@code CASE} the validator
+   * rewrote from a {@code COALESCE} or a {@code NULLIF}, the function the statement called, so that
+   * a refusal names it as the statement did; for any other node, its own kind.
+   */
+  public String construct(SqlNode node) {
+    String own = node.getKind().name();
+    if (node.getKind() != SqlKind.CASE) {
+      return own;
+    }
+    String span = span(node);
+    if (span == null
+        || java.util.Objects.requireNonNull(statement)
+            .get(node.getParserPosition())
+            .contains(SqlKind.CASE)) {
+      return own;
+    }
+    int open = span.indexOf('(');
+    String called = open > 0 ? span.substring(0, open).strip() : "";
+    return called.matches("[A-Za-z_]+") ? called.toUpperCase(java.util.Locale.ROOT) : own;
+  }
+
   /** The statement's text for {@code node}, or null when its position is not a span of it. */
   @Nullable String span(SqlNode node) {
     SqlParserPos pos = node.getParserPosition();

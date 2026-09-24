@@ -78,7 +78,7 @@ public static class CatalogValidator
                     $"{path} ({schema.Name})", "a remote schema must name the SQL dialect its source speaks");
             }
 
-            Validate(schema, $"{path} ({schema.Name})");
+            Validate(schema, $"{path} ({schema.Name})", catalog);
 
             if (options.RequireEntitlements)
             {
@@ -222,7 +222,7 @@ public static class CatalogValidator
         }
     }
 
-    private static void Validate(SchemaDescriptor schema, string path)
+    private static void Validate(SchemaDescriptor schema, string path, CatalogContext catalog)
     {
         ValidateCostProfile(schema.CostProfile, path);
         ValidateCapabilities(schema, path);
@@ -246,7 +246,7 @@ public static class CatalogValidator
                     tablePath, $"table name '{table.Name}' is used twice in schema '{schema.Name}'");
             }
 
-            Validate(table, tablePath);
+            Validate(table, tablePath, catalog);
             ValidateEntitlementAgainstSource(schema, table, tablePath);
         }
 
@@ -1022,6 +1022,15 @@ public static class CatalogValidator
                     functionPath, "`Window`, `Ordered` and `NullTreatment` describe an aggregate");
             }
 
+            // D295: the promise is about what a group's answer reports, which only an aggregate has.
+            if (function.Kind != FunctionKind.Aggregate && function.Population)
+            {
+                throw new CatalogValidationException(
+                    functionPath,
+                    "`Population` promises that an aggregate's result reports the group and never one "
+                    + "row's value, and this function is not an aggregate");
+            }
+
             if (function.Rows < 0)
             {
                 throw new CatalogValidationException(
@@ -1331,7 +1340,7 @@ public static class CatalogValidator
         }
     }
 
-    private static void Validate(TableDescriptor table, string path)
+    private static void Validate(TableDescriptor table, string path, CatalogContext catalog)
     {
         if (table.Columns.Count == 0)
         {
@@ -1486,7 +1495,7 @@ public static class CatalogValidator
                 table.Columns[c].Statistics, $"{path}.columns[{c}] ({table.Columns[c].Name})");
         }
 
-        ValidateEntitlement(table, path);
+        ValidateEntitlement(table, path, catalog);
     }
 
     /// <summary>
@@ -1519,7 +1528,7 @@ public static class CatalogValidator
     /// group-size floor. The expressions themselves are SQL text and are parsed and type-checked by
     /// the sidecar at registration, which is the only side with a SQL parser.
     /// </summary>
-    private static void ValidateEntitlement(TableDescriptor table, string path)
+    private static void ValidateEntitlement(TableDescriptor table, string path, CatalogContext catalog)
     {
         if (table.Entitlement is not { } entitlement)
         {
@@ -1567,7 +1576,7 @@ public static class CatalogValidator
                     + "default the host gives at planning, 1 disables the guard for this column)");
             }
 
-            ValidateRules(entitlement, column, table.Columns[column.Column], columnPath);
+            ValidateRules(entitlement, column, table.Columns[column.Column], columnPath, catalog);
         }
     }
 
@@ -1585,7 +1594,8 @@ public static class CatalogValidator
         TableEntitlementDescriptor entitlement,
         ColumnEntitlementDescriptor column,
         ColumnDescriptor declared,
-        string columnPath)
+        string columnPath,
+        CatalogContext catalog)
     {
         // D208: on a table whose rows are already filtered, a row outside the predicate is still
         // evaluated by any conjunct the optimiser moves below the filter, so what such a row
@@ -1659,14 +1669,17 @@ public static class CatalogValidator
         for (var f = 0; f < column.AggregateOnlyFunctions.Count; f++)
         {
             var function = column.AggregateOnlyFunctions[f].Trim().ToUpperInvariant();
-            if (!PopulationAggregates.IsPermitted(function))
+            if (!PopulationAggregates.IsPermitted(function, catalog))
             {
                 throw new CatalogValidationException(
                     $"{columnPath}.aggregate_only_functions[{f}]",
                     $"'{column.AggregateOnlyFunctions[f]}' is not a population aggregate (D190). "
                     + "MIN, MAX, ANY_VALUE, the positional and holistic aggregates, every string "
-                    + "aggregate and any user-defined aggregate each report an individual row's "
-                    + $"value. The permitted set is {PopulationAggregates.Listing}.");
+                    + "aggregate and any user-defined aggregate not declared Population() each report "
+                    + $"an individual row's value. The permitted set is {PopulationAggregates.Listing}, "
+                    + "and a user-defined aggregate the catalog declares with Population(), which "
+                    + "promises that its result reports the group and never one row's value (D295). "
+                    + "Declare it so if it keeps that promise; the engine cannot check it.");
             }
         }
 

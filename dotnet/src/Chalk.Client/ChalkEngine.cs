@@ -1688,7 +1688,12 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         // The clause that compares the plan against a *report* needs the report, so it is the entitlement
         // wrapper that asks for it; this clause is catalog data and stays here, where every prepare passes.
         PlanValidator.Validate(
-            result.Plan, new PlanValidationOptions { EntitledTables = EntitledColumnCount });
+            result.Plan,
+            new PlanValidationOptions
+            {
+                EntitledTables = EntitledColumnCount,
+                PopulationAggregates = IsPopulationAggregate,
+            });
         return result;
     }
 
@@ -1867,6 +1872,20 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether this client's own catalog declares the user aggregate a plan names — <c>schema.name</c>,
+    /// as a measure spells it — <c>Population()</c> (D295): the second question I-IR-E asks of the
+    /// catalog, of an aggregate over a population-only column.
+    /// </summary>
+    internal bool IsPopulationAggregate(string qualified)
+    {
+        var dot = qualified.LastIndexOf('.');
+        var schemaName = dot < 0 ? null : qualified[..dot];
+        var name = dot < 0 ? qualified : qualified[(dot + 1)..];
+        var schema = schemaName is null ? Catalog.Schemas.FirstOrDefault() : Catalog.FindSchema(schemaName);
+        return schema?.FindFunction(name) is { Kind: Chalk.Ir.FunctionKind.Aggregate, Population: true };
     }
 
     /// <summary>

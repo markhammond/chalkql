@@ -32,6 +32,15 @@ public sealed class PlanValidationOptions
     public Func<TableRef, int?>? EntitledTables { get; init; }
 
     /// <summary>
+    /// Whether the client's own catalog declares the user aggregate a measure names — schema-qualified,
+    /// as the plan spells it — <c>Population()</c>: a promise that its result reports the group and never
+    /// one row's value (D295). I-IR-E asks it of an aggregate over a population-only column, as it
+    /// asks <see cref="EntitledTables"/> of a read. Left null, no user aggregate is a population
+    /// aggregate, which is what every client before D295 answered.
+    /// </summary>
+    public Func<string, bool>? PopulationAggregates { get; init; }
+
+    /// <summary>
     /// What the planner's report says each output column discloses, in output order, for I-IR-E's
     /// last clause: the client recomputes the same labels from the reads' own verdicts by walking
     /// the physical plan, and a disagreement is a refusal before anything executes.

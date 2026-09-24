@@ -171,6 +171,7 @@ internal static class CatalogProtoMapping
             Window = function.Window,
             Ordered = function.Ordered,
             NullTreatment = function.NullTreatment,
+            Population = function.Population,
         };
         if (function.ReturnType is { } returnType)
         {
@@ -252,6 +253,7 @@ internal static class CatalogProtoMapping
         Window = message.Window,
         Ordered = message.Ordered,
         NullTreatment = message.NullTreatment,
+        Population = message.Population,
         Body = message.ImplementationCase switch
         {
             IrFunctionDescriptor.ImplementationOneofCase.Sql => new SqlFunctionBody { Text = message.Sql.Text },

@@ -190,9 +190,13 @@ public final class CatalogValidator {
 
       boolean aggregate = function.getKind() == FunctionKind.FUNCTION_KIND_AGGREGATE;
       if (!aggregate
-          && (function.getWindow() || function.getOrdered() || function.getNullTreatment())) {
+          && (function.getWindow()
+              || function.getOrdered()
+              || function.getNullTreatment()
+              || function.getPopulation())) {
         throw new InvalidCatalogException(
-            functionPath, "`window`, `ordered` and `null_treatment` describe an aggregate");
+            functionPath,
+            "`window`, `ordered`, `null_treatment` and `population` describe an aggregate");
       }
       if (function.getRows() < 0) {
         throw new InvalidCatalogException(

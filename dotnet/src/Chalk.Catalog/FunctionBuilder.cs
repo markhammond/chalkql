@@ -49,6 +49,7 @@ public sealed class FunctionBuilder
     private bool _window;
     private bool _ordered;
     private bool _nullTreatment;
+    private bool _population;
     private FunctionBody? _body;
 
     /// <summary>A builder for a function called <paramref name="name"/>. Source builders create these.</summary>
@@ -227,6 +228,19 @@ public sealed class FunctionBuilder
     }
 
     /// <summary>
+    /// An aggregate whose result reports the group and never one row's value: a total, a count, a
+    /// mean — for a composite result, every field of it. It is the one promise that lets an entitlement
+    /// name the aggregate among those a population-only column permits, where the group-size floor
+    /// then guards it as it guards <c>COUNT</c>. The engine cannot check the promise; declare it only
+    /// of an aggregate that keeps it.
+    /// </summary>
+    public FunctionBuilder Population(bool population = true)
+    {
+        _population = population;
+        return this;
+    }
+
+    /// <summary>
     /// The result rises with <paramref name="parameter"/>, so an ordering on that argument survives
     /// the call — which is what lets <c>ORDER BY minute_of(ts)</c> plan without a sort.
     /// </summary>
@@ -290,6 +304,7 @@ public sealed class FunctionBuilder
             Window = _window,
             Ordered = _ordered,
             NullTreatment = _nullTreatment,
+            Population = _population,
             Body = _body,
         };
     }

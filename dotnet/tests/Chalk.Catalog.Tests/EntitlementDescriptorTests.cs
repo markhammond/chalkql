@@ -1,4 +1,5 @@
 using Chalk.Ir;
+using Google.Protobuf;
 using IrDisclosure = Chalk.Ir.Disclosure;
 using IrEnforcement = Chalk.Ir.Enforcement;
 
@@ -509,6 +510,149 @@ public sealed class EntitlementDescriptorTests
         }))));
 
         Assert.True(PopulationAggregates.IsPermitted(function));
+    }
+
+    // ---- D295: a user aggregate its host declares Population() ----
+
+    private static FunctionDescriptor Summary(
+        string name, bool population, FunctionKind kind = FunctionKind.Aggregate) => new()
+    {
+        Name = name,
+        Kind = kind,
+        Parameters = [new ParameterDescriptor { Name = "x", Type = ChalkType.String(nullable: true) }],
+        ReturnType = ChalkType.Composite(
+            [new CompositeField("Total", ChalkType.Int64()), new CompositeField("Tally", ChalkType.Int64())],
+            nullable: true),
+        Population = population,
+        Body = new ClientFunctionBody(),
+    };
+
+    /// <summary>members.first_name population-only for an auditor, its allow-list naming <paramref name="function"/>.</summary>
+    private static CatalogContext AllowListing(string function, params SchemaDescriptor[] others)
+    {
+        var members = Members(Simple(new ColumnEntitlementDescriptor
+        {
+            Column = 2,
+            Rules = [Rule("@ctx.role = 'auditor'", Disclosure.AggregateOnly)],
+            AggregateOnlyFunctions = [function],
+        }));
+        return new CatalogContext
+        {
+            ContextId = "demo",
+            Epoch = 1,
+            Schemas =
+            [
+                new SchemaDescriptor
+                {
+                    SourceId = "mem",
+                    Name = "main",
+                    Kind = SourceKind.Local,
+                    Tables = [members],
+                    Functions = [Summary("name_summary", population: true), Summary("name_digest", population: false)],
+                },
+                .. others,
+            ],
+        };
+    }
+
+    [Theory]
+    [InlineData("name_summary")]
+    [InlineData("NAME_SUMMARY")]
+    [InlineData(" Name_Summary ")]
+    public void A_user_aggregate_declared_population_may_be_allow_listed(string function)
+    {
+        var catalog = AllowListing(function);
+
+        CatalogValidator.Validate(catalog);
+        Assert.True(PopulationAggregates.IsPermitted(function, catalog));
+        Assert.False(PopulationAggregates.IsPermitted(function));
+    }
+
+    [Fact]
+    public void A_user_aggregate_not_declared_population_is_refused_saying_how_to_declare_it()
+    {
+        var ex = Assert.Throws<CatalogValidationException>(() => CatalogValidator.Validate(AllowListing("name_digest")));
+
+        Assert.Contains(".aggregate_only_functions[0]", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'name_digest' is not a population aggregate (D190)", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("any user-defined aggregate not declared Population()", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Declare it so if it keeps that promise; the engine cannot check it.", ex.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_name_no_schema_declares_is_refused()
+    {
+        var ex = Assert.Throws<CatalogValidationException>(() => CatalogValidator.Validate(AllowListing("my_udaf")));
+
+        Assert.Contains("'my_udaf' is not a population aggregate", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An allow-list names an aggregate without its schema, so a name another schema declares without
+    /// the promise is never permitted by the one that makes it.
+    /// </summary>
+    [Fact]
+    public void A_name_another_schema_declares_without_the_promise_is_refused()
+    {
+        var other = new SchemaDescriptor
+        {
+            SourceId = "mem2",
+            Name = "other",
+            Kind = SourceKind.Local,
+            Tables = [],
+            Functions = [Summary("name_summary", population: false)],
+        };
+
+        var catalog = AllowListing("name_summary", other);
+
+        Assert.False(PopulationAggregates.IsPermitted("name_summary", catalog));
+        var ex = Assert.Throws<CatalogValidationException>(() => CatalogValidator.Validate(catalog));
+        Assert.Contains("'name_summary' is not a population aggregate", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_scalar_function_cannot_make_the_promise()
+    {
+        var catalog = new CatalogContext
+        {
+            ContextId = "demo",
+            Epoch = 1,
+            Schemas =
+            [
+                new SchemaDescriptor
+                {
+                    SourceId = "mem",
+                    Name = "main",
+                    Kind = SourceKind.Local,
+                    Tables = [],
+                    Functions = [Summary("name_summary", population: true, FunctionKind.Scalar)],
+                },
+            ],
+        };
+
+        var ex = Assert.Throws<CatalogValidationException>(() => CatalogValidator.Validate(catalog));
+
+        Assert.Contains("`Population` promises that an aggregate's result reports the group", ex.Message,
+            StringComparison.Ordinal);
+        Assert.Contains("this function is not an aggregate", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_promise_travels_on_the_wire_and_the_builder_makes_it()
+    {
+        var catalog = AllowListing("name_summary");
+
+        var message = catalog.ToProto();
+        Assert.True(message.Schemas[0].Functions[0].Population);
+        Assert.False(message.Schemas[0].Functions[1].Population);
+        var back = CatalogProtoMapping.FromProto(Ir.CatalogContext.Parser.ParseFrom(message.ToByteArray()));
+        Assert.True(back.Schemas[0].Functions[0].Population);
+        Assert.False(back.Schemas[0].Functions[1].Population);
+
+        var built = new FunctionBuilder("total").Aggregate<long?, long>("x").Population().Client().Build();
+        Assert.True(built.Population);
+        Assert.False(new FunctionBuilder("total").Aggregate<long?, long>("x").Client().Build().Population);
     }
 
     // ---- D203: statistical is an opt-in under a withheld name ----

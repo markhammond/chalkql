@@ -77,7 +77,15 @@ public sealed class TenancyFixture
     private static readonly Lazy<TenancyFixture> LazyShared = new(() => Create(entitled: true));
 
     private static readonly Lazy<TenancyFixture> LazySubversion =
-        new(() => Create(entitled: true, subversionFunctions: true));
+        new(() => Create(entitled: true, subversionFunctions: true, amountAggregates: SubversionAmountAggregates));
+
+    /// <summary>
+    /// What <c>amount</c> permits beyond the four built-ins on the fixtures that declare
+    /// <see cref="Functions"/>: <c>population_summary</c>, which its host declares population-safe
+    /// (D295), so that the adversarial family's statement 66 is the permitted twin of statement 64.
+    /// A fixture that does not declare the function cannot name it, and its catalog would be refused.
+    /// </summary>
+    public static readonly IReadOnlyList<string> SubversionAmountAggregates = ["POPULATION_SUMMARY"];
 
     // ---------------------------------------------------------------- the rows
 
@@ -510,9 +518,11 @@ public sealed class TenancyFixture
     /// strategies rather than through one remote query (§5, D229).
     /// </param>
     /// <param name="amountAggregates">
-    /// Population aggregates <c>amount</c> would permit beyond the four built-ins. Empty for every
-    /// fixture; the adversarial battery names a composite-valued aggregate here to show that
-    /// registration refuses a user-defined aggregate in an allow-list (D190, ADR 0077).
+    /// Population aggregates <c>amount</c> would permit beyond the four built-ins. Empty but for the
+    /// fixtures that declare <see cref="Functions"/>, which name <c>population_summary</c>
+    /// (<see cref="SubversionAmountAggregates"/>, D295); the adversarial battery names
+    /// <c>amount_summary</c> here to show that registration refuses a user-defined aggregate its host
+    /// has not declared population-safe (D190).
     /// </param>
     public static TableEntitlementDescriptor OrdersEntitlement(
         string itemSchema = "", IReadOnlyList<string>? amountAggregates = null) => new()
@@ -1118,8 +1128,10 @@ public sealed class TenancyFixture
     /// The two functions the adversarial corpus reaches an entitled table through (D251 class 4,
     /// <c>16-entitlements.md</c> §7): a SQL body whose statement names <c>members</c>, inlined
     /// before the rewrite so the reference is entitled like any other, and a client body that is
-    /// handed a protected column and can therefore say what it was given. Class 8 adds two that
-    /// answer a composite value (ADR 0077): the same client body as a record, and an aggregate.
+    /// handed a protected column and can therefore say what it was given. Class 8 adds three that
+    /// answer a composite value (ADR 0077): the same client body as a record, and an aggregate twice
+    /// over — <c>amount_summary</c>, which is not declared population-safe, and
+    /// <c>population_summary</c>, the same aggregate declared so (D295).
     /// </summary>
     /// <remarks>
     /// Declared on every fixture the family runs against — this one, the oracle's disclosed source
@@ -1150,6 +1162,12 @@ public sealed class TenancyFixture
                 .Client())
             .AddFunction("amount_summary", f => f
                 .Aggregate<long, AmountSummary>("x")
+                .Client())
+            // D295: the same aggregate, which its host declares population-safe — a total and a
+            // count report the group and never one row — so an allow-list may name it.
+            .AddFunction("population_summary", f => f
+                .Aggregate<long, AmountSummary>("x")
+                .Population()
                 .Client());
     }
 
@@ -1160,13 +1178,13 @@ public sealed class TenancyFixture
     public sealed record Echoed(string Echo, long Len);
 
     /// <summary>
-    /// What <c>amount_summary</c> answers: a population's total and how many values made it — the
-    /// two things <c>SUM</c> and <c>COUNT</c> answer apart, and nothing a single row could be read
-    /// back out of.
+    /// What <c>amount_summary</c> and <c>population_summary</c> answer: a population's total and how
+    /// many values made it — the two things <c>SUM</c> and <c>COUNT</c> answer apart, and nothing a
+    /// single row could be read back out of.
     /// </summary>
     public readonly record struct AmountSummary(long Total, long Tally);
 
-    /// <summary><c>amount_summary</c>'s state.</summary>
+    /// <summary><c>amount_summary</c>'s and <c>population_summary</c>'s state.</summary>
     public struct AmountSummaryState
     {
         public long Total;

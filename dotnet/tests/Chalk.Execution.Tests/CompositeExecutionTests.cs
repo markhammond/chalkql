@@ -645,6 +645,174 @@ public sealed class CompositeExecutionTests
             + $"than SUM and COUNT did ({measured} against {measuredFloor}).");
     }
 
+    // ---- a choice between composites of one type (D295) ----
+
+    /// <summary>
+    /// What the group-size guard writes over a composite measure, spelled over rows: the composite when
+    /// the row's id is 2048 or more, else a typed NULL of it.
+    /// </summary>
+    private static Expr Guarded(Expr value) => Case(
+        ClassificationType,
+        Null(ClassificationType),
+        (Call(FunctionId.Ge, Bool(), Ref(TxnRow, 0), Lit(2048L)), value));
+
+    /// <summary>A composite the way a host reads it back, or null.</summary>
+    private static object?[]? Expected(Classification? value) =>
+        value is { } c ? [c.Category.ToString(), c.Confidence] : null;
+
+    private static double? AmountOf(long id) => id % 4 == 3 ? null : id % 250;
+
+    [Fact]
+    public async Task A_case_over_a_composite_chooses_per_row_and_nulls_the_composite_whole()
+    {
+        var guarded = Guarded(ClassifyCall());
+        var plan = IrBuilder.Plan(Project(
+            TxnRead(),
+            [
+                ("id", Ref(TxnRow, 0)),
+                ("c", guarded),
+                ("category", FieldAccess(guarded, 0)),
+                ("confidence", FieldAccess(guarded, 1)),
+            ]));
+
+        var rows = await BothAsync(plan, [ClassifyDeclaration()], [ClassifyHost(new Counter())]);
+
+        Assert.Equal(Rows, rows.Count);
+        foreach (var row in rows)
+        {
+            var id = (long)row[0]!;
+            var expected = id >= 2048 && AmountOf(id) is { } amount ? Expected(Classify(amount)) : null;
+            Assert.Equal(Render(expected), Render(row[1]));
+            Assert.Equal(expected?[0], row[2]);
+            Assert.Equal(expected?[1], row[3]);
+        }
+    }
+
+    [Fact]
+    public async Task A_null_composite_a_case_chose_keeps_its_non_nullable_fields_free_of_nulls()
+    {
+        var plan = IrBuilder.Plan(Project(TxnRead(), [("c", Guarded(ClassifyCall()))]));
+        var compiled = Compile(plan, [ClassifyDeclaration()], [ClassifyHost(new Counter())]);
+
+        using var arena = new ExecutionArena();
+        var seen = 0;
+        await foreach (var batch in compiled.ExecuteAsync([], new ExecutionStats(), arena, CancellationToken.None))
+        {
+            using (batch)
+            {
+                var column = Assert.IsType<StructArray>(batch.Column(0));
+
+                // The 2048 rows below the threshold and the 512 above it with no amount.
+                Assert.Equal(2048 + 512, column.NullCount);
+                Assert.All(column.Fields, field => Assert.Equal(0, field.NullCount));
+                seen += batch.Length;
+            }
+        }
+
+        Assert.Equal(Rows, seen);
+    }
+
+    [Fact]
+    public async Task A_case_between_two_calls_of_one_composite_type_takes_each_row_from_its_branch()
+    {
+        var maybe = Fn("maybe_classify", ClassificationType, Ref(TxnRow, 2));
+        var even = Call(FunctionId.Eq, Bool(), Call(FunctionId.Modulus, I64(), Ref(TxnRow, 0), Lit(2L)), Lit(0L));
+        var plan = IrBuilder.Plan(Project(
+            TxnRead(),
+            [("id", Ref(TxnRow, 0)), ("c", Case(ClassificationType, maybe, (even, ClassifyCall())))]));
+
+        var rows = await BothAsync(
+            plan, [ClassifyDeclaration(), MaybeDeclaration()], [ClassifyHost(new Counter()), MaybeHost()]);
+
+        Assert.Equal(Rows, rows.Count);
+        foreach (var row in rows)
+        {
+            var id = (long)row[0]!;
+            var amount = AmountOf(id);
+            var expected = id % 2 == 0
+                ? amount is { } a ? Expected(Classify(a)) : null
+                : amount is { } b && b >= 10 ? Expected(Classify(b)) : null;
+            Assert.Equal(Render(expected), Render(row[1]));
+        }
+    }
+
+    [Fact]
+    public async Task A_coalesce_over_composites_takes_the_first_that_holds_one()
+    {
+        var maybe = Fn("maybe_classify", ClassificationType, Ref(TxnRow, 2));
+        var today = Fn("today", Composite(F("Category", Str()), F("Confidence", Fp64())));
+        var coalesce = Call(FunctionId.Coalesce, ClassificationType, maybe, today);
+        var plan = IrBuilder.Plan(Project(
+            TxnRead(),
+            [("id", Ref(TxnRow, 0)), ("c", coalesce), ("confidence", FieldAccess(coalesce, 1))]));
+
+        var rows = await BothAsync(
+            plan, [MaybeDeclaration(), TodayDeclaration()], [MaybeHost(), TodayHost(new Counter())]);
+
+        Assert.Equal(Rows, rows.Count);
+        foreach (var row in rows)
+        {
+            var amount = AmountOf((long)row[0]!);
+            var expected = amount is { } a && a >= 10
+                ? Expected(Classify(a))
+                : Expected(new Classification(Large, 1.0));
+            Assert.Equal(Render(expected), Render(row[1]));
+            Assert.Equal(expected![1], row[2]);
+        }
+    }
+
+    /// <summary>
+    /// The guard's CASE and both fields read from it evaluate the call once (D299): the choice is one
+    /// shared node, as the call under it is.
+    /// </summary>
+    [Fact]
+    public async Task A_case_read_whole_and_by_field_is_one_node_and_calls_once_per_row()
+    {
+        var counter = new Counter();
+        var guarded = Guarded(ClassifyCall());
+        var plan = IrBuilder.Plan(Project(
+            TxnRead(),
+            [("c", guarded), ("category", FieldAccess(guarded, 0)), ("confidence", FieldAccess(guarded, 1))]));
+
+        var rows = await RunAsync(Compile(plan, [ClassifyDeclaration()], [ClassifyHost(counter)]));
+
+        Assert.Equal(Rows, rows.Count);
+
+        // Every row with an amount, once: a CASE evaluates its branches over the whole batch.
+        Assert.Equal(Rows / 4 * 3, counter.Calls);
+    }
+
+    /// <summary>
+    /// A composite CASE costs nothing per batch over the scalar CASEs a host would otherwise write, one
+    /// per field: it is a choice per lane and a copy per field, into scratch the batch reuses.
+    /// </summary>
+    [Fact]
+    public async Task A_composite_case_allocates_nothing_per_batch_over_a_case_per_field()
+    {
+        var guarded = Guarded(ClassifyCall());
+        var withComposite = IrBuilder.Plan(Project(
+            TxnRead(),
+            [("category", FieldAccess(guarded, 0)), ("confidence", FieldAccess(guarded, 1))]));
+        var threshold = Call(FunctionId.Ge, Bool(), Ref(TxnRow, 0), Lit(2048L));
+        var perField = IrBuilder.Plan(Project(
+            TxnRead(),
+            [
+                ("category", Case(Str(nullable: true), Null(Str(nullable: true)), (threshold, FieldAccess(ClassifyCall(), 0)))),
+                ("confidence", Case(Fp64(nullable: true), Null(Fp64(nullable: true)), (threshold, FieldAccess(ClassifyCall(), 1)))),
+            ]));
+
+        var measuredFloor = await Measure(perField, [ClassifyDeclaration()], [ClassifyHost(new Counter())]);
+        var measured = await Measure(withComposite, [ClassifyDeclaration()], [ClassifyHost(new Counter())]);
+
+        _output.WriteLine(
+            $"composite CASE: {measured} bytes over 8 batches against a CASE per field's {measuredFloor} = "
+            + $"{(measured - measuredFloor) / 8.0:0.###} bytes/batch.");
+        Assert.True(
+            measured <= measuredFloor,
+            $"a warm composite CASE cost {(measured - measuredFloor) / 8.0:0.###} bytes per batch more "
+            + $"than a CASE per field ({measured} against {measuredFloor}).");
+    }
+
     private static async Task<long> Measure(
         Plan plan, IReadOnlyList<FunctionDescriptor> functions, IReadOnlyList<HostFunction> hosts)
     {

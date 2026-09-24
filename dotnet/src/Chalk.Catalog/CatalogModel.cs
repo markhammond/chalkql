@@ -176,6 +176,15 @@ public sealed class FunctionDescriptor
     /// <summary>Aggregates: accepts <c>IGNORE NULLS</c> / <c>RESPECT NULLS</c>.</summary>
     public bool NullTreatment { get; init; }
 
+    /// <summary>
+    /// Aggregates: the host's promise that the result reports the group as a whole and never one
+    /// row's value — every field of a composite result included. Only such an aggregate may be named
+    /// in a column's <c>AggregateOnlyFunctions</c>, where the group-size floor then guards it as it
+    /// guards <c>COUNT</c> (D295). Nothing can check the promise; like <see cref="Leakproof"/>, it is
+    /// recorded and relied on.
+    /// </summary>
+    public bool Population { get; init; }
+
     /// <summary>Where the implementation lives, which is what decides where it may run.</summary>
     public required FunctionBody Body { get; init; }
 }

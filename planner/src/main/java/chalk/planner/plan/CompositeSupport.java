@@ -18,6 +18,7 @@ import org.apache.calcite.sql.SqlNumericLiteral;
 import org.apache.calcite.sql.SqlOrderBy;
 import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.SqlSetOperator;
+import org.apache.calcite.sql.SqlUtil;
 import org.apache.calcite.sql.SqlWindow;
 import org.apache.calcite.sql.fun.SqlCase;
 import org.apache.calcite.sql.validate.SqlValidator;
@@ -37,9 +38,11 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  *
  * <p>The refusals: a composite value as an {@code ORDER BY}, {@code GROUP BY}, {@code DISTINCT}, window
  * partition or window order key; as an operand of a comparison, {@code BETWEEN} or {@code IN}; as a
- * {@code CASE} or {@code COALESCE} result; as a {@code CAST}'s operand; as a built-in aggregate's or
- * window function's argument; and as a column of a {@code UNION}, {@code INTERSECT} or {@code EXCEPT}
- * that compares rows. The {@code ROW} constructor is refused where it is lowered ({@code RexToIr}),
+ * {@code CASE} or {@code COALESCE} result beside a scalar or beside a composite of another type — a
+ * choice between composites of one type is legal (D295), which is what the group-size guard writes
+ * over a composite measure; as a {@code CAST}'s operand; as a built-in aggregate's or window
+ * function's argument; and as a column of a {@code UNION}, {@code INTERSECT} or {@code EXCEPT} that
+ * compares rows. The {@code ROW} constructor is refused where it is lowered ({@code RexToIr}),
  * and a nested composite where it is declared.
  *
  * <p>A refusal that names an expression quotes the statement's own text for it (D296, {@link
@@ -223,19 +226,7 @@ public final class CompositeSupport {
                     + "fields instead, e.g. f(x).category IN ('food', 'rent').");
           }
         }
-        case CASE, COALESCE -> {
-          if (isComposite(typeOf(call), call) || resultIsComposite(call)) {
-            throw refusal(
-                "a composite value as a "
-                    + kind.name().toUpperCase(Locale.ROOT)
-                    + " result ("
-                    + text.quote(call)
-                    + ")",
-                "A composite value is carried as the function returned it and is never chosen between. "
-                    + "Take it apart first and choose between its fields, e.g. CASE WHEN … THEN "
-                    + "f(x).category END.");
-          }
-        }
+        case CASE, COALESCE -> chooses(call);
         case CAST -> {
           SqlNode value = call.operand(0);
           if (isComposite(value)) {
@@ -251,10 +242,113 @@ public final class CompositeSupport {
     }
 
     /**
-     * Whether one of a {@code CASE}'s or {@code COALESCE}'s results is a composite value: what a statement Calcite
-     * refused for mixing a composite value with a scalar still has, when the call itself has no type.
+     * A {@code CASE} or {@code COALESCE} that answers a composite value (D295). Choosing between
+     * composite values of one type is legal — the same fields, named and typed alike, nullability
+     * aside — and a {@code NULL} result is one of them. Choosing between a composite and a scalar, or
+     * between composites of different types, is refused by name: Calcite validates neither, and the
+     * first reaches here only when validation stopped at it.
      */
-    private boolean resultIsComposite(SqlCall call) {
+    private void chooses(SqlCall call) {
+      List<SqlNode> results = results(call);
+      RelDataType type = typeOf(call);
+      boolean composite = isComposite(type, call);
+      for (SqlNode result : results) {
+        composite |= result != null && isComposite(result);
+      }
+      if (!composite) {
+        return;
+      }
+
+      // The construct as the statement wrote it: Calcite validates a COALESCE as the CASE it expands to.
+      String construct = text.construct(call);
+      boolean scalarBeside = false;
+      boolean different = false;
+      for (SqlNode result : results) {
+        if (result == null || SqlUtil.isNullLiteral(result, true)) {
+          continue;
+        }
+        if (!isComposite(result)) {
+          scalarBeside = true;
+          continue;
+        }
+        RelDataType resultType = typeOf(result);
+        if (type != null && type.isStruct() && resultType != null && !oneComposite(resultType, type)) {
+          different = true;
+        }
+      }
+
+      if (scalarBeside) {
+        throw refusal(
+            "a composite value as a " + construct + " result (" + text.quote(call) + ")",
+            "A " + construct + " chooses between composite values of one type, or between scalars, "
+                + "and never between the two. Take the composite apart and choose between its fields, "
+                + "e.g. CASE WHEN … THEN f(x).category END.");
+      }
+      // Validation stopped before it typed this choice, with every result a composite value: refused
+      // when their declared types differ — the one way Calcite refuses such a choice — and left to
+      // Calcite's own error when they agree or cannot be told, since the failure was elsewhere.
+      if (unvalidated && (type == null || !type.isStruct())) {
+        different |= declaredTypesDiffer(results);
+      }
+      if (different) {
+        throw refusal(
+            "a " + construct + " between composite values of different types (" + text.quote(call) + ")",
+            "A " + construct + " chooses between composite values of one type only: the same fields, "
+                + "named and typed alike. Choose between their fields instead, e.g. CASE WHEN … THEN "
+                + "f(x).category ELSE g(x).label END.");
+      }
+    }
+
+    /**
+     * Whether the composite results of a choice Calcite never typed are calls to functions declared
+     * to return different composites. A result that is not such a call cannot be told, and then
+     * nothing is claimed.
+     */
+    private static boolean declaredTypesDiffer(List<SqlNode> results) {
+      chalk.ir.v1.Type first = null;
+      for (SqlNode result : results) {
+        if (result == null || SqlUtil.isNullLiteral(result, true)) {
+          continue;
+        }
+        if (!(result instanceof SqlCall call)
+            || !(UserOperators.declarationOf(call.getOperator()) instanceof UserFunction declaration)
+            || declaration.descriptor().getReturnType().getKind() != TypeKind.TYPE_KIND_COMPOSITE) {
+          return false;
+        }
+        chalk.ir.v1.Type declared = declaration.descriptor().getReturnType();
+        if (first == null) {
+          first = declared;
+        } else if (!sameFields(first, declared)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    /** Two declared composites with the same fields, named alike ignoring case, nullability aside. */
+    private static boolean sameFields(chalk.ir.v1.Type left, chalk.ir.v1.Type right) {
+      if (left.getFieldsCount() != right.getFieldsCount()) {
+        return false;
+      }
+      for (int f = 0; f < left.getFieldsCount(); f++) {
+        chalk.ir.v1.Field a = left.getFields(f);
+        chalk.ir.v1.Field b = right.getFields(f);
+        if (!a.getName().equalsIgnoreCase(b.getName())
+            || !a.getType().toBuilder().setNullable(false).build()
+                .equals(b.getType().toBuilder().setNullable(false).build())) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    /**
+     * A {@code CASE}'s {@code THEN} and {@code ELSE} operands, or a {@code COALESCE}'s operands, each
+     * as the statement wrote it: the {@code CASE} Calcite expands a {@code COALESCE} into wraps each
+     * {@code THEN} in its own {@code CAST_NOT_NULL}, which is not the statement's and, where
+     * validation stopped, has no type to go by.
+     */
+    private static List<SqlNode> results(SqlCall call) {
       List<SqlNode> results = new java.util.ArrayList<>();
       if (call instanceof SqlCase caseCall) {
         results.addAll(caseCall.getThenOperands().getList());
@@ -262,12 +356,28 @@ public final class CompositeSupport {
       } else {
         results.addAll(call.getOperandList());
       }
-      for (SqlNode result : results) {
-        if (isComposite(result)) {
-          return true;
+      results.replaceAll(CompositeSupport::unwrapped);
+      return results;
+    }
+
+    /**
+     * Whether {@code actual} is {@code expected}'s composite type: the same fields in the same order,
+     * named alike ignoring case, typed alike but for nullability.
+     */
+    private boolean oneComposite(RelDataType actual, RelDataType expected) {
+      if (!actual.isStruct() || actual.getFieldCount() != expected.getFieldCount()) {
+        return false;
+      }
+      for (int f = 0; f < actual.getFieldCount(); f++) {
+        RelDataTypeField left = actual.getFieldList().get(f);
+        RelDataTypeField right = expected.getFieldList().get(f);
+        if (!left.getName().equalsIgnoreCase(right.getName())
+            || !org.apache.calcite.sql.type.SqlTypeUtil.equalSansNullability(
+                validator.getTypeFactory(), left.getType(), right.getType())) {
+          return false;
         }
       }
-      return false;
+      return true;
     }
 
     /** A set operation that compares rows cannot hold a composite value; {@code UNION ALL} carries one. */
@@ -402,6 +512,17 @@ public final class CompositeSupport {
           && UserOperators.declarationOf(call.getOperator()) instanceof UserFunction declaration
           && declaration.descriptor().getReturnType().getKind() == TypeKind.TYPE_KIND_COMPOSITE;
     }
+  }
+
+  /** {@code node} without the {@code CAST_NOT_NULL} Calcite's own rewrites put round an operand. */
+  private static @Nullable SqlNode unwrapped(@Nullable SqlNode node) {
+    SqlNode current = node;
+    while (current instanceof SqlCall call
+        && current.getKind() == SqlKind.CAST_NOT_NULL
+        && call.operandCount() == 1) {
+      current = call.operand(0);
+    }
+    return current;
   }
 
   /** A {@code ROW(…)} of values, under any number of casts. */

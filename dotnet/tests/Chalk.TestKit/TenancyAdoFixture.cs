@@ -238,7 +238,8 @@ public sealed class TenancyAdoFixture : IDisposable
                 "orders",
                 Entitled(
                     TenancyFixture.OrdersEntitlement(
-                        marketplace == MarketplacePlacement.EndpointInProcess ? LocalSchema : ""),
+                        marketplace == MarketplacePlacement.EndpointInProcess ? LocalSchema : "",
+                        TenancyFixture.SubversionAmountAggregates),
                     enforcement,
                     pushMasks))
             // §8's query 16 puts a client-bodied predicate beside the tenancy conjunct. It is
@@ -257,7 +258,10 @@ public sealed class TenancyAdoFixture : IDisposable
                 .Sql("SELECT id, first_name FROM members WHERE org_id = org"))
             .AddFunction("echo", f => f.Scalar<string, string>("s").Strict().Client())
             .AddFunction("echo_with_length", f => f.Scalar<string, TenancyFixture.Echoed>("s").Strict().Client())
-            .AddFunction("amount_summary", f => f.Aggregate<long, TenancyFixture.AmountSummary>("x").Client());
+            .AddFunction("amount_summary", f => f.Aggregate<long, TenancyFixture.AmountSummary>("x").Client())
+            .AddFunction(
+                "population_summary",
+                f => f.Aggregate<long, TenancyFixture.AmountSummary>("x").Population().Client());
 
         // §3.13: the child and — unless the caller wants them apart — its parent, both here, so the
         // join, the parent's folded predicate and the markers push as one remote query.
@@ -415,7 +419,10 @@ public sealed class TenancyAdoFixture : IDisposable
             .AddFunction("is_vip", f => f.Scalar<int, bool>("id").Strict().Client())
             .AddFunction("echo", f => f.Scalar<string, string>("s").Strict().Client())
             .AddFunction("echo_with_length", f => f.Scalar<string, TenancyFixture.Echoed>("s").Strict().Client())
-            .AddFunction("amount_summary", f => f.Aggregate<long, TenancyFixture.AmountSummary>("x").Client());
+            .AddFunction("amount_summary", f => f.Aggregate<long, TenancyFixture.AmountSummary>("x").Client())
+            .AddFunction(
+                "population_summary",
+                f => f.Aggregate<long, TenancyFixture.AmountSummary>("x").Population().Client());
 
         // The cross-source half of §3.13: the parent here and the child in the database, so the
         // planner has to reach the parent's visible keys through M5's strategies (D229, F52).
@@ -482,40 +489,45 @@ public sealed class TenancyAdoFixture : IDisposable
     }
 
     /// <summary>
-    /// The composite-valued pair (ADR 0077): <c>echo_with_length</c>, whose fields are what it was handed
-    /// and its length, and <c>amount_summary</c>, a population's total and size as one record.
+    /// The composite-valued functions (ADR 0077): <c>echo_with_length</c>, whose fields are what it was
+    /// handed and its length, and the two summaries of <see cref="RegisterSummaries"/>.
     /// </summary>
     public static void RegisterComposites(Chalk.Client.IFunctionRegistry registry)
     {
         ArgumentNullException.ThrowIfNull(registry);
         registry.AddScalar<string, TenancyFixture.Echoed>(
             "echo_with_length", static s => new TenancyFixture.Echoed(s, s.Length));
-        RegisterAmountSummary(registry);
+        RegisterSummaries(registry);
     }
 
-    /// <summary><c>amount_summary</c> alone, for a run that registers its own <c>echo_with_length</c>.</summary>
-    public static void RegisterAmountSummary(Chalk.Client.IFunctionRegistry registry)
+    /// <summary>
+    /// <c>amount_summary</c> and <c>population_summary</c>, a population's total and size as one
+    /// record — one body under two declarations, the second declared population-safe (D295) — for a
+    /// run that registers its own <c>echo_with_length</c>.
+    /// </summary>
+    public static void RegisterSummaries(Chalk.Client.IFunctionRegistry registry)
     {
         ArgumentNullException.ThrowIfNull(registry);
-        registry.AddAggregate(
-            "amount_summary",
-            new Chalk.Sources.AggregateSpec<
-                TenancyFixture.AmountSummaryState, long, TenancyFixture.AmountSummary?>
-            {
-                Init = static () => default,
-                Add = static (ref s, x) =>
-                {
-                    s.Total += x;
-                    s.Tally++;
-                },
-                Merge = static (a, b) => new TenancyFixture.AmountSummaryState
-                {
-                    Total = a.Total + b.Total,
-                    Tally = a.Tally + b.Tally,
-                },
-                Finish = static s => s.Tally == 0 ? null : new TenancyFixture.AmountSummary(s.Total, s.Tally),
-            });
+        registry.AddAggregate("amount_summary", Summary());
+        registry.AddAggregate("population_summary", Summary());
     }
+
+    private static Chalk.Sources.AggregateSpec<
+        TenancyFixture.AmountSummaryState, long, TenancyFixture.AmountSummary?> Summary() => new()
+    {
+        Init = static () => default,
+        Add = static (ref s, x) =>
+        {
+            s.Total += x;
+            s.Tally++;
+        },
+        Merge = static (a, b) => new TenancyFixture.AmountSummaryState
+        {
+            Total = a.Total + b.Total,
+            Tally = a.Tally + b.Tally,
+        },
+        Finish = static s => s.Tally == 0 ? null : new TenancyFixture.AmountSummary(s.Total, s.Tally),
+    };
 
     private static void Load(
         DbConnection connection,

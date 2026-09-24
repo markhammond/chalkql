@@ -760,7 +760,7 @@ public final class TaintCheck {
         String function = call.getAggregation().getName().toUpperCase(Locale.ROOT);
         for (int argument : call.getArgList()) {
           if (isRawPopulationOnly(aggregate.getInput(), argument, mq)
-              && !PopulationAggregates.PERMITTED.contains(function)) {
+              && !PopulationAggregates.isPermitted(call.getAggregation())) {
             throw new PolicyException(
                 "a population-only column reaches "
                     + function

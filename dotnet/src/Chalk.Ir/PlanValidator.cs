@@ -1743,19 +1743,18 @@ public static class PlanValidator
                             "CASE has no ELSE; the planner emits a typed NULL literal when SQL omits it");
                     }
 
-                    RefuseComposite(expr.Type, path, "a CASE result");
-
+                    // I-IR-23 (D295): a CASE may choose between composite values of its one composite
+                    // type — the group-size guard's CASE over a composite measure is one — and never
+                    // between composites of different types or a composite and a scalar.
                     for (var i = 0; i < expr.IfThen.Clauses.Count; i++)
                     {
                         var clause = expr.IfThen.Clauses[i];
                         Expression(clause.Condition, input, $"{path}.clauses[{i}].condition");
                         RequireKind(clause.Condition, TypeKind.Bool, $"{path}.clauses[{i}].condition");
-                        Expression(clause.Result, input, $"{path}.clauses[{i}].result");
-                        RequireSameKind(expr.Type, clause.Result.Type, $"{path}.clauses[{i}].result", "the CASE result type");
+                        Branch(clause.Result, input, $"{path}.clauses[{i}].result", expr.Type, "the CASE result type");
                     }
 
-                    Expression(expr.IfThen.ElseBranch, input, $"{path}.else");
-                    RequireSameKind(expr.Type, expr.IfThen.ElseBranch.Type, $"{path}.else", "the CASE result type");
+                    Branch(expr.IfThen.ElseBranch, input, $"{path}.else", expr.Type, "the CASE result type");
                     break;
                 }
 
@@ -1829,6 +1828,69 @@ public static class PlanValidator
                 default:
                     throw Invalid("I-IR-1", path, $"unhandled expression kind {expr.KindCase}");
             }
+        }
+
+        /// <summary>
+        /// One value a <c>CASE</c> or a <c>COALESCE</c> may answer. Of a scalar result, an expression of
+        /// its kind. Of a COMPOSITE result (I-IR-23, D295), an expression of the same composite type —
+        /// the same fields, named alike, each at most as nullable as the result's, as I-IR-4 widens a
+        /// set operation's composite — or a typed NULL of it, the one place a composite literal stands.
+        /// </summary>
+        private void Branch(Expr branch, RowType input, string path, Type? result, string what)
+        {
+            if (result?.Kind != TypeKind.Composite)
+            {
+                Expression(branch, input, path);
+                RequireSameKind(result, branch.Type, path, what);
+                return;
+            }
+
+            if (branch.KindCase == Expr.KindOneofCase.Literal
+                && branch.Literal.ValueCase == Literal.ValueOneofCase.IsNull
+                && branch.Type?.Kind == TypeKind.Composite)
+            {
+                // The one composite literal there is: a typed NULL, standing for "no composite" in a
+                // choice. Anywhere else a composite literal stays refused.
+                CheckType(branch.Type, $"{path}.type");
+            }
+            else
+            {
+                Expression(branch, input, path);
+            }
+
+            if (!OneComposite(branch.Type!, result))
+            {
+                throw Invalid(
+                    "I-IR-23",
+                    path,
+                    $"the branch is {IrTypes.Describe(branch.Type)} and {what} is "
+                    + $"{IrTypes.Describe(result)}; a CASE or COALESCE chooses between composite values of "
+                    + "one composite type, never between composites of different types or a composite and "
+                    + "a scalar");
+            }
+        }
+
+        /// <summary>
+        /// Whether <paramref name="actual"/> is <paramref name="result"/>'s composite type: the same
+        /// fields in the same order, named alike ignoring case, each widening to the result's, and
+        /// nullable only where the result is.
+        /// </summary>
+        private static bool OneComposite(Type actual, Type result)
+        {
+            if (actual.Kind != TypeKind.Composite || actual.Fields.Count != result.Fields.Count)
+            {
+                return false;
+            }
+
+            for (var f = 0; f < actual.Fields.Count; f++)
+            {
+                if (!string.Equals(actual.Fields[f].Name, result.Fields[f].Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            return WidensTo(actual, result);
         }
 
         /// <summary>
@@ -1941,6 +2003,18 @@ public static class PlanValidator
                     plan.IrVersion,
                     IrVersion.Current,
                     $"The call at {path} names a function this client does not know.");
+            }
+
+            // I-IR-23 (D295): COALESCE over composite values of one composite type, as a CASE chooses
+            // between them — the first operand that holds a value, taken whole.
+            if (call.Function == FunctionId.Coalesce && expr.Type?.Kind == TypeKind.Composite)
+            {
+                for (var i = 0; i < call.Args.Count; i++)
+                {
+                    Branch(call.Args[i], input, $"{path}.args[{i}]", expr.Type, "the COALESCE result type");
+                }
+
+                return;
             }
 
             var takesEnum = Array.IndexOf(EnumArgFunctions, call.Function) >= 0;
@@ -2355,8 +2429,9 @@ public static class PlanValidator
         }
 
         /// <summary>
-        /// <c>I-IR-23</c> (D291): the places a COMPOSITE may never be — a key, an operand, a literal, a
-        /// parameter, a cast, a CASE result, a built-in's argument or result, a table's column.
+        /// <c>I-IR-23</c> (D291): the places a COMPOSITE may never be — a key, an operand, a literal (but a
+        /// typed NULL a CASE or COALESCE chooses, D295), a parameter, a cast, a built-in's argument or
+        /// result (but COALESCE's, D295), a table's column.
         /// </summary>
         private void RefuseComposite(Type? type, string path, string what)
         {

@@ -1129,14 +1129,37 @@ A call written more than once in one select list, or more than once in one
 condition, runs once per row when its function is `Immutable()` or `Stable()`.
 The two fields in the select list above cost one classification per row, not
 two. The `WHERE` clause is a step of its own and classifies the rows it filters
-once more. A `Volatile()` function still runs once per occurrence.
+once more. A `Volatile()` function still runs once per occurrence. The same
+holds of any expression written more than once within one step — a built-in
+call, a `CAST`, a `CASE`, an `IN` or a field access — unless something inside it
+is `Volatile()`.
 
 Under entitlements a composite-valued function is a client body like any other:
 it is handed each column as the principal may see it, the mask or the
 placeholder included, and the composite and each of its fields are reported as
-disclosing what that column does. A composite-valued aggregate cannot be
-allow-listed for a population-only column, because no user-defined aggregate
-can.
+disclosing what that column does.
+
+A population-only column's allow-list may name a user-defined aggregate, the
+composite-valued ones included, only when its declaration says `.Population()`:
+
+```csharp
+public readonly record struct AmountSummary(long Total, long Tally);
+
+builder.AddFunction("amount_summary", f => f
+    .Aggregate<long, AmountSummary>("amount")
+    .Population()
+    .Client());
+```
+
+`.Population()` is your promise that the aggregate's result reports the group
+as a whole and never one row's value, every field of a composite result
+included. A total, a count or a mean keeps it; a minimum, a maximum, a first
+value or a list of the values does not. Nothing can check the promise, so, like
+`.Leakproof()`, it is recorded and relied on. An allow-list that names a
+user-defined aggregate without it is refused when the engine is created, and the
+message says how to declare it. The group-size floor then guards the aggregate
+as it guards `COUNT`: a group smaller than the floor answers a NULL composite,
+whole, and the report says `Aggregate`.
 
 The limits:
 
@@ -1148,9 +1171,12 @@ The limits:
 - A composite value has no ordering and no equality. Comparing one, sorting,
   grouping or partitioning by one, `DISTINCT` over one, `CAST`ing one, joining
   on one, or passing one to a built-in aggregate is refused. The message names
-  the construct and the way around it, which is nearly always one of the
-  composite's fields. `IS NULL` works, and `UNION ALL` carries a composite
-  value.
+  the construct, quoting the statement's own words for it, and the way around
+  it, which is nearly always one of the composite's fields. `IS NULL` works, and
+  `UNION ALL` carries a composite value.
+- `CASE` and `COALESCE` choose between composite values of one type — the same
+  fields, named and typed alike — and a `NULL`. A choice between composites of
+  different types, or between a composite and a scalar, is refused.
 - A composite value only ever comes out of a client-bodied function. It is never
   a parameter or a table column, a SQL-bodied or native function cannot return
   one, and SQL cannot build one: `ROW(…)` is refused.
@@ -1289,8 +1315,10 @@ in a real source — the SQL each tier asks it for.
 - **Population-only columns.** A column an auditor may aggregate but not read is
   followed upward to every consumer; unless every one of them is an allow-listed
   population aggregate taking it as a bare reference, the statement is refused
-  naming the table, the column and the use. Where the host asks for a floor, each
-  consuming aggregate is guarded: `CASE WHEN COUNT(c) >= k THEN agg ELSE NULL END`.
+  naming the table, the column and the use. A user-defined aggregate is one only
+  when its declaration says `.Population()` (see *Composite results*). Where the
+  host asks for a floor, each consuming aggregate is guarded:
+  `CASE WHEN COUNT(c) >= k THEN agg ELSE NULL END`.
   There is no shipped floor — a catalog with population-only columns and no
   small-cell rule pays nothing — and a host that wants one gives it at planning
   through `PrepareOptions.DefaultMinGroupSize` or per column on the descriptor.

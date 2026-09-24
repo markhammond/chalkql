@@ -107,7 +107,7 @@ public final class EntitlementRegistration {
         String path =
             "schemas[" + s + "] (" + schema.getName() + ").tables[" + t + "] ("
                 + table.getName() + ").entitlement";
-        checkTable(converter, typeFactory, descriptor, schema, table, path, nullability);
+        checkTable(converter, typeFactory, descriptor, schema, table, path, nullability, functions);
       }
     }
     return nullability.build();
@@ -120,7 +120,8 @@ public final class EntitlementRegistration {
       Schema schema,
       Table table,
       String path,
-      DisclosedNullability.Builder nullability) {
+      DisclosedNullability.Builder nullability,
+      UserFunctions functions) {
     List<String> qualified = List.of(schema.getName(), table.getName());
     String where = schema.getName() + "." + table.getName();
     RelDataType rowType = new ChalkTable(table, schema).getRowType(typeFactory);
@@ -201,6 +202,22 @@ public final class EntitlementRegistration {
           column.getColumn() < rowType.getFieldCount()
               ? rowType.getFieldList().get(column.getColumn()).getType()
               : null;
+
+      // D190 as D295 extends it, the client's own check made again here: an allow-list names a
+      // population aggregate of the fixed set, or an aggregate this catalog declares Population().
+      for (int f = 0; f < column.getAggregateOnlyFunctionsCount(); f++) {
+        String function = column.getAggregateOnlyFunctions(f);
+        if (!PopulationAggregates.isPermitted(function, functions)) {
+          throw new InvalidCatalogException(
+              columnPath + ".aggregate_only_functions[" + f + "]",
+              "'" + function + "' is not a population aggregate (D190). MIN, MAX, ANY_VALUE, the"
+                  + " positional and holistic aggregates, every string aggregate and any"
+                  + " user-defined aggregate not declared Population() each report an individual"
+                  + " row's value. A user-defined aggregate may be named here once its host declares"
+                  + " it Population(), promising that its result reports the group and never one"
+                  + " row's value (D295).");
+        }
+      }
 
       List<DisclosureRule> rules = column.getRulesList();
       Stand[] masksOfRule = new Stand[rules.size()];

@@ -657,8 +657,9 @@ public final class PlannerPipeline implements AutoCloseable {
     // after conversion there is no correlate left to ask (ADR 0026).
     LateralCorrelationSupport.check(validated);
 
-    // Where a composite value may not stand — a sort, grouping or partition key, a comparison, a CASE result,
-    // a built-in aggregate's argument — refused on the validated statement, while every expression
+    // Where a composite value may not stand — a sort, grouping or partition key, a comparison, a CASE
+    // or COALESCE result beside a scalar or a composite of another type (D295), a built-in
+    // aggregate's argument — refused on the validated statement, while every expression
     // still has its validated type and before conversion can fold a comparison away or build a sort
     // nothing can execute (D291, ADR 0077).
     CompositeSupport.check(validated, java.util.Objects.requireNonNull(planner.validator()), text);

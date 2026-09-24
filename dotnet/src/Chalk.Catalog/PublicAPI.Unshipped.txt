@@ -204,6 +204,7 @@ Chalk.Catalog.FunctionBuilder.Optional<T>(string! name, T defaultValue) -> Chalk
 Chalk.Catalog.FunctionBuilder.Ordered(bool ordered = true) -> Chalk.Catalog.FunctionBuilder!
 Chalk.Catalog.FunctionBuilder.Parameter(string! name, Chalk.Catalog.ChalkType type) -> Chalk.Catalog.FunctionBuilder!
 Chalk.Catalog.FunctionBuilder.Parameter<T>(string! name) -> Chalk.Catalog.FunctionBuilder!
+Chalk.Catalog.FunctionBuilder.Population(bool population = true) -> Chalk.Catalog.FunctionBuilder!
 Chalk.Catalog.FunctionBuilder.Returns(Chalk.Catalog.ChalkType type) -> Chalk.Catalog.FunctionBuilder!
 Chalk.Catalog.FunctionBuilder.Returns<T>() -> Chalk.Catalog.FunctionBuilder!
 Chalk.Catalog.FunctionBuilder.ReturnsNullable<T>() -> Chalk.Catalog.FunctionBuilder!
@@ -239,6 +240,8 @@ Chalk.Catalog.FunctionDescriptor.Ordered.get -> bool
 Chalk.Catalog.FunctionDescriptor.Ordered.init -> void
 Chalk.Catalog.FunctionDescriptor.Parameters.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ParameterDescriptor!>!
 Chalk.Catalog.FunctionDescriptor.Parameters.init -> void
+Chalk.Catalog.FunctionDescriptor.Population.get -> bool
+Chalk.Catalog.FunctionDescriptor.Population.init -> void
 Chalk.Catalog.FunctionDescriptor.ReturnType.get -> Chalk.Catalog.ChalkType?
 Chalk.Catalog.FunctionDescriptor.ReturnType.init -> void
 Chalk.Catalog.FunctionDescriptor.ReturnsTable.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.ColumnDescriptor!>!
@@ -624,6 +627,7 @@ static Chalk.Catalog.KeyOrder.operator ==(Chalk.Catalog.KeyOrder left, Chalk.Cat
 static Chalk.Catalog.SourceCapabilities.None.get -> Chalk.Catalog.SourceCapabilities!
 static Chalk.Entitlements.CatalogOptions.Default.get -> Chalk.Entitlements.CatalogOptions!
 static Chalk.Entitlements.PopulationAggregates.IsPermitted(string! function) -> bool
+static Chalk.Entitlements.PopulationAggregates.IsPermitted(string! function, Chalk.Catalog.CatalogContext! catalog) -> bool
 static Chalk.Entitlements.PopulationAggregates.Listing.get -> string!
 ~override Chalk.Catalog.ChalkType.Equals(object obj) -> bool
 ~override Chalk.Catalog.KeyOrder.Equals(object obj) -> bool

@@ -1,7 +1,10 @@
 package chalk.planner.entitlement;
 
+import chalk.planner.catalog.UserFunction;
+import chalk.planner.catalog.UserFunctions;
 import com.google.common.collect.ImmutableSet;
 import java.util.Locale;
+import org.apache.calcite.sql.SqlAggFunction;
 
 /**
  * The aggregates a column may permit over a population-only value (D190,
@@ -17,6 +20,11 @@ import java.util.Locale;
  * {@code AGGREGATE_REDUCE_FUNCTIONS} rewrites {@code AVG} into {@code SUM0} and {@code COUNT}, and
  * refusing it would refuse a correct plan after the optimiser had rewritten it (§3.10); {@code EVERY}
  * and {@code SOME} are Calcite's own spellings of {@code BOOL_AND} and {@code BOOL_OR}.
+ *
+ * <p>A user-defined aggregate joins the set only when its host declared it {@code Population()},
+ * promising that its result reports the group and never one row's value (D295): the registration
+ * check asks it of an allow-list's names against the catalog, and the taint check of the operator a
+ * plan actually calls.
  */
 public final class PopulationAggregates {
   private PopulationAggregates() {}
@@ -57,5 +65,46 @@ public final class PopulationAggregates {
   /** Whether this function names a population aggregate. Case-insensitive; space is ignored. */
   public static boolean isPermitted(String function) {
     return function != null && PERMITTED.contains(function.trim().toUpperCase(Locale.ROOT));
+  }
+
+  /**
+   * Whether an allow-list of this catalog may name {@code function} (D295): a population aggregate
+   * of the fixed set, or an aggregate the catalog declares {@code Population()}. An allow-list names
+   * an aggregate without its schema, so every function of that name must be such an aggregate, and
+   * at least one must exist — the client's own twin asks exactly this.
+   */
+  public static boolean isPermitted(String function, UserFunctions functions) {
+    if (isPermitted(function)) {
+      return true;
+    }
+    if (function == null) {
+      return false;
+    }
+    String name = function.trim();
+    boolean declared = false;
+    for (UserFunction candidate : functions.declarations()) {
+      if (!candidate.name().equalsIgnoreCase(name)) {
+        continue;
+      }
+      if (candidate.kind() != chalk.ir.v1.FunctionKind.FUNCTION_KIND_AGGREGATE
+          || !candidate.descriptor().getPopulation()) {
+        return false;
+      }
+      declared = true;
+    }
+    return declared;
+  }
+
+  /**
+   * Whether the aggregate a plan calls is a population aggregate: a built-in of the fixed set by its
+   * name, or a user-defined aggregate whose own declaration says {@code Population()} (D295).
+   */
+  public static boolean isPermitted(SqlAggFunction aggregation) {
+    UserFunction declaration = chalk.planner.plan.UserOperators.declarationOf(aggregation);
+    if (declaration != null) {
+      return declaration.kind() == chalk.ir.v1.FunctionKind.FUNCTION_KIND_AGGREGATE
+          && declaration.descriptor().getPopulation();
+    }
+    return isPermitted(aggregation.getName());
   }
 }

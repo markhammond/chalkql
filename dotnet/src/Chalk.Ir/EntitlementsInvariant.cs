@@ -1296,7 +1296,11 @@ internal static class EntitlementsInvariant
 
             foreach (var measure in aggregate.Measures)
             {
-                var population = measure.UserFunction.Length == 0 && Population.Contains(measure.Function);
+                // A user aggregate is a population aggregate when the client's own catalog says its
+                // host declared it one (D295), which is the question I-IR-E asks of reads too.
+                var population = measure.UserFunction.Length == 0
+                    ? Population.Contains(measure.Function)
+                    : options.PopulationAggregates?.Invoke(measure.UserFunction) == true;
                 foreach (var argument in measure.Args)
                 {
                     if (population && argument.KindCase == Expr.KindOneofCase.FieldRef)

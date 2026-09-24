@@ -462,6 +462,38 @@ public sealed class EntitlementsInvariantTests
         Assert.Contains("population-only", error.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// D295: a user aggregate over a population-only column is a population aggregate exactly when the
+    /// client's own catalog says its host declared it <c>Population()</c> — the question clause (b)
+    /// asks of the catalog for a measure, as the clause asks it which tables are entitled for a read.
+    /// </summary>
+    [Fact]
+    public void A_user_aggregate_over_a_population_only_column_is_permitted_only_when_declared_population()
+    {
+        var summarised = Composite(nullable: true, F("total", I64()), F("tally", I64()));
+        var plan = PlanOf(HashAggregate(
+            EntitledRead(), [1], [("s", UserAgg("main.population_summary", summarised, Ref(4, I64())))]));
+
+        var undeclared = Refused(plan, Catalog());
+        Assert.Equal("I-IR-E", undeclared.Invariant);
+        Assert.Contains("an aggregate that is not a population aggregate", undeclared.Message, StringComparison.Ordinal);
+
+        var asked = new List<string>();
+        PlanValidator.Validate(plan, new PlanValidationOptions
+        {
+            VerifyDigest = false,
+            EntitledTables = table => string.Equals(table.Table, "members", StringComparison.Ordinal) ? 5 : null,
+            PopulationAggregates = name =>
+            {
+                asked.Add(name);
+                return string.Equals(name, "main.population_summary", StringComparison.Ordinal);
+            },
+        });
+
+        // Asked by the name the plan spells, schema and all.
+        Assert.Equal(["main.population_summary"], asked);
+    }
+
     /// <summary>And a plan that says what it does passes, so none of the above is vacuous.</summary>
     [Fact]
     public void A_well_formed_entitled_plan_validates()

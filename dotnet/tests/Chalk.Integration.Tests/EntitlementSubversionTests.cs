@@ -325,7 +325,7 @@ public sealed class EntitlementSubversionTests(SharedSidecar sidecar)
                     seen.Add(s);
                     return new TenancyFixture.Echoed(s, s.Length);
                 });
-                TenancyAdoFixture.RegisterAmountSummary(registry);
+                TenancyAdoFixture.RegisterSummaries(registry);
             },
         });
 
@@ -431,14 +431,16 @@ public sealed class EntitlementSubversionTests(SharedSidecar sidecar)
     }
 
     /// <summary>
-    /// A composite-valued aggregate cannot be allow-listed for a population-only column at all.
-    /// Registration refuses any user-defined aggregate in <c>AggregateOnlyFunctions</c>, naming it,
+    /// A composite-valued aggregate its host has not declared population-safe cannot be allow-listed
+    /// for a population-only column. Registration refuses a user-defined aggregate in
+    /// <c>AggregateOnlyFunctions</c> unless the catalog declares it <c>Population()</c>, naming it,
     /// because a host's aggregate may report an individual row's value and nothing the engine can
-    /// check says it does not (D190). So what statement 64 is refused for is not something a host
-    /// can permit either, and the group-size guard never meets a composite measure (ADR 0077).
+    /// check says it does not (D190) — and the refusal says how a host that keeps the promise makes
+    /// it (D295). Statement 64 is the refusal as every principal; statement 66, over
+    /// <c>population_summary</c>, is its permitted twin.
     /// </summary>
     [Fact]
-    public void A_composite_aggregate_cannot_be_allow_listed_for_a_population_only_column()
+    public void An_aggregate_not_declared_population_cannot_be_allow_listed_for_a_population_only_column()
     {
         var refusal = Assert.Throws<CatalogValidationException>(
             () => TenancyFixture.Create(
@@ -447,7 +449,14 @@ public sealed class EntitlementSubversionTests(SharedSidecar sidecar)
         Assert.Contains("(amount).aggregate_only_functions[4]", refusal.Message, StringComparison.Ordinal);
         Assert.Contains(
             "'AMOUNT_SUMMARY' is not a population aggregate", refusal.Message, StringComparison.Ordinal);
-        Assert.Contains("any user-defined aggregate", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("any user-defined aggregate not declared Population()", refusal.Message, StringComparison.Ordinal);
+
+        // The same body declared population-safe is accepted where the other is refused.
+        var permitted = TenancyFixture.Create(
+            entitled: true, subversionFunctions: true, amountAggregates: ["POPULATION_SUMMARY"]);
+        Assert.Contains(
+            permitted.Catalog.Schemas.SelectMany(schema => schema.Functions),
+            function => function.Name == "population_summary" && function.Population);
     }
 
     /// <summary>

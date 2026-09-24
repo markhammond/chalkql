@@ -157,6 +157,12 @@ message FunctionDescriptor {
   bool ordered = 13;
   // FUNCTION_KIND_AGGREGATE: accepts IGNORE NULLS | RESPECT NULLS (Calcite `allowsNullTreatment`).
   bool null_treatment = 14;
+  // FUNCTION_KIND_AGGREGATE: the host's promise that the result reports the group as a whole and
+  // never one row's value — for a COMPOSITE result, every field of it. Only such an aggregate may be
+  // named among the aggregates an entitlement permits over a population-only column, and the
+  // group-size floor then guards it as it guards COUNT. Like `leakproof`, it is recorded and relied
+  // on, and nothing can check it.
+  bool population = 15;
 
   oneof implementation {
     // Inlined by the planner, so the call disappears from the plan and is pushable wherever its

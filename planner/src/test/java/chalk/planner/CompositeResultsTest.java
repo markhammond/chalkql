@@ -114,6 +114,50 @@ final class CompositeResultsTest {
     }
   }
 
+  private static List<Expr> ifThens(Plan plan) {
+    return exprs(plan).stream().filter(e -> e.getKindCase() == Expr.KindCase.IF_THEN).toList();
+  }
+
+  /**
+   * The corpus with two more client scalars over price_move's arguments: {@code price_band}, answering
+   * {@code COMPOSITE(Low FP64, High FP64)}, and {@code price_turn}, answering price_move's type with
+   * its first field renamed {@code Way}.
+   */
+  private static CatalogContext withOtherComposites() {
+    CatalogContext base = TestCatalogs.corpus();
+    CatalogContext.Builder builder = base.toBuilder();
+    for (int s = 0; s < base.getSchemasCount(); s++) {
+      chalk.ir.v1.FunctionDescriptor move =
+          base.getSchemas(s).getFunctionsList().stream()
+              .filter(f -> f.getName().equals("price_move"))
+              .findFirst()
+              .orElse(null);
+      if (move == null) {
+        continue;
+      }
+      builder.setSchemas(
+          s,
+          base.getSchemas(s).toBuilder()
+              .addFunctions(
+                  move.toBuilder()
+                      .setName("price_band")
+                      .setReturnType(
+                          TestCatalogs.composite(
+                              false,
+                              field("Low", TestCatalogs.type(TypeKind.TYPE_KIND_FP64)),
+                              field("High", TestCatalogs.type(TypeKind.TYPE_KIND_FP64)))))
+              .addFunctions(
+                  move.toBuilder()
+                      .setName("price_turn")
+                      .setReturnType(
+                          TestCatalogs.composite(
+                              false,
+                              field("Way", TestCatalogs.type(TypeKind.TYPE_KIND_STRING)),
+                              field("Change", TestCatalogs.type(TypeKind.TYPE_KIND_FP64))))));
+    }
+    return builder.build();
+  }
+
   private static List<Expr> fieldAccesses(Plan plan) {
     return exprs(plan).stream()
         .filter(e -> e.getKindCase() == Expr.KindCase.FIELD_ACCESS)
@@ -498,17 +542,94 @@ final class CompositeResultsTest {
         .isTrue();
   }
 
+  // ---- (D295) a choice between composite values of one type ----
+
   @Test
-  void a_composite_as_a_case_result_is_refused() {
+  void a_case_between_composites_of_one_type_is_a_composite_if_then() {
+    Plan plan =
+        plan(
+            "SELECT CASE WHEN volume > 0 THEN price_move(\"open\", \"close\") END AS m"
+                + " FROM bars");
+    Type m = plan.getOutputType().getFields(0).getType();
+    assertThat(m.getKind()).isEqualTo(TypeKind.TYPE_KIND_COMPOSITE);
+    assertThat(m.getNullable()).isTrue();
+
+    // One IfThen of the composite type, whose ELSE is the typed NULL SQL's missing ELSE means.
+    List<Expr> cases = ifThens(plan);
+    assertThat(cases).hasSize(1);
+    assertThat(cases.get(0).getType().getKind()).isEqualTo(TypeKind.TYPE_KIND_COMPOSITE);
+    Expr otherwise = cases.get(0).getIfThen().getElseBranch();
+    assertThat(otherwise.getLiteral().getValueCase())
+        .isEqualTo(chalk.ir.v1.Literal.ValueCase.IS_NULL);
+    assertThat(otherwise.getType().getKind()).isEqualTo(TypeKind.TYPE_KIND_COMPOSITE);
+  }
+
+  @Test
+  void a_case_and_a_coalesce_choose_between_two_calls_of_one_composite_type() {
+    Plan chosen =
+        plan(
+            "SELECT CASE WHEN volume > 0 THEN price_move(\"open\", \"close\")"
+                + " ELSE price_move(\"close\", \"open\") END AS m FROM bars");
+    assertThat(ifThens(chosen)).hasSize(1);
+    assertThat(chosen.getOutputType().getFields(0).getType().getFieldsList())
+        .extracting(Field::getName)
+        .containsExactly("Direction", "Change");
+
+    // Calcite validates a COALESCE as the CASE it expands to, so it plans as the same IfThen.
+    Plan coalesced =
+        plan(
+            "SELECT COALESCE(price_move(\"open\", \"close\"), price_move(\"close\", \"open\"))"
+                + " AS m FROM bars");
+    assertThat(ifThens(coalesced))
+        .extracting(e -> e.getType().getKind())
+        .containsExactly(TypeKind.TYPE_KIND_COMPOSITE);
+    // A field of the choice is a field access over it, as over any composite value.
+    Plan field =
+        plan(
+            "SELECT COALESCE(price_move(\"open\", \"close\"), price_move(\"close\", \"open\"))"
+                + ".change AS c FROM bars");
+    assertThat(fieldAccesses(field)).hasSize(1);
+  }
+
+  @Test
+  void a_choice_between_composites_of_different_types_is_refused_by_name() {
+    // Types Calcite cannot reconcile: validation stops, and the pre-check names the choice.
     assertThatThrownBy(
             () ->
                 plan(
-                    "SELECT CASE WHEN volume > 0 THEN price_move(\"open\", \"close\") END AS m"
-                        + " FROM bars"))
+                    withOtherComposites(),
+                    "SELECT CASE WHEN volume > 0 THEN price_move(\"open\", \"close\")"
+                        + " ELSE price_band(\"open\", \"close\") END AS m FROM bars",
+                    PushdownPolicy.full()))
         .isInstanceOf(UnsupportedFeatureException.class)
         .hasMessageContaining(
-            "a composite value as a CASE result"
-                + " (CASE WHEN volume > 0 THEN price_move(\"open\", \"close\") END)");
+            "a CASE between composite values of different types (CASE WHEN volume > 0 THEN"
+                + " price_move(\"open\", \"close\") ELSE price_band(\"open\", \"close\") END)")
+        .hasMessageContaining("the same fields, named and typed alike");
+    // Types Calcite would reconcile by taking the first one's field names: refused, not renamed.
+    assertThatThrownBy(
+            () ->
+                plan(
+                    withOtherComposites(),
+                    "SELECT COALESCE(price_move(\"open\", \"close\"), price_turn(\"open\", \"close\"))"
+                        + " AS m FROM bars",
+                    PushdownPolicy.full()))
+        .isInstanceOf(UnsupportedFeatureException.class)
+        .hasMessageContaining(
+            "a COALESCE between composite values of different types (COALESCE(price_move(\"open\","
+                + " \"close\"), price_turn(\"open\", \"close\")))")
+        .hasMessageContaining("A COALESCE chooses between composite values of one type only");
+    assertThatThrownBy(
+            () ->
+                plan(
+                    withOtherComposites(),
+                    "SELECT COALESCE(price_move(\"open\", \"close\"), price_band(\"open\", \"close\"))"
+                        + " AS m FROM bars",
+                    PushdownPolicy.full()))
+        .isInstanceOf(UnsupportedFeatureException.class)
+        .hasMessageContaining(
+            "a COALESCE between composite values of different types (COALESCE(price_move(\"open\","
+                + " \"close\"), price_band(\"open\", \"close\")))");
   }
 
   @Test

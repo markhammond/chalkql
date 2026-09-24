@@ -193,7 +193,10 @@ internal sealed class ExpressionCompiler
             Expr.KindOneofCase.Param => new ParameterExpr(BoundSlots.Of(expr.Param, _boundSlots), type),
             Expr.KindOneofCase.Call => expr.Call.UserFunction.Length > 0
                 ? UserCall(expr, type)
-                : KernelRegistry.Bind(expr, Compile),
+                : expr.Call.Function == FunctionId.Coalesce && type.Kind == TypeKind.Composite
+                    // D295: COALESCE over composites of one type, the first operand that holds one.
+                    ? CompositeChoiceExpr.Coalesce(type, [.. expr.Call.Args.Select(Compile)])
+                    : KernelRegistry.Bind(expr, Compile),
             Expr.KindOneofCase.Cast => Cast(expr, type),
             Expr.KindOneofCase.IfThen => IfThen(expr, type),
             Expr.KindOneofCase.InList => new InListExpr(
@@ -256,7 +259,10 @@ internal sealed class ExpressionCompiler
             results[i] = Compile(clauses[i].Result);
         }
 
-        return new IfThenExpr(type, conditions, results, Compile(expr.IfThen.ElseBranch));
+        // D295: a CASE over composites of one type chooses per lane and answers field by field.
+        return type.Kind == TypeKind.Composite
+            ? CompositeChoiceExpr.Case(type, conditions, results, Compile(expr.IfThen.ElseBranch))
+            : new IfThenExpr(type, conditions, results, Compile(expr.IfThen.ElseBranch));
     }
 
     /// <summary>

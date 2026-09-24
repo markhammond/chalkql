@@ -421,21 +421,101 @@ public sealed class CompositeValidatorTests
         Assert.Contains("a COMPOSITE cannot be cast", ex.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void A_composite_is_never_a_case_result()
+    // ---- I-IR-23 as D295 relaxes it: a CASE or a COALESCE chooses between composites of one type ----
+
+    private static IrType NullableClassification()
     {
-        var input = WithComposite();
         var nullable = Classification.Clone();
         nullable.Nullable = true;
+        return nullable;
+    }
+
+    /// <summary>What the group-size guard writes over a composite measure: the value, or a typed NULL of it.</summary>
+    private static Expr Guarded(Rel input) => Case(
+        NullableClassification(),
+        Null(NullableClassification()),
+        (Call(FunctionId.IsNotNull, Bool(), Ref(input.RowType, 0)), Ref(input.RowType, 1)));
+
+    [Fact]
+    public void A_case_between_a_composite_and_a_typed_null_of_it_validates()
+    {
+        var input = WithComposite();
+
+        PlanValidator.Validate(IrBuilder.Plan(Project(input, [("x", Guarded(input))])));
+    }
+
+    [Fact]
+    public void A_field_of_a_chosen_composite_validates()
+    {
+        var input = WithComposite();
+
+        PlanValidator.Validate(IrBuilder.Plan(Project(input, [("category", FieldAccess(Guarded(input), 0))])));
+    }
+
+    [Fact]
+    public void A_coalesce_between_composites_of_one_type_validates()
+    {
+        var input = WithComposite();
+        var choice = Call(
+            FunctionId.Coalesce, NullableClassification(), Ref(input.RowType, 1), Null(NullableClassification()));
+
+        PlanValidator.Validate(IrBuilder.Plan(Project(input, [("x", choice)])));
+    }
+
+    [Fact]
+    public void A_case_between_composites_of_different_types_is_refused()
+    {
+        var input = WithComposite();
+        var other = Composite(nullable: true, F("label", Str()), F("confidence", Fp64()));
         var choice = Case(
-            nullable,
-            Null(nullable),
+            NullableClassification(),
+            Null(other),
             (Call(FunctionId.IsNotNull, Bool(), Ref(input.RowType, 0)), Ref(input.RowType, 1)));
 
         var ex = AssertInvalid(IrBuilder.Plan(Project(input, [("x", choice)])));
 
         Assert.Equal("I-IR-23", ex.Invariant);
-        Assert.Contains("a CASE result", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("of one composite type", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_case_choosing_between_a_composite_and_a_scalar_is_refused()
+    {
+        var input = WithComposite();
+        var choice = Case(
+            NullableClassification(),
+            Null(Str(nullable: true)),
+            (Call(FunctionId.IsNotNull, Bool(), Ref(input.RowType, 0)), Ref(input.RowType, 1)));
+
+        var ex = AssertInvalid(IrBuilder.Plan(Project(input, [("x", choice)])));
+
+        Assert.Equal("I-IR-23", ex.Invariant);
+        Assert.Contains("never between composites of different types or a composite and a scalar", ex.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_nullable_branch_under_a_non_nullable_composite_choice_is_refused()
+    {
+        var input = WithComposite();
+        var choice = Call(FunctionId.Coalesce, Classification, Null(NullableClassification()), Ref(input.RowType, 1));
+
+        var ex = AssertInvalid(IrBuilder.Plan(Project(input, [("x", choice)])));
+
+        Assert.Equal("I-IR-23", ex.Invariant);
+        Assert.Contains("the COALESCE result type", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_scalar_case_with_a_composite_branch_is_still_refused()
+    {
+        var input = WithComposite();
+        var choice = Case(
+            Str(nullable: true),
+            Null(Str(nullable: true)),
+            (Call(FunctionId.IsNotNull, Bool(), Ref(input.RowType, 0)), Ref(input.RowType, 1)));
+
+        AssertInvalid(IrBuilder.Plan(Project(input, [("x", choice)])));
     }
 
     [Fact]
