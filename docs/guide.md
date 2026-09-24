@@ -1128,7 +1128,14 @@ for (var i = 0; i < batch.Length; i++)
 }
 ```
 
-Or read each cell back as the record itself:
+Or read the column back as the record itself, a batch at a time:
+
+```csharp
+var classifications = new Classification?[batch.Length];
+batch.Column(1).ReadComposites<Classification?>(classifications);   // null where the composite is
+```
+
+or one cell at a time:
 
 ```csharp
 var c = batch.Column(1);
@@ -1141,19 +1148,23 @@ for (var i = 0; i < batch.Length; i++)
 }
 ```
 
-`GetComposite<T>` and `TryGetComposite<T>` (in `Chalk.Arrow`) match `T`'s
-properties, or a positional record's constructor parameters, to the composite's
-fields by name, ignoring case. Each is read as a function's parameter would be,
+`ReadComposites<T>`, `GetComposite<T>` and `TryGetComposite<T>` (in
+`Chalk.Arrow`) match `T`'s properties, or a positional record's constructor
+parameters, to the composite's fields by name, ignoring case. Each is read as a function's parameter would be,
 so any Tier 1 spelling of the field's type works: `decimal` for a
 DECIMAL(18, 2), `DateOnly` or `int` days for a DATE. `T` may be a record struct,
 a record class, or a class with a parameterless constructor and settable
 properties. A field `T` does not name is not read, and a nullable field needs a
 member that can hold its NULL. A NULL composite makes `TryGetComposite` answer
-`false`, and `GetComposite` answer null into a class or a `Classification?`. The
-binding is built on the first read of a given `T` and struct type and then
-cached. A mismatch is refused on that first read, naming both sides. Reading a
-record struct allocates nothing: a `Utf8String` field is a slice of the batch,
-valid while the batch is.
+`false`, and `GetComposite` and `ReadComposites` answer null into a class or a
+`Classification?`; into any other struct, a NULL composite is refused, naming
+the row. The binding is built on the first read of a given `T` and struct type
+and then cached. A mismatch is refused on that first read, naming both sides.
+The fields are read from the batch's own buffers, so reading a record struct
+allocates nothing: a `Utf8String` or `ReadOnlyMemory<byte>` field is a slice of
+the batch, valid while the batch is. A `string` or `byte[]` field is a copy,
+allocated per row, and so is a record class. `ReadComposites` sets the read up
+once for the whole batch, which is the way to read many rows.
 
 A call written more than once in one select list, or more than once in one
 condition, runs once per row when its function is `Immutable()` or `Stable()`.

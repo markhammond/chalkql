@@ -498,19 +498,123 @@ public sealed class CompositeReadBackTests(SharedSidecar sidecar)
         Assert.True(classBytes >= rows / 7 * 6 * 24, $"{classBytes} bytes for {rows} reads of a class");
     }
 
+    // ---------------------------------------------------------------- the batch read
+
+    /// <summary>A record struct of a <c>Utf8String</c> and value fields: what a batch reads without allocating.</summary>
+    public readonly record struct Priced2(Utf8String Category, double Confidence, long Rank);
+
+    /// <summary>The same with a <c>string</c> field, which allocates a copy per row and is measured apart.</summary>
+    public readonly record struct Labelled(string? Category, double Confidence);
+
+    [Fact]
+    public void A_batch_reads_what_each_cell_reads_nulls_included()
+    {
+        var composite = Classifications(40, nullEvery: 6);
+
+        var nullable = new Classification?[composite.Length];
+        composite.ReadComposites<Classification?>(nullable);
+        var views = new ClassificationView?[composite.Length];
+        composite.ReadComposites<ClassificationView?>(views);
+
+        for (var row = 0; row < composite.Length; row++)
+        {
+            Assert.Equal(composite.GetComposite<Classification?>(row), nullable[row]);
+            Assert.Equal(row % 6 == 0, nullable[row] is null);
+            Assert.Equal(nullable[row]?.Category.ToString(), views[row]?.CATEGORY);
+        }
+
+        // From a row other than the first, into a span shorter than the rest.
+        var middle = new Classification?[5];
+        composite.ReadComposites<Classification?>(13, middle);
+        Assert.Equal(nullable.AsSpan(13, 5).ToArray(), middle);
+    }
+
+    [Fact]
+    public void A_batch_read_of_a_slice_reads_the_slice_s_rows_in_both_string_layouts()
+    {
+        foreach (var views in new[] { true, false })
+        {
+            var composite = Classifications(2500, nullEvery: 0, views);
+            var slice = (StructArray)composite.Slice(1031, 1200);
+            Assert.Equal(1031, slice.Offset);
+
+            var read = new Classification[slice.Length];
+            slice.ReadComposites<Classification>(read);
+            for (var row = 0; row < read.Length; row++)
+            {
+                var original = row + 1031;
+                Assert.Equal(new Classification(Encoded($"c{original}"), original / 10.0), read[row]);
+            }
+
+            // And a later start inside the slice, across a chunk boundary.
+            var tail = new Classification[100];
+            slice.ReadComposites<Classification>(1000, tail);
+            Assert.Equal(new Classification(Encoded("c2031"), 203.1), tail[0]);
+        }
+    }
+
+    [Fact]
+    public void A_batch_into_a_struct_that_cannot_hold_null_is_refused_at_its_first_null_row()
+    {
+        var composite = Classifications(10, nullEvery: 4);
+        var into = new Classification[6];
+
+        var refusal = Assert.Throws<InvalidOperationException>(() => composite.ReadComposites<Classification>(1, into));
+        Assert.Equal(
+            "Row 4 holds a NULL composite, which Classification cannot hold. Read it with TryGetComposite, or "
+            + "as Classification?.",
+            refusal.Message);
+        Assert.Throws<ArgumentOutOfRangeException>(() => composite.ReadComposites<Classification?>(5, new Classification?[6]));
+    }
+
+    /// <summary>
+    /// The batch gate: 4096 rows of a record struct of a <c>Utf8String</c> and value fields read into a
+    /// span cost nothing, the attach, the binder call and the copy included. A <c>string</c> field is
+    /// the one allowed exception — a copy per row — and is measured apart, so the probe is seen to see.
+    /// </summary>
+    [Fact]
+    public async Task Reading_a_batch_into_a_span_allocates_nothing_per_row()
+    {
+        const int rows = 4096;
+        var composite = Ranked(rows);
+        var into = new Priced2[rows];
+        var labelled = new Labelled[rows];
+
+        var (bytes, read) = await AllocationProbe.SteadyStateAsync(() =>
+        {
+            composite.ReadComposites<Priced2>(into);
+            return Task.FromResult(into[rows - 1].Rank == rows - 1);
+        });
+        var (stringBytes, _) = await AllocationProbe.SteadyStateAsync(() =>
+        {
+            composite.ReadComposites<Labelled>(labelled);
+            return Task.FromResult(labelled[0].Category is not null);
+        });
+
+        TestContext.Current.TestOutputHelper?.WriteLine(
+            $"a batch of {rows}: {bytes} bytes with a Utf8String field, {stringBytes} bytes "
+            + $"({stringBytes / (double)rows:0.#} a row) with a string field");
+        Assert.True(read);
+        Assert.Equal(0, bytes);
+        Assert.True(stringBytes >= rows * 24L, $"{stringBytes} bytes for {rows} strings");
+    }
+
     // ---------------------------------------------------------------- building arrays
 
     private static Utf8String Encoded(string text) => System.Text.Encoding.UTF8.GetBytes(text);
 
-    /// <summary>A COMPOSITE(Category STRING, Confidence FP64) of <paramref name="rows"/> rows, a NULL composite every <paramref name="nullEvery"/>.</summary>
-    private static StructArray Classifications(int rows, int nullEvery)
+    /// <summary>
+    /// A COMPOSITE(Category STRING, Confidence FP64) of <paramref name="rows"/> rows, a NULL composite
+    /// every <paramref name="nullEvery"/>, the strings in the view layout or the classic one.
+    /// </summary>
+    private static StructArray Classifications(int rows, int nullEvery, bool views = true)
     {
-        var categories = new StringViewArray.Builder();
         var confidences = new double?[rows];
         bool[]? valid = nullEvery > 0 ? new bool[rows] : null;
+        var names = new string[rows];
         for (var row = 0; row < rows; row++)
         {
-            categories.Append($"c{row}");
+            names[row] = $"c{row}";
             confidences[row] = row / 10.0;
             if (valid is not null)
             {
@@ -518,11 +622,35 @@ public sealed class CompositeReadBackTests(SharedSidecar sidecar)
             }
         }
 
+        IArrowArray categories = views
+            ? new StringViewArray.Builder().AppendRange(names).Build()
+            : new StringArray.Builder().AppendRange(names).Build();
         return Struct(
             rows,
             valid,
-            ("Category", StringViewType.Default, false, categories.Build()),
+            ("Category", views ? StringViewType.Default : StringType.Default, false, categories),
             ("Confidence", DoubleType.Default, false, Fixed<double>(DoubleType.Default, confidences)));
+    }
+
+    /// <summary>COMPOSITE(Category STRING, Confidence FP64, Rank I64), every row valid.</summary>
+    private static StructArray Ranked(int rows)
+    {
+        var names = new string[rows];
+        var confidences = new double?[rows];
+        var ranks = new long?[rows];
+        for (var row = 0; row < rows; row++)
+        {
+            names[row] = row % 2 == 0 ? $"category {row}, long enough to leave the view" : $"c{row}";
+            confidences[row] = row / 7.0;
+            ranks[row] = row;
+        }
+
+        return Struct(
+            rows,
+            null,
+            ("Category", StringViewType.Default, false, new StringViewArray.Builder().AppendRange(names).Build()),
+            ("Confidence", DoubleType.Default, false, Fixed<double>(DoubleType.Default, confidences)),
+            ("Rank", Int64Type.Default, false, Fixed<long>(Int64Type.Default, ranks)));
     }
 
     private static StructArray Struct(

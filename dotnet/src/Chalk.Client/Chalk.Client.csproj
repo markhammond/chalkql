@@ -5,6 +5,8 @@
     <IsPackable>false</IsPackable>
     <Description>Chalk client: ChalkEngine, IQueryPlanner and the gRPC transport to the Calcite planner sidecar.</Description>
     <PlannerJarGlob>$(RepoRoot)planner/build/libs/chalk-planner-*-all.jar</PlannerJarGlob>
+    <!-- The typed read back of composite cells reads the child arrays through pinned buffers (D301). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>

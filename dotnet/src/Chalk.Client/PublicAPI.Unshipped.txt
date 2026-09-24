@@ -1099,6 +1099,8 @@ static Chalk.Arrow.RecordBatchExtensions.GetComposite<T>(this Apache.Arrow.IArro
 static Chalk.Arrow.RecordBatchExtensions.GetUtf8(this Apache.Arrow.IArrowArray! array, int index) -> System.ReadOnlySpan<byte>
 static Chalk.Arrow.RecordBatchExtensions.GetUtf8String(this Apache.Arrow.IArrowArray! array, int index) -> string?
 static Chalk.Arrow.RecordBatchExtensions.IsNullAt(this Apache.Arrow.IArrowArray! array, int index) -> bool
+static Chalk.Arrow.RecordBatchExtensions.ReadComposites<T>(this Apache.Arrow.IArrowArray! array, int start, System.Span<T> into) -> void
+static Chalk.Arrow.RecordBatchExtensions.ReadComposites<T>(this Apache.Arrow.IArrowArray! array, System.Span<T> into) -> void
 static Chalk.Arrow.RecordBatchExtensions.ToRows(this Apache.Arrow.RecordBatch! batch) -> System.Collections.Generic.List<object?[]!>!
 static Chalk.Arrow.RecordBatchExtensions.ToRows(this System.Collections.Generic.IEnumerable<Apache.Arrow.RecordBatch!>! batches) -> System.Collections.Generic.List<object?[]!>!
 static Chalk.Arrow.RecordBatchExtensions.TryGetComposite<T>(this Apache.Arrow.IArrowArray! array, int index, out T value) -> bool

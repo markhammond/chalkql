@@ -65,11 +65,13 @@ public static class RecordBatchExtensions
     }
     
     /// <summary>
-    /// One composite cell of a struct column — what a function answering a record returns — as the
-    /// host's own <typeparamref name="T"/>: a record struct, a record class, or any class or struct
-    /// with a public parameterless constructor and settable properties. A NULL composite reads as
-    /// null for a reference type or a <c>Nullable&lt;T&gt;</c>; for any other struct it is refused,
-    /// and <see cref="TryGetComposite{T}"/> is the way to read it.
+    /// One composite cell of a struct column — what a function answering a record returns, or a
+    /// composite column of an in-process table — as the host's own <typeparamref name="T"/>: a record
+    /// struct, a record class, or any class or struct with a public parameterless constructor and
+    /// settable properties. A NULL composite reads as null for a reference type or a
+    /// <c>Nullable&lt;T&gt;</c>; for any other struct it is refused, and
+    /// <see cref="TryGetComposite{T}"/> is the way to read it. A batch is read at once with
+    /// <see cref="ReadComposites{T}(IArrowArray, int, Span{T})"/>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -83,9 +85,10 @@ public static class RecordBatchExtensions
     /// both sides.
     /// </para>
     /// <para>
-    /// A read allocates nothing but what <typeparamref name="T"/> itself costs. A <c>Utf8String</c> or a
-    /// <c>ReadOnlyMemory&lt;byte&gt;</c> field borrows the batch's memory and is valid while the batch
-    /// is; a <c>string</c> or a <c>byte[]</c> field is a copy.
+    /// The fields are read from the child arrays' own buffers, and nothing is allocated but what
+    /// <typeparamref name="T"/> itself costs: a <c>Utf8String</c> or a <c>ReadOnlyMemory&lt;byte&gt;</c>
+    /// field is a slice of the batch's memory, valid while the batch is. A <c>string</c> or a
+    /// <c>byte[]</c> field is a copy, allocated on every read, and so is a record class.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentException">The array is not a struct array.</exception>
@@ -95,9 +98,16 @@ public static class RecordBatchExtensions
     /// </exception>
     public static T GetComposite<T>(this IArrowArray array, int index)
     {
-        var composite = CompositeAt(array, index);
+        var composite = CompositeAt(array, index, 1);
         var reader = CompositeReader<T>.For(composite);
-        return composite.IsNull(index) ? reader.Null(index) : reader.Read(composite, index);
+        if (composite.IsNull(index))
+        {
+            return reader.Null(index);
+        }
+
+        T value = default!;
+        reader.Read(composite, index, System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref value, 1));
+        return value;
     }
 
     /// <summary>
@@ -108,19 +118,54 @@ public static class RecordBatchExtensions
     public static bool TryGetComposite<T>(
         this IArrowArray array, int index, [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out T value)
     {
-        var composite = CompositeAt(array, index);
+        var composite = CompositeAt(array, index, 1);
         var reader = CompositeReader<T>.For(composite);
+        value = default!;
         if (composite.IsNull(index))
         {
-            value = default;
             return false;
         }
 
-        value = reader.Read(composite, index);
+        reader.Read(composite, index, System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref value, 1));
         return true;
     }
 
-    private static StructArray CompositeAt(IArrowArray array, int index)
+    /// <summary>
+    /// The first <c>into.Length</c> composite cells of a struct column, one per element of
+    /// <paramref name="into"/>: the batch form of <see cref="GetComposite{T}(IArrowArray, int)"/>, which
+    /// sets the read up once and loops inside the compiled binding rather than once per row.
+    /// </summary>
+    /// <inheritdoc cref="ReadComposites{T}(IArrowArray, int, Span{T})" path="/remarks"/>
+    public static void ReadComposites<T>(this IArrowArray array, Span<T> into) =>
+        ReadComposites(array, 0, into);
+
+    /// <summary>
+    /// The composite cells from row <paramref name="start"/>, one per element of
+    /// <paramref name="into"/>, read as <see cref="GetComposite{T}(IArrowArray, int)"/> reads one: a
+    /// NULL composite is null for a reference type or a <c>Nullable&lt;T&gt;</c>, and refused, naming
+    /// the row, for any other <typeparamref name="T"/>.
+    /// </summary>
+    /// <remarks>
+    /// The read attaches to the child arrays once — their buffers pinned for its length, the struct's
+    /// offset applied to every child — and the compiled binding then constructs each row from them, a
+    /// chunk at a time, into the span. Nothing is allocated per row for value fields and
+    /// <c>Utf8String</c> or <c>ReadOnlyMemory&lt;byte&gt;</c> fields, which are slices of the batch's
+    /// memory and valid while the batch is. A <c>string</c> or a <c>byte[]</c> field allocates a copy
+    /// per row, and so does a record class.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The array is not a struct array.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The rows run past the array's end.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// <typeparamref name="T"/> cannot be read from the composite, or a cell is a NULL composite and
+    /// <typeparamref name="T"/> cannot hold one.
+    /// </exception>
+    public static void ReadComposites<T>(this IArrowArray array, int start, Span<T> into)
+    {
+        var composite = CompositeAt(array, start, into.Length);
+        CompositeReader<T>.For(composite).Read(composite, start, into);
+    }
+
+    private static StructArray CompositeAt(IArrowArray array, int start, int rows)
     {
         ArgumentNullException.ThrowIfNull(array);
         if (array is not StructArray composite)
@@ -130,9 +175,10 @@ public static class RecordBatchExtensions
                 nameof(array));
         }
 
-        if ((uint)index >= (uint)composite.Length)
+        if (start < 0 || rows < 0 || (long)start + rows > composite.Length || (rows == 1 && start >= composite.Length))
         {
-            throw new ArgumentOutOfRangeException(nameof(index));
+            throw new ArgumentOutOfRangeException(
+                nameof(start), start, $"rows {start} to {(long)start + rows - 1} of an array of {composite.Length}");
         }
 
         return composite;
