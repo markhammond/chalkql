@@ -1228,8 +1228,10 @@ The limits:
 A member of a POCO table whose type is a record is a composite column, typed
 exactly as a function's record result is: its fields are the record's public
 properties, in order and under the record's own names, each one of the Tier 1
-types. A record struct member is never NULL; a `Nullable<T>` member or a record
-class member may be.
+types. A record struct member is never NULL, and its `Nullable<T>` may be. A
+record class member follows the rule for a `string` member: it is nullable
+unless the compiler annotates it as not null, so `Venue?` is a nullable
+composite.
 
 ```csharp
 public readonly record struct Side(double Price, long Size);
@@ -1282,12 +1284,12 @@ The limits, beyond those of every composite value above:
 Under entitlements a composite column is a column, and a rule may name it: the
 column as a whole, never a field. It is disclosed whole or withheld whole —
 `Full`, or `None`, whose placeholder is the NULL composite, so every field of a
-withheld value reads NULL. `Masked`, `AggregateOnly` and `Test` are refused
-when the engine is created, naming the column and the verdict: no expression
-builds a composite value to mask it with, no built-in aggregate takes one, and
-a composite value has no equality to test. So are a mask, a placeholder, an
-allow-list and the statistical opt-in on one. A rule's condition may read a
-field of it:
+withheld value reads NULL. `Masked`, `AggregateOnly` and `Test` are refused at
+registration — a POCO table's at `Build()` — naming the column and the verdict:
+no expression builds a composite value to mask it with, no built-in aggregate
+takes one, and a composite value has no equality to test. So are a mask, a
+placeholder, an allow-list and the statistical opt-in on one. A rule's
+condition may read a field of it:
 
 ```csharp
 new ColumnEntitlementDescriptor
