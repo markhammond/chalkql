@@ -21,14 +21,22 @@ internal abstract class Tier1Kernel : IVectorFunction
     /// </summary>
     private readonly object? _composite;
 
+    /// <summary>The result's lane format (D298): a DECIMAL's scale, a TIMESTAMP's unit, and whose it is.</summary>
+    private readonly LaneFormat _result;
+
     protected Tier1Kernel(FunctionSignature signature, bool strict, object? compositeWriter = null)
     {
         Signature = signature;
         Strict = strict;
         _composite = compositeWriter;
+        _result = new LaneFormat(signature.ReturnType, $"the result of '{signature.Name}'");
     }
 
     public FunctionSignature Signature { get; }
+
+    /// <summary>Argument <paramref name="index"/>'s lane format, built once when the kernel is bound.</summary>
+    protected LaneFormat ArgumentFormat(int index) =>
+        new(Signature.Parameters[index], $"argument {index + 1} of '{Signature.Name}'");
 
     protected bool Strict { get; }
 
@@ -92,7 +100,7 @@ internal abstract class Tier1Kernel : IVectorFunction
                 continue;
             }
 
-            LaneCodec.Write(result, length, row, value);
+            LaneCodec.Write(result, length, row, value, in _result);
             Apache.Arrow.BitUtility.SetBit(validity, row);
         }
     }
@@ -129,7 +137,7 @@ internal abstract class Tier1Kernel : IVectorFunction
     /// <summary>The composite writer a kernel of this result type needs, or null for a scalar result.</summary>
     protected static object? CompositeWriterFor<TOut>(FunctionSignature signature) =>
         signature.ReturnType.Kind == Ir.TypeKind.Composite
-            ? CompositeWriters.For<TOut>(signature.ReturnType)
+            ? CompositeWriters.For<TOut>(signature.ReturnType, $"the result of '{signature.Name}'")
             : null;
 
     /// <summary>One row's answer. A struct-free delegate: it closes over nothing this code allocates.</summary>
@@ -157,12 +165,14 @@ internal sealed class Tier1Kernel1<T1, TOut> : Tier1Kernel
     private readonly Func<T1, TOut> _f;
     private readonly LaneProducer<TOut> _produce;
     private ColumnView _a1;
+    private readonly LaneFormat _f1;
 
     public Tier1Kernel1(FunctionSignature signature, bool strict, Func<T1, TOut> f)
         : base(signature, strict, CompositeWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
+        _f1 = ArgumentFormat(0);
     }
 
     public override void Invoke(ReadOnlySpan<ColumnView> args, ColumnWriter result, in FunctionContext context)
@@ -171,7 +181,7 @@ internal sealed class Tier1Kernel1<T1, TOut> : Tier1Kernel
         Run(args, result, context.RowCount, _produce);
     }
 
-    private TOut Produce(int row) => _f(LaneCodec.Read<T1>(_a1, row));
+    private TOut Produce(int row) => _f(LaneCodec.Read<T1>(_a1, row, in _f1));
 }
 
 internal sealed class Tier1Kernel2<T1, T2, TOut> : Tier1Kernel
@@ -180,12 +190,16 @@ internal sealed class Tier1Kernel2<T1, T2, TOut> : Tier1Kernel
     private readonly LaneProducer<TOut> _produce;
     private ColumnView _a1;
     private ColumnView _a2;
+    private readonly LaneFormat _f1;
+    private readonly LaneFormat _f2;
 
     public Tier1Kernel2(FunctionSignature signature, bool strict, Func<T1, T2, TOut> f)
         : base(signature, strict, CompositeWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
+        _f1 = ArgumentFormat(0);
+        _f2 = ArgumentFormat(1);
     }
 
     public override void Invoke(ReadOnlySpan<ColumnView> args, ColumnWriter result, in FunctionContext context)
@@ -195,7 +209,7 @@ internal sealed class Tier1Kernel2<T1, T2, TOut> : Tier1Kernel
         Run(args, result, context.RowCount, _produce);
     }
 
-    private TOut Produce(int row) => _f(LaneCodec.Read<T1>(_a1, row), LaneCodec.Read<T2>(_a2, row));
+    private TOut Produce(int row) => _f(LaneCodec.Read<T1>(_a1, row, in _f1), LaneCodec.Read<T2>(_a2, row, in _f2));
 }
 
 internal sealed class Tier1Kernel3<T1, T2, T3, TOut> : Tier1Kernel
@@ -205,12 +219,18 @@ internal sealed class Tier1Kernel3<T1, T2, T3, TOut> : Tier1Kernel
     private ColumnView _a1;
     private ColumnView _a2;
     private ColumnView _a3;
+    private readonly LaneFormat _f1;
+    private readonly LaneFormat _f2;
+    private readonly LaneFormat _f3;
 
     public Tier1Kernel3(FunctionSignature signature, bool strict, Func<T1, T2, T3, TOut> f)
         : base(signature, strict, CompositeWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
+        _f1 = ArgumentFormat(0);
+        _f2 = ArgumentFormat(1);
+        _f3 = ArgumentFormat(2);
     }
 
     public override void Invoke(ReadOnlySpan<ColumnView> args, ColumnWriter result, in FunctionContext context)
@@ -222,7 +242,7 @@ internal sealed class Tier1Kernel3<T1, T2, T3, TOut> : Tier1Kernel
     }
 
     private TOut Produce(int row) => _f(
-        LaneCodec.Read<T1>(_a1, row), LaneCodec.Read<T2>(_a2, row), LaneCodec.Read<T3>(_a3, row));
+        LaneCodec.Read<T1>(_a1, row, in _f1), LaneCodec.Read<T2>(_a2, row, in _f2), LaneCodec.Read<T3>(_a3, row, in _f3));
 }
 
 internal sealed class Tier1Kernel4<T1, T2, T3, T4, TOut> : Tier1Kernel
@@ -233,12 +253,20 @@ internal sealed class Tier1Kernel4<T1, T2, T3, T4, TOut> : Tier1Kernel
     private ColumnView _a2;
     private ColumnView _a3;
     private ColumnView _a4;
+    private readonly LaneFormat _f1;
+    private readonly LaneFormat _f2;
+    private readonly LaneFormat _f3;
+    private readonly LaneFormat _f4;
 
     public Tier1Kernel4(FunctionSignature signature, bool strict, Func<T1, T2, T3, T4, TOut> f)
         : base(signature, strict, CompositeWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
+        _f1 = ArgumentFormat(0);
+        _f2 = ArgumentFormat(1);
+        _f3 = ArgumentFormat(2);
+        _f4 = ArgumentFormat(3);
     }
 
     public override void Invoke(ReadOnlySpan<ColumnView> args, ColumnWriter result, in FunctionContext context)
@@ -251,10 +279,10 @@ internal sealed class Tier1Kernel4<T1, T2, T3, T4, TOut> : Tier1Kernel
     }
 
     private TOut Produce(int row) => _f(
-        LaneCodec.Read<T1>(_a1, row),
-        LaneCodec.Read<T2>(_a2, row),
-        LaneCodec.Read<T3>(_a3, row),
-        LaneCodec.Read<T4>(_a4, row));
+        LaneCodec.Read<T1>(_a1, row, in _f1),
+        LaneCodec.Read<T2>(_a2, row, in _f2),
+        LaneCodec.Read<T3>(_a3, row, in _f3),
+        LaneCodec.Read<T4>(_a4, row, in _f4));
 }
 
 internal sealed class Tier1Kernel5<T1, T2, T3, T4, T5, TOut> : Tier1Kernel
@@ -266,12 +294,22 @@ internal sealed class Tier1Kernel5<T1, T2, T3, T4, T5, TOut> : Tier1Kernel
     private ColumnView _a3;
     private ColumnView _a4;
     private ColumnView _a5;
+    private readonly LaneFormat _f1;
+    private readonly LaneFormat _f2;
+    private readonly LaneFormat _f3;
+    private readonly LaneFormat _f4;
+    private readonly LaneFormat _f5;
 
     public Tier1Kernel5(FunctionSignature signature, bool strict, Func<T1, T2, T3, T4, T5, TOut> f)
         : base(signature, strict, CompositeWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
+        _f1 = ArgumentFormat(0);
+        _f2 = ArgumentFormat(1);
+        _f3 = ArgumentFormat(2);
+        _f4 = ArgumentFormat(3);
+        _f5 = ArgumentFormat(4);
     }
 
     public override void Invoke(ReadOnlySpan<ColumnView> args, ColumnWriter result, in FunctionContext context)
@@ -285,11 +323,11 @@ internal sealed class Tier1Kernel5<T1, T2, T3, T4, T5, TOut> : Tier1Kernel
     }
 
     private TOut Produce(int row) => _f(
-        LaneCodec.Read<T1>(_a1, row),
-        LaneCodec.Read<T2>(_a2, row),
-        LaneCodec.Read<T3>(_a3, row),
-        LaneCodec.Read<T4>(_a4, row),
-        LaneCodec.Read<T5>(_a5, row));
+        LaneCodec.Read<T1>(_a1, row, in _f1),
+        LaneCodec.Read<T2>(_a2, row, in _f2),
+        LaneCodec.Read<T3>(_a3, row, in _f3),
+        LaneCodec.Read<T4>(_a4, row, in _f4),
+        LaneCodec.Read<T5>(_a5, row, in _f5));
 }
 
 internal sealed class Tier1Kernel6<T1, T2, T3, T4, T5, T6, TOut> : Tier1Kernel
@@ -302,6 +340,12 @@ internal sealed class Tier1Kernel6<T1, T2, T3, T4, T5, T6, TOut> : Tier1Kernel
     private ColumnView _a4;
     private ColumnView _a5;
     private ColumnView _a6;
+    private readonly LaneFormat _f1;
+    private readonly LaneFormat _f2;
+    private readonly LaneFormat _f3;
+    private readonly LaneFormat _f4;
+    private readonly LaneFormat _f5;
+    private readonly LaneFormat _f6;
 
     public Tier1Kernel6(
         FunctionSignature signature, bool strict, Func<T1, T2, T3, T4, T5, T6, TOut> f)
@@ -309,6 +353,12 @@ internal sealed class Tier1Kernel6<T1, T2, T3, T4, T5, T6, TOut> : Tier1Kernel
     {
         _f = f;
         _produce = Produce;
+        _f1 = ArgumentFormat(0);
+        _f2 = ArgumentFormat(1);
+        _f3 = ArgumentFormat(2);
+        _f4 = ArgumentFormat(3);
+        _f5 = ArgumentFormat(4);
+        _f6 = ArgumentFormat(5);
     }
 
     public override void Invoke(ReadOnlySpan<ColumnView> args, ColumnWriter result, in FunctionContext context)
@@ -323,10 +373,10 @@ internal sealed class Tier1Kernel6<T1, T2, T3, T4, T5, T6, TOut> : Tier1Kernel
     }
 
     private TOut Produce(int row) => _f(
-        LaneCodec.Read<T1>(_a1, row),
-        LaneCodec.Read<T2>(_a2, row),
-        LaneCodec.Read<T3>(_a3, row),
-        LaneCodec.Read<T4>(_a4, row),
-        LaneCodec.Read<T5>(_a5, row),
-        LaneCodec.Read<T6>(_a6, row));
+        LaneCodec.Read<T1>(_a1, row, in _f1),
+        LaneCodec.Read<T2>(_a2, row, in _f2),
+        LaneCodec.Read<T3>(_a3, row, in _f3),
+        LaneCodec.Read<T4>(_a4, row, in _f4),
+        LaneCodec.Read<T5>(_a5, row, in _f5),
+        LaneCodec.Read<T6>(_a6, row, in _f6));
 }

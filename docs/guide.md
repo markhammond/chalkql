@@ -1000,6 +1000,35 @@ state can be moved backwards exactly, which lets a sliding frame be maintained
 rather than recomputed. With neither, a frame is recomputed from its rows — the
 same answer, more work.
 
+A Tier 1 delegate is written in the CLR types a POCO property maps from:
+
+| SQL type | CLR type |
+|---|---|
+| BOOL, I8, I16, I32, I64, FP32, FP64 | `bool`, `sbyte`, `short`, `int`, `long`, `float`, `double` |
+| STRING | `Utf8String`, or `string` |
+| DECIMAL of up to 28 digits | `decimal` |
+| DATE, TIME | `DateOnly`, `TimeOnly` |
+| TIMESTAMP, TIMESTAMP_TZ | `DateTime`, `DateTimeOffset` (in UTC) |
+| INTERVAL_DAY | `TimeSpan` |
+| UUID | `Guid` |
+| BINARY | `ReadOnlyMemory<byte>`, or `byte[]` |
+
+A function that is not strict takes the nullable form of a value type, so it can
+see a NULL. `string` and `byte[]` cost an allocation per row. The other types do
+not. `Parameter<T>()` and `Returns<T>()` infer the SQL type from the CLR type as a
+POCO property would: `decimal` is DECIMAL(28, 10) and `DateTime` is
+TIMESTAMP(9). Declare a narrower type with `Parameter(name, type)` and still
+implement it in `decimal` or `DateTime`. A temporal may also still be written as its
+raw count: `int` days, or `long` units.
+
+A DECIMAL wider than 28 digits has no CLR type. It is refused when the engine is
+created, and a Tier 2 kernel reads it. A time the SQL type cannot hold exactly is
+refused rather than rounded. That includes a `TimeOnly` or `TimeSpan` with a
+fraction of a microsecond, and a `DateTime` with sub-millisecond ticks answered
+for a TIMESTAMP(3). A nanosecond TIMESTAMP read as a `DateTime` is truncated to
+its 100-nanosecond tick. A Tier 1 aggregate folds fixed-width values, so its input
+and result may be any of these types except BINARY.
+
 **Tier 2** is the expression evaluator's own contract, for a host that needs
 SIMD or wants to avoid the per-lane call:
 
@@ -1111,9 +1140,9 @@ can.
 
 The limits:
 
-- A field is a `bool`, `sbyte`, `short`, `int`, `long`, `float`, `double`,
-  `string` or `Utf8String`, or a nullable form of one. A property of any other
-  type is refused at registration, naming it.
+- A field is one of the Tier 1 types above, or a nullable form of one. A
+  `byte[]` or `string` property is a nullable field. A property of any other type
+  is refused at registration, naming it.
 - A composite value is one level deep: a record inside a record, or a list
   inside one, is refused.
 - A composite value has no ordering and no equality. Comparing one, sorting,

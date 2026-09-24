@@ -23,6 +23,12 @@ namespace Chalk.Catalog;
 /// composite. A composite is only ever a result: a parameter or a column typed as a record is refused.
 /// </para>
 /// <para>
+/// The Tier 1 set is the CLR types the POCO source maps a member from, inferred as it infers an
+/// unannotated member: <c>decimal</c> as DECIMAL(28, 10), <c>DateTime</c> as TIMESTAMP(9) and so on.
+/// A narrower DECIMAL or a coarser TIMESTAMP is declared with the explicit overloads and still
+/// implemented with a <c>decimal</c> or a <c>DateTime</c>.
+/// </para>
+/// <para>
 /// A textual <c>CREATE FUNCTION</c> form is a follow-up, not part of this step (§4).
 /// </para>
 /// </remarks>
@@ -330,8 +336,9 @@ public sealed class FunctionBuilder
 
     /// <summary>
     /// The declared type a CLR type stands for: the Tier 1 set and no more — <c>Utf8String</c> being a
-    /// STRING spelled without an allocation per row — or, for a result, a COMPOSITE inferred from a record
-    /// (D294). A record anywhere else is refused, because a composite value is only ever a function's result.
+    /// STRING spelled without an allocation per row, and the POCO source's own mappings for the rest
+    /// (D298) — or, for a result, a COMPOSITE inferred from a record (D294). A record anywhere else is
+    /// refused, because a composite value is only ever a function's result.
     /// </summary>
     private ChalkType TypeOf<T>(bool nullable, Role role, string? name)
     {

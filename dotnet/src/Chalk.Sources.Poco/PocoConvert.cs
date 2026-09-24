@@ -9,10 +9,10 @@ namespace Chalk.Sources.Poco;
 internal static class PocoConvert
 {
     /// <summary>Ticks at 1970-01-01, the epoch every Chalk temporal counts from (<c>02-ir.md</c> §3).</summary>
-    public const long UnixEpochTicks = 621_355_968_000_000_000L;
+    public const long UnixEpochTicks = ClrStorage.UnixEpochTicks;
 
     /// <summary><see cref="DateOnly.DayNumber"/> of 1970-01-01, so DATE is days since the epoch.</summary>
-    public const int UnixEpochDayNumber = 719_162;
+    public const int UnixEpochDayNumber = ClrStorage.UnixEpochDayNumber;
 
     /// <summary>10^0 … 10^38 as <see cref="UInt128"/>, for rescaling decimals. DECIMAL precision is capped at 38.</summary>
 

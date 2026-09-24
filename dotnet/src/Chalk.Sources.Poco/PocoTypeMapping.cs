@@ -387,17 +387,15 @@ internal static class PocoTypeMapping
             TypeKind.Binary => underlying == typeof(byte[])
                 ? value => Expression.New(ReadOnlyMemoryFromArray, value)
                 : value => value,
-            TypeKind.Date => value => Expression.Subtract(
-                Expression.Property(value, nameof(DateOnly.DayNumber)),
-                Expression.Constant(PocoConvert.UnixEpochDayNumber)),
-            TypeKind.Time => value => Expression.Divide(
-                Expression.Property(value, nameof(TimeOnly.Ticks)), Expression.Constant(10L)),
+            // The temporal lanes through ClrStorage, which the engine's lane codec shares for a
+            // delegate's arguments and answers (D298): one conversion per kind, not two.
+            TypeKind.Date => value => Expression.Call(DaysOfMethod, value),
+            TypeKind.Time => value => Expression.Call(TimeMicrosMethod, value),
             TypeKind.Timestamp => value => TicksToUnit(
                 Expression.Property(value, nameof(DateTime.Ticks)), type.Precision),
             TypeKind.TimestampTz => value => TicksToUnit(
                 Expression.Property(value, nameof(DateTimeOffset.UtcTicks)), type.Precision),
-            TypeKind.IntervalDay => value => Expression.Divide(
-                Expression.Property(value, nameof(TimeSpan.Ticks)), Expression.Constant(10L)),
+            TypeKind.IntervalDay => value => Expression.Call(IntervalMicrosMethod, value),
             TypeKind.Uuid => value => value,
             _ => throw new UnsupportedFeatureException(
                 $"POCO column of kind {type.Kind}",
@@ -413,16 +411,8 @@ internal static class PocoTypeMapping
     /// A .NET tick is 100 ns, so nanoseconds are exact and coarser units divide. Truncation only
     /// happens when a host asks for a precision below the source's, which is its own choice.
     /// </summary>
-    private static Expression TicksToUnit(Expression ticks, int precision)
-    {
-        var sinceEpoch = Expression.Subtract(ticks, Expression.Constant(PocoConvert.UnixEpochTicks));
-        return ArrowTypeMapping.TimestampUnit(precision) switch
-        {
-            TimeUnit.Nanosecond => Expression.Multiply(sinceEpoch, Expression.Constant(100L)),
-            TimeUnit.Microsecond => Expression.Divide(sinceEpoch, Expression.Constant(10L)),
-            _ => Expression.Divide(sinceEpoch, Expression.Constant(10_000L)),
-        };
-    }
+    private static Expression TicksToUnit(Expression ticks, int precision) =>
+        Expression.Call(UnitsOfMethod, ticks, Expression.Constant(precision));
 
     /// <summary>
     /// <c>Enum.GetName&lt;TEnum&gt;</c> returns the cached name without allocating for a declared
@@ -461,4 +451,16 @@ internal static class PocoTypeMapping
 
     private static readonly ConstructorInfo ReadOnlyMemoryFromArray =
         typeof(ReadOnlyMemory<byte>).GetConstructor([typeof(byte[])])!;
+
+    private static readonly MethodInfo DaysOfMethod =
+        typeof(ClrStorage).GetMethod(nameof(ClrStorage.DaysOf), [typeof(DateOnly)])!;
+
+    private static readonly MethodInfo TimeMicrosMethod =
+        typeof(ClrStorage).GetMethod(nameof(ClrStorage.MicrosOf), [typeof(TimeOnly)])!;
+
+    private static readonly MethodInfo IntervalMicrosMethod =
+        typeof(ClrStorage).GetMethod(nameof(ClrStorage.MicrosOf), [typeof(TimeSpan)])!;
+
+    private static readonly MethodInfo UnitsOfMethod =
+        typeof(ClrStorage).GetMethod(nameof(ClrStorage.UnitsOf), [typeof(long), typeof(int)])!;
 }

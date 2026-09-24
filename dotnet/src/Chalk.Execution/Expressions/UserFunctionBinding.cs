@@ -150,6 +150,29 @@ internal static class UserFunctionBinding
             strict: true,
             $"{where}: '{descriptor.Name}' returns",
             key);
+        RequireFixedWidth(
+            descriptor.Parameters[0].Type,
+            $"{where}: '{descriptor.Name}' parameter '{descriptor.Parameters[0].Name}'",
+            key);
+        RequireFixedWidth(descriptor.ReturnType!.Value, $"{where}: '{descriptor.Name}' returns", key);
+    }
+
+    /// <summary>
+    /// D298: a Tier 1 aggregate folds fixed-width lanes — the hash aggregate hands it each value's
+    /// bytes, and it answers into one — so a BINARY input or result, which a scalar may spell as
+    /// <c>ReadOnlyMemory&lt;byte&gt;</c> or <c>byte[]</c>, is refused here rather than at the first row.
+    /// </summary>
+    private static void RequireFixedWidth(ChalkType declared, string what, string key)
+    {
+        if (declared.Kind == Ir.TypeKind.Binary)
+        {
+            throw new InvalidOperationException(
+                $"{what} {IrTypes.Describe(declared.ToProto())}, and a Tier 1 aggregate registered as "
+                + $"'{key}' folds fixed-width values only: its input and result may be bool, sbyte, "
+                + "short, int, long, float, double, decimal, DateOnly, TimeOnly, DateTime, "
+                + "DateTimeOffset, TimeSpan or Guid. Aggregate a BINARY with a Tier 2 kernel, or over "
+                + "a fixed-width value derived from it.");
+        }
     }
 
     private static void CheckTable(
@@ -189,6 +212,20 @@ internal static class UserFunctionBinding
         }
 
         var underlying = Nullable.GetUnderlyingType(clr);
+        if (declared.Kind == Ir.TypeKind.Decimal
+            && declared.Precision > LaneCodec.DecimalDigits
+            && (underlying ?? clr) == typeof(decimal))
+        {
+            // D298: named on its own, because the CLR type is the right family and only its width
+            // is wrong — which the general message below would not say.
+            throw new InvalidOperationException(
+                $"{what} is {IrTypes.Describe(declared.ToProto())}, which has no Tier 1 spelling: a CLR "
+                + $"decimal holds {LaneCodec.DecimalDigits} digits and this DECIMAL {declared.Precision}. "
+                + $"Declare DECIMAL({LaneCodec.DecimalDigits},{Math.Min(declared.Scale, LaneCodec.DecimalDigits)}) "
+                + $"or narrower, or implement '{key}' as a Tier 2 kernel (IVectorFunction), which reads the "
+                + "DECIMAL's 16-byte lane.");
+        }
+
         if (!LaneCodec.Accepts(clr, declared))
         {
             throw new InvalidOperationException(
@@ -333,7 +370,8 @@ internal static class UserFunctionBinding
         var descriptor = Resolve(catalog, qualified);
         var host = Find(functions, descriptor);
         Check(descriptor, host, $"aggregate {qualified}");
-        return ((HostAggregate)host!).Accept(new Aggregation.UserAggregateFactory(resultType));
+        return ((HostAggregate)host!).Accept(
+            new Aggregation.UserAggregateFactory(descriptor.Parameters[0].Type, resultType, descriptor.Name));
     }
 
     /// <summary>The window evaluator for the same aggregate over a frame (D80).</summary>

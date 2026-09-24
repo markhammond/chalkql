@@ -2619,6 +2619,57 @@
           "volatility": "VOLATILITY_IMMUTABLE",
           "window": true,
           "client": {}
+        },
+        {
+          "name": "net_amount",
+          "kind": "FUNCTION_KIND_SCALAR",
+          "parameters": [
+            {
+              "name": "price",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 15,
+                "scale": 2
+              }
+            },
+            {
+              "name": "discount",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "nullable": true,
+                "precision": 15,
+                "scale": 2
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "precision": 15,
+            "scale": 2
+          },
+          "volatility": "VOLATILITY_IMMUTABLE",
+          "strict": true,
+          "client": {}
+        },
+        {
+          "name": "week_start",
+          "kind": "FUNCTION_KIND_SCALAR",
+          "parameters": [
+            {
+              "name": "d",
+              "type": {
+                "kind": "TYPE_KIND_DATE",
+                "nullable": true
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "TYPE_KIND_DATE"
+          },
+          "volatility": "VOLATILITY_IMMUTABLE",
+          "strict": true,
+          "client": {}
         }
       ]
     }

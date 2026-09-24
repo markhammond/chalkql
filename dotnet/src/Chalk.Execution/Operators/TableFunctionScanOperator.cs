@@ -168,15 +168,19 @@ internal abstract class RowColumn<TRow>
     /// </summary>
     public static RowColumn<TRow> For(ColumnDescriptor column, int columnCount, string what)
     {
-        var clr = LaneCodec.ClrTypeOf(column.Type)
-            ?? throw new UnsupportedFeatureException(
+        if (LaneCodec.ClrTypeOf(column.Type) is null)
+        {
+            throw new UnsupportedFeatureException(
                 $"{what}: column '{column.Name}' of {LaneCodec.Describe(column.Type)}",
                 "A v1 table function returns the scalar kinds a Tier 1 delegate can carry "
                 + "(docs/design/17-user-defined-functions.md §3).");
+        }
 
-        if (columnCount == 1 && Matches(typeof(TRow), clr))
+        // A member is read as a Tier 1 delegate's value is: in any of the spellings the lane codec
+        // accepts for the column's type, the widened ones of D298 included.
+        if (columnCount == 1 && LaneCodec.Accepts(typeof(TRow), column.Type))
         {
-            return Build(column, clr, accessor: null, what);
+            return Build(column, accessor: null, what);
         }
 
         var member = Member(column.Name)
@@ -184,11 +188,8 @@ internal abstract class RowColumn<TRow>
                 $"{what}: column '{column.Name}'",
                 $"{typeof(TRow).Name} has no public property or field with that name; a table "
                 + "function's row type names its columns the way a POCO table does.");
-        return Build(column, clr, member, what);
+        return Build(column, member, what);
     }
-
-    private static bool Matches(Type actual, Type required) =>
-        actual == required || Nullable.GetUnderlyingType(actual) == required;
 
     private static MemberInfo? Member(string name)
     {
@@ -212,8 +213,7 @@ internal abstract class RowColumn<TRow>
         return null;
     }
 
-    private static RowColumn<TRow> Build(
-        ColumnDescriptor column, Type clr, MemberInfo? accessor, string what)
+    private static RowColumn<TRow> Build(ColumnDescriptor column, MemberInfo? accessor, string what)
     {
         var actual = accessor switch
         {
@@ -222,7 +222,7 @@ internal abstract class RowColumn<TRow>
             _ => typeof(TRow),
         };
 
-        if (!Matches(actual, clr))
+        if (!LaneCodec.Accepts(actual, column.Type))
         {
             throw new UnsupportedFeatureException(
                 $"{what}: column '{column.Name}'",
@@ -230,7 +230,8 @@ internal abstract class RowColumn<TRow>
                 + $"{actual.Name}.");
         }
 
-        return new ReflectedRowColumn<TRow>(column.Type, accessor);
+        return new ReflectedRowColumn<TRow>(
+            column.Type, accessor, new LaneFormat(column.Type, $"column '{column.Name}' of {what}"));
     }
 }
 
@@ -246,31 +247,26 @@ internal sealed class ReflectedRowColumn<TRow> : RowColumn<TRow>
     private readonly int _width;
     private readonly bool _variable;
 
-    public ReflectedRowColumn(ChalkType type, MemberInfo? accessor)
+    /// <summary>The column's lane format, for the widened member types (D298).</summary>
+    private readonly LaneFormat _format;
+
+    public ReflectedRowColumn(ChalkType type, MemberInfo? accessor, LaneFormat format)
     {
         _type = type;
         _accessor = accessor;
+        _format = format;
         var kind = ColumnKinds.Of(type);
         _width = ColumnKinds.Width(kind);
         _variable = ColumnKinds.IsVariableLength(kind);
     }
 
-    public override object? Read(TRow row) => Normalise(Member(row));
+    public override object? Read(TRow row) => ClrBoxes.ToStorage(Member(row), in _format);
 
     private object? Member(TRow row) => _accessor switch
     {
         PropertyInfo property => property.GetValue(row),
         FieldInfo field => field.GetValue(row),
         _ => row,
-    };
-
-    /// <summary>The reference executor boxes every exact and temporal kind as a <c>long</c>.</summary>
-    private static object? Normalise(object? value) => value switch
-    {
-        sbyte v => (long)v,
-        short v => (long)v,
-        int v => (long)v,
-        _ => value,
     };
 
     public override void Append(ColumnCopier copier, TRow row)
@@ -296,13 +292,24 @@ internal sealed class ReflectedRowColumn<TRow> : RowColumn<TRow>
         if (_variable)
         {
             copier.AppendConstant(
-                new ScalarValue { Type = _type, Text = (string)value }, 1);
+                value switch
+                {
+                    byte[] bytes => new ScalarValue { Type = _type, Bytes = bytes },
+                    ReadOnlyMemory<byte> memory => new ScalarValue { Type = _type, Bytes = memory.ToArray() },
+                    Utf8String text => new ScalarValue { Type = _type, Text = text.ToString() },
+                    _ => new ScalarValue { Type = _type, Text = (string)value },
+                },
+                1);
             return;
         }
 
         Span<byte> lane = stackalloc byte[_width];
         lane.Clear();
-        WriteLane(lane, value);
+        if (!ClrBoxes.TryWriteLane(lane, value, in _format))
+        {
+            WriteLane(lane, value);
+        }
+
         copier.AppendRaw(lane, valid: true);
     }
 

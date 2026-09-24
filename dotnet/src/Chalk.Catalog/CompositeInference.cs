@@ -15,7 +15,15 @@ namespace Chalk.Catalog;
 /// its public readable instance properties, in declaration order — a positional record's constructor
 /// order when a constructor's parameters match the properties, metadata order otherwise — named as
 /// declared. Each is a Tier 1 type: a value type is a non-nullable field and its <c>Nullable</c> form a
-/// nullable one; <c>Utf8String</c> is a non-nullable STRING and <c>string</c> a nullable one.
+/// nullable one; <c>Utf8String</c> is a non-nullable STRING and <c>string</c> a nullable one;
+/// <c>ReadOnlyMemory&lt;byte&gt;</c> is a non-nullable BINARY and <c>byte[]</c> a nullable one.
+/// </para>
+/// <para>
+/// The Tier 1 set is the CLR types the POCO source maps a member from (D298): the primitives,
+/// <c>decimal</c> as DECIMAL(28, 10), <c>DateOnly</c>, <c>TimeOnly</c> as TIME(6), <c>DateTime</c> as
+/// TIMESTAMP(9), <c>DateTimeOffset</c> as TIMESTAMP_TZ(9), <c>TimeSpan</c> as INTERVAL_DAY, <c>Guid</c>,
+/// and <c>ReadOnlyMemory&lt;byte&gt;</c> or <c>byte[]</c> as BINARY — each inferred as the POCO source
+/// infers an unannotated member, so a function and a table agree about a CLR type's SQL type.
 /// </para>
 /// <para>
 /// Reflection runs here, once per declaration and once per binding, and never per row: the engine
@@ -95,8 +103,8 @@ internal static class CompositeInference
             {
                 refusal = $"property '{property.Name}' of {record.Name} is "
                     + $"{Describe(property.PropertyType)}, which no composite field can be: a field is "
-                    + "bool, sbyte, short, int, long, float, double, string or Utf8String, or a nullable "
-                    + "form of one, and a composite value is one level deep";
+                    + TierOneTypes + ", or a nullable form of one, and a composite value is one level "
+                    + "deep";
                 return false;
             }
 
@@ -155,8 +163,9 @@ internal static class CompositeInference
 
     /// <summary>
     /// The field type a property type spells, or null for one no field can be. Nullability follows
-    /// the CLR: a value type is non-nullable and its <c>Nullable</c> form nullable; <c>string</c> is a
-    /// reference and nullable; <c>Utf8String</c> is a value and not.
+    /// the CLR: a value type is non-nullable and its <c>Nullable</c> form nullable; <c>string</c> and
+    /// <c>byte[]</c> are references and nullable; <c>Utf8String</c> and <c>ReadOnlyMemory&lt;byte&gt;</c>
+    /// are values and not.
     /// </summary>
     public static ChalkType? FieldType(Type clr)
     {
@@ -168,14 +177,26 @@ internal static class CompositeInference
             return null;
         }
 
-        var nullable = underlying is not null || clr == typeof(string);
+        var nullable = underlying is not null || !clr.IsValueType;
         return type.WithNullable(nullable);
     }
 
+    /// <summary>The Tier 1 CLR types, as a refusal lists them.</summary>
+    internal const string TierOneTypes =
+        "bool, sbyte, short, int, long, float, double, decimal, DateOnly, TimeOnly, DateTime, "
+        + "DateTimeOffset, TimeSpan, Guid, string, Utf8String, ReadOnlyMemory<byte> or byte[]";
+
+    /// <summary>The DECIMAL a <c>decimal</c> is inferred as: the POCO source's default, DECIMAL(28, 10).</summary>
+    public const int DecimalPrecision = 28;
+
+    /// <summary>The scale of the DECIMAL a <c>decimal</c> is inferred as.</summary>
+    public const int DecimalScale = 10;
+
     /// <summary>
     /// The declared type a Tier 1 CLR type stands for, non-nullable, or null for anything else. The
-    /// set the declaration surface guesses at (D79) plus <c>Utf8String</c>, which is how a STRING is
-    /// spelled without an allocation per row (D146).
+    /// set the declaration surface guesses at (D79), <c>Utf8String</c>, which is how a STRING is
+    /// spelled without an allocation per row (D146), and the CLR types the POCO source maps a member
+    /// from, inferred as it infers an unannotated one (D298).
     /// </summary>
     public static ChalkType? ScalarOf(Type clr)
     {
@@ -218,6 +239,47 @@ internal static class CompositeInference
         if (clr == typeof(string) || IsUtf8String(clr))
         {
             return ChalkType.String();
+        }
+
+        if (clr == typeof(decimal))
+        {
+            return ChalkType.Decimal(DecimalPrecision, DecimalScale);
+        }
+
+        if (clr == typeof(DateOnly))
+        {
+            return ChalkType.Date();
+        }
+
+        if (clr == typeof(TimeOnly))
+        {
+            return ChalkType.Time(6);
+        }
+
+        if (clr == typeof(DateTime))
+        {
+            // A tick is 100 ns, so nanoseconds hold every DateTime exactly (D16).
+            return ChalkType.Timestamp(9);
+        }
+
+        if (clr == typeof(DateTimeOffset))
+        {
+            return ChalkType.TimestampTz(9);
+        }
+
+        if (clr == typeof(TimeSpan))
+        {
+            return ChalkType.IntervalDay();
+        }
+
+        if (clr == typeof(Guid))
+        {
+            return ChalkType.Uuid();
+        }
+
+        if (clr == typeof(ReadOnlyMemory<byte>) || clr == typeof(byte[]))
+        {
+            return ChalkType.Binary();
         }
 
         return null;

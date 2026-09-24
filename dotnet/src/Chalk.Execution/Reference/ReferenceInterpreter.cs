@@ -63,12 +63,19 @@ internal sealed class ReferenceInterpreter
             _catalog ?? throw NoCatalog(name), name);
         var host = Expressions.UserFunctionBinding.Find(_functions, descriptor);
         Expressions.UserFunctionBinding.Check(descriptor, host, $"aggregate {name}");
-        var boxed = ((Chalk.Sources.HostAggregate)host!).NewBoxed();
+        var aggregate = (Chalk.Sources.HostAggregate)host!;
+        var boxed = aggregate.NewBoxed();
 
-        // D291: a record Finish answered is held as the reference's composite value.
-        return descriptor.ReturnType?.Kind == TypeKind.Composite
-            ? new ReferenceComposites.Aggregate(boxed)
-            : boxed;
+        // D291: a record Finish answered is held as the reference's composite value. D298: the input
+        // reaches Add in the delegate's own CLR spelling, and a scalar answer leaves in the storage
+        // vocabulary, through the conversions the vectorised engine's lanes use.
+        var returns = descriptor.ReturnType!.Value;
+        return new ReferenceComposites.Converted(
+            boxed,
+            descriptor.Parameters[0].Type,
+            aggregate.InputType,
+            returns,
+            descriptor.Name);
     }
 
     /// <summary>The row reader for a client-bodied table function, shared with the vectorised engine.</summary>
@@ -78,9 +85,19 @@ internal sealed class ReferenceInterpreter
             _catalog ?? throw NoCatalog(name), name);
         var host = Expressions.UserFunctionBinding.Find(_functions, descriptor);
         Expressions.UserFunctionBinding.Check(descriptor, host, $"table function {name}");
-        return ((Chalk.Sources.HostTable)host!).Accept(
+        var table = (Chalk.Sources.HostTable)host!;
+
+        // D298: each argument in the producer's own CLR spelling, as the vectorised engine hands it.
+        var converted = new object?[arguments.Length];
+        for (var i = 0; i < converted.Length; i++)
+        {
+            converted[i] = Expressions.ClrBoxes.ToClr(
+                arguments[i], descriptor.Parameters[i].Type, table.ParameterTypes[i]);
+        }
+
+        return table.Accept(
             new Operators.TableRowsFactory(
-                arguments, descriptor.ReturnsTable, $"table function {name}"));
+                converted, descriptor.ReturnsTable, $"table function {name}"));
     }
 
     private static UnsupportedFeatureException NoCatalog(string name) =>
@@ -118,13 +135,24 @@ internal sealed class ReferenceInterpreter
             return reference.Invoke(arguments, _now);
         }
 
-        var answer = ((Chalk.Sources.HostScalar)host!).InvokeBoxed(arguments);
+        // D298: each argument in the delegate's own CLR spelling, from the storage vocabulary.
+        var scalar = (Chalk.Sources.HostScalar)host!;
+        for (var i = 0; i < arguments.Length; i++)
+        {
+            arguments[i] = Expressions.ClrBoxes.ToClr(
+                arguments[i], descriptor.Parameters[i].Type, scalar.ParameterTypes[i]);
+        }
+
+        var answer = scalar.InvokeBoxed(arguments);
 
         // D291: a record is held as the reference's composite value, read through the same properties
-        // the vectorised engine writes from.
-        return descriptor.ReturnType?.Kind == TypeKind.Composite
-            ? ReferenceComposites.FromRecord(answer)
-            : answer;
+        // the vectorised engine writes from; D298: a scalar answer in the storage vocabulary, refused
+        // as the vectorised engine refuses it.
+        var returns = descriptor.ReturnType!.Value;
+        return returns.Kind == TypeKind.Composite
+            ? ReferenceComposites.FromRecord(answer, returns, $"the result of '{descriptor.Name}'")
+            : Expressions.ClrBoxes.ToStorage(
+                answer, new Expressions.LaneFormat(returns, $"the result of '{descriptor.Name}'"));
     }
 
     private readonly Dictionary<string, ReferenceKernel> _kernels = new(StringComparer.Ordinal);

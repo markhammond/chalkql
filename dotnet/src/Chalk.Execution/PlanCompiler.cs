@@ -1445,10 +1445,14 @@ internal static class PlanCompiler
 
             return context =>
             {
+                // D298: each argument in the producer's own CLR spelling.
                 var values = new object?[arguments.Length];
                 for (var i = 0; i < values.Length; i++)
                 {
-                    values[i] = arguments[i](context).ToClr();
+                    values[i] = ClrBoxes.ToClr(
+                        arguments[i](context).ToClr(),
+                        descriptor.Parameters[i].Type,
+                        ((HostTable)host).ParameterTypes[i]);
                 }
 
                 var rows = ((HostTable)host).Accept(

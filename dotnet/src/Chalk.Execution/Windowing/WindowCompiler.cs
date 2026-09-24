@@ -348,10 +348,14 @@ internal static class WindowCompiler
         {
             // A client-bodied aggregate over a frame (D80). Its declaration must say WINDOW, which
             // is what the planner has already told Calcite through `allowsFraming`.
-            var (host, _) = Expressions.UserFunctionBinding.AggregateFor(
+            var (host, descriptor) = Expressions.UserFunctionBinding.AggregateFor(
                 catalog, functions, call.UserFunction);
             return host.Accept(
-                new WindowUserAggregateFactory(result, Field(call, 0, inputTypes, path)));
+                new WindowUserAggregateFactory(
+                    descriptor.Parameters[0].Type,
+                    result,
+                    descriptor.Name,
+                    Field(call, 0, inputTypes, path)));
         }
 
         return call.FunctionCase == WindowCall.FunctionOneofCase.WindowFunction

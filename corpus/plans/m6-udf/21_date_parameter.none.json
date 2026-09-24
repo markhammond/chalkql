@@ -1,0 +1,386 @@
+{
+  "irVersion": 1,
+  "planDigest": "10194684549233360944",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "week",
+        "type": {
+          "kind": "TYPE_KIND_DATE"
+        }
+      },
+      {
+        "name": "lines",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "week",
+          "type": {
+            "kind": "TYPE_KIND_DATE"
+          }
+        },
+        {
+          "name": "lines",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 170.46666663590335,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_DATE"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "week",
+              "type": {
+                "kind": "TYPE_KIND_DATE"
+              }
+            },
+            {
+              "name": "lines",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            }
+          ]
+        },
+        "estRowCount": 170.46666663590335,
+        "hashAggregate": {
+          "aggregate": {
+            "input": {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "week",
+                    "type": {
+                      "kind": "TYPE_KIND_DATE"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 4000,
+              "project": {
+                "input": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "l_orderkey",
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        }
+                      },
+                      {
+                        "name": "l_shipdate",
+                        "type": {
+                          "kind": "TYPE_KIND_DATE"
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 4000,
+                  "filter": {
+                    "input": {
+                      "rowType": {
+                        "fields": [
+                          {
+                            "name": "l_orderkey",
+                            "type": {
+                              "kind": "TYPE_KIND_I64"
+                            }
+                          },
+                          {
+                            "name": "l_shipdate",
+                            "type": {
+                              "kind": "TYPE_KIND_DATE"
+                            }
+                          }
+                        ]
+                      },
+                      "estRowCount": 60000,
+                      "project": {
+                        "input": {
+                          "rowType": {
+                            "fields": [
+                              {
+                                "name": "l_orderkey",
+                                "type": {
+                                  "kind": "TYPE_KIND_I64"
+                                }
+                              },
+                              {
+                                "name": "l_linenumber",
+                                "type": {
+                                  "kind": "TYPE_KIND_I32"
+                                }
+                              },
+                              {
+                                "name": "l_partkey",
+                                "type": {
+                                  "kind": "TYPE_KIND_I64"
+                                }
+                              },
+                              {
+                                "name": "l_suppkey",
+                                "type": {
+                                  "kind": "TYPE_KIND_I64"
+                                }
+                              },
+                              {
+                                "name": "l_quantity",
+                                "type": {
+                                  "kind": "TYPE_KIND_DECIMAL",
+                                  "precision": 15,
+                                  "scale": 2
+                                }
+                              },
+                              {
+                                "name": "l_extendedprice",
+                                "type": {
+                                  "kind": "TYPE_KIND_DECIMAL",
+                                  "precision": 15,
+                                  "scale": 2
+                                }
+                              },
+                              {
+                                "name": "l_discount",
+                                "type": {
+                                  "kind": "TYPE_KIND_DECIMAL",
+                                  "precision": 15,
+                                  "scale": 2
+                                }
+                              },
+                              {
+                                "name": "l_tax",
+                                "type": {
+                                  "kind": "TYPE_KIND_DECIMAL",
+                                  "precision": 15,
+                                  "scale": 2
+                                }
+                              },
+                              {
+                                "name": "l_returnflag",
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                }
+                              },
+                              {
+                                "name": "l_linestatus",
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                }
+                              },
+                              {
+                                "name": "l_shipdate",
+                                "type": {
+                                  "kind": "TYPE_KIND_DATE"
+                                }
+                              },
+                              {
+                                "name": "l_commitdate",
+                                "type": {
+                                  "kind": "TYPE_KIND_DATE"
+                                }
+                              },
+                              {
+                                "name": "l_receiptdate",
+                                "type": {
+                                  "kind": "TYPE_KIND_DATE"
+                                }
+                              },
+                              {
+                                "name": "l_shipinstruct",
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                }
+                              },
+                              {
+                                "name": "l_shipmode",
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                }
+                              },
+                              {
+                                "name": "l_comment",
+                                "type": {
+                                  "kind": "TYPE_KIND_STRING"
+                                }
+                              }
+                            ]
+                          },
+                          "estRowCount": 60000,
+                          "collations": [
+                            {
+                              "fields": [
+                                {
+                                  "expr": {
+                                    "type": {
+                                      "kind": "TYPE_KIND_I64"
+                                    },
+                                    "fieldRef": {}
+                                  },
+                                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                },
+                                {
+                                  "expr": {
+                                    "type": {
+                                      "kind": "TYPE_KIND_I32"
+                                    },
+                                    "fieldRef": {
+                                      "index": 1
+                                    }
+                                  },
+                                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                                }
+                              ]
+                            }
+                          ],
+                          "read": {
+                            "table": {
+                              "sourceId": "mem",
+                              "schema": "main",
+                              "table": "lineitem"
+                            },
+                            "projection": [
+                              0,
+                              1,
+                              2,
+                              3,
+                              4,
+                              5,
+                              6,
+                              7,
+                              8,
+                              9,
+                              10,
+                              11,
+                              12,
+                              13,
+                              14,
+                              15
+                            ]
+                          }
+                        },
+                        "exprs": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_I64"
+                            },
+                            "fieldRef": {}
+                          },
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_DATE"
+                            },
+                            "fieldRef": {
+                              "index": 10
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "condition": {
+                      "type": {
+                        "kind": "TYPE_KIND_BOOL"
+                      },
+                      "call": {
+                        "function": "FUNCTION_ID_LT",
+                        "args": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_I64"
+                            },
+                            "fieldRef": {}
+                          },
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_I64"
+                            },
+                            "literal": {
+                              "i64Value": "1000"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "exprs": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_DATE"
+                    },
+                    "call": {
+                      "args": [
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_DATE"
+                          },
+                          "fieldRef": {
+                            "index": 1
+                          }
+                        }
+                      ],
+                      "userFunction": "main.week_start"
+                    }
+                  }
+                ]
+              }
+            },
+            "groupings": [
+              {
+                "keys": [
+                  0
+                ]
+              }
+            ],
+            "measures": [
+              {
+                "function": "AGGREGATE_FUNCTION_ID_COUNT",
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_DATE"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

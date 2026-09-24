@@ -18,8 +18,23 @@ public sealed class CompositeInferenceTests
     /// <summary>Every nullability a field can have.</summary>
     public sealed record Mixed(string Label, int? Rank, Utf8String? Code, bool Flag);
 
-    /// <summary>A record with a field no composite can hold.</summary>
+    /// <summary>A record with a DECIMAL field, which D298 lets a composite hold.</summary>
     public readonly record struct Priced(Utf8String Name, decimal Amount);
+
+    /// <summary>Every widened kind as a field, and the nullability each CLR form carries (D298).</summary>
+    public sealed record Widened(
+        decimal Amount,
+        DateOnly Day,
+        TimeOnly? At,
+        DateTime Stamp,
+        DateTimeOffset Instant,
+        TimeSpan Span,
+        Guid Key,
+        ReadOnlyMemory<byte> Bytes,
+        byte[]? Blob);
+
+    /// <summary>A record with a property outside Tier 1 even as D298 widens it.</summary>
+    public readonly record struct Counted(Utf8String Name, ulong Count);
 
     /// <summary>A record one level too deep.</summary>
     public readonly record struct Nested(Classification Inner, int Rank);
@@ -120,9 +135,9 @@ public sealed class CompositeInferenceTests
     public void A_property_outside_tier_1_is_refused_naming_it()
     {
         var error = Assert.Throws<CatalogValidationException>(
-            () => Build(f => f.Scalar().Returns<Priced>()));
+            () => Build(f => f.Scalar().Returns<Counted>()));
 
-        Assert.Contains("property 'Amount' of Priced is Decimal", error.Message, StringComparison.Ordinal);
+        Assert.Contains("property 'Count' of Counted is UInt64", error.Message, StringComparison.Ordinal);
         Assert.Contains("functions (f)", error.Message, StringComparison.Ordinal);
     }
 
@@ -176,10 +191,55 @@ public sealed class CompositeInferenceTests
     [Fact]
     public void A_platform_value_type_is_not_read_as_a_record()
     {
+        // D298 makes decimal a Tier 1 type; a platform type outside the set is still not a record.
         var error = Assert.Throws<CatalogValidationException>(
-            () => Build(f => f.Scalar().Returns<decimal>()));
+            () => Build(f => f.Scalar().Returns<ulong>()));
 
-        Assert.Contains("Decimal has no inferred declared type", error.Message, StringComparison.Ordinal);
+        Assert.Contains("UInt64 has no inferred declared type", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Every_widened_clr_type_is_inferred_as_the_poco_source_infers_it()
+    {
+        // D298: the parameter, the result and a table function's column read a CLR type the same way,
+        // and the same way as an unannotated POCO member.
+        (Func<FunctionBuilder, FunctionBuilder> Declare, ChalkType Expected)[] cases =
+        [
+            (f => f.Scalar<decimal, decimal>("x"), ChalkType.Decimal(28, 10)),
+            (f => f.Scalar<DateOnly, DateOnly>("x"), ChalkType.Date()),
+            (f => f.Scalar<TimeOnly, TimeOnly>("x"), ChalkType.Time(6)),
+            (f => f.Scalar<DateTime, DateTime>("x"), ChalkType.Timestamp(9)),
+            (f => f.Scalar<DateTimeOffset, DateTimeOffset>("x"), ChalkType.TimestampTz(9)),
+            (f => f.Scalar<TimeSpan, TimeSpan>("x"), ChalkType.IntervalDay()),
+            (f => f.Scalar<Guid, Guid>("x"), ChalkType.Uuid()),
+            (f => f.Scalar<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>>("x"), ChalkType.Binary()),
+            (f => f.Scalar<byte[], byte[]>("x"), ChalkType.Binary()),
+        ];
+
+        foreach (var (declare, expected) in cases)
+        {
+            var descriptor = Build(declare);
+            Assert.Equal(expected.WithNullable(true), descriptor.Parameters[0].Type);
+            Assert.Equal(expected, descriptor.ReturnType);
+        }
+
+        var table = Build(f => f.TableFunction().Column<DateOnly>("day").Column<decimal>("amount"));
+        Assert.Equal(ChalkType.Date(), table.ReturnsTable[0].Type);
+        Assert.Equal(ChalkType.Decimal(28, 10), table.ReturnsTable[1].Type);
+    }
+
+    [Fact]
+    public void A_composite_s_fields_may_be_widened_kinds_nullable_as_their_clr_forms_are()
+    {
+        var descriptor = Build(f => f.Scalar().Returns<Widened>());
+
+        Assert.Equal(
+            "COMPOSITE(Amount DECIMAL(28,10), Day DATE, At TIME(6)?, Stamp TIMESTAMP(9), "
+            + "Instant TIMESTAMP_TZ(9), Span INTERVAL_DAY, Key UUID, Bytes BINARY, Blob BINARY?)",
+            IrTypes.Describe(descriptor.ReturnType!.Value.ToProto()));
+        Assert.Equal(
+            "COMPOSITE(Name STRING, Amount DECIMAL(28,10))",
+            IrTypes.Describe(Build(f => f.Scalar().Returns<Priced>()).ReturnType!.Value.ToProto()));
     }
 
     [Fact]

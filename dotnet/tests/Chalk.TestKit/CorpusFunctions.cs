@@ -86,6 +86,20 @@ public static class CorpusFunctions
             .AddFunction("close_range", f => f
                 .Aggregate<double, PriceRange>("x")
                 .Window()
+                .Client())
+
+            // Tier 1 widened (D298): a DECIMAL and a DATE, each written in its CLR spelling — a
+            // decimal and a DateOnly — rather than refused at registration.
+            .AddFunction("net_amount", f => f
+                .Scalar()
+                .Parameter("price", ChalkType.Decimal(15, 2, nullable: true))
+                .Parameter("discount", ChalkType.Decimal(15, 2, nullable: true))
+                .Returns(ChalkType.Decimal(15, 2))
+                .Strict()
+                .Client())
+            .AddFunction("week_start", f => f
+                .Scalar<DateOnly, DateOnly>("d")
+                .Strict()
                 .Client());
     }
 
@@ -168,6 +182,10 @@ public static class CorpusFunctions
             Finish = static s => s.Count == 0 ? null : new PriceRange(s.Low, s.High),
         });
 
+        // Tier 1 widened (D298): a decimal and a DateOnly in and out, allocating nothing.
+        registry.AddScalar<decimal, decimal, decimal>("net_amount", static (price, discount) => NetAmount(price, discount));
+        registry.AddScalar<DateOnly, DateOnly>("week_start", static d => WeekStart(d));
+
         // Tier 1 table function.
         registry.AddTable<long>(
             "generate_series",
@@ -202,6 +220,17 @@ public static class CorpusFunctions
     /// <summary><c>price_move</c> itself: a comparison and a subtraction, and nothing allocated.</summary>
     public static PriceMove Move(double open, double close) =>
         new(close > open ? Up : close < open ? Down : Flat, close - open);
+
+    /// <summary>
+    /// <c>net_amount</c>: a price less its discount, to the cent — the arithmetic a host writes in
+    /// <c>decimal</c> because a DECIMAL(15, 2) amount is exact there and in a double it is not.
+    /// </summary>
+    public static decimal NetAmount(decimal price, decimal discount) =>
+        decimal.Round(price * (1m - discount), 2, MidpointRounding.ToEven);
+
+    /// <summary><c>week_start</c>: the Monday on or before a day, as a DATE.</summary>
+    public static DateOnly WeekStart(DateOnly day) =>
+        day.AddDays(-(((int)day.DayOfWeek + 6) % 7));
 
     /// <summary>What <c>as_of()</c> answers: fixed, so the corpus is deterministic.</summary>
     public static readonly DateTime AsOf = new(2026, 3, 1, 12, 0, 0, DateTimeKind.Utc);

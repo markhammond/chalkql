@@ -376,6 +376,81 @@ public sealed class UserFunctionEngineTests(SharedSidecar sidecar)
     /// <summary>The owner's record with its second field renamed.</summary>
     public readonly record struct Scored(Utf8String Category, double Score);
 
+    // ---- Tier 1 widened: the owner's classifier over a DECIMAL amount (D298) ----
+
+    /// <summary>A transaction as most schemas hold one: the amount a DECIMAL(18, 2), sometimes missing.</summary>
+    private sealed record Posting(
+        long Id,
+        Utf8String Description,
+        [property: ChalkColumn(Precision = 18, Scale = 2)] decimal? Amount);
+
+    private static readonly Posting[] Postings =
+    [
+        .. Enumerable.Range(0, 50).Select(i => new Posting(
+            i, i % 2 == 0 ? Large : Small, i % 5 == 4 ? null : (i * 7.5m) + 0.01m)),
+    ];
+
+    private static Classification ClassifyAmount(decimal amount) =>
+        new(amount >= 100m ? Large : Small, (double)Math.Min(1m, amount / 1000m));
+
+    /// <summary>
+    /// The owner's classifier written as <c>Func&lt;Utf8String, decimal, Classification&gt;</c> over a
+    /// <c>DECIMAL(18, 2)</c> amount, which before D298 was refused at registration: the delegate reads
+    /// the amount exactly, and the owner's two-field query calls it once per row that reaches it.
+    /// </summary>
+    [Fact]
+    public async Task The_owner_s_classifier_reads_a_decimal_amount_as_a_clr_decimal()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+
+        var counter = new Counter();
+        var seen = new List<decimal>();
+        var source = new PocoSourceBuilder("mem")
+            .AddTable("transactions", Postings)
+            .AddFunction("classify_transaction", f => f
+                .Scalar()
+                .Parameter<Utf8String>("description")
+                .Parameter("amount", Chalk.Catalog.ChalkType.Decimal(18, 2, nullable: true))
+                .Returns<Classification>()
+                .Strict()
+                .Client())
+            .Build();
+        await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+        {
+            ContextId = "decimal-amount",
+            Sources = [source],
+            Functions = registry => registry.AddScalar<Utf8String, decimal, Classification>(
+                "classify_transaction",
+                (description, amount) =>
+                {
+                    counter.Calls++;
+                    seen.Add(amount);
+                    return ClassifyAmount(amount);
+                }),
+            Planner = sidecar.CreatePlanner(),
+        });
+
+        var prepared = await engine.PrepareAsync(
+            "SELECT id,"
+            + " classify_transaction(description, amount).category AS category,"
+            + " classify_transaction(description, amount).confidence AS confidence"
+            + " FROM transactions ORDER BY id");
+        var rows = await RowsAsync(engine, prepared);
+
+        Assert.Equal(Postings.Length, rows.Count);
+        foreach (var row in rows)
+        {
+            var amount = Postings[(int)(long)row[0]!].Amount;
+            Assert.Equal(amount is { } a ? ClassifyAmount(a).Category.ToString() : null, row[1]);
+            Assert.Equal(amount is { } b ? ClassifyAmount(b).Confidence : null, (double?)row[2]);
+        }
+
+        Assert.Equal(Postings.Count(p => p.Amount is not null), counter.Calls);
+        Assert.Equal(
+            Postings.Where(p => p.Amount is not null).Select(p => p.Amount!.Value).Order(),
+            seen.Order());
+    }
+
     private static readonly Transaction[] Transactions =
     [
         .. Enumerable.Range(0, 50).Select(i => new Transaction(

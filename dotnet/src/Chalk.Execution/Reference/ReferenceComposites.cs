@@ -20,8 +20,11 @@ internal static class ReferenceComposites
 {
     private static readonly ConcurrentDictionary<Type, Func<object, object?>[]> Accessors = new();
 
-    /// <summary>A boxed record, or null, as the reference's composite value.</summary>
-    public static object?[]? FromRecord(object? boxed)
+    /// <summary>
+    /// A boxed record, or null, as the reference's composite value: each field in the storage
+    /// vocabulary, converted — and refused — as the vectorised engine writes the field's lane (D298).
+    /// </summary>
+    public static object?[]? FromRecord(object? boxed, ChalkType declared, string owner)
     {
         if (boxed is null)
         {
@@ -32,22 +35,14 @@ internal static class ReferenceComposites
         var fields = new object?[accessors.Length];
         for (var i = 0; i < fields.Length; i++)
         {
-            fields[i] = Normalise(accessors[i](boxed));
+            var field = declared.Fields[i];
+            fields[i] = Expressions.ClrBoxes.ToStorage(
+                accessors[i](boxed),
+                new Expressions.LaneFormat(field.Type, $"field '{field.Name}' of {owner}"));
         }
 
         return fields;
     }
-
-    /// <summary>One field's boxed CLR value in the reference's representation.</summary>
-    private static object? Normalise(object? value) => value switch
-    {
-        null => null,
-        Utf8String text => text.ToString(),
-        sbyte v => (long)v,
-        short v => (long)v,
-        int v => (long)v,
-        _ => value,
-    };
 
     private static Func<object, object?>[] Compile(Type record)
     {
@@ -67,11 +62,21 @@ internal static class ReferenceComposites
         return accessors;
     }
 
-    /// <summary>A boxed aggregate whose <c>Finish</c> answers a record, answering the composite value instead.</summary>
-    public sealed class Aggregate(IBoxedAggregate inner) : IBoxedAggregate
+    /// <summary>
+    /// A boxed aggregate in the storage vocabulary: its input handed to <c>Add</c> in the delegate's
+    /// own CLR spelling (D298), and <c>Finish</c>'s answer converted back — a record into the
+    /// reference's composite value (D291), a scalar as the vectorised engine writes its lane.
+    /// </summary>
+    public sealed class Converted(
+        IBoxedAggregate inner, ChalkType inputType, Type inputClr, ChalkType resultType, string name)
+        : IBoxedAggregate
     {
-        public void Add(object? value) => inner.Add(value);
+        public void Add(object? value) =>
+            inner.Add(Expressions.ClrBoxes.ToClr(value, inputType, inputClr));
 
-        public object? Finish() => FromRecord(inner.Finish());
+        public object? Finish() => resultType.Kind == Ir.TypeKind.Composite
+            ? FromRecord(inner.Finish(), resultType, $"the result of '{name}'")
+            : Expressions.ClrBoxes.ToStorage(
+                inner.Finish(), new Expressions.LaneFormat(resultType, $"the result of '{name}'"));
     }
 }

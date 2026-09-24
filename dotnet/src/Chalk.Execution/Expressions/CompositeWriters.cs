@@ -50,14 +50,14 @@ internal static class CompositeWriters
     /// The binding check has already compared the record with the declaration field by field, so the
     /// properties read here are the fields, in the declaration's order.
     /// </summary>
-    public static CompositeWriter<TOut> For<TOut>(ChalkType declared)
+    public static CompositeWriter<TOut> For<TOut>(ChalkType declared, string owner)
     {
         var underlying = Nullable.GetUnderlyingType(typeof(TOut));
         var record = underlying ?? typeof(TOut);
         var recordWriter = typeof(CompositeWriters)
             .GetMethod(nameof(RecordWriter), BindingFlags.NonPublic | BindingFlags.Static)!
             .MakeGenericMethod(record)
-            .Invoke(null, [declared])!;
+            .Invoke(null, [declared, owner])!;
 
         if (underlying is null)
         {
@@ -68,7 +68,7 @@ internal static class CompositeWriters
             typeof(NullableRecordWriter<>).MakeGenericType(record), recordWriter)!;
     }
 
-    private static RecordWriter<TRecord> RecordWriter<TRecord>(ChalkType declared)
+    private static RecordWriter<TRecord> RecordWriter<TRecord>(ChalkType declared, string owner)
     {
         var properties = CompositeInference.Properties(typeof(TRecord));
         if (properties.Count != declared.Fields.Count)
@@ -81,14 +81,16 @@ internal static class CompositeWriters
         var fields = new FieldWriter<TRecord>[properties.Count];
         for (var i = 0; i < fields.Length; i++)
         {
-            fields[i] = Field<TRecord>(properties[i], declared.Fields[i].Type.Nullable);
+            fields[i] = Field<TRecord>(
+                properties[i],
+                new LaneFormat(declared.Fields[i].Type, $"field '{declared.Fields[i].Name}' of {owner}"));
         }
 
         return new RecordWriter<TRecord>(fields);
     }
 
-    /// <summary>One field's writer: the property's compiled getter, and the field's nullability.</summary>
-    private static FieldWriter<TRecord> Field<TRecord>(PropertyInfo property, bool nullable)
+    /// <summary>One field's writer: the property's compiled getter, and the field's lane format.</summary>
+    private static FieldWriter<TRecord> Field<TRecord>(PropertyInfo property, LaneFormat format)
     {
         var parameter = Expression.Parameter(typeof(TRecord), "record");
         var getter = Expression.Lambda(
@@ -100,7 +102,7 @@ internal static class CompositeWriters
         return (FieldWriter<TRecord>)Activator.CreateInstance(
             typeof(FieldWriter<,>).MakeGenericType(typeof(TRecord), property.PropertyType),
             getter,
-            nullable)!;
+            format)!;
     }
 }
 
@@ -186,13 +188,17 @@ internal sealed class FieldWriter<TRecord, TField> : FieldWriter<TRecord>
 
     private readonly Func<TRecord, TField> _get;
     private readonly bool _nullable;
+
+    /// <summary>The field's lane format (D298): its declared type, and whose field it is.</summary>
+    private readonly LaneFormat _format;
     private ColumnWriter? _column;
     private int _length;
 
-    public FieldWriter(Func<TRecord, TField> get, bool nullable)
+    public FieldWriter(Func<TRecord, TField> get, LaneFormat format)
     {
         _get = get;
-        _nullable = nullable;
+        _format = format;
+        _nullable = format.Type.Nullable;
     }
 
     public override void Begin(ColumnWriter field, int length)
@@ -230,7 +236,7 @@ internal sealed class FieldWriter<TRecord, TField> : FieldWriter<TRecord>
             return;
         }
 
-        LaneCodec.Write(column, _length, row, value);
+        LaneCodec.Write(column, _length, row, value, in _format);
         if (_nullable)
         {
             column.SetValid(row);
@@ -257,8 +263,9 @@ internal sealed class FieldWriter<TRecord, TField> : FieldWriter<TRecord>
         if (!_nullable)
         {
             // A non-nullable field under a NULL composite holds its type's default, never garbage from
-            // the previous batch — and never a NULL, which its column may not have.
-            LaneCodec.Write(column, _length, row, default(TField)!);
+            // the previous batch — and never a NULL, which its column may not have. The default is the
+            // zero lane, which needs no conversion: default(DateTime) is not a TIMESTAMP (D298).
+            LaneCodec.WriteZero(column, _length, row, _format.Type);
         }
     }
 }
@@ -278,7 +285,7 @@ internal abstract class CompositeEmitter<TOut>
 /// <summary>Builds a <see cref="CompositeEmitter{TOut}"/>, once, when the aggregate is bound.</summary>
 internal static class CompositeEmitters
 {
-    public static CompositeEmitter<TOut> For<TOut>(ChalkType declared)
+    public static CompositeEmitter<TOut> For<TOut>(ChalkType declared, string owner)
     {
         var underlying = Nullable.GetUnderlyingType(typeof(TOut));
         var record = underlying ?? typeof(TOut);
@@ -303,7 +310,8 @@ internal static class CompositeEmitters
             fields.SetValue(
                 Activator.CreateInstance(
                     typeof(FieldEmitter<,>).MakeGenericType(record, properties[i].PropertyType),
-                    getter),
+                    getter,
+                    new LaneFormat(declared.Fields[i].Type, $"field '{declared.Fields[i].Name}' of {owner}")),
                 i);
         }
 
@@ -372,7 +380,14 @@ internal sealed class FieldEmitter<TRecord, TField> : FieldEmitter<TRecord>
 {
     private readonly Func<TRecord, TField> _get;
 
-    public FieldEmitter(Func<TRecord, TField> get) => _get = get;
+    /// <summary>The field's lane format (D298).</summary>
+    private readonly LaneFormat _format;
+
+    public FieldEmitter(Func<TRecord, TField> get, LaneFormat format)
+    {
+        _get = get;
+        _format = format;
+    }
 
     public override void Emit(Vectors.ColumnCopier field, TRecord record)
     {
@@ -415,8 +430,37 @@ internal sealed class FieldEmitter<TRecord, TField> : FieldEmitter<TRecord>
             return;
         }
 
+        if (typeof(TField) == typeof(ReadOnlyMemory<byte>))
+        {
+            // D298: a BINARY field's bytes, allocation-free.
+            field.AppendRaw(Unsafe.As<TField, ReadOnlyMemory<byte>>(ref value).Span, valid: true);
+            return;
+        }
+
+        if (typeof(TField) == typeof(ReadOnlyMemory<byte>?))
+        {
+            var bytes = Unsafe.As<TField, ReadOnlyMemory<byte>?>(ref value);
+            if (bytes is { } present)
+            {
+                field.AppendRaw(present.Span, valid: true);
+            }
+            else
+            {
+                field.AppendRaw(default, valid: false);
+            }
+
+            return;
+        }
+
+        if (typeof(TField) == typeof(byte[]))
+        {
+            var array = Unsafe.As<TField, byte[]?>(ref value);
+            field.AppendRaw(array, valid: array is not null);
+            return;
+        }
+
         Span<byte> lane = stackalloc byte[16];
-        var valid = LaneCodec.WriteLane(lane, value);
+        var valid = LaneCodec.WriteLane(lane, value, in _format);
         field.AppendRaw(lane, valid);
     }
 

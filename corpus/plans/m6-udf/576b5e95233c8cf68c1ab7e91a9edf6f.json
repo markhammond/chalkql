@@ -1,0 +1,203 @@
+{
+  "irVersion": 1,
+  "planDigest": "4097870765984453089",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "week",
+        "type": {
+          "kind": "TYPE_KIND_DATE"
+        }
+      },
+      {
+        "name": "lines",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "week",
+          "type": {
+            "kind": "TYPE_KIND_DATE"
+          }
+        },
+        {
+          "name": "lines",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 1567.1814306410904,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_DATE"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "week",
+              "type": {
+                "kind": "TYPE_KIND_DATE"
+              }
+            },
+            {
+              "name": "lines",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            }
+          ]
+        },
+        "estRowCount": 1567.1814306410904,
+        "hashAggregate": {
+          "aggregate": {
+            "input": {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "week",
+                    "type": {
+                      "kind": "TYPE_KIND_DATE"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 4000,
+              "project": {
+                "input": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "l_orderkey",
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        }
+                      },
+                      {
+                        "name": "l_shipdate",
+                        "type": {
+                          "kind": "TYPE_KIND_DATE"
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 4000,
+                  "collations": [
+                    {
+                      "fields": [
+                        {
+                          "expr": {
+                            "type": {
+                              "kind": "TYPE_KIND_I64"
+                            },
+                            "fieldRef": {}
+                          },
+                          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                        }
+                      ]
+                    }
+                  ],
+                  "indexLookup": {
+                    "table": {
+                      "sourceId": "mem",
+                      "schema": "main",
+                      "table": "lineitem"
+                    },
+                    "index": "ix_lineitem_l_orderkey",
+                    "ranges": [
+                      {
+                        "lowerInclusive": true,
+                        "upper": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_I64"
+                            },
+                            "literal": {
+                              "i64Value": "1000"
+                            }
+                          }
+                        ]
+                      }
+                    ],
+                    "projection": [
+                      0,
+                      10
+                    ]
+                  }
+                },
+                "exprs": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_DATE"
+                    },
+                    "call": {
+                      "args": [
+                        {
+                          "type": {
+                            "kind": "TYPE_KIND_DATE"
+                          },
+                          "fieldRef": {
+                            "index": 1
+                          }
+                        }
+                      ],
+                      "userFunction": "main.week_start"
+                    }
+                  }
+                ]
+              }
+            },
+            "groupings": [
+              {
+                "keys": [
+                  0
+                ]
+              }
+            ],
+            "measures": [
+              {
+                "function": "AGGREGATE_FUNCTION_ID_COUNT",
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_DATE"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

@@ -92,21 +92,50 @@ public sealed class UserFunctionTests
     [InlineData(TypeKind.Fp32, "Single")]
     [InlineData(TypeKind.Fp64, "Double")]
     [InlineData(TypeKind.String, "String")]
-    [InlineData(TypeKind.Date, "Int32")]
-    [InlineData(TypeKind.Timestamp, "Int64")]
+    [InlineData(TypeKind.Date, "DateOnly")]
+    [InlineData(TypeKind.Time, "TimeOnly")]
+    [InlineData(TypeKind.Timestamp, "DateTime")]
+    [InlineData(TypeKind.TimestampTz, "DateTimeOffset")]
+    [InlineData(TypeKind.IntervalDay, "TimeSpan")]
+    [InlineData(TypeKind.Uuid, "Guid")]
+    [InlineData(TypeKind.Binary, "ReadOnlyMemory`1")]
+    [InlineData(TypeKind.IntervalYear, "Int32")]
     public void Every_supported_declared_kind_has_the_clr_type_a_delegate_writes(
         TypeKind kind, string clr)
     {
-        var type = new ChalkType(kind, Nullable: true);
+        var type = new ChalkType(kind, Nullable: true, Precision: kind is TypeKind.Time ? 6 : 9);
         Assert.Equal(clr, LaneCodec.ClrTypeOf(type)!.Name);
-        Assert.Contains(clr, LaneCodec.Describe(type), StringComparison.Ordinal);
+        Assert.Contains(clr.Replace("`1", "<Byte>", StringComparison.Ordinal), LaneCodec.Describe(type), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_decimal_of_up_to_28_digits_is_a_clr_decimal()
+    {
+        Assert.Equal(typeof(decimal), LaneCodec.ClrTypeOf(ChalkType.Decimal(18, 2)));
+        Assert.Equal(typeof(decimal), LaneCodec.ClrTypeOf(ChalkType.Decimal(28, 10)));
     }
 
     [Fact]
     public void A_kind_tier_1_cannot_carry_says_so_and_points_at_tier_2()
     {
-        Assert.Null(LaneCodec.ClrTypeOf(ChalkType.Decimal()));
-        Assert.Contains("Tier 2", LaneCodec.Describe(ChalkType.Decimal()), StringComparison.Ordinal);
+        // D298: a DECIMAL wider than a CLR decimal's 28 digits, and a LIST, have no Tier 1 spelling.
+        Assert.Null(LaneCodec.ClrTypeOf(ChalkType.Decimal(38, 2)));
+        Assert.Contains("Tier 2", LaneCodec.Describe(ChalkType.Decimal(38, 2)), StringComparison.Ordinal);
+        Assert.Null(LaneCodec.ClrTypeOf(ChalkType.List(ChalkType.Int64())));
+        Assert.Contains("Tier 2", LaneCodec.Describe(ChalkType.List(ChalkType.Int64())), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_temporal_may_still_be_spelled_as_its_raw_count()
+    {
+        // What a delegate wrote before D298 keeps working: int days, long units.
+        Assert.True(LaneCodec.Accepts(typeof(int), ChalkType.Date()));
+        Assert.True(LaneCodec.Accepts(typeof(long), ChalkType.Timestamp(9)));
+        Assert.True(LaneCodec.Accepts(typeof(long?), ChalkType.Time(6)));
+        Assert.True(LaneCodec.Accepts(typeof(long), ChalkType.IntervalDay()));
+        Assert.True(LaneCodec.Accepts(typeof(byte[]), ChalkType.Binary()));
+        Assert.False(LaneCodec.Accepts(typeof(decimal), ChalkType.Decimal(38, 2)));
+        Assert.False(LaneCodec.Accepts(typeof(DateTime), ChalkType.Date()));
     }
 
     // ---- the aggregate protocol ----
@@ -151,7 +180,7 @@ public sealed class UserFunctionTests
         using var arena = new ExecutionArena();
         arena.BeginExecution();
         var accumulator = new UserAggregateAccumulator<double, double, double?>(
-            ChalkType.Float64(nullable: true), Summing());
+            ChalkType.Float64(nullable: true), ChalkType.Float64(nullable: true), "summing", Summing());
         accumulator.Begin(arena);
         try
         {
@@ -196,7 +225,7 @@ public sealed class UserFunctionTests
         using var arena = new ExecutionArena();
         arena.BeginExecution();
         var accumulator = new UserAggregateAccumulator<double, double, double?>(
-            ChalkType.Float64(nullable: true), NullWhenEmpty());
+            ChalkType.Float64(nullable: true), ChalkType.Float64(nullable: true), "null_when_empty", NullWhenEmpty());
         accumulator.Begin(arena);
         try
         {

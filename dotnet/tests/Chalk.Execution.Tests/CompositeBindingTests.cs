@@ -22,6 +22,9 @@ public sealed class CompositeBindingTests
 
     public readonly record struct Priced(Utf8String Name, decimal Amount);
 
+    /// <summary>A record with a property outside Tier 1 even as D298 widens it.</summary>
+    public readonly record struct Counted(Utf8String Name, ulong Count);
+
     public readonly record struct Summary(double Total, long Count);
 
     public struct SummaryState
@@ -112,11 +115,11 @@ public sealed class CompositeBindingTests
     {
         var error = Assert.Throws<InvalidOperationException>(() => UserFunctionBinding.Check(
             Classify(),
-            new HostScalar2<Utf8String, double, Priced>(
-                "classify_transaction", static (d, a) => new Priced(d, (decimal)a)),
+            new HostScalar2<Utf8String, double, Counted>(
+                "classify_transaction", static (d, a) => new Counted(d, (ulong)a)),
             "test"));
 
-        Assert.Contains("property 'Amount' of Priced is Decimal", error.Message, StringComparison.Ordinal);
+        Assert.Contains("property 'Count' of Counted is UInt64", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

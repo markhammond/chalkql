@@ -37,19 +37,29 @@ internal sealed class WindowUserAggregateEvaluator<TState, TIn, TOut> : WindowVa
     /// </summary>
     private readonly CompositeEmitter<TOut>? _composite;
     private readonly ColumnCopier? _records;
+
+    /// <summary>The input's and the result's lane formats (D298).</summary>
+    private readonly LaneFormat _input;
+    private readonly LaneFormat _result;
     private ColumnView _recordView;
     private bool _recordsFinished;
     private int _written;
 
     public WindowUserAggregateEvaluator(
-        ChalkType resultType, AggregateSpec<TState, TIn, TOut> spec, int valueColumn)
+        ChalkType inputType,
+        ChalkType resultType,
+        string name,
+        AggregateSpec<TState, TIn, TOut> spec,
+        int valueColumn)
         : base(resultType)
     {
         _spec = spec;
         _valueColumn = valueColumn;
+        _input = new LaneFormat(inputType, $"the input of '{name}'");
+        _result = new LaneFormat(resultType, $"the result of '{name}'");
         if (resultType.Kind == Ir.TypeKind.Composite)
         {
-            _composite = CompositeEmitters.For<TOut>(resultType);
+            _composite = CompositeEmitters.For<TOut>(resultType, $"the result of '{name}'");
             _records = new ColumnCopier(resultType);
         }
     }
@@ -157,7 +167,7 @@ internal sealed class WindowUserAggregateEvaluator<TState, TIn, TOut> : WindowVa
     {
         if (column.IsValid(row))
         {
-            _spec.Add(ref state, LaneCodec.Read<TIn>(column.View, row));
+            _spec.Add(ref state, LaneCodec.Read<TIn>(column.View, row, in _input));
         }
     }
 
@@ -165,7 +175,7 @@ internal sealed class WindowUserAggregateEvaluator<TState, TIn, TOut> : WindowVa
     {
         if (column.IsValid(row))
         {
-            _spec.Remove!(ref state, LaneCodec.Read<TIn>(column.View, row));
+            _spec.Remove!(ref state, LaneCodec.Read<TIn>(column.View, row, in _input));
         }
     }
 
@@ -173,7 +183,7 @@ internal sealed class WindowUserAggregateEvaluator<TState, TIn, TOut> : WindowVa
     {
         if (_composite is null)
         {
-            Valid[row] = LaneCodec.WriteRaw(Lane(row), _spec.Finish(state));
+            Valid[row] = LaneCodec.WriteRaw(Lane(row), _spec.Finish(state), in _result);
             return;
         }
 
@@ -194,16 +204,20 @@ internal sealed class WindowUserAggregateEvaluator<TState, TIn, TOut> : WindowVa
 /// <summary>Builds the frame evaluator for one registered aggregate, types known statically.</summary>
 internal sealed class WindowUserAggregateFactory : IHostAggregateVisitor<WindowCallEvaluator>
 {
+    private readonly ChalkType _inputType;
     private readonly ChalkType _resultType;
+    private readonly string _name;
     private readonly int _valueColumn;
 
-    public WindowUserAggregateFactory(ChalkType resultType, int valueColumn)
+    public WindowUserAggregateFactory(ChalkType inputType, ChalkType resultType, string name, int valueColumn)
     {
+        _inputType = inputType;
         _resultType = resultType;
+        _name = name;
         _valueColumn = valueColumn;
     }
 
     public WindowCallEvaluator Visit<TState, TIn, TOut>(AggregateSpec<TState, TIn, TOut> spec)
         where TState : struct =>
-        new WindowUserAggregateEvaluator<TState, TIn, TOut>(_resultType, spec, _valueColumn);
+        new WindowUserAggregateEvaluator<TState, TIn, TOut>(_inputType, _resultType, _name, spec, _valueColumn);
 }

@@ -211,6 +211,19 @@ public final class TestCatalogs {
             .setWindow(true)
             .addParameters(parameter("x", d))
             .setClient(chalk.ir.v1.ClientBody.getDefaultInstance())
+            .build(),
+
+        // Tier 1 widened (D298): a DECIMAL and a DATE, written in the host's decimal and DateOnly.
+        scalar("net_amount", decimal(15, 2, false))
+            .setStrict(true)
+            .addParameters(parameter("price", decimal(15, 2, true)))
+            .addParameters(parameter("discount", decimal(15, 2, true)))
+            .setClient(chalk.ir.v1.ClientBody.getDefaultInstance())
+            .build(),
+        scalar("week_start", type(TypeKind.TYPE_KIND_DATE))
+            .setStrict(true)
+            .addParameters(parameter("d", nullable(TypeKind.TYPE_KIND_DATE)))
+            .setClient(chalk.ir.v1.ClientBody.getDefaultInstance())
             .build());
   }
 

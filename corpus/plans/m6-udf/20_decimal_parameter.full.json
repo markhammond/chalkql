@@ -1,0 +1,317 @@
+{
+  "irVersion": 1,
+  "planDigest": "1747274563128414785",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "l_orderkey",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      },
+      {
+        "name": "l_linenumber",
+        "type": {
+          "kind": "TYPE_KIND_I32"
+        }
+      },
+      {
+        "name": "net",
+        "type": {
+          "kind": "TYPE_KIND_DECIMAL",
+          "precision": 15,
+          "scale": 2
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "l_orderkey",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        },
+        {
+          "name": "l_linenumber",
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          }
+        },
+        {
+          "name": "net",
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "precision": 15,
+            "scale": 2
+          }
+        }
+      ]
+    },
+    "estRowCount": 396.39639639639637,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          },
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "project": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "l_orderkey",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            },
+            {
+              "name": "l_linenumber",
+              "type": {
+                "kind": "TYPE_KIND_I32"
+              }
+            },
+            {
+              "name": "l_extendedprice",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              }
+            },
+            {
+              "name": "l_discount",
+              "type": {
+                "kind": "TYPE_KIND_DECIMAL",
+                "precision": 15,
+                "scale": 2
+              }
+            }
+          ]
+        },
+        "estRowCount": 396.39639639639637,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_I64"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_I32"
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "sort": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "l_orderkey",
+                  "type": {
+                    "kind": "TYPE_KIND_I64"
+                  }
+                },
+                {
+                  "name": "l_linenumber",
+                  "type": {
+                    "kind": "TYPE_KIND_I32"
+                  }
+                },
+                {
+                  "name": "l_extendedprice",
+                  "type": {
+                    "kind": "TYPE_KIND_DECIMAL",
+                    "precision": 15,
+                    "scale": 2
+                  }
+                },
+                {
+                  "name": "l_discount",
+                  "type": {
+                    "kind": "TYPE_KIND_DECIMAL",
+                    "precision": 15,
+                    "scale": 2
+                  }
+                }
+              ]
+            },
+            "estRowCount": 396.39639639639637,
+            "collations": [
+              {
+                "fields": [
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_I64"
+                      },
+                      "fieldRef": {}
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  }
+                ]
+              }
+            ],
+            "indexLookup": {
+              "table": {
+                "sourceId": "mem",
+                "schema": "main",
+                "table": "lineitem"
+              },
+              "index": "ix_lineitem_l_orderkey",
+              "ranges": [
+                {
+                  "lowerInclusive": true,
+                  "upper": [
+                    {
+                      "type": {
+                        "kind": "TYPE_KIND_I64"
+                      },
+                      "literal": {
+                        "i64Value": "100"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "projection": [
+                0,
+                1,
+                5,
+                6
+              ]
+            }
+          },
+          "fields": [
+            {
+              "expr": {
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                },
+                "fieldRef": {}
+              },
+              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+            },
+            {
+              "expr": {
+                "type": {
+                  "kind": "TYPE_KIND_I32"
+                },
+                "fieldRef": {
+                  "index": 1
+                }
+              },
+              "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+            }
+          ]
+        }
+      },
+      "exprs": [
+        {
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          },
+          "fieldRef": {}
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_I32"
+          },
+          "fieldRef": {
+            "index": 1
+          }
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_DECIMAL",
+            "precision": 15,
+            "scale": 2
+          },
+          "call": {
+            "args": [
+              {
+                "type": {
+                  "kind": "TYPE_KIND_DECIMAL",
+                  "precision": 15,
+                  "scale": 2
+                },
+                "cast": {
+                  "input": {
+                    "type": {
+                      "kind": "TYPE_KIND_DECIMAL",
+                      "precision": 15,
+                      "scale": 2
+                    },
+                    "fieldRef": {
+                      "index": 2
+                    }
+                  },
+                  "onFailure": "CAST_FAILURE_ERROR"
+                }
+              },
+              {
+                "type": {
+                  "kind": "TYPE_KIND_DECIMAL",
+                  "precision": 15,
+                  "scale": 2
+                },
+                "cast": {
+                  "input": {
+                    "type": {
+                      "kind": "TYPE_KIND_DECIMAL",
+                      "precision": 15,
+                      "scale": 2
+                    },
+                    "fieldRef": {
+                      "index": 3
+                    }
+                  },
+                  "onFailure": "CAST_FAILURE_ERROR"
+                }
+              }
+            ],
+            "userFunction": "main.net_amount"
+          }
+        }
+      ]
+    }
+  }
+}

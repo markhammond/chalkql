@@ -28,11 +28,20 @@ internal sealed class UserAggregateAccumulator<TState, TIn, TOut> : MeasureAccum
     /// </summary>
     private readonly CompositeEmitter<TOut>? _composite;
 
-    public UserAggregateAccumulator(ChalkType resultType, AggregateSpec<TState, TIn, TOut> spec)
+    /// <summary>The input's and the result's lane formats (D298).</summary>
+    private readonly LaneFormat _input;
+    private readonly LaneFormat _result;
+
+    public UserAggregateAccumulator(
+        ChalkType inputType, ChalkType resultType, string name, AggregateSpec<TState, TIn, TOut> spec)
         : base(resultType)
     {
         _spec = spec;
-        _composite = resultType.Kind == Ir.TypeKind.Composite ? CompositeEmitters.For<TOut>(resultType) : null;
+        _input = new LaneFormat(inputType, $"the input of '{name}'");
+        _result = new LaneFormat(resultType, $"the result of '{name}'");
+        _composite = resultType.Kind == Ir.TypeKind.Composite
+            ? CompositeEmitters.For<TOut>(resultType, $"the result of '{name}'")
+            : null;
     }
 
     public override void EnsureCapacity(int groups)
@@ -63,7 +72,7 @@ internal sealed class UserAggregateAccumulator<TState, TIn, TOut> : MeasureAccum
             return;
         }
 
-        _spec.Add(ref _states[group], LaneCodec.ReadRaw<TIn>(lane));
+        _spec.Add(ref _states[group], LaneCodec.ReadRaw<TIn>(lane, in _input));
     }
 
     public override void Emit(ColumnCopier copier, int group)
@@ -77,7 +86,7 @@ internal sealed class UserAggregateAccumulator<TState, TIn, TOut> : MeasureAccum
         }
 
         Span<byte> lane = stackalloc byte[ResultWidth];
-        var valid = LaneCodec.WriteRaw(lane, _spec.Finish(state));
+        var valid = LaneCodec.WriteRaw(lane, _spec.Finish(state), in _result);
         copier.AppendRaw(lane, valid);
     }
 }
@@ -85,11 +94,18 @@ internal sealed class UserAggregateAccumulator<TState, TIn, TOut> : MeasureAccum
 /// <summary>Builds the accumulator for one registered aggregate, with its types known statically.</summary>
 internal sealed class UserAggregateFactory : IHostAggregateVisitor<MeasureAccumulator>
 {
+    private readonly ChalkType _inputType;
     private readonly ChalkType _resultType;
+    private readonly string _name;
 
-    public UserAggregateFactory(ChalkType resultType) => _resultType = resultType;
+    public UserAggregateFactory(ChalkType inputType, ChalkType resultType, string name)
+    {
+        _inputType = inputType;
+        _resultType = resultType;
+        _name = name;
+    }
 
     public MeasureAccumulator Visit<TState, TIn, TOut>(AggregateSpec<TState, TIn, TOut> spec)
         where TState : struct =>
-        new UserAggregateAccumulator<TState, TIn, TOut>(_resultType, spec);
+        new UserAggregateAccumulator<TState, TIn, TOut>(_inputType, _resultType, _name, spec);
 }
