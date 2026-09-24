@@ -158,6 +158,42 @@ public sealed class ArrowTypeMappingTests
         Assert.Contains("docs/design/02-ir.md §3", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A COMPOSITE is an Arrow struct (D291): one child field per composite field, named as declared and
+    /// nullable as declared, the composite's own nullability on the column's field.
+    /// </summary>
+    [Fact]
+    public void A_composite_round_trips_through_arrow_with_its_fields_named_and_nullable_as_declared()
+    {
+        var classification = ChalkType.Composite(
+            [new CompositeField("Category", ChalkType.String()), new CompositeField("Confidence", ChalkType.Float64(nullable: true))],
+            nullable: true);
+
+        var arrow = Assert.IsType<StructType>(ArrowTypeMapping.ToArrow(classification));
+
+        Assert.Equal(["Category", "Confidence"], arrow.Fields.Select(f => f.Name));
+        Assert.Equal([false, true], arrow.Fields.Select(f => f.IsNullable));
+        Assert.IsType<StringType>(arrow.Fields[0].DataType);
+        Assert.IsType<DoubleType>(arrow.Fields[1].DataType);
+        Assert.Equal(classification, ArrowTypeMapping.FromArrow(arrow, nullable: true));
+        Assert.Equal(classification.WithNullable(false), ArrowTypeMapping.FromArrow(arrow, nullable: false));
+    }
+
+    /// <summary>The output string layout reaches a composite value's STRING fields as it reaches a list's element.</summary>
+    [Theory]
+    [InlineData(StringLayouts.Utf8View, typeof(StringViewType))]
+    [InlineData(StringLayouts.Utf8, typeof(StringType))]
+    public void The_string_layout_reaches_a_composite_s_fields(StringLayouts layout, System.Type expected)
+    {
+        var classification = ChalkType.Composite(
+            new CompositeField("Category", ChalkType.String()), new CompositeField("Confidence", ChalkType.Float64()));
+
+        var arrow = Assert.IsType<StructType>(ArrowTypeMapping.ToArrow(classification, layout));
+
+        Assert.IsType(expected, arrow.Fields[0].DataType);
+        Assert.IsType<DoubleType>(arrow.Fields[1].DataType);
+    }
+
     /// <summary>A LIST does round-trip since D58; it is exactly one level deep.</summary>
     [Fact]
     public void A_list_round_trips_through_arrow()

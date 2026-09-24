@@ -71,8 +71,8 @@ internal sealed class OutputMaterialiser
     }
 
     /// <summary>
-    /// The STRING layout a declared field names, a LIST's element included. A field that holds no
-    /// STRING answers <see cref="StringLayouts.Utf8"/>, which nothing then reads.
+    /// The STRING layout a declared field names, a LIST's element and a COMPOSITE's fields included. A
+    /// field that holds no STRING answers <see cref="StringLayouts.Utf8"/>, which nothing then reads.
     /// </summary>
     private static StringLayouts Declared(
         IArrowType type) =>
@@ -80,6 +80,12 @@ internal sealed class OutputMaterialiser
         {
             StringViewType => StringLayouts.Utf8View,
             ListType list => Declared(list.ValueDataType),
+
+            // D291: a composite column's fields were declared in the column's one layout, so any STRING
+            // field among them says which it is.
+            StructType record => record.Fields.Any(f => Declared(f.DataType) == StringLayouts.Utf8View)
+                ? StringLayouts.Utf8View
+                : StringLayouts.Utf8,
             _ => StringLayouts.Utf8,
         };
 

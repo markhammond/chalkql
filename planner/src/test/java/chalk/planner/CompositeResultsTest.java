@@ -230,6 +230,24 @@ final class CompositeResultsTest {
   }
 
   @Test
+  void the_alias_spellings_work_and_the_two_that_look_right_do_not() {
+    String inner = "(SELECT symbol, price_move(\"open\", \"close\") AS m FROM bars) AS s";
+
+    // Through the alias: parenthesised, or qualified by the sub-query's name.
+    assertThat(fieldAccesses(plan("SELECT (m).change FROM " + inner))).hasSize(1);
+    assertThat(fieldAccesses(plan("SELECT s.m.change FROM " + inner))).hasSize(1);
+    assertThat(fieldAccesses(plan("SELECT s.m.* FROM " + inner))).hasSize(2);
+
+    // A bare `m.change` reads `m` as a table.
+    assertThatThrownBy(() -> plan("SELECT m.change FROM " + inner))
+        .hasMessageContaining("Table 'm' not found");
+    // And `(f(x)).*` does not parse.
+    assertThatThrownBy(() -> plan("SELECT (price_move(\"open\", \"close\")).* FROM bars"))
+        .hasCauseInstanceOf(org.apache.calcite.sql.parser.SqlParseException.class)
+        .hasMessageContaining("Encountered \". *\"");
+  }
+
+  @Test
   void a_composite_valued_aggregate_is_one_measure_and_two_field_accesses_over_its_column() {
     Plan plan =
         plan(

@@ -128,9 +128,28 @@ public static class RecordBatchExtensions
             DurationArray a => a.GetValue(index),
             Apache.Arrow.Arrays.FixedSizeBinaryArray a => Uuid(a, index),
             BinaryArray a => a.GetBytes(index).ToArray(),
+            StructArray a => Fields(a, index),
             _ => throw new NotSupportedException(
                 $"no CLR mapping for Arrow array {array.GetType().Name}; see 04-client.md §7.2"),
         };
+    }
+
+    /// <summary>
+    /// A COMPOSITE — what a function answering a record returns — as the <c>object?[]</c> of its fields
+    /// in declared order, each read as a column of the field's own type would be. The fields are
+    /// aligned with the composite's rows, so the composite's offset applies to them too.
+    /// </summary>
+    private static object?[] Fields(StructArray array, int index)
+    {
+        var fields = new object?[array.Data.Children.Length];
+        for (var i = 0; i < fields.Length; i++)
+        {
+            // A view of the composite's own child data, which the composite owns: not disposed here.
+            var field = ArrowArrayFactory.BuildArray(array.Data.Children[i]);
+            fields[i] = ValueAt(field, array.Offset + index);
+        }
+
+        return fields;
     }
 
     /// <summary>

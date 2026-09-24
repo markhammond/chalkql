@@ -1022,6 +1022,103 @@ query runs, naming the function and both types. The row-at-a-time reference
 executor calls the same implementations, which is what makes the differential
 test a test of Chalk's plumbing rather than of your arithmetic.
 
+### Composite results
+
+A client-bodied function can answer a small record instead of a single value,
+and SQL takes the record apart by field. The record is the declaration:
+
+```csharp
+public readonly record struct Classification(Utf8String Category, double Confidence);
+
+var source = new PocoSourceBuilder("mem")
+    .AddTable("transactions", transactions)
+    .AddFunction("classify_transaction", f => f
+        .Scalar<Utf8String, double, Classification>("description", "amount")
+        .Strict()
+        .Client())
+    .Build();
+
+await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+{
+    ContextId = "app",
+    Sources = [source],
+    Planner = planner,
+    Functions = registry => registry.AddScalar<Utf8String, double, Classification>(
+        "classify_transaction", (description, amount) => classifier.Classify(description, amount)),
+});
+```
+
+The result type is read off the record. Its fields are the record's public
+properties, in the order a positional record's constructor declares them and
+under the names it gives them, so `Classification` is
+`COMPOSITE(Category STRING, Confidence FP64)` with both fields non-nullable. A
+`Nullable<T>` or `Utf8String?` property is a nullable field, and so is a
+`string` property. A `Classification?` result makes the composite itself
+nullable. An aggregate's `Finish` may answer a record the same way, grouped or
+over a window. When the engine is created, the registered delegate's record is
+checked against the declaration field by field, and a mismatch names both.
+
+A field is `.name`, matched ignoring case like any identifier:
+
+```sql
+SELECT id,
+       classify_transaction(description, amount).category   AS category,
+       classify_transaction(description, amount).confidence AS confidence
+FROM transactions
+WHERE classify_transaction(description, amount).confidence > 0.8
+ORDER BY confidence DESC
+```
+
+A composite value can be named in a sub-query and read through the alias.
+There are two spellings that look right and do not work:
+
+| Instead of | Write | Because |
+|---|---|---|
+| `SELECT (classify_transaction(description, amount)).* FROM transactions` | `SELECT s.c.* FROM (SELECT classify_transaction(description, amount) AS c FROM transactions) AS s` | `(…).*` does not parse. Expand the composite through an alias |
+| `SELECT c.category FROM (…) AS s` | `SELECT (c).category FROM (…) AS s`, or `s.c.category` | a bare `c.category` reads `c` as a table name, and fails with *Table 'c' not found* |
+
+Selected whole, as in `SELECT id, classify_transaction(description, amount) AS
+c`, the value reaches the host as one Arrow struct column. That is a
+`StructArray` whose children are named `Category` and `Confidence` and carry the
+fields' nullability; the composite's own nullability is on the column. A NULL
+composite is a null slot of the column. Its STRING fields arrive in the layout
+`ChalkEngineOptions.Output.Strings` asks for, as every STRING column does:
+
+```csharp
+var c = (StructArray)batch.Column(1);
+var category = (StringViewArray)c.Fields[0];   // utf8view by default
+var confidence = (DoubleArray)c.Fields[1];
+for (var i = 0; i < batch.Length; i++)
+{
+    if (c.IsNull(i)) continue;                 // STRICT, and the amount was NULL
+    ReadOnlySpan<byte> text = category.GetBytes(i);
+    double sure = confidence.GetValue(i)!.Value;
+}
+```
+
+A call written more than once in one select list, or more than once in one
+condition, runs once per row when its function is `Immutable()` or `Stable()`.
+The two fields in the select list above cost one classification per row, not
+two. The `WHERE` clause is a step of its own and classifies the rows it filters
+once more. A `Volatile()` function still runs once per occurrence.
+
+The limits:
+
+- A field is a `bool`, `sbyte`, `short`, `int`, `long`, `float`, `double`,
+  `string` or `Utf8String`, or a nullable form of one. A property of any other
+  type is refused at registration, naming it.
+- A composite value is one level deep: a record inside a record, or a list
+  inside one, is refused.
+- A composite value has no ordering and no equality. Comparing one, sorting,
+  grouping or partitioning by one, `DISTINCT` over one, `CAST`ing one, joining
+  on one, or passing one to a built-in aggregate is refused. The message names
+  the construct and the way around it, which is nearly always one of the
+  composite's fields. `IS NULL` works, and `UNION ALL` carries a composite
+  value.
+- A composite value only ever comes out of a client-bodied function. It is never
+  a parameter or a table column, a SQL-bodied or native function cannot return
+  one, and SQL cannot build one: `ROW(…)` is refused.
+
 
 ## Entitlements — row and column disclosure
 

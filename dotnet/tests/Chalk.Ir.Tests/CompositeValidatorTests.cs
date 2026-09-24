@@ -236,6 +236,41 @@ public sealed class CompositeValidatorTests
         PlanValidator.Validate(plan);
     }
 
+    /// <summary>
+    /// Calcite makes a union's composite nullable by copying it with every field nullable, so the
+    /// output composite's fields may be wider than a branch's (ADR 0077): up to nullability means at
+    /// every level of a composite, position by position, as it does for a row's columns.
+    /// </summary>
+    [Fact]
+    public void A_union_s_composite_may_widen_its_fields_but_never_narrow_them()
+    {
+        var widened = Composite(
+            nullable: true, F("category", Str(nullable: true)), F("confidence", Fp64(nullable: true)));
+        var union = SetOp(SetOpKind.UnionAll, WithComposite(), WithComposite());
+        union.RowType = Row(F("id", I64()), F("c", widened));
+
+        PlanValidator.Validate(IrBuilder.Plan(union));
+
+        // A branch whose field is nullable under an output field that is not.
+        var narrowed = SetOp(
+            SetOpKind.UnionAll,
+            Project(TransactionsRead(), [("id", Ref(Transactions, 0)), ("c", UserCall(
+                "main.classify_transaction",
+                Composite(F("category", Str(nullable: true)), F("confidence", Fp64())),
+                Ref(Transactions, 1),
+                Ref(Transactions, 2)))]),
+            WithComposite());
+        narrowed.RowType = Row(F("id", I64()), F("c", Classification));
+        var ex = AssertInvalid(IrBuilder.Plan(narrowed));
+        Assert.Equal("I-IR-4", ex.Invariant);
+
+        // And a branch with a different number of fields.
+        var wider = SetOp(SetOpKind.UnionAll, WithComposite(), WithComposite());
+        wider.RowType = Row(
+            F("id", I64()), F("c", Composite(F("category", Str()), F("confidence", Fp64()), F("extra", I64()))));
+        Assert.Equal("I-IR-4", AssertInvalid(IrBuilder.Plan(wider)).Invariant);
+    }
+
     [Fact]
     public void A_composite_output_column_is_what_the_host_receives()
     {

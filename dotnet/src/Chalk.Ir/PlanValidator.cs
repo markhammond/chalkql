@@ -2489,9 +2489,7 @@ public static class PlanValidator
             {
                 var expected = output.Fields[i].Type;
                 var actual = input.Fields[i].Type;
-                var widened = actual.Clone();
-                widened.Nullable = expected.Nullable;
-                if (!expected.Equals(widened) || (actual.Nullable && !expected.Nullable))
+                if (!WidensTo(actual, expected))
                 {
                     throw Invalid(
                         "I-IR-4",
@@ -2501,6 +2499,44 @@ public static class PlanValidator
                         + $"{IrTypes.Describe(expected)}");
                 }
             }
+        }
+
+        /// <summary>
+        /// Whether <paramref name="actual"/> is <paramref name="expected"/> with nothing but
+        /// nullability narrower: the same type, nullable wherever the input is and perhaps where it is
+        /// not. A COMPOSITE's fields widen the same way, position by position as a row's columns do
+        /// (D291, ADR 0077): Calcite makes a record nullable by copying it with every field nullable,
+        /// so a union's least restrictive composite has nullable fields over branches whose fields are
+        /// not, and an outer join does the same to its nullable side.
+        /// </summary>
+        private static bool WidensTo(Type actual, Type expected)
+        {
+            if (actual.Nullable && !expected.Nullable)
+            {
+                return false;
+            }
+
+            if (actual.Kind == TypeKind.Composite && expected.Kind == TypeKind.Composite)
+            {
+                if (actual.Fields.Count != expected.Fields.Count)
+                {
+                    return false;
+                }
+
+                for (var f = 0; f < actual.Fields.Count; f++)
+                {
+                    if (!WidensTo(actual.Fields[f].Type, expected.Fields[f].Type))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            var widened = actual.Clone();
+            widened.Nullable = expected.Nullable;
+            return expected.Equals(widened);
         }
 
         private void RequireSameRow(RowType output, RowType input, string path, string what)
