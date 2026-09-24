@@ -1095,11 +1095,13 @@ override Chalk.Client.Rpc.StopPlanningResponse.GetHashCode() -> int
 override Chalk.Client.Rpc.TableStatistics.GetHashCode() -> int
 override Chalk.Client.SqlPosition.GetHashCode() -> int
 override Chalk.Client.SqlPosition.ToString() -> string!
+static Chalk.Arrow.RecordBatchExtensions.GetComposite<T>(this Apache.Arrow.IArrowArray! array, int index) -> T
 static Chalk.Arrow.RecordBatchExtensions.GetUtf8(this Apache.Arrow.IArrowArray! array, int index) -> System.ReadOnlySpan<byte>
 static Chalk.Arrow.RecordBatchExtensions.GetUtf8String(this Apache.Arrow.IArrowArray! array, int index) -> string?
 static Chalk.Arrow.RecordBatchExtensions.IsNullAt(this Apache.Arrow.IArrowArray! array, int index) -> bool
 static Chalk.Arrow.RecordBatchExtensions.ToRows(this Apache.Arrow.RecordBatch! batch) -> System.Collections.Generic.List<object?[]!>!
 static Chalk.Arrow.RecordBatchExtensions.ToRows(this System.Collections.Generic.IEnumerable<Apache.Arrow.RecordBatch!>! batches) -> System.Collections.Generic.List<object?[]!>!
+static Chalk.Arrow.RecordBatchExtensions.TryGetComposite<T>(this Apache.Arrow.IArrowArray! array, int index, out T value) -> bool
 static Chalk.Arrow.RecordBatchExtensions.ValueAt(Apache.Arrow.IArrowArray! array, int index) -> object?
 static Chalk.Client.ChalkEngine.CreateAsync(Chalk.Client.ChalkEngineOptions! options, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.ChalkEngine!>
 static Chalk.Client.ContextRelation.Of(System.Collections.Generic.IReadOnlyList<string!>! columns, params object?[]![]! rows) -> Chalk.Client.ContextRelation!

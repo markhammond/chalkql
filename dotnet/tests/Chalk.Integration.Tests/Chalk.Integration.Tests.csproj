@@ -5,6 +5,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The typed read back's allocation gate (D301) measures as the executor's gates do. -->
+    <Compile Include="../Shared/AllocationProbe.cs" Link="AllocationProbe.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../../src/Chalk.Client/Chalk.Client.csproj" />
     <ProjectReference Include="../../src/Chalk.Entitlements.Tenancy/Chalk.Entitlements.Tenancy.csproj" />
     <ProjectReference Include="../Chalk.TestKit/Chalk.TestKit.csproj" />

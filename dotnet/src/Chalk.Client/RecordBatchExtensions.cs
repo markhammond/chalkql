@@ -5,8 +5,11 @@ using Apache.Arrow.Types;
 namespace Chalk.Arrow;
 
 /// <summary>
-/// Arrow batches as boxed CLR rows, with the value mapping of <b>Test kit and samples only</b>:
-/// it boxes every value, which is precisely what the engine exists to avoid. Hosts read Arrow.
+/// Arrow batches as CLR values. <see cref="ToRows(RecordBatch)"/> and <see cref="ValueAt"/> are the
+/// boxed rows of the <b>test kit and samples only</b>: they box every value, which is precisely what
+/// the engine exists to avoid, and hosts read Arrow. <see cref="GetComposite{T}"/> and
+/// <see cref="TryGetComposite{T}"/> are a host's own: a composite cell read as the host's record,
+/// allocating nothing a record struct does not.
 /// </summary>
 public static class RecordBatchExtensions
 {
@@ -61,6 +64,80 @@ public static class RecordBatchExtensions
             array.GetUtf8(index));
     }
     
+    /// <summary>
+    /// One composite cell of a struct column — what a function answering a record returns — as the
+    /// host's own <typeparamref name="T"/>: a record struct, a record class, or any class or struct
+    /// with a public parameterless constructor and settable properties. A NULL composite reads as
+    /// null for a reference type or a <c>Nullable&lt;T&gt;</c>; for any other struct it is refused,
+    /// and <see cref="TryGetComposite{T}"/> is the way to read it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <typeparamref name="T"/>'s properties — or a positional record's constructor parameters — are
+    /// matched to the composite's fields by name, ignoring case, and each must read its field's type
+    /// as a function's parameter would: <c>Utf8String</c> or <c>string</c> for a STRING, <c>decimal</c>
+    /// for a DECIMAL of up to 28 digits, <c>DateOnly</c>, <c>DateTime</c>, <c>Guid</c> and the rest of
+    /// the Tier 1 table. A nullable field needs a member that can hold its NULL. A field
+    /// <typeparamref name="T"/> does not name is not read. The binding is built on the first call for a
+    /// given <typeparamref name="T"/> and struct type and cached; a mismatch is refused there, naming
+    /// both sides.
+    /// </para>
+    /// <para>
+    /// A read allocates nothing but what <typeparamref name="T"/> itself costs. A <c>Utf8String</c> or a
+    /// <c>ReadOnlyMemory&lt;byte&gt;</c> field borrows the batch's memory and is valid while the batch
+    /// is; a <c>string</c> or a <c>byte[]</c> field is a copy.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">The array is not a struct array.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// <typeparamref name="T"/> cannot be read from the composite, or the cell is a NULL composite and
+    /// <typeparamref name="T"/> cannot hold one.
+    /// </exception>
+    public static T GetComposite<T>(this IArrowArray array, int index)
+    {
+        var composite = CompositeAt(array, index);
+        var reader = CompositeReader<T>.For(composite);
+        return composite.IsNull(index) ? reader.Null(index) : reader.Read(composite, index);
+    }
+
+    /// <summary>
+    /// The same read, saying whether the cell held a composite: false, with <paramref name="value"/>
+    /// the default, for a NULL composite.
+    /// </summary>
+    /// <inheritdoc cref="GetComposite{T}(IArrowArray, int)" path="/remarks"/>
+    public static bool TryGetComposite<T>(
+        this IArrowArray array, int index, [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out T value)
+    {
+        var composite = CompositeAt(array, index);
+        var reader = CompositeReader<T>.For(composite);
+        if (composite.IsNull(index))
+        {
+            value = default;
+            return false;
+        }
+
+        value = reader.Read(composite, index);
+        return true;
+    }
+
+    private static StructArray CompositeAt(IArrowArray array, int index)
+    {
+        ArgumentNullException.ThrowIfNull(array);
+        if (array is not StructArray composite)
+        {
+            throw new ArgumentException(
+                $"Expected an Arrow struct array — a composite column — and got {array.Data.DataType.Name}.",
+                nameof(array));
+        }
+
+        if ((uint)index >= (uint)composite.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        return composite;
+    }
+
     /// <summary>Every row of one batch, as <c>object?[]</c> in column order.</summary>
     public static List<object?[]> ToRows(this RecordBatch batch)
     {

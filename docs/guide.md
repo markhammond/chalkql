@@ -1128,6 +1128,33 @@ for (var i = 0; i < batch.Length; i++)
 }
 ```
 
+Or read each cell back as the record itself:
+
+```csharp
+var c = batch.Column(1);
+for (var i = 0; i < batch.Length; i++)
+{
+    if (c.TryGetComposite<Classification>(i, out var classification))
+    {
+        // classification.Category borrows the batch's memory; ToString() copies it.
+    }
+}
+```
+
+`GetComposite<T>` and `TryGetComposite<T>` (in `Chalk.Arrow`) match `T`'s
+properties, or a positional record's constructor parameters, to the composite's
+fields by name, ignoring case. Each is read as a function's parameter would be,
+so any Tier 1 spelling of the field's type works: `decimal` for a
+DECIMAL(18, 2), `DateOnly` or `int` days for a DATE. `T` may be a record struct,
+a record class, or a class with a parameterless constructor and settable
+properties. A field `T` does not name is not read, and a nullable field needs a
+member that can hold its NULL. A NULL composite makes `TryGetComposite` answer
+`false`, and `GetComposite` answer null into a class or a `Classification?`. The
+binding is built on the first read of a given `T` and struct type and then
+cached. A mismatch is refused on that first read, naming both sides. Reading a
+record struct allocates nothing: a `Utf8String` field is a slice of the batch,
+valid while the batch is.
+
 A call written more than once in one select list, or more than once in one
 condition, runs once per row when its function is `Immutable()` or `Stable()`.
 The two fields in the select list above cost one classification per row, not

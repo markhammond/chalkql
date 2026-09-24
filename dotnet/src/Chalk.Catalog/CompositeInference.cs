@@ -123,13 +123,31 @@ internal static class CompositeInference
     public static IReadOnlyList<PropertyInfo> Properties(Type type)
     {
         ArgumentNullException.ThrowIfNull(type);
-        var properties = type
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.GetMethod is { IsPublic: true } && p.GetIndexParameters().Length == 0)
-            .OrderBy(p => Depth(p.DeclaringType))
-            .ThenBy(p => p.MetadataToken)
-            .ToArray();
+        var properties = Readable(type);
+        return Positional(type, properties)?.Ordered ?? properties;
+    }
 
+    /// <summary>
+    /// A positional record's primary constructor — the public constructor whose parameters are
+    /// exactly the readable properties, by name and type, which is what fixes the fields' order — or
+    /// null when there is none. The typed read back builds a record through it (D301).
+    /// </summary>
+    public static ConstructorInfo? PositionalConstructor(Type type)
+    {
+        ArgumentNullException.ThrowIfNull(type);
+        return Positional(type, Readable(type))?.Constructor;
+    }
+
+    private static PropertyInfo[] Readable(Type type) => type
+        .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+        .Where(p => p.GetMethod is { IsPublic: true } && p.GetIndexParameters().Length == 0)
+        .OrderBy(p => Depth(p.DeclaringType))
+        .ThenBy(p => p.MetadataToken)
+        .ToArray();
+
+    private static (ConstructorInfo Constructor, PropertyInfo[] Ordered)? Positional(
+        Type type, PropertyInfo[] properties)
+    {
         foreach (var constructor in type.GetConstructors(BindingFlags.Public | BindingFlags.Instance))
         {
             var parameters = constructor.GetParameters();
@@ -154,11 +172,11 @@ internal static class CompositeInference
 
             if (matched)
             {
-                return ordered;
+                return (constructor, ordered);
             }
         }
 
-        return properties;
+        return null;
     }
 
     /// <summary>
