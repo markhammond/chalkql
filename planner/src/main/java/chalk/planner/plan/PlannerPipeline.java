@@ -360,7 +360,7 @@ public final class PlannerPipeline implements AutoCloseable {
     ParameterHints parameterHints = new ParameterHints();
     return new PlannerPipeline(
         // Chalk's own driver rather than Frameworks.getPlanner: Calcite's PlannerImpl, less the
-        // structured-type flattener, which would split a struct-valued call into a call per field
+        // structured-type flattener, which would split a composite-valued call into a call per field
         // (D292, ChalkPlanner).
         new ChalkPlanner(
             config(
@@ -641,10 +641,10 @@ public final class PlannerPipeline implements AutoCloseable {
     try {
       validated = planner.validate(inlined);
     } catch (ValidationException e) {
-      // Calcite's own type checks can stop at a misplaced struct first — a struct IN a subquery
-      // reads to it as a row of the struct's fields, a comparison with a scalar has no signature —
+      // Calcite's own type checks can stop at a misplaced composite first — a composite value IN a subquery
+      // reads to it as a row of the composite's fields, a comparison with a scalar has no signature —
       // and the refusal by name below should not depend on which of the two reached it (D291).
-      StructSupport.checkUnvalidated(inlined, planner.validator());
+      CompositeSupport.checkUnvalidated(inlined, planner.validator());
       throw e;
     }
     RelDataType parameterRowType = planner.getParameterRowType();
@@ -654,11 +654,11 @@ public final class PlannerPipeline implements AutoCloseable {
     // after conversion there is no correlate left to ask (ADR 0026).
     LateralCorrelationSupport.check(validated);
 
-    // Where a struct may not stand — a sort, grouping or partition key, a comparison, a CASE result,
+    // Where a composite value may not stand — a sort, grouping or partition key, a comparison, a CASE result,
     // a built-in aggregate's argument — refused on the validated statement, while every expression
     // still has its validated type and before conversion can fold a comparison away or build a sort
     // nothing can execute (D291, ADR 0077).
-    StructSupport.check(validated, java.util.Objects.requireNonNull(planner.validator()));
+    CompositeSupport.check(validated, java.util.Objects.requireNonNull(planner.validator()));
 
     long t2 = System.nanoTime();
     RelRoot root = convert(sql, validated);

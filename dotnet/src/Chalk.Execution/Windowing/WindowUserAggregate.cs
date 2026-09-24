@@ -30,12 +30,12 @@ internal sealed class WindowUserAggregateEvaluator<TState, TIn, TOut> : WindowVa
     private readonly int _valueColumn;
 
     /// <summary>
-    /// A STRUCT result (D291, D294): the compiled writer of <c>Finish</c>'s record, and the column the
+    /// A COMPOSITE result (D291, D294): the compiled writer of <c>Finish</c>'s record, and the column the
     /// frames' records are appended to as they are computed — in row order, which is the order the
     /// operator computes partitions in — and emitted from row by row. Null for a scalar result, whose
     /// answers are the base class's raw lanes.
     /// </summary>
-    private readonly StructEmitter<TOut>? _struct;
+    private readonly CompositeEmitter<TOut>? _composite;
     private readonly ColumnCopier? _records;
     private ColumnView _recordView;
     private bool _recordsFinished;
@@ -47,9 +47,9 @@ internal sealed class WindowUserAggregateEvaluator<TState, TIn, TOut> : WindowVa
     {
         _spec = spec;
         _valueColumn = valueColumn;
-        if (resultType.Kind == Ir.TypeKind.Struct)
+        if (resultType.Kind == Ir.TypeKind.Composite)
         {
-            _struct = StructEmitters.For<TOut>(resultType);
+            _composite = CompositeEmitters.For<TOut>(resultType);
             _records = new ColumnCopier(resultType);
         }
     }
@@ -171,7 +171,7 @@ internal sealed class WindowUserAggregateEvaluator<TState, TIn, TOut> : WindowVa
 
     private void Write(int row, TState state)
     {
-        if (_struct is null)
+        if (_composite is null)
         {
             Valid[row] = LaneCodec.WriteRaw(Lane(row), _spec.Finish(state));
             return;
@@ -182,11 +182,11 @@ internal sealed class WindowUserAggregateEvaluator<TState, TIn, TOut> : WindowVa
         if (row != _written)
         {
             throw new InvalidOperationException(
-                $"a struct-valued window aggregate computed row {row} after {_written} rows; its "
+                $"a composite-valued window aggregate computed row {row} after {_written} rows; its "
                 + "frames are written in row order.");
         }
 
-        _struct.Emit(_records!, _spec.Finish(state));
+        _composite.Emit(_records!, _spec.Finish(state));
         _written++;
     }
 }

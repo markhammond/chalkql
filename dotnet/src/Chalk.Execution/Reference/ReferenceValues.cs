@@ -170,8 +170,8 @@ internal static class ReferenceValues
                         16),
                     type.Scale);
 
-            // D291: the struct value, its fields read at the struct's own row.
-            case TypeKind.Struct:
+            // D291: the composite value, its fields read at the composite's own row.
+            case TypeKind.Composite:
             {
                 var fields = new object?[type.Fields.Count];
                 for (var i = 0; i < fields.Length; i++)
@@ -326,9 +326,9 @@ internal static class ReferenceValues
 
         var nullBuffer = nulls == 0 ? ArrowBuffer.Empty : validity.Build(allocator);
 
-        // D291: one child column per field, each built the same way from the struct values' fields;
-        // a NULL struct's fields are NULL here, which the struct's own validity says to ignore.
-        if (type.Kind == TypeKind.Struct)
+        // D291: one child column per field, each built the same way from the composite values' fields;
+        // a NULL composite's fields are NULL here, which the composite's own validity says to ignore.
+        if (type.Kind == TypeKind.Composite)
         {
             var structType = (StructType)arrowType;
             var children = new ArrayData[type.Fields.Count];

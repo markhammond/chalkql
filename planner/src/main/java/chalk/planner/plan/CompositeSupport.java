@@ -24,27 +24,27 @@ import org.apache.calcite.sql.validate.SqlValidator;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
- * Where a struct may not stand in a statement, refused by name before conversion (D291, ADR 0077).
+ * Where a composite value may not stand in a statement, refused by name before conversion (D291, ADR 0077).
  *
- * <p>A struct — what a client-bodied user function returns — is carried and taken apart by field
+ * <p>A composite value — what a client-bodied user function returns — is carried and taken apart by field
  * access, and never compared, ordered or grouped. Calcite would accept several of those shapes: it
  * validates {@code f(x) = f(x)} and folds it to {@code TRUE} during conversion, and it converts
- * {@code ORDER BY f(x)} into a sort on a struct column that nothing can execute. So they are refused
+ * {@code ORDER BY f(x)} into a sort on a composite column that nothing can execute. So they are refused
  * here, on the validated statement, where the validator still knows every expression's type and
  * nothing has been folded away yet — and the message names the construct and the way out, which is
- * nearly always the same: use one of the struct's fields.
+ * nearly always the same: use one of the composite's fields.
  *
- * <p>The refusals: a struct as an {@code ORDER BY}, {@code GROUP BY}, {@code DISTINCT}, window
+ * <p>The refusals: a composite value as an {@code ORDER BY}, {@code GROUP BY}, {@code DISTINCT}, window
  * partition or window order key; as an operand of a comparison, {@code BETWEEN} or {@code IN}; as a
  * {@code CASE} or {@code COALESCE} result; as a {@code CAST}'s operand; as a built-in aggregate's or
  * window function's argument; and as a column of a {@code UNION}, {@code INTERSECT} or {@code EXCEPT}
  * that compares rows. The {@code ROW} constructor is refused where it is lowered ({@code RexToIr}),
- * and a nested struct where it is declared.
+ * and a nested composite where it is declared.
  */
-public final class StructSupport {
-  private StructSupport() {}
+public final class CompositeSupport {
+  private CompositeSupport() {}
 
-  /** Throws for the first misplaced struct; returns silently for a statement that has none. */
+  /** Throws for the first misplaced composite; returns silently for a statement that has none. */
   public static void check(SqlNode statement, SqlValidator validator) {
     Checker checker = new Checker(validator, false);
     walk(statement, checker::visit);
@@ -52,14 +52,14 @@ public final class StructSupport {
 
   /**
    * The same over a statement Calcite could not validate, asking only about the nodes whose types it
-   * derived before it stopped. Calcite's own type checks can reach a misplaced struct first — a struct
-   * {@code IN} a subquery reads to it as a row of the struct's fields, and a comparison with a scalar,
-   * a {@code CAST}, a {@code MAX} or a {@code CASE} mixing a struct with a scalar has no signature — and
+   * derived before it stopped. Calcite's own type checks can reach a misplaced composite first — a composite value
+   * {@code IN} a subquery reads to it as a row of the composite's fields, and a comparison with a scalar,
+   * a {@code CAST}, a {@code MAX} or a {@code CASE} mixing a composite value with a scalar has no signature — and
    * the refusal should not depend on which of the two got there first. Where validation stopped
    * before it recorded a node's type — a select item is typed on a copy that only replaces the
-   * original once the whole list is through — a call to a function declared to return a struct is
+   * original once the whole list is through — a call to a function declared to return a composite value is
    * known to be one from its declaration alone. Returns silently when nothing it can see is a
-   * misplaced struct, and the caller throws Calcite's own error.
+   * misplaced composite, and the caller throws Calcite's own error.
    */
   public static void checkUnvalidated(SqlNode statement, @Nullable SqlValidator validator) {
     if (validator == null) {
@@ -101,8 +101,8 @@ public final class StructSupport {
         for (RelDataTypeField field : row.getFieldList()) {
           if (field.getType().isStruct()) {
             throw refusal(
-                "SELECT DISTINCT over the struct column '" + field.getName() + "'",
-                "A struct has no equality, so DISTINCT cannot compare the rows that hold one. "
+                "SELECT DISTINCT over the composite column '" + field.getName() + "'",
+                "A composite value has no equality, so DISTINCT cannot compare the rows that hold one. "
                     + "Select its fields as columns of their own, or GROUP BY one of them.");
           }
         }
@@ -135,18 +135,18 @@ public final class StructSupport {
 
     private void window(SqlWindow window) {
       for (SqlNode key : window.getPartitionList()) {
-        if (isStruct(key)) {
+        if (isComposite(key)) {
           throw refusal(
-              "PARTITION BY a struct (" + key + ")",
-              "A struct has no equality, so rows cannot be partitioned by one. Partition by one "
+              "PARTITION BY a composite value (" + key + ")",
+              "A composite value has no equality, so rows cannot be partitioned by one. Partition by one "
                   + "of its fields instead, e.g. PARTITION BY f(x).category.");
         }
       }
       for (SqlNode key : window.getOrderList()) {
-        if (isStruct(unwrapOrder(key))) {
+        if (isComposite(unwrapOrder(key))) {
           throw refusal(
-              "a window ORDER BY a struct (" + unwrapOrder(key) + ")",
-              "A struct has no ordering. Order the window by one of its fields instead, e.g. "
+              "a window ORDER BY a composite value (" + unwrapOrder(key) + ")",
+              "A composite value has no ordering. Order the window by one of its fields instead, e.g. "
                   + "ORDER BY f(x).confidence.");
         }
       }
@@ -167,10 +167,10 @@ public final class StructSupport {
         return;
       }
 
-      if (isStruct(resolve(row, select.getSelectList(), item), item)) {
+      if (isComposite(resolve(row, select.getSelectList(), item), item)) {
         throw refusal(
-            "GROUP BY a struct (" + item + ")",
-            "A struct has no equality, so rows cannot be grouped by one. Group by one of its "
+            "GROUP BY a composite value (" + item + ")",
+            "A composite value has no equality, so rows cannot be grouped by one. Group by one of its "
                 + "fields instead, e.g. GROUP BY f(x).category.");
       }
     }
@@ -178,10 +178,10 @@ public final class StructSupport {
     private void orderItem(
         @Nullable RelDataType row, @Nullable SqlNodeList selectList, SqlNode item, String clause) {
       SqlNode key = unwrapOrder(item);
-      if (isStruct(resolve(row, selectList, key), key)) {
+      if (isComposite(resolve(row, selectList, key), key)) {
         throw refusal(
-            clause + " a struct (" + key + ")",
-            "A struct has no ordering. Sort by one of its fields instead, e.g. ORDER BY "
+            clause + " a composite value (" + key + ")",
+            "A composite value has no ordering. Sort by one of its fields instead, e.g. ORDER BY "
                 + "f(x).confidence, or ORDER BY (c).confidence over a subquery alias.");
       }
     }
@@ -193,38 +193,38 @@ public final class StructSupport {
             GREATER_THAN_OR_EQUAL, IS_DISTINCT_FROM, IS_NOT_DISTINCT_FROM, BETWEEN, NULLIF,
             SOME, ALL -> {
           for (SqlNode operand : call.getOperandList()) {
-            if (isStruct(operand)) {
+            if (isComposite(operand)) {
               throw refusal(
-                  "a comparison of a struct (" + call + ")",
-                  "A struct has no equality or ordering, so it cannot be compared. Compare one "
+                  "a comparison of a composite value (" + call + ")",
+                  "A composite value has no equality or ordering, so it cannot be compared. Compare one "
                       + "of its fields instead, e.g. f(x).category = 'food'.");
             }
           }
         }
         case IN, NOT_IN -> {
           SqlNode value = call.operand(0);
-          if (isStruct(value)) {
+          if (isComposite(value)) {
             throw refusal(
-                "a struct in IN (" + value + ")",
-                "A struct has no equality, so it cannot be looked up in a list. Test one of its "
+                "a composite value in IN (" + value + ")",
+                "A composite value has no equality, so it cannot be looked up in a list. Test one of its "
                     + "fields instead, e.g. f(x).category IN ('food', 'rent').");
           }
         }
         case CASE, COALESCE -> {
-          if (isStruct(typeOf(call), call) || resultIsStruct(call)) {
+          if (isComposite(typeOf(call), call) || resultIsComposite(call)) {
             throw refusal(
-                "a struct as a " + kind.name().toUpperCase(Locale.ROOT) + " result",
-                "A struct is carried as the function returned it and is never chosen between. "
+                "a composite value as a " + kind.name().toUpperCase(Locale.ROOT) + " result",
+                "A composite value is carried as the function returned it and is never chosen between. "
                     + "Take it apart first and choose between its fields, e.g. CASE WHEN … THEN "
                     + "f(x).category END.");
           }
         }
         case CAST -> {
           SqlNode value = call.operand(0);
-          if (isStruct(value)) {
+          if (isComposite(value)) {
             throw refusal(
-                "CAST of a struct (" + value + ")",
-                "A struct is never cast. Cast one of its fields instead, e.g. "
+                "CAST of a composite value (" + value + ")",
+                "A composite value is never cast. Cast one of its fields instead, e.g. "
                     + "CAST(f(x).confidence AS DECIMAL(5, 2)).");
           }
         }
@@ -234,10 +234,10 @@ public final class StructSupport {
     }
 
     /**
-     * Whether one of a {@code CASE}'s or {@code COALESCE}'s results is a struct: what a statement Calcite
-     * refused for mixing a struct with a scalar still has, when the call itself has no type.
+     * Whether one of a {@code CASE}'s or {@code COALESCE}'s results is a composite value: what a statement Calcite
+     * refused for mixing a composite value with a scalar still has, when the call itself has no type.
      */
-    private boolean resultIsStruct(SqlCall call) {
+    private boolean resultIsComposite(SqlCall call) {
       List<SqlNode> results = new java.util.ArrayList<>();
       if (call instanceof SqlCase caseCall) {
         results.addAll(caseCall.getThenOperands().getList());
@@ -246,14 +246,14 @@ public final class StructSupport {
         results.addAll(call.getOperandList());
       }
       for (SqlNode result : results) {
-        if (isStruct(result)) {
+        if (isComposite(result)) {
           return true;
         }
       }
       return false;
     }
 
-    /** A set operation that compares rows cannot hold a struct; {@code UNION ALL} carries one. */
+    /** A set operation that compares rows cannot hold a composite value; {@code UNION ALL} carries one. */
     private void setOperation(SqlCall call) {
       if (call.getOperator() instanceof SqlSetOperator operator && operator.isAll()
           && call.getKind() == SqlKind.UNION) {
@@ -266,14 +266,14 @@ public final class StructSupport {
       for (RelDataTypeField field : row.getFieldList()) {
         if (field.getType().isStruct()) {
           throw refusal(
-              call.getOperator().getName() + " over the struct column '" + field.getName() + "'",
-              "A struct has no equality, so a set operation that compares rows cannot hold one. "
-                  + "UNION ALL, which compares nothing, carries a struct.");
+              call.getOperator().getName() + " over the composite column '" + field.getName() + "'",
+              "A composite value has no equality, so a set operation that compares rows cannot hold one. "
+                  + "UNION ALL, which compares nothing, carries a composite value.");
         }
       }
     }
 
-    /** A built-in aggregate or window function never takes a struct; a user aggregate never does either. */
+    /** A built-in aggregate or window function never takes a composite value; a user aggregate never does either. */
     private void aggregate(SqlCall call) {
       if (!(call.getOperator() instanceof SqlAggFunction)
           || UserOperators.declarationOf(call.getOperator()) != null) {
@@ -284,10 +284,10 @@ public final class StructSupport {
             || (operand instanceof SqlIdentifier identifier && identifier.isStar())) {
           continue;
         }
-        if (isStruct(operand)) {
+        if (isComposite(operand)) {
           throw refusal(
-              call.getOperator().getName() + " of a struct (" + operand + ")",
-              "A built-in aggregate takes a scalar. Aggregate one of the struct's fields instead, "
+              call.getOperator().getName() + " of a composite value (" + operand + ")",
+              "A built-in aggregate takes a scalar. Aggregate one of the composite's fields instead, "
                   + "e.g. MAX(f(x).confidence).");
         }
       }
@@ -349,24 +349,24 @@ public final class StructSupport {
       }
     }
 
-    /** Whether {@code node} is a struct, by its validated type or, failing one, its declaration. */
-    private boolean isStruct(@Nullable SqlNode node) {
-      return node != null && isStruct(typeOf(node), node);
+    /** Whether {@code node} is a composite value, by its validated type or, failing one, its declaration. */
+    private boolean isComposite(@Nullable SqlNode node) {
+      return node != null && isComposite(typeOf(node), node);
     }
 
     /**
-     * Whether a node of {@code type} is a struct. With no type — validation stopped before it — a
-     * call to a function declared to return a struct is one all the same: the declaration is the
+     * Whether a node of {@code type} is a composite value. With no type — validation stopped before it — a
+     * call to a function declared to return a composite value is one all the same: the declaration is the
      * only thing its type is ever inferred from.
      */
-    private boolean isStruct(@Nullable RelDataType type, SqlNode node) {
+    private boolean isComposite(@Nullable RelDataType type, SqlNode node) {
       if (type != null) {
         return type.isStruct();
       }
       return unvalidated
           && node instanceof SqlCall call
           && UserOperators.declarationOf(call.getOperator()) instanceof UserFunction declaration
-          && declaration.descriptor().getReturnType().getKind() == TypeKind.TYPE_KIND_STRUCT;
+          && declaration.descriptor().getReturnType().getKind() == TypeKind.TYPE_KIND_COMPOSITE;
     }
   }
 

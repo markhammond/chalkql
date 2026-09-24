@@ -3,22 +3,22 @@ using Chalk.Ir;
 namespace Chalk.Catalog.Tests;
 
 /// <summary>
-/// D294 (ADR 0077): a function's result typed as a record of the host's own is a STRUCT, read off the
+/// D294 (ADR 0077): a function's result typed as a record of the host's own is a COMPOSITE, read off the
 /// record's public properties in declaration order, each a Tier 1 type and nullable as its CLR type
 /// is — and refused, naming the property, where it cannot be one.
 /// </summary>
-public sealed class StructInferenceTests
+public sealed class CompositeInferenceTests
 {
     /// <summary>The owner's record, exactly as the question put it.</summary>
     public readonly record struct Classification(Utf8String Category, double Confidence);
 
-    /// <summary>What a struct-valued aggregate answers.</summary>
+    /// <summary>What a composite-valued aggregate answers.</summary>
     public readonly record struct Summary(double Total, long Count);
 
     /// <summary>Every nullability a field can have.</summary>
     public sealed record Mixed(string Label, int? Rank, Utf8String? Code, bool Flag);
 
-    /// <summary>A record with a field no struct can hold.</summary>
+    /// <summary>A record with a field no composite can hold.</summary>
     public readonly record struct Priced(Utf8String Name, decimal Amount);
 
     /// <summary>A record one level too deep.</summary>
@@ -58,22 +58,22 @@ public sealed class StructInferenceTests
         declare(new FunctionBuilder("f")).Client().Build();
 
     [Fact]
-    public void The_owner_s_record_is_a_struct_of_two_non_nullable_fields()
+    public void The_owner_s_record_is_a_composite_of_two_non_nullable_fields()
     {
         var descriptor = Build(f => f.Scalar<string, double, Classification>("description", "amount"));
 
         var type = descriptor.ReturnType!.Value;
 
         Assert.Equal(
-            ChalkType.Struct(
-                new ChalkField("Category", ChalkType.String()),
-                new ChalkField("Confidence", ChalkType.Float64())),
+            ChalkType.Composite(
+                new CompositeField("Category", ChalkType.String()),
+                new CompositeField("Confidence", ChalkType.Float64())),
             type);
-        Assert.Equal("STRUCT<Category:STRING, Confidence:FP64>", type.ToString());
+        Assert.Equal("COMPOSITE(Category STRING, Confidence FP64)", type.ToString());
     }
 
     [Fact]
-    public void A_nullable_record_is_a_nullable_struct_of_the_same_fields()
+    public void A_nullable_record_is_a_nullable_composite_of_the_same_fields()
     {
         var descriptor = Build(f => f.Scalar().Returns<Classification?>());
 
@@ -85,13 +85,13 @@ public sealed class StructInferenceTests
     }
 
     [Fact]
-    public void An_aggregate_s_record_result_is_a_nullable_struct()
+    public void An_aggregate_s_record_result_is_a_nullable_composite()
     {
         var descriptor = Build(f => f.Aggregate<double, Summary>("x"));
 
         Assert.Equal(
-            ChalkType.Struct(
-                [new ChalkField("Total", ChalkType.Float64()), new ChalkField("Count", ChalkType.Int64())],
+            ChalkType.Composite(
+                [new CompositeField("Total", ChalkType.Float64()), new CompositeField("Count", ChalkType.Int64())],
                 nullable: true),
             descriptor.ReturnType);
     }

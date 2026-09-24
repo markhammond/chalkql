@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "18277972582125327691",
+  "planDigest": "5558839352662255202",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -150,43 +150,9 @@
                   }
                 },
                 {
-                  "name": "high",
-                  "type": {
-                    "kind": "TYPE_KIND_FP64"
-                  }
-                },
-                {
-                  "name": "low",
-                  "type": {
-                    "kind": "TYPE_KIND_FP64"
-                  }
-                },
-                {
                   "name": "close",
                   "type": {
                     "kind": "TYPE_KIND_FP64"
-                  }
-                },
-                {
-                  "name": "volume",
-                  "type": {
-                    "kind": "TYPE_KIND_I64"
-                  }
-                },
-                {
-                  "name": "vwap",
-                  "type": {
-                    "kind": "TYPE_KIND_DECIMAL",
-                    "nullable": true,
-                    "precision": 28,
-                    "scale": 10
-                  }
-                },
-                {
-                  "name": "trade_count",
-                  "type": {
-                    "kind": "TYPE_KIND_I32",
-                    "nullable": true
                   }
                 }
               ]
@@ -229,12 +195,7 @@
                 0,
                 1,
                 2,
-                3,
-                4,
-                5,
-                6,
-                7,
-                8
+                5
               ]
             }
           },
@@ -252,7 +213,7 @@
               "fieldAccess": {
                 "input": {
                   "type": {
-                    "kind": "TYPE_KIND_STRUCT",
+                    "kind": "TYPE_KIND_COMPOSITE",
                     "fields": [
                       {
                         "name": "Direction",
@@ -283,7 +244,7 @@
                           "kind": "TYPE_KIND_FP64"
                         },
                         "fieldRef": {
-                          "index": 5
+                          "index": 3
                         }
                       }
                     ],
@@ -300,7 +261,7 @@
               "fieldAccess": {
                 "input": {
                   "type": {
-                    "kind": "TYPE_KIND_STRUCT",
+                    "kind": "TYPE_KIND_COMPOSITE",
                     "fields": [
                       {
                         "name": "Direction",
@@ -331,7 +292,7 @@
                           "kind": "TYPE_KIND_FP64"
                         },
                         "fieldRef": {
-                          "index": 5
+                          "index": 3
                         }
                       }
                     ],
@@ -347,7 +308,7 @@
               "fieldAccess": {
                 "input": {
                   "type": {
-                    "kind": "TYPE_KIND_STRUCT",
+                    "kind": "TYPE_KIND_COMPOSITE",
                     "fields": [
                       {
                         "name": "Direction",
@@ -378,7 +339,7 @@
                           "kind": "TYPE_KIND_FP64"
                         },
                         "fieldRef": {
-                          "index": 5
+                          "index": 3
                         }
                       }
                     ],

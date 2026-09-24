@@ -157,18 +157,18 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
         // type mapper has already refused those, because neither operand type reaches the IR.
         return scalarCall(call, type);
       }
-      // D291: a STRUCT is produced by a client-bodied function and by nothing else, so there is no
+      // D291: a COMPOSITE is produced by a client-bodied function and by nothing else, so there is no
       // constructor to lower one from; a MAP is not a type the IR has at all.
       case ROW ->
           throw new UnsupportedFeatureException(
               "the ROW constructor",
-              "A struct comes from a function: a client-bodied user function returns one, and SQL "
+              "A composite comes from a function: a client-bodied user function returns one, and SQL "
                   + "takes it apart with .field or carries it whole. Select the values as columns "
                   + "of their own (docs/design/51-structured-function-results.md §1).");
       case MAP_VALUE_CONSTRUCTOR ->
           throw new UnsupportedFeatureException(
               "constructor " + call.getKind(),
-              "The IR's composite value types are LIST and STRUCT (docs/design/14-windows-ii.md §5).");
+              "The IR's non-scalar types are LIST and COMPOSITE (docs/design/14-windows-ii.md §5).");
       default -> {
         if (chalk.planner.plan.ChalkKeySet.is(call)) {
           return keySet(call, type);
@@ -422,9 +422,9 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
   }
 
   /**
-   * A field of a STRUCT (D291): a {@code FieldAccess} by position over the struct's expression — a
+   * A field of a COMPOSITE (D291): a {@code FieldAccess} by position over the composite's expression — a
    * user call, a column that carries one, or another field access's input. Typed by the IR's rule,
-   * which is the field's own type made nullable when the struct is: Calcite's builder types it so,
+   * which is the field's own type made nullable when the composite is: Calcite's builder types it so,
    * and where a rewrite typed one narrower, the IR's rule wins (I-IR-22).
    *
    * <p>A correlation variable's field — {@code $cor0.symbol} — is a correlated reference that survived
@@ -443,10 +443,10 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
 
     Expr input = convert(reference);
     Type composite = input.getType();
-    if (composite.getKind() != TypeKind.TYPE_KIND_STRUCT) {
+    if (composite.getKind() != TypeKind.TYPE_KIND_COMPOSITE) {
       throw unsupported(
           "field access over " + reference.getType(),
-          "A field is read from a STRUCT, which only a client-bodied user function produces "
+          "A field is read from a COMPOSITE, which only a client-bodied user function produces "
               + "(docs/design/51-structured-function-results.md §1).");
     }
 
@@ -454,7 +454,7 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
     if (index < 0 || index >= composite.getFieldsCount()) {
       throw unsupported(
           "field " + access.getField().getName() + " of " + reference.getType(),
-          "The field is not one of the struct's own, which is a planner bug.");
+          "The field is not one of the composite's own, which is a planner bug.");
     }
 
     Type field = composite.getFields(index).getType();

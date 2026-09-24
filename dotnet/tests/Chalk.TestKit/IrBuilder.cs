@@ -763,22 +763,22 @@ public static class IrBuilder
         new() { Kind = TypeKind.List, Nullable = nullable, Element = element };
 
     /// <summary>
-    /// A STRUCT type of <paramref name="fields"/>, in order, one level deep (D291). Each field keeps
-    /// its own nullability; <paramref name="nullable"/> is the struct's own.
+    /// A COMPOSITE type of <paramref name="fields"/>, in order, one level deep (D291). Each field keeps
+    /// its own nullability; <paramref name="nullable"/> is the composite's own.
     /// </summary>
-    public static IrType Struct(bool nullable, params Field[] fields)
+    public static IrType Composite(bool nullable, params Field[] fields)
     {
-        var type = new IrType { Kind = TypeKind.Struct, Nullable = nullable };
+        var type = new IrType { Kind = TypeKind.Composite, Nullable = nullable };
         type.Fields.AddRange(fields);
         return type;
     }
 
     /// <summary>The same, non-nullable as a whole.</summary>
-    public static IrType Struct(params Field[] fields) => Struct(nullable: false, fields);
+    public static IrType Composite(params Field[] fields) => Composite(nullable: false, fields);
 
     /// <summary>
-    /// Field <paramref name="index"/> of a STRUCT-typed <paramref name="input"/> (D291), typed as
-    /// I-IR-22 says: the field's own type, made nullable when the struct is.
+    /// Field <paramref name="index"/> of a COMPOSITE-typed <paramref name="input"/> (D291), typed as
+    /// I-IR-22 says: the field's own type, made nullable when the composite is.
     /// </summary>
     public static Expr FieldAccess(Expr input, int index)
     {

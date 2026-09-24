@@ -1,4 +1,4 @@
--- The same aggregate over a frame (it is declared WINDOW): each frame's struct is written into the
+-- The same aggregate over a frame (it is declared WINDOW): each frame's composite is written into the
 -- window's measure column, and the query above takes it apart. `close_range` declares no Remove, so
 -- every frame is recomputed — the answer the reference executor gives by materialising it.
 -- expect: has(Window)

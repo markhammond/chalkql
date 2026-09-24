@@ -1,4 +1,4 @@
--- The subquery spellings: `(m).change` reads a field of the alias's struct column and `s.m.*`
+-- The subquery spellings: `(m).change` reads a field of the alias's composite column and `s.m.*`
 -- expands to every field of it. Once Calcite merges the projections each field access is over the
 -- call itself, so the call runs once per row whichever spelling asked for it (D293).
 -- expect: has_user_function(main.price_move)

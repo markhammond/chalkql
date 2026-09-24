@@ -182,9 +182,9 @@ internal static class UserFunctionBinding
     private static void RequireLaneType(
         Type clr, ChalkType declared, bool strict, string what, string key)
     {
-        if (declared.Kind == Ir.TypeKind.Struct)
+        if (declared.Kind == Ir.TypeKind.Composite)
         {
-            RequireStructType(clr, declared, what, key);
+            RequireCompositeType(clr, declared, what, key);
             return;
         }
 
@@ -206,41 +206,41 @@ internal static class UserFunctionBinding
     }
 
     /// <summary>
-    /// D294: a declared STRUCT is served by a record the engine reads exactly as the declaration read
+    /// D294: a declared COMPOSITE is served by a record the engine reads exactly as the declaration read
     /// one — the same properties, in the same order — and the two must agree field by field: names
-    /// ignoring case, types exact. The struct's own nullability is not compared, as a scalar result's
+    /// ignoring case, types exact. The composite's own nullability is not compared, as a scalar result's
     /// is not: a record that never answers NULL serves a nullable declaration, and one that does
-    /// answers NULL for the whole struct.
+    /// answers NULL for the whole composite.
     /// </summary>
-    private static void RequireStructType(Type clr, ChalkType declared, string what, string key)
+    private static void RequireCompositeType(Type clr, ChalkType declared, string what, string key)
     {
-        if (!StructInference.IsCandidate(clr))
+        if (!CompositeInference.IsCandidate(clr))
         {
             throw new InvalidOperationException(
                 $"{what} {IrTypes.Describe(declared.ToProto())} and the implementation registered as "
-                + $"'{key}' uses {StructInference.Describe(clr)}, which is not a record a struct can be "
+                + $"'{key}' uses {CompositeInference.Describe(clr)}, which is not a record a composite value can be "
                 + "read from.");
         }
 
-        if (!StructInference.TryInfer(clr, nullable: declared.Nullable, out var registered, out var refusal))
+        if (!CompositeInference.TryInfer(clr, nullable: declared.Nullable, out var registered, out var refusal))
         {
             throw new InvalidOperationException(
                 $"{what} {IrTypes.Describe(declared.ToProto())} and the implementation registered as "
-                + $"'{key}' uses {StructInference.Describe(clr)}, which is not one: {refusal}.");
+                + $"'{key}' uses {CompositeInference.Describe(clr)}, which is not one: {refusal}.");
         }
 
-        var mismatch = StructMismatch(declared, registered);
+        var mismatch = CompositeMismatch(declared, registered);
         if (mismatch is not null)
         {
             throw new InvalidOperationException(
                 $"{what} {IrTypes.Describe(declared.ToProto())} and the implementation registered as "
-                + $"'{key}' uses {StructInference.Describe(clr)}, which reads as "
+                + $"'{key}' uses {CompositeInference.Describe(clr)}, which reads as "
                 + $"{IrTypes.Describe(registered.ToProto())}: {mismatch}.");
         }
     }
 
-    /// <summary>Where two structs part company, or null when they agree field by field.</summary>
-    private static string? StructMismatch(ChalkType declared, ChalkType registered)
+    /// <summary>Where two composite values part company, or null when they agree field by field.</summary>
+    private static string? CompositeMismatch(ChalkType declared, ChalkType registered)
     {
         if (declared.Fields.Count != registered.Fields.Count)
         {

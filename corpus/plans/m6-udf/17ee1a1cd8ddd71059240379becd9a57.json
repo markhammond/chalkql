@@ -225,7 +225,7 @@
           "fieldAccess": {
             "input": {
               "type": {
-                "kind": "TYPE_KIND_STRUCT",
+                "kind": "TYPE_KIND_COMPOSITE",
                 "fields": [
                   {
                     "name": "Direction",
@@ -288,7 +288,7 @@
           "fieldAccess": {
             "input": {
               "type": {
-                "kind": "TYPE_KIND_STRUCT",
+                "kind": "TYPE_KIND_COMPOSITE",
                 "fields": [
                   {
                     "name": "Direction",

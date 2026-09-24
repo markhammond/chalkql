@@ -23,16 +23,16 @@ internal sealed class UserAggregateAccumulator<TState, TIn, TOut> : MeasureAccum
     private int _initialised;
 
     /// <summary>
-    /// The compiled writer of a STRUCT result into the measure column's fields (D294), and null for a
+    /// The compiled writer of a COMPOSITE result into the measure column's fields (D294), and null for a
     /// scalar result.
     /// </summary>
-    private readonly StructEmitter<TOut>? _struct;
+    private readonly CompositeEmitter<TOut>? _composite;
 
     public UserAggregateAccumulator(ChalkType resultType, AggregateSpec<TState, TIn, TOut> spec)
         : base(resultType)
     {
         _spec = spec;
-        _struct = resultType.Kind == Ir.TypeKind.Struct ? StructEmitters.For<TOut>(resultType) : null;
+        _composite = resultType.Kind == Ir.TypeKind.Composite ? CompositeEmitters.For<TOut>(resultType) : null;
     }
 
     public override void EnsureCapacity(int groups)
@@ -69,10 +69,10 @@ internal sealed class UserAggregateAccumulator<TState, TIn, TOut> : MeasureAccum
     public override void Emit(ColumnCopier copier, int group)
     {
         var state = group < _initialised ? _states[group] : _spec.Init();
-        if (_struct is not null)
+        if (_composite is not null)
         {
             // D291: Finish's record, field by field into the measure column's children.
-            _struct.Emit(copier, _spec.Finish(state));
+            _composite.Emit(copier, _spec.Finish(state));
             return;
         }
 

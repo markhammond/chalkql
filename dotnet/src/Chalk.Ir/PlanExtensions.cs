@@ -466,7 +466,7 @@ public static class PlanExtensions
                 break;
             case Expr.KindOneofCase.FieldAccess:
                 // D291: printed as Calcite prints one — `classify_transaction($1, $2).category`,
-                // `$1.total` — with the field named from the struct's own type.
+                // `$1.total` — with the field named from the composite's own type.
                 if (expr.FieldAccess.Input is null)
                 {
                     sb.Append("<none>");
@@ -503,7 +503,7 @@ public static class PlanExtensions
     private static string Name(FunctionId function) => function.ToString().ToUpperInvariant();
 
     /// <summary>
-    /// The name of the field a <c>FieldAccess</c> reads, or <c>#index</c> when the struct's type does
+    /// The name of the field a <c>FieldAccess</c> reads, or <c>#index</c> when the composite's type does
     /// not say — a malformed plan, which the printer still prints rather than throws on.
     /// </summary>
     private static string FieldName(FieldAccess access)

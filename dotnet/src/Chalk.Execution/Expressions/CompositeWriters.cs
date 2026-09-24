@@ -8,7 +8,7 @@ using Type = System.Type;
 namespace Chalk.Execution.Expressions;
 
 /// <summary>
-/// Writes a record a Tier 1 delegate returned into a STRUCT result's field columns (D294, ADR 0077):
+/// Writes a record a Tier 1 delegate returned into a COMPOSITE result's field columns (D294, ADR 0077):
 /// one accessor per field, compiled once when the kernel is bound, and per lane one read and one write
 /// per field — no boxing, no reflection and no allocation per row.
 /// </summary>
@@ -20,61 +20,61 @@ namespace Chalk.Execution.Expressions;
 /// <see cref="LaneCodec"/> call a scalar result makes.
 /// </para>
 /// <para>
-/// Every field column gets exactly one row per struct row, whether the struct is NULL or not, so the
-/// fields stay aligned with the struct's own rows. A NULL struct's fields are undefined (D291): a
+/// Every field column gets exactly one row per composite row, whether the composite is NULL or not, so the
+/// fields stay aligned with the composite's own rows. A NULL composite's fields are undefined (D291): a
 /// nullable field is written NULL, a non-nullable one its type's default, so a non-nullable field
 /// column never holds a NULL.
 /// </para>
 /// </remarks>
 /// <typeparam name="TOut">What the delegate returns: the record, or a <c>Nullable</c> of it.</typeparam>
-internal abstract class StructWriter<TOut>
+internal abstract class CompositeWriter<TOut>
 {
     /// <summary>Starts one batch of <paramref name="length"/> rows in <paramref name="result"/>'s fields.</summary>
     public abstract void Begin(ColumnWriter result, int length);
 
     /// <summary>
     /// Writes one row's answer into the fields, and says whether it was a value at all — false for a
-    /// NULL record, whose fields have then been written as a NULL struct's are.
+    /// NULL record, whose fields have then been written as a NULL composite's are.
     /// </summary>
     public abstract bool Write(TOut value, int row);
 
-    /// <summary>Writes a NULL struct's row: a strict lane the delegate never saw.</summary>
+    /// <summary>Writes a NULL composite's row: a strict lane the delegate never saw.</summary>
     public abstract void WriteNull(int row);
 }
 
-/// <summary>Builds a <see cref="StructWriter{TOut}"/> for a declared struct, once, at binding.</summary>
-internal static class StructWriters
+/// <summary>Builds a <see cref="CompositeWriter{TOut}"/> for a declared composite, once, at binding.</summary>
+internal static class CompositeWriters
 {
     /// <summary>
     /// The writer for a delegate returning <typeparamref name="TOut"/> into <paramref name="declared"/>.
     /// The binding check has already compared the record with the declaration field by field, so the
     /// properties read here are the fields, in the declaration's order.
     /// </summary>
-    public static StructWriter<TOut> For<TOut>(ChalkType declared)
+    public static CompositeWriter<TOut> For<TOut>(ChalkType declared)
     {
         var underlying = Nullable.GetUnderlyingType(typeof(TOut));
         var record = underlying ?? typeof(TOut);
-        var recordWriter = typeof(StructWriters)
+        var recordWriter = typeof(CompositeWriters)
             .GetMethod(nameof(RecordWriter), BindingFlags.NonPublic | BindingFlags.Static)!
             .MakeGenericMethod(record)
             .Invoke(null, [declared])!;
 
         if (underlying is null)
         {
-            return (StructWriter<TOut>)recordWriter;
+            return (CompositeWriter<TOut>)recordWriter;
         }
 
-        return (StructWriter<TOut>)Activator.CreateInstance(
+        return (CompositeWriter<TOut>)Activator.CreateInstance(
             typeof(NullableRecordWriter<>).MakeGenericType(record), recordWriter)!;
     }
 
     private static RecordWriter<TRecord> RecordWriter<TRecord>(ChalkType declared)
     {
-        var properties = StructInference.Properties(typeof(TRecord));
+        var properties = CompositeInference.Properties(typeof(TRecord));
         if (properties.Count != declared.Fields.Count)
         {
             throw new InvalidOperationException(
-                $"{typeof(TRecord).Name} has {properties.Count} fields and the declared struct "
+                $"{typeof(TRecord).Name} has {properties.Count} fields and the declared composite "
                 + $"{declared.Fields.Count}; the binding check should have refused this.");
         }
 
@@ -104,8 +104,8 @@ internal static class StructWriters
     }
 }
 
-/// <summary>The record itself: a value type or a class, a class's null being a NULL struct.</summary>
-internal sealed class RecordWriter<TRecord> : StructWriter<TRecord>
+/// <summary>The record itself: a value type or a class, a class's null being a NULL composite.</summary>
+internal sealed class RecordWriter<TRecord> : CompositeWriter<TRecord>
 {
     private readonly FieldWriter<TRecord>[] _fields;
 
@@ -121,7 +121,7 @@ internal sealed class RecordWriter<TRecord> : StructWriter<TRecord>
 
     public override bool Write(TRecord value, int row)
     {
-        // A value-type record is never null, and the test folds away; a class's null is a NULL struct.
+        // A value-type record is never null, and the test folds away; a class's null is a NULL composite.
         if (!typeof(TRecord).IsValueType && value is null)
         {
             WriteNull(row);
@@ -145,8 +145,8 @@ internal sealed class RecordWriter<TRecord> : StructWriter<TRecord>
     }
 }
 
-/// <summary><c>Nullable&lt;TRecord&gt;</c>: no value is a NULL struct.</summary>
-internal sealed class NullableRecordWriter<TRecord> : StructWriter<TRecord?>
+/// <summary><c>Nullable&lt;TRecord&gt;</c>: no value is a NULL composite.</summary>
+internal sealed class NullableRecordWriter<TRecord> : CompositeWriter<TRecord?>
     where TRecord : struct
 {
     private readonly RecordWriter<TRecord> _record;
@@ -256,7 +256,7 @@ internal sealed class FieldWriter<TRecord, TField> : FieldWriter<TRecord>
 
         if (!_nullable)
         {
-            // A non-nullable field under a NULL struct holds its type's default, never garbage from
+            // A non-nullable field under a NULL composite holds its type's default, never garbage from
             // the previous batch — and never a NULL, which its column may not have.
             LaneCodec.Write(column, _length, row, default(TField)!);
         }
@@ -264,29 +264,29 @@ internal sealed class FieldWriter<TRecord, TField> : FieldWriter<TRecord>
 }
 
 /// <summary>
-/// Appends a record an aggregate's <c>Finish</c> returned to a STRUCT column's copier (D294): the
+/// Appends a record an aggregate's <c>Finish</c> returned to a COMPOSITE column's copier (D294): the
 /// grouped aggregate's emit and the window aggregate's frames. The same compiled accessors as
-/// <see cref="StructWriter{TOut}"/>, writing into <see cref="Vectors.ColumnCopier"/> fields rather than
-/// a kernel's writer — one read and one append per field, and the struct row closed.
+/// <see cref="CompositeWriter{TOut}"/>, writing into <see cref="Vectors.ColumnCopier"/> fields rather than
+/// a kernel's writer — one read and one append per field, and the composite row closed.
 /// </summary>
-internal abstract class StructEmitter<TOut>
+internal abstract class CompositeEmitter<TOut>
 {
-    /// <summary>Appends one struct row: <paramref name="value"/>'s fields, or a NULL struct's.</summary>
+    /// <summary>Appends one composite row: <paramref name="value"/>'s fields, or a NULL composite's.</summary>
     public abstract void Emit(Vectors.ColumnCopier copier, TOut value);
 }
 
-/// <summary>Builds a <see cref="StructEmitter{TOut}"/>, once, when the aggregate is bound.</summary>
-internal static class StructEmitters
+/// <summary>Builds a <see cref="CompositeEmitter{TOut}"/>, once, when the aggregate is bound.</summary>
+internal static class CompositeEmitters
 {
-    public static StructEmitter<TOut> For<TOut>(ChalkType declared)
+    public static CompositeEmitter<TOut> For<TOut>(ChalkType declared)
     {
         var underlying = Nullable.GetUnderlyingType(typeof(TOut));
         var record = underlying ?? typeof(TOut);
-        var properties = StructInference.Properties(record);
+        var properties = CompositeInference.Properties(record);
         if (properties.Count != declared.Fields.Count)
         {
             throw new InvalidOperationException(
-                $"{record.Name} has {properties.Count} fields and the declared struct "
+                $"{record.Name} has {properties.Count} fields and the declared composite "
                 + $"{declared.Fields.Count}; the binding check should have refused this.");
         }
 
@@ -310,14 +310,14 @@ internal static class StructEmitters
         var emitter = Activator.CreateInstance(
             typeof(RecordEmitter<>).MakeGenericType(record), fields)!;
         return underlying is null
-            ? (StructEmitter<TOut>)emitter
-            : (StructEmitter<TOut>)Activator.CreateInstance(
+            ? (CompositeEmitter<TOut>)emitter
+            : (CompositeEmitter<TOut>)Activator.CreateInstance(
                 typeof(NullableRecordEmitter<>).MakeGenericType(record), emitter)!;
     }
 }
 
-/// <summary>The record itself; a class's null is a NULL struct.</summary>
-internal sealed class RecordEmitter<TRecord> : StructEmitter<TRecord>
+/// <summary>The record itself; a class's null is a NULL composite.</summary>
+internal sealed class RecordEmitter<TRecord> : CompositeEmitter<TRecord>
 {
     private readonly FieldEmitter<TRecord>[] _fields;
 
@@ -336,12 +336,12 @@ internal sealed class RecordEmitter<TRecord> : StructEmitter<TRecord>
             _fields[i].Emit(copier.Field(i), value);
         }
 
-        copier.EndStruct(valid: true);
+        copier.EndComposite(valid: true);
     }
 }
 
-/// <summary><c>Nullable&lt;TRecord&gt;</c>: no value is a NULL struct.</summary>
-internal sealed class NullableRecordEmitter<TRecord> : StructEmitter<TRecord?>
+/// <summary><c>Nullable&lt;TRecord&gt;</c>: no value is a NULL composite.</summary>
+internal sealed class NullableRecordEmitter<TRecord> : CompositeEmitter<TRecord?>
     where TRecord : struct
 {
     private readonly RecordEmitter<TRecord> _record;

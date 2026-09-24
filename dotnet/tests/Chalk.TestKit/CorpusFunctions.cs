@@ -179,7 +179,7 @@ public static class CorpusFunctions
 
     /// <summary>
     /// What <c>price_move</c> answers (D291): which way a bar moved — <c>up</c>, <c>down</c> or
-    /// <c>flat</c> — and by how much. Declared from this record, so the struct's fields are its
+    /// <c>flat</c> — and by how much. Declared from this record, so the composite's fields are its
     /// properties in order, <c>Direction STRING</c> and <c>Change FP64</c>, both non-nullable.
     /// </summary>
     public readonly record struct PriceMove(Utf8String Direction, double Change);

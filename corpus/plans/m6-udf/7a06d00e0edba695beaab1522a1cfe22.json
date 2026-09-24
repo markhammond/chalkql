@@ -21,7 +21,7 @@
       {
         "name": "m",
         "type": {
-          "kind": "TYPE_KIND_STRUCT",
+          "kind": "TYPE_KIND_COMPOSITE",
           "fields": [
             {
               "name": "Direction",
@@ -59,7 +59,7 @@
         {
           "name": "m",
           "type": {
-            "kind": "TYPE_KIND_STRUCT",
+            "kind": "TYPE_KIND_COMPOSITE",
             "fields": [
               {
                 "name": "Direction",
@@ -236,7 +236,7 @@
         },
         {
           "type": {
-            "kind": "TYPE_KIND_STRUCT",
+            "kind": "TYPE_KIND_COMPOSITE",
             "fields": [
               {
                 "name": "Direction",

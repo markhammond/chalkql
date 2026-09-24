@@ -71,7 +71,7 @@ internal sealed class ExpressionCompiler
                 Compile(expr.InList.Value),
                 [.. expr.InList.Options.Select(Compile)]),
 
-            // D291: a field of a struct, a view of the struct's field column.
+            // D291: a field of a composite value, a view of the composite's field column.
             Expr.KindOneofCase.FieldAccess => new FieldAccessExpr(
                 type, Compile(expr.FieldAccess.Input), (int)expr.FieldAccess.Index),
             _ => throw new UnsupportedFeatureException(

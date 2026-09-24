@@ -6,21 +6,21 @@ using Chalk.Sources;
 namespace Chalk.Execution.Reference;
 
 /// <summary>
-/// How the reference executor holds a STRUCT (D291, ADR 0077): an <c>object?[]</c> of its fields in
+/// How the reference executor holds a COMPOSITE (D291, ADR 0077): an <c>object?[]</c> of its fields in
 /// order, each in the reference's own representation — <see cref="long"/> for every integer,
-/// <see cref="string"/> for a STRING — and null for a NULL struct. It is also what a host reads a
-/// struct cell as.
+/// <see cref="string"/> for a STRING — and null for a NULL composite. It is also what a host reads a
+/// composite cell as.
 /// </summary>
 /// <remarks>
 /// A delegate's record reaches it boxed, which the reference path is allowed (D13); the fields are
 /// read through accessors compiled once per record type from the same properties the declaration and
 /// the vectorised engine read, so the two engines cannot disagree about which property is which field.
 /// </remarks>
-internal static class ReferenceStructs
+internal static class ReferenceComposites
 {
     private static readonly ConcurrentDictionary<Type, Func<object, object?>[]> Accessors = new();
 
-    /// <summary>A boxed record, or null, as the reference's struct value.</summary>
+    /// <summary>A boxed record, or null, as the reference's composite value.</summary>
     public static object?[]? FromRecord(object? boxed)
     {
         if (boxed is null)
@@ -51,7 +51,7 @@ internal static class ReferenceStructs
 
     private static Func<object, object?>[] Compile(Type record)
     {
-        var properties = StructInference.Properties(record);
+        var properties = CompositeInference.Properties(record);
         var accessors = new Func<object, object?>[properties.Count];
         for (var i = 0; i < accessors.Length; i++)
         {
@@ -67,7 +67,7 @@ internal static class ReferenceStructs
         return accessors;
     }
 
-    /// <summary>A boxed aggregate whose <c>Finish</c> answers a record, answering the struct value instead.</summary>
+    /// <summary>A boxed aggregate whose <c>Finish</c> answers a record, answering the composite value instead.</summary>
     public sealed class Aggregate(IBoxedAggregate inner) : IBoxedAggregate
     {
         public void Add(object? value) => inner.Add(value);

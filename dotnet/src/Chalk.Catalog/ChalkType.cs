@@ -29,13 +29,13 @@ public readonly record struct ChalkType(TypeKind Kind, bool Nullable, int Precis
 
     // The same reason again: a field holds a ChalkType, so the fields live behind an array, compared
     // element by element in Equals below (D291).
-    private readonly ChalkField[]? _fields;
+    private readonly CompositeField[]? _fields;
 
     /// <summary>
-    /// A <see cref="TypeKind.Struct"/>'s fields, in declared order, and empty for every other kind.
-    /// Every field is a scalar — a struct is exactly one level deep.
+    /// A <see cref="TypeKind.Composite"/>'s fields, in declared order, and empty for every other kind.
+    /// Every field is a scalar — a composite value is exactly one level deep.
     /// </summary>
-    public IReadOnlyList<ChalkField> Fields
+    public IReadOnlyList<CompositeField> Fields
     {
         get => _fields ?? [];
         init => _fields = value is { Count: > 0 } fields ? [.. fields] : null;
@@ -98,21 +98,21 @@ public readonly record struct ChalkType(TypeKind Kind, bool Nullable, int Precis
     }
 
     /// <summary>
-    /// A struct of <paramref name="fields"/>, in order (D291). Each field carries its own nullability;
-    /// <paramref name="nullable"/> is whether the struct itself may be NULL, which reads as NULL in
+    /// A composite value of <paramref name="fields"/>, in order (D291). Each field carries its own nullability;
+    /// <paramref name="nullable"/> is whether the composite itself may be NULL, which reads as NULL in
     /// every field.
     /// </summary>
     /// <exception cref="ArgumentException">
     /// There is no field, a field has no name, two names are equal ignoring case, or a field is itself
-    /// a LIST or a STRUCT.
+    /// a LIST or a COMPOSITE.
     /// </exception>
-    public static ChalkType Struct(IEnumerable<ChalkField> fields, bool nullable = false)
+    public static ChalkType Composite(IEnumerable<CompositeField> fields, bool nullable = false)
     {
         ArgumentNullException.ThrowIfNull(fields);
         var list = fields.ToArray();
         if (list.Length == 0)
         {
-            throw new ArgumentException("a STRUCT has at least one field.", nameof(fields));
+            throw new ArgumentException("a COMPOSITE has at least one field.", nameof(fields));
         }
 
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -120,7 +120,7 @@ public readonly record struct ChalkType(TypeKind Kind, bool Nullable, int Precis
         {
             if (string.IsNullOrEmpty(field.Name))
             {
-                throw new ArgumentException("a STRUCT field has no name.", nameof(fields));
+                throw new ArgumentException("a COMPOSITE field has no name.", nameof(fields));
             }
 
             if (!names.Add(field.Name))
@@ -131,20 +131,20 @@ public readonly record struct ChalkType(TypeKind Kind, bool Nullable, int Precis
                     nameof(fields));
             }
 
-            if (field.Type.Kind is TypeKind.List or TypeKind.Struct)
+            if (field.Type.Kind is TypeKind.List or TypeKind.Composite)
             {
                 throw new ArgumentException(
                     $"field '{field.Name}' is a {field.Type.Kind.ToString().ToUpperInvariant()}; a "
-                    + "STRUCT is one level deep and its fields are scalars.",
+                    + "COMPOSITE is one level deep and its fields are scalars.",
                     nameof(fields));
             }
         }
 
-        return new ChalkType(TypeKind.Struct, nullable) { Fields = list };
+        return new ChalkType(TypeKind.Composite, nullable) { Fields = list };
     }
 
     /// <summary>The same, non-nullable as a whole.</summary>
-    public static ChalkType Struct(params ChalkField[] fields) => Struct((IEnumerable<ChalkField>)fields);
+    public static ChalkType Composite(params CompositeField[] fields) => Composite((IEnumerable<CompositeField>)fields);
 
     /// <summary>The same type, nullable or not.</summary>
     public ChalkType WithNullable(bool nullable) => this with { Nullable = nullable };
@@ -190,7 +190,7 @@ public readonly record struct ChalkType(TypeKind Kind, bool Nullable, int Precis
             ? mapped
             : mapped with
             {
-                Fields = [.. type.Fields.Select(f => new ChalkField(f.Name, FromProto(f.Type)))],
+                Fields = [.. type.Fields.Select(f => new CompositeField(f.Name, FromProto(f.Type)))],
             };
     }
 
@@ -216,7 +216,7 @@ public readonly record struct ChalkType(TypeKind Kind, bool Nullable, int Precis
 }
 
 /// <summary>
-/// One field of a <see cref="TypeKind.Struct"/> (D291): its name as declared, and its type — a scalar,
+/// One field of a <see cref="TypeKind.Composite"/> (D291): its name as declared, and its type — a scalar,
 /// with its own nullability. A value, compared by value, as the type it belongs to is.
 /// </summary>
 /// <remarks>
@@ -224,10 +224,10 @@ public readonly record struct ChalkType(TypeKind Kind, bool Nullable, int Precis
 /// <c>SqlPosition</c> are the public API's only records (D26), and a field needs no more than a name,
 /// a type and equality.
 /// </remarks>
-public readonly struct ChalkField : IEquatable<ChalkField>
+public readonly struct CompositeField : IEquatable<CompositeField>
 {
     /// <summary>A field called <paramref name="name"/> of type <paramref name="type"/>.</summary>
-    public ChalkField(string name, ChalkType type)
+    public CompositeField(string name, ChalkType type)
     {
         ArgumentNullException.ThrowIfNull(name);
         Name = name;
@@ -237,21 +237,21 @@ public readonly struct ChalkField : IEquatable<ChalkField>
     /// <summary>The field's name, as declared. SQL matches it ignoring case.</summary>
     public string Name { get; }
 
-    /// <summary>The field's type; never a LIST or a STRUCT.</summary>
+    /// <summary>The field's type; never a LIST or a COMPOSITE.</summary>
     public ChalkType Type { get; }
 
-    public static bool operator ==(ChalkField left, ChalkField right) => left.Equals(right);
+    public static bool operator ==(CompositeField left, CompositeField right) => left.Equals(right);
 
-    public static bool operator !=(ChalkField left, ChalkField right) => !left.Equals(right);
+    public static bool operator !=(CompositeField left, CompositeField right) => !left.Equals(right);
 
     /// <summary>Equal when the names are the same, case included, and the types are equal.</summary>
-    public bool Equals(ChalkField other) =>
+    public bool Equals(CompositeField other) =>
         string.Equals(Name, other.Name, StringComparison.Ordinal) && Type.Equals(other.Type);
 
-    public override bool Equals(object? obj) => obj is ChalkField other && Equals(other);
+    public override bool Equals(object? obj) => obj is CompositeField other && Equals(other);
 
     public override int GetHashCode() => HashCode.Combine(Name, Type);
 
     /// <summary>Human-readable form, e.g. <c>category:STRING</c>.</summary>
-    public override string ToString() => $"{Name}:{Type}";
+    public override string ToString() => $"{Name} {Type}";
 }

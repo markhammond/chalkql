@@ -36,10 +36,10 @@ internal sealed class VectorScratch : IArenaScratch, IColumnSink
     private int _varUsed;
     private int _varNulls;
 
-    /// <summary>A STRUCT's field scratch, one per field in order (D291), and null for every other kind.</summary>
+    /// <summary>A COMPOSITE's field scratch, one per field in order (D291), and null for every other kind.</summary>
     private readonly VectorScratch[]? _fields;
 
-    /// <summary>The finished field views a struct view points at, reused batch after batch.</summary>
+    /// <summary>The finished field views a composite view points at, reused batch after batch.</summary>
     private readonly ColumnView[]? _fieldViews;
 
     public VectorScratch(ChalkType type)
@@ -47,7 +47,7 @@ internal sealed class VectorScratch : IArenaScratch, IColumnSink
         Type = type;
         _kind = ColumnKinds.Of(type);
         _width = ColumnKinds.Width(_kind);
-        if (_kind == ColumnKind.Struct)
+        if (_kind == ColumnKind.Composite)
         {
             _fields = [.. type.Fields.Select(f => new VectorScratch(f.Type))];
             _fieldViews = new ColumnView[_fields.Length];
@@ -85,9 +85,9 @@ internal sealed class VectorScratch : IArenaScratch, IColumnSink
         }
     }
 
-    /// <summary>Field <paramref name="index"/>'s scratch, for a STRUCT (D291).</summary>
+    /// <summary>Field <paramref name="index"/>'s scratch, for a COMPOSITE (D291).</summary>
     public VectorScratch Field(int index) =>
-        _fields?[index] ?? throw new InvalidOperationException("This scratch is not a STRUCT's.");
+        _fields?[index] ?? throw new InvalidOperationException("This scratch is not a COMPOSITE's.");
 
     /// <summary>The typed value lanes for a batch of <paramref name="length"/> rows.</summary>
     public Span<T> Values<T>(int length)
@@ -138,7 +138,7 @@ internal sealed class VectorScratch : IArenaScratch, IColumnSink
     {
         if (_fields is not null)
         {
-            return FinishStruct(length, nullCount);
+            return FinishComposite(length, nullCount);
         }
 
         return Vector.Transient(
@@ -156,11 +156,11 @@ internal sealed class VectorScratch : IArenaScratch, IColumnSink
     }
 
     /// <summary>
-    /// A STRUCT's view (D291): its own validity over <paramref name="length"/> rows and each field's
+    /// A COMPOSITE's view (D291): its own validity over <paramref name="length"/> rows and each field's
     /// view as that field's scratch finishes it — every field written for every row, whatever the
-    /// struct's own validity says.
+    /// composite's own validity says.
     /// </summary>
-    private Vector FinishStruct(int length, int nullCount)
+    private Vector FinishComposite(int length, int nullCount)
     {
         for (var i = 0; i < _fields!.Length; i++)
         {
@@ -184,14 +184,14 @@ internal sealed class VectorScratch : IArenaScratch, IColumnSink
     /// <summary>
     /// This scratch as a finished view of <paramref name="length"/> rows, whatever wrote it: the
     /// appended rows of a variable-length one, or the lanes and bitmap of a fixed one, sized first so
-    /// that a field no row wrote — every struct NULL — is still a view of the right length.
+    /// that a field no row wrote — every composite NULL — is still a view of the right length.
     /// </summary>
     public ColumnView FinishWritten(int length)
     {
         if (_fields is not null)
         {
             var validity = MutableValidity(length);
-            return FinishStruct(length, validity.IsEmpty ? 0 : Validity.CountNulls(validity, length)).View;
+            return FinishComposite(length, validity.IsEmpty ? 0 : Validity.CountNulls(validity, length)).View;
         }
 
         if (ColumnKinds.IsVariableLength(_kind))
@@ -206,7 +206,7 @@ internal sealed class VectorScratch : IArenaScratch, IColumnSink
 
     /// <summary>
     /// Spreads row 0 of <paramref name="one"/> over <paramref name="length"/> rows of this scratch —
-    /// the STABLE broadcast (D79), field by field for a STRUCT (D291). The row's validity is the
+    /// the STABLE broadcast (D79), field by field for a COMPOSITE (D291). The row's validity is the
     /// broadcast's, narrowed to <paramref name="selection"/> at the top level only: a field's own
     /// validity is its own.
     /// </summary>
@@ -223,7 +223,7 @@ internal sealed class VectorScratch : IArenaScratch, IColumnSink
         {
             for (var i = 0; i < _fields.Length; i++)
             {
-                _fields[i].BroadcastInto(one.StructField(i), length, default);
+                _fields[i].BroadcastInto(one.FieldView(i), length, default);
             }
         }
         else if (ColumnKinds.IsVariableLength(_kind))
@@ -270,7 +270,7 @@ internal sealed class VectorScratch : IArenaScratch, IColumnSink
 
         var nulls = Validity.CountNulls(bits, length);
         return _fields is not null
-            ? FinishStruct(length, nulls).View
+            ? FinishComposite(length, nulls).View
             : Finish(length, nulls).View;
     }
 

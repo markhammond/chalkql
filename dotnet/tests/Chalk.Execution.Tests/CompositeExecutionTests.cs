@@ -15,13 +15,13 @@ using IrType = Chalk.Ir.Type;
 namespace Chalk.Execution.Tests;
 
 /// <summary>
-/// The executor's half of structured results (D291, D293, D294; ADR 0077): a struct result written
-/// by a Tier 1 delegate and taken apart by field access, nullable and strict; a struct-valued
-/// aggregate grouped and over a frame; how often a shared call runs; what a struct costs per batch;
+/// The executor's half of structured results (D291, D293, D294; ADR 0077): a composite result written
+/// by a Tier 1 delegate and taken apart by field access, nullable and strict; a composite-valued
+/// aggregate grouped and over a frame; how often a shared call runs; what a composite value costs per batch;
 /// and the reference executor agreeing with all of it.
 /// </summary>
 [Experimental("CHALK001")]
-public sealed class StructExecutionTests
+public sealed class CompositeExecutionTests
 {
     /// <summary>A transaction: every fourth amount is missing, which is what exercises STRICT.</summary>
     public sealed record Txn(long Id, Utf8String Description, double? Amount);
@@ -29,7 +29,7 @@ public sealed class StructExecutionTests
     /// <summary>The owner's record.</summary>
     public readonly record struct Classification(Utf8String Category, double Confidence);
 
-    /// <summary>A struct aggregate's answer.</summary>
+    /// <summary>A composite aggregate's answer.</summary>
     public readonly record struct Summary(double Total, long Count);
 
     public struct SummaryState
@@ -43,7 +43,7 @@ public sealed class StructExecutionTests
     private static readonly Utf8String Large = "large"u8.ToArray();
     private static readonly Utf8String Small = "small"u8.ToArray();
 
-    private static readonly IrType ClassificationType = Struct(
+    private static readonly IrType ClassificationType = Composite(
         nullable: true, F("Category", Str()), F("Confidence", Fp64()));
 
     private static readonly RowType TxnRow = Row(
@@ -51,7 +51,7 @@ public sealed class StructExecutionTests
 
     private readonly Xunit.ITestOutputHelper _output;
 
-    public StructExecutionTests(Xunit.ITestOutputHelper output) => _output = output;
+    public CompositeExecutionTests(Xunit.ITestOutputHelper output) => _output = output;
 
     /// <summary>Counts every call a registered delegate answers, per test.</summary>
     private sealed class Counter
@@ -241,7 +241,7 @@ public sealed class StructExecutionTests
             var id = (long)row[0]!;
             if (id % 4 == 3)
             {
-                // STRICT over a NULL amount: the whole struct is NULL, and so is each field.
+                // STRICT over a NULL amount: the whole composite is NULL, and so is each field.
                 Assert.Null(row[1]);
                 Assert.Null(row[2]);
                 continue;
@@ -254,7 +254,7 @@ public sealed class StructExecutionTests
     }
 
     [Fact]
-    public async Task A_field_of_a_struct_column_is_read_through_its_reference()
+    public async Task A_field_of_a_composite_column_is_read_through_its_reference()
     {
         var inner = Project(TxnRead(), [("id", Ref(TxnRow, 0)), ("c", ClassifyCall())]);
         var plan = IrBuilder.Plan(Project(
@@ -297,14 +297,14 @@ public sealed class StructExecutionTests
 
         Assert.Equal(Rows, seen);
 
-        // And read back the way a host reads it: one object?[] per struct, in field order.
+        // And read back the way a host reads it: one object?[] per composite, in field order.
         var rows = await BothAsync(plan, [ClassifyDeclaration()], [ClassifyHost(new Counter())]);
         var first = Assert.IsType<object?[]>(rows[1][1]);
         Assert.Equal(["small", 0.001], first);
     }
 
     [Fact]
-    public async Task A_nullable_record_answers_null_structs_and_null_fields()
+    public async Task A_nullable_record_answers_null_composites_and_null_fields()
     {
         var maybe = Fn("maybe_classify", ClassificationType, Ref(TxnRow, 2));
         var plan = IrBuilder.Plan(Project(
@@ -334,7 +334,7 @@ public sealed class StructExecutionTests
     }
 
     [Fact]
-    public async Task A_null_test_reads_the_struct_s_own_validity()
+    public async Task A_null_test_reads_the_composite_s_own_validity()
     {
         var maybe = Fn("maybe_classify", ClassificationType, Ref(TxnRow, 2));
         var plan = IrBuilder.Plan(Project(
@@ -351,21 +351,21 @@ public sealed class StructExecutionTests
     }
 
     [Fact]
-    public void A_struct_is_refused_where_the_engine_would_compare_order_or_hash_it()
+    public void A_composite_is_refused_where_the_engine_would_compare_order_or_hash_it()
     {
         var error = Assert.Throws<UnsupportedFeatureException>(
             () => Vectors.ColumnKinds.RequireComparable(ChalkType.FromProto(ClassificationType), "a sort key"));
 
-        Assert.Contains("a sort key on a STRUCT", error.Message);
+        Assert.Contains("a sort key on a COMPOSITE", error.Message);
         Assert.Contains("no ordering or equality", error.Message);
     }
 
     // ---- aggregates ----
 
     [Fact]
-    public async Task A_struct_aggregate_grouped_writes_finish_into_the_measure_column()
+    public async Task A_composite_aggregate_grouped_writes_finish_into_the_measure_column()
     {
-        var summary = Struct(nullable: true, F("Total", Fp64()), F("Count", I64()));
+        var summary = Composite(nullable: true, F("Total", Fp64()), F("Count", I64()));
         var bucket = Project(
             TxnRead(),
             [("b", Call(FunctionId.Modulus, I64(), Ref(TxnRow, 0), Lit(4L))), ("amount", Ref(TxnRow, 2))]);
@@ -401,9 +401,9 @@ public sealed class StructExecutionTests
     }
 
     [Fact]
-    public async Task A_struct_aggregate_over_a_frame_writes_each_frame_s_record()
+    public async Task A_composite_aggregate_over_a_frame_writes_each_frame_s_record()
     {
-        var summary = Struct(nullable: true, F("Total", Fp64()), F("Count", I64()));
+        var summary = Composite(nullable: true, F("Total", Fp64()), F("Count", I64()));
         var read = TxnRead();
         var window = Window(
             read,
@@ -566,7 +566,7 @@ public sealed class StructExecutionTests
     public async Task A_stable_call_of_constants_runs_once_per_execution()
     {
         var counter = new Counter();
-        var today = Fn("today", Struct(F("Category", Str()), F("Confidence", Fp64())));
+        var today = Fn("today", Composite(F("Category", Str()), F("Confidence", Fp64())));
         var plan = IrBuilder.Plan(Project(
             TxnRead(),
             [("category", FieldAccess(today, 0)), ("confidence", FieldAccess(today, 1)), ("c", today)]));
@@ -584,14 +584,14 @@ public sealed class StructExecutionTests
     // ---- allocation gates ----
 
     /// <summary>
-    /// D294's claim, as the corpus functions' gates make theirs: a struct call and its two fields add
+    /// D294's claim, as the corpus functions' gates make theirs: a composite call and its two fields add
     /// nothing per batch over the engine's own floor, measured against the same two-column projection
     /// written with built-ins. Both sides read and write the same column kinds.
     /// </summary>
     [Fact]
-    public async Task A_struct_result_and_its_field_accesses_allocate_nothing_per_batch()
+    public async Task A_composite_result_and_its_field_accesses_allocate_nothing_per_batch()
     {
-        var withStruct = IrBuilder.Plan(Project(
+        var withComposite = IrBuilder.Plan(Project(
             TxnRead(),
             [("category", FieldAccess(ClassifyCall(), 0)), ("confidence", FieldAccess(ClassifyCall(), 1))]));
         var floor = IrBuilder.Plan(Project(
@@ -602,28 +602,28 @@ public sealed class StructExecutionTests
             ]));
 
         var measuredFloor = await Measure(floor, [], []);
-        var measured = await Measure(withStruct, [ClassifyDeclaration()], [ClassifyHost(new Counter())]);
+        var measured = await Measure(withComposite, [ClassifyDeclaration()], [ClassifyHost(new Counter())]);
 
         _output.WriteLine(
-            $"struct scalar: {measured} bytes over 8 batches against built-ins' {measuredFloor} = "
+            $"composite scalar: {measured} bytes over 8 batches against built-ins' {measuredFloor} = "
             + $"{(measured - measuredFloor) / 8.0:0.###} bytes/batch.");
         Assert.True(
             measured <= measuredFloor,
-            $"a warm struct call cost {(measured - measuredFloor) / 8.0:0.###} bytes per batch more "
+            $"a warm composite call cost {(measured - measuredFloor) / 8.0:0.###} bytes per batch more "
             + $"than the same projection written with built-ins ({measured} against {measuredFloor}).");
     }
 
     /// <summary>
-    /// The same of an aggregate: a struct-valued measure emitted per group allocates nothing over a
+    /// The same of an aggregate: a composite-valued measure emitted per group allocates nothing over a
     /// scalar measure's emit, the fields written straight into the measure column's children.
     /// </summary>
     [Fact]
-    public async Task A_struct_aggregate_s_emit_allocates_nothing_per_group()
+    public async Task A_composite_aggregate_s_emit_allocates_nothing_per_group()
     {
-        var summary = Struct(nullable: true, F("Total", Fp64()), F("Count", I64()));
+        var summary = Composite(nullable: true, F("Total", Fp64()), F("Count", I64()));
         var grouped = HashAggregate(
             TxnRead(), [0], [("s", UserAgg("main.summarize", summary, Ref(TxnRow, 2)))]);
-        var withStruct = IrBuilder.Plan(Project(
+        var withComposite = IrBuilder.Plan(Project(
             grouped,
             [("total", FieldAccess(Ref(grouped.RowType, 1), 0)), ("n", FieldAccess(Ref(grouped.RowType, 1), 1))]));
         var scalar = HashAggregate(
@@ -635,13 +635,13 @@ public sealed class StructExecutionTests
             [("total", Ref(scalar.RowType, 1)), ("n", Ref(scalar.RowType, 2))]));
 
         var measuredFloor = await Measure(floor, [], []);
-        var measured = await Measure(withStruct, [SummarizeDeclaration()], [SummarizeHost()]);
+        var measured = await Measure(withComposite, [SummarizeDeclaration()], [SummarizeHost()]);
 
         _output.WriteLine(
-            $"struct aggregate: {measured} bytes over {Rows} groups against built-ins' {measuredFloor}.");
+            $"composite aggregate: {measured} bytes over {Rows} groups against built-ins' {measuredFloor}.");
         Assert.True(
             measured <= measuredFloor,
-            $"a warm struct aggregate cost {measured - measuredFloor} bytes more over {Rows} groups "
+            $"a warm composite aggregate cost {measured - measuredFloor} bytes more over {Rows} groups "
             + $"than SUM and COUNT did ({measured} against {measuredFloor}).");
     }
 

@@ -482,8 +482,8 @@ public static class PlanWalker
 
                 break;
             case Expr.KindOneofCase.FieldAccess:
-                // D291: one field of a STRUCT. The struct is the only operand, so whatever reads a
-                // column through a field access reads it through the struct's expression.
+                // D291: one field of a COMPOSITE. The composite is the only operand, so whatever reads a
+                // column through a field access reads it through the composite's expression.
                 if (expr.FieldAccess.Input is not null)
                 {
                     yield return expr.FieldAccess.Input;

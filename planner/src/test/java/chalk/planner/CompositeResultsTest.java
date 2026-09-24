@@ -29,15 +29,15 @@ import org.junit.jupiter.api.Test;
 /**
  * Structured function results in the planner (D291, D292; design 51 §4, ADR 0077): the type mapping
  * both ways, the lowering of a field access, the refusals by name, pushdown declining a field access,
- * and a struct-valued return type through the user operators. The corpus functions are {@code
- * price_move(open_price, close_price)}, a strict scalar answering {@code STRUCT<Direction:STRING,
+ * and a composite-valued return type through the user operators. The corpus functions are {@code
+ * price_move(open_price, close_price)}, a strict scalar answering {@code COMPOSITE<Direction:STRING,
  * Change:FP64>}, and {@code close_range(x)}, a window-capable aggregate answering a nullable {@code
- * STRUCT<Low:FP64, High:FP64>}.
+ * COMPOSITE(Low FP64, High FP64)}.
  */
-final class StructResultsTest {
+final class CompositeResultsTest {
 
   private static final Type MOVE =
-      TestCatalogs.struct(
+      TestCatalogs.composite(
           false,
           field("Direction", TestCatalogs.type(TypeKind.TYPE_KIND_STRING)),
           field("Change", TestCatalogs.type(TypeKind.TYPE_KIND_FP64)));
@@ -123,10 +123,10 @@ final class StructResultsTest {
   // ---- (a) TypeMapper, both ways ----
 
   @Test
-  void a_struct_maps_to_a_record_and_back_keeping_every_nullability() {
+  void a_composite_maps_to_a_record_and_back_keeping_every_nullability() {
     TypeMapper types = new TypeMapper(new JavaTypeFactoryImpl());
     Type nullableOfNonNull =
-        TestCatalogs.struct(
+        TestCatalogs.composite(
             true,
             field("Direction", TestCatalogs.type(TypeKind.TYPE_KIND_STRING)),
             field("Change", TestCatalogs.nullable(TypeKind.TYPE_KIND_FP64)));
@@ -145,7 +145,7 @@ final class StructResultsTest {
   @Test
   void a_nested_composite_is_refused_as_one_level_deep_in_both_directions() {
     TypeMapper types = new TypeMapper(new JavaTypeFactoryImpl());
-    Type nested = TestCatalogs.struct(false, field("Inner", MOVE));
+    Type nested = TestCatalogs.composite(false, field("Inner", MOVE));
 
     assertThatThrownBy(() -> types.toCalcite(nested))
         .isInstanceOf(UnsupportedFeatureException.class)
@@ -186,19 +186,19 @@ final class StructResultsTest {
   }
 
   @Test
-  void a_field_of_a_nullable_struct_is_nullable() {
+  void a_field_of_a_nullable_composite_is_nullable() {
     // STRICT over a NULL argument makes the whole result nullable, and the field with it.
     Plan plan = plan("SELECT price_move(NULL, \"close\").change AS c FROM bars");
 
     Expr access = fieldAccesses(plan).get(0);
-    Type struct = access.getFieldAccess().getInput().getType();
-    assertThat(struct.getNullable()).isTrue();
+    Type composite = access.getFieldAccess().getInput().getType();
+    assertThat(composite.getNullable()).isTrue();
     assertThat(access.getType().getKind()).isEqualTo(TypeKind.TYPE_KIND_FP64);
     assertThat(access.getType().getNullable()).isTrue();
   }
 
   @Test
-  void the_whole_value_is_a_struct_column_and_one_call() {
+  void the_whole_value_is_a_composite_column_and_one_call() {
     Plan plan = plan("SELECT symbol, price_move(\"open\", \"close\") AS m FROM bars");
 
     assertThat(plan.getOutputType().getFields(1).getType()).isEqualTo(MOVE);
@@ -230,7 +230,7 @@ final class StructResultsTest {
   }
 
   @Test
-  void a_struct_valued_aggregate_is_one_measure_and_two_field_accesses_over_its_column() {
+  void a_composite_valued_aggregate_is_one_measure_and_two_field_accesses_over_its_column() {
     Plan plan =
         plan(
             "SELECT symbol, close_range(\"close\").low AS low, close_range(\"close\").high AS high"
@@ -244,86 +244,86 @@ final class StructResultsTest {
               assertThat(a.getFieldAccess().getInput().getKindCase())
                   .isEqualTo(Expr.KindCase.FIELD_REF);
               assertThat(a.getFieldAccess().getInput().getType().getKind())
-                  .isEqualTo(TypeKind.TYPE_KIND_STRUCT);
-              // The aggregate's struct is nullable, so each field read through it is too.
+                  .isEqualTo(TypeKind.TYPE_KIND_COMPOSITE);
+              // The aggregate's composite is nullable, so each field read through it is too.
               assertThat(a.getType().getNullable()).isTrue();
             });
     assertThat(plan.toString()).contains("main.close_range");
   }
 
   @Test
-  void the_row_constructor_stays_refused_because_a_struct_comes_from_a_function() {
+  void the_row_constructor_stays_refused_because_a_composite_comes_from_a_function() {
     assertThatThrownBy(() -> plan("SELECT symbol, ROW(symbol, \"close\") AS r FROM bars"))
         .isInstanceOf(UnsupportedFeatureException.class)
         .hasMessageContaining("the ROW constructor")
-        .hasMessageContaining("A struct comes from a function");
+        .hasMessageContaining("A composite comes from a function");
   }
 
   // ---- (c) the refusals, by name ----
 
   @Test
-  void order_by_a_struct_is_refused_naming_the_field_alternative() {
+  void order_by_a_composite_is_refused_naming_the_field_alternative() {
     assertThatThrownBy(
             () -> plan("SELECT symbol FROM bars ORDER BY price_move(\"open\", \"close\")"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("ORDER BY a struct")
+        .hasMessageContaining("ORDER BY a composite value")
         .hasMessageContaining("Sort by one of its fields");
   }
 
   @Test
-  void order_by_the_alias_of_a_struct_is_refused_too() {
+  void order_by_the_alias_of_a_composite_is_refused_too() {
     assertThatThrownBy(
             () -> plan("SELECT symbol, price_move(\"open\", \"close\") AS m FROM bars ORDER BY m"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("ORDER BY a struct");
+        .hasMessageContaining("ORDER BY a composite value");
     assertThatThrownBy(
             () -> plan("SELECT symbol, price_move(\"open\", \"close\") AS m FROM bars ORDER BY 2"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("ORDER BY a struct");
+        .hasMessageContaining("ORDER BY a composite value");
   }
 
   @Test
-  void distinct_over_a_struct_is_refused() {
+  void distinct_over_a_composite_is_refused() {
     assertThatThrownBy(() -> plan("SELECT DISTINCT price_move(\"open\", \"close\") AS m FROM bars"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("SELECT DISTINCT over the struct column 'm'");
+        .hasMessageContaining("SELECT DISTINCT over the composite column 'm'");
   }
 
   @Test
-  void group_by_a_struct_is_refused() {
+  void group_by_a_composite_is_refused() {
     assertThatThrownBy(
             () ->
                 plan(
                     "SELECT COUNT(*) FROM bars GROUP BY price_move(\"open\", \"close\")"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("GROUP BY a struct")
+        .hasMessageContaining("GROUP BY a composite value")
         .hasMessageContaining("Group by one of its fields");
   }
 
   @Test
-  void a_comparison_of_structs_is_refused_even_where_calcite_would_fold_it() {
+  void a_comparison_of_composites_is_refused_even_where_calcite_would_fold_it() {
     assertThatThrownBy(
             () ->
                 plan(
                     "SELECT symbol FROM bars WHERE price_move(\"open\", \"close\")"
                         + " = price_move(\"open\", \"close\")"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("a comparison of a struct")
+        .hasMessageContaining("a comparison of a composite value")
         .hasMessageContaining("Compare one of its fields");
   }
 
   @Test
-  void a_struct_in_in_is_refused() {
-    // A list of structs validates, and the refusal comes after validation.
+  void a_composite_in_in_is_refused() {
+    // A list of composite values validates, and the refusal comes after validation.
     assertThatThrownBy(
             () ->
                 plan(
                     "SELECT symbol FROM bars WHERE price_move(\"open\", \"close\") IN"
                         + " (price_move(\"close\", \"open\"), price_move(\"open\", \"open\"))"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("a struct in IN")
+        .hasMessageContaining("a composite value in IN")
         .hasMessageContaining("Test one of its fields");
-    // Against a subquery Calcite reads the struct as a row of its two fields and refuses the shape
+    // Against a subquery Calcite reads the composite as a row of its two fields and refuses the shape
     // itself; the refusal by name still wins.
     assertThatThrownBy(
             () ->
@@ -331,70 +331,70 @@ final class StructResultsTest {
                     "SELECT symbol FROM bars WHERE price_move(\"open\", \"close\") IN"
                         + " (SELECT price_move(\"close\", \"open\") FROM bars)"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("a struct in IN");
+        .hasMessageContaining("a composite value in IN");
   }
 
   @Test
   void where_calcite_s_own_type_checks_stop_first_the_refusal_is_still_by_name() {
-    // A comparison with a scalar, a CAST, MAX and a CASE that mixes a struct with a scalar have no
+    // A comparison with a scalar, a CAST, MAX and a CASE that mixes a composite value with a scalar have no
     // signature, so validation fails before the checks that run on a validated statement.
     assertThatThrownBy(
             () -> plan("SELECT symbol FROM bars WHERE price_move(\"open\", \"close\") = 1"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("a comparison of a struct");
+        .hasMessageContaining("a comparison of a composite value");
     assertThatThrownBy(
             () -> plan("SELECT CAST(price_move(\"open\", \"close\") AS VARCHAR) FROM bars"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("CAST of a struct")
+        .hasMessageContaining("CAST of a composite value")
         .hasMessageContaining("Cast one of its fields");
     assertThatThrownBy(() -> plan("SELECT MAX(price_move(\"open\", \"close\")) FROM bars"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("MAX of a struct");
+        .hasMessageContaining("MAX of a composite value");
     assertThatThrownBy(
             () ->
                 plan(
                     "SELECT CASE WHEN volume > 0 THEN price_move(\"open\", \"close\") ELSE 1 END"
                         + " FROM bars"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("a struct as a CASE result");
+        .hasMessageContaining("a composite value as a CASE result");
   }
 
   @Test
-  void a_window_partitioned_or_ordered_by_a_struct_is_refused() {
+  void a_window_partitioned_or_ordered_by_a_composite_is_refused() {
     assertThatThrownBy(
             () ->
                 plan(
                     "SELECT COUNT(*) OVER (PARTITION BY price_move(\"open\", \"close\")) FROM bars"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("PARTITION BY a struct");
+        .hasMessageContaining("PARTITION BY a composite value");
     assertThatThrownBy(
             () ->
                 plan(
                     "SELECT COUNT(*) OVER (ORDER BY price_move(\"open\", \"close\")) FROM bars"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("a window ORDER BY a struct");
+        .hasMessageContaining("a window ORDER BY a composite value");
   }
 
   @Test
-  void a_set_operation_that_compares_rows_is_refused_and_union_all_carries_a_struct() {
+  void a_set_operation_that_compares_rows_is_refused_and_union_all_carries_a_composite() {
     assertThatThrownBy(
             () ->
                 plan(
                     "SELECT price_move(\"open\", \"close\") AS m FROM bars UNION"
                         + " SELECT price_move(\"close\", \"open\") FROM bars"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("UNION over the struct column 'm'");
+        .hasMessageContaining("UNION over the composite column 'm'");
 
     Plan plan =
         plan(
             "SELECT price_move(\"open\", \"close\") AS m FROM bars UNION ALL"
                 + " SELECT price_move(\"close\", \"open\") FROM bars");
     assertThat(plan.getOutputType().getFields(0).getType().getKind())
-        .isEqualTo(TypeKind.TYPE_KIND_STRUCT);
+        .isEqualTo(TypeKind.TYPE_KIND_COMPOSITE);
   }
 
   @Test
-  void a_null_test_reads_a_struct_s_validity_and_is_allowed() {
+  void a_null_test_reads_a_composite_s_validity_and_is_allowed() {
     Plan plan =
         plan(
             "SELECT symbol FROM bars WHERE price_move(\"open\", \"close\") IS NOT NULL");
@@ -406,21 +406,21 @@ final class StructResultsTest {
   }
 
   @Test
-  void a_struct_as_a_case_result_is_refused() {
+  void a_composite_as_a_case_result_is_refused() {
     assertThatThrownBy(
             () ->
                 plan(
                     "SELECT CASE WHEN volume > 0 THEN price_move(\"open\", \"close\") END AS m"
                         + " FROM bars"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("a struct as a CASE result");
+        .hasMessageContaining("a composite value as a CASE result");
   }
 
   @Test
-  void a_struct_as_a_built_in_aggregate_s_argument_is_refused() {
+  void a_composite_as_a_built_in_aggregate_s_argument_is_refused() {
     assertThatThrownBy(() -> plan("SELECT COUNT(price_move(\"open\", \"close\")) FROM bars"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("COUNT of a struct");
+        .hasMessageContaining("COUNT of a composite value");
   }
 
   @Test
@@ -430,7 +430,7 @@ final class StructResultsTest {
   }
 
   @Test
-  void a_nested_struct_declared_is_refused_at_registration() {
+  void a_nested_composite_declared_is_refused_at_registration() {
     CatalogContext catalog =
         TestCatalogs.declared().toBuilder()
             .setSchemas(
@@ -441,7 +441,7 @@ final class StructResultsTest {
                             .setName("nested")
                             .setKind(chalk.ir.v1.FunctionKind.FUNCTION_KIND_SCALAR)
                             .setVolatility(chalk.ir.v1.Volatility.VOLATILITY_IMMUTABLE)
-                            .setReturnType(TestCatalogs.struct(false, field("inner", MOVE)))
+                            .setReturnType(TestCatalogs.composite(false, field("inner", MOVE)))
                             .setClient(chalk.ir.v1.ClientBody.getDefaultInstance())))
             .build();
 
@@ -451,7 +451,7 @@ final class StructResultsTest {
   }
 
   @Test
-  void a_struct_returned_by_a_sql_bodied_function_is_refused_at_registration() {
+  void a_composite_returned_by_a_sql_bodied_function_is_refused_at_registration() {
     CatalogContext catalog =
         TestCatalogs.declared().toBuilder()
             .setSchemas(
@@ -459,7 +459,7 @@ final class StructResultsTest {
                 TestCatalogs.declared().getSchemas(0).toBuilder()
                     .addFunctions(
                         chalk.ir.v1.FunctionDescriptor.newBuilder()
-                            .setName("inlined_struct")
+                            .setName("inlined_composite")
                             .setKind(chalk.ir.v1.FunctionKind.FUNCTION_KIND_SCALAR)
                             .setVolatility(chalk.ir.v1.Volatility.VOLATILITY_IMMUTABLE)
                             .setReturnType(MOVE)
@@ -472,11 +472,11 @@ final class StructResultsTest {
 
     assertThatThrownBy(() -> RegisteredCatalog.of(catalog))
         .isInstanceOf(InvalidCatalogException.class)
-        .hasMessageContaining("returns a STRUCT and is SQL-bodied");
+        .hasMessageContaining("returns a COMPOSITE and is SQL-bodied");
   }
 
   @Test
-  void the_catalog_refuses_a_struct_wherever_one_would_be_stored_bound_or_nested() {
+  void the_catalog_refuses_a_composite_wherever_one_would_be_stored_bound_or_nested() {
     chalk.ir.v1.FunctionDescriptor client =
         chalk.ir.v1.FunctionDescriptor.newBuilder()
             .setName("mover")
@@ -486,7 +486,7 @@ final class StructResultsTest {
             .setClient(chalk.ir.v1.ClientBody.getDefaultInstance())
             .build();
 
-    // A native body runs in a source, which has no way to return a struct.
+    // A native body runs in a source, which has no way to return a composite value.
     assertThatThrownBy(
             () ->
                 RegisteredCatalog.of(
@@ -495,7 +495,7 @@ final class StructResultsTest {
                             .setNative(chalk.ir.v1.NativeBody.newBuilder().setDialectName("m"))
                             .build())))
         .isInstanceOf(InvalidCatalogException.class)
-        .hasMessageContaining("returns a STRUCT and is native");
+        .hasMessageContaining("returns a COMPOSITE and is native");
     // A parameter is a scalar.
     assertThatThrownBy(
             () ->
@@ -507,7 +507,7 @@ final class StructResultsTest {
                                 chalk.ir.v1.Parameter.newBuilder().setName("m").setType(MOVE))
                             .build())))
         .isInstanceOf(InvalidCatalogException.class)
-        .hasMessageContaining("a STRUCT is only ever a function's result");
+        .hasMessageContaining("a COMPOSITE is only ever a function's result");
     // Two fields SQL could not tell apart.
     assertThatThrownBy(
             () ->
@@ -515,7 +515,7 @@ final class StructResultsTest {
                     withFunction(
                         client.toBuilder()
                             .setReturnType(
-                                TestCatalogs.struct(
+                                TestCatalogs.composite(
                                     false,
                                     field("Change", TestCatalogs.type(TypeKind.TYPE_KIND_FP64)),
                                     field("change", TestCatalogs.type(TypeKind.TYPE_KIND_FP64))))
@@ -535,7 +535,7 @@ final class StructResultsTest {
                                     .build())
                             .build())))
         .isInstanceOf(InvalidCatalogException.class)
-        .hasMessageContaining("a LIST's element is a STRUCT");
+        .hasMessageContaining("a LIST's element is a COMPOSITE");
     // And no table stores one.
     CatalogContext column =
         TestCatalogs.declared().toBuilder()
@@ -549,7 +549,7 @@ final class StructResultsTest {
             .build();
     assertThatThrownBy(() -> RegisteredCatalog.of(column))
         .isInstanceOf(InvalidCatalogException.class)
-        .hasMessageContaining("a STRUCT cannot be a table column");
+        .hasMessageContaining("a COMPOSITE cannot be a table column");
   }
 
   private static CatalogContext withFunction(chalk.ir.v1.FunctionDescriptor function) {
@@ -583,22 +583,22 @@ final class StructResultsTest {
   // ---- (f) the user operators ----
 
   @Test
-  void a_struct_return_type_flows_through_and_strict_widens_the_whole_result() {
+  void a_composite_return_type_flows_through_and_strict_widens_the_whole_result() {
     Plan nonNull = plan("SELECT price_move(\"open\", \"close\") AS m FROM bars");
     Plan widened = plan("SELECT price_move(NULL, \"close\") AS m FROM bars");
 
     assertThat(nonNull.getOutputType().getFields(0).getType()).isEqualTo(MOVE);
-    // Widened as a whole: the struct is nullable and its fields are the record's, as declared.
+    // Widened as a whole: the composite is nullable and its fields are the record's, as declared.
     assertThat(widened.getOutputType().getFields(0).getType())
         .isEqualTo(MOVE.toBuilder().setNullable(true).build());
   }
 
   @Test
-  void an_aggregate_s_declared_nullable_struct_keeps_its_fields_as_declared() {
+  void an_aggregate_s_declared_nullable_composite_keeps_its_fields_as_declared() {
     Plan plan = plan("SELECT symbol, close_range(\"close\") AS r FROM bars GROUP BY symbol");
 
     Type range = plan.getOutputType().getFields(1).getType();
-    assertThat(range.getKind()).isEqualTo(TypeKind.TYPE_KIND_STRUCT);
+    assertThat(range.getKind()).isEqualTo(TypeKind.TYPE_KIND_COMPOSITE);
     assertThat(range.getNullable()).isTrue();
     assertThat(range.getFieldsList().stream().map(Field::getName)).containsExactly("Low", "High");
   }

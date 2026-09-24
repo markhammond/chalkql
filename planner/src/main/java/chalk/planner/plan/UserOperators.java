@@ -258,7 +258,7 @@ public final class UserOperators {
    * The declared return type, made nullable when {@code strict} and any argument is — which is
    * exactly what {@code RETURNS NULL ON NULL INPUT} means, and what {@code TO_NULLABLE} computes.
    *
-   * <p>A STRUCT result is widened as a whole (D291): the struct becomes nullable and its fields keep
+   * <p>A COMPOSITE result is widened as a whole (D291): the composite becomes nullable and its fields keep
    * the nullability the record declared. {@code TO_NULLABLE} would widen every field along with it,
    * because Calcite makes a record nullable by copying it with nullable fields.
    */
@@ -270,13 +270,13 @@ public final class UserOperators {
     if (!declaration.strict()) {
       return declared;
     }
-    return declaration.descriptor().getReturnType().getKind() == chalk.ir.v1.TypeKind.TYPE_KIND_STRUCT
-        ? ReturnTypes.cascade(declared, STRICT_STRUCT)
+    return declaration.descriptor().getReturnType().getKind() == chalk.ir.v1.TypeKind.TYPE_KIND_COMPOSITE
+        ? ReturnTypes.cascade(declared, STRICT_COMPOSITE)
         : ReturnTypes.cascade(declared, SqlTypeTransforms.TO_NULLABLE);
   }
 
-  /** {@code TO_NULLABLE} for a struct: nullable as a whole when any argument is, fields as declared. */
-  private static final org.apache.calcite.sql.type.SqlTypeTransform STRICT_STRUCT =
+  /** {@code TO_NULLABLE} for a composite value: nullable as a whole when any argument is, fields as declared. */
+  private static final org.apache.calcite.sql.type.SqlTypeTransform STRICT_COMPOSITE =
       (binding, type) ->
           org.apache.calcite.sql.type.SqlTypeUtil.containsNullable(binding.collectOperandTypes())
               ? binding.getTypeFactory().enforceTypeWithNullability(type, true)

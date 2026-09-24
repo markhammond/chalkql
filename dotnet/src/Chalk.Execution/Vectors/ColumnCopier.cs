@@ -63,12 +63,12 @@ internal sealed class ColumnCopier : IArenaScratch
     private readonly ColumnCopier? _children;
 
     /// <summary>
-    /// A STRUCT's field copiers, one per field in order (D291), and null for every other kind. Every
-    /// append walks them at the struct's own row, so each field has exactly the struct's rows.
+    /// A COMPOSITE's field copiers, one per field in order (D291), and null for every other kind. Every
+    /// append walks them at the composite's own row, so each field has exactly the composite's rows.
     /// </summary>
     private readonly ColumnCopier[]? _fields;
 
-    /// <summary>The finished field views a struct view points at, reused batch after batch.</summary>
+    /// <summary>The finished field views a composite view points at, reused batch after batch.</summary>
     private readonly ColumnView[]? _fieldViews;
 
     private int _rows;
@@ -112,7 +112,7 @@ internal sealed class ColumnCopier : IArenaScratch
                     "docs/design/02-ir.md §3 requires Type.element on a LIST."),
                 strings)
             : null;
-        if (_kind == ColumnKind.Struct)
+        if (_kind == ColumnKind.Composite)
         {
             _fields = [.. type.Fields.Select(f => new ColumnCopier(f.Type, strings))];
             _fieldViews = new ColumnView[_fields.Length];
@@ -270,9 +270,9 @@ internal sealed class ColumnCopier : IArenaScratch
     /// <summary>Appends <paramref name="count"/> NULLs.</summary>
     public void AppendNulls(int count)
     {
-        if (_kind == ColumnKind.Struct)
+        if (_kind == ColumnKind.Composite)
         {
-            // D291: a NULL struct still has a row in every field, NULL where the field may be and
+            // D291: a NULL composite still has a row in every field, NULL where the field may be and
             // its type's default where it may not.
             foreach (var field in _fields!)
             {
@@ -281,7 +281,7 @@ internal sealed class ColumnCopier : IArenaScratch
 
             for (var i = 0; i < count; i++)
             {
-                EndStruct(valid: false);
+                EndComposite(valid: false);
             }
 
             return;
@@ -427,17 +427,17 @@ internal sealed class ColumnCopier : IArenaScratch
         EndList(valid: true);
     }
 
-    // ---- STRUCT (D291) -----------------------------------------------------------------------
+    // ---- COMPOSITE (D291) -----------------------------------------------------------------------
 
-    /// <summary>The copier field <paramref name="index"/> of a STRUCT is appended through.</summary>
+    /// <summary>The copier field <paramref name="index"/> of a COMPOSITE is appended through.</summary>
     public ColumnCopier Field(int index) => _fields?[index]
-        ?? throw new InvalidOperationException("This column is not a STRUCT.");
+        ?? throw new InvalidOperationException("This column is not a COMPOSITE.");
 
     /// <summary>
-    /// Closes the struct row under construction: each field has had exactly one row appended since
-    /// the previous close. A row closed as invalid is a NULL struct.
+    /// Closes the composite row under construction: each field has had exactly one row appended since
+    /// the previous close. A row closed as invalid is a NULL composite.
     /// </summary>
-    public void EndStruct(bool valid)
+    public void EndComposite(bool valid)
     {
         SetValidity(_rows, valid);
         _rows++;
@@ -448,7 +448,7 @@ internal sealed class ColumnCopier : IArenaScratch
     }
 
     /// <summary>
-    /// Appends <paramref name="count"/> rows of a NULL struct's field: NULL when this column's type
+    /// Appends <paramref name="count"/> rows of a NULL composite's field: NULL when this column's type
     /// may be NULL, and the type's default when it may not, so a non-nullable field never holds one.
     /// </summary>
     public void AppendUndefined(int count)
@@ -470,15 +470,15 @@ internal sealed class ColumnCopier : IArenaScratch
     /// <summary>Appends <paramref name="count"/> copies of one constant.</summary>
     public void AppendConstant(ScalarValue value, int count)
     {
-        if (_kind == ColumnKind.Struct)
+        if (_kind == ColumnKind.Composite)
         {
-            // A struct is produced by a function and never written as a constant (D291), so the only
+            // A composite value is produced by a function and never written as a constant (D291), so the only
             // constant of this type is a typed NULL — an outer join's padding, say.
             if (!value.IsNull)
             {
                 throw new UnsupportedFeatureException(
-                    "a STRUCT constant",
-                    "A struct comes from a function and has no literal (docs/design/51-structured-function-results.md §1).");
+                    "a COMPOSITE constant",
+                    "A composite comes from a function and has no literal (docs/design/51-structured-function-results.md §1).");
             }
 
             AppendNulls(count);
@@ -680,11 +680,11 @@ internal sealed class ColumnCopier : IArenaScratch
         ReadOnlySpan<byte> lane,
         bool valid)
     {
-        if (_kind == ColumnKind.Struct)
+        if (_kind == ColumnKind.Composite)
         {
             throw new InvalidOperationException(
-                "A STRUCT has no lane of its own: append its fields through Field(i) and close the "
-                + "row with EndStruct.");
+                "A COMPOSITE has no lane of its own: append its fields through Field(i) and close the "
+                + "row with EndComposite.");
         }
 
         if (_kind == ColumnKind.Utf8 &&
@@ -833,7 +833,7 @@ internal sealed class ColumnCopier : IArenaScratch
     /// </summary>
     public ColumnView FinishView()
     {
-        if (_kind == ColumnKind.Struct)
+        if (_kind == ColumnKind.Composite)
         {
             for (var i = 0; i < _fields!.Length; i++)
             {
@@ -926,11 +926,11 @@ internal sealed class ColumnCopier : IArenaScratch
 
     public IArrowArray FinishManaged()
     {
-        if (_kind == ColumnKind.Struct)
+        if (_kind == ColumnKind.Composite)
         {
             var fields = new IArrowArray?[_fields!.Length];
-            var structBuffers = new ArrowBuffer[1];
-            var structBuilt = 0;
+            var compositeBuffers = new ArrowBuffer[1];
+            var compositeBuilt = 0;
             try
             {
                 for (var i = 0; i < fields.Length; i++)
@@ -938,18 +938,18 @@ internal sealed class ColumnCopier : IArenaScratch
                     fields[i] = _fields[i].FinishManaged();
                 }
 
-                structBuffers[0] = _nulls == 0
+                compositeBuffers[0] = _nulls == 0
                     ? ArrowBuffer.Empty
                     : DetachManaged(ref _validity, Validity.ByteCount(_rows));
-                structBuilt = 1;
+                compositeBuilt = 1;
 
                 return new StructArray(
                     new ArrayData(
-                        _arrowType, _rows, _nulls, 0, structBuffers, fields.Select(f => f!.Data)));
+                        _arrowType, _rows, _nulls, 0, compositeBuffers, fields.Select(f => f!.Data)));
             }
             catch
             {
-                Release(structBuffers, structBuilt);
+                Release(compositeBuffers, compositeBuilt);
                 DisposeAll(fields);
                 throw;
             }
@@ -1348,11 +1348,11 @@ internal sealed class ColumnCopier : IArenaScratch
     public IArrowArray FinishPooled(
         ref PooledBatchRentalCollector rentals)
     {
-        if (_kind == ColumnKind.Struct)
+        if (_kind == ColumnKind.Composite)
         {
             var fields = new IArrowArray?[_fields!.Length];
-            var structBuffers = new ArrowBuffer[1];
-            var structBuilt = 0;
+            var compositeBuffers = new ArrowBuffer[1];
+            var compositeBuilt = 0;
             try
             {
                 for (var i = 0; i < fields.Length; i++)
@@ -1360,18 +1360,18 @@ internal sealed class ColumnCopier : IArenaScratch
                     fields[i] = _fields[i].FinishPooled(ref rentals);
                 }
 
-                structBuffers[0] = _nulls == 0
+                compositeBuffers[0] = _nulls == 0
                     ? ArrowBuffer.Empty
                     : rentals.Adopt(ref _validity, Validity.ByteCount(_rows));
-                structBuilt = 1;
+                compositeBuilt = 1;
 
                 return new StructArray(
                     new ArrayData(
-                        _arrowType, _rows, _nulls, 0, structBuffers, fields.Select(f => f!.Data)));
+                        _arrowType, _rows, _nulls, 0, compositeBuffers, fields.Select(f => f!.Data)));
             }
             catch
             {
-                Release(structBuffers, structBuilt);
+                Release(compositeBuffers, compositeBuilt);
                 DisposeAll(fields);
                 throw;
             }
@@ -1701,10 +1701,10 @@ internal sealed class ColumnCopier : IArenaScratch
                 + "copy it through a ColumnCopier first.");
         }
 
-        if (_kind == ColumnKind.Struct)
+        if (_kind == ColumnKind.Composite)
         {
             var fields = new IArrowArray?[_fields!.Length];
-            var structBuffers = new ArrowBuffer[1];
+            var compositeBuffers = new ArrowBuffer[1];
             try
             {
                 for (var i = 0; i < fields.Length; i++)
@@ -1712,7 +1712,7 @@ internal sealed class ColumnCopier : IArenaScratch
                     fields[i] = _fields[i].ToArrow(view.Children![i], arena);
                 }
 
-                structBuffers[0] = view.NullCount == 0
+                compositeBuffers[0] = view.NullCount == 0
                     ? ArrowBuffer.Empty
                     : Owned(view.Validity.Span[..Validity.ByteCount(view.Length)], arena);
             }
@@ -1724,7 +1724,7 @@ internal sealed class ColumnCopier : IArenaScratch
 
             return new StructArray(
                 new ArrayData(
-                    _arrowType, view.Length, view.NullCount, 0, structBuffers, fields.Select(f => f!.Data)));
+                    _arrowType, view.Length, view.NullCount, 0, compositeBuffers, fields.Select(f => f!.Data)));
         }
 
         if (_kind == ColumnKind.List)
@@ -1813,11 +1813,11 @@ internal sealed class ColumnCopier : IArenaScratch
                 + "directly; normalise it through a ColumnCopier first.");
         }
 
-        if (_kind == ColumnKind.Struct)
+        if (_kind == ColumnKind.Composite)
         {
             var fields = new IArrowArray?[_fields!.Length];
-            var structBuffers = new ArrowBuffer[1];
-            var structBuilt = 0;
+            var compositeBuffers = new ArrowBuffer[1];
+            var compositeBuilt = 0;
             try
             {
                 for (var i = 0; i < fields.Length; i++)
@@ -1825,18 +1825,18 @@ internal sealed class ColumnCopier : IArenaScratch
                     fields[i] = _fields[i].ToArrowPooled(view.Children![i], ref rentals);
                 }
 
-                structBuffers[0] = view.NullCount == 0
+                compositeBuffers[0] = view.NullCount == 0
                     ? ArrowBuffer.Empty
                     : rentals.CopyFrom(view.Validity.Span[..Validity.ByteCount(view.Length)]);
-                structBuilt = 1;
+                compositeBuilt = 1;
 
                 return new StructArray(
                     new ArrayData(
-                        _arrowType, view.Length, view.NullCount, 0, structBuffers, fields.Select(f => f!.Data)));
+                        _arrowType, view.Length, view.NullCount, 0, compositeBuffers, fields.Select(f => f!.Data)));
             }
             catch
             {
-                Release(structBuffers, structBuilt);
+                Release(compositeBuffers, compositeBuilt);
                 DisposeAll(fields);
                 throw;
             }
@@ -1984,7 +1984,7 @@ internal sealed class ColumnCopier : IArenaScratch
         }
     }
 
-    /// <summary>Disposes the field arrays a failed STRUCT build had already made.</summary>
+    /// <summary>Disposes the field arrays a failed COMPOSITE build had already made.</summary>
     private static void DisposeAll(IArrowArray?[] arrays)
     {
         foreach (var array in arrays)
@@ -2050,15 +2050,15 @@ internal sealed class ColumnCopier : IArenaScratch
         if (count == 0)
             return;
 
-        if (_kind == ColumnKind.Struct)
+        if (_kind == ColumnKind.Composite)
         {
-            // D291: the struct's own validity, then every field at the same rows — a field of the
+            // D291: the composite's own validity, then every field at the same rows — a field of the
             // source seen through the source's offset, as Arrow aligns them.
             CopyValidity(source, indices, identity, _rows, count);
             _rows += count;
             for (var i = 0; i < _fields!.Length; i++)
             {
-                var field = source.StructField(i);
+                var field = source.FieldView(i);
                 if (identity)
                 {
                     _fields[i].Append(field, count);

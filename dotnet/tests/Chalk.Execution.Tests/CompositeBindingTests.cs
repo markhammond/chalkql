@@ -7,10 +7,10 @@ namespace Chalk.Execution.Tests;
 
 /// <summary>
 /// D294's binding check (ADR 0077): the engine reads the registered delegate's result record as a
-/// struct exactly as the declaration read one, and a registration whose record does not agree with the
-/// declared struct is refused at engine creation naming both sides.
+/// composite exactly as the declaration read one, and a registration whose record does not agree with the
+/// declared composite is refused at engine creation naming both sides.
 /// </summary>
-public sealed class StructBindingTests
+public sealed class CompositeBindingTests
 {
     public readonly record struct Classification(Utf8String Category, double Confidence);
 
@@ -68,9 +68,9 @@ public sealed class StructBindingTests
                 "classify_transaction", static (d, a) => new Renamed(d, a)),
             "test"));
 
-        Assert.Contains("STRUCT<Category:STRING, Confidence:FP64>", error.Message, StringComparison.Ordinal);
+        Assert.Contains("COMPOSITE(Category STRING, Confidence FP64)", error.Message, StringComparison.Ordinal);
         Assert.Contains("uses Renamed", error.Message, StringComparison.Ordinal);
-        Assert.Contains("STRUCT<Category:STRING, Score:FP64>", error.Message, StringComparison.Ordinal);
+        Assert.Contains("COMPOSITE(Category STRING, Score FP64)", error.Message, StringComparison.Ordinal);
         Assert.Contains("field 2 is 'Confidence' declared and 'Score' registered", error.Message, StringComparison.Ordinal);
     }
 
@@ -94,9 +94,9 @@ public sealed class StructBindingTests
             .Scalar()
             .Parameter("description", ChalkType.String(nullable: true))
             .Parameter("amount", ChalkType.Float64(nullable: true))
-            .Returns(ChalkType.Struct(
-                new ChalkField("category", ChalkType.String()),
-                new ChalkField("confidence", ChalkType.Float64())))
+            .Returns(ChalkType.Composite(
+                new CompositeField("category", ChalkType.String()),
+                new CompositeField("confidence", ChalkType.Float64())))
             .Strict()
             .Client()
             .Build();
@@ -108,7 +108,7 @@ public sealed class StructBindingTests
     }
 
     [Fact]
-    public void A_registered_record_no_struct_can_be_read_from_is_refused_saying_why()
+    public void A_registered_record_no_composite_can_be_read_from_is_refused_saying_why()
     {
         var error = Assert.Throws<InvalidOperationException>(() => UserFunctionBinding.Check(
             Classify(),
@@ -120,7 +120,7 @@ public sealed class StructBindingTests
     }
 
     [Fact]
-    public void A_scalar_registered_for_a_struct_is_refused()
+    public void A_scalar_registered_for_a_composite_is_refused()
     {
         var error = Assert.Throws<InvalidOperationException>(() => UserFunctionBinding.Check(
             Classify(),
@@ -131,7 +131,7 @@ public sealed class StructBindingTests
     }
 
     [Fact]
-    public void A_struct_valued_aggregate_binds_to_its_record()
+    public void A_composite_valued_aggregate_binds_to_its_record()
     {
         var descriptor = new FunctionBuilder("summarize").Aggregate<double, Summary>("x").Client().Build();
 

@@ -17,10 +17,10 @@ namespace Chalk.Catalog;
 /// with the explicit <see cref="Parameter(string, ChalkType)"/> and <see cref="Returns(ChalkType)"/>.
 /// </para>
 /// <para>
-/// A result type outside the Tier 1 set that is a record — a <c>class</c> or <c>struct</c> of the host's
-/// own — is a STRUCT: its public readable properties, in declaration order, are the fields, each a
-/// Tier 1 type, nullable as its CLR type is. <c>Nullable&lt;TRecord&gt;</c> is a nullable struct. A
-/// struct is only ever a result: a parameter or a column typed as a record is refused.
+/// A result type outside the Tier 1 set that is a record — a <c>class</c> or <c>struct</c> of the
+/// host's own — is a COMPOSITE: its public readable properties, in declaration order, are the fields,
+/// each a Tier 1 type, nullable as its CLR type is. <c>Nullable&lt;TRecord&gt;</c> is a nullable
+/// composite. A composite is only ever a result: a parameter or a column typed as a record is refused.
 /// </para>
 /// <para>
 /// A textual <c>CREATE FUNCTION</c> form is a follow-up, not part of this step (§4).
@@ -140,7 +140,7 @@ public sealed class FunctionBuilder
     }
 
     /// <summary>
-    /// The same, typed from <typeparamref name="T"/> and non-nullable — a STRUCT when
+    /// The same, typed from <typeparamref name="T"/> and non-nullable — a COMPOSITE when
     /// <typeparamref name="T"/> is a record, nullable when it is a <c>Nullable</c> of one (D294).
     /// </summary>
     public FunctionBuilder Returns<T>() => Returns(TypeOf<T>(nullable: false, Role.Result, null));
@@ -330,31 +330,31 @@ public sealed class FunctionBuilder
 
     /// <summary>
     /// The declared type a CLR type stands for: the Tier 1 set and no more — <c>Utf8String</c> being a
-    /// STRING spelled without an allocation per row — or, for a result, a STRUCT inferred from a record
-    /// (D294). A record anywhere else is refused, because a struct is only ever a function's result.
+    /// STRING spelled without an allocation per row — or, for a result, a COMPOSITE inferred from a record
+    /// (D294). A record anywhere else is refused, because a composite value is only ever a function's result.
     /// </summary>
     private ChalkType TypeOf<T>(bool nullable, Role role, string? name)
     {
         var clr = typeof(T);
         var type = Nullable.GetUnderlyingType(clr) ?? clr;
-        if (StructInference.ScalarOf(type) is { } scalar)
+        if (CompositeInference.ScalarOf(type) is { } scalar)
         {
             return scalar.WithNullable(nullable);
         }
 
-        if (StructInference.IsCandidate(clr))
+        if (CompositeInference.IsCandidate(clr))
         {
             if (role != Role.Result)
             {
                 var what = role == Role.Parameter ? "parameter" : "column";
                 throw new CatalogValidationException(
                     $"functions ({_name})",
-                    $"{what} '{name}' is typed {StructInference.Describe(clr)}, which would be a STRUCT; "
-                    + $"a struct is only ever a function's result, never a {what}. Declare its fields "
+                    $"{what} '{name}' is typed {CompositeInference.Describe(clr)}, which would be a COMPOSITE; "
+                    + $"a composite value is only ever a function's result, never a {what}. Declare its fields "
                     + $"as {what}s of their own.");
             }
 
-            return StructInference.Infer(clr, nullable, $"functions ({_name})");
+            return CompositeInference.Infer(clr, nullable, $"functions ({_name})");
         }
 
         throw new CatalogValidationException(

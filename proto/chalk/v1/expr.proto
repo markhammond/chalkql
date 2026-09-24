@@ -28,9 +28,9 @@ message Expr {
   }
 }
 
-// One field of a STRUCT-typed input, by its position in the struct's `Type.fields`. Expr.type is
-// that field's type, made nullable when the struct is: a NULL struct reads as NULL in every field,
-// whatever the field itself declares.
+// One field of a COMPOSITE-typed input, by its position in the composite's `Type.fields`.
+// Expr.type is that field's type, made nullable when the composite is: a NULL composite reads as
+// NULL in every field, whatever the field itself declares.
 message FieldAccess {
   Expr input = 1;
   uint32 index = 2;

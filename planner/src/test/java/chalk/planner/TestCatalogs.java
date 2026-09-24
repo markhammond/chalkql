@@ -193,7 +193,7 @@ public final class TestCatalogs {
         // records — the fields are the records' properties, named as declared.
         scalar(
                 "price_move",
-                struct(
+                composite(
                     false,
                     field("Direction", type(TypeKind.TYPE_KIND_STRING)),
                     field("Change", type(TypeKind.TYPE_KIND_FP64))))
@@ -204,7 +204,7 @@ public final class TestCatalogs {
             .build(),
         aggregate(
                 "close_range",
-                struct(
+                composite(
                     true,
                     field("Low", type(TypeKind.TYPE_KIND_FP64)),
                     field("High", type(TypeKind.TYPE_KIND_FP64))))
@@ -214,9 +214,9 @@ public final class TestCatalogs {
             .build());
   }
 
-  /** A STRUCT of {@code fields}, nullable as a whole or not (D291). */
-  public static Type struct(boolean nullable, chalk.ir.v1.Field... fields) {
-    Type.Builder type = Type.newBuilder().setKind(TypeKind.TYPE_KIND_STRUCT).setNullable(nullable);
+  /** A COMPOSITE of {@code fields}, nullable as a whole or not (D291). */
+  public static Type composite(boolean nullable, chalk.ir.v1.Field... fields) {
+    Type.Builder type = Type.newBuilder().setKind(TypeKind.TYPE_KIND_COMPOSITE).setNullable(nullable);
     for (chalk.ir.v1.Field field : fields) {
       type.addFields(field);
     }

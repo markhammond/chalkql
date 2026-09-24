@@ -988,16 +988,16 @@ public static class CatalogValidator
                 {
                     ValidateType(returnType, $"{functionPath}.return_type");
 
-                    // D291: a struct comes from a function the host implements. A SQL body is
+                    // D291: a composite comes from a function the host implements. A SQL body is
                     // inlined into algebra that has no way to build one, and a native body runs in a
                     // source that has no way to return one.
-                    if (returnType.Kind == TypeKind.Struct && function.Body is not ClientFunctionBody)
+                    if (returnType.Kind == TypeKind.Composite && function.Body is not ClientFunctionBody)
                     {
                         throw new CatalogValidationException(
                             $"{functionPath}.return_type",
-                            $"'{function.Name}' returns a STRUCT and is "
+                            $"'{function.Name}' returns a COMPOSITE and is "
                             + (function.Body is SqlFunctionBody ? "SQL-bodied" : "native")
-                            + "; only a client-bodied function returns a struct, which the host "
+                            + "; only a client-bodied function returns a composite value, which the host "
                             + "implements and the engine takes apart by field");
                     }
                 }
@@ -1083,11 +1083,11 @@ public static class CatalogValidator
                         parameterPath, "a v1 parameter is a scalar; LIST parameters are not supported");
                 }
 
-                if (parameter.Type.Kind == TypeKind.Struct)
+                if (parameter.Type.Kind == TypeKind.Composite)
                 {
                     throw new CatalogValidationException(
                         parameterPath,
-                        "a parameter is a scalar; a STRUCT is only ever a function's result, so "
+                        "a parameter is a scalar; a COMPOSITE is only ever a function's result, so "
                         + "pass its fields as parameters of their own");
                 }
 
@@ -1114,22 +1114,22 @@ public static class CatalogValidator
                 }
 
                 ValidateType(column.Type, $"{columnPath} ({column.Name})");
-                RefuseStructColumn(column.Type, $"{columnPath} ({column.Name})", "a table function's column");
+                RefuseCompositeColumn(column.Type, $"{columnPath} ({column.Name})", "a table function's column");
             }
         }
     }
 
     /// <summary>
-    /// D291: a STRUCT exists only between the function that returned it and the row that takes it apart
+    /// D291: a COMPOSITE exists only between the function that returned it and the row that takes it apart
     /// or carries it out, so no table and no table function declares one as a column.
     /// </summary>
-    private static void RefuseStructColumn(ChalkType type, string path, string what)
+    private static void RefuseCompositeColumn(ChalkType type, string path, string what)
     {
-        if (type.Kind == TypeKind.Struct)
+        if (type.Kind == TypeKind.Composite)
         {
             throw new CatalogValidationException(
                 path,
-                $"a STRUCT cannot be {what}; a struct is the result of a client-bodied function and "
+                $"a COMPOSITE cannot be {what}; a composite value is the result of a client-bodied function and "
                 + "is never stored. Declare its fields as columns of their own");
         }
     }
@@ -1363,7 +1363,7 @@ public static class CatalogValidator
             }
 
             ValidateType(column.Type, $"{path}.columns[{c}] ({column.Name})");
-            RefuseStructColumn(column.Type, $"{path}.columns[{c}] ({column.Name})", "a table column");
+            RefuseCompositeColumn(column.Type, $"{path}.columns[{c}] ({column.Name})", "a table column");
         }
 
         for (var k = 0; k < table.UniqueKeys.Count; k++)
@@ -1945,14 +1945,14 @@ public static class CatalogValidator
     }
 
     /// <summary>
-    /// A struct's fields (D291): at least one, each named, no two names equal ignoring case — SQL
-    /// resolves a field that way — and each a scalar, so a struct is exactly one level deep.
+    /// A composite value's fields (D291): at least one, each named, no two names equal ignoring case — SQL
+    /// resolves a field that way — and each a scalar, so a composite value is exactly one level deep.
     /// </summary>
-    private static void ValidateStructFields(ChalkType type, string path)
+    private static void ValidateCompositeFields(ChalkType type, string path)
     {
         if (type.Fields.Count == 0)
         {
-            throw new CatalogValidationException(path, "a STRUCT declares no fields; it has at least one");
+            throw new CatalogValidationException(path, "a COMPOSITE declares no fields; it has at least one");
         }
 
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1974,11 +1974,11 @@ public static class CatalogValidator
                     + "name ignoring case, so the two would be one field");
             }
 
-            if (field.Type.Kind is TypeKind.List or TypeKind.Struct)
+            if (field.Type.Kind is TypeKind.List or TypeKind.Composite)
             {
                 throw new CatalogValidationException(
                     fieldPath,
-                    $"the field is a {field.Type.Kind.ToString().ToUpperInvariant()}; a STRUCT is one "
+                    $"the field is a {field.Type.Kind.ToString().ToUpperInvariant()}; a COMPOSITE is one "
                     + "level deep and its fields are scalars");
             }
 
@@ -2009,11 +2009,11 @@ public static class CatalogValidator
                     + "(docs/design/14-windows-ii.md §5)");
             }
 
-            if (element.Kind == TypeKind.Struct)
+            if (element.Kind == TypeKind.Composite)
             {
                 throw new CatalogValidationException(
                     path,
-                    "a LIST's element is a STRUCT; a list holds scalars and a composite is never "
+                    "a LIST's element is a COMPOSITE; a list holds scalars and a composite is never "
                     + "nested in another");
             }
 
@@ -2025,15 +2025,15 @@ public static class CatalogValidator
                 path, $"{type.Kind} declares an element type; only a LIST has one");
         }
 
-        // D291: a STRUCT carries its fields, one level deep, and nothing else carries any.
-        if (type.Kind == TypeKind.Struct)
+        // D291: a COMPOSITE carries its fields, one level deep, and nothing else carries any.
+        if (type.Kind == TypeKind.Composite)
         {
-            ValidateStructFields(type, path);
+            ValidateCompositeFields(type, path);
         }
         else if (type.Fields.Count > 0)
         {
             throw new CatalogValidationException(
-                path, $"{type.Kind} declares {type.Fields.Count} field(s); only a STRUCT has fields");
+                path, $"{type.Kind} declares {type.Fields.Count} field(s); only a COMPOSITE has fields");
         }
 
         if (type.Precision < 0 || type.Scale < 0)

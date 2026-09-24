@@ -167,9 +167,9 @@ internal sealed class UserScalarExpr : VectorExprBase
             _stableGeneration = context.Generation;
         }
 
-        if (Kind == ColumnKind.Struct)
+        if (Kind == ColumnKind.Composite)
         {
-            // D291: the one row a STABLE struct call answered, spread field by field.
+            // D291: the one row a STABLE composite call answered, spread field by field.
             return Scratch.BroadcastRow(stable.FinishWritten(1), length, context.SelectionMask);
         }
 

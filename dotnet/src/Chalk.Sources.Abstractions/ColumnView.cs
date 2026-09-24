@@ -90,8 +90,8 @@ public readonly struct ColumnView
     public bool BitPacked { get; init; }
 
     /// <summary>
-    /// A LIST's element column (D58), a STRUCT's field columns in field order (D291), and null for
-    /// every other kind. A struct's fields are aligned with its own rows before <see cref="Offset"/>
+    /// A LIST's element column (D58), a COMPOSITE's field columns in field order (D291), and null for
+    /// every other kind. A composite value's fields are aligned with its own rows before <see cref="Offset"/>
     /// applies, as Arrow's are: field <c>i</c> of row <c>r</c> is row <c>Offset + r</c> of
     /// <c>Children[i]</c>.
     /// </summary>
@@ -112,15 +112,15 @@ public readonly struct ColumnView
         : throw new InvalidOperationException("This column is not a LIST, or its element view is unset.");
 
     /// <summary>
-    /// Field <paramref name="index"/> of a STRUCT column, as a view of this column's rows (D291): the
+    /// Field <paramref name="index"/> of a COMPOSITE column, as a view of this column's rows (D291): the
     /// child view with this view's offset applied, and no validity but the field's own — a field of
-    /// a NULL struct is undefined here, and a reader that needs it as NULL intersects the two.
+    /// a NULL composite is undefined here, and a reader that needs it as NULL intersects the two.
     /// </summary>
-    internal ColumnView StructField(int index) =>
+    internal ColumnView FieldView(int index) =>
         Children is { } children && index < children.Length
             ? children[index].Slice(Offset, Length)
             : throw new InvalidOperationException(
-                $"This column is not a STRUCT with a field {index}, or its field views are unset.");
+                $"This column is not a COMPOSITE with a field {index}, or its field views are unset.");
 
     /// <summary>The values as typed lanes, already advanced past <see cref="Offset"/>.</summary>
     public ReadOnlySpan<T> Lanes<T>()

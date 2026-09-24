@@ -120,7 +120,7 @@
             {
               "name": "w0$o0",
               "type": {
-                "kind": "TYPE_KIND_STRUCT",
+                "kind": "TYPE_KIND_COMPOSITE",
                 "nullable": true,
                 "fields": [
                   {
@@ -289,7 +289,7 @@
                 }
               ],
               "type": {
-                "kind": "TYPE_KIND_STRUCT",
+                "kind": "TYPE_KIND_COMPOSITE",
                 "nullable": true,
                 "fields": [
                   {
@@ -335,7 +335,7 @@
           "fieldAccess": {
             "input": {
               "type": {
-                "kind": "TYPE_KIND_STRUCT",
+                "kind": "TYPE_KIND_COMPOSITE",
                 "nullable": true,
                 "fields": [
                   {
@@ -366,7 +366,7 @@
           "fieldAccess": {
             "input": {
               "type": {
-                "kind": "TYPE_KIND_STRUCT",
+                "kind": "TYPE_KIND_COMPOSITE",
                 "nullable": true,
                 "fields": [
                   {

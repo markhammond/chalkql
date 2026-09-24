@@ -1,5 +1,5 @@
 -- A field in WHERE, GROUP BY and ORDER BY. Calcite projects the scalar field before it filters,
--- groups or sorts, so nothing ever compares, groups or sorts a struct.
+-- groups or sorts, so nothing ever compares, groups or sorts a composite value.
 -- expect: has(HashAggregate)
 -- expect: has_user_function(main.price_move)
 -- expect: has_field_access

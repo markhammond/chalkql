@@ -29,15 +29,15 @@ public static class IrTypes
         kind is TypeKind.IntervalDay or TypeKind.IntervalYear;
 
     /// <summary>
-    /// True for the kinds a v1 <c>LIST</c> or <c>STRUCT</c> may hold, and a plan may compare, group
-    /// or sort by: everything but the two composites, which is what makes both exactly one level deep
-    /// (D58, D291).
+    /// True for the kinds a v1 <c>LIST</c> or <c>COMPOSITE</c> may hold, and a plan may compare, group
+    /// or sort by: everything but those two non-scalar kinds, which is what makes both exactly one
+    /// level deep (D58, D291).
     /// </summary>
     public static bool IsScalar(TypeKind kind) =>
-        kind is not (TypeKind.List or TypeKind.Struct or TypeKind.Unspecified);
+        kind is not (TypeKind.List or TypeKind.Composite or TypeKind.Unspecified);
 
-    /// <summary>True for the two composite kinds, <c>LIST</c> and <c>STRUCT</c> (D58, D291).</summary>
-    public static bool IsComposite(TypeKind kind) => kind is TypeKind.List or TypeKind.Struct;
+    /// <summary>True for the two non-scalar kinds, <c>LIST</c> and <c>COMPOSITE</c> (D58, D291).</summary>
+    public static bool IsNonScalar(TypeKind kind) => kind is TypeKind.List or TypeKind.Composite;
 
     /// <summary>
     /// The number of time units per second at a TIMESTAMP / TIMESTAMP_TZ precision: precision 0–3
@@ -79,7 +79,7 @@ public static class IrTypes
             TypeKind.IntervalDay => "INTERVAL_DAY",
             TypeKind.IntervalYear => "INTERVAL_YEAR",
             TypeKind.List => "LIST",
-            TypeKind.Struct => "STRUCT",
+            TypeKind.Composite => "COMPOSITE",
             _ => $"KIND_{(int)type.Kind}",
         };
 
@@ -91,10 +91,11 @@ public static class IrTypes
                 string.Create(CultureInfo.InvariantCulture, $"({type.Precision})"),
             TypeKind.List => "<" + Describe(type.Element) + ">",
 
-            // `STRUCT<category:STRING, confidence:FP64>`, the fields as a row type spells its own.
-            TypeKind.Struct => "<"
-                + string.Join(", ", type.Fields.Select(f => $"{f.Name}:{Describe(f.Type)}"))
-                + ">",
+            // `COMPOSITE(category STRING, confidence FP64)`: each field by name and type, as a
+            // column is declared.
+            TypeKind.Composite => "("
+                + string.Join(", ", type.Fields.Select(f => $"{f.Name} {Describe(f.Type)}"))
+                + ")",
             _ => string.Empty,
         };
 

@@ -2566,7 +2566,7 @@
             }
           ],
           "returnType": {
-            "kind": "TYPE_KIND_STRUCT",
+            "kind": "TYPE_KIND_COMPOSITE",
             "fields": [
               {
                 "name": "Direction",
@@ -2599,7 +2599,7 @@
             }
           ],
           "returnType": {
-            "kind": "TYPE_KIND_STRUCT",
+            "kind": "TYPE_KIND_COMPOSITE",
             "nullable": true,
             "fields": [
               {

@@ -107,7 +107,7 @@ internal sealed class ScanOperator : OperatorBase
 internal static class ArrowBatchViews
 {
     /// <summary>
-    /// One reusable child-view holder per LIST column — its element — and per STRUCT column — one per
+    /// One reusable child-view holder per LIST column — its element — and per COMPOSITE column — one per
     /// field (D291) — so wrapping one allocates nothing.
     /// </summary>
     public static ColumnView[]?[] ChildHolders(IReadOnlyList<ChalkType> types)
@@ -118,7 +118,7 @@ internal static class ArrowBatchViews
             holders[i] = types[i].Kind switch
             {
                 Ir.TypeKind.List => new ColumnView[1],
-                Ir.TypeKind.Struct => new ColumnView[types[i].Fields.Count],
+                Ir.TypeKind.Composite => new ColumnView[types[i].Fields.Count],
                 _ => null,
             };
         }

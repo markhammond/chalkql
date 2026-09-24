@@ -43,13 +43,13 @@ enum TypeKind {
   // 32-bit offsets. A list may be NULL, may be empty, and may contain NULLs when its element type is
   // nullable. Comparison, grouping and sorting on a LIST are not supported in v1.
   TYPE_KIND_LIST = 18;
-  // A record of named fields, `Type.fields`, one level deep: every field is a scalar kind, never a
-  // LIST and never a STRUCT, and no two field names are equal ignoring case. The struct is nullable
-  // as a whole through `nullable`, and each field carries its own; the fields of a NULL struct are
-  // undefined in memory and read as NULL through a FieldAccess. Arrow: Struct, its child arrays
-  // named after the fields and carrying each field's nullability. Only a client-bodied user function
-  // produces one, and it is never compared, grouped, sorted, cast, stored or bound.
-  TYPE_KIND_STRUCT = 19;
+  // A composite value: named fields, `Type.fields`, one level deep. Every field is a scalar kind,
+  // never a LIST and never a COMPOSITE, and no two field names are equal ignoring case. A composite
+  // is nullable as a whole through `nullable`, and each field carries its own; the fields of a NULL
+  // composite are undefined in memory and read as NULL through a FieldAccess. Arrow: Struct, its
+  // child arrays named after the fields and carrying each field's nullability. Only a client-bodied
+  // user function produces one, and it is never compared, grouped, sorted, cast, stored or bound.
+  TYPE_KIND_COMPOSITE = 19;
 }
 
 message Type {
@@ -63,9 +63,9 @@ message Type {
   // LIST only, and REQUIRED there: the element type. The element is itself never a LIST — v1 lists
   // are exactly one level deep.
   Type element = 5;
-  // STRUCT only, and REQUIRED there: at least one field, in declared order. Names are non-empty and
-  // distinct ignoring case; each field's type is a scalar kind with its own nullability. Every other
-  // kind carries no fields.
+  // COMPOSITE only, and REQUIRED there: at least one field, in declared order. Names are non-empty
+  // and distinct ignoring case; each field's type is a scalar kind with its own nullability. Every
+  // other kind carries no fields.
   repeated Field fields = 6;
 }
 

@@ -6,12 +6,12 @@ using Chalk.Sources;
 namespace Chalk.Execution.Expressions;
 
 /// <summary>
-/// One field of a STRUCT (D291, ADR 0077): the struct's field column, as a view of the struct's rows.
+/// One field of a COMPOSITE (D291, ADR 0077): the composite's field column, as a view of the composite's rows.
 /// </summary>
 /// <remarks>
-/// A borrow, never a copy: when the struct has no NULL row the answer is the field's own view, and
-/// otherwise it is the same view with a validity of the field's <em>and</em> the struct's — a NULL
-/// struct reads as NULL in every field, whatever the field holds underneath. The only thing written
+/// A borrow, never a copy: when the composite has no NULL row the answer is the field's own view, and
+/// otherwise it is the same view with a validity of the field's <em>and</em> the composite's — a NULL
+/// composite reads as NULL in every field, whatever the field holds underneath. The only thing written
 /// is that bitmap, into this node's scratch, aligned with the field view's offset so the values stay
 /// where they are.
 /// </remarks>
@@ -35,25 +35,25 @@ internal sealed class FieldAccessExpr : VectorExprBase
         var value = _input.Evaluate(context);
         if (value.IsScalar)
         {
-            // No struct constant exists (D291): a scalar here is a typed NULL, and so is its field.
+            // No composite constant exists (D291): a scalar here is a typed NULL, and so is its field.
             return Vector.FromScalar(ScalarValue.Null(Type), length);
         }
 
         var composite = value.View;
 
-        // A struct the engine finished has no offset and fields of its own length, so the field is
+        // A composite value the engine finished has no offset and fields of its own length, so the field is
         // its view exactly, null count and all; a sliced one is sliced field by field.
         var child = composite.Children![_index];
         var field = (composite.Offset == 0 && child.Length == composite.Length
             ? child
-            : composite.StructField(_index)) with { Type = Type };
-        var structBits = composite.ValidityBits();
-        if (structBits.IsEmpty || composite.NullCount == 0)
+            : composite.FieldView(_index)) with { Type = Type };
+        var compositeBits = composite.ValidityBits();
+        if (compositeBits.IsEmpty || composite.NullCount == 0)
         {
             return value.IsTransient ? Vector.Transient(field, length) : Vector.FromView(field, length);
         }
 
-        // Field ∧ struct, written at the field view's own offset.
+        // Field ∧ composite, written at the field view's own offset.
         var offset = field.Offset;
         var bytes = Validity.ByteCount(offset + length);
         _bits.Ensure(Math.Max(bytes, 1));

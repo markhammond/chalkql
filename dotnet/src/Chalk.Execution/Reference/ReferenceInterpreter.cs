@@ -65,9 +65,9 @@ internal sealed class ReferenceInterpreter
         Expressions.UserFunctionBinding.Check(descriptor, host, $"aggregate {name}");
         var boxed = ((Chalk.Sources.HostAggregate)host!).NewBoxed();
 
-        // D291: a record Finish answered is held as the reference's struct value.
-        return descriptor.ReturnType?.Kind == TypeKind.Struct
-            ? new ReferenceStructs.Aggregate(boxed)
+        // D291: a record Finish answered is held as the reference's composite value.
+        return descriptor.ReturnType?.Kind == TypeKind.Composite
+            ? new ReferenceComposites.Aggregate(boxed)
             : boxed;
     }
 
@@ -120,10 +120,10 @@ internal sealed class ReferenceInterpreter
 
         var answer = ((Chalk.Sources.HostScalar)host!).InvokeBoxed(arguments);
 
-        // D291: a record is held as the reference's struct value, read through the same properties
+        // D291: a record is held as the reference's composite value, read through the same properties
         // the vectorised engine writes from.
-        return descriptor.ReturnType?.Kind == TypeKind.Struct
-            ? ReferenceStructs.FromRecord(answer)
+        return descriptor.ReturnType?.Kind == TypeKind.Composite
+            ? ReferenceComposites.FromRecord(answer)
             : answer;
     }
 
@@ -143,7 +143,7 @@ internal sealed class ReferenceInterpreter
         Expr.KindOneofCase.InList => InList(expr, row),
         Expr.KindOneofCase.Call => Call(expr, row),
 
-        // D291: a field of the struct value, which a NULL struct answers NULL for.
+        // D291: a field of the composite value, which a NULL composite answers NULL for.
         Expr.KindOneofCase.FieldAccess =>
             Evaluate(expr.FieldAccess.Input, row) is object?[] fields
                 ? fields[(int)expr.FieldAccess.Index]

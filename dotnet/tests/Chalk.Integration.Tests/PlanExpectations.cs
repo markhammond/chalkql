@@ -75,8 +75,8 @@ public static class PlanExpectations
                     break;
                 }
 
-                // D291: a field of a struct is an expression too, and how many of them a plan has
-                // is what says the struct was taken apart rather than flattened into its fields.
+                // D291: a field of a composite value is an expression too, and how many of them a plan has
+                // is what says the composite was taken apart rather than flattened into its fields.
                 if (string.Equals(kind, "FieldAccess", StringComparison.Ordinal))
                 {
                     Assert.Equal(
@@ -227,7 +227,7 @@ public static class PlanExpectations
                 Assert.Empty(UserFunctions(plan));
                 break;
 
-            // D291: the plan takes a struct apart somewhere, whatever the count.
+            // D291: the plan takes a composite value apart somewhere, whatever the count.
             case "has_field_access":
                 Assert.Contains(
                     PlanWalker.AllExprs(plan),

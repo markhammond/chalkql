@@ -5,7 +5,7 @@ using Type = System.Type;
 namespace Chalk.Catalog;
 
 /// <summary>
-/// The one reading of a CLR record as a <c>STRUCT</c> (D294, ADR 0077), shared by the declaration —
+/// The one reading of a CLR record as a <c>COMPOSITE</c> (D294, ADR 0077), shared by the declaration —
 /// <see cref="FunctionBuilder"/> inferring a result type — and the engine's binding check, which
 /// infers the registered delegate's result the same way and compares the two.
 /// </summary>
@@ -22,15 +22,16 @@ namespace Chalk.Catalog;
 /// compiles one accessor per field from the properties this returns (D294).
 /// </para>
 /// </remarks>
-internal static class StructInference
+internal static class CompositeInference
 {
     /// <summary>The full name of <c>Chalk.Utf8String</c>, which lives in a package this one cannot see.</summary>
     internal const string Utf8StringName = "Chalk.Utf8String";
 
     /// <summary>
-    /// Whether <paramref name="type"/> (a <c>Nullable</c> form unwrapped) is read as a struct: a class
-    /// or a struct that is not a Tier 1 type, not <c>Utf8String</c>, and not one of the platform's own
-    /// types — a <c>decimal</c> or a <c>DateTime</c> is a value with no fields, not a record.
+    /// Whether <paramref name="type"/> (a <c>Nullable</c> form unwrapped) is read as a composite: a
+    /// class or a struct that is not a Tier 1 type, not <c>Utf8String</c>, and not one of the
+    /// platform's own types — a <c>decimal</c> or a <c>DateTime</c> is a value with no fields, not a
+    /// record.
     /// </summary>
     public static bool IsCandidate(Type type)
     {
@@ -45,7 +46,7 @@ internal static class StructInference
     }
 
     /// <summary>
-    /// The struct <paramref name="type"/> stands for, nullable when <paramref name="nullable"/> says so
+    /// The composite <paramref name="type"/> stands for, nullable when <paramref name="nullable"/> says so
     /// or when the type is a <c>Nullable</c> of one.
     /// </summary>
     /// <exception cref="CatalogValidationException">
@@ -72,12 +73,12 @@ internal static class StructInference
         if (properties.Count == 0)
         {
             refusal = $"{record.Name} has no public readable instance property, so it reads as a "
-                + "struct of no fields; a struct has at least one";
+                + "composite of no fields; a composite value has at least one";
             return false;
         }
 
         var names = new Dictionary<string, PropertyInfo>(StringComparer.OrdinalIgnoreCase);
-        var fields = new ChalkField[properties.Count];
+        var fields = new CompositeField[properties.Count];
         for (var i = 0; i < properties.Count; i++)
         {
             var property = properties[i];
@@ -93,16 +94,16 @@ internal static class StructInference
             if (FieldType(property.PropertyType) is not { } field)
             {
                 refusal = $"property '{property.Name}' of {record.Name} is "
-                    + $"{Describe(property.PropertyType)}, which no struct field can be: a field is "
+                    + $"{Describe(property.PropertyType)}, which no composite field can be: a field is "
                     + "bool, sbyte, short, int, long, float, double, string or Utf8String, or a nullable "
-                    + "form of one, and a struct is one level deep";
+                    + "form of one, and a composite value is one level deep";
                 return false;
             }
 
-            fields[i] = new ChalkField(property.Name, field);
+            fields[i] = new CompositeField(property.Name, field);
         }
 
-        inferred = ChalkType.Struct(fields, nullable || underlying is not null);
+        inferred = ChalkType.Composite(fields, nullable || underlying is not null);
         return true;
     }
 

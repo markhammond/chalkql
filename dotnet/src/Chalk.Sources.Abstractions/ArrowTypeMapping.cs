@@ -22,7 +22,7 @@ public static class ArrowTypeMapping
     /// against.
     /// </summary>
     /// <remarks>
-    /// The layout reaches every STRING inside the type, a LIST's element and a STRUCT's fields
+    /// The layout reaches every STRING inside the type, a LIST's element and a COMPOSITE's fields
     /// included, so a declared field and the array under it agree at every level.
     /// </remarks>
     public static IArrowType ToArrow(ChalkType type, StringLayouts strings)
@@ -44,7 +44,7 @@ public static class ArrowTypeMapping
                     "LIST with no element type",
                     "docs/design/02-ir.md §3 requires Type.element on a LIST."),
                 strings)),
-            TypeKind.Struct => new StructType(
+            TypeKind.Composite => new StructType(
                 [.. type.Fields.Select(f => ToArrowField(f.Name, f.Type, strings))]),
             _ => ToArrow(type),
         };
@@ -78,9 +78,9 @@ public static class ArrowTypeMapping
                 "LIST with no element type",
                 "docs/design/02-ir.md §3 requires Type.element on a LIST."))),
 
-        // D291: one child field per struct field, named as declared and carrying the field's own
-        // nullability; the struct's own is on the column's field.
-        TypeKind.Struct => new StructType([.. type.Fields.Select(f => ToArrowField(f.Name, f.Type))]),
+        // D291: one child field per composite field, named as declared and carrying the field's own
+        // nullability; the composite's own is on the column's field.
+        TypeKind.Composite => new StructType([.. type.Fields.Select(f => ToArrowField(f.Name, f.Type))]),
         _ => throw new UnsupportedFeatureException(
             $"type kind {type.Kind}",
             "There is no Arrow mapping for it; the planner should never have produced it."),
@@ -180,8 +180,8 @@ public static class ArrowTypeMapping
             IntervalType { Unit: IntervalUnit.YearMonth } => ChalkType.IntervalYear(nullable),
             ListType list => ChalkType.List(
                 FromArrow(list.ValueDataType, list.ValueField.IsNullable), nullable),
-            StructType record => ChalkType.Struct(
-                record.Fields.Select(f => new ChalkField(f.Name, FromArrow(f.DataType, f.IsNullable))),
+            StructType record => ChalkType.Composite(
+                record.Fields.Select(f => new CompositeField(f.Name, FromArrow(f.DataType, f.IsNullable))),
                 nullable),
             _ => throw new UnsupportedFeatureException(
                 $"Arrow type {type.Name}",

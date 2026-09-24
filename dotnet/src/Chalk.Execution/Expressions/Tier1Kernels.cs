@@ -16,16 +16,16 @@ namespace Chalk.Execution.Expressions;
 internal abstract class Tier1Kernel : IVectorFunction
 {
     /// <summary>
-    /// The compiled writer of a STRUCT result (D294), a <c>StructWriter&lt;TOut&gt;</c> built once at
+    /// The compiled writer of a COMPOSITE result (D294), a <c>CompositeWriter&lt;TOut&gt;</c> built once at
     /// binding; null for every scalar result.
     /// </summary>
-    private readonly object? _struct;
+    private readonly object? _composite;
 
-    protected Tier1Kernel(FunctionSignature signature, bool strict, object? structWriter = null)
+    protected Tier1Kernel(FunctionSignature signature, bool strict, object? compositeWriter = null)
     {
         Signature = signature;
         Strict = strict;
-        _struct = structWriter;
+        _composite = compositeWriter;
     }
 
     public FunctionSignature Signature { get; }
@@ -55,9 +55,9 @@ internal abstract class Tier1Kernel : IVectorFunction
     protected void Run<TOut>(
         ReadOnlySpan<ColumnView> args, ColumnWriter result, int length, LaneProducer<TOut> produce)
     {
-        if (_struct is StructWriter<TOut> record)
+        if (_composite is CompositeWriter<TOut> record)
         {
-            RunStruct(args, result, length, produce, record);
+            RunComposite(args, result, length, produce, record);
             return;
         }
 
@@ -98,16 +98,16 @@ internal abstract class Tier1Kernel : IVectorFunction
     }
 
     /// <summary>
-    /// The lane loop of a STRUCT result (D294): one delegate call per lane, one write per field, and
-    /// the struct's own validity. A strict lane is skipped as a scalar's is, and still gets its row in
-    /// every field, which is what keeps the fields aligned with the struct.
+    /// The lane loop of a COMPOSITE result (D294): one delegate call per lane, one write per field, and
+    /// the composite's own validity. A strict lane is skipped as a scalar's is, and still gets its row in
+    /// every field, which is what keeps the fields aligned with the composite.
     /// </summary>
-    private void RunStruct<TOut>(
+    private void RunComposite<TOut>(
         ReadOnlySpan<ColumnView> args,
         ColumnWriter result,
         int length,
         LaneProducer<TOut> produce,
-        StructWriter<TOut> record)
+        CompositeWriter<TOut> record)
     {
         var validity = result.BeginValidity(length);
         record.Begin(result, length);
@@ -126,10 +126,10 @@ internal abstract class Tier1Kernel : IVectorFunction
         }
     }
 
-    /// <summary>The struct writer a kernel of this result type needs, or null for a scalar result.</summary>
-    protected static object? StructWriterFor<TOut>(FunctionSignature signature) =>
-        signature.ReturnType.Kind == Ir.TypeKind.Struct
-            ? StructWriters.For<TOut>(signature.ReturnType)
+    /// <summary>The composite writer a kernel of this result type needs, or null for a scalar result.</summary>
+    protected static object? CompositeWriterFor<TOut>(FunctionSignature signature) =>
+        signature.ReturnType.Kind == Ir.TypeKind.Composite
+            ? CompositeWriters.For<TOut>(signature.ReturnType)
             : null;
 
     /// <summary>One row's answer. A struct-free delegate: it closes over nothing this code allocates.</summary>
@@ -142,7 +142,7 @@ internal sealed class Tier1Kernel0<TOut> : Tier1Kernel
     private readonly LaneProducer<TOut> _produce;
 
     public Tier1Kernel0(FunctionSignature signature, bool strict, Func<TOut> f)
-        : base(signature, strict, StructWriterFor<TOut>(signature))
+        : base(signature, strict, CompositeWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = _ => _f();
@@ -159,7 +159,7 @@ internal sealed class Tier1Kernel1<T1, TOut> : Tier1Kernel
     private ColumnView _a1;
 
     public Tier1Kernel1(FunctionSignature signature, bool strict, Func<T1, TOut> f)
-        : base(signature, strict, StructWriterFor<TOut>(signature))
+        : base(signature, strict, CompositeWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
@@ -182,7 +182,7 @@ internal sealed class Tier1Kernel2<T1, T2, TOut> : Tier1Kernel
     private ColumnView _a2;
 
     public Tier1Kernel2(FunctionSignature signature, bool strict, Func<T1, T2, TOut> f)
-        : base(signature, strict, StructWriterFor<TOut>(signature))
+        : base(signature, strict, CompositeWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
@@ -207,7 +207,7 @@ internal sealed class Tier1Kernel3<T1, T2, T3, TOut> : Tier1Kernel
     private ColumnView _a3;
 
     public Tier1Kernel3(FunctionSignature signature, bool strict, Func<T1, T2, T3, TOut> f)
-        : base(signature, strict, StructWriterFor<TOut>(signature))
+        : base(signature, strict, CompositeWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
@@ -235,7 +235,7 @@ internal sealed class Tier1Kernel4<T1, T2, T3, T4, TOut> : Tier1Kernel
     private ColumnView _a4;
 
     public Tier1Kernel4(FunctionSignature signature, bool strict, Func<T1, T2, T3, T4, TOut> f)
-        : base(signature, strict, StructWriterFor<TOut>(signature))
+        : base(signature, strict, CompositeWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
@@ -268,7 +268,7 @@ internal sealed class Tier1Kernel5<T1, T2, T3, T4, T5, TOut> : Tier1Kernel
     private ColumnView _a5;
 
     public Tier1Kernel5(FunctionSignature signature, bool strict, Func<T1, T2, T3, T4, T5, TOut> f)
-        : base(signature, strict, StructWriterFor<TOut>(signature))
+        : base(signature, strict, CompositeWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;
@@ -305,7 +305,7 @@ internal sealed class Tier1Kernel6<T1, T2, T3, T4, T5, T6, TOut> : Tier1Kernel
 
     public Tier1Kernel6(
         FunctionSignature signature, bool strict, Func<T1, T2, T3, T4, T5, T6, TOut> f)
-        : base(signature, strict, StructWriterFor<TOut>(signature))
+        : base(signature, strict, CompositeWriterFor<TOut>(signature))
     {
         _f = f;
         _produce = Produce;

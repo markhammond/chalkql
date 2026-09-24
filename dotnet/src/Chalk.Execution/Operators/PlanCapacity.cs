@@ -72,9 +72,9 @@ internal static class PlanCapacity
         var kind = ColumnKinds.Of(column);
         var width = ColumnKinds.Width(kind);
 
-        // A STRUCT is one row of every field per row (D291), each at its own width, and a bit of
+        // A COMPOSITE is one row of every field per row (D291), each at its own width, and a bit of
         // validity this test rounds away.
-        if (kind == ColumnKind.Struct)
+        if (kind == ColumnKind.Composite)
         {
             long fields = 0;
             foreach (var field in column.Fields)

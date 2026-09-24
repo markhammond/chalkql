@@ -508,7 +508,7 @@ internal static class LaneCodec
 
     /// <summary>
     /// Writes one fixed-width value into a raw lane without boxing it, and says whether it was a value
-    /// at all — how a struct field reaches an aggregate's output copier (D294). A NULL clears the lane.
+    /// at all — how a composite field reaches an aggregate's output copier (D294). A NULL clears the lane.
     /// Every branch is a <c>typeof</c> test the JIT folds away per instantiation.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -592,8 +592,8 @@ internal static class LaneCodec
         }
 
         throw new UnsupportedFeatureException(
-            $"a struct field of CLR type {typeof(T).Name}",
-            "A struct's fields are bool, sbyte, short, int, long, float, double, Utf8String or "
+            $"a composite field of CLR type {typeof(T).Name}",
+            "A composite value's fields are bool, sbyte, short, int, long, float, double, Utf8String or "
             + "string, or a nullable form of one (docs/design/51-structured-function-results.md §1).");
     }
 

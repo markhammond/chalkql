@@ -60,11 +60,11 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * {@code PlannerImpl} does, and never run the structured-type flattener.
  *
  * <p>{@code PlannerImpl} converts with {@code convertQuery}, then calls {@code flattenTypes} on the
- * result, then decorrelates. Flattened, a struct-valued call is split into one call per field —
- * {@code ROW(f(x).category, f(x).confidence)} — and a struct-valued aggregate into a two-column
+ * result, then decorrelates. Flattened, a composite-valued call is split into one call per field —
+ * {@code ROW(f(x).category, f(x).confidence)} — and a composite-valued aggregate into a two-column
  * {@code Aggregate} whose references are then out of range. Unflattened, every tree is what the IR
- * wants: one call, one struct column, field accesses over it (design 51 §0). The flattener did
- * nothing for Chalk before structs existed, so nothing is lost by not running it.
+ * wants: one call, one composite column, field accesses over it (design 51 §0). The flattener did
+ * nothing for Chalk before composite values existed, so nothing is lost by not running it.
  *
  * <p>Why a class and not a line: every member the flattening step touches is private to {@code
  * PlannerImpl} — its validator, catalog reader, cluster planner and state — and {@code transform}
@@ -82,7 +82,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  *
  * <p>One member is Chalk's own and adds nothing to the conversion: {@link #validator()}, which hands
  * the pipeline the validator of the statement just validated, so that a check which needs an
- * expression's validated type ({@code StructSupport}) can ask before anything is converted or folded.
+ * expression's validated type ({@code CompositeSupport}) can ask before anything is converted or folded.
  */
 public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
   private final SqlOperatorTable operatorTable;
@@ -309,7 +309,7 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
         new SqlToRelConverter(
             this, validator, createCatalogReader(), cluster, convertletTable, config);
     RelRoot root = sqlToRelConverter.convertQuery(validatedSqlNode, false, true);
-    // PlannerImpl flattens here. Chalk does not: a struct stays one value (D292).
+    // PlannerImpl flattens here. Chalk does not: a composite value stays one value (D292).
     final RelBuilder relBuilder = config.getRelBuilderFactory().create(cluster, null);
     if (config.isTopDownGeneralDecorrelationEnabled()) {
       root = root.withRel(TopDownGeneralDecorrelator.decorrelateQuery(root.rel, relBuilder));

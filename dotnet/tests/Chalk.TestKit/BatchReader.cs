@@ -84,10 +84,10 @@ public static class BatchReader
             return null;
         }
 
-        // A struct has no value buffer of its own, only its fields (D291).
-        if (type.Kind == TypeKind.Struct)
+        // A composite value has no value buffer of its own, only its fields (D291).
+        if (type.Kind == TypeKind.Composite)
         {
-            return Struct(array, physicalIndex, type);
+            return Composite(array, physicalIndex, type);
         }
 
         var values = array.Data.Buffers[1].Span;
@@ -146,11 +146,11 @@ public static class BatchReader
     // }
 
     /// <summary>
-    /// A STRUCT cell, as the <c>object?[]</c> of its fields in order (D291) — what the reference
-    /// executor holds one as. The struct's physical row is each field's logical row, as Arrow aligns a
-    /// struct's children.
+    /// A COMPOSITE cell, as the <c>object?[]</c> of its fields in order (D291) — what the reference
+    /// executor holds one as. The composite's physical row is each field's logical row, as Arrow aligns a
+    /// composite's children.
     /// </summary>
-    private static object?[] Struct(IArrowArray array, int index, ChalkType type)
+    private static object?[] Composite(IArrowArray array, int index, ChalkType type)
     {
         var values = new object?[type.Fields.Count];
         for (var i = 0; i < values.Length; i++)
@@ -259,7 +259,7 @@ public static class BatchReader
             _ => value,
         },
         byte[] bytes when type.Kind == TypeKind.Uuid => new Guid(bytes, bigEndian: true),
-        object?[] fields when type.Kind == TypeKind.Struct =>
+        object?[] fields when type.Kind == TypeKind.Composite =>
             fields.Select((field, i) => Host(field, type.Fields[i].Type)).ToArray(),
         _ => storage,
     };
