@@ -1,4 +1,5 @@
 using Chalk.Catalog;
+using Chalk.Ir;
 using Chalk.Sources;
 using CatalogContext = Chalk.Catalog.CatalogContext;
 using FunctionDescriptor = Chalk.Catalog.FunctionDescriptor;
@@ -181,6 +182,12 @@ internal static class UserFunctionBinding
     private static void RequireLaneType(
         Type clr, ChalkType declared, bool strict, string what, string key)
     {
+        if (declared.Kind == Ir.TypeKind.Struct)
+        {
+            RequireStructType(clr, declared, what, key);
+            return;
+        }
+
         var underlying = Nullable.GetUnderlyingType(clr);
         if (!LaneCodec.Accepts(clr, declared))
         {
@@ -196,6 +203,67 @@ internal static class UserFunctionBinding
                 + $"registered as '{key}' must take {clr.Name}? — otherwise a NULL would arrive as "
                 + $"{clr.Name}'s default and be indistinguishable from a value.");
         }
+    }
+
+    /// <summary>
+    /// D294: a declared STRUCT is served by a record the engine reads exactly as the declaration read
+    /// one — the same properties, in the same order — and the two must agree field by field: names
+    /// ignoring case, types exact. The struct's own nullability is not compared, as a scalar result's
+    /// is not: a record that never answers NULL serves a nullable declaration, and one that does
+    /// answers NULL for the whole struct.
+    /// </summary>
+    private static void RequireStructType(Type clr, ChalkType declared, string what, string key)
+    {
+        if (!StructInference.IsCandidate(clr))
+        {
+            throw new InvalidOperationException(
+                $"{what} {IrTypes.Describe(declared.ToProto())} and the implementation registered as "
+                + $"'{key}' uses {StructInference.Describe(clr)}, which is not a record a struct can be "
+                + "read from.");
+        }
+
+        if (!StructInference.TryInfer(clr, nullable: declared.Nullable, out var registered, out var refusal))
+        {
+            throw new InvalidOperationException(
+                $"{what} {IrTypes.Describe(declared.ToProto())} and the implementation registered as "
+                + $"'{key}' uses {StructInference.Describe(clr)}, which is not one: {refusal}.");
+        }
+
+        var mismatch = StructMismatch(declared, registered);
+        if (mismatch is not null)
+        {
+            throw new InvalidOperationException(
+                $"{what} {IrTypes.Describe(declared.ToProto())} and the implementation registered as "
+                + $"'{key}' uses {StructInference.Describe(clr)}, which reads as "
+                + $"{IrTypes.Describe(registered.ToProto())}: {mismatch}.");
+        }
+    }
+
+    /// <summary>Where two structs part company, or null when they agree field by field.</summary>
+    private static string? StructMismatch(ChalkType declared, ChalkType registered)
+    {
+        if (declared.Fields.Count != registered.Fields.Count)
+        {
+            return $"the declaration has {declared.Fields.Count} fields and the record "
+                + $"{registered.Fields.Count}";
+        }
+
+        for (var i = 0; i < declared.Fields.Count; i++)
+        {
+            var want = declared.Fields[i];
+            var have = registered.Fields[i];
+            if (!string.Equals(want.Name, have.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return $"field {i + 1} is '{want.Name}' declared and '{have.Name}' registered";
+            }
+
+            if (!want.Type.Equals(have.Type))
+            {
+                return $"field '{want.Name}' is {want.Type} declared and {have.Type} registered";
+            }
+        }
+
+        return null;
     }
 
     private static InvalidOperationException Mismatch(

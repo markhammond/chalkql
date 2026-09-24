@@ -17,6 +17,12 @@ namespace Chalk.Catalog;
 /// with the explicit <see cref="Parameter(string, ChalkType)"/> and <see cref="Returns(ChalkType)"/>.
 /// </para>
 /// <para>
+/// A result type outside the Tier 1 set that is a record — a <c>class</c> or <c>struct</c> of the host's
+/// own — is a STRUCT: its public readable properties, in declaration order, are the fields, each a
+/// Tier 1 type, nullable as its CLR type is. <c>Nullable&lt;TRecord&gt;</c> is a nullable struct. A
+/// struct is only ever a result: a parameter or a column typed as a record is refused.
+/// </para>
+/// <para>
 /// A textual <c>CREATE FUNCTION</c> form is a follow-up, not part of this step (§4).
 /// </para>
 /// </remarks>
@@ -96,7 +102,7 @@ public sealed class FunctionBuilder
     }
 
     /// <summary>The same, with the type inferred from <typeparamref name="T"/>.</summary>
-    public FunctionBuilder Column<T>(string name) => Column(name, TypeOf<T>(nullable: false));
+    public FunctionBuilder Column<T>(string name) => Column(name, TypeOf<T>(nullable: false, Role.Column, name));
 
     /// <summary>A required parameter of the given type.</summary>
     public FunctionBuilder Parameter(string name, ChalkType type)
@@ -106,7 +112,8 @@ public sealed class FunctionBuilder
     }
 
     /// <summary>A required parameter, typed from <typeparamref name="T"/> and nullable.</summary>
-    public FunctionBuilder Parameter<T>(string name) => Parameter(name, TypeOf<T>(nullable: true));
+    public FunctionBuilder Parameter<T>(string name) =>
+        Parameter(name, TypeOf<T>(nullable: true, Role.Parameter, name));
 
     /// <summary>An optional parameter, and the constant an omitted argument stands for.</summary>
     public FunctionBuilder Optional(string name, ChalkType type, object? defaultValue)
@@ -123,7 +130,7 @@ public sealed class FunctionBuilder
 
     /// <summary>The same, typed from <typeparamref name="T"/>.</summary>
     public FunctionBuilder Optional<T>(string name, T defaultValue) =>
-        Optional(name, TypeOf<T>(nullable: true), defaultValue);
+        Optional(name, TypeOf<T>(nullable: true, Role.Parameter, name), defaultValue);
 
     /// <summary>The result type of a scalar or aggregate function.</summary>
     public FunctionBuilder Returns(ChalkType type)
@@ -132,11 +139,14 @@ public sealed class FunctionBuilder
         return this;
     }
 
-    /// <summary>The same, typed from <typeparamref name="T"/> and non-nullable.</summary>
-    public FunctionBuilder Returns<T>() => Returns(TypeOf<T>(nullable: false));
+    /// <summary>
+    /// The same, typed from <typeparamref name="T"/> and non-nullable — a STRUCT when
+    /// <typeparamref name="T"/> is a record, nullable when it is a <c>Nullable</c> of one (D294).
+    /// </summary>
+    public FunctionBuilder Returns<T>() => Returns(TypeOf<T>(nullable: false, Role.Result, null));
 
     /// <summary>The same, saying whether the result may be NULL even when no argument is.</summary>
-    public FunctionBuilder ReturnsNullable<T>() => Returns(TypeOf<T>(nullable: true));
+    public FunctionBuilder ReturnsNullable<T>() => Returns(TypeOf<T>(nullable: true, Role.Result, null));
 
     // ---- properties ----
 
@@ -310,48 +320,41 @@ public sealed class FunctionBuilder
         return this;
     }
 
-    /// <summary>The declared type a CLR type stands for. Deliberately the Tier 1 set and no more.</summary>
-    private static ChalkType TypeOf<T>(bool nullable)
+    /// <summary>Where an inferred type is going to stand, which decides whether a record may.</summary>
+    private enum Role
     {
-        var type = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
-        if (type == typeof(bool))
+        Parameter,
+        Column,
+        Result,
+    }
+
+    /// <summary>
+    /// The declared type a CLR type stands for: the Tier 1 set and no more — <c>Utf8String</c> being a
+    /// STRING spelled without an allocation per row — or, for a result, a STRUCT inferred from a record
+    /// (D294). A record anywhere else is refused, because a struct is only ever a function's result.
+    /// </summary>
+    private ChalkType TypeOf<T>(bool nullable, Role role, string? name)
+    {
+        var clr = typeof(T);
+        var type = Nullable.GetUnderlyingType(clr) ?? clr;
+        if (StructInference.ScalarOf(type) is { } scalar)
         {
-            return ChalkType.Bool(nullable);
+            return scalar.WithNullable(nullable);
         }
 
-        if (type == typeof(sbyte))
+        if (StructInference.IsCandidate(clr))
         {
-            return ChalkType.Int8(nullable);
-        }
+            if (role != Role.Result)
+            {
+                var what = role == Role.Parameter ? "parameter" : "column";
+                throw new CatalogValidationException(
+                    $"functions ({_name})",
+                    $"{what} '{name}' is typed {StructInference.Describe(clr)}, which would be a STRUCT; "
+                    + $"a struct is only ever a function's result, never a {what}. Declare its fields "
+                    + $"as {what}s of their own.");
+            }
 
-        if (type == typeof(short))
-        {
-            return ChalkType.Int16(nullable);
-        }
-
-        if (type == typeof(int))
-        {
-            return ChalkType.Int32(nullable);
-        }
-
-        if (type == typeof(long))
-        {
-            return ChalkType.Int64(nullable);
-        }
-
-        if (type == typeof(float))
-        {
-            return ChalkType.Float32(nullable);
-        }
-
-        if (type == typeof(double))
-        {
-            return ChalkType.Float64(nullable);
-        }
-
-        if (type == typeof(string))
-        {
-            return ChalkType.String(nullable);
+            return StructInference.Infer(clr, nullable, $"functions ({_name})");
         }
 
         throw new CatalogValidationException(

@@ -14,6 +14,8 @@
     <InternalsVisibleTo Include="Chalk.Catalog.Tests" />
     <InternalsVisibleTo Include="Chalk.Client" />
     <InternalsVisibleTo Include="Chalk.CorpusTool" />
+    <!-- The engine's binding check reads a record as a struct exactly as the declaration did (D294). -->
+    <InternalsVisibleTo Include="Chalk.Execution" />
     <InternalsVisibleTo Include="Chalk.TestKit" />
   </ItemGroup>
 
