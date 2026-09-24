@@ -222,22 +222,24 @@ public static class PlanValidator
             switch (rel.KindCase)
             {
                 case Chalk.Ir.Rel.KindOneofCase.Read:
+                    // D302: a table of an in-process source may hold a composite column; the catalog
+                    // refuses one anywhere else, so a Read carries what its table declares.
                     Read(rel, kindPath);
-                    RefuseCompositeColumns(output, kindPath, "a table column");
                     break;
 
                 case Chalk.Ir.Rel.KindOneofCase.VirtualTable:
-                    VirtualTable(rel, kindPath);
-
-                    // A VALUES row is literals, and no literal is a composite value. An empty one
-                    // holds none: it is what the planner leaves where it proved a relation empty
-                    // — a predicate that folds to FALSE, a principal who may see no row — and its
-                    // row type is still the statement's, a composite column included (ADR 0077).
+                    // A VALUES row is literals, and a VALUES column is never a composite one — not
+                    // even of typed NULLs, the one composite literal, so this is asked before the
+                    // rows' literals are. An empty VALUES holds none: it is what the planner leaves
+                    // where it proved a relation empty — a predicate that folds to FALSE, a
+                    // principal who may see no row — and its row type is still the statement's, a
+                    // composite column included (ADR 0077).
                     if (rel.VirtualTable.Rows.Count > 0)
                     {
                         RefuseCompositeColumns(output, kindPath, "a VALUES column");
                     }
 
+                    VirtualTable(rel, kindPath);
                     break;
 
                 // A relation the host bound by name (step 26, 16-entitlements.md §2, §4). Its rows
@@ -550,8 +552,9 @@ public static class PlanValidator
                     break;
 
                 case Chalk.Ir.Rel.KindOneofCase.IndexLookup:
+                    // D302: the lookup's rows may carry a composite column as a Read's do; its key never
+                    // is one, because no index is declared over one.
                     IndexLookup(rel, kindPath);
-                    RefuseCompositeColumns(output, kindPath, "a table column");
                     break;
 
                 case Chalk.Ir.Rel.KindOneofCase.RemoteQuery:
@@ -1691,9 +1694,15 @@ public static class PlanValidator
                     break;
 
                 case Expr.KindOneofCase.Literal:
-                    // A composite value is produced by a function and by nothing else: there is no composite
-                    // literal, not even a typed NULL one (I-IR-23).
-                    RefuseComposite(expr.Type, path, "a literal");
+                    // I-IR-23: a composite value is produced by a function or read from an in-process
+                    // table's column, and the one composite literal is the typed NULL — the NULL composite
+                    // a CASE chooses (D295) and a withheld composite column's placeholder is (D302).
+                    if (expr.Type?.Kind != TypeKind.Composite
+                        || expr.Literal.ValueCase != Literal.ValueOneofCase.IsNull)
+                    {
+                        RefuseComposite(expr.Type, path, "a literal other than a typed NULL");
+                    }
+
                     LiteralValue(expr, path);
                     break;
 
@@ -1834,7 +1843,7 @@ public static class PlanValidator
         /// One value a <c>CASE</c> or a <c>COALESCE</c> may answer. Of a scalar result, an expression of
         /// its kind. Of a COMPOSITE result (I-IR-23, D295), an expression of the same composite type —
         /// the same fields, named alike, each at most as nullable as the result's, as I-IR-4 widens a
-        /// set operation's composite — or a typed NULL of it, the one place a composite literal stands.
+        /// set operation's composite — a typed NULL of it among them.
         /// </summary>
         private void Branch(Expr branch, RowType input, string path, Type? result, string what)
         {
@@ -1845,19 +1854,8 @@ public static class PlanValidator
                 return;
             }
 
-            if (branch.KindCase == Expr.KindOneofCase.Literal
-                && branch.Literal.ValueCase == Literal.ValueOneofCase.IsNull
-                && branch.Type?.Kind == TypeKind.Composite)
-            {
-                // The one composite literal there is: a typed NULL, standing for "no composite" in a
-                // choice. Anywhere else a composite literal stays refused.
-                CheckType(branch.Type, $"{path}.type");
-            }
-            else
-            {
-                Expression(branch, input, path);
-            }
-
+            // A typed NULL of the composite is one of them: the one composite literal there is.
+            Expression(branch, input, path);
             if (!OneComposite(branch.Type!, result))
             {
                 throw Invalid(
@@ -2429,9 +2427,10 @@ public static class PlanValidator
         }
 
         /// <summary>
-        /// <c>I-IR-23</c> (D291): the places a COMPOSITE may never be — a key, an operand, a literal (but a
-        /// typed NULL a CASE or COALESCE chooses, D295), a parameter, a cast, a built-in's argument or
-        /// result (but COALESCE's, D295), a table's column.
+        /// <c>I-IR-23</c> (D291): the places a COMPOSITE may never be — a key, an operand, a literal (but
+        /// a typed NULL, D295 and D302), a parameter, a cast, a built-in's argument or result (but
+        /// COALESCE's, D295), a table function's or a VALUES row's column. A table's column may be
+        /// one, on an in-process source (D302).
         /// </summary>
         private void RefuseComposite(Type? type, string path, string what)
         {
@@ -2446,9 +2445,8 @@ public static class PlanValidator
         }
 
         /// <summary>
-        /// <c>I-IR-23</c> for a leaf's row: a composite value exists only between the function that produced it
-        /// and the row that takes it apart or carries it out, so no table, source or bound relation
-        /// ever holds one.
+        /// <c>I-IR-23</c> for a leaf's row: a composite value comes from a function, or from an in-process
+        /// table's own column (D302), so no table function and no VALUES row ever holds one.
         /// </summary>
         private void RefuseCompositeColumns(RowType row, string path, string what)
         {

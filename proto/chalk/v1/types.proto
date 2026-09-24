@@ -47,8 +47,10 @@ enum TypeKind {
   // never a LIST and never a COMPOSITE, and no two field names are equal ignoring case. A composite
   // is nullable as a whole through `nullable`, and each field carries its own; the fields of a NULL
   // composite are undefined in memory and read as NULL through a FieldAccess. Arrow: Struct, its
-  // child arrays named after the fields and carrying each field's nullability. Only a client-bodied
-  // user function produces one, and it is never compared, grouped, sorted, cast, stored or bound.
+  // child arrays named after the fields and carrying each field's nullability. A client-bodied user
+  // function produces one, and a table of a LOCAL source may hold one as a column; the one composite
+  // literal is the typed NULL. It is never compared, grouped, sorted, cast or bound, and never a key,
+  // an index key or a column of a REMOTE source.
   TYPE_KIND_COMPOSITE = 19;
 }
 

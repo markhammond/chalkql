@@ -803,6 +803,7 @@ public sealed class PocoTableBuilder<T>
         // The declarations are resolved once, here, because they are shape; the indexes themselves
         // are built per snapshot, because they are data (D260 §2).
         var hostIndexes = ResolveHostIndexes(byMember);
+        RefuseCompositeKeys(built, collations, uniqueKeys, foreignKeys, hostIndexes, statistics);
         var plans = PlanIndexes(built, byMember, collations, rows.RandomAccess, hostIndexes);
         var factory = new PocoSnapshotFactory<T>(
             _table, rows, built, collations, uniqueKeys, plans, hostIndexes, _indexScratch, _verify);
@@ -880,6 +881,8 @@ public sealed class PocoTableBuilder<T>
             for (var k = 0; k < keyCount; k++)
             {
                 var column = Index(byMember, declaration.Members[k]);
+                RefuseComposite(
+                    columns, column, $"index '{declaration.Name ?? "(unnamed)"}'", "an index key");
 
                 keyColumns[k] = column;
                 accessors[k] = columns[column].CompileLogicalAccessor();
@@ -904,7 +907,7 @@ public sealed class PocoTableBuilder<T>
                 Columns = keyColumns,
                 Unique = declaration.Unique,
                 Directions = declaration.Directions,
-                Covering = CoveringColumns(declaration, byMember, keyColumns),
+                Covering = CoveringColumns(declaration, byMember, keyColumns, columns),
                 // D283: the built-in index is a permutation, and a clustered one is a permutation
                 // with a copy beside it. The window a range resolves to is a contiguous slice, so
                 // walking it from its end costs exactly what walking it from its start does.
@@ -956,20 +959,106 @@ public sealed class PocoTableBuilder<T>
     /// and what every other kind declares.
     /// </summary>
     private int[] CoveringColumns(
-        IndexDeclaration declaration, Dictionary<string, int> byMember, int[] keyColumns)
+        IndexDeclaration declaration,
+        Dictionary<string, int> byMember,
+        int[] keyColumns,
+        PocoColumn<T>[] columns)
     {
         if (declaration.Covering is not { Length: > 0 } members)
         {
+            // D302: a clustered copy never carries a composite column, and "every column" would.
+            if (declaration.Kind == IndexKind.Clustered
+                && Array.FindIndex(columns, c => c.Type.Kind == Chalk.Ir.TypeKind.Composite) is var composite and >= 0)
+            {
+                throw new CatalogValidationException(
+                    $"table '{_table}' index '{declaration.Name ?? "(unnamed)"}'",
+                    $"a clustered index with no covering set copies every column, and '{columns[composite].Name}' "
+                    + "is a composite column, which a clustered copy never carries. Name the covering set "
+                    + "with Covering(…), leaving the composite column out.");
+            }
+
             return [];
         }
 
         var covering = new SortedSet<int>(keyColumns);
         foreach (var member in members)
         {
-            covering.Add(Index(byMember, member));
+            var column = Index(byMember, member);
+            RefuseComposite(
+                columns, column, $"index '{declaration.Name ?? "(unnamed)"}'", "a clustered index's covering set");
+            covering.Add(column);
         }
 
         return [.. covering];
+    }
+
+    /// <summary>
+    /// D302: a composite column has no ordering or equality, so no collation, unique key, foreign key
+    /// or index is over one, and it carries no statistics. Each is refused here, at build, naming the
+    /// declaration and the member; the catalog validator refuses the same shapes on any source.
+    /// </summary>
+    private void RefuseCompositeKeys(
+        PocoColumn<T>[] columns,
+        IReadOnlyList<CollationDescriptor> collations,
+        IReadOnlyList<UniqueKeyDescriptor> uniqueKeys,
+        IReadOnlyList<PocoForeignKey> foreignKeys,
+        IReadOnlyList<PocoHostIndex<T>> hostIndexes,
+        PocoStatisticsPlan statistics)
+    {
+        foreach (var collation in collations)
+        {
+            foreach (var key in collation.Keys)
+            {
+                RefuseComposite(columns, key.Column, "OrderedBy(…)", "a collation");
+            }
+        }
+
+        foreach (var key in uniqueKeys)
+        {
+            foreach (var column in key.Columns)
+            {
+                RefuseComposite(columns, column, "UniqueKey(…)", "a unique key");
+            }
+        }
+
+        foreach (var key in foreignKeys)
+        {
+            foreach (var column in key.Columns)
+            {
+                RefuseComposite(columns, column, "ForeignKey(…)", "a foreign key");
+            }
+        }
+
+        foreach (var index in hostIndexes)
+        {
+            foreach (var column in index.Descriptor.Columns)
+            {
+                RefuseComposite(columns, column, $"index '{index.Descriptor.Name}'", "an index key");
+            }
+        }
+
+        foreach (var column in statistics.Overrides.Keys)
+        {
+            if (columns[column].Type.Kind == Chalk.Ir.TypeKind.Composite)
+            {
+                throw new CatalogValidationException(
+                    $"table '{_table}' Statistics(…)",
+                    $"'{columns[column].Name}' is a composite column, which carries no statistics: none of "
+                    + "its values compares with another.");
+            }
+        }
+    }
+
+    private void RefuseComposite(PocoColumn<T>[] columns, int column, string declaration, string what)
+    {
+        if (column >= 0 && column < columns.Length && columns[column].Type.Kind == Chalk.Ir.TypeKind.Composite)
+        {
+            throw new CatalogValidationException(
+                $"table '{_table}' {declaration}",
+                $"'{columns[column].Name}' is a composite column and cannot be {what}: a composite value "
+                + "has no ordering or equality, so nothing is keyed, indexed or ordered on one. Declare the "
+                + "field to key on as a member of its own.");
+        }
     }
 
     /// <summary>

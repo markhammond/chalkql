@@ -103,7 +103,7 @@ public final class CatalogValidator {
         throw new InvalidCatalogException(
             tablePath, "table name '" + table.getName() + "' is used twice in this schema");
       }
-      validateTable(table, tablePath);
+      validateTable(table, tablePath, schema);
     }
 
     // Foreign keys name another table, so they can only be checked once every table is known (F14).
@@ -565,11 +565,13 @@ public final class CatalogValidator {
         int child = key.getColumns(c);
         int target = key.getParentColumns(c);
         requireColumn(child, table.getColumnsCount(), keyPath);
+        refuseCompositeKey(table, child, keyPath, "a foreign key");
         if (!seen.add(child)) {
           throw new InvalidCatalogException(
               keyPath, "column " + child + " appears twice in the same foreign key");
         }
         requireColumn(target, parent.getColumnsCount(), keyPath + " (parent '" + parent.getName() + "')");
+        refuseCompositeKey(parent, target, keyPath + " (parent '" + parent.getName() + "')", "a foreign key");
 
         TypeKind childKind = table.getColumns(child).getType().getKind();
         TypeKind parentKind = parent.getColumns(target).getType().getKind();
@@ -592,7 +594,7 @@ public final class CatalogValidator {
     }
   }
 
-  private static void validateTable(Table table, String path) {
+  private static void validateTable(Table table, String path, Schema schema) {
     if (table.getColumnsCount() == 0) {
       throw new InvalidCatalogException(path, "a table needs at least one column");
     }
@@ -613,7 +615,17 @@ public final class CatalogValidator {
             columnPath, "column name '" + column.getName() + "' is used twice in this table");
       }
       validateType(column.getType(), columnPath + " (" + column.getName() + ")");
-      refuseCompositeColumn(column.getType(), columnPath + " (" + column.getName() + ")", "a table column");
+      // D302: a composite column is a member of an in-process source's own records; a REMOTE source
+      // would need its provider's reader for a STRUCT or a ROW. Mirrors Chalk.Catalog's check.
+      if (column.getType().getKind() == TypeKind.TYPE_KIND_COMPOSITE
+          && schema.getKind() != chalk.ir.v1.SourceKind.SOURCE_KIND_LOCAL) {
+        throw new InvalidCatalogException(
+            columnPath + " (" + column.getName() + ")",
+            "column '" + column.getName() + "' of table '" + table.getName() + "' is a COMPOSITE,"
+                + " and schema '" + schema.getName() + "' is not an in-process source; a composite"
+                + " column is read only from an in-process (LOCAL) source. Declare its fields as"
+                + " columns of their own");
+      }
     }
 
     int columns = table.getColumnsCount();
@@ -626,6 +638,7 @@ public final class CatalogValidator {
       Set<Integer> seen = new HashSet<>();
       for (int column : key.getColumnsList()) {
         requireColumn(column, columns, keyPath);
+        refuseCompositeKey(table, column, keyPath, "a unique key");
         if (!seen.add(column)) {
           throw new InvalidCatalogException(
               keyPath, "column " + column + " appears twice in the same key");
@@ -644,6 +657,7 @@ public final class CatalogValidator {
         KeyOrder key = collation.getKeys(j);
         String keyPath = collationPath + ".keys[" + j + "]";
         requireColumn(key.getColumn(), columns, keyPath);
+        refuseCompositeKey(table, key.getColumn(), keyPath, "a collation");
         if (key.getDirection() == SortDirection.SORT_DIRECTION_UNSPECIFIED) {
           throw new InvalidCatalogException(
               keyPath,
@@ -677,6 +691,7 @@ public final class CatalogValidator {
       Set<Integer> indexColumns = new HashSet<>();
       for (int column : index.getColumnsList()) {
         requireColumn(column, columns, indexPath);
+        refuseCompositeKey(table, column, indexPath, "an index key");
         if (!indexColumns.add(column)) {
           throw new InvalidCatalogException(
               indexPath, "column " + column + " appears twice in the same index key");
@@ -813,6 +828,19 @@ public final class CatalogValidator {
    */
   private static void validateCovering(
       Table table, Index index, String indexPath, Set<Integer> keyColumns, int columns) {
+    // D302: a clustered copy never carries a composite column, so on a table that has one the
+    // covering set is named, and names none.
+    if (index.getKind() == chalk.ir.v1.IndexKind.INDEX_KIND_CLUSTERED && index.getCoveringCount() == 0) {
+      for (Column column : table.getColumnsList()) {
+        if (column.getType().getKind() == TypeKind.TYPE_KIND_COMPOSITE) {
+          throw new InvalidCatalogException(
+              indexPath,
+              "index '" + index.getName() + "' is CLUSTERED with no covering set, which covers every"
+                  + " column and so the composite column '" + column.getName() + "'; a clustered"
+                  + " copy never carries a composite column. Name the covering set, leaving it out");
+        }
+      }
+    }
     if (index.getCoveringCount() == 0) {
       return;
     }
@@ -833,6 +861,13 @@ public final class CatalogValidator {
     for (int c = 0; c < index.getCoveringCount(); c++) {
       int column = index.getCovering(c);
       requireColumn(column, columns, indexPath + ".covering[" + c + "]");
+      if (table.getColumns(column).getType().getKind() == TypeKind.TYPE_KIND_COMPOSITE) {
+        throw new InvalidCatalogException(
+            indexPath + ".covering[" + c + "]",
+            "the covering set of index '" + index.getName() + "' names the composite column '"
+                + table.getColumns(column).getName() + "'; a clustered copy never carries a composite"
+                + " column");
+      }
       if (!seen.add(column)) {
         throw new InvalidCatalogException(
             indexPath + ".covering[" + c + "]",
@@ -865,6 +900,20 @@ public final class CatalogValidator {
                 + "'). A range seek binary-searches the key in the copy, so the key columns are"
                 + " always covered.");
       }
+    }
+  }
+
+  /**
+   * D302: a composite column has no ordering or equality, so no key — a unique key, a collation,
+   * an index — is over one. Mirrors {@code Chalk.Catalog.CatalogValidator.RequireComparable}.
+   */
+  private static void refuseCompositeKey(Table table, int column, String path, String what) {
+    if (table.getColumns(column).getType().getKind() == TypeKind.TYPE_KIND_COMPOSITE) {
+      throw new InvalidCatalogException(
+          path,
+          "column '" + table.getColumns(column).getName() + "' is a COMPOSITE and cannot be part of "
+              + what + "; a composite value has no ordering or equality. Declare the field to key on"
+              + " as a column of its own");
     }
   }
 

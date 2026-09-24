@@ -87,6 +87,19 @@ internal static class PocoMembers
             return member.Member;
         }
 
+        // D302: a field of a composite member is reached in SQL and is not a column of its own, so
+        // a declaration naming one is refused as naming it, not as a lambda this cannot read.
+        if (body is MemberExpression { Expression: MemberExpression { Expression: ParameterExpression } outer } field
+            && outer.Member is PropertyInfo or FieldInfo
+            && CompositeInference.IsCandidate(outer.Type))
+        {
+            throw new CatalogValidationException(
+                $"table '{table}'",
+                $"{what} names '{field.Member.Name}' of '{outer.Member.Name}', which is a composite "
+                + "column; a field of a composite column is not a column of its own, and nothing is "
+                + "keyed, indexed or ordered on one. Declare the field as a member of its own.");
+        }
+
         throw new CatalogValidationException(
             $"table '{table}'",
             $"{what} must name a property or field of {lambda.Parameters[0].Type.Name} directly, "

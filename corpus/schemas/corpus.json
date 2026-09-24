@@ -2257,6 +2257,151 @@
             }
           ],
           "rowCountKind": "ROW_COUNT_KIND_EXACT"
+        },
+        {
+          "name": "quotes",
+          "columns": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "240",
+                "min": {
+                  "i64Value": "0"
+                },
+                "max": {
+                  "i64Value": "239"
+                }
+              }
+            },
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "5",
+                "min": {
+                  "stringValue": "ADAUSDT"
+                },
+                "max": {
+                  "stringValue": "XRPUSDT"
+                }
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "statistics": {
+                "level": "STATISTICS_LEVEL_BASIC",
+                "distinctCount": "-1",
+                "min": {
+                  "timestampValue": "1767225600000000000"
+                },
+                "max": {
+                  "timestampValue": "1767229185000000000"
+                }
+              }
+            },
+            {
+              "name": "bid",
+              "type": {
+                "kind": "TYPE_KIND_COMPOSITE",
+                "fields": [
+                  {
+                    "name": "Price",
+                    "type": {
+                      "kind": "TYPE_KIND_FP64"
+                    }
+                  },
+                  {
+                    "name": "Size",
+                    "type": {
+                      "kind": "TYPE_KIND_I64"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "ask",
+              "type": {
+                "kind": "TYPE_KIND_COMPOSITE",
+                "nullable": true,
+                "fields": [
+                  {
+                    "name": "Price",
+                    "type": {
+                      "kind": "TYPE_KIND_FP64"
+                    }
+                  },
+                  {
+                    "name": "Size",
+                    "type": {
+                      "kind": "TYPE_KIND_I64"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "venue",
+              "type": {
+                "kind": "TYPE_KIND_COMPOSITE",
+                "nullable": true,
+                "fields": [
+                  {
+                    "name": "Name",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING"
+                    }
+                  },
+                  {
+                    "name": "Country",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING",
+                      "nullable": true
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "rowCount": "240",
+          "uniqueKeys": [
+            {
+              "columns": [
+                0
+              ]
+            }
+          ],
+          "collations": [
+            {
+              "keys": [
+                {
+                  "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                }
+              ]
+            }
+          ],
+          "indexes": [
+            {
+              "name": "ix_quotes_symbol",
+              "kind": "INDEX_KIND_ORDERED",
+              "columns": [
+                1
+              ],
+              "reversal": "INDEX_REVERSAL_ANY"
+            }
+          ],
+          "rowCountKind": "ROW_COUNT_KIND_EXACT"
         }
       ],
       "dialectProfile": {},

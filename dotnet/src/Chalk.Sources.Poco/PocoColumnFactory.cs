@@ -75,6 +75,7 @@ internal static class PocoColumnFactory
             PocoStorageKind.Uuid =>
                 new PocoUuidColumn<T>(name, plan.Type, binding, Loops<Guid>()),
             PocoStorageKind.List => CreateList<T>(name, plan, binding, sourceId, table),
+            PocoStorageKind.Composite => CreateComposite<T>(name, plan, binding, sourceId, table),
             _ => throw new UnsupportedFeatureException(
                 $"POCO storage {plan.Storage}", "There is no encoder for it."),
         };
@@ -122,6 +123,65 @@ internal static class PocoColumnFactory
             PocoChunkCompiler.Compile<TRow, IReadOnlyList<TElement>>(
                 binding, /* nullable= */ true, sourceId, table, name),
             elements);
+    }
+
+    /// <summary>
+    /// A COMPOSITE column, and one column per field over the staged records (D302). Each field column
+    /// is created through this same method over a binding that reads the property off the record, so
+    /// a DECIMAL field encodes exactly as a DECIMAL column does.
+    /// </summary>
+    private static PocoColumn<T> CreateComposite<T>(
+        string name, PocoColumnPlan plan, PocoValueBinding binding, string sourceId, string table)
+    {
+        var record = plan.RecordClrType
+            ?? throw new UnsupportedFeatureException(
+                $"POCO composite column '{name}'", "The plan carries no record CLR type.");
+
+        return (PocoColumn<T>)
+            typeof(PocoColumnFactory)
+                .GetMethod(nameof(CreateCompositeOf), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                .MakeGenericMethod(typeof(T), record)
+                .Invoke(null, [name, plan, binding, sourceId, table])!;
+    }
+
+    private static PocoColumn<TRow> CreateCompositeOf<TRow, TRecord>(
+        string name, PocoColumnPlan plan, PocoValueBinding binding, string sourceId, string table)
+    {
+        var fields = new PocoColumn<TRecord>[plan.Fields.Count];
+        for (var f = 0; f < fields.Length; f++)
+        {
+            var (property, fieldPlan) = plan.Fields[f];
+            var record = System.Linq.Expressions.Expression.Parameter(typeof(TRecord), "record");
+
+            // A NULL composite's slot holds default(TRecord). For a record class that is null, and the
+            // field reads as its type's default: nothing reads it, because the composite is NULL, and
+            // a non-nullable field column holds a value in every row whatever its parent says.
+            System.Linq.Expressions.Expression value = System.Linq.Expressions.Expression.Property(record, property);
+            if (!typeof(TRecord).IsValueType)
+            {
+                value = System.Linq.Expressions.Expression.Condition(
+                    System.Linq.Expressions.Expression.ReferenceEqual(
+                        record, System.Linq.Expressions.Expression.Constant(null, typeof(TRecord))),
+                    System.Linq.Expressions.Expression.Default(value.Type),
+                    value);
+            }
+
+            var fieldBinding = new PocoValueBinding
+            {
+                Row = record,
+                Value = value,
+                CanBeNull = fieldPlan.Type.Nullable,
+                ToStorage = fieldPlan.ToStorage,
+            };
+            fields[f] = Create<TRecord>($"{name}.{property.Name}", fieldPlan, fieldBinding, sourceId, table);
+        }
+
+        return new PocoCompositeColumn<TRow, TRecord>(
+            name,
+            plan.Type,
+            binding,
+            PocoChunkCompiler.Compile<TRow, TRecord>(binding, plan.Type.Nullable, sourceId, table, name),
+            fields);
     }
 
     private static PocoArrayFactory Time64Factory(Time64Type type) =>

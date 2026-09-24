@@ -37,7 +37,8 @@ public sealed class CorpusFixture
         IReadOnlyList<Supplier> suppliers,
         IReadOnlyList<Sale> sales,
         IReadOnlyList<SortedRow> sortedRows,
-        IReadOnlyList<SearchRow> searchRows)
+        IReadOnlyList<SearchRow> searchRows,
+        IReadOnlyList<Quote> quotes)
     {
         Source = source;
         Bars = bars;
@@ -55,6 +56,7 @@ public sealed class CorpusFixture
         Sales = sales;
         SortedRows = sortedRows;
         SearchRows = searchRows;
+        Quotes = quotes;
         Catalog = new CatalogContext
         {
             ContextId = ContextId,
@@ -91,6 +93,7 @@ public sealed class CorpusFixture
         var sales = Fixtures.Sales();
         var sortedRows = Fixtures.SortedRows();
         var searchRows = Fixtures.SearchRows();
+        var quotes = Fixtures.Quotes(seed);
         var searchSet = searchRows.ToIndexedSet()
             .WithPrefixIndex(SearchName, indexName: SearchAccessor)
             .Build();
@@ -248,14 +251,25 @@ public sealed class CorpusFixture
             .AddTable("terms", searchRows, t => t
                 .Index(SearchIndex, _ => new HostAkadePrefixIndex<SearchRow>(
                     SearchIndex, searchSet, SearchName, SearchAccessor)))
+
+            // D302: the composite columns. `bid`, `ask` and `venue` are members whose types are
+            // records, so each is a COMPOSITE of the record's properties; the table is keyed and
+            // ordered by `id`, and indexed by `symbol`, which is what a lookup gathers them through.
+            .AddTable("quotes", quotes, t => t
+                .OrderedBy(q => q.Id)
+                .UniqueKey(q => q.Id)
+                .Index(q => q.Symbol))
             .Build();
 
         return new CorpusFixture(
             source, bars, barsSmall, symbols, sparseTrades, lineItems, funding, events, customers,
-            orders, nations, regions, suppliers, sales, sortedRows, searchRows);
+            orders, nations, regions, suppliers, sales, sortedRows, searchRows, quotes);
     }
 
     public PocoSource Source { get; }
+
+    /// <summary>The composite-column table's rows (D302).</summary>
+    public IReadOnlyList<Quote> Quotes { get; }
 
     public CatalogContext Catalog { get; }
 

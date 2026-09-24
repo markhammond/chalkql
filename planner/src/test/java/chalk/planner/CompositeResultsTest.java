@@ -752,8 +752,9 @@ final class CompositeResultsTest {
                             .build())))
         .isInstanceOf(InvalidCatalogException.class)
         .hasMessageContaining("a LIST's element is a COMPOSITE");
-    // And no table stores one.
-    CatalogContext column =
+    // A table stores one on an in-process source only (D302): the corpus's LOCAL schema takes one,
+    // and a REMOTE schema declaring one is refused, naming the table and the column.
+    CatalogContext local =
         TestCatalogs.declared().toBuilder()
             .setSchemas(
                 0,
@@ -763,9 +764,26 @@ final class CompositeResultsTest {
                         TestCatalogs.declared().getSchemas(0).getTables(0).toBuilder()
                             .addColumns(TestCatalogs.column("m", MOVE))))
             .build();
-    assertThatThrownBy(() -> RegisteredCatalog.of(column))
+    assertThat(RegisteredCatalog.of(local)).isNotNull();
+
+    CatalogContext withRemote =
+        TestCatalogs.withRemote(
+            "duck", TestCatalogs.fullSqlCapabilities().build(), TestCatalogs.duckDbProfile());
+    CatalogContext remote =
+        withRemote.toBuilder()
+            .setSchemas(
+                1,
+                withRemote.getSchemas(1).toBuilder()
+                    .setTables(
+                        0,
+                        withRemote.getSchemas(1).getTables(0).toBuilder()
+                            .addColumns(TestCatalogs.column("m", MOVE))))
+            .build();
+    assertThatThrownBy(() -> RegisteredCatalog.of(remote))
         .isInstanceOf(InvalidCatalogException.class)
-        .hasMessageContaining("a COMPOSITE cannot be a table column");
+        .hasMessageContaining(
+            "column 'm' of table 'lineitem' is a COMPOSITE, and schema 'duck' is not an in-process"
+                + " source; a composite column is read only from an in-process (LOCAL) source");
   }
 
   private static CatalogContext withFunction(chalk.ir.v1.FunctionDescriptor function) {

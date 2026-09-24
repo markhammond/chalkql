@@ -85,6 +85,17 @@ public final class TypeMapper {
   }
 
   /**
+   * {@code type} made nullable. A record — a composite value — keeps its fields as declared (D302),
+   * where Calcite's {@code createTypeWithNullability} would make every one of them nullable too, and
+   * so make it a different composite type than the column or the result it stands for.
+   */
+  public static RelDataType nullable(RelDataTypeFactory typeFactory, RelDataType type) {
+    return type.isStruct()
+        ? typeFactory.enforceTypeWithNullability(type, true)
+        : typeFactory.createTypeWithNullability(type, true);
+  }
+
+  /**
    * A COMPOSITE's Calcite record type (D291), with its fields in declared order and each field's own
    * nullability. The record's nullability is the caller's to set: {@code createTypeWithNullability}
    * would make every field nullable along with it, which is not what a nullable composite of non-nullable

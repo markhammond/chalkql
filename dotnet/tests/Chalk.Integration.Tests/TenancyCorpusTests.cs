@@ -393,8 +393,9 @@ public sealed partial class TenancyCorpusTests(SharedSidecar sidecar)
     {
         // The oracle's tables carry no entitlement, so nothing here is rewritten and the context is
         // never bound: the statement is an ordinary statement over rows somebody else disclosed.
+        var adversarial = ReferenceEquals(fixture, TenancyFixture.Subversion);
         var disclosed = TenancyOracle.Disclose(
-            context, subversionFunctions: ReferenceEquals(fixture, TenancyFixture.Subversion));
+            context, subversionFunctions: adversarial, compositeTable: adversarial);
         await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
         {
             ContextId = TenancyFixture.ContextId,

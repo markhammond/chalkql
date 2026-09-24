@@ -1,0 +1,370 @@
+{
+  "irVersion": 1,
+  "planDigest": "12299737971427316322",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "id",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      },
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "bid_price",
+        "type": {
+          "kind": "TYPE_KIND_FP64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        },
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "bid_price",
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 120,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "project": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "id",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            },
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "bid",
+              "type": {
+                "kind": "TYPE_KIND_COMPOSITE",
+                "fields": [
+                  {
+                    "name": "Price",
+                    "type": {
+                      "kind": "TYPE_KIND_FP64"
+                    }
+                  },
+                  {
+                    "name": "Size",
+                    "type": {
+                      "kind": "TYPE_KIND_I64"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "name": "ask",
+              "type": {
+                "kind": "TYPE_KIND_COMPOSITE",
+                "nullable": true,
+                "fields": [
+                  {
+                    "name": "Price",
+                    "type": {
+                      "kind": "TYPE_KIND_FP64"
+                    }
+                  },
+                  {
+                    "name": "Size",
+                    "type": {
+                      "kind": "TYPE_KIND_I64"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "estRowCount": 120,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_I64"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "filter": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "id",
+                  "type": {
+                    "kind": "TYPE_KIND_I64"
+                  }
+                },
+                {
+                  "name": "symbol",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                },
+                {
+                  "name": "bid",
+                  "type": {
+                    "kind": "TYPE_KIND_COMPOSITE",
+                    "fields": [
+                      {
+                        "name": "Price",
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        }
+                      },
+                      {
+                        "name": "Size",
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "ask",
+                  "type": {
+                    "kind": "TYPE_KIND_COMPOSITE",
+                    "nullable": true,
+                    "fields": [
+                      {
+                        "name": "Price",
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        }
+                      },
+                      {
+                        "name": "Size",
+                        "type": {
+                          "kind": "TYPE_KIND_I64"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "estRowCount": 240,
+            "collations": [
+              {
+                "fields": [
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_I64"
+                      },
+                      "fieldRef": {}
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  }
+                ]
+              }
+            ],
+            "read": {
+              "table": {
+                "sourceId": "mem",
+                "schema": "main",
+                "table": "quotes"
+              },
+              "projection": [
+                0,
+                1,
+                3,
+                4
+              ]
+            }
+          },
+          "condition": {
+            "type": {
+              "kind": "TYPE_KIND_BOOL"
+            },
+            "call": {
+              "function": "FUNCTION_ID_AND",
+              "args": [
+                {
+                  "type": {
+                    "kind": "TYPE_KIND_BOOL"
+                  },
+                  "call": {
+                    "function": "FUNCTION_ID_GT",
+                    "args": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        },
+                        "fieldAccess": {
+                          "input": {
+                            "type": {
+                              "kind": "TYPE_KIND_COMPOSITE",
+                              "fields": [
+                                {
+                                  "name": "Price",
+                                  "type": {
+                                    "kind": "TYPE_KIND_FP64"
+                                  }
+                                },
+                                {
+                                  "name": "Size",
+                                  "type": {
+                                    "kind": "TYPE_KIND_I64"
+                                  }
+                                }
+                              ]
+                            },
+                            "fieldRef": {
+                              "index": 2
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        },
+                        "literal": {
+                          "fp64Value": 400
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": {
+                    "kind": "TYPE_KIND_BOOL"
+                  },
+                  "call": {
+                    "function": "FUNCTION_ID_IS_NOT_NULL",
+                    "args": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_COMPOSITE",
+                          "nullable": true,
+                          "fields": [
+                            {
+                              "name": "Price",
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              }
+                            },
+                            {
+                              "name": "Size",
+                              "type": {
+                                "kind": "TYPE_KIND_I64"
+                              }
+                            }
+                          ]
+                        },
+                        "fieldRef": {
+                          "index": 3
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "exprs": [
+        {
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          },
+          "fieldRef": {}
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          },
+          "fieldRef": {
+            "index": 1
+          }
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          },
+          "fieldAccess": {
+            "input": {
+              "type": {
+                "kind": "TYPE_KIND_COMPOSITE",
+                "fields": [
+                  {
+                    "name": "Price",
+                    "type": {
+                      "kind": "TYPE_KIND_FP64"
+                    }
+                  },
+                  {
+                    "name": "Size",
+                    "type": {
+                      "kind": "TYPE_KIND_I64"
+                    }
+                  }
+                ]
+              },
+              "fieldRef": {
+                "index": 2
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

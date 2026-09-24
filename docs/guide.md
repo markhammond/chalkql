@@ -1218,9 +1218,96 @@ The limits:
 - `CASE` and `COALESCE` choose between composite values of one type — the same
   fields, named and typed alike — and a `NULL`. A choice between composites of
   different types, or between a composite and a scalar, is refused.
-- A composite value only ever comes out of a client-bodied function. It is never
-  a parameter or a table column, a SQL-bodied or native function cannot return
-  one, and SQL cannot build one: `ROW(…)` is refused.
+- A composite value comes out of a client-bodied function, or out of an
+  in-process table's column (below). It is never a parameter, a SQL-bodied or
+  native function cannot return one, and SQL cannot build one: `ROW(…)` is
+  refused.
+
+### Composite columns
+
+A member of a POCO table whose type is a record is a composite column, typed
+exactly as a function's record result is: its fields are the record's public
+properties, in order and under the record's own names, each one of the Tier 1
+types. A record struct member is never NULL; a `Nullable<T>` member or a record
+class member may be.
+
+```csharp
+public readonly record struct Side(double Price, long Size);
+public sealed record Venue(Utf8String Name, string? Country);
+public sealed record Quote(long Id, Utf8String Symbol, Side Bid, Side? Ask, Venue? Venue);
+
+var source = new PocoSourceBuilder("mem")
+    .NamingPolicy(PocoNamingPolicy.SnakeCase)
+    .AddTable("quotes", quotes, t => t
+        .OrderedBy(q => q.Id)
+        .UniqueKey(q => q.Id)
+        .Index(q => q.Symbol))
+    .Build();
+```
+
+`bid` is `COMPOSITE(Price FP64, Size I64)`, `ask` the same made nullable, and
+`venue` a nullable `COMPOSITE(Name STRING, Country STRING?)`. The naming policy
+names the columns; the fields keep the record's names, and are matched ignoring
+case like any identifier. A composite column is read as a function's composite
+is: whole, by field, by `t.c.*`, and by `SELECT *`, which carries it whole.
+
+```sql
+SELECT q.id, q.ask.price AS ask, q.venue.country AS country
+FROM quotes q
+WHERE q.bid.price > 400 AND q.ask IS NOT NULL
+ORDER BY q.ask.price DESC
+```
+
+A field filters, orders and groups. The column itself is carried whole through
+a sort, a join or a lookup on another column, and reaches the host as a struct
+column, which `ReadComposites<T>` reads back as the record. Each field is
+staged as a column of its own type would be, so scanning a composite column
+allocates nothing per row beyond what its fields as columns would.
+
+The limits, beyond those of every composite value above:
+
+- A composite column is read only from an in-process source. A `REMOTE`
+  source that declares one is refused at registration, naming the table and the
+  column; declare its fields as columns of their own.
+- Nothing is keyed, indexed or ordered on a composite column or on a field of
+  one. `UniqueKey`, `OrderedBy`, `ForeignKey`, `Index` or a clustered index's
+  `Covering` naming a composite member, or a field of one, is refused at
+  `Build()`, naming the member. A clustered index on a table with a composite
+  column names its covering set, leaving the column out.
+- A composite column carries no statistics, and an override for one is refused.
+- `AkadeSource` describes no index over a composite member: an Akade index
+  keyed by the record is not an access path, and the column is read through the
+  scan like any unindexed member.
+
+Under entitlements a composite column is a column, and a rule may name it: the
+column as a whole, never a field. It is disclosed whole or withheld whole —
+`Full`, or `None`, whose placeholder is the NULL composite, so every field of a
+withheld value reads NULL. `Masked`, `AggregateOnly` and `Test` are refused
+when the engine is created, naming the column and the verdict: no expression
+builds a composite value to mask it with, no built-in aggregate takes one, and
+a composite value has no equality to test. So are a mask, a placeholder, an
+allow-list and the statistical opt-in on one. A rule's condition may read a
+field of it:
+
+```csharp
+new ColumnEntitlementDescriptor
+{
+    Column = 2,   // contact, a ContactCard
+    Rules =
+    [
+        new DisclosureRule { When = "org_id IN (@ctx.manager_orgs)", Then = Disclosure.Full },
+        new DisclosureRule
+        {
+            When = "org_id IN (@ctx.agent_orgs) AND (contact).tier >= 2",
+            Then = Disclosure.Full,
+        },
+    ],
+    Otherwise = Disclosure.None,
+}
+```
+
+The report gives the column its own disclosure, and a field read from it the
+same one.
 
 
 ## Entitlements — row and column disclosure

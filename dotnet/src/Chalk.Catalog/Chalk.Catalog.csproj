@@ -16,6 +16,8 @@
     <InternalsVisibleTo Include="Chalk.CorpusTool" />
     <!-- The engine's binding check reads a record as a composite value exactly as the declaration did (D294). -->
     <InternalsVisibleTo Include="Chalk.Execution" />
+    <!-- A composite column reads its record exactly as a function's result is read (D302). -->
+    <InternalsVisibleTo Include="Chalk.Sources.Poco" />
     <InternalsVisibleTo Include="Chalk.TestKit" />
   </ItemGroup>
 

@@ -81,6 +81,12 @@ public static class TenancyOracle
     /// <summary>An item, likewise: the endpoint is where the key is, so the rule is one membership.</summary>
     public sealed record Item(int Id, int VendorId, string Name);
 
+    /// <summary>
+    /// A profile, as this principal may see it (D302): the contact card whole, or the NULL composite
+    /// where the principal's rules withhold it.
+    /// </summary>
+    public sealed record Profile(int Id, int OrgId, TenancyFixture.ContactCard? Contact);
+
     /// <summary>An order line, as this principal may see it — and what it may read of the price.</summary>
     public sealed record OrderItem(
         int Id, int OrderId, int ItemId, int Quantity, long? UnitPrice);
@@ -95,6 +101,10 @@ public static class TenancyOracle
     /// D251 class 4's two functions, for the family whose statements reach an entitled table
     /// through one. Off by default, so every other suite's oracle catalog is the one it was.
     /// </param>
+    /// <param name="compositeTable">
+    /// The adversarial family's composite-column table, <c>profiles</c> (D302). Off by default, so
+    /// every other suite's oracle catalog is the one it was.
+    /// </param>
     /// <param name="split">
     /// F84: leave <c>vendors</c> and <c>items</c> out, because design 38 §8's two-source layout puts
     /// them in a source of their own and <see cref="DiscloseMarketplace"/> is that source. The
@@ -105,7 +115,8 @@ public static class TenancyOracle
         RequestContext context,
         bool creatorSeesFull = true,
         bool subversionFunctions = false,
-        bool split = false)
+        bool split = false,
+        bool compositeTable = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         var grants = Read(context);
@@ -132,6 +143,12 @@ public static class TenancyOracle
             builder
                 .AddTable("vendors", Vendors(grants), t => t.OrderedBy(v => v.Id).UniqueKey(v => v.Id))
                 .AddTable("items", Items(grants), t => t.OrderedBy(i => i.Id).UniqueKey(i => i.Id));
+        }
+
+        if (compositeTable)
+        {
+            builder.AddTable(
+                "profiles", Profiles(grants), t => t.OrderedBy(p => p.Id).UniqueKey(p => p.Id));
         }
 
         return (subversionFunctions ? TenancyFixture.Functions(builder) : builder).Build();
@@ -204,6 +221,11 @@ public static class TenancyOracle
         foreach (var invite in Invites(grants))
         {
             Add(strings, invite.Target);
+        }
+
+        foreach (var profile in Profiles(grants))
+        {
+            Add(strings, profile.Contact?.Email, profile.Contact?.Phone);
         }
 
         // D265 clause (h)'s three tables carry no canary of their own — nothing on them is masked
@@ -295,6 +317,34 @@ public static class TenancyOracle
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// A profile's row is visible where the principal manages, acts in or audits its organisation, or
+    /// holds the global grant (D302). Its card is disclosed whole to a manager and the global grant,
+    /// to an agent only where the card's own tier is 2 or more, and to nobody else: the NULL composite.
+    /// </summary>
+    private static IReadOnlyList<Profile> Profiles(Grants grants)
+    {
+        var profiles = new List<Profile>();
+        foreach (var profile in TenancyFixture.Profiles)
+        {
+            var org = profile.OrgId;
+            if (!grants.ManagerOrgs.Contains(org)
+                && !grants.AgentOrgs.Contains(org)
+                && !grants.AuditorOrgs.Contains(org)
+                && !grants.Global)
+            {
+                continue;
+            }
+
+            var disclosed = grants.ManagerOrgs.Contains(org)
+                || grants.Global
+                || (grants.AgentOrgs.Contains(org) && profile.Contact is { Tier: >= 2 });
+            profiles.Add(new Profile(profile.Id, org, disclosed ? profile.Contact : null));
+        }
+
+        return profiles;
     }
 
     /// <summary>

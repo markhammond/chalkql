@@ -93,6 +93,7 @@ public final class TestCatalogs {
                 .addTables(sales())
                 .addTables(sorted())
                 .addTables(terms())
+                .addTables(quotes())
                 .addAllFunctions(functions()))
         // The client sets the message and leaves every field at its default, which is what "this
         // catalog declares no cross-source join policy" is on the wire (D104). Stated here so the
@@ -705,6 +706,39 @@ public final class TestCatalogs {
                 .setName("ix_terms_name")
                 .setKind(chalk.ir.v1.IndexKind.INDEX_KIND_PREFIX)
                 .addColumns(0))
+        .setRowCountKind(chalk.ir.v1.RowCountKind.ROW_COUNT_KIND_EXACT)
+        .build();
+  }
+
+  /**
+   * The composite-column table (D302): {@code bid}, {@code ask} and {@code venue} are members whose
+   * types are records, so each is a COMPOSITE of the record's properties, named as declared. Keyed
+   * and ordered by {@code id}, indexed by {@code symbol}, and nothing over a composite column.
+   */
+  public static Table quotes() {
+    Type side =
+        composite(
+            false,
+            field("Price", type(TypeKind.TYPE_KIND_FP64)),
+            field("Size", type(TypeKind.TYPE_KIND_I64)));
+    return Table.newBuilder()
+        .setName("quotes")
+        .setRowCount(240)
+        .addColumns(column("id", type(TypeKind.TYPE_KIND_I64)))
+        .addColumns(column("symbol", type(TypeKind.TYPE_KIND_STRING)))
+        .addColumns(column("ts", precise(TypeKind.TYPE_KIND_TIMESTAMP, 9)))
+        .addColumns(column("bid", side))
+        .addColumns(column("ask", side.toBuilder().setNullable(true).build()))
+        .addColumns(
+            column(
+                "venue",
+                composite(
+                    true,
+                    field("Name", type(TypeKind.TYPE_KIND_STRING)),
+                    field("Country", nullable(TypeKind.TYPE_KIND_STRING)))))
+        .addUniqueKeys(UniqueKey.newBuilder().addColumns(0))
+        .addCollations(TableCollation.newBuilder().addKeys(ascending(0)))
+        .addIndexes(index("ix_quotes_symbol", false, 1))
         .setRowCountKind(chalk.ir.v1.RowCountKind.ROW_COUNT_KIND_EXACT)
         .build();
   }

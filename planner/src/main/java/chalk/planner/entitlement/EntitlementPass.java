@@ -2816,10 +2816,41 @@ public final class EntitlementPass {
     // retyper above then carries up, as it always did (V62). Keeping the disclosed type is what
     // stops a mask's incidental precision — SUBSTRING(x, 1, 1) is VARCHAR(1) — from changing the
     // statement's row shape (D161: every principal gets the same one).
+    if (disclosedType.isStruct()) {
+      return composite(simplified, disclosedType);
+    }
     RelDataType target =
         typeFactory.createTypeWithNullability(
             disclosedType, disclosedType.isNullable() || simplified.getType().isNullable());
     return rexBuilder.makeCast(target, simplified, /* matchNullability= */ true, /* safe= */ false);
+  }
+
+  /**
+   * D302: a composite column's sanitiser, which is never cast — no cast of a composite exists — and
+   * is typed explicitly as the column's composite made nullable, fields as declared. Its rules can
+   * only disclose it or withhold it (registration refuses every other verdict), so what the fold
+   * leaves is the column, its NULL composite, or a {@code CASE} choosing between the two: a choice
+   * between composites of one type (D295). Calcite's own {@code CASE} inference goes through
+   * {@code createTypeWithNullability}, which would make every field nullable and so type the choice
+   * as another composite.
+   */
+  private RexNode composite(RexNode simplified, RelDataType disclosedType) {
+    RelDataType target = chalk.planner.types.TypeMapper.nullable(typeFactory, disclosedType);
+    if (simplified instanceof org.apache.calcite.rex.RexLiteral literal && literal.isNull()) {
+      return rexBuilder.makeNullLiteral(target);
+    }
+    if (simplified instanceof org.apache.calcite.rex.RexCall call
+        && call.getKind() == org.apache.calcite.sql.SqlKind.CASE) {
+      return rexBuilder.makeCall(target, SqlStdOperatorTable.CASE, call.getOperands());
+    }
+    if (org.apache.calcite.sql.type.SqlTypeUtil.equalSansNullability(
+        typeFactory, simplified.getType(), target)) {
+      return simplified;
+    }
+    throw new PolicyException(
+        "a composite column's disclosure folded to " + simplified + ", which is neither the column,"
+            + " its NULL composite nor a choice between the two. This is a bug in the entitlement"
+            + " rewrite: please report the statement and the catalog.");
   }
 
   /** {@code leaf(name)} of §3.2. */
@@ -2878,7 +2909,8 @@ public final class EntitlementPass {
         && hasEmptyValue(columnType)) {
       return rexBuilder.makeZeroLiteral(columnType);
     }
-    return rexBuilder.makeNullLiteral(typeFactory.createTypeWithNullability(columnType, true));
+    // D302: a composite column's placeholder is the NULL composite of its own type, fields as declared.
+    return rexBuilder.makeNullLiteral(chalk.planner.types.TypeMapper.nullable(typeFactory, columnType));
   }
 
   /**

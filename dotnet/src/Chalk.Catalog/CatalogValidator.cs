@@ -246,7 +246,7 @@ public static class CatalogValidator
                     tablePath, $"table name '{table.Name}' is used twice in schema '{schema.Name}'");
             }
 
-            Validate(table, tablePath, catalog);
+            Validate(table, tablePath, catalog, schema);
             ValidateEntitlementAgainstSource(schema, table, tablePath);
         }
 
@@ -1340,7 +1340,7 @@ public static class CatalogValidator
         }
     }
 
-    private static void Validate(TableDescriptor table, string path, CatalogContext catalog)
+    private static void Validate(TableDescriptor table, string path, CatalogContext catalog, SchemaDescriptor schema)
     {
         if (table.Columns.Count == 0)
         {
@@ -1372,7 +1372,18 @@ public static class CatalogValidator
             }
 
             ValidateType(column.Type, $"{path}.columns[{c}] ({column.Name})");
-            RefuseCompositeColumn(column.Type, $"{path}.columns[{c}] ({column.Name})", "a table column");
+
+            // D302: a composite column is a member of an in-process source's own records. A REMOTE
+            // source would need its provider's reader for a STRUCT or a ROW, which no source has.
+            if (column.Type.Kind == TypeKind.Composite && schema.Kind != SourceKind.Local)
+            {
+                throw new CatalogValidationException(
+                    $"{path}.columns[{c}] ({column.Name})",
+                    $"column '{column.Name}' of table '{table.Name}' is a COMPOSITE, and schema "
+                    + $"'{schema.Name}' is a {schema.Kind.ToString().ToUpperInvariant()} source; a composite "
+                    + "column is read only from an in-process (LOCAL) source. Declare its fields as "
+                    + "columns of their own");
+            }
         }
 
         for (var k = 0; k < table.UniqueKeys.Count; k++)
@@ -1491,8 +1502,19 @@ public static class CatalogValidator
 
         for (var c = 0; c < table.Columns.Count; c++)
         {
-            ValidateStatistics(
-                table.Columns[c].Statistics, $"{path}.columns[{c}] ({table.Columns[c].Name})");
+            var statistics = table.Columns[c].Statistics;
+            if (table.Columns[c].Type.Kind == TypeKind.Composite && !ReferenceEquals(statistics, ColumnStatistics.Unknown)
+                && (statistics.Level != StatisticsLevel.Unknown || statistics.DistinctCount >= 0
+                    || statistics.NullCount >= 0 || statistics.Min is not null || statistics.Max is not null
+                    || statistics.Histogram.Count > 0 || statistics.FrequentValues.Count > 0))
+            {
+                throw new CatalogValidationException(
+                    $"{path}.columns[{c}] ({table.Columns[c].Name})",
+                    $"column '{table.Columns[c].Name}' is a COMPOSITE and declares statistics; a composite "
+                    + "column carries none, because none of its values compares with another");
+            }
+
+            ValidateStatistics(statistics, $"{path}.columns[{c}] ({table.Columns[c].Name})");
         }
 
         ValidateEntitlement(table, path, catalog);
@@ -1611,6 +1633,12 @@ public static class CatalogValidator
                 + "filter. Write the permissive case as a rule whose condition is the scope.");
         }
 
+        // D302, before any rule is read for what it needs: the verdict is what is wrong.
+        if (declared.Type.Kind == TypeKind.Composite)
+        {
+            RequireWholeOrNothing(column, declared, columnPath);
+        }
+
         var reachable = new HashSet<Disclosure>();
         for (var r = 0; r < column.Rules.Count; r++)
         {
@@ -1710,6 +1738,70 @@ public static class CatalogValidator
                 $"{columnPath}.statistical",
                 "statistical is set but neither Masked nor AggregateOnly is reachable, so there is "
                 + "no withheld value for it to relax. It is an opt-in under one of those two.");
+        }
+    }
+
+    /// <summary>
+    /// D302: a composite column is disclosed whole or withheld whole — <c>Full</c> or <c>None</c>, and
+    /// <c>None</c>'s placeholder is the NULL composite. <c>Masked</c> needs an expression of the
+    /// column's type, which nothing builds; <c>AggregateOnly</c> an aggregate that takes one, which no
+    /// built-in is; <c>Test</c> an equality, which a composite value has not. Each is refused naming
+    /// the column and the verdict, and so are a mask, a placeholder, an allow-list and the statistical
+    /// opt-in, which only mean something under those. A rule's condition may read a field of it.
+    /// </summary>
+    private static void RequireWholeOrNothing(
+        ColumnEntitlementDescriptor column, ColumnDescriptor declared, string columnPath)
+    {
+        static string Why(Disclosure verdict) => verdict switch
+        {
+            Disclosure.Masked => "no expression builds a composite value to mask it with",
+            Disclosure.AggregateOnly => "no built-in aggregate takes a composite value",
+            _ => "a composite value has no equality to test",
+        };
+
+        string Refusal(Disclosure verdict) =>
+            $"column '{declared.Name}' is a COMPOSITE and is disclosed {verdict}, but {Why(verdict)}. A "
+            + "composite column is disclosed Full or None, None's placeholder being the NULL composite; "
+            + "a rule's condition may read a field of it";
+
+        for (var r = 0; r < column.Rules.Count; r++)
+        {
+            var then = column.Rules[r].Then;
+            if (then is Disclosure.Masked or Disclosure.AggregateOnly or Disclosure.Test)
+            {
+                throw new CatalogValidationException($"{columnPath}.rules[{r}]", Refusal(then));
+            }
+
+            if (column.Rules[r].Placeholder.Length > 0)
+            {
+                throw new CatalogValidationException(
+                    $"{columnPath}.rules[{r}]",
+                    $"column '{declared.Name}' is a COMPOSITE and the rule declares a placeholder; a "
+                    + "composite column's placeholder is the NULL composite, and no expression builds another");
+            }
+        }
+
+        if (column.Otherwise is Disclosure.Masked or Disclosure.AggregateOnly or Disclosure.Test)
+        {
+            throw new CatalogValidationException($"{columnPath}.otherwise", Refusal(column.Otherwise));
+        }
+
+        if (column.Mask.Length > 0 || column.Placeholder.Length > 0)
+        {
+            throw new CatalogValidationException(
+                columnPath,
+                $"column '{declared.Name}' is a COMPOSITE and declares a "
+                + (column.Mask.Length > 0 ? "mask" : "placeholder")
+                + "; no expression builds a composite value, and its placeholder is the NULL composite");
+        }
+
+        if (column.AggregateOnlyFunctions.Count > 0 || column.Statistical)
+        {
+            throw new CatalogValidationException(
+                columnPath,
+                $"column '{declared.Name}' is a COMPOSITE and declares "
+                + (column.Statistical ? "the statistical opt-in" : "an aggregate allow-list")
+                + ", which only an AggregateOnly or Masked column has; a composite column is disclosed Full or None");
         }
     }
 
@@ -1881,6 +1973,23 @@ public static class CatalogValidator
     private static void ValidateCovering(
         TableDescriptor table, IndexDescriptor index, string indexPath, HashSet<int> keyColumns)
     {
+        // D302: a clustered index's copy never carries a composite column, so on a table that has one
+        // the covering set is named, and names none.
+        if (index.Kind == IndexKind.Clustered && index.Covering.Count == 0)
+        {
+            for (var c = 0; c < table.Columns.Count; c++)
+            {
+                if (table.Columns[c].Type.Kind == TypeKind.Composite)
+                {
+                    throw new CatalogValidationException(
+                        indexPath,
+                        $"index '{index.Name}' is CLUSTERED with no covering set, which covers every "
+                        + $"column and so the composite column '{table.Columns[c].Name}'; a clustered "
+                        + "copy never carries a composite column. Name the covering set, leaving it out");
+                }
+            }
+        }
+
         if (index.Covering.Count == 0)
         {
             return;
@@ -1901,6 +2010,14 @@ public static class CatalogValidator
         {
             var column = index.Covering[c];
             RequireColumn(table, column, $"{indexPath}.covering[{c}]");
+            if (table.Columns[column].Type.Kind == TypeKind.Composite)
+            {
+                throw new CatalogValidationException(
+                    $"{indexPath}.covering[{c}]",
+                    $"the covering set of index '{index.Name}' names the composite column "
+                    + $"'{table.Columns[column].Name}'; a clustered copy never carries a composite column");
+            }
+
             if (!seen.Add(column))
             {
                 throw new CatalogValidationException(
@@ -1948,6 +2065,16 @@ public static class CatalogValidator
     /// </summary>
     private static void RequireComparable(TableDescriptor table, int column, string path, string what)
     {
+        // D302: nor is a COMPOSITE — a key over one, or over a field of one, is a key nothing orders.
+        if (table.Columns[column].Type.Kind == TypeKind.Composite)
+        {
+            throw new CatalogValidationException(
+                path,
+                $"column '{table.Columns[column].Name}' is a COMPOSITE and cannot be part of {what}; a "
+                + "composite value has no ordering or equality. Declare the field to key on as a column "
+                + "of its own");
+        }
+
         if (table.Columns[column].Type.Kind == TypeKind.List)
         {
             throw new CatalogValidationException(

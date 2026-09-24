@@ -31,6 +31,12 @@ internal enum PocoStorageKind
 
     /// <summary>A list of one of the kinds above, one level deep (D58).</summary>
     List,
+
+    /// <summary>
+    /// A record of fields of the kinds above, one level deep (D302): the member read once per row,
+    /// each field written to a child column of its own.
+    /// </summary>
+    Composite,
 }
 
 /// <summary>What inference decided for one column: its logical type and how a row's value reaches storage.</summary>
@@ -52,6 +58,18 @@ internal sealed class PocoColumnPlan
 
     /// <summary>A LIST column's CLR element type — the <c>T</c> of <c>T[]</c>.</summary>
     public Type? ElementClrType { get; init; }
+
+    /// <summary>
+    /// A COMPOSITE column's record type — the member's CLR type, a <c>Nullable</c> unwrapped — and
+    /// null for every other kind (D302).
+    /// </summary>
+    public Type? RecordClrType { get; init; }
+
+    /// <summary>
+    /// A COMPOSITE column's fields, in field order: each the record's property and the plan its
+    /// child column is written by, and empty for every other kind.
+    /// </summary>
+    public IReadOnlyList<(PropertyInfo Property, PocoColumnPlan Plan)> Fields { get; init; } = [];
 }
 
 /// <summary>
@@ -84,6 +102,18 @@ internal static class PocoTypeMapping
         var type = inferred;
         if (requested is { } explicitType)
         {
+            // A composite column's fields are read off its record, as a function's result is; an
+            // override may say whether the composite itself is nullable, and nothing else.
+            if (inferred.Kind == TypeKind.Composite
+                && !explicitType.Equals(inferred with { Nullable = explicitType.Nullable }))
+            {
+                throw new CatalogValidationException(
+                    what,
+                    $"the declared type {explicitType} does not match {inferred}, which is what "
+                    + $"{Describe(clrType)} reads as. A composite column's fields are its record's "
+                    + "properties; a type override may change only whether the composite is nullable.");
+            }
+
             if (explicitType.Kind != inferred.Kind)
             {
                 throw new CatalogValidationException(
@@ -119,6 +149,36 @@ internal static class PocoTypeMapping
                         attribute,
                         what),
                 },
+            };
+        }
+
+        if (type.Kind == TypeKind.Composite)
+        {
+            // D302: the record is staged whole, and each field is a column over the staged records,
+            // planned by the same table as any member of its type — so a DATE field is written as a
+            // DATE column is.
+            var properties = CompositeInference.Properties(underlying);
+            var fields = new (PropertyInfo, PocoColumnPlan)[properties.Count];
+            for (var f = 0; f < fields.Length; f++)
+            {
+                var property = properties[f];
+                var fieldType = type.Fields[f].Type;
+                var fieldUnderlying = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+                fields[f] = (property, new PocoColumnPlan
+                {
+                    Type = fieldType,
+                    Storage = StorageOf(fieldType.Kind, fieldUnderlying),
+                    ToStorage = Conversion(fieldUnderlying, fieldType, attribute: null, $"{what} field '{property.Name}'"),
+                });
+            }
+
+            return new PocoColumnPlan
+            {
+                Type = type,
+                Storage = PocoStorageKind.Composite,
+                ToStorage = static value => value,
+                RecordClrType = underlying,
+                Fields = fields,
             };
         }
 
@@ -314,6 +374,16 @@ internal static class PocoTypeMapping
                     + "(docs/design/14-windows-ii.md §5).");
             }
 
+            // D302 keeps a composite one level deep and a list's elements scalars: a list of
+            // records is neither a LIST nor a composite column.
+            if (CompositeInference.IsCandidate(elementUnderlying))
+            {
+                throw new CatalogValidationException(
+                    what,
+                    $"{Describe(declared)} is a list of {elementUnderlying.Name} records; a LIST holds "
+                    + "scalars, and a composite column is never nested in another column.");
+            }
+
             var elementNullable = !element.IsValueType || Nullable.GetUnderlyingType(element) is not null;
             var elementType =
                 Infer(elementUnderlying, element, attribute, defaultDecimalScale, elementNullable, what);
@@ -321,6 +391,14 @@ internal static class PocoTypeMapping
             // A list member may itself be null (a null array, or a default ImmutableArray), whatever
             // the declaration said about the member's own nullability.
             return ChalkType.List(elementType, nullable: true);
+        }
+
+        // D302: a record — a class or a struct outside the table above and outside the platform's
+        // own types — is a composite column, its fields read off it exactly as a function's record
+        // result is (D294), and one of another type among them is refused by name.
+        if (CompositeInference.IsCandidate(underlying))
+        {
+            return CompositeInference.Infer(declared, nullable, what);
         }
 
         throw new CatalogValidationException(

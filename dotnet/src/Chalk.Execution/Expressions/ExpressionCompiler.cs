@@ -189,7 +189,10 @@ internal sealed class ExpressionCompiler
             Expr.KindOneofCase.FieldRef => type.Kind == TypeKind.Bool
                 ? new BooleanFieldRefExpr((int)expr.FieldRef.Index, type)
                 : new FieldRefExpr((int)expr.FieldRef.Index, type),
-            Expr.KindOneofCase.Literal => new LiteralExpr(Literals.ToScalar(expr)),
+            // D302: the one composite literal is the typed NULL, compiled as a column of NULL composites.
+            Expr.KindOneofCase.Literal => type.Kind == TypeKind.Composite
+                ? new CompositeNullExpr(type)
+                : new LiteralExpr(Literals.ToScalar(expr)),
             Expr.KindOneofCase.Param => new ParameterExpr(BoundSlots.Of(expr.Param, _boundSlots), type),
             Expr.KindOneofCase.Call => expr.Call.UserFunction.Length > 0
                 ? UserCall(expr, type)

@@ -1,0 +1,183 @@
+{
+  "irVersion": 1,
+  "planDigest": "7653465363029744794",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "id",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      },
+      {
+        "name": "bid",
+        "type": {
+          "kind": "TYPE_KIND_COMPOSITE",
+          "fields": [
+            {
+              "name": "Price",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              }
+            },
+            {
+              "name": "Size",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "ask",
+        "type": {
+          "kind": "TYPE_KIND_COMPOSITE",
+          "nullable": true,
+          "fields": [
+            {
+              "name": "Price",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              }
+            },
+            {
+              "name": "Size",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "venue",
+        "type": {
+          "kind": "TYPE_KIND_COMPOSITE",
+          "nullable": true,
+          "fields": [
+            {
+              "name": "Name",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "Country",
+              "type": {
+                "kind": "TYPE_KIND_STRING",
+                "nullable": true
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        },
+        {
+          "name": "bid",
+          "type": {
+            "kind": "TYPE_KIND_COMPOSITE",
+            "fields": [
+              {
+                "name": "Price",
+                "type": {
+                  "kind": "TYPE_KIND_FP64"
+                }
+              },
+              {
+                "name": "Size",
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "ask",
+          "type": {
+            "kind": "TYPE_KIND_COMPOSITE",
+            "nullable": true,
+            "fields": [
+              {
+                "name": "Price",
+                "type": {
+                  "kind": "TYPE_KIND_FP64"
+                }
+              },
+              {
+                "name": "Size",
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "venue",
+          "type": {
+            "kind": "TYPE_KIND_COMPOSITE",
+            "nullable": true,
+            "fields": [
+              {
+                "name": "Name",
+                "type": {
+                  "kind": "TYPE_KIND_STRING"
+                }
+              },
+              {
+                "name": "Country",
+                "type": {
+                  "kind": "TYPE_KIND_STRING",
+                  "nullable": true
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "estRowCount": 240,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "read": {
+      "table": {
+        "sourceId": "mem",
+        "schema": "main",
+        "table": "quotes"
+      },
+      "projection": [
+        0,
+        3,
+        4,
+        5
+      ]
+    }
+  }
+}

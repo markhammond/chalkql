@@ -90,6 +90,64 @@ internal sealed class FieldAccessExpr : VectorExprBase
 }
 
 /// <summary>
+/// The NULL composite (D302): the typed NULL literal of a composite type, which a withheld composite
+/// column's placeholder is and a CASE may choose (D295). A column of NULL composites rather than a
+/// broadcast constant, so everything above it — a field access, a choice, the result — reads it as it
+/// reads any composite: no composite is valid, nullable fields are NULL, and non-nullable fields hold
+/// their storage default, as the composite writer leaves a NULL composite's (D294). Written into this
+/// node's own scratch every batch, and nothing is allocated for it after the first.
+/// </summary>
+internal sealed class CompositeNullExpr : VectorExprBase
+{
+    public CompositeNullExpr(ChalkType type)
+        : base(type)
+    {
+    }
+
+    public override Vector Evaluate(EvalContext context)
+    {
+        var length = context.Length;
+        Scratch.BeginValidity(length).Clear();
+        var fields = Type.Fields;
+        for (var f = 0; f < fields.Count; f++)
+        {
+            var field = Scratch.Field(f);
+            var type = fields[f].Type;
+            var kind = ColumnKinds.Of(type);
+            if (ColumnKinds.IsVariableLength(kind))
+            {
+                field.BeginVarLen(length, nullable: type.Nullable);
+                for (var i = 0; i < length; i++)
+                {
+                    if (type.Nullable)
+                    {
+                        field.AppendNull();
+                    }
+                    else
+                    {
+                        field.AppendValue(default);
+                    }
+                }
+
+                continue;
+            }
+
+            field.RawValues(length)[..(length * ColumnKinds.Width(kind))].Clear();
+            if (type.Nullable)
+            {
+                field.BeginValidity(length).Clear();
+            }
+            else
+            {
+                field.NoValidity();
+            }
+        }
+
+        return Scratch.Finish(length, length);
+    }
+}
+
+/// <summary>
 /// A <c>CASE</c> or a <c>COALESCE</c> over composite values of one type (D295): the choice is made per
 /// lane as any <c>CASE</c> makes it — the first clause whose condition holds, or the first operand
 /// that holds a value — and the answer is the chosen branch's composite, field by field. Each field
@@ -204,8 +262,8 @@ internal sealed class CompositeChoiceExpr : VectorExprBase
         {
             for (var k = 0; k < _vectors.Length; k++)
             {
-                // A scalar branch is a typed NULL composite (no composite constant exists, D291), which
-                // no lane chose above; its field view is never read.
+                // A typed NULL composite is a column of NULL composites (CompositeNullExpr), which no
+                // lane chose above; a scalar vector never reaches here, and its view would not be read.
                 _fields[k] = _vectors[k].IsScalar ? default : _vectors[k].View.FieldView(f);
             }
 

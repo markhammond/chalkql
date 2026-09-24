@@ -134,7 +134,7 @@ public final class CompositeSupport {
       SqlNodeList order = select.getOrderList();
       if (order != null) {
         for (SqlNode item : order) {
-          orderItem(row, select.getSelectList(), item, "ORDER BY");
+          orderItem(select, row, select.getSelectList(), item, "ORDER BY");
         }
       }
     }
@@ -145,7 +145,8 @@ public final class CompositeSupport {
       SqlNodeList selectList =
           orderBy.query instanceof SqlSelect select ? select.getSelectList() : null;
       for (SqlNode item : orderBy.orderList) {
-        orderItem(row, selectList, item, "ORDER BY");
+        orderItem(
+            orderBy.query instanceof SqlSelect select ? select : null, row, selectList, item, "ORDER BY");
       }
     }
 
@@ -192,9 +193,17 @@ public final class CompositeSupport {
     }
 
     private void orderItem(
-        @Nullable RelDataType row, @Nullable SqlNodeList selectList, SqlNode item, String clause) {
+        @Nullable SqlSelect select,
+        @Nullable RelDataType row,
+        @Nullable SqlNodeList selectList,
+        SqlNode item,
+        String clause) {
       SqlNode key = unwrapOrder(item);
-      if (isComposite(resolve(row, selectList, key), key)) {
+      RelDataType type = resolve(row, selectList, key);
+      if (type == null && select != null && key instanceof SqlIdentifier) {
+        type = unselectedColumn(select, key);
+      }
+      if (isComposite(type, key)) {
         throw refusal(
             clause + " a composite value (" + text.quote(key) + ")",
             "A composite value has no ordering. Sort by one of its fields instead, e.g. ORDER BY "
@@ -438,6 +447,23 @@ public final class CompositeSupport {
         }
       }
       return typeOf(item);
+    }
+
+    /**
+     * The type of a column the statement orders by without selecting it — a composite column of a
+     * table (D302) — which the validator types in the ORDER BY scope and records against a node of
+     * its own. Asked of that scope here; null where it does not resolve, and never asked of a
+     * statement whose validation stopped short.
+     */
+    private @Nullable RelDataType unselectedColumn(SqlSelect select, SqlNode key) {
+      if (unvalidated) {
+        return null;
+      }
+      try {
+        return validator.deriveType(validator.getOrderScope(select), key);
+      } catch (RuntimeException notResolved) {
+        return null;
+      }
     }
 
     /** The select item a simple name is the alias of, if it is one. */

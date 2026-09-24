@@ -1,0 +1,65 @@
+-- u1
+report id:Full, email:PerRow, phone:PerRow, tier:PerRow, profiles:Some
+1|tara@o1 CANARY-EMAIL-01|+64 1 CANARY-PHONE-01|1
+2|bo@o1 CANARY-EMAIL-02|+64 2 CANARY-PHONE-02|3
+3|tomas@o2 CANARY-EMAIL-03|<null>|2
+4|<null>|<null>|<null>
+
+-- u2
+report id:Full, email:PerRow, phone:PerRow, tier:PerRow, profiles:Some
+1|<null>|<null>|<null>
+2|bo@o1 CANARY-EMAIL-02|+64 2 CANARY-PHONE-02|3
+
+-- u3
+report id:Full, email:Redacted, phone:Redacted, tier:Redacted, profiles:None
+
+-- u3-in-o1
+report id:Full, email:Redacted, phone:Redacted, tier:Redacted, profiles:None
+
+-- u4
+report id:Full, email:Full, phone:Full, tier:Full, profiles:All
+1|tara@o1 CANARY-EMAIL-01|+64 1 CANARY-PHONE-01|1
+2|bo@o1 CANARY-EMAIL-02|+64 2 CANARY-PHONE-02|3
+3|tomas@o2 CANARY-EMAIL-03|<null>|2
+4|<null>|<null>|<null>
+5|kim@o3 CANARY-EMAIL-05|+64 5 CANARY-PHONE-05|1
+6|lea@o3 CANARY-EMAIL-06|+64 6 CANARY-PHONE-06|2
+
+-- u5
+report id:Full, email:Redacted, phone:Redacted, tier:Redacted, profiles:None
+
+-- u6
+report id:Full, email:Redacted, phone:Redacted, tier:Redacted, profiles:Some
+1|<null>|<null>|<null>
+2|<null>|<null>|<null>
+
+-- u6-two-orgs
+report id:Full, email:Redacted, phone:Redacted, tier:Redacted, profiles:Some
+1|<null>|<null>|<null>
+2|<null>|<null>|<null>
+3|<null>|<null>|<null>
+4|<null>|<null>|<null>
+
+-- u7
+report id:Full, email:Redacted, phone:Redacted, tier:Redacted, profiles:None
+
+-- u8
+report id:Full, email:Redacted, phone:Redacted, tier:Redacted, profiles:None
+
+-- u9
+report id:Full, email:Redacted, phone:Redacted, tier:Redacted, profiles:None
+
+-- u10-in-a-region
+report id:Full, email:Redacted, phone:Redacted, tier:Redacted, profiles:None
+
+-- u11-subject-in-a-region
+report id:Full, email:Redacted, phone:Redacted, tier:Redacted, profiles:None
+
+-- u14-a-vendor
+report id:Full, email:Redacted, phone:Redacted, tier:Redacted, profiles:None
+
+-- u15-a-vendor-and-an-org
+report id:Full, email:Full, phone:Full, tier:Full, profiles:Some
+1|tara@o1 CANARY-EMAIL-01|+64 1 CANARY-PHONE-01|1
+2|bo@o1 CANARY-EMAIL-02|+64 2 CANARY-PHONE-02|3
+

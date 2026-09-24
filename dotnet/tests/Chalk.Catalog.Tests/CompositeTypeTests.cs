@@ -1,11 +1,16 @@
+using Chalk.Entitlements;
 using Chalk.Ir;
+using Disclosure = Chalk.Entitlements.Disclosure;
+using DisclosureRule = Chalk.Entitlements.DisclosureRule;
 
 namespace Chalk.Catalog.Tests;
 
 /// <summary>
 /// The catalog half of D291 (ADR 0077): <see cref="ChalkType.Composite(IEnumerable{CompositeField}, bool)"/>
 /// is a value with its fields in it, it round-trips through the IR's <c>Type</c>, and the catalog
-/// refuses a composite value everywhere but as a client-bodied function's result.
+/// refuses a composite value everywhere but as a client-bodied function's result — and, since D302, as
+/// a column of an in-process source's table, which is keyed, indexed and summarised on nothing and is
+/// disclosed whole or withheld whole.
 /// </summary>
 public sealed class CompositeTypeTests
 {
@@ -177,13 +182,189 @@ public sealed class CompositeTypeTests
         Assert.Contains("a parameter is a scalar", ex.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void A_composite_table_column_is_refused()
-    {
-        var ex = AssertInvalid(Catalog(
-            [new ColumnDescriptor { Name = "c", Type = Classification }]));
+    // ---- a composite column (D302) ----
 
-        Assert.Contains("a COMPOSITE cannot be a table column", ex.Message, StringComparison.Ordinal);
+    private static readonly ChalkType Card = ChalkType.Composite(
+        [new CompositeField("Email", ChalkType.String()), new CompositeField("Tier", ChalkType.Int32())],
+        nullable: true);
+
+    /// <summary>
+    /// A table of an id and a composite <c>contact</c> card, on a source of the kind given, with the
+    /// keys, statistics and policy a test declares over it.
+    /// </summary>
+    private static CatalogContext Profiles(
+        SourceKind kind = SourceKind.Local,
+        IReadOnlyList<UniqueKeyDescriptor>? uniqueKeys = null,
+        IReadOnlyList<CollationDescriptor>? collations = null,
+        IReadOnlyList<IndexDescriptor>? indexes = null,
+        ColumnStatistics? statistics = null,
+        ColumnEntitlementDescriptor? contact = null) => new()
+    {
+        ContextId = "demo",
+        Epoch = 1,
+        Schemas =
+        [
+            new SchemaDescriptor
+            {
+                SourceId = "crm",
+                Name = "people",
+                Kind = kind,
+                Dialect = kind == SourceKind.Remote ? "sqlite" : null,
+                Tables =
+                [
+                    new TableDescriptor
+                    {
+                        Name = "profiles",
+                        RowCount = 6,
+                        Columns =
+                        [
+                            new ColumnDescriptor { Name = "id", Type = ChalkType.Int32() },
+                            new ColumnDescriptor
+                            {
+                                Name = "contact",
+                                Type = Card,
+                                Statistics = statistics ?? ColumnStatistics.Unknown,
+                            },
+                        ],
+                        UniqueKeys = uniqueKeys ?? [],
+                        Collations = collations ?? [],
+                        Indexes = indexes ?? [],
+                        Entitlement = contact is null
+                            ? null
+                            : new TableEntitlementDescriptor { Columns = [contact] },
+                    },
+                ],
+            },
+        ],
+    };
+
+    [Fact]
+    public void A_composite_column_is_declared_on_an_in_process_source()
+    {
+        CatalogValidator.Validate(Profiles());
+        CatalogValidator.Validate(Profiles(
+            uniqueKeys: [new UniqueKeyDescriptor { Columns = [0] }],
+            collations: [new CollationDescriptor { Keys = [new KeyOrder(0, SortDirection.AscNullsLast)] }],
+            indexes:
+            [
+                new IndexDescriptor
+                {
+                    Name = "cx_id", Kind = IndexKind.Clustered, Columns = [0], Covering = [0],
+                },
+            ]));
+    }
+
+    [Fact]
+    public void A_composite_column_on_a_remote_source_is_refused_naming_the_table_and_the_column()
+    {
+        var ex = AssertInvalid(Profiles(SourceKind.Remote));
+
+        Assert.Equal(
+            "Invalid catalog at schemas[0] (people).tables[0] (profiles).columns[1] (contact): column "
+            + "'contact' of table "
+            + "'profiles' is a COMPOSITE, and schema 'people' is a REMOTE source; a composite column is "
+            + "read only from an in-process (LOCAL) source. Declare its fields as columns of their own",
+            ex.Message);
+    }
+
+    [Fact]
+    public void No_key_collation_or_index_is_over_a_composite_column()
+    {
+        const string Why = "is a COMPOSITE and cannot be part of";
+
+        Assert.Contains(
+            $"column 'contact' {Why} a unique key",
+            AssertInvalid(Profiles(uniqueKeys: [new UniqueKeyDescriptor { Columns = [0, 1] }])).Message,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            $"column 'contact' {Why} a collation",
+            AssertInvalid(Profiles(collations:
+                [new CollationDescriptor { Keys = [new KeyOrder(1, SortDirection.AscNullsLast)] }])).Message,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            $"column 'contact' {Why} an index key",
+            AssertInvalid(Profiles(indexes:
+                [new IndexDescriptor { Name = "ix_contact", Kind = IndexKind.Ordered, Columns = [1] }])).Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_clustered_copy_never_carries_a_composite_column()
+    {
+        var everything = AssertInvalid(Profiles(indexes:
+            [new IndexDescriptor { Name = "cx_id", Kind = IndexKind.Clustered, Columns = [0] }]));
+        Assert.Contains(
+            "index 'cx_id' is CLUSTERED with no covering set, which covers every column and so the "
+            + "composite column 'contact'",
+            everything.Message,
+            StringComparison.Ordinal);
+
+        var named = AssertInvalid(Profiles(indexes:
+            [new IndexDescriptor { Name = "cx_id", Kind = IndexKind.Clustered, Columns = [0], Covering = [0, 1] }]));
+        Assert.Contains(
+            "the covering set of index 'cx_id' names the composite column 'contact'",
+            named.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_composite_column_carries_no_statistics()
+    {
+        var ex = AssertInvalid(Profiles(statistics: new ColumnStatistics { DistinctCount = 6 }));
+
+        Assert.Contains(
+            "column 'contact' is a COMPOSITE and declares statistics", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_composite_column_is_disclosed_whole_or_withheld_whole()
+    {
+        // FULL under a condition over one of its own fields, NONE otherwise: registered.
+        CatalogValidator.Validate(Profiles(contact: new ColumnEntitlementDescriptor
+        {
+            Column = 1,
+            Rules = [new DisclosureRule { When = "(contact).tier >= 2", Then = Disclosure.Full }],
+            Otherwise = Disclosure.None,
+        }));
+
+        var masked = AssertInvalid(Profiles(contact: new ColumnEntitlementDescriptor
+        {
+            Column = 1,
+            Rules = [new DisclosureRule { When = "TRUE", Then = Disclosure.Masked, Mask = "contact" }],
+        }));
+        Assert.Equal(
+            "Invalid catalog at schemas[0] (people).tables[0] (profiles).entitlement.columns[0] "
+            + "(contact).rules[0]: column 'contact' "
+            + "is a COMPOSITE and is disclosed Masked, but no expression builds a composite value to "
+            + "mask it with. A composite column is disclosed Full or None, None's placeholder being the "
+            + "NULL composite; a rule's condition may read a field of it",
+            masked.Message);
+
+        Assert.Contains(
+            "is disclosed AggregateOnly, but no built-in aggregate takes a composite value",
+            AssertInvalid(Profiles(contact: new ColumnEntitlementDescriptor
+            {
+                Column = 1,
+                Otherwise = Disclosure.AggregateOnly,
+                AggregateOnlyFunctions = ["COUNT"],
+            })).Message,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "is disclosed Test, but a composite value has no equality to test",
+            AssertInvalid(Profiles(contact: new ColumnEntitlementDescriptor
+            {
+                Column = 1,
+                Rules = [new DisclosureRule { When = "TRUE", Then = Disclosure.Test }],
+            })).Message,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "is a COMPOSITE and the rule declares a placeholder",
+            AssertInvalid(Profiles(contact: new ColumnEntitlementDescriptor
+            {
+                Column = 1,
+                Rules = [new DisclosureRule { When = "TRUE", Then = Disclosure.None, Placeholder = "NULL" }],
+            })).Message,
+            StringComparison.Ordinal);
     }
 
     [Fact]

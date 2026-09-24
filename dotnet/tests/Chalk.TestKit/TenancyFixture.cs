@@ -77,7 +77,11 @@ public sealed class TenancyFixture
     private static readonly Lazy<TenancyFixture> LazyShared = new(() => Create(entitled: true));
 
     private static readonly Lazy<TenancyFixture> LazySubversion =
-        new(() => Create(entitled: true, subversionFunctions: true, amountAggregates: SubversionAmountAggregates));
+        new(() => Create(
+            entitled: true,
+            subversionFunctions: true,
+            amountAggregates: SubversionAmountAggregates,
+            compositeTable: true));
 
     /// <summary>
     /// What <c>amount</c> permits beyond the four built-ins on the fixtures that declare
@@ -185,6 +189,34 @@ public sealed class TenancyFixture
         new(6, 3, FirstName("Lea", 6), LastName("Fox", 6), NationalId("CC-2", 6), "4001"),
         new(7, 2, FirstName("Tara", 1), LastName("Vo", 7), NationalId("BB-3", 7), "3002"),
     ];
+
+    /// <summary>
+    /// A member's contact card: the composite member of <c>profiles</c> (D302), a record whose email and
+    /// phone carry canaries, and whose tier a rule condition reads as a field.
+    /// </summary>
+    public sealed record ContactCard(string Email, string? Phone, int Tier);
+
+    /// <summary>A profile: one contact card per row, or none.</summary>
+    public sealed record Profile(int Id, int OrgId, ContactCard? Contact);
+
+    /// <summary>
+    /// The composite-column table of the adversarial family (D302): two profiles per organisation,
+    /// the tiers spread so that an agent's rule over the <c>tier</c> field discloses some cards of an
+    /// organisation and withholds others, and one profile with no card at all.
+    /// </summary>
+    public static IReadOnlyList<Profile> Profiles { get; } =
+    [
+        new(1, 1, new ContactCard(Email("tara@o1", 1), Phone("+64 1", 1), 1)),
+        new(2, 1, new ContactCard(Email("bo@o1", 2), Phone("+64 2", 2), 3)),
+        new(3, 2, new ContactCard(Email("tomas@o2", 3), null, 2)),
+        new(4, 2, null),
+        new(5, 3, new ContactCard(Email("kim@o3", 5), Phone("+64 5", 5), 1)),
+        new(6, 3, new ContactCard(Email("lea@o3", 6), Phone("+64 6", 6), 2)),
+    ];
+
+    private static string Email(string value, int ordinal) => TenancyCanaries.Mark(value, "EMAIL", ordinal);
+
+    private static string Phone(string value, int ordinal) => TenancyCanaries.Mark(value, "PHONE", ordinal);
 
     private static string FirstName(string value, int ordinal) =>
         TenancyCanaries.Mark(value, "FIRST", ordinal);
@@ -494,6 +526,38 @@ public sealed class TenancyFixture
                         When = "org_id IN (@ctx.counter_orgs)",
                         Then = Disclosure.AggregateOnly,
                         Tests = [TestShape.Equals],
+                    },
+                ],
+                Otherwise = Disclosure.None,
+            },
+        ],
+    };
+
+    /// <summary>A profile's rows: any organisation this principal manages, acts in or audits, and the global grant.</summary>
+    private const string ProfileRows =
+        "org_id IN (@ctx.manager_orgs) OR org_id IN (@ctx.agent_orgs) "
+        + "OR org_id IN (@ctx.auditor_orgs) OR @ctx.global";
+
+    /// <summary>
+    /// The composite column's policy (D302): disclosed whole or withheld whole. A manager — and the
+    /// global grant — sees the card; an agent sees it only where the card's own <c>tier</c> field is 2
+    /// or more, a condition over a field of the column it decides; everyone else gets the NULL composite.
+    /// </summary>
+    public static TableEntitlementDescriptor ProfilesEntitlement() => new()
+    {
+        RowPredicate = ProfileRows,
+        Columns =
+        [
+            new ColumnEntitlementDescriptor
+            {
+                Column = 2,
+                Rules =
+                [
+                    new DisclosureRule { When = "org_id IN (@ctx.manager_orgs) OR @ctx.global", Then = Disclosure.Full },
+                    new DisclosureRule
+                    {
+                        When = "org_id IN (@ctx.agent_orgs) AND (contact).tier >= 2",
+                        Then = Disclosure.Full,
                     },
                 ],
                 Otherwise = Disclosure.None,
@@ -1036,7 +1100,8 @@ public sealed class TenancyFixture
         bool subversionFunctions = false,
         string itemSchema = "",
         IReadOnlyList<string>? amountAggregates = null,
-        string? firstNameMask = null)
+        string? firstNameMask = null,
+        bool compositeTable = false)
     {
         var builder = new PocoSourceBuilder("mem").NamingPolicy(PocoNamingPolicy.SnakeCase);
 
@@ -1121,7 +1186,31 @@ public sealed class TenancyFixture
             Functions(builder);
         }
 
+        if (compositeTable)
+        {
+            AddProfiles(builder, entitled);
+        }
+
         return new TenancyFixture(builder.Build());
+    }
+
+    /// <summary>
+    /// The composite-column table (D302), in schema <c>main</c> of every fixture the adversarial family
+    /// runs against: this one, and the in-process source beside the database, since a composite column
+    /// is read only from an in-process source. The family's statements name it <c>main.profiles</c>,
+    /// so they resolve over the database too, where the database's schema is the default one.
+    /// </summary>
+    public static PocoSourceBuilder AddProfiles(PocoSourceBuilder builder, bool entitled = true)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        return builder.AddTable("profiles", Profiles, t =>
+        {
+            t.OrderedBy(p => p.Id).UniqueKey(p => p.Id);
+            if (entitled)
+            {
+                t.Entitlement(ProfilesEntitlement());
+            }
+        });
     }
 
     /// <summary>

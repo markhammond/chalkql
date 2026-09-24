@@ -53,9 +53,12 @@ class CorpusSchemaTest {
     for (Schema schema : fromClient.getSchemasList()) {
       for (Table table : schema.getTablesList()) {
         for (Column column : table.getColumnsList()) {
+          // D302: every column but a composite one, which carries none — none of its values
+          // compares with another, so there is no minimum, maximum or distinct count to state.
+          boolean composite = column.getType().getKind() == chalk.ir.v1.TypeKind.TYPE_KIND_COMPOSITE;
           assertThat(column.hasStatistics())
               .as("%s.%s has statistics", table.getName(), column.getName())
-              .isTrue();
+              .isEqualTo(!composite);
         }
       }
     }

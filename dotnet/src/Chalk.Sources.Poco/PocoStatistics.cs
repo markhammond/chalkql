@@ -83,6 +83,12 @@ internal static class PocoStatistics
         {
             for (var c = 0; c < columnCount; c++)
             {
+                if (IsComposite(columns[c]))
+                {
+                    result[c] = ColumnStatistics.Unknown;
+                    continue;
+                }
+
                 result[c] = new ColumnStatistics
                 {
                     Level = plan.Level,
@@ -146,8 +152,9 @@ internal static class PocoStatistics
 
         for (var c = 0; c < columnCount; c++)
         {
-            accessors[c] = columns[c].CompileLogicalAccessor();
-            ordered[c] = columns[c].Type.Kind != Chalk.Ir.TypeKind.List;
+            // D302: a composite column carries no statistics at all, so its records are never read here.
+            accessors[c] = IsComposite(columns[c]) ? static _ => null : columns[c].CompileLogicalAccessor();
+            ordered[c] = columns[c].Type.Kind != Chalk.Ir.TypeKind.List && !IsComposite(columns[c]);
         }
 
         var nulls = new int[columnCount];
@@ -329,6 +336,12 @@ internal static class PocoStatistics
                         comparer);
             }
 
+            if (IsComposite(columns[c]))
+            {
+                result[c] = ColumnStatistics.Unknown;
+                continue;
+            }
+
             result[c] = new ColumnStatistics
             {
                 Level = plan.Level,
@@ -343,6 +356,9 @@ internal static class PocoStatistics
 
         return Apply(result, columns, plan);
     }
+
+    /// <summary>A composite column carries no statistics (D302): none of its values compares with another.</summary>
+    private static bool IsComposite<T>(PocoColumn<T> column) => column.Type.Kind == Chalk.Ir.TypeKind.Composite;
 
     /// <summary>Host overrides win over anything computed; a supplier replaces the lot.</summary>
     private static ColumnStatistics[] Apply<T>(

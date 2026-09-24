@@ -46,7 +46,7 @@ was handed, and what the tree does with a statement that spells `@ctx` itself.
 | 3 | Set operations | 29–33 (5) | §3.1, §3.12 the reported disclosure of a union |
 | 4 | Indirection | 34–39 (6) | §3.1 the rewrite is at the leaf; §7 SQL and client bodies |
 | — | D253's known limit | 40 (1) | not defended, and recorded as such |
-| 8 | Composite values | 60–66 (7) | §7 a client body is handed the disclosed value; §3.1 through a field; §3.4 the allow-list (ADR 0077) and a population aggregate its host declares (D295) |
+| 8 | Composite values | 60–70 (11) | §7 a client body is handed the disclosed value; §3.1 through a field; §3.4 the allow-list (ADR 0077) and a population aggregate its host declares (D295); a composite column disclosed whole or withheld whole (D302) |
 
 ## D253 — the limit this family records rather than defends
 
@@ -125,6 +125,18 @@ the client, as the column they come from. A user-defined aggregate its host has 
 `Population()` cannot be allow-listed. And a mask written as a field of a composite-valued function,
 `echo_with_length(SUBSTRING(first_name, 1, 1)).echo`, is applied at the leaf and seen by a plain
 select, a predicate and a join key exactly as the plain mask is.
+
+**Composite columns (D302).** Statements 67–70 are class 8 over a composite *column* rather than a
+function's value: `profiles.contact`, a record member of an in-process table, whose rules can only
+disclose it whole or withhold it whole — `FULL` for a manager and the global grant, `FULL` for an
+agent only where the card's own `tier` field is 2 or more, a condition over a field of the column it
+decides, and `NONE`, the NULL composite, for everyone else. 67 selects the card whole, 68 takes it
+apart by field, 69 expands it with `p.contact.*`, and 70 probes through a field: an agent filtering
+on `tier = 1` finds only the cards it may see, because the predicate compares the disclosed
+composite's field. The email and the phone carry canaries, and every field of a withheld card is
+NULL with it. A composite column is read only from an in-process source, so over a database
+`profiles` stays in process beside it; the four name it `main.profiles`, which resolves where the
+database's schema is the default, and run there at every pushdown level under both bindings.
 
 Three statements are not run in one place or another, each for a reason that is not about this
 family's subject and each named in the theory that skips it. `49` and `23` are no longer among

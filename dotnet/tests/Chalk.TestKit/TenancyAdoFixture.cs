@@ -467,6 +467,12 @@ public sealed class TenancyAdoFixture : IDisposable
             });
         }
 
+        // D302: the adversarial family's composite-column table. A composite column is read only from
+        // an in-process source, so it is here in every placement and never in the database, and the
+        // family's statements name it by its schema, `main.profiles`, so they resolve where the
+        // database's schema is the default one.
+        TenancyFixture.AddProfiles(builder);
+
         return builder.Build();
     }
 

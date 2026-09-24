@@ -1,0 +1,65 @@
+-- u1
+report id:Full, org_id:Full, contact:PerRow, profiles:Some
+1|1|[tara@o1 CANARY-EMAIL-01, +64 1 CANARY-PHONE-01, 1]
+2|1|[bo@o1 CANARY-EMAIL-02, +64 2 CANARY-PHONE-02, 3]
+3|2|[tomas@o2 CANARY-EMAIL-03, <null>, 2]
+4|2|<null>
+
+-- u2
+report id:Full, org_id:Full, contact:PerRow, profiles:Some
+1|1|<null>
+2|1|[bo@o1 CANARY-EMAIL-02, +64 2 CANARY-PHONE-02, 3]
+
+-- u3
+report id:Full, org_id:Full, contact:Redacted, profiles:None
+
+-- u3-in-o1
+report id:Full, org_id:Full, contact:Redacted, profiles:None
+
+-- u4
+report id:Full, org_id:Full, contact:Full, profiles:All
+1|1|[tara@o1 CANARY-EMAIL-01, +64 1 CANARY-PHONE-01, 1]
+2|1|[bo@o1 CANARY-EMAIL-02, +64 2 CANARY-PHONE-02, 3]
+3|2|[tomas@o2 CANARY-EMAIL-03, <null>, 2]
+4|2|<null>
+5|3|[kim@o3 CANARY-EMAIL-05, +64 5 CANARY-PHONE-05, 1]
+6|3|[lea@o3 CANARY-EMAIL-06, +64 6 CANARY-PHONE-06, 2]
+
+-- u5
+report id:Full, org_id:Full, contact:Redacted, profiles:None
+
+-- u6
+report id:Full, org_id:Full, contact:Redacted, profiles:Some
+1|1|<null>
+2|1|<null>
+
+-- u6-two-orgs
+report id:Full, org_id:Full, contact:Redacted, profiles:Some
+1|1|<null>
+2|1|<null>
+3|2|<null>
+4|2|<null>
+
+-- u7
+report id:Full, org_id:Full, contact:Redacted, profiles:None
+
+-- u8
+report id:Full, org_id:Full, contact:Redacted, profiles:None
+
+-- u9
+report id:Full, org_id:Full, contact:Redacted, profiles:None
+
+-- u10-in-a-region
+report id:Full, org_id:Full, contact:Redacted, profiles:None
+
+-- u11-subject-in-a-region
+report id:Full, org_id:Full, contact:Redacted, profiles:None
+
+-- u14-a-vendor
+report id:Full, org_id:Full, contact:Redacted, profiles:None
+
+-- u15-a-vendor-and-an-org
+report id:Full, org_id:Full, contact:Full, profiles:Some
+1|1|[tara@o1 CANARY-EMAIL-01, +64 1 CANARY-PHONE-01, 1]
+2|1|[bo@o1 CANARY-EMAIL-02, +64 2 CANARY-PHONE-02, 3]
+

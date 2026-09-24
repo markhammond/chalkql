@@ -813,6 +813,78 @@ public sealed class CompositeExecutionTests
             + $"than a CASE per field ({measured} against {measuredFloor}).");
     }
 
+    // ---- the typed NULL composite (D302) ----
+
+    /// <summary>
+    /// The one composite literal, the typed NULL — what a withheld composite column's placeholder is,
+    /// and a CASE's NULL branch — is a column of NULL composites: NULL whole and NULL by field in both
+    /// engines, and its non-nullable fields hold their storage default rather than a NULL, as every
+    /// NULL composite's do.
+    /// </summary>
+    [Fact]
+    public async Task The_typed_null_composite_is_a_column_of_null_composites()
+    {
+        var none = Null(ClassificationType);
+        var plan = IrBuilder.Plan(Project(
+            TxnRead(),
+            [
+                ("id", Ref(TxnRow, 0)),
+                ("c", none),
+                ("category", FieldAccess(none, 0)),
+                ("confidence", FieldAccess(none, 1)),
+            ]));
+
+        var rows = await BothAsync(plan, [], []);
+        Assert.Equal(Rows, rows.Count);
+        Assert.All(rows, row => Assert.Equal("(NULL, NULL, NULL)", Render(row[1..])));
+
+        var compiled = Compile(plan, [], [], batchSize: Rows / 8);
+        using var arena = new ExecutionArena();
+        var seen = 0;
+        await foreach (var batch in compiled.ExecuteAsync([], new ExecutionStats(), arena, CancellationToken.None))
+        {
+            using (batch)
+            {
+                var column = Assert.IsType<StructArray>(batch.Column(1));
+                Assert.Equal(batch.Length, column.NullCount);
+                Assert.All(column.Fields, field => Assert.Equal(0, field.NullCount));
+                seen += batch.Length;
+            }
+        }
+
+        Assert.Equal(Rows, seen);
+    }
+
+    /// <summary>
+    /// And it costs nothing per row: written into the node's own scratch every batch, it allocates no
+    /// more than the same NULLs as two scalar columns but for the struct array the result carries, under
+    /// 400 bytes a batch.
+    /// </summary>
+    [Fact]
+    public async Task The_typed_null_composite_allocates_nothing_per_row()
+    {
+        var withComposite = IrBuilder.Plan(Project(
+            TxnRead(), [("id", Ref(TxnRow, 0)), ("c", Null(ClassificationType))]));
+        var floor = IrBuilder.Plan(Project(
+            TxnRead(),
+            [
+                ("id", Ref(TxnRow, 0)),
+                ("category", Null(Str(nullable: true))),
+                ("confidence", Null(Fp64(nullable: true))),
+            ]));
+
+        var measuredFloor = await Measure(floor, [], []);
+        var measured = await Measure(withComposite, [], []);
+
+        _output.WriteLine(
+            $"typed NULL composite: {measured} bytes over 8 batches against two scalar NULL columns' "
+            + $"{measuredFloor} = {(measured - measuredFloor) / 8.0:0.###} bytes/batch.");
+        Assert.True(
+            measured <= measuredFloor + (8 * 400L),
+            $"a typed NULL composite cost {(measured - measuredFloor) / 8.0:0.###} bytes per batch more "
+            + $"than two scalar NULL columns ({measured} against {measuredFloor}).");
+    }
+
     private static async Task<long> Measure(
         Plan plan, IReadOnlyList<FunctionDescriptor> functions, IReadOnlyList<HostFunction> hosts)
     {

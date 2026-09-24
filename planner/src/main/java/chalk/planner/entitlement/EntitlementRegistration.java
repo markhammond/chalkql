@@ -203,6 +203,13 @@ public final class EntitlementRegistration {
               ? rowType.getFieldList().get(column.getColumn()).getType()
               : null;
 
+      // D302: a composite column is disclosed whole or withheld whole, the client's own check made
+      // again here — before any mask or placeholder is converted, because the verdict is what is
+      // wrong, and the ROW check on a mask's or a placeholder's type below stays as it was.
+      if (declared != null && declared.isStruct()) {
+        refuseCompositeVerdicts(column, name, where, columnPath);
+      }
+
       // D190 as D295 extends it, the client's own check made again here: an allow-list names a
       // population aggregate of the fixed set, or an aggregate this catalog declares Population().
       for (int f = 0; f < column.getAggregateOnlyFunctionsCount(); f++) {
@@ -619,6 +626,70 @@ public final class EntitlementRegistration {
               + " — a type Chalk states no equality for (D58), so no comparison of it could be"
               + " computed at the leaf. A test verdict needs a column whose values compare.");
     }
+  }
+
+  /**
+   * D302: a composite column is disclosed {@code FULL} or {@code NONE}, {@code NONE}'s placeholder
+   * being the NULL composite. {@code MASKED} needs an expression of the column's type, which nothing
+   * builds; {@code AGGREGATE_ONLY} an aggregate that takes one, which no built-in is; {@code TEST} an
+   * equality, which a composite value has not. Each is refused naming the column and the verdict,
+   * and so are a mask, a placeholder, an allow-list and the statistical opt-in. A rule's condition
+   * may read a field of it. Mirrors {@code Chalk.Catalog.CatalogValidator.RequireWholeOrNothing}.
+   */
+  private static void refuseCompositeVerdicts(
+      ColumnEntitlement column, String name, String where, String columnPath) {
+    for (int r = 0; r < column.getRulesCount(); r++) {
+      Disclosure then = normalise(column.getRules(r).getThen());
+      if (then == Disclosure.DISCLOSURE_MASKED
+          || then == Disclosure.DISCLOSURE_AGGREGATE_ONLY
+          || then == Disclosure.DISCLOSURE_TEST) {
+        throw new InvalidCatalogException(
+            columnPath + ".rules[" + r + "]", wholeOrNothing(name, where, then));
+      }
+      if (!column.getRules(r).getPlaceholder().isBlank() || !column.getRules(r).getMask().isBlank()) {
+        throw new InvalidCatalogException(
+            columnPath + ".rules[" + r + "]",
+            "on " + where + ", '" + name + "' is a COMPOSITE column and the rule states a "
+                + (column.getRules(r).getMask().isBlank() ? "placeholder" : "mask")
+                + "; no expression builds a composite value, and its placeholder is the NULL"
+                + " composite");
+      }
+    }
+    Disclosure otherwise = normalise(column.getOtherwise());
+    if (otherwise == Disclosure.DISCLOSURE_MASKED
+        || otherwise == Disclosure.DISCLOSURE_AGGREGATE_ONLY
+        || otherwise == Disclosure.DISCLOSURE_TEST) {
+      throw new InvalidCatalogException(
+          columnPath + ".otherwise", wholeOrNothing(name, where, otherwise));
+    }
+    if (!column.getMask().isBlank() || !column.getPlaceholder().isBlank()) {
+      throw new InvalidCatalogException(
+          columnPath,
+          "on " + where + ", '" + name + "' is a COMPOSITE column and states a "
+              + (column.getMask().isBlank() ? "placeholder" : "mask")
+              + "; no expression builds a composite value, and its placeholder is the NULL"
+              + " composite");
+    }
+    if (column.getAggregateOnlyFunctionsCount() > 0 || column.getStatistical()) {
+      throw new InvalidCatalogException(
+          columnPath,
+          "on " + where + ", '" + name + "' is a COMPOSITE column and states "
+              + (column.getStatistical() ? "the statistical opt-in" : "an aggregate allow-list")
+              + ", which only an AGGREGATE_ONLY or MASKED column has; a composite column is"
+              + " disclosed FULL or NONE");
+    }
+  }
+
+  private static String wholeOrNothing(String name, String where, Disclosure verdict) {
+    String why =
+        switch (verdict) {
+          case DISCLOSURE_MASKED -> "no expression builds a composite value to mask it with";
+          case DISCLOSURE_AGGREGATE_ONLY -> "no built-in aggregate takes a composite value";
+          default -> "a composite value has no equality to test";
+        };
+    return "on " + where + ", '" + name + "' is a COMPOSITE column and is disclosed "
+        + spelling(verdict) + ", but " + why + ". A composite column is disclosed FULL or NONE,"
+        + " NONE's placeholder being the NULL composite; a rule's condition may read a field of it.";
   }
 
   /** Whether a value of this type compares for equality at all (types.proto, D58). */

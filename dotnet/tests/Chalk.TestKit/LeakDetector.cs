@@ -212,6 +212,13 @@ public sealed class LeakDetector
             Take(attachment.Name);
         }
 
+        // D302: the composite column's fields carry canaries of their own.
+        foreach (var profile in TenancyFixture.Profiles)
+        {
+            Take(profile.Contact?.Email);
+            Take(profile.Contact?.Phone);
+        }
+
         foreach (var invite in TenancyFixture.Invites)
         {
             Take(invite.Target);

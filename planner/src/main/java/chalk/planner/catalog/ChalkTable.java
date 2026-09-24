@@ -304,7 +304,7 @@ public final class ChalkTable extends AbstractTable implements ScannableTable, T
       builder.add(
           field.getName(),
           widened.get(i)
-              ? typeFactory.createTypeWithNullability(field.getType(), true)
+              ? chalk.planner.types.TypeMapper.nullable(typeFactory, field.getType())
               : field.getType());
     }
     RelDataType rowType = builder.build();

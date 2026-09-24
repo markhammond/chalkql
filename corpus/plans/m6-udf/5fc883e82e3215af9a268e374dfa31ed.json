@@ -1,0 +1,289 @@
+{
+  "irVersion": 1,
+  "planDigest": "11286637789910308037",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "venue",
+        "type": {
+          "kind": "TYPE_KIND_STRING",
+          "nullable": true
+        }
+      },
+      {
+        "name": "quotes",
+        "type": {
+          "kind": "TYPE_KIND_I64"
+        }
+      },
+      {
+        "name": "best_bid",
+        "type": {
+          "kind": "TYPE_KIND_FP64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "venue",
+          "type": {
+            "kind": "TYPE_KIND_STRING",
+            "nullable": true
+          }
+        },
+        {
+          "name": "quotes",
+          "type": {
+            "kind": "TYPE_KIND_I64"
+          }
+        },
+        {
+          "name": "best_bid",
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 24,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING",
+                "nullable": true
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "venue",
+              "type": {
+                "kind": "TYPE_KIND_STRING",
+                "nullable": true
+              }
+            },
+            {
+              "name": "quotes",
+              "type": {
+                "kind": "TYPE_KIND_I64"
+              }
+            },
+            {
+              "name": "best_bid",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              }
+            }
+          ]
+        },
+        "estRowCount": 24,
+        "hashAggregate": {
+          "aggregate": {
+            "input": {
+              "rowType": {
+                "fields": [
+                  {
+                    "name": "venue",
+                    "type": {
+                      "kind": "TYPE_KIND_STRING",
+                      "nullable": true
+                    }
+                  },
+                  {
+                    "name": "$f1",
+                    "type": {
+                      "kind": "TYPE_KIND_FP64"
+                    }
+                  }
+                ]
+              },
+              "estRowCount": 240,
+              "project": {
+                "input": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "bid",
+                        "type": {
+                          "kind": "TYPE_KIND_COMPOSITE",
+                          "fields": [
+                            {
+                              "name": "Price",
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              }
+                            },
+                            {
+                              "name": "Size",
+                              "type": {
+                                "kind": "TYPE_KIND_I64"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "name": "venue",
+                        "type": {
+                          "kind": "TYPE_KIND_COMPOSITE",
+                          "nullable": true,
+                          "fields": [
+                            {
+                              "name": "Name",
+                              "type": {
+                                "kind": "TYPE_KIND_STRING"
+                              }
+                            },
+                            {
+                              "name": "Country",
+                              "type": {
+                                "kind": "TYPE_KIND_STRING",
+                                "nullable": true
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 240,
+                  "read": {
+                    "table": {
+                      "sourceId": "mem",
+                      "schema": "main",
+                      "table": "quotes"
+                    },
+                    "projection": [
+                      3,
+                      5
+                    ]
+                  }
+                },
+                "exprs": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_STRING",
+                      "nullable": true
+                    },
+                    "fieldAccess": {
+                      "input": {
+                        "type": {
+                          "kind": "TYPE_KIND_COMPOSITE",
+                          "nullable": true,
+                          "fields": [
+                            {
+                              "name": "Name",
+                              "type": {
+                                "kind": "TYPE_KIND_STRING"
+                              }
+                            },
+                            {
+                              "name": "Country",
+                              "type": {
+                                "kind": "TYPE_KIND_STRING",
+                                "nullable": true
+                              }
+                            }
+                          ]
+                        },
+                        "fieldRef": {
+                          "index": 1
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_FP64"
+                    },
+                    "fieldAccess": {
+                      "input": {
+                        "type": {
+                          "kind": "TYPE_KIND_COMPOSITE",
+                          "fields": [
+                            {
+                              "name": "Price",
+                              "type": {
+                                "kind": "TYPE_KIND_FP64"
+                              }
+                            },
+                            {
+                              "name": "Size",
+                              "type": {
+                                "kind": "TYPE_KIND_I64"
+                              }
+                            }
+                          ]
+                        },
+                        "fieldRef": {}
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "groupings": [
+              {
+                "keys": [
+                  0
+                ]
+              }
+            ],
+            "measures": [
+              {
+                "function": "AGGREGATE_FUNCTION_ID_COUNT",
+                "type": {
+                  "kind": "TYPE_KIND_I64"
+                }
+              },
+              {
+                "function": "AGGREGATE_FUNCTION_ID_MAX",
+                "args": [
+                  {
+                    "type": {
+                      "kind": "TYPE_KIND_FP64"
+                    },
+                    "fieldRef": {
+                      "index": 1
+                    }
+                  }
+                ],
+                "type": {
+                  "kind": "TYPE_KIND_FP64"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_STRING",
+              "nullable": true
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

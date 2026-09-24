@@ -62,8 +62,10 @@ internal static class ReferenceValues
             return null;
         }
 
+        // A struct carries its validity alone and its values in its children (D302: a composite column
+        // from a source reaches here, as a function's composite never did), so it has no values buffer.
         var values =
-            array.Data.Buffers[1].Span;
+            array.Data.Buffers.Length > 1 ? array.Data.Buffers[1].Span : default;
 
         switch (type.Kind)
         {

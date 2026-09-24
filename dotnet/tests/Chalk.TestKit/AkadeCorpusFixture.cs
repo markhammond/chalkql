@@ -79,6 +79,7 @@ public sealed class AkadeCorpusFixture
         var regions = Fixtures.Regions();
         var suppliers = Fixtures.Suppliers(seed);
         var searchRows = Fixtures.SearchRows();
+        var quotes = Fixtures.Quotes(seed);
         var searchSet = searchRows.ToIndexedSet()
             .WithPrefixIndex(CorpusFixture.SearchName, indexName: CorpusFixture.SearchAccessor)
             .Build();
@@ -213,6 +214,13 @@ public sealed class AkadeCorpusFixture
                     searchSet,
                     CorpusFixture.SearchName,
                     CorpusFixture.SearchAccessor)))
+
+            // D302's composite-column table, declared exactly as the built-in configuration declares
+            // it, and a control here like every table but `bars`.
+            .AddTable("quotes", quotes, t => t
+                .OrderedBy(q => q.Id)
+                .UniqueKey(q => q.Id)
+                .Index(q => q.Symbol))
             )
             .Build();
 

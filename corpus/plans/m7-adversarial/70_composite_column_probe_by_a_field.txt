@@ -1,0 +1,49 @@
+-- u1
+report id:Full, org_id:Full, profiles:Some
+1|1
+
+-- u2
+report id:Full, org_id:Full, profiles:Some
+
+-- u3
+report id:Full, org_id:Full, profiles:None
+
+-- u3-in-o1
+report id:Full, org_id:Full, profiles:None
+
+-- u4
+report id:Full, org_id:Full, profiles:All
+1|1
+5|3
+
+-- u5
+report id:Full, org_id:Full, profiles:None
+
+-- u6
+report id:Full, org_id:Full, profiles:Some
+
+-- u6-two-orgs
+report id:Full, org_id:Full, profiles:Some
+
+-- u7
+report id:Full, org_id:Full, profiles:None
+
+-- u8
+report id:Full, org_id:Full, profiles:None
+
+-- u9
+report id:Full, org_id:Full, profiles:None
+
+-- u10-in-a-region
+report id:Full, org_id:Full, profiles:None
+
+-- u11-subject-in-a-region
+report id:Full, org_id:Full, profiles:None
+
+-- u14-a-vendor
+report id:Full, org_id:Full, profiles:None
+
+-- u15-a-vendor-and-an-org
+report id:Full, org_id:Full, profiles:Some
+1|1
+

@@ -518,16 +518,25 @@ public sealed class CompositeValidatorTests
         AssertInvalid(IrBuilder.Plan(Project(input, [("x", choice)])));
     }
 
+    /// <summary>
+    /// The one composite literal is the typed NULL (D295, D302): the NULL composite a CASE chooses and
+    /// a withheld composite column's placeholder is, legal wherever a composite value is. A literal of a
+    /// composite type carrying any value is refused, as no such value exists.
+    /// </summary>
     [Fact]
-    public void A_composite_has_no_literal_not_even_a_null_one()
+    public void The_one_composite_literal_is_the_typed_null()
     {
         var nullable = Classification.Clone();
         nullable.Nullable = true;
 
-        var ex = AssertInvalid(IrBuilder.Plan(Project(TransactionsRead(), [("x", Null(nullable))])));
+        PlanValidator.Validate(IrBuilder.Plan(Project(
+            TransactionsRead(), [("x", Null(nullable)), ("category", FieldAccess(Null(nullable), 0))])));
+
+        var valued = new Expr { Type = nullable, Literal = new Literal { I64Value = 1 } };
+        var ex = AssertInvalid(IrBuilder.Plan(Project(TransactionsRead(), [("x", valued)])));
 
         Assert.Equal("I-IR-23", ex.Invariant);
-        Assert.Contains("a COMPOSITE cannot be a literal", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("a COMPOSITE cannot be a literal other than a typed NULL", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -543,15 +552,49 @@ public sealed class CompositeValidatorTests
         Assert.Contains("a parameter's type", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// D302: an in-process table may hold a composite column, so a Read carries one — and a field of
+    /// it is read by field access, as a function's composite is. The catalog is what keeps one off
+    /// every source that is not in process.
+    /// </summary>
     [Fact]
-    public void A_composite_is_never_a_table_column()
+    public void A_read_may_carry_a_composite_column_and_a_field_of_it_is_a_field_access()
     {
         var rowType = Row(F("id", I64()), F("c", Classification));
+        var read = Read("transactions", rowType);
 
-        var ex = AssertInvalid(IrBuilder.Plan(Read("transactions", rowType)));
+        PlanValidator.Validate(IrBuilder.Plan(read));
+        PlanValidator.Validate(IrBuilder.Plan(Project(
+            Filter(read, Call(FunctionId.Gt, Bool(), FieldAccess(Ref(rowType, 1), 1), Lit(0.5))),
+            [("id", Ref(rowType, 0)), ("category", FieldAccess(Ref(rowType, 1), 0))])));
+    }
+
+    [Fact]
+    public void A_composite_column_is_still_never_compared_or_sorted()
+    {
+        var rowType = Row(F("id", I64()), F("c", Classification));
+        var read = Read("transactions", rowType);
+
+        var sorted = AssertInvalid(IrBuilder.Plan(Sort(read, Asc(1, Classification))));
+        Assert.Equal("I-IR-23", sorted.Invariant);
+
+        var compared = AssertInvalid(IrBuilder.Plan(
+            Filter(read, Call(FunctionId.IsNotDistinctFrom, Bool(), Ref(rowType, 1), Ref(rowType, 1)))));
+        Assert.Equal("I-IR-23", compared.Invariant);
+    }
+
+    [Fact]
+    public void A_composite_is_never_a_values_column()
+    {
+        var values = new Rel
+        {
+            RowType = Row(F("c", Classification)),
+            VirtualTable = new VirtualTable { Rows = { new VirtualRow { Values = { Null(Classification) } } } },
+        };
+
+        var ex = AssertInvalid(IrBuilder.Plan(values));
 
         Assert.Equal("I-IR-23", ex.Invariant);
-        Assert.Contains("a table column", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

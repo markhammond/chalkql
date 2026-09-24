@@ -126,6 +126,19 @@ public sealed record Sale(int Id, string Region, int? Amount, string Label);
 /// </remarks>
 public sealed record SortedRow(int K, string V);
 
+/// <summary>One side of a quote: a record struct, so a composite column that is never NULL (D302).</summary>
+public readonly record struct QuoteSide(double Price, long Size);
+
+/// <summary>Where a quote was made: a record class, whose composite may be NULL, with a nullable field.</summary>
+public sealed record QuoteVenue(Utf8String Name, string? Country);
+
+/// <summary>
+/// The composite-column fixture (D302): each quote's bid, its ask — absent for some quotes, so a
+/// <c>QuoteSide?</c> — and its venue as members whose types are records. Collated and keyed by
+/// <c>Id</c>; nothing is keyed, indexed or ordered on a composite column.
+/// </summary>
+public sealed record Quote(long Id, Utf8String Symbol, DateTime Ts, QuoteSide Bid, QuoteSide? Ask, QuoteVenue? Venue);
+
 /// <summary>
 /// Deterministic generators. Every one takes a seed and produces identical data on every platform:
 /// seeded <see cref="Random"/> uses .NET's stable legacy algorithm, and no control flow depends on a
@@ -321,6 +334,31 @@ public static class Fixtures
         }
 
         return rows;
+    }
+
+    /// <summary>
+    /// The <c>quotes</c> rows (D302): 240 quotes over the five symbols, the ask absent from one in
+    /// seven and the venue from one in five, the venue's country absent from one in three, so every
+    /// NULL path of a composite column and of a field is in the data.
+    /// </summary>
+    public static IReadOnlyList<Quote> Quotes(int seed = DefaultSeed)
+    {
+        var random = new Random(seed + 7);
+        Utf8String[] venues = [Utf8String.FromString("north"), Utf8String.FromString("south"), Utf8String.FromString("east")];
+        var quotes = new Quote[240];
+        for (var i = 0; i < quotes.Length; i++)
+        {
+            var mid = 100 + random.Next(0, 5000) / 10.0;
+            quotes[i] = new Quote(
+                i,
+                Symbols[i % Symbols.Length],
+                BarsStart.AddSeconds(i * 15),
+                new QuoteSide(mid - 0.5, random.Next(1, 400)),
+                i % 7 == 6 ? null : new QuoteSide(mid + 0.5, random.Next(1, 400)),
+                i % 5 == 4 ? null : new QuoteVenue(venues[i % venues.Length], i % 3 == 2 ? null : "NZ"));
+        }
+
+        return quotes;
     }
 
     /// <summary>
