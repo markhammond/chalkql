@@ -881,11 +881,7 @@ public sealed class PocoTableBuilder<T>
             for (var k = 0; k < keyCount; k++)
             {
                 var column = Index(byMember, declaration.Members[k]);
-                RefuseComposite(
-                    columns, column, $"index '{declaration.Name ?? "(unnamed)"}'", "an index key");
-
                 keyColumns[k] = column;
-                accessors[k] = columns[column].CompileLogicalAccessor();
                 keyColumnNames[k] = columns[column].Name;
             }
 
@@ -900,6 +896,13 @@ public sealed class PocoTableBuilder<T>
                 name += string.Join("_", keyColumnNames);
             }
 
+            // D302: an index over a composite member is refused by the name it would have had.
+            for (var k = 0; k < keyCount; k++)
+            {
+                RefuseComposite(columns, keyColumns[k], $"index '{name}'", "an index key");
+                accessors[k] = columns[keyColumns[k]].CompileLogicalAccessor();
+            }
+
             var descriptor = new IndexDescriptor
             {
                 Name = name,
@@ -907,7 +910,7 @@ public sealed class PocoTableBuilder<T>
                 Columns = keyColumns,
                 Unique = declaration.Unique,
                 Directions = declaration.Directions,
-                Covering = CoveringColumns(declaration, byMember, keyColumns, columns),
+                Covering = CoveringColumns(declaration, name, byMember, keyColumns, columns),
                 // D283: the built-in index is a permutation, and a clustered one is a permutation
                 // with a copy beside it. The window a range resolves to is a contiguous slice, so
                 // walking it from its end costs exactly what walking it from its start does.
@@ -960,6 +963,7 @@ public sealed class PocoTableBuilder<T>
     /// </summary>
     private int[] CoveringColumns(
         IndexDeclaration declaration,
+        string name,
         Dictionary<string, int> byMember,
         int[] keyColumns,
         PocoColumn<T>[] columns)
@@ -971,7 +975,7 @@ public sealed class PocoTableBuilder<T>
                 && Array.FindIndex(columns, c => c.Type.Kind == Chalk.Ir.TypeKind.Composite) is var composite and >= 0)
             {
                 throw new CatalogValidationException(
-                    $"table '{_table}' index '{declaration.Name ?? "(unnamed)"}'",
+                    $"table '{_table}' index '{name}'",
                     $"a clustered index with no covering set copies every column, and '{columns[composite].Name}' "
                     + "is a composite column, which a clustered copy never carries. Name the covering set "
                     + "with Covering(…), leaving the composite column out.");
@@ -984,8 +988,7 @@ public sealed class PocoTableBuilder<T>
         foreach (var member in members)
         {
             var column = Index(byMember, member);
-            RefuseComposite(
-                columns, column, $"index '{declaration.Name ?? "(unnamed)"}'", "a clustered index's covering set");
+            RefuseComposite(columns, column, $"index '{name}'", "a clustered index's covering set");
             covering.Add(column);
         }
 
