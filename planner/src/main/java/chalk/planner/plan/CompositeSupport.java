@@ -21,6 +21,7 @@ import org.apache.calcite.sql.SqlSetOperator;
 import org.apache.calcite.sql.SqlWindow;
 import org.apache.calcite.sql.fun.SqlCase;
 import org.apache.calcite.sql.validate.SqlValidator;
+import org.apache.calcite.sql.validate.SqlValidatorNamespace;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
@@ -360,6 +361,23 @@ public final class CompositeSupport {
      * only thing its type is ever inferred from.
      */
     private boolean isComposite(@Nullable RelDataType type, SqlNode node) {
+      // Row-value syntax — `(a, b) IN (…)`, `(a, b) = (c, d)`, and the CAST the validator's coercion
+      // puts round the right-hand row — is Calcite's to expand into scalar comparisons, and is
+      // never a composite value.
+      if (isRowSyntax(node)) {
+        return false;
+      }
+      // A query's type is its row type, which Calcite calls a struct too. A query standing where a
+      // value does — the right of `= SOME (…)` or `IN (…)`, a scalar sub-query in a CASE — is a
+      // composite value only when its one column is one.
+      SqlValidatorNamespace namespace = unvalidated ? null : validator.getNamespace(node);
+      if (node.isA(SqlKind.QUERY) || namespace != null) {
+        if (namespace == null) {
+          return false;
+        }
+        RelDataType row = namespace.getRowType();
+        return row.getFieldCount() == 1 && row.getFieldList().get(0).getType().isStruct();
+      }
       if (type != null) {
         return type.isStruct();
       }
@@ -368,6 +386,18 @@ public final class CompositeSupport {
           && UserOperators.declarationOf(call.getOperator()) instanceof UserFunction declaration
           && declaration.descriptor().getReturnType().getKind() == TypeKind.TYPE_KIND_COMPOSITE;
     }
+  }
+
+  /** A {@code ROW(…)} of values, under any number of casts. */
+  private static boolean isRowSyntax(SqlNode node) {
+    SqlNode current = node;
+    while (current instanceof SqlCall call
+        && call.getKind() == SqlKind.CAST
+        && !call.getOperandList().isEmpty()
+        && call.operand(0) != null) {
+      current = call.operand(0);
+    }
+    return current.getKind() == SqlKind.ROW;
   }
 
   /** An {@code ORDER BY} item without its {@code DESC} and {@code NULLS} wrappers. */

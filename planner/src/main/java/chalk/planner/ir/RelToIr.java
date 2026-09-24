@@ -1468,8 +1468,17 @@ public final class RelToIr {
       source.addAll(derived);
     }
 
-    List<Collation> collations = new ArrayList<>(source.size());
+    // D291: a composite has no ordering, so a claim is only ever made up to the first composite
+    // column. The metadata can put one in a derived ordering — a one-row or empty input satisfies
+    // every ordering, and so does whatever follows a unique key — and the claim's prefix is exactly
+    // as true as the whole, where refusing it would refuse a plan nobody asked to sort that way.
+    java.util.SortedSet<RelCollation> claimed = new java.util.TreeSet<>();
     for (RelCollation collation : source) {
+      claimed.add(beforeTheFirstComposite(collation, node.getRowType()));
+    }
+
+    List<Collation> collations = new ArrayList<>(claimed.size());
+    for (RelCollation collation : claimed) {
       if (collation.getFieldCollations().isEmpty()) {
         continue;
       }
@@ -1479,5 +1488,17 @@ public final class RelToIr {
               .build());
     }
     return collations;
+  }
+
+  /** {@code collation} up to, and not including, its first key on a composite column. */
+  private static RelCollation beforeTheFirstComposite(RelCollation collation, RelDataType row) {
+    List<RelFieldCollation> prefix = new ArrayList<>();
+    for (RelFieldCollation field : collation.getFieldCollations()) {
+      if (row.getFieldList().get(field.getFieldIndex()).getType().isStruct()) {
+        return org.apache.calcite.rel.RelCollations.of(prefix);
+      }
+      prefix.add(field);
+    }
+    return collation;
   }
 }

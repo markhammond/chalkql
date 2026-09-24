@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "4524734341631419052",
+  "planDigest": "2249642452895862285",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -315,30 +315,14 @@
                                       "type": {
                                         "kind": "TYPE_KIND_FP64"
                                       },
-                                      "cast": {
-                                        "input": {
-                                          "type": {
-                                            "kind": "TYPE_KIND_FP64"
-                                          },
-                                          "fieldRef": {}
-                                        },
-                                        "onFailure": "CAST_FAILURE_ERROR"
-                                      }
+                                      "fieldRef": {}
                                     },
                                     {
                                       "type": {
                                         "kind": "TYPE_KIND_FP64"
                                       },
-                                      "cast": {
-                                        "input": {
-                                          "type": {
-                                            "kind": "TYPE_KIND_FP64"
-                                          },
-                                          "fieldRef": {
-                                            "index": 1
-                                          }
-                                        },
-                                        "onFailure": "CAST_FAILURE_ERROR"
+                                      "fieldRef": {
+                                        "index": 1
                                       }
                                     }
                                   ],
@@ -391,30 +375,14 @@
                               "type": {
                                 "kind": "TYPE_KIND_FP64"
                               },
-                              "cast": {
-                                "input": {
-                                  "type": {
-                                    "kind": "TYPE_KIND_FP64"
-                                  },
-                                  "fieldRef": {}
-                                },
-                                "onFailure": "CAST_FAILURE_ERROR"
-                              }
+                              "fieldRef": {}
                             },
                             {
                               "type": {
                                 "kind": "TYPE_KIND_FP64"
                               },
-                              "cast": {
-                                "input": {
-                                  "type": {
-                                    "kind": "TYPE_KIND_FP64"
-                                  },
-                                  "fieldRef": {
-                                    "index": 1
-                                  }
-                                },
-                                "onFailure": "CAST_FAILURE_ERROR"
+                              "fieldRef": {
+                                "index": 1
                               }
                             }
                           ],
@@ -452,30 +420,14 @@
                               "type": {
                                 "kind": "TYPE_KIND_FP64"
                               },
-                              "cast": {
-                                "input": {
-                                  "type": {
-                                    "kind": "TYPE_KIND_FP64"
-                                  },
-                                  "fieldRef": {}
-                                },
-                                "onFailure": "CAST_FAILURE_ERROR"
-                              }
+                              "fieldRef": {}
                             },
                             {
                               "type": {
                                 "kind": "TYPE_KIND_FP64"
                               },
-                              "cast": {
-                                "input": {
-                                  "type": {
-                                    "kind": "TYPE_KIND_FP64"
-                                  },
-                                  "fieldRef": {
-                                    "index": 1
-                                  }
-                                },
-                                "onFailure": "CAST_FAILURE_ERROR"
+                              "fieldRef": {
+                                "index": 1
                               }
                             }
                           ],

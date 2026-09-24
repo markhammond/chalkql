@@ -230,6 +230,76 @@ final class CompositeResultsTest {
   }
 
   @Test
+  void a_call_taken_apart_and_the_same_call_selected_whole_are_one_expression() {
+    // The validator casts the arguments to the declared parameter types; the converter drops the
+    // casts that change nothing for a call standing alone and kept them under a field access, so
+    // the two spellings were two expressions and the executor could not share them (D293).
+    Plan plan =
+        plan(
+            "SELECT price_move(\"open\", \"close\").change AS change,"
+                + " price_move(\"open\", \"close\") AS m FROM bars");
+
+    List<Expr> calls =
+        exprs(plan).stream()
+            .filter(e -> e.getKindCase() == Expr.KindCase.CALL)
+            .filter(e -> e.getCall().getUserFunction().equals("main.price_move"))
+            .toList();
+    assertThat(calls).hasSize(2);
+    assertThat(calls.get(0)).isEqualTo(calls.get(1));
+    assertThat(calls.get(0).getCall().getArgsList())
+        .allSatisfy(arg -> assertThat(arg.getKindCase()).isEqualTo(Expr.KindCase.FIELD_REF));
+  }
+
+  @Test
+  void a_row_type_is_not_a_composite_value() {
+    // Calcite calls a query's row type and a row constructor structs too. None of these compares,
+    // chooses between or casts a composite value, and each plans as it did before composites.
+    String[] statements = {
+      "SELECT symbol FROM bars WHERE \"close\" = SOME (SELECT \"close\" FROM bars_small)",
+      "SELECT symbol FROM bars WHERE (symbol, ts) IN (SELECT symbol, ts FROM bars_small)",
+      "SELECT symbol FROM bars WHERE (symbol, \"close\") = ('a', 1.0)",
+      "SELECT CASE WHEN volume > 0 THEN (SELECT MAX(\"close\") FROM bars_small) END AS m FROM bars",
+      "SELECT COALESCE((SELECT MAX(\"close\") FROM bars_small), 0.0) AS m FROM bars",
+      "SELECT CAST((SELECT MAX(\"close\") FROM bars_small) AS DECIMAL(10, 2)) AS m FROM bars",
+    };
+    for (String sql : statements) {
+      assertThat(plan(sql).getOutputType().getFieldsCount()).as(sql).isOne();
+    }
+
+    // A scalar sub-query whose one column is a composite value is one.
+    assertThatThrownBy(
+            () ->
+                plan(
+                    "SELECT symbol FROM bars WHERE price_move(\"open\", \"close\") ="
+                        + " (SELECT price_move(\"close\", \"open\") FROM bars_small LIMIT 1)"))
+        .isInstanceOf(UnsupportedFeatureException.class)
+        .hasMessageContaining("a comparison of a composite value");
+  }
+
+  @Test
+  void a_derived_ordering_stops_short_of_a_composite_column() {
+    // Proved empty, the relation is a VALUES of no row, which satisfies every ordering, the
+    // composite column included. The claim is made up to that column and no further, rather than
+    // refused as an ordering on it (ADR 0077).
+    Plan plan =
+        plan(
+            "SELECT symbol, price_move(\"open\", \"close\") AS m FROM bars WHERE 1 = 0"
+                + " ORDER BY symbol");
+
+    assertThat(plan.getOutputType().getFields(1).getType().getKind())
+        .isEqualTo(TypeKind.TYPE_KIND_COMPOSITE);
+    List<chalk.ir.v1.Collation> claimed = new ArrayList<>(plan.getRoot().getCollationsList());
+    assertThat(claimed)
+        .allSatisfy(
+            collation ->
+                assertThat(collation.getFieldsList())
+                    .noneSatisfy(
+                        field ->
+                            assertThat(field.getExpr().getType().getKind())
+                                .isEqualTo(TypeKind.TYPE_KIND_COMPOSITE)));
+  }
+
+  @Test
   void the_alias_spellings_work_and_the_two_that_look_right_do_not() {
     String inner = "(SELECT symbol, price_move(\"open\", \"close\") AS m FROM bars) AS s";
 

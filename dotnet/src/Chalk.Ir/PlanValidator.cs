@@ -228,7 +228,16 @@ public static class PlanValidator
 
                 case Chalk.Ir.Rel.KindOneofCase.VirtualTable:
                     VirtualTable(rel, kindPath);
-                    RefuseCompositeColumns(output, kindPath, "a VALUES column");
+
+                    // A VALUES row is literals, and no literal is a composite value. An empty one
+                    // holds none: it is what the planner leaves where it proved a relation empty
+                    // — a predicate that folds to FALSE, a principal who may see no row — and its
+                    // row type is still the statement's, a composite column included (ADR 0077).
+                    if (rel.VirtualTable.Rows.Count > 0)
+                    {
+                        RefuseCompositeColumns(output, kindPath, "a VALUES column");
+                    }
+
                     break;
 
                 // A relation the host bound by name (step 26, 16-entitlements.md §2, §4). Its rows

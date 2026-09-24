@@ -271,6 +271,32 @@ public sealed class CompositeValidatorTests
         Assert.Equal("I-IR-4", AssertInvalid(IrBuilder.Plan(wider)).Invariant);
     }
 
+    /// <summary>
+    /// An empty VALUES carries a composite column: it is what the planner leaves where it proved a
+    /// relation empty, and it holds no literal to be a composite. One with a row is still refused.
+    /// </summary>
+    [Fact]
+    public void An_empty_values_may_carry_a_composite_column_and_one_with_a_row_may_not()
+    {
+        var row = Row(F("id", I64()), F("c", Classification));
+        PlanValidator.Validate(IrBuilder.Plan(new Rel
+        {
+            RowType = row,
+            VirtualTable = new VirtualTable(),
+        }));
+
+        var withRow = new Rel
+        {
+            RowType = row,
+            VirtualTable = new VirtualTable
+            {
+                Rows = { new VirtualRow { Values = { Lit(1L), new Expr { Type = Classification, Literal = new Literal { IsNull = true } } } } },
+            },
+        };
+        var ex = AssertInvalid(IrBuilder.Plan(withRow));
+        Assert.Equal("I-IR-23", ex.Invariant);
+    }
+
     [Fact]
     public void A_composite_output_column_is_what_the_host_receives()
     {

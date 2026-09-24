@@ -431,6 +431,52 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
    * decorrelation, which is refused as it always was: Chalk plans a correlated sub-query only as a
    * join (D67).
    */
+  /**
+   * The user call a field access reads, with every cast on its arguments that changes nothing but
+   * nullability taken off (D293, ADR 0077).
+   *
+   * <p>The validator's type coercion wraps a user function's arguments in casts to the declared
+   * parameter types, and the entitlement pass can widen one to nullable when it puts a sanitiser in
+   * a column's place. Calcite removes such a cast from a call that stands alone and does not reach
+   * inside a field access. Left there, {@code f(x).a} and {@code f(x)} lower to two different
+   * expressions, and the executor, which shares a call only between equal expressions, would run
+   * the function twice per row. A windowed call is a {@code RexOver} and is left as it is: its
+   * composite is a measure column.
+   */
+  private RexNode sameCallEitherSpelling(RexNode reference) {
+    if (!(reference instanceof RexCall call)
+        || reference instanceof org.apache.calcite.rex.RexOver
+        || chalk.planner.plan.UserOperators.declarationOf(call.getOperator()) == null) {
+      return reference;
+    }
+    List<RexNode> operands = new ArrayList<>(call.getOperands().size());
+    boolean changed = false;
+    for (RexNode operand : call.getOperands()) {
+      RexNode bare = operand;
+      while (bare instanceof RexCall cast
+          && cast.getKind() == SqlKind.CAST
+          && cast.getOperands().size() == 1
+          && onlyNullabilityDiffers(cast.getOperands().get(0).getType(), cast.getType())) {
+        bare = cast.getOperands().get(0);
+      }
+      changed |= bare != operand;
+      operands.add(bare);
+    }
+    return changed ? call.clone(call.getType(), operands) : call;
+  }
+
+  /** Whether {@code from} is {@code to}, or {@code to} made nullable: a cast that moves no value. */
+  private boolean onlyNullabilityDiffers(
+      org.apache.calcite.rel.type.RelDataType from, org.apache.calcite.rel.type.RelDataType to) {
+    if (from.isNullable() && !to.isNullable()) {
+      return false;
+    }
+    org.apache.calcite.rel.type.RelDataTypeFactory factory = rexBuilder.getTypeFactory();
+    return factory
+        .createTypeWithNullability(from, true)
+        .equals(factory.createTypeWithNullability(to, true));
+  }
+
   @Override
   public Expr visitFieldAccess(RexFieldAccess access) {
     RexNode reference = access.getReferenceExpr();
@@ -441,7 +487,7 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
               + "as a join (docs/design/14-windows-ii.md §8).");
     }
 
-    Expr input = convert(reference);
+    Expr input = convert(sameCallEitherSpelling(reference));
     Type composite = input.getType();
     if (composite.getKind() != TypeKind.TYPE_KIND_COMPOSITE) {
       throw unsupported(

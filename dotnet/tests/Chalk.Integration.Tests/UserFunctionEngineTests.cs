@@ -174,6 +174,56 @@ public sealed class UserFunctionEngineTests(SharedSidecar sidecar)
     }
 
     /// <summary>
+    /// A field of the call beside the same call selected whole, and a predicate over another field:
+    /// one call per row that reaches it, however the call is spelled (D293). The planner writes
+    /// both spellings as the one expression, which is what lets the executor share them.
+    /// </summary>
+    [Fact]
+    public async Task A_field_beside_the_whole_value_is_one_call_per_row()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+
+        var counter = new Counter();
+        await using var engine = await CreateClassifyingAsync(counter, StringLayouts.Utf8View);
+        var prepared = await engine.PrepareAsync(
+            "SELECT id, classify_transaction(description, amount).category AS category,"
+            + " classify_transaction(description, amount) AS c"
+            + " FROM transactions ORDER BY id");
+        var rows = await RowsAsync(engine, prepared);
+
+        Assert.Equal(Transactions.Length, rows.Count);
+        Assert.All(rows, row =>
+        {
+            if (row[2] is object?[] whole)
+            {
+                Assert.Equal(whole[0], row[1]);
+            }
+            else
+            {
+                Assert.Null(row[1]);
+            }
+        });
+        Assert.Equal(Transactions.Count(t => t.Amount is not null), counter.Calls);
+    }
+
+    /// <summary>
+    /// A statement the planner proves empty still hands back its composite column, typed: the
+    /// relation becomes an empty VALUES with the statement's row type, and no row.
+    /// </summary>
+    [Fact]
+    public async Task A_statement_proved_empty_still_carries_its_composite_column()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+
+        await using var engine = await CreateClassifyingAsync(new Counter(), StringLayouts.Utf8View);
+        var prepared = await engine.PrepareAsync(
+            "SELECT id, classify_transaction(description, amount) AS c FROM transactions WHERE 1 = 0");
+
+        Assert.IsType<StructType>(prepared.OutputSchema.GetFieldByIndex(1).DataType);
+        Assert.Empty(await RowsAsync(engine, prepared));
+    }
+
+    /// <summary>
     /// The whole value: one Arrow struct column whose children are named after the record's
     /// properties and carry their nullability, the composite's own on the column; the string layout the
     /// host asked for reaches the fields; and a host reads a cell as the object array of its fields.
