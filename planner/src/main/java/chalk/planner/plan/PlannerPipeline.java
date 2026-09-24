@@ -637,6 +637,9 @@ public final class PlannerPipeline implements AutoCloseable {
     // and everything downstream — the validator, the optimiser, pushdown — sees only what the body
     // is made of (D78, docs/design/17-user-defined-functions.md §2).
     SqlNode inlined = chalk.planner.ir.SqlBodyInliner.inline(parsed, catalog.functions());
+    // The statement's own words, for a refusal that names an expression (D296). Nothing is read
+    // from it unless a refusal asks.
+    StatementText text = StatementText.of(sql, parserConfig(), catalog.functions());
     SqlNode validated;
     try {
       validated = planner.validate(inlined);
@@ -644,7 +647,7 @@ public final class PlannerPipeline implements AutoCloseable {
       // Calcite's own type checks can stop at a misplaced composite first — a composite value IN a subquery
       // reads to it as a row of the composite's fields, a comparison with a scalar has no signature —
       // and the refusal by name below should not depend on which of the two reached it (D291).
-      CompositeSupport.checkUnvalidated(inlined, planner.validator());
+      CompositeSupport.checkUnvalidated(inlined, planner.validator(), text);
       throw e;
     }
     RelDataType parameterRowType = planner.getParameterRowType();
@@ -658,7 +661,7 @@ public final class PlannerPipeline implements AutoCloseable {
     // a built-in aggregate's argument — refused on the validated statement, while every expression
     // still has its validated type and before conversion can fold a comparison away or build a sort
     // nothing can execute (D291, ADR 0077).
-    CompositeSupport.check(validated, java.util.Objects.requireNonNull(planner.validator()));
+    CompositeSupport.check(validated, java.util.Objects.requireNonNull(planner.validator()), text);
 
     long t2 = System.nanoTime();
     RelRoot root = convert(sql, validated);

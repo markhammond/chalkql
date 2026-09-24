@@ -41,13 +41,20 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * window function's argument; and as a column of a {@code UNION}, {@code INTERSECT} or {@code EXCEPT}
  * that compares rows. The {@code ROW} constructor is refused where it is lowered ({@code RexToIr}),
  * and a nested composite where it is declared.
+ *
+ * <p>A refusal that names an expression quotes the statement's own text for it (D296, {@link
+ * StatementText}), and prints the validated form only where no span of the statement can be
+ * recovered — a node the validator synthesised, or one a SQL body brought in.
  */
 public final class CompositeSupport {
   private CompositeSupport() {}
 
-  /** Throws for the first misplaced composite; returns silently for a statement that has none. */
-  public static void check(SqlNode statement, SqlValidator validator) {
-    Checker checker = new Checker(validator, false);
+  /**
+   * Throws for the first misplaced composite; returns silently for a statement that has none. A
+   * refusal quotes {@code text} for the expression it names.
+   */
+  public static void check(SqlNode statement, SqlValidator validator, StatementText text) {
+    Checker checker = new Checker(validator, false, text);
     walk(statement, checker::visit);
   }
 
@@ -62,11 +69,12 @@ public final class CompositeSupport {
    * known to be one from its declaration alone. Returns silently when nothing it can see is a
    * misplaced composite, and the caller throws Calcite's own error.
    */
-  public static void checkUnvalidated(SqlNode statement, @Nullable SqlValidator validator) {
+  public static void checkUnvalidated(
+      SqlNode statement, @Nullable SqlValidator validator, StatementText text) {
     if (validator == null) {
       return;
     }
-    Checker checker = new Checker(validator, true);
+    Checker checker = new Checker(validator, true, text);
     walk(statement, checker::visit);
   }
 
@@ -79,9 +87,13 @@ public final class CompositeSupport {
      */
     private final boolean unvalidated;
 
-    Checker(SqlValidator validator, boolean unvalidated) {
+    /** The statement's own words, which every refusal naming an expression quotes (D296). */
+    private final StatementText text;
+
+    Checker(SqlValidator validator, boolean unvalidated, StatementText text) {
       this.validator = validator;
       this.unvalidated = unvalidated;
+      this.text = text;
     }
 
     void visit(SqlNode node) {
@@ -138,7 +150,7 @@ public final class CompositeSupport {
       for (SqlNode key : window.getPartitionList()) {
         if (isComposite(key)) {
           throw refusal(
-              "PARTITION BY a composite value (" + key + ")",
+              "PARTITION BY a composite value (" + text.quote(key) + ")",
               "A composite value has no equality, so rows cannot be partitioned by one. Partition by one "
                   + "of its fields instead, e.g. PARTITION BY f(x).category.");
         }
@@ -146,7 +158,7 @@ public final class CompositeSupport {
       for (SqlNode key : window.getOrderList()) {
         if (isComposite(unwrapOrder(key))) {
           throw refusal(
-              "a window ORDER BY a composite value (" + unwrapOrder(key) + ")",
+              "a window ORDER BY a composite value (" + text.quote(unwrapOrder(key)) + ")",
               "A composite value has no ordering. Order the window by one of its fields instead, e.g. "
                   + "ORDER BY f(x).confidence.");
         }
@@ -170,7 +182,7 @@ public final class CompositeSupport {
 
       if (isComposite(resolve(row, select.getSelectList(), item), item)) {
         throw refusal(
-            "GROUP BY a composite value (" + item + ")",
+            "GROUP BY a composite value (" + text.quote(item) + ")",
             "A composite value has no equality, so rows cannot be grouped by one. Group by one of its "
                 + "fields instead, e.g. GROUP BY f(x).category.");
       }
@@ -181,7 +193,7 @@ public final class CompositeSupport {
       SqlNode key = unwrapOrder(item);
       if (isComposite(resolve(row, selectList, key), key)) {
         throw refusal(
-            clause + " a composite value (" + key + ")",
+            clause + " a composite value (" + text.quote(key) + ")",
             "A composite value has no ordering. Sort by one of its fields instead, e.g. ORDER BY "
                 + "f(x).confidence, or ORDER BY (c).confidence over a subquery alias.");
       }
@@ -196,7 +208,7 @@ public final class CompositeSupport {
           for (SqlNode operand : call.getOperandList()) {
             if (isComposite(operand)) {
               throw refusal(
-                  "a comparison of a composite value (" + call + ")",
+                  "a comparison of a composite value (" + text.quote(call) + ")",
                   "A composite value has no equality or ordering, so it cannot be compared. Compare one "
                       + "of its fields instead, e.g. f(x).category = 'food'.");
             }
@@ -206,7 +218,7 @@ public final class CompositeSupport {
           SqlNode value = call.operand(0);
           if (isComposite(value)) {
             throw refusal(
-                "a composite value in IN (" + value + ")",
+                "a composite value in IN (" + text.quote(value) + ")",
                 "A composite value has no equality, so it cannot be looked up in a list. Test one of its "
                     + "fields instead, e.g. f(x).category IN ('food', 'rent').");
           }
@@ -214,7 +226,11 @@ public final class CompositeSupport {
         case CASE, COALESCE -> {
           if (isComposite(typeOf(call), call) || resultIsComposite(call)) {
             throw refusal(
-                "a composite value as a " + kind.name().toUpperCase(Locale.ROOT) + " result",
+                "a composite value as a "
+                    + kind.name().toUpperCase(Locale.ROOT)
+                    + " result ("
+                    + text.quote(call)
+                    + ")",
                 "A composite value is carried as the function returned it and is never chosen between. "
                     + "Take it apart first and choose between its fields, e.g. CASE WHEN … THEN "
                     + "f(x).category END.");
@@ -224,7 +240,7 @@ public final class CompositeSupport {
           SqlNode value = call.operand(0);
           if (isComposite(value)) {
             throw refusal(
-                "CAST of a composite value (" + value + ")",
+                "CAST of a composite value (" + text.quote(value) + ")",
                 "A composite value is never cast. Cast one of its fields instead, e.g. "
                     + "CAST(f(x).confidence AS DECIMAL(5, 2)).");
           }
@@ -287,7 +303,7 @@ public final class CompositeSupport {
         }
         if (isComposite(operand)) {
           throw refusal(
-              call.getOperator().getName() + " of a composite value (" + operand + ")",
+              call.getOperator().getName() + " of a composite value (" + text.quote(operand) + ")",
               "A built-in aggregate takes a scalar. Aggregate one of the composite's fields instead, "
                   + "e.g. MAX(f(x).confidence).");
         }

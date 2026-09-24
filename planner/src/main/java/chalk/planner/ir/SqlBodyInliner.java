@@ -402,11 +402,17 @@ public final class SqlBodyInliner extends SqlShuttle {
    * {@code CAST(argument AS declared-type)}, so a call decides nothing about the body's types that
    * the declaration has not already decided. A cast between equal types disappears in
    * {@code RexBuilder.makeCast}, so this leaves no trace in a plan whose arguments already match.
+   *
+   * <p>The cast stands where the argument stood, so it takes the argument's position. Calcite
+   * builds a call's position as the union of its own and its operands', and one built at {@link
+   * SqlParserPos#ZERO} over a positioned operand starts at line 0: the rebuilt call around it, and
+   * every call built around that, would then start there too, and a refusal could not quote the
+   * statement's text for any of them (D296). Positions reach error messages only, never a plan.
    */
   private static SqlNode cast(SqlNode argument, Parameter parameter) {
     RelDataType target = new TypeMapper(SPEC_TYPES).toCalcite(parameter.getType());
     SqlDataTypeSpec spec = SqlTypeUtil.convertTypeToSpec(target);
-    return SqlStdOperatorTable.CAST.createCall(SqlParserPos.ZERO, argument, spec);
+    return SqlStdOperatorTable.CAST.createCall(argument.getParserPosition(), argument, spec);
   }
 
   /** Replaces a bare identifier naming a parameter with the bound argument. */
@@ -430,6 +436,24 @@ public final class SqlBodyInliner extends SqlShuttle {
   // ---- registration-time checks and parsing ----
 
   /** One parse of a scalar or aggregate body's expression. Bodies are small; this is not cached. */
+  /**
+   * Every scalar and aggregate body this inliner could substitute into a statement, parsed exactly
+   * as it parses one. What a caller reads off them is their parser positions, which index each
+   * body's own text and never the statement's: a refusal that quotes the statement (D296) must not
+   * take a span from a substituted body for one of the statement's own.
+   */
+  public static List<SqlNode> substitutableBodies(UserFunctions functions) {
+    List<SqlNode> bodies = new ArrayList<>();
+    for (UserFunction declaration : functions.declarations()) {
+      if (declaration.isSqlBodied()
+          && (declaration.kind() == chalk.ir.v1.FunctionKind.FUNCTION_KIND_SCALAR
+              || declaration.kind() == chalk.ir.v1.FunctionKind.FUNCTION_KIND_AGGREGATE)) {
+        bodies.add(parse(declaration));
+      }
+    }
+    return bodies;
+  }
+
   private static SqlNode parse(UserFunction declaration) {
     try {
       return SqlParser.create(declaration.sqlText(), parserConfig()).parseExpression();
