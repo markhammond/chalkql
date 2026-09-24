@@ -38,9 +38,15 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * {@code LogicalUnion} — and the partition values, which are the whole reason the node exists, are
  * gone. As its own rel it survives the trimmer intact; what it gives up is the trimmer's column
  * pruning, which {@link chalk.planner.plan.rules.PartitionRules#PROJECT} does instead.
+ *
+ * <p>It used to implement Calcite's {@code RelStructuredTypeFlattener.SelfFlatteningRel}, because the
+ * flattener dispatches on rel class with no fallback and failed conversion with "no 'rewriteRel'
+ * method found" on any rel it had no overload for (ADR 0022). Chalk converts through its own driver
+ * now, {@link chalk.planner.plan.ChalkPlanner}, which never runs the flattener — neither over a
+ * statement nor over a SQL-bodied table function's expansion (D292, ADR 0077) — so nothing is left to
+ * ask this node to flatten itself.
  */
-public final class ChalkPartitionedScan extends AbstractRelNode
-    implements ChalkRel, org.apache.calcite.sql2rel.RelStructuredTypeFlattener.SelfFlatteningRel {
+public final class ChalkPartitionedScan extends AbstractRelNode implements ChalkRel {
 
   private ImmutableList<RelNode> inputs;
   private final List<@Nullable RexNode> partitionValues;
@@ -168,19 +174,6 @@ public final class ChalkPartitionedScan extends AbstractRelNode
       values.add(value == null ? "range" : value);
     }
     return written.item("partitions", values);
-  }
-
-  /**
-   * Calcite's structured-type flattener dispatches on rel class and has no fallback: every rel
-   * {@code SqlToRelConverter} produces must be one of its twenty-seven overloads, or implement this
-   * interface. A partitioned scan has no structured columns to flatten — its row type is the
-   * table's — so the generic rewrite, which flattens the inputs and leaves the node alone, is the
-   * whole of it. Without this, a query over a partitioned table fails at conversion with "no
-   * 'rewriteRel' method found", which is the error this whole method exists to answer (ADR 0022).
-   */
-  @Override
-  public void flattenRel(org.apache.calcite.sql2rel.RelStructuredTypeFlattener flattener) {
-    flattener.rewriteGeneric(this);
   }
 
   @Override

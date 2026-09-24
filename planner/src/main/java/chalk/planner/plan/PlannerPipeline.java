@@ -360,7 +360,10 @@ public final class PlannerPipeline implements AutoCloseable {
         new org.apache.calcite.util.CancelFlag(new java.util.concurrent.atomic.AtomicBoolean());
     ParameterHints parameterHints = new ParameterHints();
     return new PlannerPipeline(
-        Frameworks.getPlanner(
+        // Chalk's own driver rather than Frameworks.getPlanner: Calcite's PlannerImpl, less the
+        // structured-type flattener, which would split a struct-valued call into a call per field
+        // (D292, ChalkPlanner).
+        new ChalkPlanner(
             config(
                 catalog,
                 policy,

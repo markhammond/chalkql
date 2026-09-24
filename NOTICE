@@ -8,6 +8,20 @@ distributions and are not redistributed here.
 
 --------------------------------------------------------------------------------
 
+This product includes code derived from Apache Calcite
+(https://calcite.apache.org), licensed under the Apache License 2.0:
+
+    Copyright 2012-2026 The Apache Software Foundation
+
+Derived from that project, and carrying a provenance line at its head:
+
+    planner/src/main/java/chalk/planner/plan/     the planner driver: parse,
+        ChalkPlanner.java                         validate and convert,
+          <- core/src/main/java/org/apache/       without the structured-type
+             calcite/prepare/PlannerImpl.java     flattener
+
+--------------------------------------------------------------------------------
+
 This product includes test material derived from calcite-dotnet
 (https://github.com/ikvmnet/calcite-dotnet), licensed under the Apache License
 2.0:
