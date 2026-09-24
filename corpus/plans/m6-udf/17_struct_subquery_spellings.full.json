@@ -1,0 +1,398 @@
+{
+  "irVersion": 1,
+  "planDigest": "5558839352662255202",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "move",
+        "type": {
+          "kind": "TYPE_KIND_FP64"
+        }
+      },
+      {
+        "name": "Direction",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "Change",
+        "type": {
+          "kind": "TYPE_KIND_FP64"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "move",
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          }
+        },
+        {
+          "name": "Direction",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "Change",
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          }
+        }
+      ]
+    },
+    "estRowCount": 5000,
+    "project": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "move",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              }
+            },
+            {
+              "name": "Direction",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "Change",
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              }
+            },
+            {
+              "name": "ts",
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              }
+            }
+          ]
+        },
+        "estRowCount": 5000,
+        "collations": [
+          {
+            "fields": [
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  },
+                  "fieldRef": {
+                    "index": 4
+                  }
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              },
+              {
+                "expr": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  },
+                  "fieldRef": {}
+                },
+                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+              }
+            ]
+          }
+        ],
+        "project": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "symbol",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                },
+                {
+                  "name": "ts",
+                  "type": {
+                    "kind": "TYPE_KIND_TIMESTAMP",
+                    "precision": 9
+                  }
+                },
+                {
+                  "name": "open",
+                  "type": {
+                    "kind": "TYPE_KIND_FP64"
+                  }
+                },
+                {
+                  "name": "close",
+                  "type": {
+                    "kind": "TYPE_KIND_FP64"
+                  }
+                }
+              ]
+            },
+            "estRowCount": 5000,
+            "collations": [
+              {
+                "fields": [
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_TIMESTAMP",
+                        "precision": 9
+                      },
+                      "fieldRef": {
+                        "index": 1
+                      }
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  },
+                  {
+                    "expr": {
+                      "type": {
+                        "kind": "TYPE_KIND_STRING"
+                      },
+                      "fieldRef": {}
+                    },
+                    "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+                  }
+                ]
+              }
+            ],
+            "read": {
+              "table": {
+                "sourceId": "mem",
+                "schema": "main",
+                "table": "bars_small"
+              },
+              "projection": [
+                0,
+                1,
+                2,
+                5
+              ]
+            }
+          },
+          "exprs": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldAccess": {
+                "input": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRUCT",
+                    "fields": [
+                      {
+                        "name": "Direction",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      },
+                      {
+                        "name": "Change",
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        }
+                      }
+                    ]
+                  },
+                  "call": {
+                    "args": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        },
+                        "fieldRef": {
+                          "index": 2
+                        }
+                      },
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        },
+                        "fieldRef": {
+                          "index": 3
+                        }
+                      }
+                    ],
+                    "userFunction": "main.price_move"
+                  }
+                },
+                "index": 1
+              }
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldAccess": {
+                "input": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRUCT",
+                    "fields": [
+                      {
+                        "name": "Direction",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      },
+                      {
+                        "name": "Change",
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        }
+                      }
+                    ]
+                  },
+                  "call": {
+                    "args": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        },
+                        "fieldRef": {
+                          "index": 2
+                        }
+                      },
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        },
+                        "fieldRef": {
+                          "index": 3
+                        }
+                      }
+                    ],
+                    "userFunction": "main.price_move"
+                  }
+                }
+              }
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_FP64"
+              },
+              "fieldAccess": {
+                "input": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRUCT",
+                    "fields": [
+                      {
+                        "name": "Direction",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      },
+                      {
+                        "name": "Change",
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        }
+                      }
+                    ]
+                  },
+                  "call": {
+                    "args": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        },
+                        "fieldRef": {
+                          "index": 2
+                        }
+                      },
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        },
+                        "fieldRef": {
+                          "index": 3
+                        }
+                      }
+                    ],
+                    "userFunction": "main.price_move"
+                  }
+                },
+                "index": 1
+              }
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_TIMESTAMP",
+                "precision": 9
+              },
+              "fieldRef": {
+                "index": 1
+              }
+            }
+          ]
+        }
+      },
+      "exprs": [
+        {
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          },
+          "fieldRef": {}
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          },
+          "fieldRef": {
+            "index": 1
+          }
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          },
+          "fieldRef": {
+            "index": 2
+          }
+        },
+        {
+          "type": {
+            "kind": "TYPE_KIND_FP64"
+          },
+          "fieldRef": {
+            "index": 3
+          }
+        }
+      ]
+    }
+  }
+}

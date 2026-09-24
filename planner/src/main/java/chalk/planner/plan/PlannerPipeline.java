@@ -45,7 +45,6 @@ import org.apache.calcite.sql.validate.SqlValidatorUtil;
 import org.apache.calcite.sql2rel.RelDecorrelator;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
-import org.apache.calcite.tools.Planner;
 import org.apache.calcite.tools.Programs;
 import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.tools.RelConversionException;
@@ -64,7 +63,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * a heuristic optimiser — stays a drop-in change.
  */
 public final class PlannerPipeline implements AutoCloseable {
-  private final Planner planner;
+  private final ChalkPlanner planner;
   private final PushdownPolicy policy;
   private final List<RelOptRule> volcanoRules;
   private final RuleTrace ruleTrace = new RuleTrace();
@@ -142,7 +141,7 @@ public final class PlannerPipeline implements AutoCloseable {
   private static final int PROGRAM_FIXED_JOIN_ORDER = 1;
 
   private PlannerPipeline(
-      Planner planner,
+      ChalkPlanner planner,
       PushdownPolicy policy,
       List<RelOptRule> volcanoRules,
       RegisteredCatalog catalog,
@@ -637,14 +636,29 @@ public final class PlannerPipeline implements AutoCloseable {
     // SQL bodies are inlined before validation, so a call to one disappears into ordinary algebra
     // and everything downstream — the validator, the optimiser, pushdown — sees only what the body
     // is made of (D78, docs/design/17-user-defined-functions.md §2).
-    SqlNode validated =
-        planner.validate(chalk.planner.ir.SqlBodyInliner.inline(parsed, catalog.functions()));
+    SqlNode inlined = chalk.planner.ir.SqlBodyInliner.inline(parsed, catalog.functions());
+    SqlNode validated;
+    try {
+      validated = planner.validate(inlined);
+    } catch (ValidationException e) {
+      // Calcite's own type checks can stop at a misplaced struct first — a struct IN a subquery
+      // reads to it as a row of the struct's fields, a comparison with a scalar has no signature —
+      // and the refusal by name below should not depend on which of the two reached it (D291).
+      StructSupport.checkUnvalidated(inlined, planner.validator());
+      throw e;
+    }
     RelDataType parameterRowType = planner.getParameterRowType();
 
     // The one LATERAL shape the general decorrelator gets wrong, refused here and not later: it is a
     // question about the statement's own text, and `Planner.rel` decorrelates unconditionally, so
     // after conversion there is no correlate left to ask (ADR 0026).
     LateralCorrelationSupport.check(validated);
+
+    // Where a struct may not stand — a sort, grouping or partition key, a comparison, a CASE result,
+    // a built-in aggregate's argument — refused on the validated statement, while every expression
+    // still has its validated type and before conversion can fold a comparison away or build a sort
+    // nothing can execute (D291, ADR 0077).
+    StructSupport.check(validated, java.util.Objects.requireNonNull(planner.validator()));
 
     long t2 = System.nanoTime();
     RelRoot root = convert(sql, validated);

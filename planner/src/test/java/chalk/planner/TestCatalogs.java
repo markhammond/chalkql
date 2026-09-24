@@ -187,7 +187,40 @@ public final class TestCatalogs {
             .addParameters(parameter("t", ts))
             .addMonotonicity(chalk.ir.v1.Monotonicity.MONOTONICITY_INCREASING)
             .setClient(chalk.ir.v1.ClientBody.getDefaultInstance())
+            .build(),
+
+        // Structured results (D291–D294): what the client infers from its PriceMove and PriceRange
+        // records — the fields are the records' properties, named as declared.
+        scalar(
+                "price_move",
+                struct(
+                    false,
+                    field("Direction", type(TypeKind.TYPE_KIND_STRING)),
+                    field("Change", type(TypeKind.TYPE_KIND_FP64))))
+            .setStrict(true)
+            .addParameters(parameter("open_price", d))
+            .addParameters(parameter("close_price", d))
+            .setClient(chalk.ir.v1.ClientBody.getDefaultInstance())
+            .build(),
+        aggregate(
+                "close_range",
+                struct(
+                    true,
+                    field("Low", type(TypeKind.TYPE_KIND_FP64)),
+                    field("High", type(TypeKind.TYPE_KIND_FP64))))
+            .setWindow(true)
+            .addParameters(parameter("x", d))
+            .setClient(chalk.ir.v1.ClientBody.getDefaultInstance())
             .build());
+  }
+
+  /** A STRUCT of {@code fields}, nullable as a whole or not (D291). */
+  public static Type struct(boolean nullable, chalk.ir.v1.Field... fields) {
+    Type.Builder type = Type.newBuilder().setKind(TypeKind.TYPE_KIND_STRUCT).setNullable(nullable);
+    for (chalk.ir.v1.Field field : fields) {
+      type.addFields(field);
+    }
+    return type.build();
   }
 
   /** The native function the M4 ADO source declares (§5), for the pushdown half of the corpus. */

@@ -75,6 +75,17 @@ public static class CorpusFunctions
                 .Returns<long>()
                 .Strict()
                 .Increasing("t")
+                .Client())
+
+            // Structured results (D291–D294): a scalar and an aggregate that each answer a record,
+            // declared from the record itself.
+            .AddFunction("price_move", f => f
+                .Scalar<double, double, PriceMove>("open_price", "close_price")
+                .Strict()
+                .Client())
+            .AddFunction("close_range", f => f
+                .Aggregate<double, PriceRange>("x")
+                .Window()
                 .Client());
     }
 
@@ -136,6 +147,27 @@ public static class CorpusFunctions
             Finish = static s => s.Count == 0 ? null : s.Sum,
         });
 
+        // Structured results (D294): a delegate that answers a record, and an aggregate whose Finish
+        // does. Neither allocates: the direction is one of three arrays made once.
+        registry.AddScalar<double, double, PriceMove>("price_move", static (open, close) => Move(open, close));
+        registry.AddAggregate("close_range", new AggregateSpec<PriceRangeState, double, PriceRange?>
+        {
+            Init = static () => default,
+            Add = static (ref s, x) =>
+            {
+                s.Low = s.Count == 0 ? x : Math.Min(s.Low, x);
+                s.High = s.Count == 0 ? x : Math.Max(s.High, x);
+                s.Count++;
+            },
+            Merge = static (a, b) => a.Count == 0 ? b : b.Count == 0 ? a : new PriceRangeState
+            {
+                Low = Math.Min(a.Low, b.Low),
+                High = Math.Max(a.High, b.High),
+                Count = a.Count + b.Count,
+            },
+            Finish = static s => s.Count == 0 ? null : new PriceRange(s.Low, s.High),
+        });
+
         // Tier 1 table function.
         registry.AddTable<long>(
             "generate_series",
@@ -144,6 +176,32 @@ public static class CorpusFunctions
         // Tier 2: the same registry, a whole-batch kernel.
         registry.AddKernel("fast_hash", new FastHashKernel());
     }
+
+    /// <summary>
+    /// What <c>price_move</c> answers (D291): which way a bar moved — <c>up</c>, <c>down</c> or
+    /// <c>flat</c> — and by how much. Declared from this record, so the struct's fields are its
+    /// properties in order, <c>Direction STRING</c> and <c>Change FP64</c>, both non-nullable.
+    /// </summary>
+    public readonly record struct PriceMove(Utf8String Direction, double Change);
+
+    /// <summary>What <c>close_range</c> answers: the lowest and the highest value it saw.</summary>
+    public readonly record struct PriceRange(double Low, double High);
+
+    /// <summary><c>close_range</c>'s state: the extremes so far, and how many values made them.</summary>
+    public struct PriceRangeState
+    {
+        public double Low;
+        public double High;
+        public long Count;
+    }
+
+    private static readonly Utf8String Up = "up"u8.ToArray();
+    private static readonly Utf8String Down = "down"u8.ToArray();
+    private static readonly Utf8String Flat = "flat"u8.ToArray();
+
+    /// <summary><c>price_move</c> itself: a comparison and a subtraction, and nothing allocated.</summary>
+    public static PriceMove Move(double open, double close) =>
+        new(close > open ? Up : close < open ? Down : Flat, close - open);
 
     /// <summary>What <c>as_of()</c> answers: fixed, so the corpus is deterministic.</summary>
     public static readonly DateTime AsOf = new(2026, 3, 1, 12, 0, 0, DateTimeKind.Utc);

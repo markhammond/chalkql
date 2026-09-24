@@ -1,0 +1,293 @@
+{
+  "irVersion": 1,
+  "planDigest": "2724533468372680996",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "symbol",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "low",
+        "type": {
+          "kind": "TYPE_KIND_FP64",
+          "nullable": true
+        }
+      },
+      {
+        "name": "high",
+        "type": {
+          "kind": "TYPE_KIND_FP64",
+          "nullable": true
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "symbol",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "low",
+          "type": {
+            "kind": "TYPE_KIND_FP64",
+            "nullable": true
+          }
+        },
+        {
+          "name": "high",
+          "type": {
+            "kind": "TYPE_KIND_FP64",
+            "nullable": true
+          }
+        }
+      ]
+    },
+    "estRowCount": 5,
+    "collations": [
+      {
+        "fields": [
+          {
+            "expr": {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+          }
+        ]
+      }
+    ],
+    "sort": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "symbol",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            },
+            {
+              "name": "low",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              }
+            },
+            {
+              "name": "high",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              }
+            }
+          ]
+        },
+        "estRowCount": 5,
+        "project": {
+          "input": {
+            "rowType": {
+              "fields": [
+                {
+                  "name": "symbol",
+                  "type": {
+                    "kind": "TYPE_KIND_STRING"
+                  }
+                },
+                {
+                  "name": "$f1",
+                  "type": {
+                    "kind": "TYPE_KIND_STRUCT",
+                    "nullable": true,
+                    "fields": [
+                      {
+                        "name": "Low",
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        }
+                      },
+                      {
+                        "name": "High",
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "estRowCount": 5,
+            "hashAggregate": {
+              "aggregate": {
+                "input": {
+                  "rowType": {
+                    "fields": [
+                      {
+                        "name": "symbol",
+                        "type": {
+                          "kind": "TYPE_KIND_STRING"
+                        }
+                      },
+                      {
+                        "name": "close",
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        }
+                      }
+                    ]
+                  },
+                  "estRowCount": 5000,
+                  "read": {
+                    "table": {
+                      "sourceId": "mem",
+                      "schema": "main",
+                      "table": "bars_small"
+                    },
+                    "projection": [
+                      0,
+                      5
+                    ]
+                  }
+                },
+                "groupings": [
+                  {
+                    "keys": [
+                      0
+                    ]
+                  }
+                ],
+                "measures": [
+                  {
+                    "args": [
+                      {
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        },
+                        "fieldRef": {
+                          "index": 1
+                        }
+                      }
+                    ],
+                    "type": {
+                      "kind": "TYPE_KIND_STRUCT",
+                      "nullable": true,
+                      "fields": [
+                        {
+                          "name": "Low",
+                          "type": {
+                            "kind": "TYPE_KIND_FP64"
+                          }
+                        },
+                        {
+                          "name": "High",
+                          "type": {
+                            "kind": "TYPE_KIND_FP64"
+                          }
+                        }
+                      ]
+                    },
+                    "userFunction": "main.close_range"
+                  }
+                ]
+              }
+            }
+          },
+          "exprs": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              },
+              "fieldAccess": {
+                "input": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRUCT",
+                    "nullable": true,
+                    "fields": [
+                      {
+                        "name": "Low",
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        }
+                      },
+                      {
+                        "name": "High",
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        }
+                      }
+                    ]
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                }
+              }
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              },
+              "fieldAccess": {
+                "input": {
+                  "type": {
+                    "kind": "TYPE_KIND_STRUCT",
+                    "nullable": true,
+                    "fields": [
+                      {
+                        "name": "Low",
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        }
+                      },
+                      {
+                        "name": "High",
+                        "type": {
+                          "kind": "TYPE_KIND_FP64"
+                        }
+                      }
+                    ]
+                  },
+                  "fieldRef": {
+                    "index": 1
+                  }
+                },
+                "index": 1
+              }
+            }
+          ]
+        }
+      },
+      "fields": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_STRING"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
+    }
+  }
+}

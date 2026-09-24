@@ -163,6 +163,21 @@ public final class CatalogValidator {
           throw new InvalidCatalogException(functionPath, "the function declares no return type");
         }
         validateType(function.getReturnType(), functionPath + ".return_type");
+        // D291: a struct comes from a function the host implements. A SQL body is inlined into
+        // algebra that has no way to build one, and a native body runs in a source that has no way
+        // to return one.
+        if (function.getReturnType().getKind() == TypeKind.TYPE_KIND_STRUCT
+            && function.getImplementationCase() != FunctionDescriptor.ImplementationCase.CLIENT) {
+          throw new InvalidCatalogException(
+              functionPath + ".return_type",
+              "'"
+                  + function.getName()
+                  + "' returns a STRUCT and is "
+                  + (function.getImplementationCase() == FunctionDescriptor.ImplementationCase.SQL
+                      ? "SQL-bodied"
+                      : "native")
+                  + "; only a client-bodied function returns a struct");
+        }
         if (function.hasReturnsTable()) {
           throw new InvalidCatalogException(
               functionPath, "only a table function declares a returned row type");
@@ -230,6 +245,12 @@ public final class CatalogValidator {
           throw new InvalidCatalogException(
               parameterPath, "a v1 parameter is a scalar; LIST parameters are not supported");
         }
+        if (parameter.getType().getKind() == TypeKind.TYPE_KIND_STRUCT) {
+          throw new InvalidCatalogException(
+              parameterPath,
+              "a parameter is a scalar; a STRUCT is only ever a function's result, so pass its "
+                  + "fields as parameters of their own");
+        }
         if (parameter.getOptional() && !parameter.hasDefaultValue()) {
           throw new InvalidCatalogException(
               parameterPath, "an optional parameter must carry the default it stands for");
@@ -251,6 +272,7 @@ public final class CatalogValidator {
           throw new InvalidCatalogException(fieldPath, "the column name is empty");
         }
         validateType(field.getType(), fieldPath);
+        refuseStructColumn(field.getType(), fieldPath, "a table function's column");
       }
     }
   }
@@ -587,6 +609,7 @@ public final class CatalogValidator {
             columnPath, "column name '" + column.getName() + "' is used twice in this table");
       }
       validateType(column.getType(), columnPath + " (" + column.getName() + ")");
+      refuseStructColumn(column.getType(), columnPath + " (" + column.getName() + ")", "a table column");
     }
 
     int columns = table.getColumnsCount();
@@ -849,9 +872,73 @@ public final class CatalogValidator {
     }
   }
 
+  /**
+   * D291: a STRUCT exists only between the function that returned it and the row that takes it
+   * apart or carries it out, so no table and no table function declares one as a column.
+   */
+  private static void refuseStructColumn(Type type, String path, String what) {
+    if (type.getKind() == TypeKind.TYPE_KIND_STRUCT) {
+      throw new InvalidCatalogException(
+          path,
+          "a STRUCT cannot be "
+              + what
+              + "; a struct is the result of a client-bodied function and is never stored."
+              + " Declare its fields as columns of their own");
+    }
+  }
+
+  /**
+   * A struct's fields (D291): at least one, each named, no two names equal ignoring case — SQL
+   * resolves a field that way — and each a scalar, so a struct is exactly one level deep.
+   */
+  private static void validateStructFields(Type type, String path) {
+    if (type.getFieldsCount() == 0) {
+      throw new InvalidCatalogException(path, "a STRUCT declares no fields; it has at least one");
+    }
+    Set<String> names = new HashSet<>();
+    for (int f = 0; f < type.getFieldsCount(); f++) {
+      chalk.ir.v1.Field field = type.getFields(f);
+      String fieldPath = path + ".fields[" + f + "]";
+      if (field.getName().isBlank()) {
+        throw new InvalidCatalogException(fieldPath, "the field name is empty");
+      }
+      fieldPath = fieldPath + " (" + field.getName() + ")";
+      if (!names.add(lower(field.getName()))) {
+        throw new InvalidCatalogException(
+            fieldPath,
+            "field name '"
+                + field.getName()
+                + "' is used twice ignoring case; SQL resolves a field by name ignoring case, so"
+                + " the two would be one field");
+      }
+      TypeKind kind = field.getType().getKind();
+      if (kind == TypeKind.TYPE_KIND_LIST || kind == TypeKind.TYPE_KIND_STRUCT) {
+        throw new InvalidCatalogException(
+            fieldPath,
+            "the field is a "
+                + (kind == TypeKind.TYPE_KIND_LIST ? "LIST" : "STRUCT")
+                + "; a STRUCT is one level deep and its fields are scalars");
+      }
+      validateType(field.getType(), fieldPath);
+    }
+  }
+
   private static void validateType(Type type, String path) {
     if (type.getKind() == TypeKind.TYPE_KIND_UNSPECIFIED) {
       throw new InvalidCatalogException(path, "the column type is unspecified");
+    }
+    if (type.getKind() == TypeKind.TYPE_KIND_STRUCT) {
+      validateStructFields(type, path);
+    } else if (type.getFieldsCount() > 0) {
+      throw new InvalidCatalogException(
+          path,
+          type.getKind() + " declares " + type.getFieldsCount() + " field(s); only a STRUCT has fields");
+    }
+    if (type.getKind() == TypeKind.TYPE_KIND_LIST
+        && type.hasElement()
+        && type.getElement().getKind() == TypeKind.TYPE_KIND_STRUCT) {
+      throw new InvalidCatalogException(
+          path, "a LIST's element is a STRUCT; a list holds scalars and a composite is never nested");
     }
     switch (type.getKind()) {
       case TYPE_KIND_DECIMAL -> {

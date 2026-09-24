@@ -2545,6 +2545,80 @@
             "MONOTONICITY_INCREASING"
           ],
           "client": {}
+        },
+        {
+          "name": "price_move",
+          "kind": "FUNCTION_KIND_SCALAR",
+          "parameters": [
+            {
+              "name": "open_price",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              }
+            },
+            {
+              "name": "close_price",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "TYPE_KIND_STRUCT",
+            "fields": [
+              {
+                "name": "Direction",
+                "type": {
+                  "kind": "TYPE_KIND_STRING"
+                }
+              },
+              {
+                "name": "Change",
+                "type": {
+                  "kind": "TYPE_KIND_FP64"
+                }
+              }
+            ]
+          },
+          "volatility": "VOLATILITY_IMMUTABLE",
+          "strict": true,
+          "client": {}
+        },
+        {
+          "name": "close_range",
+          "kind": "FUNCTION_KIND_AGGREGATE",
+          "parameters": [
+            {
+              "name": "x",
+              "type": {
+                "kind": "TYPE_KIND_FP64",
+                "nullable": true
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "TYPE_KIND_STRUCT",
+            "nullable": true,
+            "fields": [
+              {
+                "name": "Low",
+                "type": {
+                  "kind": "TYPE_KIND_FP64"
+                }
+              },
+              {
+                "name": "High",
+                "type": {
+                  "kind": "TYPE_KIND_FP64"
+                }
+              }
+            ]
+          },
+          "volatility": "VOLATILITY_IMMUTABLE",
+          "window": true,
+          "client": {}
         }
       ]
     }

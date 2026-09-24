@@ -75,6 +75,16 @@ public static class PlanExpectations
                     break;
                 }
 
+                // D291: a field of a struct is an expression too, and how many of them a plan has
+                // is what says the struct was taken apart rather than flattened into its fields.
+                if (string.Equals(kind, "FieldAccess", StringComparison.Ordinal))
+                {
+                    Assert.Equal(
+                        expected,
+                        PlanWalker.AllExprs(plan).Count(e => e.KindCase == Expr.KindOneofCase.FieldAccess));
+                    break;
+                }
+
                 Assert.Equal(expected, PlanWalker.Count(plan, Kind(kind)));
                 break;
             }
@@ -215,6 +225,13 @@ public static class PlanExpectations
 
             case "not_user_function":
                 Assert.Empty(UserFunctions(plan));
+                break;
+
+            // D291: the plan takes a struct apart somewhere, whatever the count.
+            case "has_field_access":
+                Assert.Contains(
+                    PlanWalker.AllExprs(plan),
+                    e => e.KindCase == Expr.KindOneofCase.FieldAccess);
                 break;
 
             case "has_in_list":

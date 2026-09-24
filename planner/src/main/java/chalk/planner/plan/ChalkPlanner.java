@@ -79,6 +79,10 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * the statement's own conversion. Flattening that subtree and not the tree it is spliced into would
  * leave the driver half-flattened, and would keep alive the one reason {@code ChalkPartitionedScan}
  * implemented Calcite's self-flattening interface: an expansion that reads a partitioned table.
+ *
+ * <p>One member is Chalk's own and adds nothing to the conversion: {@link #validator()}, which hands
+ * the pipeline the validator of the statement just validated, so that a check which needs an
+ * expression's validated type ({@code StructSupport}) can ask before anything is converted or folded.
  */
 public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
   private final SqlOperatorTable operatorTable;
@@ -246,6 +250,16 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
     }
     state = State.STATE_4_VALIDATED;
     return validatedSqlNode;
+  }
+
+  /**
+   * The validator the last {@link #validate} used, and with it the type of every node it reached: the
+   * whole statement's when validation succeeded, what it had derived before it stopped when it did
+   * not. Null before the first call. Not a {@code PlannerImpl} member: the pipeline reads it between
+   * validation and conversion.
+   */
+  public @Nullable SqlValidator validator() {
+    return validator;
   }
 
   @Override

@@ -227,6 +227,7 @@ public final class RelToIr {
       builder.setTableFunctionScan(tableFunctionScan(scan));
     } else if (node instanceof ChalkHashJoin join) {
       JoinInfo info = join.analyzeCondition();
+      refuseStructKeys(join, info.leftKeys, info.rightKeys);
       HashJoin.Builder ir =
           HashJoin.newBuilder()
               .setLeft(toRel(join.getLeft()))
@@ -246,6 +247,7 @@ public final class RelToIr {
     } else if (node instanceof chalk.planner.plan.rel.ChalkPartitionedScan scan) {
       builder.setPartitionedScan(partitionedScan(scan));
     } else if (node instanceof ChalkMergeJoin join) {
+      refuseStructKeys(join, join.leftKeys(), join.rightKeys());
       MergeJoin.Builder ir =
           MergeJoin.newBuilder()
               .setLeft(toRel(join.getLeft()))
@@ -393,6 +395,7 @@ public final class RelToIr {
   private chalk.ir.v1.LookupJoin lookupJoin(
       chalk.planner.plan.rel.ChalkLookupJoin join, Rel driving, Rel lookup) {
     JoinInfo info = join.analyzeCondition();
+    refuseStructKeys(join, info.leftKeys, info.rightKeys);
     chalk.ir.v1.LookupJoin.Builder ir =
         chalk.ir.v1.LookupJoin.newBuilder()
             .setDriving(driving)
@@ -416,6 +419,7 @@ public final class RelToIr {
    */
   private chalk.ir.v1.AdaptiveJoin adaptiveJoin(chalk.planner.plan.rel.ChalkAdaptiveJoin join) {
     JoinInfo info = join.analyzeCondition();
+    refuseStructKeys(join, info.leftKeys, info.rightKeys);
     Rel small = toRel(join.getLeft());
     Rel replay =
         Rel.newBuilder()
@@ -483,6 +487,24 @@ public final class RelToIr {
     return ir.build();
   }
 
+  /**
+   * D291: a struct has no equality, so it is never a join key. The statement's own comparison of one
+   * is refused at validation ({@code StructSupport}); this is the same refusal for a key the join
+   * condition reached some other way — a {@code USING} or {@code NATURAL} join on a struct column.
+   */
+  private void refuseStructKeys(Join join, List<Integer> leftKeys, List<Integer> rightKeys) {
+    for (int i = 0; i < leftKeys.size(); i++) {
+      RelDataTypeField left = join.getLeft().getRowType().getFieldList().get(leftKeys.get(i));
+      RelDataTypeField right = join.getRight().getRowType().getFieldList().get(rightKeys.get(i));
+      if (left.getType().isStruct() || right.getType().isStruct()) {
+        throw new UnsupportedFeatureException(
+            "a join on the struct column '" + left.getName() + "'",
+            "A struct has no equality, so it cannot be a join key. Join on one of its fields "
+                + "instead (docs/design/51-structured-function-results.md §1).");
+      }
+    }
+  }
+
   private @Nullable Expr residual(JoinInfo info, Join join) {
     RexNode remainder =
         RexUtil.composeConjunction(join.getCluster().getRexBuilder(), info.nonEquiConditions, true);
@@ -496,6 +518,7 @@ public final class RelToIr {
    */
   private AsOfJoin asOfJoin(ChalkAsOfJoin join) {
     JoinInfo info = join.analyzeCondition();
+    refuseStructKeys(join, info.leftKeys, info.rightKeys);
     int leftFields = join.getLeft().getRowType().getFieldCount();
     RexCall match = (RexCall) join.getMatchCondition();
     RexInputRef first = (RexInputRef) match.getOperands().get(0);
@@ -1338,6 +1361,14 @@ public final class RelToIr {
                   + "have one in its row (docs/design/14-windows-ii.md §5). UNION ALL, which "
                   + "compares nothing, is allowed.");
         }
+        // D291: the same of a struct, which the statement's validation refuses first.
+        if (field.getType().isStruct()) {
+          throw new UnsupportedFeatureException(
+              rel.kind + " on the struct column '" + field.getName() + "'",
+              "A struct has no equality, so a set operation that compares rows cannot have one in "
+                  + "its row. UNION ALL, which compares nothing, carries one "
+                  + "(docs/design/51-structured-function-results.md §1).");
+        }
       }
     }
 
@@ -1388,6 +1419,17 @@ public final class RelToIr {
                 + "'",
             "v1 lists have no ordering or equality; they can be produced, projected and indexed "
                 + "into (docs/design/14-windows-ii.md §5).");
+      }
+
+      // D291: the same of a struct. The statement's validation refuses ORDER BY one by name first;
+      // this is the refusal for an ordering a rule derived rather than the statement wrote.
+      if (key.getType().getKind() == TypeKind.TYPE_KIND_STRUCT) {
+        throw new UnsupportedFeatureException(
+            "ordering on the struct column '"
+                + inputRow.getFieldList().get(field.getFieldIndex()).getName()
+                + "'",
+            "A struct has no ordering: sort by one of its fields instead "
+                + "(docs/design/51-structured-function-results.md §1).");
       }
 
       fields.add(

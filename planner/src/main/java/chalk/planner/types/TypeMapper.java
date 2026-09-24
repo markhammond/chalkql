@@ -71,16 +71,51 @@ public final class TypeMapper {
             }
             yield typeFactory.createArrayType(toCalcite(type.getElement()), -1);
           }
-          // The IR has the kind (D291); the planner maps it once it can plan one.
-          case TYPE_KIND_STRUCT ->
-              throw new UnsupportedFeatureException(
-                  "STRUCT type", "This planner does not map a STRUCT to Calcite yet.");
+          // Depth 1 (D291): every field is a scalar, so this recursion is one level and no more. The
+          // struct's own nullability is set below and the fields keep theirs.
+          case TYPE_KIND_STRUCT -> struct(type);
           case TYPE_KIND_UNSPECIFIED, UNRECOGNIZED ->
               throw new UnsupportedFeatureException(
                   "type kind " + type.getKind(),
                   "The catalog declares a type this planner does not know.");
         };
-    return typeFactory.createTypeWithNullability(base, type.getNullable());
+    return type.getKind() == TypeKind.TYPE_KIND_STRUCT
+        ? typeFactory.enforceTypeWithNullability(base, type.getNullable())
+        : typeFactory.createTypeWithNullability(base, type.getNullable());
+  }
+
+  /**
+   * A STRUCT's Calcite record type (D291), with its fields in declared order and each field's own
+   * nullability. The record's nullability is the caller's to set: {@code createTypeWithNullability}
+   * would make every field nullable along with it, which is not what a nullable struct of non-nullable
+   * fields says, so the caller uses {@code enforceTypeWithNullability}, which leaves the fields alone.
+   */
+  private RelDataType struct(Type type) {
+    if (type.getFieldsCount() == 0) {
+      throw new UnsupportedFeatureException(
+          "STRUCT with no fields", "docs/design/02-ir.md §3 requires at least one field on a STRUCT.");
+    }
+    List<RelDataType> fieldTypes = new java.util.ArrayList<>(type.getFieldsCount());
+    List<String> fieldNames = new java.util.ArrayList<>(type.getFieldsCount());
+    for (Field field : type.getFieldsList()) {
+      if (field.getType().getKind() == TypeKind.TYPE_KIND_STRUCT
+          || field.getType().getKind() == TypeKind.TYPE_KIND_LIST) {
+        throw nested(
+            "a STRUCT whose field '" + field.getName() + "' is a " + field.getType().getKind());
+      }
+      fieldTypes.add(toCalcite(field.getType()));
+      fieldNames.add(field.getName());
+    }
+    return typeFactory.createStructType(
+        org.apache.calcite.rel.type.StructKind.FULLY_QUALIFIED, fieldTypes, fieldNames);
+  }
+
+  /** A composite inside a composite: refused, because a STRUCT and a LIST are one level deep. */
+  private static UnsupportedFeatureException nested(String what) {
+    return new UnsupportedFeatureException(
+        "a nested composite type (" + what + ")",
+        "A STRUCT's fields and a LIST's element are scalars: both are exactly one level deep "
+            + "(docs/design/51-structured-function-results.md §1).");
   }
 
   /** The IR type for a Calcite type. */
@@ -142,6 +177,22 @@ public final class TypeMapper {
                   + "(docs/design/14-windows-ii.md §5).");
         }
         builder.setKind(TypeKind.TYPE_KIND_LIST).setElement(toIr(element));
+      }
+      // D291: a record — what a struct-valued user function returns — is a STRUCT of its fields,
+      // one level deep. Only a function produces one; a ROW constructor is refused where it is met.
+      case ROW -> {
+        builder.setKind(TypeKind.TYPE_KIND_STRUCT);
+        for (RelDataTypeField field : type.getFieldList()) {
+          RelDataType fieldType = field.getType();
+          SqlTypeName fieldName = fieldType.getSqlTypeName();
+          if (fieldName == SqlTypeName.ROW
+              || fieldName == SqlTypeName.ARRAY
+              || fieldName == SqlTypeName.MULTISET
+              || fieldName == SqlTypeName.MAP) {
+            throw nested(type.getFullTypeString());
+          }
+          builder.addFields(Field.newBuilder().setName(field.getName()).setType(toIr(fieldType)));
+        }
       }
       default ->
           throw new UnsupportedFeatureException(

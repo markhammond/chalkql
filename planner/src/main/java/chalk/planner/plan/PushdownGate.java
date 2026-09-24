@@ -492,6 +492,12 @@ public final class PushdownGate {
       // answers to, and `PushdownRules.SortRule` is where that is asked.
       return !(node instanceof chalk.planner.entitlement.BoundParam) && supportsParameters();
     }
+    if (node instanceof org.apache.calcite.rex.RexFieldAccess) {
+      // D291: a field of a STRUCT, and a struct only ever comes from a client-bodied function,
+      // which runs in the host and never in a source. Declined by name rather than by falling
+      // through, so the reason is written down where the next reader looks for it.
+      return false;
+    }
     if (!(node instanceof RexCall call)) {
       return false;
     }
