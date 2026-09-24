@@ -252,8 +252,8 @@ public final class CatalogValidator {
         if (parameter.getType().getKind() == TypeKind.TYPE_KIND_COMPOSITE) {
           throw new InvalidCatalogException(
               parameterPath,
-              "a parameter is a scalar; a COMPOSITE is only ever a function's result, so pass its "
-                  + "fields as parameters of their own");
+              "a parameter is a scalar; a COMPOSITE is a function's result or an in-process table's"
+                  + " column and never a parameter, so pass its fields as parameters of their own");
         }
         if (parameter.getOptional() && !parameter.hasDefaultValue()) {
           throw new InvalidCatalogException(
@@ -926,8 +926,8 @@ public final class CatalogValidator {
   }
 
   /**
-   * D291: a COMPOSITE exists only between the function that returned it and the row that takes it
-   * apart or carries it out, so no table and no table function declares one as a column.
+   * D291, D302: a COMPOSITE is a client-bodied function's result or a column of an in-process
+   * source's table, so no table function declares one as a column.
    */
   private static void refuseCompositeColumn(Type type, String path, String what) {
     if (type.getKind() == TypeKind.TYPE_KIND_COMPOSITE) {
@@ -935,8 +935,8 @@ public final class CatalogValidator {
           path,
           "a COMPOSITE cannot be "
               + what
-              + "; a composite value is the result of a client-bodied function and is never stored."
-              + " Declare its fields as columns of their own");
+              + "; a composite value is a client-bodied function's result or a column of an"
+              + " in-process source's table. Declare its fields as columns of their own");
     }
   }
 

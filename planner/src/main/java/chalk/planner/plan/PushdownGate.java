@@ -493,9 +493,10 @@ public final class PushdownGate {
       return !(node instanceof chalk.planner.entitlement.BoundParam) && supportsParameters();
     }
     if (node instanceof org.apache.calcite.rex.RexFieldAccess) {
-      // D291: a field of a COMPOSITE, and a composite value only ever comes from a client-bodied function,
-      // which runs in the host and never in a source. Declined by name rather than by falling
-      // through, so the reason is written down where the next reader looks for it.
+      // D291, D302: a field of a COMPOSITE. A composite value comes from a client-bodied function,
+      // which runs in the host and never in a source, or from a column of an in-process table, whose
+      // source takes nothing pushed. Declined by name rather than by falling through, so the reason
+      // is written down where the next reader looks for it.
       return false;
     }
     if (!(node instanceof RexCall call)) {

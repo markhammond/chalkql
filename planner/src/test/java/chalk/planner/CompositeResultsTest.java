@@ -723,7 +723,9 @@ final class CompositeResultsTest {
                                 chalk.ir.v1.Parameter.newBuilder().setName("m").setType(MOVE))
                             .build())))
         .isInstanceOf(InvalidCatalogException.class)
-        .hasMessageContaining("a COMPOSITE is only ever a function's result");
+        .hasMessageContaining(
+            "a COMPOSITE is a function's result or an in-process table's column and never a"
+                + " parameter");
     // Two fields SQL could not tell apart.
     assertThatThrownBy(
             () ->

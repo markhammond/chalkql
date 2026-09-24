@@ -176,7 +176,7 @@ public sealed class CompositeInferenceTests
             () => Build(f => f.Scalar().Parameter<Classification>("c").Returns<double>()));
 
         Assert.Contains("parameter 'c' is typed Classification", error.Message, StringComparison.Ordinal);
-        Assert.Contains("only ever a function's result", error.Message, StringComparison.Ordinal);
+        Assert.Contains("a composite value is never a parameter", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

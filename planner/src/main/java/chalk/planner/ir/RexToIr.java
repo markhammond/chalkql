@@ -492,8 +492,8 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
     if (composite.getKind() != TypeKind.TYPE_KIND_COMPOSITE) {
       throw unsupported(
           "field access over " + reference.getType(),
-          "A field is read from a COMPOSITE, which only a client-bodied user function produces "
-              + "(docs/design/51-structured-function-results.md §1).");
+          "A field is read from a COMPOSITE: a client-bodied user function's result or an"
+              + " in-process table's column (docs/design/51-structured-function-results.md §1).");
     }
 
     int index = access.getField().getIndex();

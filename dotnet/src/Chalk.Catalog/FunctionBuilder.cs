@@ -20,7 +20,8 @@ namespace Chalk.Catalog;
 /// A result type outside the Tier 1 set that is a record — a <c>class</c> or <c>struct</c> of the
 /// host's own — is a COMPOSITE: its public readable properties, in declaration order, are the fields,
 /// each a Tier 1 type, nullable as its CLR type is. <c>Nullable&lt;TRecord&gt;</c> is a nullable
-/// composite. A composite is only ever a result: a parameter or a column typed as a record is refused.
+/// composite. A composite is never a parameter or a table function's column: one typed as a record is
+/// refused.
 /// </para>
 /// <para>
 /// The Tier 1 set is the CLR types the POCO source maps a member from, inferred as it infers an
@@ -353,7 +354,7 @@ public sealed class FunctionBuilder
     /// The declared type a CLR type stands for: the Tier 1 set and no more — <c>Utf8String</c> being a
     /// STRING spelled without an allocation per row, and the POCO source's own mappings for the rest
     /// (D298) — or, for a result, a COMPOSITE inferred from a record (D294). A record anywhere else is
-    /// refused, because a composite value is only ever a function's result.
+    /// refused, because a composite value is never a parameter or a table function's column.
     /// </summary>
     private ChalkType TypeOf<T>(bool nullable, Role role, string? name)
     {
@@ -369,11 +370,11 @@ public sealed class FunctionBuilder
             if (role != Role.Result)
             {
                 var what = role == Role.Parameter ? "parameter" : "column";
+                var never = role == Role.Parameter ? "a parameter" : "a table function's column";
                 throw new CatalogValidationException(
                     $"functions ({_name})",
                     $"{what} '{name}' is typed {CompositeInference.Describe(clr)}, which would be a COMPOSITE; "
-                    + $"a composite value is only ever a function's result, never a {what}. Declare its fields "
-                    + $"as {what}s of their own.");
+                    + $"a composite value is never {never}. Declare its fields as {what}s of their own.");
             }
 
             return CompositeInference.Infer(clr, nullable, $"functions ({_name})");
