@@ -16,7 +16,7 @@ Applications and agents increasingly need to query data they do not completely o
 
 ChalkQL is most useful where ***who may know what*** matters, or where the data needed to answer a question does not live neatly in one place.
 
-Database row-level security is often exactly the right answer when access can be expressed cleanly within one database and its schema. ChalkQL addresses the less tidy case: authorisation follows relationships the original schema was not designed around, different principals reach the same data through different scopes, disclosure rules extend beyond rows, or the _correct_ answer spans several sources of truth.
+Database row-level security is often exactly the right answer when access can be expressed cleanly within one database and its schema; in that case, ChalkQL's **entitlement layer** may add little. ChalkQL is aimed at the less tidy middle ground: authorisation follows relationships the original schema was not designed around, different principals reach the same data through different scopes, disclosure rules extend beyond rows, or the _correct_ answer spans several sources of truth.
 
 It is intended for applications that need to:
 
@@ -26,9 +26,7 @@ It is intended for applications that need to:
 * keep application-defined authorisation independent of individual queries and of the physical source in which data happens to reside;
 * evolve access rules as the domain changes, rather than requiring the original storage model to have anticipated every future boundary.
 
-If one trusted application talks to one database and that database's native access controls already express everything required, ChalkQL's **entitlement layer** may add little. The less tidy middle ground is where it becomes challenging: the architecture has evolved, the data is already distributed, boundaries matter, and replacing every source with the theoretically perfect model is neither necessary nor practical.
-
-There’s more to it, of course. But if battling these constraints sounds familiar, ChalkQL may be for you.
+The architecture may already have evolved, the data may already be distributed, and the boundaries may matter more than the original storage model anticipated. Replacing every source with the theoretically perfect model is neither necessary nor practical.
 
 ### _Live streaming queries the ~~hard~~ easy way._
 
@@ -36,15 +34,15 @@ The [tutorial](docs/tutorial.md) develops this step by step, culminating in a li
 
 ### Access control you can reason about.
 
-ChalkQL’s entitlement layer is entirely optional. When used, policy is explicit and inspectable rather than reconstructed from views, predicates, ORMs or application code.
+ChalkQL’s entitlement layer is entirely optional. When used, access policy is explicit and inspectable rather than reconstructed from views, predicates, ORMs or application code.
 
 Entitlements may draw on application state, relationships, roles, resource scopes, or other domain-specific context to govern what a principal may access or derive:
 
 * **Row and column access** — restrict which rows and columns a principal may access.
-* **Value disclosure** — allow direct access, masked values, or testing the presence of a value without revealing it.
+* **Value disclosure** — allow direct access, masking, or testing the presence of a value without revealing it.
 * **Tenant isolation** — constrain access to the appropriate tenant or resource scope, including through transitive relationships.
-* **Aggregate disclosure** — permit approved statistical aggregates over protected values without granting direct access to those values.
-* **Relationship-aware scopes** — resolve access through multiple declared relationships while preserving the scope that confines a grant; for example, a franchise owner may access their stores while an auditor accesses stores within their region.
+* **Aggregate disclosure** — allow approved statistical aggregates over restricted values without direct access.
+* **Relationship-aware scopes** — resolve access through multiple declared relationships while preserving the scope within which access is granted; for example, a franchise owner may access their stores while an auditor accesses stores within their region.
 
 ### Federation for (almost) everyone.
 
@@ -231,6 +229,8 @@ ChalkQL is under active development. APIs, policy semantics, and planner behavio
 
 Feedback, experiments, adversarial SQL, and contributions are welcome.
 
-_Technically_ sound, it was tempting to name the library _Derpinator_, in reference to preventing derpy agentic behaviour.
+## TL;DR
+
+_Technically_ sound, it was tempting to name the library _Derpinator_, in reference to preventing derpy agentic behaviour. **Read this far? Then ChalkQL may be for you!**
 
 <img width="56" height="56" alt="derp_smiley" src="docs/assets/derp_smiley.svg">
