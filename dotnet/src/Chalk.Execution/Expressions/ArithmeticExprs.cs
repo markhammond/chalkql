@@ -248,40 +248,35 @@ internal sealed class RoundDigitsExpr<T> : VectorExprBase
     }
 }
 
-/// <summary>ROUND to a signed number of digits, done by scaling so that negative digits work too.</summary>
+/// <summary>
+/// ROUND to a signed number of digits, half away from zero as SQL rounds, on the exact value (F134,
+/// <see cref="Numeric.ExactRounding"/>): a negative count rounds to a power of ten, and a count at or
+/// beyond the value's own precision leaves it as it is.
+/// </summary>
 internal static class Rounding
 {
-    public static decimal Round(decimal value, int digits)
-    {
-        if (digits is >= 0 and <= 28)
-        {
-            return Math.Round(value, digits, MidpointRounding.AwayFromZero);
-        }
-
-        var factor = Scale(digits);
-        return Math.Round(value * factor, 0, MidpointRounding.AwayFromZero) / factor;
-    }
+    public static decimal Round(decimal value, int digits) =>
+        Numeric.ExactRounding.Round(value, digits, MidpointRounding.AwayFromZero);
 
     public static T Round<T>(T value, int digits)
         where T : System.Numerics.IFloatingPoint<T>
     {
-        if (digits is >= 0 and <= 15)
+        if (typeof(T) == typeof(double))
         {
-            return T.Round(value, digits, MidpointRounding.AwayFromZero);
+            var rounded = Numeric.ExactRounding.Round(
+                System.Runtime.CompilerServices.Unsafe.As<T, double>(ref value), digits, MidpointRounding.AwayFromZero);
+            return System.Runtime.CompilerServices.Unsafe.As<double, T>(ref rounded);
         }
 
-        var factor = T.CreateChecked(Scale(digits));
-        return T.Round(value * factor, 0, MidpointRounding.AwayFromZero) / factor;
-    }
-
-    private static decimal Scale(int digits)
-    {
-        var factor = 1m;
-        for (var i = 0; i < Math.Abs(digits); i++)
+        if (typeof(T) == typeof(float))
         {
-            factor *= 10m;
+            var rounded = Numeric.ExactRounding.Round(
+                System.Runtime.CompilerServices.Unsafe.As<T, float>(ref value), digits, MidpointRounding.AwayFromZero);
+            return System.Runtime.CompilerServices.Unsafe.As<float, T>(ref rounded);
         }
 
-        return digits >= 0 ? factor : 1m / factor;
+        throw new Chalk.Sources.UnsupportedFeatureException(
+            $"ROUND over CLR type {typeof(T).Name}",
+            "ROUND with a digit count is computed for double and float lanes.");
     }
 }

@@ -1,4 +1,5 @@
 using Chalk.Execution.Tests.Harness;
+using Chalk.Catalog;
 using Chalk.Ir;
 using Chalk.Sources;
 using Chalk.TestKit;
@@ -269,6 +270,79 @@ public sealed class ArithmeticKernelTests
         Assert.Equal(-3d, rounds[1]);     // -2.5 -> -3
         Assert.Null(floors[4]);
     }
+
+    /// <summary>
+    /// The values a scaled rounding gets wrong, through both engines (F134): a double is rounded on
+    /// its exact value, so 655.925 to two places is 655.92 and 2.675 is 2.67, while the same digits
+    /// as a DECIMAL are exact in base ten and round the other way; a negative count rounds to a power
+    /// of ten; and a midpoint that is exactly representable rounds away from zero.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BatchSizes))]
+    public async Task Round_with_digits_rounds_the_exact_value_in_both_engines(int batchSize)
+    {
+        var source = TestData.Source(RoundingBoundaries);
+        var row = RoundingBoundaries.RowType();
+
+        var two = IrBuilder.Call(FunctionId.Round, IrBuilder.Fp64(true), IrBuilder.Ref(row, 0), IrBuilder.Lit(2));
+        var hundreds = IrBuilder.Call(FunctionId.Round, IrBuilder.Fp64(true), IrBuilder.Ref(row, 0), IrBuilder.Lit(-2));
+        var singles = IrBuilder.Call(FunctionId.Round, IrBuilder.Fp32(true), IrBuilder.Ref(row, 1), IrBuilder.Lit(2));
+        var decimals = IrBuilder.Call(FunctionId.Round, IrBuilder.Dec(18, 4, true), IrBuilder.Ref(row, 2), IrBuilder.Lit(2));
+        var decimalHundreds = IrBuilder.Call(FunctionId.Round, IrBuilder.Dec(18, 4, true), IrBuilder.Ref(row, 2), IrBuilder.Lit(-2));
+
+        foreach (var reference in new[] { false, true })
+        {
+            var doubles = await Runner.ProjectAsync(two, source, RoundingBoundaries, batchSize, reference);
+            Assert.Equal([2.5, -2.5, 655.92, 2.67, 1.0, 0.28, 0.13, 1250.0, null], doubles);
+
+            var coarse = await Runner.ProjectAsync(hundreds, source, RoundingBoundaries, batchSize, reference);
+            Assert.Equal([0.0, -0.0, 700.0, 0.0, 0.0, 0.0, 0.0, 1300.0, null], coarse);
+
+            var floats = await Runner.ProjectAsync(singles, source, RoundingBoundaries, batchSize, reference);
+            Assert.Equal([2.5f, -2.5f, 655.92f, 2.67f, 1.0f, 0.28f, 0.13f, 1250f, null], floats);
+
+            var exact = await Runner.ProjectAsync(decimals, source, RoundingBoundaries, batchSize, reference);
+            Assert.Equal([2.5m, -2.5m, 655.93m, 2.68m, 1.01m, 0.29m, 0.13m, 1250m, null], exact);
+
+            var exactCoarse = await Runner.ProjectAsync(decimalHundreds, source, RoundingBoundaries, batchSize, reference);
+            Assert.Equal([0m, 0m, 700m, 0m, 0m, 0m, 0m, 1300m, null], exactCoarse);
+        }
+
+        await Runner.AssertEnginesAgreeAsync(
+            IrBuilder.Plan(IrBuilder.Project(
+                IrBuilder.Read(RoundingBoundaries.Name, row),
+                [("a", two), ("b", hundreds), ("c", singles), ("d", decimals), ("e", decimalHundreds)])),
+            source);
+    }
+
+    /// <summary>
+    /// The neighbours of midpoints at two decimal places: 655.925, 2.675, 1.005 and 0.285 are below
+    /// their midpoints in binary, as doubles and as floats, and round down; 0.125 is a midpoint exactly
+    /// and rounds away; 1250 sits on a hundreds midpoint. The same digits as a DECIMAL are exact and
+    /// round the other way. The oracle test proves the arithmetic; here the engines' answers are pinned.
+    /// </summary>
+    private static TestTable RoundingBoundaries { get; } = new()
+    {
+        Name = "rounding_boundaries",
+        Columns =
+        [
+            ("f64", ChalkType.Float64(nullable: true)),
+            ("f32", ChalkType.Float32(nullable: true)),
+            ("dec", ChalkType.Decimal(18, 4, nullable: true)),
+        ],
+        Rows =
+        [
+            [2.5d, 2.5f, 2.5m],
+            [-2.5d, -2.5f, -2.5m],
+            [655.925d, 655.925f, 655.925m],
+            [2.675d, 2.675f, 2.675m],
+            [1.005d, 1.005f, 1.005m],
+            [0.285d, 0.285f, 0.285m],
+            [0.125d, 0.125f, 0.125m],
+            [1250d, 1250f, 1250m],
+            [null, null, null],
+        ],
+    };
 
     [Theory]
     [MemberData(nameof(BatchSizes))]

@@ -167,7 +167,11 @@ internal readonly struct CeilOp<T> : IUnaryNumericOp<T>
     public static T Apply(T value) => T.Ceiling(value);
 }
 
-/// <summary>SQL ROUND is half away from zero, not .NET's default half-even (<c>02-ir.md</c> §6).</summary>
+/// <summary>
+/// SQL ROUND is half away from zero, not .NET's default half-even (<c>02-ir.md</c> §6). With no digit
+/// count there is no scaling, so <c>Round</c> is exact here on every runtime; a count goes through
+/// <c>Rounding.Round</c> (F134).
+/// </summary>
 internal readonly struct RoundOp<T> : IUnaryNumericOp<T>
     where T : IFloatingPoint<T>
 {

@@ -626,15 +626,12 @@ internal sealed class ReferenceInterpreter
             }
         }
 
-        private static double RoundAway(double value, int digits)
-        {
-            var factor = Math.Pow(10, digits);
-            return Math.Round(value * factor, 0, MidpointRounding.AwayFromZero) / factor;
-        }
+        // F134: the same exact rounding as the vectorised engine, so the two agree on every midpoint.
+        private static double RoundAway(double value, int digits) =>
+            Numeric.ExactRounding.Round(value, digits, MidpointRounding.AwayFromZero);
 
-        private static decimal RoundAway(decimal value, int digits) => digits is >= 0 and <= 28
-            ? Math.Round(value, digits, MidpointRounding.AwayFromZero)
-            : (decimal)RoundAway((double)value, digits);
+        private static decimal RoundAway(decimal value, int digits) =>
+            Numeric.ExactRounding.Round(value, digits, MidpointRounding.AwayFromZero);
     }
 
     /// <summary>SUBSTRING and LIKE, in code points, spelled out against SQL:2011 (<c>02-ir.md</c> §6).</summary>
