@@ -20,7 +20,7 @@ internal sealed class ArenaWindowUserAggregateEvaluator<TState, TIn, TOut> : Win
     where TOut : allows ref struct
 {
     private readonly ArenaAggregateSpec<TState, TIn, TOut> _spec;
-    private readonly ExecutionArenaStore _store = new();
+    private readonly ArenaStore _store = new();
     private readonly int _valueColumn;
     private readonly CompositeEmitter<TOut>? _composite;
     private readonly ColumnCopier? _appended;
@@ -60,7 +60,7 @@ internal sealed class ArenaWindowUserAggregateEvaluator<TState, TIn, TOut> : Win
     public override void Begin(ExecutionArena arena, int rows)
     {
         base.Begin(arena, rows);
-        _store.Begin(arena);
+        _store.Begin(arena.Pool);
         if (_appended is not null)
         {
             _appended.Begin(rows);

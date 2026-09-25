@@ -76,6 +76,7 @@ public sealed class ExecutionArena : IDisposable
     private readonly Lock _gate = new();
     private readonly Dictionary<Type, SizeClasses> _pools = [];
     private readonly ArenaMemoryAllocator _allocator;
+    private readonly ArenaMemoryPool _memoryPool;
 
     /// <summary>
     /// The one Arrow builder the arena keeps, used as a conduit: content is staged in it and copied into
@@ -128,6 +129,7 @@ public sealed class ExecutionArena : IDisposable
         }
 
         _allocator = new ArenaMemoryAllocator(this);
+        _memoryPool = new ArenaMemoryPool(this);
     }
 
     /// <summary>The options this arena was built with.</summary>
@@ -135,6 +137,14 @@ public sealed class ExecutionArena : IDisposable
 
     /// <summary>Where Arrow buffers for batches built inside this execution come from.</summary>
     public MemoryAllocator Allocator => _allocator;
+
+    /// <summary>
+    /// The arena behind the runtime's pool abstraction, for code written to a <see cref="MemoryPool{T}"/>
+    /// rather than to <see cref="Rent{T}"/>: a buffer rented from it is the size class behind the
+    /// request, counts toward the budget, and comes back to the arena when its owner is disposed.
+    /// Disposing the pool itself does nothing; the arena owns it.
+    /// </summary>
+    public MemoryPool<byte> Pool => _memoryPool;
 
     /// <summary>Bytes rented and not yet returned — batch buffers and scratch together.</summary>
     public long OutstandingBytes => Volatile.Read(ref _outstanding);
@@ -630,35 +640,80 @@ public sealed class ExecutionArena : IDisposable
             bytesAllocated = length;
             return new ExecutionArenaBuffer(_arena, rented, length);
         }
+    }
 
-        private sealed class ExecutionArenaBuffer : IMemoryOwner<byte>
+    /// <summary>
+    /// <see cref="Pool"/>: the arena over the runtime's pool abstraction, on the same size classes and
+    /// accounting as <see cref="Rent{T}"/>. A request of no particular size gets what the runtime's
+    /// shared pool would give it.
+    /// </summary>
+    private sealed class ArenaMemoryPool : MemoryPool<byte>
+    {
+        private const int DefaultLength = 4096;
+
+        private readonly ExecutionArena _arena;
+
+        public ArenaMemoryPool(ExecutionArena arena) => _arena = arena;
+
+        public override int MaxBufferSize => Array.MaxLength;
+
+        public override IMemoryOwner<byte> Rent(int minBufferSize = -1)
         {
-            private readonly ExecutionArena _arena;
-            private readonly int _length;
-            private byte[]? _array;
-
-            public ExecutionArenaBuffer(ExecutionArena arena, byte[] array, int length)
+            if (minBufferSize == -1)
             {
-                _arena = arena;
-                _array = array;
-                _length = length;
+                minBufferSize = DefaultLength;
             }
-            
-            public bool IsEmpty =>
-                _array?.Length == 0;
-
-            public Memory<byte> Memory => _array?.AsMemory(0, _length) ?? Memory<byte>.Empty;
-            
-            public void Dispose()
+            else
             {
-                // Arrow's reference counting can reach a buffer twice when a batch and a shared slice
-                // of it are both disposed; returning an array to a pool twice would corrupt it, so the
-                // reference is swapped out first.
-                var array = Interlocked.Exchange(ref _array, null);
-                if (array is { Length: > 0 })
-                {
-                    _arena.Return(array);
-                }
+                ArgumentOutOfRangeException.ThrowIfNegative(minBufferSize);
+                ArgumentOutOfRangeException.ThrowIfGreaterThan(minBufferSize, MaxBufferSize);
+            }
+
+            if (minBufferSize == 0)
+            {
+                return new ExecutionArenaBuffer(_arena, [], 0);
+            }
+
+            var rented = _arena.Rent<byte>(minBufferSize);
+            return new ExecutionArenaBuffer(_arena, rented, rented.Length);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+        }
+    }
+
+    /// <summary>
+    /// What <see cref="Allocator"/> and <see cref="Pool"/> hand out: an array of the arena's, given
+    /// back to it once, however many times the owner is disposed.
+    /// </summary>
+    private sealed class ExecutionArenaBuffer : IMemoryOwner<byte>
+    {
+        private readonly ExecutionArena _arena;
+        private readonly int _length;
+        private byte[]? _array;
+
+        public ExecutionArenaBuffer(ExecutionArena arena, byte[] array, int length)
+        {
+            _arena = arena;
+            _array = array;
+            _length = length;
+        }
+
+        public bool IsEmpty =>
+            _array?.Length == 0;
+
+        public Memory<byte> Memory => _array?.AsMemory(0, _length) ?? Memory<byte>.Empty;
+
+        public void Dispose()
+        {
+            // Arrow's reference counting can reach a buffer twice when a batch and a shared slice
+            // of it are both disposed; returning an array to a pool twice would corrupt it, so the
+            // reference is swapped out first.
+            var array = Interlocked.Exchange(ref _array, null);
+            if (array is { Length: > 0 })
+            {
+                _arena.Return(array);
             }
         }
     }

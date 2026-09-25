@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 
 namespace Chalk.Sources;
@@ -16,18 +17,34 @@ public readonly record struct ArenaHandle(int Offset, int Length)
 }
 
 /// <summary>
-/// The memory an <see cref="ArenaScope"/> hands out: one growing byte buffer, bump-allocated, owned by
-/// whoever runs the aggregate — the execution's arena in the engine, the heap in the reference executor
-/// — and released as a whole. A returned buffer is garbage until the scope is reset or released;
-/// nothing moves, so a handle stays valid for the scope's life.
+/// The memory an <see cref="ArenaScope"/> hands out: one growing byte buffer, bump-allocated, rented
+/// from a <see cref="MemoryPool{T}"/> — the execution arena's pool in the engine, the runtime's shared
+/// pool in the reference executor — and given back as a whole. A returned buffer is garbage until the
+/// scope is reset or released; nothing moves, so a handle stays valid for the scope's life.
 /// </summary>
-public abstract class ArenaStore
+internal sealed class ArenaStore
 {
-    private byte[] _bytes = [];
+    private MemoryPool<byte>? _pool;
+    private IMemoryOwner<byte>? _owner;
+    private Memory<byte> _memory;
     private int _used;
+
+    /// <summary>A store over <paramref name="pool"/>; null until <see cref="Begin"/> names one.</summary>
+    public ArenaStore(MemoryPool<byte>? pool = null) => _pool = pool;
 
     /// <summary>Bytes handed out and not yet reset, garbage included.</summary>
     public int Used => _used;
+
+    /// <summary>
+    /// Releases what the store holds and rents from <paramref name="pool"/> from here on: the engine's
+    /// operators begin each execution over that execution's arena.
+    /// </summary>
+    public void Begin(MemoryPool<byte> pool)
+    {
+        ArgumentNullException.ThrowIfNull(pool);
+        Release();
+        _pool = pool;
+    }
 
     /// <summary>A zeroed buffer of <paramref name="length"/> bytes.</summary>
     public ArenaHandle Rent(int length)
@@ -35,7 +52,7 @@ public abstract class ArenaStore
         ArgumentOutOfRangeException.ThrowIfNegative(length);
         Ensure(checked(_used + length));
         var buffer = new ArenaHandle(_used, length);
-        _bytes.AsSpan(_used, length).Clear();
+        _memory.Span.Slice(_used, length).Clear();
         _used += length;
         return buffer;
     }
@@ -74,50 +91,38 @@ public abstract class ArenaStore
     }
 
     /// <summary>The bytes behind a handle, valid for this call.</summary>
-    public Span<byte> Bytes(ArenaHandle buffer) => _bytes.AsSpan(buffer.Offset, buffer.Length);
+    public Span<byte> Bytes(ArenaHandle buffer) => _memory.Span.Slice(buffer.Offset, buffer.Length);
 
     /// <summary>Forgets every buffer: what a recomputed frame does before its first row.</summary>
     public void Reset() => _used = 0;
 
-    /// <summary>Gives the memory back to its owner.</summary>
+    /// <summary>Gives the memory back to its pool.</summary>
     public void Release()
     {
-        if (_bytes.Length > 0)
-        {
-            Recycle(_bytes);
-        }
-
-        _bytes = [];
+        _owner?.Dispose();
+        _owner = null;
+        _memory = default;
         _used = 0;
     }
 
-    /// <summary>A buffer of at least <paramref name="minimum"/> bytes holding <paramref name="current"/>'s bytes.</summary>
-    protected abstract byte[] Resize(byte[] current, int minimum);
-
-    /// <summary>Gives a buffer <see cref="Resize"/> handed out back to its owner.</summary>
-    protected abstract void Recycle(byte[] bytes);
-
+    /// <summary>
+    /// Rents a buffer of at least <paramref name="needed"/> bytes, doubling from a floor so a state
+    /// that keeps growing does not go back to the pool for every value, and carries the live bytes
+    /// over. The pool decides what a request rounds up to; the whole of what it hands out is used.
+    /// </summary>
     private void Ensure(int needed)
     {
-        if (needed > _bytes.Length)
+        if (needed <= _memory.Length)
         {
-            _bytes = Resize(_bytes, needed);
+            return;
         }
-    }
-}
 
-/// <summary>The store behind the reference executor's aggregates: plain arrays.</summary>
-internal sealed class HeapArenaStore : ArenaStore
-{
-    protected override byte[] Resize(byte[] current, int minimum)
-    {
-        var grown = new byte[Math.Max(minimum, Math.Max(256, current.Length * 2))];
-        current.CopyTo(grown, 0);
-        return grown;
-    }
-
-    protected override void Recycle(byte[] bytes)
-    {
+        var pool = _pool ?? throw new InvalidOperationException("this arena store is not attached to a pool.");
+        var grown = pool.Rent(Math.Max(needed, Math.Max(256, _memory.Length * 2)));
+        _memory.Span[.._used].CopyTo(grown.Memory.Span);
+        _owner?.Dispose();
+        _owner = grown;
+        _memory = grown.Memory;
     }
 }
 

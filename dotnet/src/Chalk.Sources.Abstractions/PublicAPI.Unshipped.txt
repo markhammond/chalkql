@@ -80,6 +80,7 @@ Chalk.Sources.ExecutionArena.IsRunning.get -> bool
 Chalk.Sources.ExecutionArena.Options.get -> Chalk.Sources.ArenaOptions!
 Chalk.Sources.ExecutionArena.OutstandingBytes.get -> long
 Chalk.Sources.ExecutionArena.PeakBytes.get -> long
+Chalk.Sources.ExecutionArena.Pool.get -> System.Buffers.MemoryPool<byte>!
 Chalk.Sources.ExecutionArena.Rent<T>(int minimumLength) -> T[]!
 Chalk.Sources.ExecutionArena.RentStrings(int minimumLength) -> string![]!
 Chalk.Sources.ExecutionArena.Rentals.get -> long
@@ -504,11 +505,6 @@ static Chalk.Utf8StringComparer.ForString.get -> Chalk.Utf8StringComparer.String
 static Chalk.Utf8StringComparer.Ordinal.get -> Chalk.Utf8StringComparer!
 static Chalk.Utf8StringExtensions.TextEquals(this System.ReadOnlySpan<byte> utf8, string? text) -> bool
 static Chalk.Utf8StringExtensions.Utf8Hash(this System.ReadOnlySpan<byte> utf8) -> int
-Chalk.Sources.ArenaStore
-Chalk.Sources.ArenaStore.ArenaStore() -> void
-Chalk.Sources.ArenaStore.Release() -> void
-Chalk.Sources.ArenaStore.Reset() -> void
-Chalk.Sources.ArenaStore.Used.get -> int
 [CHALK001]Chalk.Sources.ArenaAccumulate<TState, TIn>
 [CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>
 [CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>.Add.get -> Chalk.Sources.ArenaAccumulate<TState, TIn>!
@@ -536,8 +532,6 @@ Chalk.Sources.ArenaStore.Used.get -> int
 [CHALK001]virtual Chalk.Sources.ArenaHasValue<TState>.Invoke(in TState state) -> bool
 [CHALK001]virtual Chalk.Sources.ArenaInit<TState>.Invoke(ref Chalk.Sources.ArenaScope arena) -> TState
 [CHALK001]virtual Chalk.Sources.ArenaMerge<TState>.Invoke(ref TState state, in TState other, ref Chalk.Sources.ArenaScope arena, ref Chalk.Sources.ArenaScope otherArena) -> void
-abstract Chalk.Sources.ArenaStore.Recycle(byte[]! bytes) -> void
-abstract Chalk.Sources.ArenaStore.Resize(byte[]! current, int minimum) -> byte[]!
 Chalk.Sources.ArenaHandle
 Chalk.Sources.ArenaHandle.ArenaHandle() -> void
 Chalk.Sources.ArenaHandle.ArenaHandle(int Offset, int Length) -> void
@@ -548,11 +542,6 @@ Chalk.Sources.ArenaHandle.Length.get -> int
 Chalk.Sources.ArenaHandle.Length.init -> void
 Chalk.Sources.ArenaHandle.Offset.get -> int
 Chalk.Sources.ArenaHandle.Offset.init -> void
-Chalk.Sources.ArenaStore.Bytes(Chalk.Sources.ArenaHandle buffer) -> System.Span<byte>
-Chalk.Sources.ArenaStore.Grow(Chalk.Sources.ArenaHandle buffer, int length) -> Chalk.Sources.ArenaHandle
-Chalk.Sources.ArenaStore.Keep(System.ReadOnlySpan<byte> value) -> Chalk.Sources.ArenaHandle
-Chalk.Sources.ArenaStore.Rent(int length) -> Chalk.Sources.ArenaHandle
-Chalk.Sources.ArenaStore.Return(Chalk.Sources.ArenaHandle buffer) -> void
 [CHALK001]Chalk.Sources.ArenaScope.Bytes(Chalk.Sources.ArenaHandle buffer) -> System.Span<byte>
 [CHALK001]Chalk.Sources.ArenaScope.Grow(Chalk.Sources.ArenaHandle buffer, int length) -> Chalk.Sources.ArenaHandle
 [CHALK001]Chalk.Sources.ArenaScope.Keep(System.ReadOnlySpan<byte> value) -> Chalk.Sources.ArenaHandle

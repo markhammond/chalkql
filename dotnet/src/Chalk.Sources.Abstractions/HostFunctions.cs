@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace Chalk.Sources;
 
 /// <summary>
@@ -372,11 +374,11 @@ internal sealed class HostArenaAggregate<TState, TIn, TOut> : HostAggregate
 
     public override IBoxedAggregate NewBoxed() => new Boxed(_spec);
 
-    /// <summary>The reference executor's accumulator: the same delegates over a heap-backed scope.</summary>
+    /// <summary>The reference executor's accumulator: the same delegates over a scope on the runtime's shared pool.</summary>
     private sealed class Boxed : IBoxedAggregate
     {
         private readonly ArenaAggregateSpec<TState, TIn, TOut> _spec;
-        private readonly HeapArenaStore _store = new();
+        private readonly ArenaStore _store = new(MemoryPool<byte>.Shared);
         private TState _state;
 
         public Boxed(ArenaAggregateSpec<TState, TIn, TOut> spec)

@@ -35,6 +35,39 @@ public sealed class MemoryTests
     }
 
     [Fact]
+    public void The_arena_pool_offers_the_size_class_it_books_and_takes_it_back_once()
+    {
+        var stats = new ExecutionStats();
+        using var arena = new ExecutionArena();
+        arena.BeginExecution(stats);
+
+        var owner = arena.Pool.Rent(1000);
+
+        // A pool's contract is "at least this many": the whole size class is offered, and booked.
+        Assert.Equal(1024, owner.Memory.Length);
+        Assert.Equal(1024, arena.OutstandingBytes);
+        Assert.Equal(1024, stats.PeakPooledBytes);
+
+        owner.Dispose();
+        owner.Dispose();
+
+        Assert.Equal(0, arena.OutstandingBytes);
+        Assert.Equal(1024, arena.PeakBytes);
+    }
+
+    [Fact]
+    public void The_arena_pool_serves_a_request_of_no_particular_size_as_the_shared_pool_does()
+    {
+        using var arena = new ExecutionArena();
+
+        using var owner = arena.Pool.Rent();
+
+        Assert.Equal(4096, owner.Memory.Length);
+        Assert.Equal(0, arena.Pool.Rent(0).Memory.Length);
+        Assert.Throws<ArgumentOutOfRangeException>(() => arena.Pool.Rent(-2));
+    }
+
+    [Fact]
     public void The_arena_allocator_hands_out_zeroed_memory()
     {
         using var arena = new ExecutionArena();

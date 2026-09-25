@@ -7,39 +7,10 @@ using Chalk.Sources;
 namespace Chalk.Execution.Aggregation;
 
 /// <summary>
-/// The store behind an aggregate's <see cref="ArenaScope"/> in the engine: one byte buffer rented from
-/// the execution's arena, grown by doubling, returned when the operator releases.
-/// </summary>
-internal sealed class ExecutionArenaStore : ArenaStore
-{
-    private ExecutionArena? _arena;
-
-    public void Begin(ExecutionArena arena)
-    {
-        Release();
-        _arena = arena;
-    }
-
-    protected override byte[] Resize(byte[] current, int minimum)
-    {
-        var arena = _arena ?? throw new InvalidOperationException("this arena store is not attached to an execution.");
-        var grown = arena.Rent<byte>(Math.Max(minimum, Math.Max(256, current.Length * 2)));
-        current.CopyTo(grown, 0);
-        if (current.Length > 0)
-        {
-            arena.Return(current);
-        }
-
-        return grown;
-    }
-
-    protected override void Recycle(byte[] bytes) => _arena?.Return(bytes);
-}
-
-/// <summary>
 /// A client-bodied aggregate with an arena state over groups (D305): one <typeparamref name="TState"/>
 /// per group in an arena-owned array, as <see cref="UserAggregateAccumulator{TState, TIn, TOut}"/> keeps
-/// it, plus one <see cref="ExecutionArenaStore"/> the states rent variable-length data from. A span
+/// it, plus one <see cref="ArenaStore"/> over the execution arena's pool that the states rent
+/// variable-length data from. A span
 /// answered is copied into the measure column as the group is emitted.
 /// </summary>
 internal sealed class ArenaUserAggregateAccumulator<TState, TIn, TOut> : MeasureAccumulator
@@ -48,7 +19,7 @@ internal sealed class ArenaUserAggregateAccumulator<TState, TIn, TOut> : Measure
     where TOut : allows ref struct
 {
     private readonly ArenaAggregateSpec<TState, TIn, TOut> _spec;
-    private readonly ExecutionArenaStore _store = new();
+    private readonly ArenaStore _store = new();
     private readonly CompositeEmitter<TOut>? _composite;
     private readonly LaneFormat _input;
     private readonly LaneFormat _result;
@@ -71,7 +42,7 @@ internal sealed class ArenaUserAggregateAccumulator<TState, TIn, TOut> : Measure
             : null;
     }
 
-    protected override void BeginCore(ExecutionArena arena) => _store.Begin(arena);
+    protected override void BeginCore(ExecutionArena arena) => _store.Begin(arena.Pool);
 
     public override void EnsureCapacity(int groups)
     {
