@@ -151,11 +151,18 @@ internal static class UserFunctionBinding
             strict: true,
             $"{where}: '{descriptor.Name}' returns",
             key);
-        RequireFixedWidth(
-            descriptor.Parameters[0].Type,
-            $"{where}: '{descriptor.Name}' parameter '{descriptor.Parameters[0].Name}'",
-            key);
-        RequireFixedWidth(descriptor.ReturnType!.Value, $"{where}: '{descriptor.Name}' returns", key);
+        if (aggregate.InputType != typeof(ReadOnlySpan<byte>))
+        {
+            // D304: a STRING or BINARY input reaches a Tier 1 aggregate as a span over the value's
+            // bytes, and only as that; the state and the result stay fixed-width.
+            RequireFixedWidth(
+                descriptor.Parameters[0].Type,
+                $"{where}: '{descriptor.Name}' parameter '{descriptor.Parameters[0].Name}'",
+                key,
+                input: true);
+        }
+
+        RequireFixedWidth(descriptor.ReturnType!.Value, $"{where}: '{descriptor.Name}' returns", key, input: false);
     }
 
     /// <summary>
@@ -163,19 +170,22 @@ internal static class UserFunctionBinding
     /// bytes, and it answers into one — so a BINARY input or result, which a scalar may spell as
     /// <c>ReadOnlyMemory&lt;byte&gt;</c> or <c>byte[]</c>, is refused here rather than at the first row.
     /// </summary>
-    private static void RequireFixedWidth(ChalkType declared, string what, string key)
+    private static void RequireFixedWidth(ChalkType declared, string what, string key, bool input)
     {
         // F132: a STRING is refused here too. The grouped accumulator reads fixed-width lanes and
         // refused a text input at its first row, after the engine had been created.
         if (declared.Kind is Ir.TypeKind.Binary or Ir.TypeKind.String)
         {
             var kind = declared.Kind == Ir.TypeKind.Binary ? "BINARY" : "STRING";
+            var wayOut = input
+                ? $"Spell the input ReadOnlySpan<byte>, which is the {kind}'s own bytes lent for the call, "
+                    + "and keep the state fixed-width"
+                : $"Answer a fixed-width value, or aggregate the {kind} with a Tier 2 kernel";
             throw new InvalidOperationException(
                 $"{what} {IrTypes.Describe(declared.ToProto())}, and a Tier 1 aggregate registered as "
-                + $"'{key}' folds fixed-width values only: its input and result may be bool, sbyte, "
+                + $"'{key}' folds fixed-width values: its state and its result may be bool, sbyte, "
                 + "short, int, long, float, double, decimal, DateOnly, TimeOnly, DateTime, "
-                + $"DateTimeOffset, TimeSpan or Guid. Aggregate a {kind} with a Tier 2 kernel, or over "
-                + "a fixed-width value derived from it.");
+                + $"DateTimeOffset, TimeSpan or Guid. {wayOut}.");
         }
     }
 

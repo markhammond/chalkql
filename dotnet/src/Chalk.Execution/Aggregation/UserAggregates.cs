@@ -17,6 +17,7 @@ namespace Chalk.Execution.Aggregation;
 /// </remarks>
 internal sealed class UserAggregateAccumulator<TState, TIn, TOut> : MeasureAccumulator
     where TState : struct
+    where TIn : allows ref struct
 {
     private readonly AggregateSpec<TState, TIn, TOut> _spec;
     private TState[] _states = [];
@@ -106,6 +107,7 @@ internal sealed class UserAggregateFactory : IHostAggregateVisitor<MeasureAccumu
     }
 
     public MeasureAccumulator Visit<TState, TIn, TOut>(AggregateSpec<TState, TIn, TOut> spec)
-        where TState : struct =>
+        where TState : struct
+        where TIn : allows ref struct =>
         new UserAggregateAccumulator<TState, TIn, TOut>(_inputType, _resultType, _name, spec);
 }

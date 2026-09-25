@@ -30,7 +30,9 @@ namespace Chalk.Client;
 /// input, or of a buffer the host owns — copied into the result column before the next call, a
 /// <see cref="Utf8String"/> or <c>ReadOnlyMemory&lt;byte&gt;</c> over the host's own memory, or a
 /// <c>string</c> or <c>byte[]</c>. A span has no NULL, so a non-strict function, which sees every
-/// NULL, spells a STRING parameter <c>string?</c>.
+/// NULL, spells a STRING parameter <c>string?</c>. A Tier 1 aggregate folds fixed-width state and
+/// answers a fixed-width result; its input may be a fixed-width value or a <c>ReadOnlySpan&lt;byte&gt;</c>
+/// over a STRING or BINARY, which is how a text input reaches one.
 /// </para>
 /// </remarks>
 public interface IFunctionRegistry
@@ -90,7 +92,8 @@ public interface IFunctionRegistry
 
     /// <summary>An aggregate, as the state machine of D80.</summary>
     void AddAggregate<TState, TIn, TOut>(string name, AggregateSpec<TState, TIn, TOut> spec)
-        where TState : struct;
+        where TState : struct
+        where TIn : allows ref struct;
 
     /// <summary>
     /// A table function: a delegate <c>(args…) =&gt; IEnumerable&lt;TRow&gt;</c> whose row type is
@@ -174,7 +177,8 @@ public sealed class FunctionRegistry : IFunctionRegistry
         Add(new HostScalar6<T1, T2, T3, T4, T5, T6, TResult>(Key(name), Required(f)));
 
     public void AddAggregate<TState, TIn, TOut>(string name, AggregateSpec<TState, TIn, TOut> spec)
-        where TState : struct =>
+        where TState : struct
+        where TIn : allows ref struct =>
         Add(new HostAggregate<TState, TIn, TOut>(Key(name), Required(spec)));
 
     public void AddTable<TRow>(string name, Delegate producer) =>

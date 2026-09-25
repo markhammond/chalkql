@@ -25,6 +25,7 @@ namespace Chalk.Execution.Windowing;
 /// </remarks>
 internal sealed class WindowUserAggregateEvaluator<TState, TIn, TOut> : WindowValueEvaluator
     where TState : struct
+    where TIn : allows ref struct
 {
     private readonly AggregateSpec<TState, TIn, TOut> _spec;
     private readonly int _valueColumn;
@@ -218,6 +219,7 @@ internal sealed class WindowUserAggregateFactory : IHostAggregateVisitor<WindowC
     }
 
     public WindowCallEvaluator Visit<TState, TIn, TOut>(AggregateSpec<TState, TIn, TOut> spec)
-        where TState : struct =>
+        where TState : struct
+        where TIn : allows ref struct =>
         new WindowUserAggregateEvaluator<TState, TIn, TOut>(_inputType, _resultType, _name, spec, _valueColumn);
 }

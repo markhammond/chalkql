@@ -296,11 +296,13 @@ internal interface IBoxedAggregate
 internal interface IHostAggregateVisitor<out TResult>
 {
     TResult Visit<TState, TIn, TOut>(AggregateSpec<TState, TIn, TOut> spec)
-        where TState : struct;
+        where TState : struct
+        where TIn : allows ref struct;
 }
 
 internal sealed class HostAggregate<TState, TIn, TOut> : HostAggregate
     where TState : struct
+    where TIn : allows ref struct
 {
     private readonly AggregateSpec<TState, TIn, TOut> _spec;
 
@@ -334,7 +336,7 @@ internal sealed class HostAggregate<TState, TIn, TOut> : HostAggregate
         {
             if (value is not null)
             {
-                _spec.Add(ref _state, (TIn)value);
+                _spec.Add(ref _state, BoxedLanes.Cast<TIn>(value));
             }
         }
 

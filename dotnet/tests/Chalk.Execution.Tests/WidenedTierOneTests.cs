@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Diagnostics.CodeAnalysis;
 using Apache.Arrow;
 using Chalk.Catalog;
@@ -36,7 +37,8 @@ public sealed class WidenedTierOneTests
         Guid Key,
         byte[]? Blob,
         DateOnly? MaybeDay,
-        [property: ChalkColumn(Precision = 18, Scale = 2)] decimal? MaybeAmount);
+        [property: ChalkColumn(Precision = 18, Scale = 2)] decimal? MaybeAmount,
+        string? Label);
 
     /// <summary>A composite whose fields are widened kinds.</summary>
     public readonly record struct Stamped(DateOnly Day, decimal Amount, Guid Key, TimeSpan Span);
@@ -80,7 +82,8 @@ public sealed class WidenedTierOneTests
                 new Guid(i, 7, 9, 1, 2, 3, 4, 5, 6, 7, 8),
                 i % 5 == 0 ? null : [(byte)i, (byte)(i >> 8), 42],
                 i % 3 == 0 ? null : new DateOnly(2000, 1, 1).AddDays(i),
-                i % 4 == 0 ? null : i / 4m);
+                i % 4 == 0 ? null : i / 4m,
+                i % 7 == 0 ? null : (i % 2 == 0 ? $"item-{i}" : $"artikel-{i}-é"));
         }
 
         return rows;
@@ -491,6 +494,115 @@ public sealed class WidenedTierOneTests
         Assert.Equal(Rows, framed.Count);
     }
 
+    /// <summary>
+    /// D304: a STRING or BINARY input reaches a Tier 1 aggregate as a <c>ReadOnlySpan&lt;byte&gt;</c> over
+    /// the value's own bytes — the hash aggregate hands them as the lane, the window path reads them —
+    /// while the state and the result stay fixed-width. Here: the total byte length of a group's labels.
+    /// </summary>
+    [Fact]
+    public async Task An_aggregate_reads_a_text_input_as_a_span()
+    {
+        FunctionDescriptor[] declarations =
+        [
+            new FunctionBuilder("total_bytes").Aggregate<ReadOnlySpan<byte>, long>("s").Window().Client().Build(),
+            // Declared from byte[], which infers BINARY; the host spells the same input as a span.
+            new FunctionBuilder("blob_bytes").Aggregate<byte[], long>("b").Client().Build(),
+        ];
+        HostFunction[] hosts =
+        [
+            new HostAggregate<long, ReadOnlySpan<byte>, long?>("total_bytes", new AggregateSpec<long, ReadOnlySpan<byte>, long?>
+            {
+                Init = static () => 0,
+                Add = static (ref s, v) => s += v.Length,
+                Merge = static (a, b) => a + b,
+                Finish = static s => s,
+            }),
+            new HostAggregate<long, ReadOnlySpan<byte>, long?>("blob_bytes", new AggregateSpec<long, ReadOnlySpan<byte>, long?>
+            {
+                Init = static () => 0,
+                Add = static (ref s, v) => s += v.Length,
+                Finish = static s => s,
+            }),
+        ];
+
+        var bucket = Project(
+            EntryRead(),
+            [
+                ("b", Call(FunctionId.Modulus, I64(), Col("Id"), Lit(8L))),
+                ("label", Col("Label")),
+                ("blob", Col("Blob")),
+            ]);
+        var grouped = HashAggregate(
+            bucket,
+            [0],
+            [
+                ("t", UserAgg("main.total_bytes", I64(nullable: true), Ref(bucket.RowType, 1))),
+                ("u", UserAgg("main.blob_bytes", I64(nullable: true), Ref(bucket.RowType, 2))),
+            ]);
+        var rows = await BothAsync(IrBuilder.Plan(grouped), declarations, hosts);
+
+        var entries = Entries();
+        Assert.Equal(8, rows.Count);
+        foreach (var row in rows)
+        {
+            var b = (long)row[0]!;
+            var members = entries.Where(e => e.Id % 8 == b).ToArray();
+            Assert.Equal(
+                members.Where(e => e.Label is not null).Sum(e => (long)System.Text.Encoding.UTF8.GetByteCount(e.Label!)),
+                (long)row[1]!);
+            Assert.Equal(members.Where(e => e.Blob is not null).Sum(e => (long)e.Blob!.Length), (long)row[2]!);
+        }
+
+        // The same over a frame: the window path reads the lane as the span too.
+        var window = Window(
+            Project(EntryRead(), [("id", Col("Id")), ("label", Col("Label"))]),
+            [],
+            [Asc(0, I64())],
+            RowsFrame(2, 0),
+            [("t", WinUserAgg("main.total_bytes", I64(nullable: true), Ref(1, Str(nullable: true))))]);
+        var framed = await BothAsync(IrBuilder.Plan(window), declarations, hosts);
+        Assert.Equal(Rows, framed.Count);
+        for (var i = 2; i < Rows; i++)
+        {
+            var expected = entries.Skip(i - 2).Take(3).Where(e => e.Label is not null)
+                .Sum(e => (long)System.Text.Encoding.UTF8.GetByteCount(e.Label!));
+            // The window's output is its input's columns and then the call: id, label, t.
+            Assert.Equal(expected, (long)framed[i][2]!);
+        }
+    }
+
+    /// <summary>A text input spelled any other way, or a text result, stays refused at registration, naming the span.</summary>
+    [Fact]
+    public void A_text_aggregate_input_is_the_span_and_nothing_else()
+    {
+        var declaration = new FunctionBuilder("longest").Aggregate<string, long>("s").Client().Build();
+        var asString = new HostAggregate<long, string, long>(
+            "longest",
+            new AggregateSpec<long, string, long>
+            {
+                Init = static () => 0,
+                Add = static (ref s, v) => s = Math.Max(s, v.Length),
+                Finish = static s => s,
+            });
+        var error = Assert.Throws<InvalidOperationException>(
+            () => UserFunctionBinding.Check(declaration, asString, "engine creation"));
+        Assert.Contains("Spell the input ReadOnlySpan<byte>", error.Message, StringComparison.Ordinal);
+
+        var answersText = new FunctionBuilder("first_label").Aggregate<ReadOnlySpan<byte>, string>("s").Client().Build();
+        var textResult = new HostAggregate<long, ReadOnlySpan<byte>, string?>(
+            "first_label",
+            new AggregateSpec<long, ReadOnlySpan<byte>, string?>
+            {
+                Init = static () => 0,
+                Add = static (ref s, v) => s += v.Length,
+                Finish = static s => s.ToString(CultureInfo.InvariantCulture),
+            });
+        var refused = Assert.Throws<InvalidOperationException>(
+            () => UserFunctionBinding.Check(answersText, textResult, "engine creation"));
+        Assert.Contains("returns STRING?", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("Answer a fixed-width value", refused.Message, StringComparison.Ordinal);
+    }
+
     private static WindowCall WinUserAgg(string name, IrType type, Expr arg)
     {
         var call = new WindowCall { UserFunction = name, Type = type };
@@ -647,7 +759,8 @@ public sealed class WidenedTierOneTests
         var error = Assert.Throws<InvalidOperationException>(
             () => UserFunctionBinding.Check(declaration, host, "engine creation"));
 
-        Assert.Contains("folds fixed-width values only", error.Message, StringComparison.Ordinal);
+        Assert.Contains("folds fixed-width values", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Spell the input ReadOnlySpan<byte>", error.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -672,8 +785,8 @@ public sealed class WidenedTierOneTests
             () => UserFunctionBinding.Check(declaration, host, "engine creation"));
 
         Assert.Contains("parameter 's' STRING?", error.Message, StringComparison.Ordinal);
-        Assert.Contains("folds fixed-width values only", error.Message, StringComparison.Ordinal);
-        Assert.Contains("Aggregate a STRING with a Tier 2 kernel", error.Message, StringComparison.Ordinal);
+        Assert.Contains("folds fixed-width values", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Spell the input ReadOnlySpan<byte>", error.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

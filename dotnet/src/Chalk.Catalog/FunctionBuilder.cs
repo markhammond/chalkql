@@ -97,6 +97,7 @@ public sealed class FunctionBuilder
 
     /// <summary>An aggregate over one named argument.</summary>
     public FunctionBuilder Aggregate<T1, TResult>(string p1)
+        where T1 : allows ref struct
     {
         _kind = FunctionKind.Aggregate;
         return Parameter<T1>(p1).ReturnsNullable<TResult>();
@@ -104,6 +105,8 @@ public sealed class FunctionBuilder
 
     /// <summary>An aggregate over two named arguments — a value and a weight.</summary>
     public FunctionBuilder Aggregate<T1, T2, TResult>(string p1, string p2)
+        where T1 : allows ref struct
+        where T2 : allows ref struct
     {
         _kind = FunctionKind.Aggregate;
         return Parameter<T1>(p1).Parameter<T2>(p2).ReturnsNullable<TResult>();

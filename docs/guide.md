@@ -1008,7 +1008,10 @@ all. `Cost(n)` and `Rows(n)` reach the cost model.
 generates the lane loop: it reads the lanes, calls the delegate, writes the
 result and its validity, and skips a strict function's NULL lanes before the
 call. Nothing allocates per row unless the delegate does. Aggregates are a state
-machine of the shape PostgreSQL's are:
+machine of the shape PostgreSQL's are, with a fixed-width state and result; a
+STRING or BINARY input reaches one as a `ReadOnlySpan<byte>` over the value's
+own bytes, so a byte total, a prefix count or a hash over text is a Tier 1
+aggregate, while one that keeps text per group is not yet:
 
 ```csharp
 registry.AddAggregate("wsum", new AggregateSpec<Sum, double, double?>

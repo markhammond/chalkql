@@ -2,7 +2,8 @@ namespace Chalk.Sources;
 
 /// <summary>One row folded into a group's state (D80). The state is a struct held in arena memory.</summary>
 public delegate void Accumulate<TState, in TIn>(ref TState state, TIn value)
-    where TState : struct;
+    where TState : struct
+    where TIn : allows ref struct;
 
 /// <summary>
 /// The aggregate protocol of Tier 1 (D80,
@@ -25,10 +26,15 @@ public delegate void Accumulate<TState, in TIn>(ref TState state, TIn value)
 /// </para>
 /// </remarks>
 /// <typeparam name="TState">The per-group state.</typeparam>
-/// <typeparam name="TIn">The CLR type of the value being aggregated.</typeparam>
-/// <typeparam name="TOut">The CLR type of the result.</typeparam>
+/// <typeparam name="TIn">
+/// The CLR type of the value being aggregated: a fixed-width Tier 1 type, or
+/// <c>ReadOnlySpan&lt;byte&gt;</c> for a STRING or BINARY input, which is the value's own bytes lent for
+/// the call — the state stays fixed-width, so what is kept of them is what the host computes from them.
+/// </typeparam>
+/// <typeparam name="TOut">The CLR type of the result, always fixed-width.</typeparam>
 public sealed class AggregateSpec<TState, TIn, TOut>
     where TState : struct
+    where TIn : allows ref struct
 {
     /// <summary>The state of an empty group.</summary>
     public required Func<TState> Init { get; init; }

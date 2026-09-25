@@ -842,7 +842,15 @@ internal static class LaneCodec
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static T ReadRaw<T>(ReadOnlySpan<byte> lane, in LaneFormat format)
+        where T : allows ref struct
     {
+        if (typeof(T) == typeof(ReadOnlySpan<byte>))
+        {
+            // D304: a STRING or BINARY input is the value's own bytes — the hash aggregate hands a
+            // variable-length measure's bytes as the lane — lent for the call and unable to outlive it.
+            return Unsafe.As<ReadOnlySpan<byte>, T>(ref lane);
+        }
+
         if (typeof(T) == typeof(double))
         {
             var value = System.Runtime.InteropServices.MemoryMarshal.Read<double>(lane);
