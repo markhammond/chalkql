@@ -739,14 +739,14 @@ still costs what it always did:
   by bytes costs nothing. `TextEquals` compares a span with a `string` the same
   way, and `Utf8Hash` is the hash every spelling shares.
 
-**The lifetime rule.** A span from `GetUtf8` cannot outlive its batch: the
-compiler refuses to store or capture it, which is why a batch hands out bytes
-and never a borrowed `Utf8String` — a value that could be kept past the
-buffer it points into, and read again after the arena had reused it. The one
-borrowed `Utf8String` is the lane lent to a Tier 1 delegate, valid for that
-call — exactly the rule a `ColumnView` has — and a delegate that keeps it calls
-`ToArray()` or `ToString()`. A `Utf8String` you construct yourself, or copy
-out of a span with `ToUtf8String()`, is your own memory and outlives everything.
+**The lifetime rule.** A span from `GetUtf8` cannot outlive its batch, and a
+span handed to a delegate cannot outlive the call: the compiler refuses to store
+or capture either. That is why a batch hands out bytes and never a borrowed
+`Utf8String`, and why a delegate is never handed one — a value that could be
+kept past the buffer it points into and read again after the engine had reused
+it. No `Utf8String` you meet is borrowed: one you construct yourself, copy out
+of a span with `ToUtf8String()`, or read back from a composite is your own
+memory and outlives everything.
 
 `ToString()` is the one place a .NET string is made, and you are the one who
 calls it. Two things it is deliberately not: it is not culture-aware — casing,
@@ -1071,8 +1071,10 @@ created, and a Tier 2 kernel reads it. A time the SQL type cannot hold exactly i
 refused rather than rounded. That includes a `TimeOnly` or `TimeSpan` with a
 fraction of a microsecond, and a `DateTime` with sub-millisecond ticks answered
 for a TIMESTAMP(3). A nanosecond TIMESTAMP read as a `DateTime` is truncated to
-its 100-nanosecond tick. A Tier 1 aggregate folds fixed-width values, so its input
-and result may be any of these types except BINARY.
+its 100-nanosecond tick. A Tier 1 aggregate folds fixed-width values: its result
+may be any of these types except BINARY, and its input any of them, or a STRING
+or BINARY read as a `ReadOnlySpan<byte>`; a text or binary result needs an
+`ArenaAggregateSpec`.
 
 **Tier 2** is the expression evaluator's own contract, for a host that needs
 SIMD or wants to avoid the per-lane call:

@@ -27,13 +27,12 @@ namespace Chalk;
 /// and <c>LIKE</c> with non-ASCII folding stay on the existing kernels, which decode when they must.
 /// </para>
 /// <para>
-/// <b>Lifetime.</b> A result batch never hands out a <see cref="Utf8String"/>: a STRING cell is
-/// read as a <c>ReadOnlySpan&lt;byte&gt;</c> through <c>GetUtf8</c>, which the compiler keeps inside
-/// the batch's lifetime, and a value to keep is copied out of it with <c>ToUtf8String()</c>. The
-/// one borrowed <see cref="Utf8String"/> is the lane lent to a Tier 1 delegate, valid for that call
-/// and no longer — exactly the rule <c>ColumnView</c> states — and a delegate that keeps it calls
-/// <see cref="ToArray"/> or <see cref="ToString"/>. A <see cref="Utf8String"/> the host constructs is
-/// the host's own memory and outlives anything.
+/// <b>Lifetime.</b> Nothing the engine hands a host is a borrowed <see cref="Utf8String"/>: a STRING
+/// cell is read as a <c>ReadOnlySpan&lt;byte&gt;</c> through <c>GetUtf8</c>, a Tier 1 delegate is
+/// handed its STRING argument as one, and a Tier 2 kernel reads <c>ColumnView.VarValue</c> — spans the
+/// compiler keeps inside the batch or the call. A value to keep is copied out with
+/// <c>ToUtf8String()</c>, and a composite read back as a record copies its text fields. Every
+/// <see cref="Utf8String"/> a host holds is therefore the host's own memory and outlives anything.
 /// </para>
 /// <para>
 /// <b>One trap, and it is the price of the implicit conversions.</b> Because a

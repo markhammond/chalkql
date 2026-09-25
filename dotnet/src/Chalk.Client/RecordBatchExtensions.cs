@@ -142,10 +142,10 @@ public static class RecordBatchExtensions
     /// both sides.
     /// </para>
     /// <para>
-    /// The fields are read from the child arrays' own buffers, and nothing is allocated but what
-    /// <typeparamref name="T"/> itself costs: a <c>Utf8String</c> or a <c>ReadOnlyMemory&lt;byte&gt;</c>
-    /// field is a slice of the batch's memory, valid while the batch is. A <c>string</c> or a
-    /// <c>byte[]</c> field is a copy, allocated on every read, and so is a record class.
+    /// The value fields are read from the child arrays' own buffers, and nothing is allocated but
+    /// what <typeparamref name="T"/> itself costs. A <c>Utf8String</c>, <c>ReadOnlyMemory&lt;byte&gt;</c>,
+    /// <c>string</c> or <c>byte[]</c> field is a copy, allocated on every read, because the record may
+    /// be kept past the batch; so is a record class.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentException">The array is not a struct array.</exception>
@@ -205,10 +205,10 @@ public static class RecordBatchExtensions
     /// <remarks>
     /// The read attaches to the child arrays once — their buffers pinned for its length, the struct's
     /// offset applied to every child — and the compiled binding then constructs each row from them, a
-    /// chunk at a time, into the span. Nothing is allocated per row for value fields and
-    /// <c>Utf8String</c> or <c>ReadOnlyMemory&lt;byte&gt;</c> fields, which are slices of the batch's
-    /// memory and valid while the batch is. A <c>string</c> or a <c>byte[]</c> field allocates a copy
-    /// per row, and so does a record class.
+    /// chunk at a time, into the span. Nothing is allocated per row for value fields. A
+    /// <c>Utf8String</c>, <c>ReadOnlyMemory&lt;byte&gt;</c>, <c>string</c> or <c>byte[]</c> field
+    /// allocates a copy per row, because the record may be kept past the batch, and so does a record
+    /// class.
     /// </remarks>
     /// <exception cref="ArgumentException">The array is not a struct array.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The rows run past the array's end.</exception>
