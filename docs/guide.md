@@ -93,6 +93,7 @@ git clone <this repo> && cd chalk
 ./scripts/install-tools.sh      # macOS; on Linux install a JDK 21 and buf yourself
 ./scripts/build.sh              # gradle shadowJar + dotnet build
 ./scripts/test.sh               # java tests, .NET unit tests, then integration tests
+./scripts/battery.sh            # the lot, phase by phase, with a summary at the end
 ```
 
 Then, in your own application:
@@ -1810,7 +1811,7 @@ is not a NULL; and a column whose provider type the declared one cannot hold is 
 | `planner/` | the Calcite sidecar (Gradle, Kotlin DSL) |
 | `corpus/` | queries, recorded plans and digests shared by both test suites |
 | `docs/` | this guide and the tutorial |
-| `scripts/` | build, test, plan recording, tool install |
+| `scripts/` | build, test, the battery, plan recording, tool install |
 
 ## Documentation
 

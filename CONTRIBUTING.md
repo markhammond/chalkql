@@ -7,6 +7,7 @@
 ./scripts/build.sh           # gradle build -x test, then dotnet build
 ./scripts/test.sh            # planner tests, .NET unit tests, integration tests
 ./scripts/test.sh --no-integration   # skip anything that needs the sidecar jar
+./scripts/battery.sh         # the lot, phase by phase: planner, Release and Debug suites, quickstart, plans, tutorial
 ```
 
 `scripts/java-home.sh` finds a JDK 21+ without you having to export `JAVA_HOME`;
