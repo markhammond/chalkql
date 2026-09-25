@@ -110,4 +110,10 @@ internal sealed class UserAggregateFactory : IHostAggregateVisitor<MeasureAccumu
         where TState : struct
         where TIn : allows ref struct =>
         new UserAggregateAccumulator<TState, TIn, TOut>(_inputType, _resultType, _name, spec);
+
+    public MeasureAccumulator Visit<TState, TIn, TOut>(ArenaAggregateSpec<TState, TIn, TOut> spec)
+        where TState : struct
+        where TIn : allows ref struct
+        where TOut : allows ref struct =>
+        new ArenaUserAggregateAccumulator<TState, TIn, TOut>(_inputType, _resultType, _name, spec);
 }

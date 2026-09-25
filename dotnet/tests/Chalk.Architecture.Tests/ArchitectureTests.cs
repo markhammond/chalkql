@@ -359,9 +359,10 @@ public sealed class ArchitectureTests
     }
 
     /// <summary>
-    /// The three small value types are the only positional records in the public API (D26): each is a
-    /// closed tuple of primitives that will never grow a member, which is the one shape a positional
-    /// record models honestly. Nothing else should have quietly become one.
+    /// The four small value types are the only positional records in the public API (D26): each is a
+    /// closed tuple of primitives that will never grow a member — an arena handle is an offset and a
+    /// length — which is the one shape a positional record models honestly. Nothing else should have
+    /// quietly become one.
     /// </summary>
     [Fact]
     public void Only_the_documented_value_types_are_records()
@@ -375,7 +376,7 @@ public sealed class ArchitectureTests
             .ToArray();
 
         Assert.Equal(
-            ["Chalk.Catalog.ChalkType", "Chalk.Catalog.KeyOrder", "Chalk.Client.SqlPosition"],
+            ["Chalk.Catalog.ChalkType", "Chalk.Catalog.KeyOrder", "Chalk.Client.SqlPosition", "Chalk.Sources.ArenaHandle"],
             recordStructs);
     }
 

@@ -50,8 +50,10 @@ internal readonly struct LaneFormat
 /// same <see cref="ClrStorage"/> the POCO chunk writer uses: <c>decimal</c> for a DECIMAL of up to 28
 /// digits, <c>DateOnly</c>, <c>TimeOnly</c>, <c>DateTime</c> (a TIMESTAMP, kind unspecified),
 /// <c>DateTimeOffset</c> (a TIMESTAMP_TZ, in UTC), <c>TimeSpan</c> (an INTERVAL_DAY), <c>Guid</c>
-/// and <c>ReadOnlyMemory&lt;byte&gt;</c> for BINARY — all allocation-free — plus <c>string</c> and
-/// <c>byte[]</c>, which cost an allocation per row as a .NET string always has. Each value type may
+/// and <c>ReadOnlySpan&lt;byte&gt;</c> for a STRING or BINARY argument (D304) — all allocation-free —
+/// plus <c>string</c> and <c>byte[]</c>, which cost an allocation per row as a .NET string always
+/// has. A result may also be a <c>Utf8String</c> or a <c>ReadOnlyMemory&lt;byte&gt;</c> over the
+/// host's own memory; an argument is never one, since either could be kept past the call. Each value type may
 /// also be spelled nullable, for a non-strict function. A temporal may still be spelled as its raw
 /// count (<c>int</c> days, <c>long</c> units), as it could before D298. A LIST, an INTERVAL_YEAR
 /// beyond its raw <c>int</c>, and a DECIMAL of more than 28 digits have no Tier 1 spelling.
@@ -168,7 +170,7 @@ internal static class LaneCodec
             ? type.Kind switch
             {
                 TypeKind.String => $"{described} (CLR ReadOnlySpan<Byte> or String; a result may also be Utf8String)",
-                TypeKind.Binary => $"{described} (CLR ReadOnlySpan<Byte>, ReadOnlyMemory<Byte> or Byte[])",
+                TypeKind.Binary => $"{described} (CLR ReadOnlySpan<Byte> or Byte[]; a result may also be ReadOnlyMemory<Byte>)",
                 TypeKind.Date => $"{described} (CLR DateOnly, or Int32 days since 1970-01-01)",
                 TypeKind.Time => $"{described} (CLR TimeOnly, or Int64 microseconds since midnight)",
                 TypeKind.Timestamp =>
@@ -245,12 +247,6 @@ internal static class LaneCodec
             return Unsafe.As<bool, T>(ref value);
         }
 
-        if (typeof(T) == typeof(Utf8String))
-        {
-            var value = view.Utf8(row);
-            return Unsafe.As<Utf8String, T>(ref value);
-        }
-
         // D298: the POCO source's CLR spellings, through the conversions its chunk writer uses.
         if (typeof(T) == typeof(decimal))
         {
@@ -292,13 +288,6 @@ internal static class LaneCodec
         {
             var value = ClrStorage.UuidOf(view.RawLanes(16).Slice(row * 16, 16));
             return Unsafe.As<Guid, T>(ref value);
-        }
-
-        if (typeof(T) == typeof(ReadOnlyMemory<byte>))
-        {
-            // A slice of the lane's own buffer, borrowed for the call as a Utf8String is (D146).
-            var value = view.VarValueMemory(row);
-            return Unsafe.As<ReadOnlyMemory<byte>, T>(ref value);
         }
 
         if (typeof(T) == typeof(string))
@@ -366,19 +355,6 @@ internal static class LaneCodec
             return Unsafe.As<bool?, T>(ref value);
         }
 
-        if (typeof(T) == typeof(Utf8String?))
-        {
-            Utf8String? value = default;
-
-            if (valid)
-            {
-                value = view.Utf8(row);
-            }
-
-            return Unsafe.As<Utf8String?, T>(
-                ref value);
-        }
-
         if (typeof(T) == typeof(decimal?))
         {
             decimal? value = valid
@@ -425,12 +401,6 @@ internal static class LaneCodec
         {
             Guid? value = valid ? ClrStorage.UuidOf(view.RawLanes(16).Slice(row * 16, 16)) : null;
             return Unsafe.As<Guid?, T>(ref value);
-        }
-
-        if (typeof(T) == typeof(ReadOnlyMemory<byte>?))
-        {
-            ReadOnlyMemory<byte>? value = valid ? view.VarValueMemory(row) : null;
-            return Unsafe.As<ReadOnlyMemory<byte>?, T>(ref value);
         }
 
         throw new UnsupportedFeatureException(
@@ -951,43 +921,123 @@ internal static class LaneCodec
     /// the lane zeroed, which is what an aggregate with no rows produces.
     /// </summary>
     public static bool WriteRaw<T>(Span<byte> lane, T value, in LaneFormat format)
+        where T : allows ref struct
     {
-        switch (value)
+        if (typeof(T) == typeof(double))
         {
-            case double d:
-                System.Runtime.InteropServices.MemoryMarshal.Write(lane, in d);
-                return true;
-            case long l:
-                System.Runtime.InteropServices.MemoryMarshal.Write(lane, in l);
-                return true;
-            case int i:
-                System.Runtime.InteropServices.MemoryMarshal.Write(lane, in i);
-                return true;
-            case float f:
-                System.Runtime.InteropServices.MemoryMarshal.Write(lane, in f);
-                return true;
-            case short s:
-                System.Runtime.InteropServices.MemoryMarshal.Write(lane, in s);
-                return true;
-            case sbyte b:
-                System.Runtime.InteropServices.MemoryMarshal.Write(lane, in b);
-                return true;
-            case bool o:
-                lane[0] = (byte)(o ? 1 : 0);
-                return true;
-            case null:
+            System.Runtime.InteropServices.MemoryMarshal.Write(lane, in Unsafe.As<T, double>(ref value));
+            return true;
+        }
+
+        if (typeof(T) == typeof(long))
+        {
+            System.Runtime.InteropServices.MemoryMarshal.Write(lane, in Unsafe.As<T, long>(ref value));
+            return true;
+        }
+
+        if (typeof(T) == typeof(int))
+        {
+            System.Runtime.InteropServices.MemoryMarshal.Write(lane, in Unsafe.As<T, int>(ref value));
+            return true;
+        }
+
+        if (typeof(T) == typeof(float))
+        {
+            System.Runtime.InteropServices.MemoryMarshal.Write(lane, in Unsafe.As<T, float>(ref value));
+            return true;
+        }
+
+        if (typeof(T) == typeof(short))
+        {
+            System.Runtime.InteropServices.MemoryMarshal.Write(lane, in Unsafe.As<T, short>(ref value));
+            return true;
+        }
+
+        if (typeof(T) == typeof(sbyte))
+        {
+            System.Runtime.InteropServices.MemoryMarshal.Write(lane, in Unsafe.As<T, sbyte>(ref value));
+            return true;
+        }
+
+        if (typeof(T) == typeof(bool))
+        {
+            lane[0] = (byte)(Unsafe.As<T, bool>(ref value) ? 1 : 0);
+            return true;
+        }
+
+        if (typeof(T) == typeof(double?))
+        {
+            return WriteNullableRaw(lane, Unsafe.As<T, double?>(ref value));
+        }
+
+        if (typeof(T) == typeof(long?))
+        {
+            return WriteNullableRaw(lane, Unsafe.As<T, long?>(ref value));
+        }
+
+        if (typeof(T) == typeof(int?))
+        {
+            return WriteNullableRaw(lane, Unsafe.As<T, int?>(ref value));
+        }
+
+        if (typeof(T) == typeof(float?))
+        {
+            return WriteNullableRaw(lane, Unsafe.As<T, float?>(ref value));
+        }
+
+        if (typeof(T) == typeof(short?))
+        {
+            return WriteNullableRaw(lane, Unsafe.As<T, short?>(ref value));
+        }
+
+        if (typeof(T) == typeof(sbyte?))
+        {
+            return WriteNullableRaw(lane, Unsafe.As<T, sbyte?>(ref value));
+        }
+
+        if (typeof(T) == typeof(bool?))
+        {
+            var flag = Unsafe.As<T, bool?>(ref value);
+            if (!flag.HasValue)
+            {
                 lane.Clear();
                 return false;
-            case decimal or DateOnly or TimeOnly or DateTime or DateTimeOffset or TimeSpan or Guid:
-                // D298: the widened spellings, through the same conversions as a scalar's answer.
-                return WriteLane(lane, value, format);
-            default:
-                throw new UnsupportedFeatureException(
-                    $"a Tier 1 aggregate returning CLR type {typeof(T).Name}",
-                    "A Tier 1 aggregate returns bool, sbyte, short, int, long, float, double, decimal, "
-                    + "DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan or Guid, or a nullable "
-                    + "form of one (docs/design/17-user-defined-functions.md §3).");
+            }
+
+            lane[0] = (byte)(flag.GetValueOrDefault() ? 1 : 0);
+            return true;
         }
+
+        if (typeof(T) == typeof(decimal) || typeof(T) == typeof(decimal?)
+            || typeof(T) == typeof(DateOnly) || typeof(T) == typeof(DateOnly?)
+            || typeof(T) == typeof(TimeOnly) || typeof(T) == typeof(TimeOnly?)
+            || typeof(T) == typeof(DateTime) || typeof(T) == typeof(DateTime?)
+            || typeof(T) == typeof(DateTimeOffset) || typeof(T) == typeof(DateTimeOffset?)
+            || typeof(T) == typeof(TimeSpan) || typeof(T) == typeof(TimeSpan?)
+            || typeof(T) == typeof(Guid) || typeof(T) == typeof(Guid?))
+        {
+            // D298: the widened spellings, through the same conversions as a scalar's answer.
+            return WriteLane(lane, value, format);
+        }
+
+        throw new UnsupportedFeatureException(
+            $"a Tier 1 aggregate returning CLR type {typeof(T).Name}",
+            "A Tier 1 aggregate returns bool, sbyte, short, int, long, float, double, decimal, "
+            + "DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan or Guid, or a nullable "
+            + "form of one (docs/design/17-user-defined-functions.md §3).");
+    }
+
+    private static bool WriteNullableRaw<TValue>(Span<byte> lane, TValue? value)
+        where TValue : unmanaged
+    {
+        if (!value.HasValue)
+        {
+            lane.Clear();
+            return false;
+        }
+
+        System.Runtime.InteropServices.MemoryMarshal.Write(lane, value.GetValueOrDefault());
+        return true;
     }
 
     /// <summary>
@@ -998,6 +1048,7 @@ internal static class LaneCodec
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool WriteLane<T>(Span<byte> lane, T value, in LaneFormat format)
+        where T : allows ref struct
     {
         if (typeof(T) == typeof(double))
         {

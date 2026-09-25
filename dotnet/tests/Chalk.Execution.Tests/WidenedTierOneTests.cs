@@ -232,7 +232,7 @@ public sealed class WidenedTierOneTests
             new HostScalar1<DateTimeOffset, DateTimeOffset>("hour_later", static t => t.AddHours(1)),
             new HostScalar1<TimeSpan, TimeSpan>("doubled", static s => s + s),
             new HostScalar1<Guid, Guid>("same_key", static k => k),
-            new HostScalar1<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>>("same_blob", static b => b),
+            new HostScalar1<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("same_blob", static b => b),
             new HostScalar1<byte[], byte[]>("reversed_blob", static b => [.. b.Reverse()]),
             new HostScalar1<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("span_blob", static b => b[1..]),
         ];
@@ -603,6 +603,200 @@ public sealed class WidenedTierOneTests
         Assert.Contains("Answer a fixed-width value", refused.Message, StringComparison.Ordinal);
     }
 
+    // ---- an aggregate with an arena state (D305) ----
+
+    /// <summary>The longest label's handle and whether one was seen: two integers and a flag, no reference.</summary>
+    public struct LongestState
+    {
+        public ArenaHandle Kept;
+        public bool Any;
+    }
+
+    /// <summary>A 256-bit bitmap of first bytes seen, rented once per group.</summary>
+    public struct InitialsState
+    {
+        public ArenaHandle Bits;
+    }
+
+    private static ArenaAggregateSpec<LongestState, ReadOnlySpan<byte>, ReadOnlySpan<byte>> LongestLabel() => new()
+    {
+        Init = static (ref ArenaScope _) => default,
+        Add = static (ref LongestState s, ReadOnlySpan<byte> v, ref ArenaScope arena) =>
+        {
+            if (!s.Any || v.Length > s.Kept.Length)
+            {
+                s.Kept = arena.Keep(v);
+                s.Any = true;
+            }
+        },
+        HasValue = static (in LongestState s) => s.Any,
+        Finish = static (in LongestState s, ref ArenaScope arena) => arena.Bytes(s.Kept),
+    };
+
+    private static ArenaAggregateSpec<InitialsState, ReadOnlySpan<byte>, long?> DistinctInitials() => new()
+    {
+        Init = static (ref ArenaScope arena) => new InitialsState { Bits = arena.Rent(32) },
+        Add = static (ref InitialsState s, ReadOnlySpan<byte> v, ref ArenaScope arena) =>
+        {
+            if (v.Length > 0)
+            {
+                arena.Bytes(s.Bits)[v[0] >> 3] |= (byte)(1 << (v[0] & 7));
+            }
+        },
+        Finish = static (in InitialsState s, ref ArenaScope arena) =>
+        {
+            long count = 0;
+            foreach (var b in arena.Bytes(s.Bits))
+            {
+                count += System.Numerics.BitOperations.PopCount(b);
+            }
+
+            return count;
+        },
+    };
+
+    /// <summary>
+    /// D305: an aggregate whose state keeps a string per group — the longest label — rents it from the
+    /// arena scope and answers a span over the scope, grouped and framed, in both engines; and one whose
+    /// state is a rented bitmap answers a fixed-width count. Nothing of either is on the heap.
+    /// </summary>
+    [Fact]
+    public async Task An_aggregate_with_an_arena_state_keeps_text_per_group()
+    {
+        FunctionDescriptor[] declarations =
+        [
+            new FunctionBuilder("longest_label").Aggregate<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("s").Window().Client().Build(),
+            new FunctionBuilder("distinct_initials").Aggregate<ReadOnlySpan<byte>, long>("s").Client().Build(),
+        ];
+        HostFunction[] hosts =
+        [
+            new HostArenaAggregate<LongestState, ReadOnlySpan<byte>, ReadOnlySpan<byte>>("longest_label", LongestLabel()),
+            new HostArenaAggregate<InitialsState, ReadOnlySpan<byte>, long?>("distinct_initials", DistinctInitials()),
+        ];
+
+        var bucket = Project(
+            EntryRead(),
+            [
+                ("b", Call(FunctionId.Modulus, I64(), Col("Id"), Lit(8L))),
+                ("label", Col("Label")),
+            ]);
+        var grouped = HashAggregate(
+            bucket,
+            [0],
+            [
+                ("longest", UserAgg("main.longest_label", Str(nullable: true), Ref(bucket.RowType, 1))),
+                ("initials", UserAgg("main.distinct_initials", I64(nullable: true), Ref(bucket.RowType, 1))),
+            ]);
+        var rows = await BothAsync(IrBuilder.Plan(grouped), declarations, hosts);
+
+        var entries = Entries();
+        Assert.Equal(8, rows.Count);
+        foreach (var row in rows)
+        {
+            var b = (long)row[0]!;
+            var labels = entries.Where(e => e.Id % 8 == b && e.Label is not null).Select(e => e.Label!).ToArray();
+            var longest = labels.Aggregate((best, next) =>
+                System.Text.Encoding.UTF8.GetByteCount(next) > System.Text.Encoding.UTF8.GetByteCount(best) ? next : best);
+            Assert.Equal(longest, (string)row[1]!);
+            Assert.Equal((long)labels.Select(l => l[0]).Distinct().Count(), (long)row[2]!);
+        }
+
+        // Framed: every frame recomputed from an empty scope, and the answer copied out before the next.
+        var window = Window(
+            Project(EntryRead(), [("id", Col("Id")), ("label", Col("Label"))]),
+            [],
+            [Asc(0, I64())],
+            RowsFrame(2, 0),
+            [("longest", WinUserAgg("main.longest_label", Str(nullable: true), Ref(1, Str(nullable: true))))]);
+        var framed = await BothAsync(IrBuilder.Plan(window), declarations, hosts);
+        Assert.Equal(Rows, framed.Count);
+        for (var i = 0; i < Rows; i++)
+        {
+            var labels = entries.Skip(Math.Max(0, i - 2)).Take(Math.Min(3, i + 1)).Where(e => e.Label is not null).Select(e => e.Label!).ToArray();
+            if (labels.Length == 0)
+            {
+                Assert.Null(framed[i][2]);
+                continue;
+            }
+
+            var longest = labels.Aggregate((best, next) =>
+                System.Text.Encoding.UTF8.GetByteCount(next) > System.Text.Encoding.UTF8.GetByteCount(best) ? next : best);
+            Assert.Equal(longest, (string)framed[i][2]!);
+        }
+    }
+
+    /// <summary>The grouped arena aggregate allocates nothing per row: its strings live in the scope.</summary>
+    [Fact]
+    public async Task An_aggregate_with_an_arena_state_allocates_nothing_per_row()
+    {
+        var declaration = new FunctionBuilder("longest_label").Aggregate<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("s").Client().Build();
+        var host = new HostArenaAggregate<LongestState, ReadOnlySpan<byte>, ReadOnlySpan<byte>>("longest_label", LongestLabel());
+        var bucket = Project(EntryRead(), [("b", Call(FunctionId.Modulus, I64(), Col("Id"), Lit(8L))), ("label", Col("Label"))]);
+        var floor = HashAggregate(bucket, [0], [("n", Agg(AggregateFunctionId.Count, I64(), Ref(bucket.RowType, 1)))]);
+        var withCall = HashAggregate(
+            bucket, [0], [("longest", UserAgg("main.longest_label", Str(nullable: true), Ref(bucket.RowType, 1)))]);
+
+        var measuredFloor = await Measure(IrBuilder.Plan(floor), [], []);
+        var measured = await Measure(IrBuilder.Plan(withCall), [declaration], [host]);
+
+        _output.WriteLine($"floor {measuredFloor} bytes, with the arena aggregate {measured} bytes, over {Rows} rows");
+        Assert.True(measured - measuredFloor <= 2048, $"{measured - measuredFloor} bytes over the floor for {Rows} rows");
+    }
+
+    /// <summary>The refusals of the arena form: a state with a reference, and a text result not answered as a span.</summary>
+    [Fact]
+    public void An_arena_aggregate_is_refused_where_its_shape_is_wrong()
+    {
+        var registry = new Chalk.Client.FunctionRegistry();
+        var withReference = Assert.Throws<ArgumentException>(() => registry.AddAggregate(
+            "keeps_a_string",
+            new ArenaAggregateSpec<ReferenceState, ReadOnlySpan<byte>, long?>
+            {
+                Init = static (ref ArenaScope _) => default,
+                Add = static (ref ReferenceState s, ReadOnlySpan<byte> v, ref ArenaScope _) => s.Text = v.Length.ToString(CultureInfo.InvariantCulture),
+                Finish = static (in ReferenceState s, ref ArenaScope _) => (long?)(s.Text?.Length ?? 0),
+            }));
+        Assert.Contains("holds a reference", withReference.Message, StringComparison.Ordinal);
+        Assert.Contains("ArenaAggregateSpec", withReference.Message, StringComparison.Ordinal);
+
+        // The plain form is held to the same rule (F138).
+        var plain = Assert.Throws<ArgumentException>(() => registry.AddAggregate(
+            "keeps_a_string_too",
+            new AggregateSpec<ReferenceState, long, long>
+            {
+                Init = static () => default,
+                Add = static (ref ReferenceState s, long v) => s.Text = v.ToString(CultureInfo.InvariantCulture),
+                Finish = static s => s.Text?.Length ?? 0,
+            }));
+        Assert.Contains("holds a reference", plain.Message, StringComparison.Ordinal);
+
+        // A STRING result is answered as a span over the scope, and only as that.
+        var declaration = new FunctionBuilder("first_label").Aggregate<ReadOnlySpan<byte>, string>("s").Client().Build();
+        var asString = new HostArenaAggregate<LongestState, ReadOnlySpan<byte>, string?>(
+            "first_label",
+            new ArenaAggregateSpec<LongestState, ReadOnlySpan<byte>, string?>
+            {
+                Init = static (ref ArenaScope _) => default,
+                Add = static (ref LongestState s, ReadOnlySpan<byte> v, ref ArenaScope arena) => s.Kept = arena.Keep(v),
+                Finish = static (in LongestState s, ref ArenaScope arena) => System.Text.Encoding.UTF8.GetString(arena.Bytes(s.Kept)),
+            });
+        var refused = Assert.Throws<InvalidOperationException>(
+            () => UserFunctionBinding.Check(declaration, asString, "engine creation"));
+        Assert.Contains("answers a STRING or a BINARY as a ReadOnlySpan<byte> over its scope", refused.Message, StringComparison.Ordinal);
+
+        // And a span answers a STRING or a BINARY, nothing else.
+        var counted = new FunctionBuilder("longest_length").Aggregate<ReadOnlySpan<byte>, long>("s").Client().Build();
+        var spanForLong = new HostArenaAggregate<LongestState, ReadOnlySpan<byte>, ReadOnlySpan<byte>>("longest_length", LongestLabel());
+        var wrong = Assert.Throws<InvalidOperationException>(
+            () => UserFunctionBinding.Check(counted, spanForLong, "engine creation"));
+        Assert.Contains("answers a ReadOnlySpan<byte>, which is how a STRING or a BINARY is answered", wrong.Message, StringComparison.Ordinal);
+    }
+
+    public struct ReferenceState
+    {
+        public string? Text;
+    }
+
     private static WindowCall WinUserAgg(string name, IrType type, Expr arg)
     {
         var call = new WindowCall { UserFunction = name, Type = type };
@@ -759,8 +953,11 @@ public sealed class WidenedTierOneTests
         var error = Assert.Throws<InvalidOperationException>(
             () => UserFunctionBinding.Check(declaration, host, "engine creation"));
 
-        Assert.Contains("folds fixed-width values", error.Message, StringComparison.Ordinal);
-        Assert.Contains("Spell the input ReadOnlySpan<byte>", error.Message, StringComparison.Ordinal);
+        // A ReadOnlyMemory<byte> input is refused first as a value the aggregate could keep past the
+        // call (D304); the span it names is the input a BINARY reaches an aggregate as.
+        Assert.Contains("parameter 'b' is spelled ReadOnlyMemory<Byte>", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Spell the parameter ReadOnlySpan<byte>", error.Message, StringComparison.Ordinal);
+        Assert.Contains("or byte[], which is a copy", error.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -821,12 +1018,12 @@ public sealed class WidenedTierOneTests
     /// A <c>decimal</c> and a <c>DateOnly</c> lane cost nothing per row (D298): the call's result is
     /// written into arena-backed lanes through <see cref="ClrStorage"/>, exactly as a scalar result
     /// is, so a warm projection through a delegate allocates what the same projection without one
-    /// does. <c>ReadOnlyMemory&lt;byte&gt;</c>, BINARY's allocation-free spelling, is held to it too.
+    /// does. <c>ReadOnlySpan&lt;byte&gt;</c>, BINARY's allocation-free spelling in and out, is held to it too.
     /// </summary>
     [Theory]
     [InlineData("decimal")]
     [InlineData("DateOnly")]
-    [InlineData("ReadOnlyMemory<byte>")]
+    [InlineData("ReadOnlySpan<byte>")]
     public async Task A_widened_lane_allocates_nothing_per_row(string spelling)
     {
         var (declaration, host, column, type) = spelling switch
@@ -844,7 +1041,7 @@ public sealed class WidenedTierOneTests
                 Date()),
             _ => (
                 new FunctionBuilder("keep").Scalar<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>>("b").Strict().Client().Build(),
-                new HostScalar1<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>>("keep", static b => b),
+                new HostScalar1<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("keep", static b => b),
                 "Blob",
                 Binary(nullable: true)),
         };

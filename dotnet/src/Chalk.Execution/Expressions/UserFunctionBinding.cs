@@ -144,7 +144,14 @@ internal static class UserFunctionBinding
             descriptor.Parameters[0].Type,
             strict: true,
             $"{where}: '{descriptor.Name}' parameter '{descriptor.Parameters[0].Name}'",
-            key);
+            key,
+            lent: true);
+        if (aggregate.GetType().IsGenericType
+            && aggregate.GetType().GetGenericTypeDefinition() == typeof(HostArenaAggregate<,,>))
+        {
+            CheckArenaAggregate(descriptor, aggregate, where, key);
+            return;
+        }
         RequireLaneType(
             aggregate.ResultType,
             descriptor.ReturnType!.Value,
@@ -163,6 +170,50 @@ internal static class UserFunctionBinding
         }
 
         RequireFixedWidth(descriptor.ReturnType!.Value, $"{where}: '{descriptor.Name}' returns", key, input: false);
+    }
+
+    /// <summary>
+    /// D305: an aggregate with an arena state takes a fixed-width or span input like any other, and
+    /// answers a fixed-width value, a record, or — for a STRING or BINARY result — a
+    /// <c>ReadOnlySpan&lt;byte&gt;</c> over its scope, and only that.
+    /// </summary>
+    private static void CheckArenaAggregate(
+        FunctionDescriptor descriptor, HostAggregate aggregate, string where, string key)
+    {
+        if (aggregate.InputType != typeof(ReadOnlySpan<byte>))
+        {
+            RequireFixedWidth(
+                descriptor.Parameters[0].Type,
+                $"{where}: '{descriptor.Name}' parameter '{descriptor.Parameters[0].Name}'",
+                key,
+                input: true);
+        }
+
+        var declared = descriptor.ReturnType!.Value;
+        var what = $"{where}: '{descriptor.Name}' returns";
+        if (aggregate.ResultType == typeof(ReadOnlySpan<byte>))
+        {
+            if (declared.Kind is not (Ir.TypeKind.String or Ir.TypeKind.Binary))
+            {
+                throw new InvalidOperationException(
+                    $"{what} {IrTypes.Describe(declared.ToProto())}, and the aggregate registered as '{key}' "
+                    + "answers a ReadOnlySpan<byte>, which is how a STRING or a BINARY is answered and "
+                    + "nothing else. Answer the declared type, or declare the result STRING or BINARY.");
+            }
+
+            return;
+        }
+
+        if (declared.Kind is Ir.TypeKind.String or Ir.TypeKind.Binary)
+        {
+            throw new InvalidOperationException(
+                $"{what} {IrTypes.Describe(declared.ToProto())}, and an aggregate with an arena state "
+                + $"answers a STRING or a BINARY as a ReadOnlySpan<byte> over its scope; the one registered "
+                + $"as '{key}' answers {Describe(aggregate.ResultType)}. Spell Finish's result "
+                + "ReadOnlySpan<byte>, over bytes the scope keeps or the input lent.");
+        }
+
+        RequireLaneType(aggregate.ResultType, declared, strict: true, what, key);
     }
 
     /// <summary>
@@ -189,9 +240,23 @@ internal static class UserFunctionBinding
         }
     }
 
-    /// <summary>A CLR type as a refusal names it, its nullable form included.</summary>
-    private static string Describe(Type clr) =>
-        Nullable.GetUnderlyingType(clr) is { } underlying ? $"{underlying.Name}?" : clr.Name;
+    /// <summary>A CLR type as a refusal names it: generic arguments spelled out, a nullable form with its question mark.</summary>
+    private static string Describe(Type clr)
+    {
+        if (Nullable.GetUnderlyingType(clr) is { } underlying)
+        {
+            return $"{Describe(underlying)}?";
+        }
+
+        if (!clr.IsGenericType)
+        {
+            return clr.Name;
+        }
+
+        var name = clr.Name;
+        var tick = name.IndexOf('`', StringComparison.Ordinal);
+        return $"{(tick < 0 ? name : name[..tick])}<{string.Join(", ", clr.GetGenericArguments().Select(Describe))}>";
+    }
 
     private static void CheckTable(
         FunctionDescriptor descriptor, HostFunction host, string where, string key)
@@ -245,14 +310,15 @@ internal static class UserFunctionBinding
         }
 
         var underlying = Nullable.GetUnderlyingType(clr);
-        if (lent && (underlying ?? clr) == typeof(Utf8String))
+        if (lent && ((underlying ?? clr) == typeof(Utf8String) || (underlying ?? clr) == typeof(ReadOnlyMemory<byte>)))
         {
+            var text = (underlying ?? clr) == typeof(Utf8String);
             throw new InvalidOperationException(
                 $"{what} is spelled {Describe(clr)}, which would lend the lane's memory to the delegate "
                 + $"registered as '{key}' as a value it could keep past the call — and the engine reuses "
                 + "that memory. Spell the parameter ReadOnlySpan<byte>, which the compiler keeps inside "
-                + "the call, or string, which is a copy. A result may still be a Utf8String: that is the "
-                + "host's own memory.");
+                + $"the call, or {(text ? "string" : "byte[]")}, which is a copy. A result may still be a "
+                + $"{Describe(clr)}: that is the host's own memory.");
         }
 
         if (clr == typeof(ReadOnlySpan<byte>) && !strict && declared.Nullable)

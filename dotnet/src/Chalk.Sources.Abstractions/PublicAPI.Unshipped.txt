@@ -365,12 +365,9 @@ Chalk.Utf8StringExtensions
 [CHALK001]Chalk.Sources.ColumnView.Slice(int start, int length) -> Chalk.Sources.ColumnView
 [CHALK001]Chalk.Sources.ColumnView.Type.get -> Chalk.Catalog.ChalkType
 [CHALK001]Chalk.Sources.ColumnView.Type.init -> void
-[CHALK001]Chalk.Sources.ColumnView.Utf8(int row) -> Chalk.Utf8String
-[CHALK001]Chalk.Sources.ColumnView.Utf8View(int row) -> Chalk.Utf8String
 [CHALK001]Chalk.Sources.ColumnView.Utf8ViewBytes(int row) -> System.ReadOnlySpan<byte>
 [CHALK001]Chalk.Sources.ColumnView.Utf8ViewLanes() -> System.ReadOnlySpan<byte>
 [CHALK001]Chalk.Sources.ColumnView.Utf8ViewLength(int row) -> int
-[CHALK001]Chalk.Sources.ColumnView.Utf8ViewMemory(int row) -> System.ReadOnlyMemory<byte>
 [CHALK001]Chalk.Sources.ColumnView.Validity.get -> System.ReadOnlyMemory<byte>
 [CHALK001]Chalk.Sources.ColumnView.Validity.init -> void
 [CHALK001]Chalk.Sources.ColumnView.ValidityBits() -> System.ReadOnlySpan<byte>
@@ -378,7 +375,6 @@ Chalk.Utf8StringExtensions
 [CHALK001]Chalk.Sources.ColumnView.Values.init -> void
 [CHALK001]Chalk.Sources.ColumnView.VarData() -> System.ReadOnlySpan<byte>
 [CHALK001]Chalk.Sources.ColumnView.VarValue(int row) -> System.ReadOnlySpan<byte>
-[CHALK001]Chalk.Sources.ColumnView.VarValueMemory(int row) -> System.ReadOnlyMemory<byte>
 [CHALK001]Chalk.Sources.ColumnView.ViewBufferCount.get -> int
 [CHALK001]Chalk.Sources.ColumnView.ViewBufferCount.init -> void
 [CHALK001]Chalk.Sources.ColumnView.ViewBuffers.get -> System.ReadOnlyMemory<byte>[]?
@@ -508,3 +504,63 @@ static Chalk.Utf8StringComparer.ForString.get -> Chalk.Utf8StringComparer.String
 static Chalk.Utf8StringComparer.Ordinal.get -> Chalk.Utf8StringComparer!
 static Chalk.Utf8StringExtensions.TextEquals(this System.ReadOnlySpan<byte> utf8, string? text) -> bool
 static Chalk.Utf8StringExtensions.Utf8Hash(this System.ReadOnlySpan<byte> utf8) -> int
+Chalk.Sources.ArenaStore
+Chalk.Sources.ArenaStore.ArenaStore() -> void
+Chalk.Sources.ArenaStore.Release() -> void
+Chalk.Sources.ArenaStore.Reset() -> void
+Chalk.Sources.ArenaStore.Used.get -> int
+[CHALK001]Chalk.Sources.ArenaAccumulate<TState, TIn>
+[CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>
+[CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>.Add.get -> Chalk.Sources.ArenaAccumulate<TState, TIn>!
+[CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>.Add.init -> void
+[CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>.ArenaAggregateSpec() -> void
+[CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>.Finish.get -> Chalk.Sources.ArenaFinish<TState, TOut>!
+[CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>.Finish.init -> void
+[CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>.HasValue.get -> Chalk.Sources.ArenaHasValue<TState>?
+[CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>.HasValue.init -> void
+[CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>.Init.get -> Chalk.Sources.ArenaInit<TState>!
+[CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>.Init.init -> void
+[CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>.Merge.get -> Chalk.Sources.ArenaMerge<TState>?
+[CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>.Merge.init -> void
+[CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>.Remove.get -> Chalk.Sources.ArenaAccumulate<TState, TIn>?
+[CHALK001]Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>.Remove.init -> void
+[CHALK001]Chalk.Sources.ArenaFinish<TState, TOut>
+[CHALK001]Chalk.Sources.ArenaHasValue<TState>
+[CHALK001]Chalk.Sources.ArenaInit<TState>
+[CHALK001]Chalk.Sources.ArenaMerge<TState>
+[CHALK001]Chalk.Sources.ArenaScope
+[CHALK001]Chalk.Sources.ArenaScope.ArenaScope() -> void
+[CHALK001]Chalk.Sources.ArenaScope.Used.get -> int
+[CHALK001]virtual Chalk.Sources.ArenaAccumulate<TState, TIn>.Invoke(ref TState state, TIn value, ref Chalk.Sources.ArenaScope arena) -> void
+[CHALK001]virtual Chalk.Sources.ArenaFinish<TState, TOut>.Invoke(in TState state, ref Chalk.Sources.ArenaScope arena) -> TOut
+[CHALK001]virtual Chalk.Sources.ArenaHasValue<TState>.Invoke(in TState state) -> bool
+[CHALK001]virtual Chalk.Sources.ArenaInit<TState>.Invoke(ref Chalk.Sources.ArenaScope arena) -> TState
+[CHALK001]virtual Chalk.Sources.ArenaMerge<TState>.Invoke(ref TState state, in TState other, ref Chalk.Sources.ArenaScope arena, ref Chalk.Sources.ArenaScope otherArena) -> void
+abstract Chalk.Sources.ArenaStore.Recycle(byte[]! bytes) -> void
+abstract Chalk.Sources.ArenaStore.Resize(byte[]! current, int minimum) -> byte[]!
+Chalk.Sources.ArenaHandle
+Chalk.Sources.ArenaHandle.ArenaHandle() -> void
+Chalk.Sources.ArenaHandle.ArenaHandle(int Offset, int Length) -> void
+Chalk.Sources.ArenaHandle.Deconstruct(out int Offset, out int Length) -> void
+Chalk.Sources.ArenaHandle.Equals(Chalk.Sources.ArenaHandle other) -> bool
+Chalk.Sources.ArenaHandle.IsEmpty.get -> bool
+Chalk.Sources.ArenaHandle.Length.get -> int
+Chalk.Sources.ArenaHandle.Length.init -> void
+Chalk.Sources.ArenaHandle.Offset.get -> int
+Chalk.Sources.ArenaHandle.Offset.init -> void
+Chalk.Sources.ArenaStore.Bytes(Chalk.Sources.ArenaHandle buffer) -> System.Span<byte>
+Chalk.Sources.ArenaStore.Grow(Chalk.Sources.ArenaHandle buffer, int length) -> Chalk.Sources.ArenaHandle
+Chalk.Sources.ArenaStore.Keep(System.ReadOnlySpan<byte> value) -> Chalk.Sources.ArenaHandle
+Chalk.Sources.ArenaStore.Rent(int length) -> Chalk.Sources.ArenaHandle
+Chalk.Sources.ArenaStore.Return(Chalk.Sources.ArenaHandle buffer) -> void
+[CHALK001]Chalk.Sources.ArenaScope.Bytes(Chalk.Sources.ArenaHandle buffer) -> System.Span<byte>
+[CHALK001]Chalk.Sources.ArenaScope.Grow(Chalk.Sources.ArenaHandle buffer, int length) -> Chalk.Sources.ArenaHandle
+[CHALK001]Chalk.Sources.ArenaScope.Keep(System.ReadOnlySpan<byte> value) -> Chalk.Sources.ArenaHandle
+[CHALK001]Chalk.Sources.ArenaScope.Rent(int length) -> Chalk.Sources.ArenaHandle
+[CHALK001]Chalk.Sources.ArenaScope.Return(Chalk.Sources.ArenaHandle buffer) -> void
+override Chalk.Sources.ArenaHandle.GetHashCode() -> int
+static Chalk.Sources.ArenaHandle.Empty.get -> Chalk.Sources.ArenaHandle
+static Chalk.Sources.ArenaHandle.operator !=(Chalk.Sources.ArenaHandle left, Chalk.Sources.ArenaHandle right) -> bool
+static Chalk.Sources.ArenaHandle.operator ==(Chalk.Sources.ArenaHandle left, Chalk.Sources.ArenaHandle right) -> bool
+~override Chalk.Sources.ArenaHandle.Equals(object obj) -> bool
+~override Chalk.Sources.ArenaHandle.ToString() -> string

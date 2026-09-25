@@ -2831,7 +2831,7 @@ internal sealed class ColumnCopier : IArenaScratch
                     source.Offset + row))
             {
                 var value =
-                    source.Utf8ViewMemory(row).Span;
+                    source.Utf8ViewBytes(row);
 
                 if (!value.IsEmpty)
                 {

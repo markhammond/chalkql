@@ -728,7 +728,8 @@ still costs what it always did:
   host's own may carry — gives the cell as a `ReadOnlySpan<byte>`;
   `TryGetUtf8` says whether it was NULL. A batch never hands out a borrowed
   `Utf8String`: the span cannot outlive the batch, and `ToUtf8String()` on it
-  copies, for a value to keep. Inside a Tier 2 kernel it is `ColumnView.Utf8(row)`.
+  copies, for a value to keep. Inside a Tier 2 kernel it is `ColumnView.VarValue(row)`,
+  a span too.
 - **Looking a result up**: `Utf8StringComparer.ForString` for a dictionary keyed
   by `string` and `Utf8StringComparer.Ordinal` for one keyed by `Utf8String`
   implement .NET's alternate-key contracts, so the collection's
@@ -1011,7 +1012,13 @@ call. Nothing allocates per row unless the delegate does. Aggregates are a state
 machine of the shape PostgreSQL's are, with a fixed-width state and result; a
 STRING or BINARY input reaches one as a `ReadOnlySpan<byte>` over the value's
 own bytes, so a byte total, a prefix count or a hash over text is a Tier 1
-aggregate, while one that keeps text per group is not yet:
+aggregate. One that keeps variable-length data per group — the longest label, a
+concatenation, a sketch, a bitmap — is an `ArenaAggregateSpec`: its state is
+still a struct, and what the struct cannot hold it rents from the `ArenaScope`
+every step receives, keeping `ArenaHandle`s, two integers each; a STRING or
+BINARY answer is a span over the scope, copied into the result before the next
+group. Neither form puts anything on the heap, and a state with a reference field
+is refused when it is registered. The plain form first:
 
 ```csharp
 registry.AddAggregate("wsum", new AggregateSpec<Sum, double, double?>
@@ -1040,7 +1047,7 @@ A Tier 1 delegate is written in the CLR types a POCO property maps from:
 | TIMESTAMP, TIMESTAMP_TZ | `DateTime`, `DateTimeOffset` (in UTC) |
 | INTERVAL_DAY | `TimeSpan` |
 | UUID | `Guid` |
-| BINARY | `ReadOnlySpan<byte>`, `ReadOnlyMemory<byte>` or `byte[]`, declared BINARY explicitly for a span |
+| BINARY | `ReadOnlySpan<byte>` or `byte[]` in, declared BINARY explicitly for a span; `ReadOnlySpan<byte>`, `ReadOnlyMemory<byte>` or `byte[]` out |
 
 A function that is not strict takes the nullable form of a value type, so it can
 see a NULL. `string` and `byte[]` cost an allocation per row. The other types do
@@ -1049,6 +1056,15 @@ POCO property would: `decimal` is DECIMAL(28, 10) and `DateTime` is
 TIMESTAMP(9). Declare a narrower type with `Parameter(name, type)` and still
 implement it in `decimal` or `DateTime`. A temporal may also still be written as its
 raw count: `int` days, or `long` units.
+
+Two rules of arithmetic hold everywhere a number is rounded. A DECIMAL result,
+and a cast to a DECIMAL, rounds a midpoint away from zero, as PostgreSQL, DuckDB,
+SQL Server and SQLite do, so a statement answers the same wherever it ran. `ROUND`
+on a double or a float rounds the exact value the number holds, not a scaled copy
+of it, so `ROUND(655.925, 2)` is `655.92` because that double is
+`655.92499999999995…`; the same digits as a DECIMAL round to `655.93`, because a
+decimal is exact. The casts between DECIMAL and floating point are exact in both
+directions.
 
 A DECIMAL wider than 28 digits has no CLR type. It is refused when the engine is
 created, and a Tier 2 kernel reads it. A time the SQL type cannot hold exactly is
@@ -1189,11 +1205,15 @@ member that can hold its NULL. A NULL composite makes `TryGetComposite` answer
 `Classification?`; into any other struct, a NULL composite is refused, naming
 the row. The binding is built on the first read of a given `T` and struct type
 and then cached. A mismatch is refused on that first read, naming both sides.
-The fields are read from the batch's own buffers, so reading a record struct
-allocates nothing: a `Utf8String` or `ReadOnlyMemory<byte>` field is a slice of
-the batch, valid while the batch is. A `string` or `byte[]` field is a copy,
-allocated per row, and so is a record class. `ReadComposites` sets the read up
-once for the whole batch, which is the way to read many rows.
+The value fields are read from the batch's own buffers, so reading a record
+struct of value fields allocates nothing. A `Utf8String`, `ReadOnlyMemory<byte>`,
+`string` or `byte[]` field is a copy, allocated per row, because the record may
+be kept past the batch and a slice of the batch could be read again after the
+engine had reused its memory; a host that wants the text without a copy reads
+the field's own Arrow array as a span. A record class is an object per row. A
+DECIMAL field wider than 28 digits binds to a `decimal` too, and a value that
+does not fit is refused by name at the row it stands in. `ReadComposites` sets
+the read up once for the whole batch, which is the way to read many rows.
 
 A call written more than once in one select list, or more than once in one
 condition, runs once per row when its function is `Immutable()` or `Stable()`.

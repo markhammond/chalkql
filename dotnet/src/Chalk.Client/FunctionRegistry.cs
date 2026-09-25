@@ -32,7 +32,10 @@ namespace Chalk.Client;
 /// <c>string</c> or <c>byte[]</c>. A span has no NULL, so a non-strict function, which sees every
 /// NULL, spells a STRING parameter <c>string?</c>. A Tier 1 aggregate folds fixed-width state and
 /// answers a fixed-width result; its input may be a fixed-width value or a <c>ReadOnlySpan&lt;byte&gt;</c>
-/// over a STRING or BINARY, which is how a text input reaches one.
+/// over a STRING or BINARY, which is how a text input reaches one. An aggregate that keeps
+/// variable-length data per group is an <see cref="ArenaAggregateSpec{TState, TIn, TOut}"/>: the same
+/// struct state, holding handles to bytes it rents from an <see cref="ArenaScope"/>, and a STRING or
+/// BINARY answer as a span over that scope.
 /// </para>
 /// </remarks>
 public interface IFunctionRegistry
@@ -94,6 +97,16 @@ public interface IFunctionRegistry
     void AddAggregate<TState, TIn, TOut>(string name, AggregateSpec<TState, TIn, TOut> spec)
         where TState : struct
         where TIn : allows ref struct;
+
+    /// <summary>
+    /// An aggregate whose state keeps variable-length data per group in memory rented from an
+    /// <see cref="ArenaScope"/> (D305): the longest label, a concatenation, a sketch.
+    /// </summary>
+    [Experimental("CHALK001")]
+    void AddAggregate<TState, TIn, TOut>(string name, ArenaAggregateSpec<TState, TIn, TOut> spec)
+        where TState : struct
+        where TIn : allows ref struct
+        where TOut : allows ref struct;
 
     /// <summary>
     /// A table function: a delegate <c>(args…) =&gt; IEnumerable&lt;TRow&gt;</c> whose row type is
@@ -178,8 +191,41 @@ public sealed class FunctionRegistry : IFunctionRegistry
 
     public void AddAggregate<TState, TIn, TOut>(string name, AggregateSpec<TState, TIn, TOut> spec)
         where TState : struct
-        where TIn : allows ref struct =>
+        where TIn : allows ref struct
+    {
+        RequireSelfContained<TState>(Key(name));
         Add(new HostAggregate<TState, TIn, TOut>(Key(name), Required(spec)));
+    }
+
+    [Experimental("CHALK001")]
+    public void AddAggregate<TState, TIn, TOut>(string name, ArenaAggregateSpec<TState, TIn, TOut> spec)
+        where TState : struct
+        where TIn : allows ref struct
+        where TOut : allows ref struct
+    {
+        RequireSelfContained<TState>(Key(name));
+        Add(new HostArenaAggregate<TState, TIn, TOut>(Key(name), Required(spec)));
+    }
+
+    /// <summary>
+    /// F138: a state with a reference field would put an object per group on the heap, which the arena
+    /// exists to avoid, and the doc comment used to be the only guard. Refused by name, naming the way
+    /// to keep variable-length data.
+    /// </summary>
+    private static void RequireSelfContained<TState>(string name)
+        where TState : struct
+    {
+        if (System.Runtime.CompilerServices.RuntimeHelpers.IsReferenceOrContainsReferences<TState>())
+        {
+            throw new ArgumentException(
+                $"The state of the aggregate registered as '{name}', {typeof(TState).Name}, holds a reference. "
+                + "A Tier 1 aggregate's state lives in arena memory, one struct per group, and a reference "
+                + "field would put an object per group on the heap. Keep the state to value fields; an "
+                + "aggregate that keeps variable-length data per group rents it through an "
+                + "ArenaAggregateSpec and holds the ArenaHandle handles.",
+                nameof(TState));
+        }
+    }
 
     public void AddTable<TRow>(string name, Delegate producer) =>
         Add(new HostTable<TRow>(Key(name), Required(producer)));

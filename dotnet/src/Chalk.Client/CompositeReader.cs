@@ -307,17 +307,21 @@ internal sealed class CompositeReader<T>
         }
 
         var field = declared.Fields[index];
-        if (field.Type.Kind == Ir.TypeKind.Decimal && field.Type.Precision > LaneCodec.DecimalDigits)
+        if (field.Type.Kind == Ir.TypeKind.Decimal && field.Type.Scale > LaneCodec.DecimalDigits)
         {
             throw Refused(
                 described,
-                $"field '{field.Name}' is {IrTypes.Describe(field.Type.ToProto())}, which a CLR decimal cannot "
-                + $"hold (it holds {LaneCodec.DecimalDigits} digits), and '{name}' of "
+                $"field '{field.Name}' is {IrTypes.Describe(field.Type.ToProto())}, whose scale no CLR decimal "
+                + $"can hold (it holds {LaneCodec.DecimalDigits} places), and '{name}' of "
                 + $"{CompositeInference.Describe(record)} is {CompositeInference.Describe(clr)}; read this field "
                 + "from its own Arrow array");
         }
 
-        if (!LaneCodec.Accepts(clr, field.Type))
+        // A DECIMAL wider than 28 digits binds to a decimal all the same: a value that fits reads
+        // exactly, and one that does not is refused by name when it is read (D301 as amended).
+        var wideDecimal = field.Type.Kind == Ir.TypeKind.Decimal && field.Type.Precision > LaneCodec.DecimalDigits
+            && (Nullable.GetUnderlyingType(clr) ?? clr) == typeof(decimal);
+        if (!wideDecimal && !LaneCodec.Accepts(clr, field.Type))
         {
             throw Refused(
                 described,
@@ -333,7 +337,7 @@ internal sealed class CompositeReader<T>
                 + $"{CompositeInference.Describe(clr)}, which cannot hold its NULL; declare it {clr.Name}?");
         }
 
-        var cursor = CursorKind.For(clr, field.Type, type.Fields[index].DataType);
+        var cursor = CursorKind.For(clr, field.Name, field.Type, type.Fields[index].DataType);
         var nullable = Nullable.GetUnderlyingType(clr) is not null;
         var read = cursor.Type.GetMethod(nullable ? nameof(FixedCursor<int>.ReadNullable) : nameof(FixedCursor<int>.Read))
             ?? throw new InvalidOperationException($"{cursor.Type.Name} has no reader for {clr.Name}.");
@@ -431,7 +435,7 @@ internal sealed class CompositeReader<T>
 internal sealed record CursorKind(Type Type, Func<FieldCursor> Create)
 {
     /// <summary>The cursor for one (CLR spelling, Chalk type, Arrow type), the lane codec's pairs.</summary>
-    public static CursorKind For(Type clr, ChalkType field, IArrowType arrow)
+    public static CursorKind For(Type clr, string name, ChalkType field, IArrowType arrow)
     {
         var value = Nullable.GetUnderlyingType(clr) ?? clr;
         var views = arrow is StringViewType or BinaryViewType;
@@ -444,7 +448,7 @@ internal sealed record CursorKind(Type Type, Func<FieldCursor> Create)
             Ir.TypeKind.I64 => Of(() => new FixedCursor<long>()),
             Ir.TypeKind.Fp32 => Of(() => new FixedCursor<float>()),
             Ir.TypeKind.Fp64 => Of(() => new FixedCursor<double>()),
-            Ir.TypeKind.Decimal => Of(() => new DecimalCursor(field.Scale)),
+            Ir.TypeKind.Decimal => Of(() => new DecimalCursor(field.Scale, name, field.Precision)),
             Ir.TypeKind.String when value == typeof(Utf8String) => Of(() => new Utf8Cursor(views)),
             Ir.TypeKind.String => Of(() => new StringCursor(views)),
             Ir.TypeKind.Binary when value == typeof(ReadOnlyMemory<byte>) => Of(() => new BinaryMemoryCursor(views)),
@@ -636,9 +640,34 @@ internal sealed unsafe class BoolCursor : FieldCursor
     public bool? ReadNullable(int row) => IsValid(row) ? Read(row) : default(bool?);
 }
 
-internal sealed unsafe class DecimalCursor(int scale) : LaneCursor<byte>
+/// <summary>
+/// A DECIMAL field as a <c>decimal</c>. A field wider than 28 digits binds too, and a value that does
+/// not fit is refused by name, at the row it stands in, when it is read.
+/// </summary>
+internal sealed unsafe class DecimalCursor(int scale, string name, int precision) : LaneCursor<byte>
 {
-    public decimal Read(int row) => ClrStorage.DecimalOf(new ReadOnlySpan<byte>(LaneAddress(row, 16), 16), scale);
+    public decimal Read(int row)
+    {
+        var lane = new ReadOnlySpan<byte>(LaneAddress(row, 16), 16);
+        if (precision <= LaneCodec.DecimalDigits)
+        {
+            return ClrStorage.DecimalOf(lane, scale);
+        }
+
+        try
+        {
+            return ClrStorage.DecimalOf(lane, scale);
+        }
+        catch (OverflowException)
+        {
+            var unscaled = System.Buffers.Binary.BinaryPrimitives.ReadInt128LittleEndian(lane);
+            throw new InvalidOperationException(
+                $"field '{name}' is DECIMAL({precision},{scale}) and at row {row} holds "
+                + $"{unscaled.ToString(System.Globalization.CultureInfo.InvariantCulture)}E-{scale}, which a CLR "
+                + $"decimal cannot (it holds {LaneCodec.DecimalDigits} digits); read this field from its own "
+                + "Arrow array.");
+        }
+    }
 
     public decimal? ReadNullable(int row) => IsValid(row) ? Read(row) : default(decimal?);
 }
@@ -763,9 +792,15 @@ internal abstract unsafe class BytesCursor(bool views) : FieldCursor
 /// <see cref="Utf8String"/>'s conversion from <c>byte[]</c> into an empty value — as it would through
 /// <see cref="ReadOnlyMemory{T}"/>'s below.
 /// </summary>
+/// <summary>
+/// A <c>Utf8String</c> field is a copy of the cell's bytes, allocated per row: the record may be kept
+/// past the batch, and a value over the batch's buffer could be read again after the arena had reused
+/// it (D303, D304). A host that wants the text without a copy reads the field's own Arrow array as a
+/// span.
+/// </summary>
 internal sealed class Utf8Cursor(bool views) : BytesCursor(views)
 {
-    public Utf8String Read(int row) => new(Bytes(row));
+    public Utf8String Read(int row) => Utf8String.Copy(Bytes(row).Span);
 
     public Utf8String? ReadNullable(int row) => IsValid(row) ? Read(row) : default(Utf8String?);
 }
@@ -777,9 +812,10 @@ internal sealed class StringCursor(bool views) : BytesCursor(views)
 }
 
 /// <summary>BINARY as a <see cref="ReadOnlyMemory{T}"/>: a slice of the batch's memory.</summary>
+/// <summary>A <c>ReadOnlyMemory&lt;byte&gt;</c> field is a copy too, for the same reason.</summary>
 internal sealed class BinaryMemoryCursor(bool views) : BytesCursor(views)
 {
-    public ReadOnlyMemory<byte> Read(int row) => Bytes(row);
+    public ReadOnlyMemory<byte> Read(int row) => Bytes(row).ToArray();
 
     public ReadOnlyMemory<byte>? ReadNullable(int row) => IsValid(row) ? Read(row) : default(ReadOnlyMemory<byte>?);
 }

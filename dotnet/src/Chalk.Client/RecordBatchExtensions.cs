@@ -9,7 +9,7 @@ namespace Chalk.Arrow;
 /// boxed rows of the <b>test kit and samples only</b>: they box every value, which is precisely what
 /// the engine exists to avoid, and hosts read Arrow. <see cref="GetComposite{T}"/> and
 /// <see cref="TryGetComposite{T}"/> are a host's own: a composite cell read as the host's record,
-/// allocating nothing a record struct does not.
+/// its value fields from the batch's buffers and its text or binary fields as copies.
 /// </summary>
 public static class RecordBatchExtensions
 {

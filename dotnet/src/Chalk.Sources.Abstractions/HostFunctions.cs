@@ -298,6 +298,11 @@ internal interface IHostAggregateVisitor<out TResult>
     TResult Visit<TState, TIn, TOut>(AggregateSpec<TState, TIn, TOut> spec)
         where TState : struct
         where TIn : allows ref struct;
+
+    TResult Visit<TState, TIn, TOut>(ArenaAggregateSpec<TState, TIn, TOut> spec)
+        where TState : struct
+        where TIn : allows ref struct
+        where TOut : allows ref struct;
 }
 
 internal sealed class HostAggregate<TState, TIn, TOut> : HostAggregate
@@ -341,6 +346,65 @@ internal sealed class HostAggregate<TState, TIn, TOut> : HostAggregate
         }
 
         public object? Finish() => _spec.Finish(_state);
+    }
+}
+
+/// <summary>An aggregate with an arena state (D305): the same engine shape, over the arena spec.</summary>
+internal sealed class HostArenaAggregate<TState, TIn, TOut> : HostAggregate
+    where TState : struct
+    where TIn : allows ref struct
+    where TOut : allows ref struct
+{
+    private readonly ArenaAggregateSpec<TState, TIn, TOut> _spec;
+
+    public HostArenaAggregate(string name, ArenaAggregateSpec<TState, TIn, TOut> spec)
+        : base(name) => _spec = spec;
+
+    public override bool HasRemove => _spec.Remove is not null;
+
+    public override bool HasMerge => _spec.Merge is not null;
+
+    public override Type InputType => typeof(TIn);
+
+    public override Type ResultType => typeof(TOut);
+
+    public override TResult Accept<TResult>(IHostAggregateVisitor<TResult> visitor) => visitor.Visit(_spec);
+
+    public override IBoxedAggregate NewBoxed() => new Boxed(_spec);
+
+    /// <summary>The reference executor's accumulator: the same delegates over a heap-backed scope.</summary>
+    private sealed class Boxed : IBoxedAggregate
+    {
+        private readonly ArenaAggregateSpec<TState, TIn, TOut> _spec;
+        private readonly HeapArenaStore _store = new();
+        private TState _state;
+
+        public Boxed(ArenaAggregateSpec<TState, TIn, TOut> spec)
+        {
+            _spec = spec;
+            var scope = new ArenaScope(_store);
+            _state = spec.Init(ref scope);
+        }
+
+        public void Add(object? value)
+        {
+            if (value is not null)
+            {
+                var scope = new ArenaScope(_store);
+                _spec.Add(ref _state, BoxedLanes.Cast<TIn>(value), ref scope);
+            }
+        }
+
+        public object? Finish()
+        {
+            if (_spec.HasValue is { } hasValue && !hasValue(in _state))
+            {
+                return null;
+            }
+
+            var scope = new ArenaScope(_store);
+            return BoxedLanes.Box(_spec.Finish(in _state, ref scope));
+        }
     }
 }
 

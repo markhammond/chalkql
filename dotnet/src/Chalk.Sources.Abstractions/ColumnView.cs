@@ -167,7 +167,7 @@ public readonly struct ColumnView
     {
         if (ViewBuffers is not null)
         {
-            return Utf8ViewMemory(row).Span;
+            return Utf8ViewBytes(row);
         }
 
         var offsets = OffsetLanes();
@@ -175,56 +175,13 @@ public readonly struct ColumnView
 
         return Values.Span.Slice(start, offsets[row + 1] - start);
     }
-
+            
     /// <summary>
-    /// The bytes of one row of a variable-length column, as memory rather than a span, so a caller
-    /// may hold it across an <c>await</c> (D147).
+    /// One row of a STRING_VIEW column as its bytes: inside the sixteen-byte lane for a value of twelve
+    /// bytes or fewer, in the variadic buffer the lane names otherwise. A span, valid for the batch and
+    /// unable to outlive it — the one form a kernel is handed text in (D304).
     /// </summary>
-    /// <remarks>
-    /// The memory points into this batch's buffers and is valid until the batch is disposed or the
-    /// arena reuses it — the lifetime rule of this type. Anything that outlives the batch copies.
-    /// </remarks>
-    public ReadOnlyMemory<byte> VarValueMemory(int row)
-    {
-        if (ViewBuffers is not null)
-        {
-            return Utf8ViewMemory(row);
-        }
-
-        var offsets = OffsetLanes();
-        var start = offsets[row];
-
-        return Values.Slice(start, offsets[row + 1] - start);
-    }
-    
-    /// <summary>One row of a STRING column as a <see cref="Utf8String"/> (D147).</summary>
-    /// <remarks>
-    /// The value borrows this batch's buffers and is valid until the batch is disposed or the arena
-    /// reuses it. A caller that keeps it calls <c>ToArray()</c> or <c>ToString()</c>. The bytes are
-    /// valid UTF-8 by construction — they were checked where they entered the column — and are not
-    /// checked again here.
-    /// </remarks>
-    public Utf8String Utf8(int row) => new(VarValueMemory(row));
-
-    /// <summary>
-    /// One row of a STRING_VIEW column as a borrowed UTF-8 value.
-    ///
-    /// The caller is responsible for using this only with STRING_VIEW physical
-    /// storage. For classic STRING storage use <see cref="Utf8"/>.
-    /// </summary>
-    public Utf8String Utf8View(int row) => new(Utf8ViewMemory(row));
-    
-    /// <summary>
-    /// One row of a STRING_VIEW column as borrowed UTF-8 bytes.
-    /// </summary>
-    public ReadOnlySpan<byte> Utf8ViewBytes(
-        int row) =>
-        Utf8ViewMemory(row).Span;
-    
-    /// <summary>
-    /// One row of a STRING_VIEW column as borrowed memory.
-    /// </summary>
-    public ReadOnlyMemory<byte> Utf8ViewMemory(int row)
+    public ReadOnlySpan<byte> Utf8ViewBytes(int row)
     {
         Validate();
 
@@ -250,7 +207,7 @@ public readonly struct ColumnView
             //
             // [length:4][inline payload:12]
             //
-            return Values.Slice(
+            return Values.Span.Slice(
                 laneOffset + sizeof(int),
                 length);
         }
@@ -281,6 +238,7 @@ public readonly struct ColumnView
         }
 
         return buffers[bufferIndex]
+            .Span
             .Slice(
                 bufferOffset,
                 length);

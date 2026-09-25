@@ -377,6 +377,18 @@ public sealed class CompositeReadBackTests(SharedSidecar sidecar)
 
     public readonly record struct Wide(decimal Amount);
 
+    /// <summary>A DECIMAL(38, s) array from digits, since a C# decimal cannot spell 38 of them.</summary>
+    private static Decimal128Array WideDecimals(Decimal128Type type, string[] digits)
+    {
+        var builder = new Decimal128Array.Builder(type);
+        foreach (var value in digits)
+        {
+            builder.Append(System.Data.SqlTypes.SqlDecimal.Parse(value));
+        }
+
+        return builder.Build();
+    }
+
     public sealed class Unbuildable
     {
         public Unbuildable(int unrelated) => _ = unrelated;
@@ -421,15 +433,17 @@ public sealed class CompositeReadBackTests(SharedSidecar sidecar)
             + "hold its NULL; declare it Double?.",
             Assert.Throws<InvalidOperationException>(() => nullable.GetComposite<Classification>(0)).Message);
 
+        // A DECIMAL wider than 28 digits binds to a decimal all the same (D301 as amended): a value that
+        // fits reads exactly, and one that does not is refused by name at the row it stands in.
         var wide = Struct(
-            1,
+            2,
             validity: null,
-            ("Amount", new Decimal128Type(38, 4), false, Decimals(new Decimal128Type(38, 4), [1m])));
-        Assert.Equal(
-            "Wide cannot be read from the composite COMPOSITE(Amount DECIMAL(38,4)): field 'Amount' is "
-            + "DECIMAL(38,4), which a CLR decimal cannot hold (it holds 28 digits), and 'Amount' of Wide is "
-            + "Decimal; read this field from its own Arrow array.",
-            Assert.Throws<InvalidOperationException>(() => wide.GetComposite<Wide>(0)).Message);
+            ("Amount", new Decimal128Type(38, 4), false, WideDecimals(new Decimal128Type(38, 4), ["1.0000", "123456789012345678901234567890.1234"])));
+        Assert.Equal(1m, wide.GetComposite<Wide>(0).Amount);
+        Assert.Contains(
+            "field 'Amount' is DECIMAL(38,4) and at row 1 holds 1234567890123456789012345678901234E-4, which a CLR "
+            + "decimal cannot (it holds 28 digits); read this field from its own Arrow array.",
+            Assert.Throws<InvalidOperationException>(() => wide.GetComposite<Wide>(1)).Message);
 
         var twice = Struct(
             1,
@@ -450,9 +464,13 @@ public sealed class CompositeReadBackTests(SharedSidecar sidecar)
         Assert.Throws<ArgumentOutOfRangeException>(() => composite.GetComposite<Classification>(3));
     }
 
+    /// <summary>A record struct of the value fields alone: what a read costs nothing for.</summary>
+    public readonly record struct Scored(double Confidence);
+
     /// <summary>
-    /// A record struct of value and <c>Utf8String</c> fields costs nothing to read: the binding is
-    /// asked by reference, the fields are read from the child buffers, and the string is a slice.
+    /// A record struct of value fields costs nothing to read: the binding is asked by reference and
+    /// the fields are read from the child buffers. A <c>Utf8String</c> field is a copy per row (D304),
+    /// which the probe is seen to see.
     /// </summary>
     [Fact]
     public async Task Reading_a_record_struct_allocates_nothing_per_row()
@@ -464,9 +482,9 @@ public sealed class CompositeReadBackTests(SharedSidecar sidecar)
             var total = 0.0;
             for (var row = 0; row < rows; row++)
             {
-                if (composite.TryGetComposite<Classification>(row, out var value))
+                if (composite.TryGetComposite<Scored>(row, out var value))
                 {
-                    total += value.Confidence + value.Category.Length;
+                    total += value.Confidence;
                 }
             }
 
@@ -484,6 +502,23 @@ public sealed class CompositeReadBackTests(SharedSidecar sidecar)
         Assert.True(read);
         Assert.Equal(0, bytes);
 
+        // A Utf8String field is a copy of the cell's bytes, allocated per row, so the record may be
+        // kept past the batch.
+        var (textBytes, _) = await AllocationProbe.SteadyStateAsync(() =>
+        {
+            var total = 0;
+            for (var row = 0; row < rows; row++)
+            {
+                if (composite.TryGetComposite<Classification>(row, out var value))
+                {
+                    total += value.Category.Length;
+                }
+            }
+
+            return Task.FromResult(total > 0);
+        });
+        Assert.True(textBytes >= rows / 7 * 6 * 24, $"{textBytes} bytes for {rows} reads with a Utf8String field");
+
         // And the probe sees what a read does allocate: a record class is an object a row.
         var (classBytes, _) = await AllocationProbe.SteadyStateAsync(() =>
         {
@@ -500,8 +535,11 @@ public sealed class CompositeReadBackTests(SharedSidecar sidecar)
 
     // ---------------------------------------------------------------- the batch read
 
-    /// <summary>A record struct of a <c>Utf8String</c> and value fields: what a batch reads without allocating.</summary>
+    /// <summary>A record struct of a <c>Utf8String</c> and value fields; the text is a copy per row.</summary>
     public readonly record struct Priced2(Utf8String Category, double Confidence, long Rank);
+
+    /// <summary>The value fields alone: what a batch reads without allocating.</summary>
+    public readonly record struct Ranked2(double Confidence, long Rank);
 
     /// <summary>The same with a <c>string</c> field, which allocates a copy per row and is measured apart.</summary>
     public readonly record struct Labelled(string? Category, double Confidence);
@@ -568,22 +606,28 @@ public sealed class CompositeReadBackTests(SharedSidecar sidecar)
     }
 
     /// <summary>
-    /// The batch gate: 4096 rows of a record struct of a <c>Utf8String</c> and value fields read into a
-    /// span cost nothing, the attach, the binder call and the copy included. A <c>string</c> field is
-    /// the one allowed exception — a copy per row — and is measured apart, so the probe is seen to see.
+    /// The batch gate: 4096 rows of a record struct of value fields read into a span cost nothing, the
+    /// attach, the binder call and the copy included. A <c>Utf8String</c> or a <c>string</c> field is a
+    /// copy per row (D304) and is measured apart, so the probe is seen to see.
     /// </summary>
     [Fact]
     public async Task Reading_a_batch_into_a_span_allocates_nothing_per_row()
     {
         const int rows = 4096;
         var composite = Ranked(rows);
-        var into = new Priced2[rows];
+        var into = new Ranked2[rows];
+        var priced = new Priced2[rows];
         var labelled = new Labelled[rows];
 
         var (bytes, read) = await AllocationProbe.SteadyStateAsync(() =>
         {
-            composite.ReadComposites<Priced2>(into);
+            composite.ReadComposites<Ranked2>(into);
             return Task.FromResult(into[rows - 1].Rank == rows - 1);
+        });
+        var (textBytes, _) = await AllocationProbe.SteadyStateAsync(() =>
+        {
+            composite.ReadComposites<Priced2>(priced);
+            return Task.FromResult(priced[rows - 1].Rank == rows - 1);
         });
         var (stringBytes, _) = await AllocationProbe.SteadyStateAsync(() =>
         {
@@ -592,10 +636,11 @@ public sealed class CompositeReadBackTests(SharedSidecar sidecar)
         });
 
         TestContext.Current.TestOutputHelper?.WriteLine(
-            $"a batch of {rows}: {bytes} bytes with a Utf8String field, {stringBytes} bytes "
-            + $"({stringBytes / (double)rows:0.#} a row) with a string field");
+            $"a batch of {rows}: {bytes} bytes with value fields, {textBytes} bytes with a Utf8String field, "
+            + $"{stringBytes} bytes ({stringBytes / (double)rows:0.#} a row) with a string field");
         Assert.True(read);
         Assert.Equal(0, bytes);
+        Assert.True(textBytes >= rows * 24L, $"{textBytes} bytes for {rows} Utf8String copies");
         Assert.True(stringBytes >= rows * 24L, $"{stringBytes} bytes for {rows} strings");
     }
 

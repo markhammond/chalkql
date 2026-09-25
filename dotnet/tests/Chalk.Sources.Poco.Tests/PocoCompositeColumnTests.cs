@@ -130,7 +130,7 @@ public sealed class PocoCompositeColumnTests
                     if (rows[row].Contact is { } c)
                     {
                         Assert.Equal(c.Tier, tier[i]);
-                        Assert.Equal(c.Email.ToString(), contact.FieldView(0).Utf8(i).ToString());
+                        Assert.Equal(c.Email.ToString(), System.Text.Encoding.UTF8.GetString(contact.FieldView(0).VarValue(i)));
                     }
 
                     Assert.Equal(rows[row].Where.X, x[i]);

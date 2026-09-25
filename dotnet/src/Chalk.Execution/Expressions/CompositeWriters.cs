@@ -279,6 +279,7 @@ internal sealed class FieldWriter<TRecord, TField> : FieldWriter<TRecord>
 /// a kernel's writer — one read and one append per field, and the composite row closed.
 /// </summary>
 internal abstract class CompositeEmitter<TOut>
+    where TOut : allows ref struct
 {
     /// <summary>Appends one composite row: <paramref name="value"/>'s fields, or a NULL composite's.</summary>
     public abstract void Emit(Vectors.ColumnCopier copier, TOut value);
@@ -288,6 +289,7 @@ internal abstract class CompositeEmitter<TOut>
 internal static class CompositeEmitters
 {
     public static CompositeEmitter<TOut> For<TOut>(ChalkType declared, string owner)
+        where TOut : allows ref struct
     {
         var underlying = Nullable.GetUnderlyingType(typeof(TOut));
         var record = underlying ?? typeof(TOut);
