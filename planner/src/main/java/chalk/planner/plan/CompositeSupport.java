@@ -119,7 +119,9 @@ public final class CompositeSupport {
             throw refusal(
                 "SELECT DISTINCT over the composite column '" + field.getName() + "'",
                 "A composite value has no equality, so DISTINCT cannot compare the rows that hold one. "
-                    + "Select its fields as columns of their own, or GROUP BY one of them.");
+                    + "Select its fields as columns of their own, e.g. "
+                    + field(field.getName(), field.getType())
+                    + ", or GROUP BY one of them.");
           }
         }
       }
@@ -156,7 +158,7 @@ public final class CompositeSupport {
           throw refusal(
               "PARTITION BY a composite value (" + text.quote(key) + ")",
               "A composite value has no equality, so rows cannot be partitioned by one. Partition by one "
-                  + "of its fields instead, e.g. PARTITION BY f(x).category.");
+                  + "of its fields instead, e.g. PARTITION BY " + field(key, null) + ".");
         }
       }
       for (SqlNode key : window.getOrderList()) {
@@ -164,7 +166,7 @@ public final class CompositeSupport {
           throw refusal(
               "a window ORDER BY a composite value (" + text.quote(unwrapOrder(key)) + ")",
               "A composite value has no ordering. Order the window by one of its fields instead, e.g. "
-                  + "ORDER BY f(x).confidence.");
+                  + "ORDER BY " + field(unwrapOrder(key), null) + ".");
         }
       }
     }
@@ -184,11 +186,12 @@ public final class CompositeSupport {
         return;
       }
 
-      if (isComposite(resolve(row, select.getSelectList(), item), item)) {
+      RelDataType type = resolve(row, select.getSelectList(), item);
+      if (isComposite(type, item)) {
         throw refusal(
             "GROUP BY a composite value (" + text.quote(item) + ")",
             "A composite value has no equality, so rows cannot be grouped by one. Group by one of its "
-                + "fields instead, e.g. GROUP BY f(x).category.");
+                + "fields instead, e.g. GROUP BY " + keyField(item, row, type) + ".");
       }
     }
 
@@ -207,7 +210,7 @@ public final class CompositeSupport {
         throw refusal(
             clause + " a composite value (" + text.quote(key) + ")",
             "A composite value has no ordering. Sort by one of its fields instead, e.g. ORDER BY "
-                + "f(x).confidence, or ORDER BY (c).confidence over a subquery alias.");
+                + keyField(key, row, type) + ".");
       }
     }
 
@@ -222,7 +225,7 @@ public final class CompositeSupport {
               throw refusal(
                   "a comparison of a composite value (" + text.quote(call) + ")",
                   "A composite value has no equality or ordering, so it cannot be compared. Compare one "
-                      + "of its fields instead, e.g. f(x).category = 'food'.");
+                      + "of its fields instead, e.g. " + field(operand, null) + " = ….");
             }
           }
         }
@@ -232,7 +235,7 @@ public final class CompositeSupport {
             throw refusal(
                 "a composite value in IN (" + text.quote(value) + ")",
                 "A composite value has no equality, so it cannot be looked up in a list. Test one of its "
-                    + "fields instead, e.g. f(x).category IN ('food', 'rent').");
+                    + "fields instead, e.g. " + field(value, null) + " IN (…).");
           }
         }
         case CASE, COALESCE -> chooses(call);
@@ -242,7 +245,7 @@ public final class CompositeSupport {
             throw refusal(
                 "CAST of a composite value (" + text.quote(value) + ")",
                 "A composite value is never cast. Cast one of its fields instead, e.g. "
-                    + "CAST(f(x).confidence AS DECIMAL(5, 2)).");
+                    + "CAST(" + field(value, null) + " AS …).");
           }
         }
         case UNION, INTERSECT, EXCEPT -> setOperation(call);
@@ -286,12 +289,18 @@ public final class CompositeSupport {
         }
       }
 
+      List<SqlNode> composites = new java.util.ArrayList<>();
+      for (SqlNode result : results) {
+        if (result != null && !SqlUtil.isNullLiteral(result, true) && isComposite(result)) {
+          composites.add(result);
+        }
+      }
       if (scalarBeside) {
         throw refusal(
             "a composite value as a " + construct + " result (" + text.quote(call) + ")",
             "A " + construct + " chooses between composite values of one type, or between scalars, "
                 + "and never between the two. Take the composite apart and choose between its fields, "
-                + "e.g. CASE WHEN … THEN f(x).category END.");
+                + "e.g. " + choice(construct, composites, null) + ".");
       }
       // Validation stopped before it typed this choice, with every result a composite value: refused
       // when their declared types differ — the one way Calcite refuses such a choice — and left to
@@ -303,8 +312,8 @@ public final class CompositeSupport {
         throw refusal(
             "a " + construct + " between composite values of different types (" + text.quote(call) + ")",
             "A " + construct + " chooses between composite values of one type only: the same fields, "
-                + "named and typed alike. Choose between their fields instead, e.g. CASE WHEN … THEN "
-                + "f(x).category ELSE g(x).label END.");
+                + "named and typed alike. Choose between their fields instead, e.g. "
+                + choice(construct, composites, composites.size() > 1 ? composites.get(1) : null) + ".");
       }
     }
 
@@ -424,7 +433,7 @@ public final class CompositeSupport {
           throw refusal(
               call.getOperator().getName() + " of a composite value (" + text.quote(operand) + ")",
               "A built-in aggregate takes a scalar. Aggregate one of the composite's fields instead, "
-                  + "e.g. MAX(f(x).confidence).");
+                  + "e.g. " + call.getOperator().getName() + "(" + field(operand, null) + ").");
         }
       }
     }
@@ -483,6 +492,79 @@ public final class CompositeSupport {
         }
       }
       return null;
+    }
+
+    /**
+     * The way out a refusal names, built from the refused value itself: the value as the statement
+     * wrote it, parenthesised, and its first field — {@code (bid).price} — rather than a generic
+     * {@code f(x).confidence}, which named no field the statement has. Where the value's type is not
+     * known and it is not a call to a declared function, the generic example stands.
+     */
+    private String field(SqlNode value, @Nullable RelDataType type) {
+      String name = firstField(value, type);
+      return name == null ? "f(x).confidence" : "(" + text.quote(value) + ")." + name;
+    }
+
+    /**
+     * The example for an {@code ORDER BY} or {@code GROUP BY} key: an ordinal stands for a select item,
+     * so the item's own name is used — {@code (m).Direction} for {@code ORDER BY 2} — and any other key
+     * is quoted as the statement wrote it.
+     */
+    private String keyField(SqlNode key, @Nullable RelDataType row, @Nullable RelDataType type) {
+      if (row != null && key instanceof SqlNumericLiteral literal && literal.isInteger()) {
+        int ordinal = literal.intValue(true) - 1;
+        List<RelDataTypeField> fields = row.getFieldList();
+        if (ordinal >= 0 && ordinal < fields.size()) {
+          return field(fields.get(ordinal).getName(), fields.get(ordinal).getType());
+        }
+      }
+      return field(key, type);
+    }
+
+    /** The same for a column named in a refusal, whose type the row supplies. */
+    private static String field(String column, RelDataType type) {
+      return type.isStruct() && type.getFieldCount() > 0
+          ? "(" + identifier(column) + ")." + identifier(type.getFieldList().get(0).getName())
+          : "(" + identifier(column) + ").confidence";
+    }
+
+    /**
+     * A choice between fields, for the {@code CASE} and {@code COALESCE} refusals: the first composite
+     * result's field, and {@code other}'s where a second composite of another type stands beside it.
+     */
+    private String choice(String construct, List<SqlNode> composites, @Nullable SqlNode other) {
+      String first = composites.isEmpty() ? "f(x).category" : field(composites.get(0), null);
+      String second = other == null ? null : field(other, null);
+      if ("COALESCE".equals(construct)) {
+        return "COALESCE(" + first + ", " + (second == null ? "…" : second) + ")";
+      }
+      return "CASE WHEN … THEN " + first + (second == null ? "" : " ELSE " + second) + " END";
+    }
+
+    /** The composite's first field name, from the validated type, the namespace, or the declaration. */
+    private @Nullable String firstField(SqlNode value, @Nullable RelDataType type) {
+      RelDataType known = type != null ? type : typeOf(value);
+      SqlValidatorNamespace namespace = unvalidated ? null : validator.getNamespace(value);
+      if (namespace != null) {
+        // A query standing where a value does: its one column is the composite.
+        RelDataType row = namespace.getRowType();
+        known = row.getFieldCount() == 1 ? row.getFieldList().get(0).getType() : null;
+      }
+      if (known != null && known.isStruct() && known.getFieldCount() > 0) {
+        return identifier(known.getFieldList().get(0).getName());
+      }
+      if (value instanceof SqlCall call
+          && UserOperators.declarationOf(call.getOperator()) instanceof UserFunction declaration
+          && declaration.descriptor().getReturnType().getKind() == TypeKind.TYPE_KIND_COMPOSITE
+          && declaration.descriptor().getReturnType().getFieldsCount() > 0) {
+        return identifier(declaration.descriptor().getReturnType().getFields(0).getName());
+      }
+      return null;
+    }
+
+    /** A field name as the statement may spell it: bare where it is a plain identifier, quoted otherwise. */
+    private static String identifier(String name) {
+      return name.matches("[A-Za-z_][A-Za-z0-9_]*") ? name : "\"" + name.replace("\"", "\"\"") + "\"";
     }
 
     private @Nullable RelDataType typeOf(SqlNode node) {

@@ -399,7 +399,8 @@ final class CompositeResultsTest {
             () -> plan("SELECT symbol FROM bars ORDER BY price_move(\"open\", \"close\")"))
         .isInstanceOf(UnsupportedFeatureException.class)
         .hasMessageContaining("ORDER BY a composite value (price_move(\"open\", \"close\"))")
-        .hasMessageContaining("Sort by one of its fields");
+        .hasMessageContaining("Sort by one of its fields")
+        .hasMessageContaining("e.g. ORDER BY (price_move(\"open\", \"close\")).Direction.");
   }
 
   @Test
@@ -407,18 +408,22 @@ final class CompositeResultsTest {
     assertThatThrownBy(
             () -> plan("SELECT symbol, price_move(\"open\", \"close\") AS m FROM bars ORDER BY m"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("ORDER BY a composite value (m)");
+        .hasMessageContaining("ORDER BY a composite value (m)")
+        .hasMessageContaining("e.g. ORDER BY (m).Direction.");
+    // An ordinal names the select item it stands for, and the example uses the item's own name.
     assertThatThrownBy(
             () -> plan("SELECT symbol, price_move(\"open\", \"close\") AS m FROM bars ORDER BY 2"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("ORDER BY a composite value (2)");
+        .hasMessageContaining("ORDER BY a composite value (2)")
+        .hasMessageContaining("e.g. ORDER BY (m).Direction.");
   }
 
   @Test
   void distinct_over_a_composite_is_refused() {
     assertThatThrownBy(() -> plan("SELECT DISTINCT price_move(\"open\", \"close\") AS m FROM bars"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("SELECT DISTINCT over the composite column 'm'");
+        .hasMessageContaining("SELECT DISTINCT over the composite column 'm'")
+        .hasMessageContaining("e.g. (m).Direction, or GROUP BY one of them");
   }
 
   @Test
@@ -429,7 +434,8 @@ final class CompositeResultsTest {
                     "SELECT COUNT(*) FROM bars GROUP BY price_move(\"open\", \"close\")"))
         .isInstanceOf(UnsupportedFeatureException.class)
         .hasMessageContaining("GROUP BY a composite value (price_move(\"open\", \"close\"))")
-        .hasMessageContaining("Group by one of its fields");
+        .hasMessageContaining("Group by one of its fields")
+        .hasMessageContaining("e.g. GROUP BY (price_move(\"open\", \"close\")).Direction.");
   }
 
   @Test
@@ -443,7 +449,8 @@ final class CompositeResultsTest {
         .hasMessageContaining(
             "a comparison of a composite value"
                 + " (price_move(\"open\", \"close\") = price_move(\"open\", \"close\"))")
-        .hasMessageContaining("Compare one of its fields");
+        .hasMessageContaining("Compare one of its fields")
+        .hasMessageContaining("e.g. (price_move(\"open\", \"close\")).Direction = …");
   }
 
   @Test
@@ -456,7 +463,8 @@ final class CompositeResultsTest {
                         + " (price_move(\"close\", \"open\"), price_move(\"open\", \"open\"))"))
         .isInstanceOf(UnsupportedFeatureException.class)
         .hasMessageContaining("a composite value in IN (price_move(\"open\", \"close\"))")
-        .hasMessageContaining("Test one of its fields");
+        .hasMessageContaining("Test one of its fields")
+        .hasMessageContaining("e.g. (price_move(\"open\", \"close\")).Direction IN (…)");
     // Against a subquery Calcite reads the composite as a row of its two fields and refuses the shape
     // itself; the refusal by name still wins.
     assertThatThrownBy(
@@ -480,10 +488,12 @@ final class CompositeResultsTest {
             () -> plan("SELECT CAST(price_move(\"open\", \"close\") AS VARCHAR) FROM bars"))
         .isInstanceOf(UnsupportedFeatureException.class)
         .hasMessageContaining("CAST of a composite value (price_move(\"open\", \"close\"))")
-        .hasMessageContaining("Cast one of its fields");
+        .hasMessageContaining("Cast one of its fields")
+        .hasMessageContaining("e.g. CAST((price_move(\"open\", \"close\")).Direction AS …)");
     assertThatThrownBy(() -> plan("SELECT MAX(price_move(\"open\", \"close\")) FROM bars"))
         .isInstanceOf(UnsupportedFeatureException.class)
-        .hasMessageContaining("MAX of a composite value (price_move(\"open\", \"close\"))");
+        .hasMessageContaining("MAX of a composite value (price_move(\"open\", \"close\"))")
+        .hasMessageContaining("e.g. MAX((price_move(\"open\", \"close\")).Direction)");
     assertThatThrownBy(
             () ->
                 plan(
