@@ -38,6 +38,42 @@ var source = new PocoSourceBuilder("mem")
     .Build();
 ```
 
+A `Utf8String` member is a STRING column whose bytes are copied in as they are, never
+transcoded, and its keys, indexes and foreign keys compare bytes; `byte[]` and
+`ReadOnlyMemory<byte>` members are BINARY.
+
+A member whose type is a record is a composite column: one column whose fields are the record's
+public properties, in order and under the record's own names, each of a type a member may have.
+SQL reads a field by name to filter, order or group, and the column itself travels whole through
+`SELECT *`, a sort or a join and reaches the host as an Arrow struct column, which
+`ReadComposites<T>` reads back as the record. Each field is staged as a column of its own type
+would be. A record struct member is never NULL and its `Nullable<T>` may be; a record class
+member is nullable unless the compiler annotates it as not null.
+
+```csharp
+public readonly record struct Side(double Price, long Size);
+public sealed record Quote(long Id, Utf8String Symbol, Side Bid, Side? Ask);
+
+var source = new PocoSourceBuilder("mem")
+    .NamingPolicy(PocoNamingPolicy.SnakeCase)
+    .AddTable("quotes", quotes, t => t
+        .UniqueKey(q => q.Id)
+        .Index(q => q.Symbol))
+    .Build();
+```
+
+```sql
+SELECT q.id, q.ask.price AS ask
+FROM quotes q
+WHERE q.bid.price > 400 AND q.ask IS NOT NULL
+ORDER BY q.ask.price DESC
+```
+
+No key, index or declared ordering may name a composite column or a field of one: a `UniqueKey`,
+`OrderedBy`, `ForeignKey`, `Index` or clustered covering set that names one is refused at
+`Build()`, naming the member, and the column carries no statistics. Under entitlements a
+composite column is disclosed whole or withheld whole.
+
 POCO indexing is extensible: implement `IPocoIndex<T>` to adapt an index structure the
 application already maintains, and run the test kit's `PocoIndexConformance.Verify` against it to
 assert ChalkQL's range and ordering contract.
@@ -80,6 +116,10 @@ descending comparer registers a descending index. The
 lists what each Akade index becomes, shows how to modify a published set safely, and carries a
 benchmark of ChalkQL's execution overhead against Akade's own calls.
 
+A record member is a composite column here, as on a POCO table. An Akade index keyed by the
+record itself is not an access path, since nothing is keyed on a composite value, so that column
+is read through the scan while the set's other indexes still serve their lookups.
+
 ## Remote SQL sources
 
 ADO.NET and DuckDB sources declare which relational operations they can evaluate. ChalkQL pushes
@@ -104,7 +144,9 @@ dialect profile a deployment uses.
 ## Custom sources
 
 `Chalk.Sources.Abstractions` is distributed with the core `ChalkQL` package. Implement
-`ISourceRuntime` when the built-in sources are not appropriate.
+`ISourceRuntime` when the built-in sources are not appropriate. A composite column belongs to an
+in-process source alone: a remote source that declares one is refused at registration, naming the
+table and the column, so a remote table declares a record's fields as columns of their own.
 
 ## Things that will bite you
 
@@ -123,7 +165,9 @@ disagreement in production.
 ## Documentation
 
 See the [ChalkQL guide](https://github.com/markhammond/chalkql/blob/main/docs/guide.md) for source
-configuration and extension points, the
+configuration,
+[composite columns](https://github.com/markhammond/chalkql/blob/main/docs/guide.md#composite-columns)
+and extension points, the
 [tutorial](https://github.com/markhammond/chalkql/blob/main/docs/tutorial.md) for worked federation
 examples, and the
 [Akade source README](https://github.com/markhammond/chalkql/blob/main/dotnet/src/Chalk.Sources.Akade/README.md).
