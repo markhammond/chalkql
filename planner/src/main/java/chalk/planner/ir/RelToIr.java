@@ -1228,6 +1228,21 @@ public final class RelToIr {
     aggregate.addGroupings(grouping);
 
     RelDataType inputRow = node.getInput().getRowType();
+    // D58: a LIST has no equality, so nothing groups by one, and nothing de-duplicates one for a
+    // DISTINCT measure — F128 found COUNT(DISTINCT …) over a LIST counting every list as one. Both are
+    // refused here by name, where the column can be named, rather than left for the executor's own
+    // refusal at prepare. A composite value is refused by the statement's validation first (D291);
+    // here it is the backstop for a key a rule derived.
+    for (int key : node.getGroupSet()) {
+      refuseIncomparableKey(inputRow, key, "GROUP BY or SELECT DISTINCT");
+    }
+    for (AggregateCall call : node.getAggCallList()) {
+      if (call.isDistinct()) {
+        for (int argument : call.getArgList()) {
+          refuseIncomparableKey(inputRow, argument, call.getAggregation().getName() + "(DISTINCT)");
+        }
+      }
+    }
     for (AggregateCall call : node.getAggCallList()) {
       Measure.Builder measure =
           Measure.newBuilder().setDistinct(call.isDistinct()).setType(types.toIr(call.getType()));
@@ -1396,6 +1411,27 @@ public final class RelToIr {
       table.addRows(row);
     }
     return table.build();
+  }
+
+  /**
+   * D58 and D291: a LIST and a composite value have no equality, so a grouping key or a DISTINCT
+   * measure's argument of either kind is refused, naming the clause and the column.
+   */
+  private void refuseIncomparableKey(RelDataType row, int index, String clause) {
+    RelDataTypeField field = row.getFieldList().get(index);
+    TypeKind kind = types.toIr(field.getType()).getKind();
+    if (kind == TypeKind.TYPE_KIND_LIST) {
+      throw new UnsupportedFeatureException(
+          clause + " on the LIST column '" + field.getName() + "'",
+          "v1 lists have no ordering or equality; they can be produced, projected and indexed "
+              + "into (docs/design/14-windows-ii.md §5).");
+    }
+    if (kind == TypeKind.TYPE_KIND_COMPOSITE) {
+      throw new UnsupportedFeatureException(
+          clause + " on the composite column '" + field.getName() + "'",
+          "A composite value has no equality: group by one of its fields instead "
+              + "(docs/design/51-structured-function-results.md §1).");
+    }
   }
 
   private Expr fieldRef(int index, RelDataType row) {
