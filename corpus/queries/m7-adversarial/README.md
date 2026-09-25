@@ -1,6 +1,6 @@
 # `m7-adversarial` — statements written to subvert the entitlement rewrite
 
-Forty statements, in the conventions of `m7-tenancy` beside it, whose purpose is to **fail**:
+Seventy statements, in the conventions of `m7-tenancy` beside it, whose purpose is to **fail**:
 each one is an attempt to make the leaf rewrite of `docs/design/16-entitlements.md` §3 disclose
 something the policy of §8 says the principal may not have. The design is
 `docs/design/32-adversarial-entitlements.md` (D251–D253); the threat model is its §0, and the short
@@ -15,7 +15,7 @@ principal the statement is a `POLICY` refusal for, and one header this family ad
 ## What runs them
 
 - **In process, against the oracle and a golden** — `TenancyCorpusTests`, theory
-  `Every_subversion_is_held_to_the_oracle_and_the_golden`, as every one of the nine principals
+  `Every_subversion_is_held_to_the_oracle_and_the_golden`, as every one of the fifteen principals
   `TenancyFixture` names. The rows must be the rows `TenancyOracle` — §8's model stated naively in
   C#, with no descriptor, no planner and no pass — discloses to that principal, and they must be
   what `corpus/plans/m7-adversarial/` records.
@@ -46,6 +46,9 @@ was handed, and what the tree does with a statement that spells `@ctx` itself.
 | 3 | Set operations | 29–33 (5) | §3.1, §3.12 the reported disclosure of a union |
 | 4 | Indirection | 34–39 (6) | §3.1 the rewrite is at the leaf; §7 SQL and client bodies |
 | — | D253's known limit | 40 (1) | not defended, and recorded as such |
+| 5 | The inherited path | 53–59 (7) | D265 clause (h), design 38 §8: the column a vendor may not read on the rows it reaches along the path; a correlated count of an order's lines; a `VALUES` list on the key; another vendor's lines; the mechanism's own shape and its negation written by hand over the bridge; the chain walked from the endpoint outward |
+| 6 | The tested column | 41–49 (9) | D261, §36: every shape the support desk's rule does not name, each reading the placeholder |
+| 7 | Conjoined confinement | 50–52 (3) | D266, §40: the three ways a principal confined along two tenancy kinds might recombine the halves |
 | 8 | Composite values | 60–70 (11) | §7 a client body is handed the disclosed value; §3.1 through a field; §3.4 the allow-list (ADR 0077) and a population aggregate its host declares (D295); a composite column disclosed whole or withheld whole (D302) |
 
 ## D253 — the limit this family records rather than defends
