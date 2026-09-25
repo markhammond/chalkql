@@ -76,12 +76,18 @@ await using var execution = await engine.ExecuteAsync(query, ["EUR"]);
 On macOS and Linux the local sidecar uses a Unix domain socket by default, so there is
 no port to assign or configure.
 
+Results arrive as Apache Arrow record batches, and text can be read from them without making
+a string: `GetUtf8` gives a STRING cell as a `ReadOnlySpan<byte>` over the batch's own buffer,
+whichever Arrow layout the column arrived in, and `Utf8StringComparer` lets a dictionary keyed
+by `string` or `Utf8String` be asked in those bytes with nothing allocated.
+
 ## Bring your own data
 
 ChalkQL introduces no persistence layer: data is queried on demand, wherever it resides.
 
 Application-owned `IReadOnlyList<T>` collections can be exposed directly as relational
-tables, including declared keys, collations, statistics and indexes. Remote sources
+tables, including declared keys, collations, statistics and indexes. A member whose type is
+a record becomes a composite column, whose fields SQL reads by name. Remote sources
 declare the operations they can perform; ChalkQL pushes work down when supported and
 executes the remainder locally.
 
@@ -97,6 +103,16 @@ A single plan can therefore span:
 
 SQL-defined, host-language and native functions may participate in the same plan, with
 pushdown where the underlying source supports them.
+
+A host-language function is an ordinary delegate, written in the CLR types a POCO property
+maps from — `decimal`, `DateOnly`, `DateTime`, `Guid` and the rest — and it takes text and
+bytes as a `ReadOnlySpan<byte>` lent for the length of the call; none of these spellings
+allocates per row. It may answer a record, which SQL takes apart by field
+(`classify_transaction(description, amount).category`) and the host reads back as the same
+record with `ReadComposites<T>`. An aggregate may read text through a span, answer a record,
+or, through the experimental `ArenaAggregateSpec`, keep variable-length data per group in
+memory rented from the execution. An expression written more than once in one step is
+computed once per batch unless it calls a `Volatile()` function.
 
 ## Hints for better planning
 
@@ -123,7 +139,7 @@ Entitlements may draw on application state, relationships, roles, resource scope
 * **Row and column access** — restrict which rows and columns a principal may access.
 * **Value disclosure** — allow direct access, masked values, or testing the presence of a value without revealing it.
 * **Tenant isolation** — constrain access to the appropriate tenant or resource scope, including through transitive relationships.
-* **Aggregate disclosure** — permit approved statistical aggregates over protected values without granting direct access to those values.
+* **Aggregate disclosure** — permit approved statistical aggregates over protected values without granting direct access to those values, including an application's own aggregate declared population-safe with `.Population()`.
 * **Relationship-aware scopes** — resolve access through multiple declared relationships while preserving the scope that confines a grant; for example, a franchise owner may access their stores while an auditor accesses stores within their region.
 
 ## Choose your own topology
@@ -175,6 +191,23 @@ keep one rule: no mutation overlaps an execution or a refresh. Mutate between re
 set behind a delegate, or use the transactional refresh, which gives each execution its own
 snapshot.
 
+**Text is lent, not given.** A STRING cell read with `GetUtf8`, and a STRING argument handed
+to a delegate, is a `ReadOnlySpan<byte>` over memory the engine reuses, and the compiler keeps
+it from outliving its batch or its call. Copy what you keep: `ToUtf8String()`,
+`GetUtf8String`, or a `string` parameter. A delegate registered with a `Utf8String` or
+`ReadOnlyMemory<byte>` parameter is refused when the engine is created.
+
+**A composite value has no equality, and neither has a LIST.** Grouping by either, sorting on
+either, `DISTINCT` over either and joining on either are refused, and so is comparing a composite
+value; the refusal of a composite quotes the statement and suggests one of its fields. A
+composite column is read only from an in-process source, no key, index or declared ordering may
+name it, and under entitlements it is disclosed whole or withheld whole.
+
+**Rounding follows the value, and the databases.** A DECIMAL midpoint rounds away from zero,
+as PostgreSQL, DuckDB, SQL Server and SQLite round it. `ROUND` on a DOUBLE rounds the value the
+double actually holds: the double written 2.675 is slightly less than 2.675 and rounds to 2.67,
+while the DECIMAL 2.675 rounds to 2.68.
+
 **ChalkQL is currently read-only.** `SELECT` is supported; DML (future), DDL and transactions are
 not.
 
@@ -201,7 +234,8 @@ ChalkQL is licensed under the Apache License 2.0.
 
 Apache Calcite and its JVM dependencies are bundled into the planner artefact distributed
 with `ChalkQL`. Their licences and attribution are recorded in
-`THIRD-PARTY-NOTICES.txt`.
+`THIRD-PARTY-NOTICES.txt`. The planner's statement driver is derived from Apache Calcite's
+own `PlannerImpl`, and the repository's `NOTICE` records it.
 
 ChalkQL is an independent project and is not affiliated with or endorsed by the Apache
 Software Foundation.
