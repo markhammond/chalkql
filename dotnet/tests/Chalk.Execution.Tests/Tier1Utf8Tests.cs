@@ -11,15 +11,16 @@ using FunctionDescriptor = Chalk.Catalog.FunctionDescriptor;
 namespace Chalk.Execution.Tests;
 
 /// <summary>
-/// Tier 1 delegates written in <c>Utf8String</c> (D146, <c>docs/design/24-zero-gc.md</c> §4): the
-/// lane is lent as a memory-backed slice, the result's bytes are copied into the column with one
-/// validity check, and none of it allocates.
+/// Tier 1 delegates over a STRING lane written in <c>ReadOnlySpan&lt;byte&gt;</c> (D146, D304,
+/// <c>docs/design/24-zero-gc.md</c> §4): the lane's bytes are lent for the call and cannot outlive
+/// it, a span answered is copied into the column with one validity check, and none of it allocates.
+/// A <c>Utf8String</c> over the lane is the spelling this replaced, and is refused by name.
 /// </summary>
 /// <remarks>
 /// The gate itself — 0 bytes per batch, beside the existing Tier 1 gate — is the benchmark's, where
 /// the pipeline is pooled and an output batch's Arrow graph is not in the measurement. What is here
 /// is the part a unit test can hold: the same answers as the <c>string</c> spelling, NULLs, the
-/// refusal of invalid UTF-8, and the signature check.
+/// refusal of invalid UTF-8, the signature check and the boxed path.
 /// </remarks>
 [Experimental("CHALK001")]
 public sealed class Tier1Utf8Tests
@@ -30,21 +31,21 @@ public sealed class Tier1Utf8Tests
         ["btcusdt", "ÉTOILE", "MiXeD", "", "a_very_long_symbol_name", "日経"];
 
     [Fact]
-    public async Task A_Utf8String_delegate_reads_the_lane_and_writes_bytes_back()
+    public async Task A_span_delegate_reads_the_lane_and_writes_bytes_back()
     {
         var results = await ProjectAsync(
             StringToString("upper_ascii"),
-            new HostScalar1<Utf8String, Utf8String>("upper_ascii", Utf8Fixture.UpperAscii));
+            new HostScalar1<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("upper_ascii", Utf8Fixture.UpperAscii));
 
         Assert.Equal(Words.Select(UpperAsciiReference), results);
     }
 
     [Fact]
-    public async Task A_Utf8String_delegate_and_a_string_delegate_agree()
+    public async Task A_span_delegate_and_a_string_delegate_agree()
     {
         var viaBytes = await ProjectAsync(
             StringToString("upper_ascii"),
-            new HostScalar1<Utf8String, Utf8String>("upper_ascii", Utf8Fixture.UpperAscii));
+            new HostScalar1<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("upper_ascii", Utf8Fixture.UpperAscii));
         var viaString = await ProjectAsync(
             StringToString("upper_ascii"),
             new HostScalar1<string, string>("upper_ascii", static s => UpperAsciiReference(s)));
@@ -52,8 +53,37 @@ public sealed class Tier1Utf8Tests
         Assert.Equal(viaString, viaBytes);
     }
 
+    /// <summary>
+    /// A span answered may be a slice of the span received: the input outlives the call, so the
+    /// compiler allows it, and the engine copies the bytes out before the next row.
+    /// </summary>
     [Fact]
-    public async Task A_Utf8String_argument_returning_a_long_is_the_byte_length()
+    public async Task A_span_result_may_be_a_slice_of_the_input()
+    {
+        var results = await ProjectAsync(
+            StringToString("before_underscore"),
+            new HostScalar1<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("before_underscore", static v =>
+            {
+                var at = v.IndexOf((byte)'_');
+                return at < 0 ? v : v[..at];
+            }));
+
+        Assert.Equal(["btcusdt", "ÉTOILE", "MiXeD", "", "a", "日経"], results);
+    }
+
+    /// <summary>A result spelled <c>Utf8String</c> is the host's own memory, and stays legal.</summary>
+    [Fact]
+    public async Task A_Utf8String_result_is_the_hosts_own_memory()
+    {
+        var results = await ProjectAsync(
+            StringToString("copy"),
+            new HostScalar1<ReadOnlySpan<byte>, Utf8String>("copy", static v => Utf8String.Copy(v)));
+
+        Assert.Equal(Words, results);
+    }
+
+    [Fact]
+    public async Task A_span_argument_returning_a_long_is_the_byte_length()
     {
         var results = await ProjectAsync(
             new FunctionDescriptor
@@ -65,7 +95,7 @@ public sealed class Tier1Utf8Tests
                 Strict = true,
                 Body = new ClientFunctionBody(),
             },
-            new HostScalar1<Utf8String, long>("byte_length", static v => v.Length),
+            new HostScalar1<ReadOnlySpan<byte>, long>("byte_length", static v => v.Length),
             column: 0);
 
         Assert.Equal(
@@ -74,29 +104,22 @@ public sealed class Tier1Utf8Tests
     }
 
     /// <summary>
-    /// A non-strict delegate sees the NULL as <c>Utf8String?</c> and decides — the empty string and
-    /// a NULL are different values, which is what the nullable spelling exists to say.
+    /// A non-strict delegate sees the NULL, and a span has no NULL to see it as: the nullable
+    /// spelling of a STRING parameter is <c>string?</c>, the allocating one — the empty string and a
+    /// NULL are different values, which is what the nullable spelling exists to say.
     /// </summary>
     [Fact]
-    public async Task A_nullable_Utf8String_delegate_sees_the_null()
+    public async Task A_non_strict_string_delegate_sees_the_null()
     {
         var seenNull = 0;
         var results = await ProjectAsync(
-            new FunctionDescriptor
-            {
-                Name = "or_missing",
-                Kind = FunctionKind.Scalar,
-                Parameters = [new ParameterDescriptor { Name = "s", Type = ChalkType.String(nullable: true) }],
-                ReturnType = ChalkType.String(nullable: true),
-                Strict = false,
-                Body = new ClientFunctionBody(),
-            },
-            new HostScalar1<Utf8String?, Utf8String?>("or_missing", value =>
+            NullableStringToString("or_missing", strict: false),
+            new HostScalar1<string?, string?>("or_missing", value =>
             {
                 if (value is null)
                 {
                     seenNull++;
-                    return Utf8String.FromString("<missing>");
+                    return "<missing>";
                 }
 
                 return value;
@@ -111,16 +134,14 @@ public sealed class Tier1Utf8Tests
     }
 
     [Fact]
-    public async Task Invalid_UTF_8_from_a_delegate_is_refused_naming_the_row()
+    public async Task Invalid_UTF_8_from_a_span_is_refused_naming_the_row()
     {
         // The operator wraps what a plan throws, naming the failing node; the cause is the refusal.
         var wrapped = await Assert.ThrowsAsync<ExecutionException>(() => ProjectAsync(
             StringToString("bad"),
-            new HostScalar1<Utf8String, Utf8String>(
+            new HostScalar1<ReadOnlySpan<byte>, ReadOnlySpan<byte>>(
                 "bad",
-                static v => v.Length == 0
-                    ? v
-                    : Utf8String.FromBytes(new byte[] { 0xC3, 0x28 }))));
+                static v => v.Length == 0 ? v : new byte[] { 0xC3, 0x28 })));
 
         var failure = Assert.IsType<InvalidUtf8Exception>(wrapped.InnerException);
         Assert.Equal(0, failure.Row);
@@ -129,61 +150,103 @@ public sealed class Tier1Utf8Tests
     }
 
     [Fact]
-    public void The_signature_check_accepts_Utf8String_for_a_STRING()
+    public void The_signature_check_accepts_a_span_for_a_STRING()
     {
         var descriptor = StringToString("f");
         UserFunctionBinding.Check(
-            descriptor, new HostScalar1<Utf8String, Utf8String>("f", static v => v), "test");
+            descriptor, new HostScalar1<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("f", static v => v), "test");
         UserFunctionBinding.Check(
             descriptor, new HostScalar1<string, string>("f", static v => v), "test");
+        UserFunctionBinding.Check(
+            descriptor, new HostScalar1<ReadOnlySpan<byte>, Utf8String>("f", static v => Utf8String.Copy(v)), "test");
 
         var wrong = Assert.Throws<InvalidOperationException>(
             () => UserFunctionBinding.Check(
-                descriptor, new HostScalar1<Utf8String, long>("f", static v => v.Length), "test"));
-        Assert.Contains("Utf8String, or string", wrong.Message, StringComparison.Ordinal);
+                descriptor, new HostScalar1<ReadOnlySpan<byte>, long>("f", static v => v.Length), "test"));
+        Assert.Contains("ReadOnlySpan<Byte> or String", wrong.Message, StringComparison.Ordinal);
         Assert.Contains("Int64", wrong.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// A non-strict STRING parameter needs the nullable spelling, exactly as a <c>double</c> one
-    /// does: a <c>Utf8String</c> is a value type, so a NULL would arrive as the empty string.
+    /// The spelling this design retired (D304): a <c>Utf8String</c> over the lane is storable, and the
+    /// lane's memory is the arena's to reuse, so a parameter so spelled is refused when the engine is
+    /// created — strict or not — and the refusal names the two spellings that replace it.
     /// </summary>
     [Fact]
-    public void A_non_strict_Utf8String_parameter_must_be_nullable()
+    public void A_Utf8String_parameter_is_refused_as_a_value_the_delegate_could_keep()
     {
-        var descriptor = new FunctionDescriptor
-        {
-            Name = "f",
-            Kind = FunctionKind.Scalar,
-            Parameters = [new ParameterDescriptor { Name = "s", Type = ChalkType.String(nullable: true) }],
-            ReturnType = ChalkType.String(nullable: true),
-            Strict = false,
-            Body = new ClientFunctionBody(),
-        };
+        var strict = Assert.Throws<InvalidOperationException>(
+            () => UserFunctionBinding.Check(
+                StringToString("f"), new HostScalar1<Utf8String, Utf8String>("f", static v => v), "test"));
+        Assert.Contains("parameter 's' is spelled Utf8String", strict.Message, StringComparison.Ordinal);
+        Assert.Contains("keep past the call", strict.Message, StringComparison.Ordinal);
+        Assert.Contains("ReadOnlySpan<byte>", strict.Message, StringComparison.Ordinal);
+        Assert.Contains("A result may still be a Utf8String", strict.Message, StringComparison.Ordinal);
 
+        var nullable = Assert.Throws<InvalidOperationException>(
+            () => UserFunctionBinding.Check(
+                NullableStringToString("g", strict: false),
+                new HostScalar1<Utf8String?, Utf8String?>("g", static v => v),
+                "test"));
+        Assert.Contains("parameter 's' is spelled Utf8String?", nullable.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A non-strict STRING parameter needs a nullable spelling, exactly as a <c>double</c> one does —
+    /// and a span has none, so the refusal names <c>string?</c> and the other way out.
+    /// </summary>
+    [Fact]
+    public void A_non_strict_span_parameter_is_refused_naming_the_nullable_spelling()
+    {
         var error = Assert.Throws<InvalidOperationException>(
             () => UserFunctionBinding.Check(
-                descriptor, new HostScalar1<Utf8String, Utf8String>("f", static v => v), "test"));
-        Assert.Contains("must take Utf8String?", error.Message, StringComparison.Ordinal);
+                NullableStringToString("f", strict: false),
+                new HostScalar1<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("f", static v => v),
+                "test"));
+        Assert.Contains("ReadOnlySpan<byte> has no NULL", error.Message, StringComparison.Ordinal);
+        Assert.Contains("string?", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Strict()", error.Message, StringComparison.Ordinal);
+
+        // The other way out: a strict function never sees the NULL, so the span serves it.
+        UserFunctionBinding.Check(
+            NullableStringToString("f", strict: true),
+            new HostScalar1<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("f", static v => v),
+            "test");
     }
 
     /// <summary>
     /// The reference executor works in boxed values throughout (D13), so the same delegate runs
-    /// under both engines: the string it is handed is encoded on the way in and its answer decoded
-    /// on the way out.
+    /// under both engines: the string it is handed is encoded on the way in, and a span it answers
+    /// leaves as its bytes, which the reference decodes for a STRING.
     /// </summary>
     [Fact]
-    public void The_boxed_path_hands_a_Utf8String_delegate_the_encoded_bytes()
+    public void The_boxed_path_hands_a_span_delegate_the_encoded_bytes()
     {
-        HostScalar host = new HostScalar1<Utf8String, Utf8String>("f", Utf8Fixture.UpperAscii);
-        Assert.Equal("ÉTOILE", host.InvokeBoxed(["ÉTOILE"]));
-        Assert.Equal("BTCUSDT", host.InvokeBoxed(["btcusdt"]));
+        HostScalar host = new HostScalar1<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("f", Utf8Fixture.UpperAscii);
+        Assert.Equal("ÉTOILE", System.Text.Encoding.UTF8.GetString((byte[])host.InvokeBoxed(["ÉTOILE"])!));
+        Assert.Equal("BTCUSDT", System.Text.Encoding.UTF8.GetString((byte[])host.InvokeBoxed(["btcusdt"])!));
 
-        HostScalar nullable = new HostScalar1<Utf8String?, long?>(
-            "g", static v => v?.Length);
+        HostScalar length = new HostScalar1<ReadOnlySpan<byte>, long>("g", static v => v.Length);
+        Assert.Equal(7L, length.InvokeBoxed(["ÉTOILE"]));
+
+        HostScalar nullable = new HostScalar1<string?, long?>("h", static v => v?.Length);
         Assert.Equal(3L, nullable.InvokeBoxed(["abc"]));
         Assert.Null(nullable.InvokeBoxed([null]));
+
+        // A Utf8String result leaves decoded, as it always did.
+        HostScalar copy = new HostScalar1<ReadOnlySpan<byte>, Utf8String>("k", static v => Utf8String.Copy(v));
+        Assert.Equal("日経", copy.InvokeBoxed(["日経"]));
     }
+
+    private static FunctionDescriptor NullableStringToString(string name, bool strict) => new()
+    {
+        Name = name,
+        Kind = FunctionKind.Scalar,
+        Parameters = [new ParameterDescriptor { Name = "s", Type = ChalkType.String(nullable: true) }],
+        ReturnType = ChalkType.String(nullable: true),
+        Strict = strict,
+        Body = new ClientFunctionBody(),
+    };
 
     private static string UpperAsciiReference(string value)
     {

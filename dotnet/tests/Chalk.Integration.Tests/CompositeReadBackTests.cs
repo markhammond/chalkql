@@ -223,7 +223,7 @@ public sealed class CompositeReadBackTests(SharedSidecar sidecar)
         {
             ContextId = "read-back",
             Sources = [source],
-            Functions = registry => registry.AddScalar<Utf8String, double, Classification>(
+            Functions = registry => registry.AddScalar<ReadOnlySpan<byte>, double, Classification>(
                 "classify_transaction", static (_, amount) => Classify(amount)),
             Output = new OutputOptions { Strings = strings },
             Execution = new ExecutionOptions { BatchSize = batchSize },

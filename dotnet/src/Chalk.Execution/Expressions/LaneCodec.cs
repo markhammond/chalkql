@@ -121,6 +121,13 @@ internal static class LaneCodec
             return false;
         }
 
+        if (actual == typeof(ReadOnlySpan<byte>))
+        {
+            // D304: the bytes of a STRING or a BINARY lane as a span — the borrowed spelling, which the
+            // compiler keeps inside the call. Inferred as a STRING; a BINARY span is declared explicitly.
+            return type.Kind is TypeKind.String or TypeKind.Binary;
+        }
+
         var underlying = Nullable.GetUnderlyingType(actual);
         if (required == typeof(string)
             && (actual == typeof(Utf8String) || underlying == typeof(Utf8String)))
@@ -160,8 +167,8 @@ internal static class LaneCodec
         return ClrTypeOf(type) is { } clr
             ? type.Kind switch
             {
-                TypeKind.String => $"{described} (CLR Utf8String, or string)",
-                TypeKind.Binary => $"{described} (CLR ReadOnlyMemory<Byte>, or Byte[])",
+                TypeKind.String => $"{described} (CLR ReadOnlySpan<Byte> or String; a result may also be Utf8String)",
+                TypeKind.Binary => $"{described} (CLR ReadOnlySpan<Byte>, ReadOnlyMemory<Byte> or Byte[])",
                 TypeKind.Date => $"{described} (CLR DateOnly, or Int32 days since 1970-01-01)",
                 TypeKind.Time => $"{described} (CLR TimeOnly, or Int64 microseconds since midnight)",
                 TypeKind.Timestamp =>
@@ -186,7 +193,16 @@ internal static class LaneCodec
     /// <summary>Reads one lane. NULL becomes <c>default</c> for a value type and null for the rest.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static T Read<T>(in ColumnView view, int row, in LaneFormat format)
+        where T : allows ref struct
     {
+        if (typeof(T) == typeof(ReadOnlySpan<byte>))
+        {
+            // D304: the lane's own bytes, borrowed for the call and unable to outlive it — a STRING's
+            // or a BINARY's. The one borrowed spelling a delegate is handed.
+            var value = view.VarValue(row);
+            return Unsafe.As<ReadOnlySpan<byte>, T>(ref value);
+        }
+
         if (typeof(T) == typeof(double))
         {
             var value = view.Lanes<double>()[row];
@@ -287,15 +303,17 @@ internal static class LaneCodec
 
         if (typeof(T) == typeof(string))
         {
-            object value = Encoding.UTF8.GetString(view.VarValue(row));
-            return (T)value;
+            // F133: a NULL is null, not the empty string — a non-strict delegate spelled string? is
+            // the one that reads a NULL row, and used to be handed "" for it.
+            var value = view.IsValid(row) ? Encoding.UTF8.GetString(view.VarValue(row)) : null;
+            return Unsafe.As<string?, T>(ref value);
         }
 
         if (typeof(T) == typeof(byte[]))
         {
             // BINARY's allocating spelling, as string is STRING's: a copy the delegate may keep.
-            object? value = view.IsValid(row) ? view.VarValue(row).ToArray() : null;
-            return (T)value!;
+            var value = view.IsValid(row) ? view.VarValue(row).ToArray() : null;
+            return Unsafe.As<byte[]?, T>(ref value);
         }
 
         return ReadNullable<T>(view, row, format);
@@ -303,6 +321,7 @@ internal static class LaneCodec
 
     /// <summary>The nullable forms, which is what a non-strict delegate is written in.</summary>
     private static T ReadNullable<T>(in ColumnView view, int row, in LaneFormat format)
+        where T : allows ref struct
     {
         var valid = view.IsValid(row);
         if (typeof(T) == typeof(double?))
@@ -423,7 +442,8 @@ internal static class LaneCodec
     /// <summary>The CLR types a Tier 1 lane may be spelled in, as a refusal lists them.</summary>
     internal const string Spellings =
         "bool, sbyte, short, int, long, float, double, decimal, DateOnly, TimeOnly, DateTime, "
-        + "DateTimeOffset, TimeSpan, Guid, Utf8String, string, ReadOnlyMemory<byte> and byte[]";
+        + "DateTimeOffset, TimeSpan, Guid, ReadOnlySpan<byte>, Utf8String, string, ReadOnlyMemory<byte> "
+        + "and byte[]";
 
     /// <summary>
     /// Whether a value a delegate returned is a NULL.
@@ -437,8 +457,10 @@ internal static class LaneCodec
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsNull<T>(T value)
+        where T : allows ref struct
     {
-        if (typeof(T) == typeof(double)
+        if (typeof(T) == typeof(ReadOnlySpan<byte>)
+            || typeof(T) == typeof(double)
             || typeof(T) == typeof(long)
             || typeof(T) == typeof(int)
             || typeof(T) == typeof(float)
@@ -547,6 +569,7 @@ internal static class LaneCodec
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Write<T>(ColumnWriter writer, int length, int row, T value, in LaneFormat format)
+        where T : allows ref struct
     {
         if (typeof(T) == typeof(double))
         {
@@ -633,78 +656,153 @@ internal static class LaneCodec
         }
 
         // D298: every widened spelling is one fixed-width lane, written through WriteLane's
-        // conversions — the same as a composite field's or an aggregate's answer.
-        if (typeof(T) == typeof(decimal) || typeof(T) == typeof(decimal?)
-            || typeof(T) == typeof(Guid) || typeof(T) == typeof(Guid?))
+        // conversions — the same as a composite field's or an aggregate's answer. Each is named as
+        // the concrete type it is before the call, so WriteLane need not admit a ref struct.
+
+        if (typeof(T) == typeof(decimal))
         {
             _ = WriteLane(
                 System.Runtime.InteropServices.MemoryMarshal.AsBytes(writer.Values<Int128>(length))
                     .Slice(row * 16, 16),
-                value,
+                Unsafe.As<T, decimal>(ref value),
                 format);
             return;
         }
 
-        if (typeof(T) == typeof(DateOnly) || typeof(T) == typeof(DateOnly?))
+        if (typeof(T) == typeof(decimal?))
+        {
+            _ = WriteLane(
+                System.Runtime.InteropServices.MemoryMarshal.AsBytes(writer.Values<Int128>(length))
+                    .Slice(row * 16, 16),
+                Unsafe.As<T, decimal?>(ref value),
+                format);
+            return;
+        }
+
+        if (typeof(T) == typeof(Guid))
+        {
+            _ = WriteLane(
+                System.Runtime.InteropServices.MemoryMarshal.AsBytes(writer.Values<Int128>(length))
+                    .Slice(row * 16, 16),
+                Unsafe.As<T, Guid>(ref value),
+                format);
+            return;
+        }
+
+        if (typeof(T) == typeof(Guid?))
+        {
+            _ = WriteLane(
+                System.Runtime.InteropServices.MemoryMarshal.AsBytes(writer.Values<Int128>(length))
+                    .Slice(row * 16, 16),
+                Unsafe.As<T, Guid?>(ref value),
+                format);
+            return;
+        }
+
+        if (typeof(T) == typeof(DateOnly))
         {
             _ = WriteLane(
                 System.Runtime.InteropServices.MemoryMarshal.AsBytes(writer.Values<int>(length))
                     .Slice(row * 4, 4),
-                value,
+                Unsafe.As<T, DateOnly>(ref value),
                 format);
             return;
         }
 
-        if (typeof(T) == typeof(TimeOnly) || typeof(T) == typeof(TimeOnly?)
-            || typeof(T) == typeof(DateTime) || typeof(T) == typeof(DateTime?)
-            || typeof(T) == typeof(DateTimeOffset) || typeof(T) == typeof(DateTimeOffset?)
-            || typeof(T) == typeof(TimeSpan) || typeof(T) == typeof(TimeSpan?))
+        if (typeof(T) == typeof(DateOnly?))
+        {
+            _ = WriteLane(
+                System.Runtime.InteropServices.MemoryMarshal.AsBytes(writer.Values<int>(length))
+                    .Slice(row * 4, 4),
+                Unsafe.As<T, DateOnly?>(ref value),
+                format);
+            return;
+        }
+
+        if (typeof(T) == typeof(TimeOnly))
         {
             _ = WriteLane(
                 System.Runtime.InteropServices.MemoryMarshal.AsBytes(writer.Values<long>(length))
                     .Slice(row * 8, 8),
-                value,
+                Unsafe.As<T, TimeOnly>(ref value),
                 format);
             return;
         }
 
-        WriteNullable(writer, length, row, value);
-    }
-
-    /// <summary>The forms the generic fast paths above do not cover, which is the error path.</summary>
-    private static void WriteNullable<T>(ColumnWriter writer, int length, int row, T value)
-    {
-        switch (value)
+        if (typeof(T) == typeof(TimeOnly?))
         {
-            case double d:
-                writer.Values<double>(length)[row] = d;
-                return;
-            case long l:
-                writer.Values<long>(length)[row] = l;
-                return;
-            case int i:
-                writer.Values<int>(length)[row] = i;
-                return;
-            case float f:
-                writer.Values<float>(length)[row] = f;
-                return;
-            case short s:
-                writer.Values<short>(length)[row] = s;
-                return;
-            case sbyte b:
-                writer.Values<sbyte>(length)[row] = b;
-                return;
-            case bool o:
-                writer.Values<byte>(length)[row] = (byte)(o ? 1 : 0);
-                return;
-            case null:
-                return;
-            default:
-                throw new UnsupportedFeatureException(
-                    $"a Tier 1 result of CLR type {typeof(T).Name}",
-                    "Tier 1 delegates return " + Spellings + " and their nullable forms "
-                    + "(docs/design/17-user-defined-functions.md §3).");
+            _ = WriteLane(
+                System.Runtime.InteropServices.MemoryMarshal.AsBytes(writer.Values<long>(length))
+                    .Slice(row * 8, 8),
+                Unsafe.As<T, TimeOnly?>(ref value),
+                format);
+            return;
         }
+
+        if (typeof(T) == typeof(DateTime))
+        {
+            _ = WriteLane(
+                System.Runtime.InteropServices.MemoryMarshal.AsBytes(writer.Values<long>(length))
+                    .Slice(row * 8, 8),
+                Unsafe.As<T, DateTime>(ref value),
+                format);
+            return;
+        }
+
+        if (typeof(T) == typeof(DateTime?))
+        {
+            _ = WriteLane(
+                System.Runtime.InteropServices.MemoryMarshal.AsBytes(writer.Values<long>(length))
+                    .Slice(row * 8, 8),
+                Unsafe.As<T, DateTime?>(ref value),
+                format);
+            return;
+        }
+
+        if (typeof(T) == typeof(DateTimeOffset))
+        {
+            _ = WriteLane(
+                System.Runtime.InteropServices.MemoryMarshal.AsBytes(writer.Values<long>(length))
+                    .Slice(row * 8, 8),
+                Unsafe.As<T, DateTimeOffset>(ref value),
+                format);
+            return;
+        }
+
+        if (typeof(T) == typeof(DateTimeOffset?))
+        {
+            _ = WriteLane(
+                System.Runtime.InteropServices.MemoryMarshal.AsBytes(writer.Values<long>(length))
+                    .Slice(row * 8, 8),
+                Unsafe.As<T, DateTimeOffset?>(ref value),
+                format);
+            return;
+        }
+
+        if (typeof(T) == typeof(TimeSpan))
+        {
+            _ = WriteLane(
+                System.Runtime.InteropServices.MemoryMarshal.AsBytes(writer.Values<long>(length))
+                    .Slice(row * 8, 8),
+                Unsafe.As<T, TimeSpan>(ref value),
+                format);
+            return;
+        }
+
+        if (typeof(T) == typeof(TimeSpan?))
+        {
+            _ = WriteLane(
+                System.Runtime.InteropServices.MemoryMarshal.AsBytes(writer.Values<long>(length))
+                    .Slice(row * 8, 8),
+                Unsafe.As<T, TimeSpan?>(ref value),
+                format);
+            return;
+        }
+
+        throw new UnsupportedFeatureException(
+            $"a Tier 1 result of CLR type {typeof(T).Name}",
+            "Tier 1 delegates return " + Spellings + " and their nullable forms "
+            + "(docs/design/17-user-defined-functions.md §3).");
     }
 
     /// <summary>
@@ -1118,8 +1216,11 @@ internal static class LaneCodec
             + $"{why}. Round the value in the function, or declare a type that holds it.");
 
     /// <summary>Whether <typeparamref name="T"/> is written by appending rather than by lane.</summary>
-    public static bool IsVariableLength<T>() =>
-        typeof(T) == typeof(string)
+    public static bool IsVariableLength<T>()
+        where T : allows ref struct
+        =>
+        typeof(T) == typeof(ReadOnlySpan<byte>)
+        || typeof(T) == typeof(string)
         || typeof(T) == typeof(Utf8String)
         || typeof(T) == typeof(Utf8String?)
         || typeof(T) == typeof(byte[])
@@ -1131,9 +1232,28 @@ internal static class LaneCodec
     /// <param name="length">Rows in this batch, for the message a refusal names.</param>
     /// <param name="row">The row being written, for the same reason.</param>
     /// <param name="value">What the delegate returned.</param>
-    public static void Append<T>(ColumnWriter writer, int length, int row, T value)
+    /// <param name="format">The result's declared type, which says whether a span's bytes are text.</param>
+    public static void Append<T>(ColumnWriter writer, int length, int row, T value, in LaneFormat format)
+        where T : allows ref struct
     {
         _ = length;
+        if (typeof(T) == typeof(ReadOnlySpan<byte>))
+        {
+            // D304: the delegate's own bytes — a slice of its input, or of a buffer it owns — copied
+            // into the result's data buffer before the next call, and validated where they are text.
+            var bytes = Unsafe.As<T, ReadOnlySpan<byte>>(ref value);
+            if (format.Type.Kind == TypeKind.String)
+            {
+                AppendUtf8(writer, bytes, row);
+            }
+            else
+            {
+                writer.AppendValue(bytes);
+            }
+
+            return;
+        }
+
         if (typeof(T) == typeof(Utf8String))
         {
             // D146: the delegate's own bytes, copied straight into the result's data buffer. This is
@@ -1180,19 +1300,37 @@ internal static class LaneCodec
             return;
         }
 
-        if (value is byte[] array)
+        if (typeof(T) == typeof(byte[]))
         {
-            writer.AppendValue(array);
+            var array = Unsafe.As<T, byte[]?>(ref value);
+            if (array is null)
+            {
+                writer.AppendNull();
+            }
+            else
+            {
+                writer.AppendValue(array);
+            }
+
             return;
         }
 
-        if (value is string text)
+        if (typeof(T) == typeof(string))
         {
             // The second allocating step, and the reason a STRING-returning Tier 1 function written
             // in `string` is not on the zero-allocation path: a .NET string has to be encoded to
-            // reach a UTF-8 buffer. A delegate declared in Utf8String takes the branch above and
-            // allocates nothing.
-            writer.AppendValue(Encoding.UTF8.GetBytes(text));
+            // reach a UTF-8 buffer. A delegate answering a span or a Utf8String takes a branch above
+            // and allocates nothing.
+            var text = Unsafe.As<T, string?>(ref value);
+            if (text is null)
+            {
+                writer.AppendNull();
+            }
+            else
+            {
+                writer.AppendValue(Encoding.UTF8.GetBytes(text));
+            }
+
             return;
         }
 
@@ -1208,7 +1346,7 @@ internal static class LaneCodec
     {
         if (!Utf8String.IsValidUtf8(bytes))
         {
-            throw new InvalidUtf8Exception("the Utf8String a Tier 1 function returned", row);
+            throw new InvalidUtf8Exception("the text a Tier 1 function returned", row);
         }
 
         writer.AppendValue(bytes);

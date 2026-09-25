@@ -112,7 +112,8 @@ internal static class UserFunctionBinding
                 parameter.Type,
                 descriptor.Strict,
                 $"{where}: '{descriptor.Name}' parameter '{parameter.Name}'",
-                key);
+                key,
+                lent: true);
         }
 
         RequireLaneType(
@@ -164,16 +165,23 @@ internal static class UserFunctionBinding
     /// </summary>
     private static void RequireFixedWidth(ChalkType declared, string what, string key)
     {
-        if (declared.Kind == Ir.TypeKind.Binary)
+        // F132: a STRING is refused here too. The grouped accumulator reads fixed-width lanes and
+        // refused a text input at its first row, after the engine had been created.
+        if (declared.Kind is Ir.TypeKind.Binary or Ir.TypeKind.String)
         {
+            var kind = declared.Kind == Ir.TypeKind.Binary ? "BINARY" : "STRING";
             throw new InvalidOperationException(
                 $"{what} {IrTypes.Describe(declared.ToProto())}, and a Tier 1 aggregate registered as "
                 + $"'{key}' folds fixed-width values only: its input and result may be bool, sbyte, "
                 + "short, int, long, float, double, decimal, DateOnly, TimeOnly, DateTime, "
-                + "DateTimeOffset, TimeSpan or Guid. Aggregate a BINARY with a Tier 2 kernel, or over "
+                + $"DateTimeOffset, TimeSpan or Guid. Aggregate a {kind} with a Tier 2 kernel, or over "
                 + "a fixed-width value derived from it.");
         }
     }
+
+    /// <summary>A CLR type as a refusal names it, its nullable form included.</summary>
+    private static string Describe(Type clr) =>
+        Nullable.GetUnderlyingType(clr) is { } underlying ? $"{underlying.Name}?" : clr.Name;
 
     private static void CheckTable(
         FunctionDescriptor descriptor, HostFunction host, string where, string key)
@@ -193,17 +201,32 @@ internal static class UserFunctionBinding
         for (var i = 0; i < descriptor.Parameters.Count; i++)
         {
             var parameter = descriptor.Parameters[i];
-            RequireLaneType(
-                table.ParameterTypes[i],
-                parameter.Type,
-                strict: true,
-                $"{where}: '{descriptor.Name}' parameter '{parameter.Name}'",
-                key);
+            var what = $"{where}: '{descriptor.Name}' parameter '{parameter.Name}'";
+            if (table.ParameterTypes[i] == typeof(ReadOnlySpan<byte>))
+            {
+                // D304: a producer is called once, with boxed arguments, and a span cannot be boxed.
+                // Its text is a constant the producer may keep, so the owning spellings serve it.
+                throw new InvalidOperationException(
+                    $"{what} is spelled ReadOnlySpan<byte>, and a table function's producer registered "
+                    + $"as '{key}' is called once with its arguments boxed, which a span cannot be. "
+                    + "Spell a STRING parameter string or Utf8String, and a BINARY one byte[] or "
+                    + "ReadOnlyMemory<byte>: the argument is a constant, and the producer may keep it.");
+            }
+
+            RequireLaneType(table.ParameterTypes[i], parameter.Type, strict: true, what, key);
         }
     }
 
+    /// <summary>
+    /// The lane type check. <paramref name="lent"/> says the value is a scalar's argument — a lane lent
+    /// to the delegate for one call — which is where a borrowed <see cref="Utf8String"/> is refused
+    /// (D304): the struct is storable, the lane's memory is the arena's to reuse, and the documented rule
+    /// was the only guard. A span is the borrowed spelling the compiler keeps inside the call; a
+    /// <c>string</c> is the copy. A result or a table function's argument is the host's own memory and
+    /// may still be a <see cref="Utf8String"/>.
+    /// </summary>
     private static void RequireLaneType(
-        Type clr, ChalkType declared, bool strict, string what, string key)
+        Type clr, ChalkType declared, bool strict, string what, string key, bool lent = false)
     {
         if (declared.Kind == Ir.TypeKind.Composite)
         {
@@ -212,6 +235,25 @@ internal static class UserFunctionBinding
         }
 
         var underlying = Nullable.GetUnderlyingType(clr);
+        if (lent && (underlying ?? clr) == typeof(Utf8String))
+        {
+            throw new InvalidOperationException(
+                $"{what} is spelled {Describe(clr)}, which would lend the lane's memory to the delegate "
+                + $"registered as '{key}' as a value it could keep past the call — and the engine reuses "
+                + "that memory. Spell the parameter ReadOnlySpan<byte>, which the compiler keeps inside "
+                + "the call, or string, which is a copy. A result may still be a Utf8String: that is the "
+                + "host's own memory.");
+        }
+
+        if (clr == typeof(ReadOnlySpan<byte>) && !strict && declared.Nullable)
+        {
+            throw new InvalidOperationException(
+                $"{what} is nullable and the function is not STRICT, so the implementation registered "
+                + $"as '{key}' sees every NULL — and a ReadOnlySpan<byte> has no NULL, so one would arrive "
+                + "as the empty value and be indistinguishable from it. Spell the parameter string?, "
+                + "or declare the function Strict() and let the engine answer NULL for a NULL argument.");
+        }
+
         if (declared.Kind == Ir.TypeKind.Decimal
             && declared.Precision > LaneCodec.DecimalDigits
             && (underlying ?? clr) == typeof(decimal))
@@ -428,26 +470,54 @@ internal static class UserFunctionBinding
             _strict = strict;
         }
 
-        public IVectorFunction Visit<TOut>(Func<TOut> f) =>
+        public IVectorFunction Visit<TOut>(Func<TOut> f)
+            where TOut : allows ref struct =>
             new Tier1Kernel0<TOut>(_signature, _strict, f);
 
-        public IVectorFunction Visit<T1, TOut>(Func<T1, TOut> f) =>
+        public IVectorFunction Visit<T1, TOut>(Func<T1, TOut> f)
+            where T1 : allows ref struct
+            where TOut : allows ref struct =>
             new Tier1Kernel1<T1, TOut>(_signature, _strict, f);
 
-        public IVectorFunction Visit<T1, T2, TOut>(Func<T1, T2, TOut> f) =>
+        public IVectorFunction Visit<T1, T2, TOut>(Func<T1, T2, TOut> f)
+            where T1 : allows ref struct
+            where T2 : allows ref struct
+            where TOut : allows ref struct =>
             new Tier1Kernel2<T1, T2, TOut>(_signature, _strict, f);
 
-        public IVectorFunction Visit<T1, T2, T3, TOut>(Func<T1, T2, T3, TOut> f) =>
+        public IVectorFunction Visit<T1, T2, T3, TOut>(Func<T1, T2, T3, TOut> f)
+            where T1 : allows ref struct
+            where T2 : allows ref struct
+            where T3 : allows ref struct
+            where TOut : allows ref struct =>
             new Tier1Kernel3<T1, T2, T3, TOut>(_signature, _strict, f);
 
-        public IVectorFunction Visit<T1, T2, T3, T4, TOut>(Func<T1, T2, T3, T4, TOut> f) =>
+        public IVectorFunction Visit<T1, T2, T3, T4, TOut>(Func<T1, T2, T3, T4, TOut> f)
+            where T1 : allows ref struct
+            where T2 : allows ref struct
+            where T3 : allows ref struct
+            where T4 : allows ref struct
+            where TOut : allows ref struct =>
             new Tier1Kernel4<T1, T2, T3, T4, TOut>(_signature, _strict, f);
 
-        public IVectorFunction Visit<T1, T2, T3, T4, T5, TOut>(Func<T1, T2, T3, T4, T5, TOut> f) =>
+        public IVectorFunction Visit<T1, T2, T3, T4, T5, TOut>(Func<T1, T2, T3, T4, T5, TOut> f)
+            where T1 : allows ref struct
+            where T2 : allows ref struct
+            where T3 : allows ref struct
+            where T4 : allows ref struct
+            where T5 : allows ref struct
+            where TOut : allows ref struct =>
             new Tier1Kernel5<T1, T2, T3, T4, T5, TOut>(_signature, _strict, f);
 
         public IVectorFunction Visit<T1, T2, T3, T4, T5, T6, TOut>(
-            Func<T1, T2, T3, T4, T5, T6, TOut> f) =>
+            Func<T1, T2, T3, T4, T5, T6, TOut> f)
+            where T1 : allows ref struct
+            where T2 : allows ref struct
+            where T3 : allows ref struct
+            where T4 : allows ref struct
+            where T5 : allows ref struct
+            where T6 : allows ref struct
+            where TOut : allows ref struct =>
             new Tier1Kernel6<T1, T2, T3, T4, T5, T6, TOut>(_signature, _strict, f);
     }
 }

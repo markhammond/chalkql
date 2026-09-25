@@ -202,7 +202,7 @@ internal static class CompositeInference
     /// <summary>The Tier 1 CLR types, as a refusal lists them.</summary>
     internal const string TierOneTypes =
         "bool, sbyte, short, int, long, float, double, decimal, DateOnly, TimeOnly, DateTime, "
-        + "DateTimeOffset, TimeSpan, Guid, string, Utf8String, ReadOnlyMemory<byte> or byte[]";
+        + "DateTimeOffset, TimeSpan, Guid, string, Utf8String, ReadOnlySpan<byte>, ReadOnlyMemory<byte> or byte[]";
 
     /// <summary>The DECIMAL a <c>decimal</c> is inferred as: the POCO source's default, DECIMAL(28, 10).</summary>
     public const int DecimalPrecision = 28;
@@ -254,8 +254,9 @@ internal static class CompositeInference
             return ChalkType.Float64();
         }
 
-        if (clr == typeof(string) || IsUtf8String(clr))
+        if (clr == typeof(string) || clr == typeof(ReadOnlySpan<byte>) || IsUtf8String(clr))
         {
+            // ReadOnlySpan<byte> is a STRING by inference; a BINARY spelled as a span is declared explicitly.
             return ChalkType.String();
         }
 

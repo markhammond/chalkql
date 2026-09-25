@@ -40,15 +40,16 @@ public sealed class CompositeBindingTests
             .Client()
             .Build();
 
-    private static Classification Answer(Utf8String description, double amount) =>
-        new(description, amount > 100 ? 0.9 : 0.1);
+    // The record keeps the text, so the lent bytes are copied into memory of the host's own (D304).
+    private static Classification Answer(ReadOnlySpan<byte> description, double amount) =>
+        new(Utf8String.Copy(description), amount > 100 ? 0.9 : 0.1);
 
     [Fact]
     public void The_record_the_declaration_was_inferred_from_binds()
     {
         UserFunctionBinding.Check(
             Classify(),
-            new HostScalar2<Utf8String, double, Classification>("classify_transaction", Answer),
+            new HostScalar2<ReadOnlySpan<byte>, double, Classification>("classify_transaction", Answer),
             "test");
     }
 
@@ -57,8 +58,8 @@ public sealed class CompositeBindingTests
     {
         UserFunctionBinding.Check(
             Classify(),
-            new HostScalar2<Utf8String, double, Classification?>(
-                "classify_transaction", static (d, a) => a < 0 ? null : new Classification(d, a)),
+            new HostScalar2<ReadOnlySpan<byte>, double, Classification?>(
+                "classify_transaction", static (d, a) => a < 0 ? null : new Classification(Utf8String.Copy(d), a)),
             "test");
     }
 
@@ -67,8 +68,8 @@ public sealed class CompositeBindingTests
     {
         var error = Assert.Throws<InvalidOperationException>(() => UserFunctionBinding.Check(
             Classify(),
-            new HostScalar2<Utf8String, double, Renamed>(
-                "classify_transaction", static (d, a) => new Renamed(d, a)),
+            new HostScalar2<ReadOnlySpan<byte>, double, Renamed>(
+                "classify_transaction", static (d, a) => new Renamed(Utf8String.Copy(d), a)),
             "test"));
 
         Assert.Contains("COMPOSITE(Category STRING, Confidence FP64)", error.Message, StringComparison.Ordinal);
@@ -82,8 +83,8 @@ public sealed class CompositeBindingTests
     {
         var error = Assert.Throws<InvalidOperationException>(() => UserFunctionBinding.Check(
             Classify(),
-            new HostScalar2<Utf8String, double, Narrow>(
-                "classify_transaction", static (d, a) => new Narrow(d, (float)a)),
+            new HostScalar2<ReadOnlySpan<byte>, double, Narrow>(
+                "classify_transaction", static (d, a) => new Narrow(Utf8String.Copy(d), (float)a)),
             "test"));
 
         Assert.Contains(
@@ -106,7 +107,7 @@ public sealed class CompositeBindingTests
 
         UserFunctionBinding.Check(
             declared,
-            new HostScalar2<Utf8String, double, Classification>("classify_transaction", Answer),
+            new HostScalar2<ReadOnlySpan<byte>, double, Classification>("classify_transaction", Answer),
             "test");
     }
 
@@ -115,8 +116,8 @@ public sealed class CompositeBindingTests
     {
         var error = Assert.Throws<InvalidOperationException>(() => UserFunctionBinding.Check(
             Classify(),
-            new HostScalar2<Utf8String, double, Counted>(
-                "classify_transaction", static (d, a) => new Counted(d, (ulong)a)),
+            new HostScalar2<ReadOnlySpan<byte>, double, Counted>(
+                "classify_transaction", static (d, a) => new Counted(Utf8String.Copy(d), (ulong)a)),
             "test"));
 
         Assert.Contains("property 'Count' of Counted is UInt64", error.Message, StringComparison.Ordinal);
@@ -127,7 +128,7 @@ public sealed class CompositeBindingTests
     {
         var error = Assert.Throws<InvalidOperationException>(() => UserFunctionBinding.Check(
             Classify(),
-            new HostScalar2<Utf8String, double, double>("classify_transaction", static (_, a) => a),
+            new HostScalar2<ReadOnlySpan<byte>, double, double>("classify_transaction", static (_, a) => a),
             "test"));
 
         Assert.Contains("uses Double, which is not a record", error.Message, StringComparison.Ordinal);

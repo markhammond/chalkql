@@ -25,9 +25,10 @@ namespace Chalk.Catalog;
 /// </para>
 /// <para>
 /// The Tier 1 set is the CLR types the POCO source maps a member from, inferred as it infers an
-/// unannotated member: <c>decimal</c> as DECIMAL(28, 10), <c>DateTime</c> as TIMESTAMP(9) and so on.
-/// A narrower DECIMAL or a coarser TIMESTAMP is declared with the explicit overloads and still
-/// implemented with a <c>decimal</c> or a <c>DateTime</c>.
+/// unannotated member: <c>decimal</c> as DECIMAL(28, 10), <c>DateTime</c> as TIMESTAMP(9) and so on,
+/// and <c>ReadOnlySpan&lt;byte&gt;</c> as STRING — a BINARY spelled as a span is declared with the
+/// explicit overloads. A narrower DECIMAL or a coarser TIMESTAMP is declared with the explicit
+/// overloads and still implemented with a <c>decimal</c> or a <c>DateTime</c>.
 /// </para>
 /// <para>
 /// A textual <c>CREATE FUNCTION</c> form is a follow-up, not part of this step (§4).
@@ -66,18 +67,32 @@ public sealed class FunctionBuilder
     }
 
     /// <summary>A scalar function of no arguments — a clock, a sequence, a session value.</summary>
-    public FunctionBuilder Scalar<TResult>() => Scalar().Returns<TResult>();
+    public FunctionBuilder Scalar<TResult>()
+        where TResult : allows ref struct
+        => Scalar().Returns<TResult>();
 
     /// <summary>A scalar function of one named argument.</summary>
-    public FunctionBuilder Scalar<T1, TResult>(string p1) =>
+    public FunctionBuilder Scalar<T1, TResult>(string p1)
+        where T1 : allows ref struct
+        where TResult : allows ref struct
+        =>
         Scalar().Parameter<T1>(p1).Returns<TResult>();
 
     /// <summary>A scalar function of two named arguments.</summary>
-    public FunctionBuilder Scalar<T1, T2, TResult>(string p1, string p2) =>
+    public FunctionBuilder Scalar<T1, T2, TResult>(string p1, string p2)
+        where T1 : allows ref struct
+        where T2 : allows ref struct
+        where TResult : allows ref struct
+        =>
         Scalar().Parameter<T1>(p1).Parameter<T2>(p2).Returns<TResult>();
 
     /// <summary>A scalar function of three named arguments.</summary>
-    public FunctionBuilder Scalar<T1, T2, T3, TResult>(string p1, string p2, string p3) =>
+    public FunctionBuilder Scalar<T1, T2, T3, TResult>(string p1, string p2, string p3)
+        where T1 : allows ref struct
+        where T2 : allows ref struct
+        where T3 : allows ref struct
+        where TResult : allows ref struct
+        =>
         Scalar().Parameter<T1>(p1).Parameter<T2>(p2).Parameter<T3>(p3).Returns<TResult>();
 
     /// <summary>An aggregate over one named argument.</summary>
@@ -120,8 +135,9 @@ public sealed class FunctionBuilder
     }
 
     /// <summary>A required parameter, typed from <typeparamref name="T"/> and nullable.</summary>
-    public FunctionBuilder Parameter<T>(string name) =>
-        Parameter(name, TypeOf<T>(nullable: true, Role.Parameter, name));
+    public FunctionBuilder Parameter<T>(string name)
+        where T : allows ref struct
+        => Parameter(name, TypeOf<T>(nullable: true, Role.Parameter, name));
 
     /// <summary>An optional parameter, and the constant an omitted argument stands for.</summary>
     public FunctionBuilder Optional(string name, ChalkType type, object? defaultValue)
@@ -151,10 +167,14 @@ public sealed class FunctionBuilder
     /// The same, typed from <typeparamref name="T"/> and non-nullable — a COMPOSITE when
     /// <typeparamref name="T"/> is a record, nullable when it is a <c>Nullable</c> of one (D294).
     /// </summary>
-    public FunctionBuilder Returns<T>() => Returns(TypeOf<T>(nullable: false, Role.Result, null));
+    public FunctionBuilder Returns<T>()
+        where T : allows ref struct
+        => Returns(TypeOf<T>(nullable: false, Role.Result, null));
 
     /// <summary>The same, saying whether the result may be NULL even when no argument is.</summary>
-    public FunctionBuilder ReturnsNullable<T>() => Returns(TypeOf<T>(nullable: true, Role.Result, null));
+    public FunctionBuilder ReturnsNullable<T>()
+        where T : allows ref struct
+        => Returns(TypeOf<T>(nullable: true, Role.Result, null));
 
     // ---- properties ----
 
@@ -351,12 +371,14 @@ public sealed class FunctionBuilder
     }
 
     /// <summary>
-    /// The declared type a CLR type stands for: the Tier 1 set and no more — <c>Utf8String</c> being a
-    /// STRING spelled without an allocation per row, and the POCO source's own mappings for the rest
-    /// (D298) — or, for a result, a COMPOSITE inferred from a record (D294). A record anywhere else is
-    /// refused, because a composite value is never a parameter or a table function's column.
+    /// The declared type a CLR type stands for: the Tier 1 set and no more — <c>ReadOnlySpan&lt;byte&gt;</c>
+    /// and <c>Utf8String</c> being a STRING spelled without an allocation per row, and the POCO source's
+    /// own mappings for the rest (D298) — or, for a result, a COMPOSITE inferred from a record (D294). A
+    /// record anywhere else is refused, because a composite value is never a parameter or a table
+    /// function's column.
     /// </summary>
     private ChalkType TypeOf<T>(bool nullable, Role role, string? name)
+        where T : allows ref struct
     {
         var clr = typeof(T);
         var type = Nullable.GetUnderlyingType(clr) ?? clr;

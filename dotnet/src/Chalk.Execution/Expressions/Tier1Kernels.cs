@@ -8,10 +8,16 @@ namespace Chalk.Execution.Expressions;
 /// the two tiers cannot drift, which is the point of building it this way.
 /// </summary>
 /// <remarks>
+/// <para>
 /// A <c>STRICT</c> function's NULL lanes are skipped here, before the delegate is called — that is
 /// what the flag means, and it also spares the host writing the check. A non-strict function sees
 /// every lane and decides for itself, which is why its arguments are declared with nullable CLR
 /// types.
+/// </para>
+/// <para>
+/// Every type parameter <c>allows ref struct</c> (D304): a STRING or BINARY argument is handed to the
+/// delegate as a <c>ReadOnlySpan&lt;byte&gt;</c> over the lane, and a result may be one, copied into
+/// the column before the next call. The compiler keeps both inside the call, which is the point.
 /// </remarks>
 internal abstract class Tier1Kernel : IVectorFunction
 {
@@ -62,6 +68,7 @@ internal abstract class Tier1Kernel : IVectorFunction
     /// </summary>
     protected void Run<TOut>(
         ReadOnlySpan<ColumnView> args, ColumnWriter result, int length, LaneProducer<TOut> produce)
+        where TOut : allows ref struct
     {
         if (_composite is CompositeWriter<TOut> record)
         {
@@ -80,7 +87,7 @@ internal abstract class Tier1Kernel : IVectorFunction
                     continue;
                 }
 
-                LaneCodec.Append(result, length, row, produce(row));
+                LaneCodec.Append(result, length, row, produce(row), in _result);
             }
 
             return;
@@ -116,6 +123,7 @@ internal abstract class Tier1Kernel : IVectorFunction
         int length,
         LaneProducer<TOut> produce,
         CompositeWriter<TOut> record)
+        where TOut : allows ref struct
     {
         var validity = result.BeginValidity(length);
         record.Begin(result, length);
@@ -135,16 +143,20 @@ internal abstract class Tier1Kernel : IVectorFunction
     }
 
     /// <summary>The composite writer a kernel of this result type needs, or null for a scalar result.</summary>
-    protected static object? CompositeWriterFor<TOut>(FunctionSignature signature) =>
+    protected static object? CompositeWriterFor<TOut>(FunctionSignature signature)
+        where TOut : allows ref struct
+        =>
         signature.ReturnType.Kind == Ir.TypeKind.Composite
             ? CompositeWriters.For<TOut>(signature.ReturnType, $"the result of '{signature.Name}'")
             : null;
 
     /// <summary>One row's answer. A struct-free delegate: it closes over nothing this code allocates.</summary>
-    protected delegate TOut LaneProducer<out TOut>(int row);
+    protected delegate TOut LaneProducer<out TOut>(int row)
+        where TOut : allows ref struct;
 }
 
 internal sealed class Tier1Kernel0<TOut> : Tier1Kernel
+    where TOut : allows ref struct
 {
     private readonly Func<TOut> _f;
     private readonly LaneProducer<TOut> _produce;
@@ -161,6 +173,8 @@ internal sealed class Tier1Kernel0<TOut> : Tier1Kernel
 }
 
 internal sealed class Tier1Kernel1<T1, TOut> : Tier1Kernel
+    where T1 : allows ref struct
+    where TOut : allows ref struct
 {
     private readonly Func<T1, TOut> _f;
     private readonly LaneProducer<TOut> _produce;
@@ -185,6 +199,9 @@ internal sealed class Tier1Kernel1<T1, TOut> : Tier1Kernel
 }
 
 internal sealed class Tier1Kernel2<T1, T2, TOut> : Tier1Kernel
+    where T1 : allows ref struct
+    where T2 : allows ref struct
+    where TOut : allows ref struct
 {
     private readonly Func<T1, T2, TOut> _f;
     private readonly LaneProducer<TOut> _produce;
@@ -213,6 +230,10 @@ internal sealed class Tier1Kernel2<T1, T2, TOut> : Tier1Kernel
 }
 
 internal sealed class Tier1Kernel3<T1, T2, T3, TOut> : Tier1Kernel
+    where T1 : allows ref struct
+    where T2 : allows ref struct
+    where T3 : allows ref struct
+    where TOut : allows ref struct
 {
     private readonly Func<T1, T2, T3, TOut> _f;
     private readonly LaneProducer<TOut> _produce;
@@ -246,6 +267,11 @@ internal sealed class Tier1Kernel3<T1, T2, T3, TOut> : Tier1Kernel
 }
 
 internal sealed class Tier1Kernel4<T1, T2, T3, T4, TOut> : Tier1Kernel
+    where T1 : allows ref struct
+    where T2 : allows ref struct
+    where T3 : allows ref struct
+    where T4 : allows ref struct
+    where TOut : allows ref struct
 {
     private readonly Func<T1, T2, T3, T4, TOut> _f;
     private readonly LaneProducer<TOut> _produce;
@@ -286,6 +312,12 @@ internal sealed class Tier1Kernel4<T1, T2, T3, T4, TOut> : Tier1Kernel
 }
 
 internal sealed class Tier1Kernel5<T1, T2, T3, T4, T5, TOut> : Tier1Kernel
+    where T1 : allows ref struct
+    where T2 : allows ref struct
+    where T3 : allows ref struct
+    where T4 : allows ref struct
+    where T5 : allows ref struct
+    where TOut : allows ref struct
 {
     private readonly Func<T1, T2, T3, T4, T5, TOut> _f;
     private readonly LaneProducer<TOut> _produce;
@@ -331,6 +363,13 @@ internal sealed class Tier1Kernel5<T1, T2, T3, T4, T5, TOut> : Tier1Kernel
 }
 
 internal sealed class Tier1Kernel6<T1, T2, T3, T4, T5, T6, TOut> : Tier1Kernel
+    where T1 : allows ref struct
+    where T2 : allows ref struct
+    where T3 : allows ref struct
+    where T4 : allows ref struct
+    where T5 : allows ref struct
+    where T6 : allows ref struct
+    where TOut : allows ref struct
 {
     private readonly Func<T1, T2, T3, T4, T5, T6, TOut> _f;
     private readonly LaneProducer<TOut> _produce;

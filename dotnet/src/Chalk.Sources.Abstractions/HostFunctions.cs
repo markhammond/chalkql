@@ -44,80 +44,65 @@ internal abstract class HostScalar : HostFunction
     /// </summary>
     public abstract object? InvokeBoxed(object?[] args);
 
-    /// <summary>
-    /// One boxed argument as the delegate's own CLR type. The reference executor represents a STRING
-    /// as a .NET <c>string</c>; a delegate written in <see cref="Utf8String"/> (D146) is handed the
-    /// encoded bytes here, which is a per-call allocation the reference path is allowed and the
-    /// vectorised one never makes.
-    /// </summary>
+    /// <summary>One boxed argument as the delegate's own type; see <see cref="BoxedLanes.Cast{T}"/>.</summary>
     private protected static T Cast<T>(object? value)
-    {
-        if (typeof(T) == typeof(Utf8String))
-        {
-            var text = value is Utf8String already ? already : Utf8String.FromString((string?)value);
-            return (T)(object)text;
-        }
+        where T : allows ref struct
+        => BoxedLanes.Cast<T>(value);
 
-        if (typeof(T) == typeof(Utf8String?))
-        {
-            // Written out for the reason V43 gives: a null literal beside a Utf8String binds to the
-            // implicit byte[] conversion and produces the empty value, not a null Nullable.
-            Utf8String? text = default;
-            if (value is Utf8String already)
-            {
-                text = already;
-            }
-            else if (value is not null)
-            {
-                text = Utf8String.FromString((string)value);
-            }
-
-            return (T)(object)text!;
-        }
-
-        return value is null ? default! : (T)value;
-    }
-
-    /// <summary>
-    /// The delegate's answer as the boxed CLR value the reference executor compares in. A
-    /// <see cref="Utf8String"/> becomes a <c>string</c> — decoded, and therefore also copied out of
-    /// whatever buffer the delegate lent, which the lifetime rule requires of anything kept.
-    /// </summary>
+    /// <summary>The delegate's answer boxed; see <see cref="BoxedLanes.Box{TOut}"/>.</summary>
     private protected static object? Box<TOut>(TOut value)
-    {
-        if (typeof(TOut) == typeof(Utf8String))
-        {
-            return ((Utf8String)(object)value!).ToString();
-        }
-
-        if (typeof(TOut) == typeof(Utf8String?))
-        {
-            return value is null ? null : ((Utf8String?)(object)value).GetValueOrDefault().ToString();
-        }
-
-        return value;
-    }
+        where TOut : allows ref struct
+        => BoxedLanes.Box(value);
 }
 
 /// <summary>Receives a registered delegate with its CLR types intact.</summary>
 internal interface IHostScalarVisitor<out TResult>
 {
-    TResult Visit<TOut>(Func<TOut> f);
+    TResult Visit<TOut>(Func<TOut> f)
+        where TOut : allows ref struct;
 
-    TResult Visit<T1, TOut>(Func<T1, TOut> f);
+    TResult Visit<T1, TOut>(Func<T1, TOut> f)
+        where T1 : allows ref struct
+        where TOut : allows ref struct;
 
-    TResult Visit<T1, T2, TOut>(Func<T1, T2, TOut> f);
+    TResult Visit<T1, T2, TOut>(Func<T1, T2, TOut> f)
+        where T1 : allows ref struct
+        where T2 : allows ref struct
+        where TOut : allows ref struct;
 
-    TResult Visit<T1, T2, T3, TOut>(Func<T1, T2, T3, TOut> f);
+    TResult Visit<T1, T2, T3, TOut>(Func<T1, T2, T3, TOut> f)
+        where T1 : allows ref struct
+        where T2 : allows ref struct
+        where T3 : allows ref struct
+        where TOut : allows ref struct;
 
-    TResult Visit<T1, T2, T3, T4, TOut>(Func<T1, T2, T3, T4, TOut> f);
+    TResult Visit<T1, T2, T3, T4, TOut>(Func<T1, T2, T3, T4, TOut> f)
+        where T1 : allows ref struct
+        where T2 : allows ref struct
+        where T3 : allows ref struct
+        where T4 : allows ref struct
+        where TOut : allows ref struct;
 
-    TResult Visit<T1, T2, T3, T4, T5, TOut>(Func<T1, T2, T3, T4, T5, TOut> f);
+    TResult Visit<T1, T2, T3, T4, T5, TOut>(Func<T1, T2, T3, T4, T5, TOut> f)
+        where T1 : allows ref struct
+        where T2 : allows ref struct
+        where T3 : allows ref struct
+        where T4 : allows ref struct
+        where T5 : allows ref struct
+        where TOut : allows ref struct;
 
-    TResult Visit<T1, T2, T3, T4, T5, T6, TOut>(Func<T1, T2, T3, T4, T5, T6, TOut> f);
+    TResult Visit<T1, T2, T3, T4, T5, T6, TOut>(Func<T1, T2, T3, T4, T5, T6, TOut> f)
+        where T1 : allows ref struct
+        where T2 : allows ref struct
+        where T3 : allows ref struct
+        where T4 : allows ref struct
+        where T5 : allows ref struct
+        where T6 : allows ref struct
+        where TOut : allows ref struct;
 }
 
 internal sealed class HostScalar0<TOut> : HostScalar
+    where TOut : allows ref struct
 {
     private readonly Func<TOut> _f;
 
@@ -136,6 +121,8 @@ internal sealed class HostScalar0<TOut> : HostScalar
 }
 
 internal sealed class HostScalar1<T1, TOut> : HostScalar
+    where T1 : allows ref struct
+    where TOut : allows ref struct
 {
     private readonly Func<T1, TOut> _f;
 
@@ -154,6 +141,9 @@ internal sealed class HostScalar1<T1, TOut> : HostScalar
 }
 
 internal sealed class HostScalar2<T1, T2, TOut> : HostScalar
+    where T1 : allows ref struct
+    where T2 : allows ref struct
+    where TOut : allows ref struct
 {
     private readonly Func<T1, T2, TOut> _f;
 
@@ -172,6 +162,10 @@ internal sealed class HostScalar2<T1, T2, TOut> : HostScalar
 }
 
 internal sealed class HostScalar3<T1, T2, T3, TOut> : HostScalar
+    where T1 : allows ref struct
+    where T2 : allows ref struct
+    where T3 : allows ref struct
+    where TOut : allows ref struct
 {
     private readonly Func<T1, T2, T3, TOut> _f;
 
@@ -190,6 +184,11 @@ internal sealed class HostScalar3<T1, T2, T3, TOut> : HostScalar
 }
 
 internal sealed class HostScalar4<T1, T2, T3, T4, TOut> : HostScalar
+    where T1 : allows ref struct
+    where T2 : allows ref struct
+    where T3 : allows ref struct
+    where T4 : allows ref struct
+    where TOut : allows ref struct
 {
     private readonly Func<T1, T2, T3, T4, TOut> _f;
 
@@ -208,6 +207,12 @@ internal sealed class HostScalar4<T1, T2, T3, T4, TOut> : HostScalar
 }
 
 internal sealed class HostScalar5<T1, T2, T3, T4, T5, TOut> : HostScalar
+    where T1 : allows ref struct
+    where T2 : allows ref struct
+    where T3 : allows ref struct
+    where T4 : allows ref struct
+    where T5 : allows ref struct
+    where TOut : allows ref struct
 {
     private readonly Func<T1, T2, T3, T4, T5, TOut> _f;
 
@@ -227,6 +232,13 @@ internal sealed class HostScalar5<T1, T2, T3, T4, T5, TOut> : HostScalar
 }
 
 internal sealed class HostScalar6<T1, T2, T3, T4, T5, T6, TOut> : HostScalar
+    where T1 : allows ref struct
+    where T2 : allows ref struct
+    where T3 : allows ref struct
+    where T4 : allows ref struct
+    where T5 : allows ref struct
+    where T6 : allows ref struct
+    where TOut : allows ref struct
 {
     private readonly Func<T1, T2, T3, T4, T5, T6, TOut> _f;
 

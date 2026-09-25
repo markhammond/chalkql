@@ -161,7 +161,7 @@ public sealed class Utf8Fixture
     /// <summary>
     /// The two Tier 1 fixture functions of §9, declared in the catalog's own terms — STRING in,
     /// STRING or I64 out. The delegate's spelling is its own business (D146), and these are written
-    /// in <see cref="Utf8String"/>.
+    /// in <c>ReadOnlySpan&lt;byte&gt;</c>: the lane's bytes, lent for the call.
     /// </summary>
     public static PocoSourceBuilder Declare(PocoSourceBuilder builder)
     {
@@ -179,15 +179,16 @@ public sealed class Utf8Fixture
 
     /// <summary>
     /// The implementations. Neither allocates: <c>upper_ascii</c> writes into a per-thread scratch
-    /// buffer and lends it, which the lifetime rule of <see cref="Utf8String"/> allows because the
-    /// engine copies the bytes into the result column before the next call.
+    /// buffer and answers a span over it, which is safe because the engine copies the bytes into the
+    /// result column before the next call — and the compiler would refuse a span that tried to
+    /// outlive the call.
     /// </summary>
     [Experimental("CHALK001")]
     public static void Register(IFunctionRegistry registry)
     {
         ArgumentNullException.ThrowIfNull(registry);
-        registry.AddScalar<Utf8String, Utf8String>("upper_ascii", UpperAscii);
-        registry.AddScalar<Utf8String, long>("byte_length", static value => value.Length);
+        registry.AddScalar<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("upper_ascii", UpperAscii);
+        registry.AddScalar<ReadOnlySpan<byte>, long>("byte_length", static value => value.Length);
     }
 
     /// <summary>
@@ -196,9 +197,8 @@ public sealed class Utf8Fixture
     /// <em>not</em> a culture operation — that is what <see cref="Utf8String"/>'s doc comment says
     /// belongs on the existing string kernels.
     /// </summary>
-    public static Utf8String UpperAscii(Utf8String value)
+    public static ReadOnlySpan<byte> UpperAscii(ReadOnlySpan<byte> source)
     {
-        var source = value.AsSpan();
         var scratch = _scratch;
         if (scratch is null || scratch.Length < source.Length)
         {
@@ -214,7 +214,7 @@ public sealed class Utf8Fixture
             target[i] = b is >= (byte)'a' and <= (byte)'z' ? (byte)(b - 32) : b;
         }
 
-        return Utf8String.FromBytes(scratch.AsMemory(0, source.Length));
+        return scratch.AsSpan(0, source.Length);
     }
 
     [ThreadStatic]

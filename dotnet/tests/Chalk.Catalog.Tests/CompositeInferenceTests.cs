@@ -250,4 +250,20 @@ public sealed class CompositeInferenceTests
         Assert.Equal(ChalkType.String(nullable: true), descriptor.Parameters[0].Type);
         Assert.Equal(ChalkType.String(), descriptor.ReturnType);
     }
+
+    /// <summary>
+    /// A span is a STRING by inference — the spelling a delegate reads a lane in — and a BINARY only
+    /// when the declaration says so, since the bytes themselves cannot tell.
+    /// </summary>
+    [Fact]
+    public void A_span_of_bytes_is_a_string_wherever_a_type_is_inferred()
+    {
+        var descriptor = Build(f => f.Scalar<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("s"));
+
+        Assert.Equal(ChalkType.String(nullable: true), descriptor.Parameters[0].Type);
+        Assert.Equal(ChalkType.String(), descriptor.ReturnType);
+
+        var binary = Build(f => f.Scalar().Parameter("b", ChalkType.Binary(nullable: true)).Returns(ChalkType.Binary()));
+        Assert.Equal(ChalkType.Binary(nullable: true), binary.Parameters[0].Type);
+    }
 }

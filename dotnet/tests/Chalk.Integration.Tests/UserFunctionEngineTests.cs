@@ -363,7 +363,7 @@ public sealed class UserFunctionEngineTests(SharedSidecar sidecar)
             {
                 ContextId = "composite-mismatch",
                 Sources = [source],
-                Functions = registry => registry.AddScalar<Utf8String, double, Scored>(
+                Functions = registry => registry.AddScalar<ReadOnlySpan<byte>, double, Scored>(
                     "classify_transaction", static (_, amount) => new Scored(default, amount)),
                 Planner = new RecordedPlanner(RepoLayout.Plans.FullName),
             }).AsTask());
@@ -419,7 +419,7 @@ public sealed class UserFunctionEngineTests(SharedSidecar sidecar)
         {
             ContextId = "decimal-amount",
             Sources = [source],
-            Functions = registry => registry.AddScalar<Utf8String, decimal, Classification>(
+            Functions = registry => registry.AddScalar<ReadOnlySpan<byte>, decimal, Classification>(
                 "classify_transaction",
                 (description, amount) =>
                 {
@@ -471,7 +471,7 @@ public sealed class UserFunctionEngineTests(SharedSidecar sidecar)
         {
             ContextId = "composite-results",
             Sources = [source],
-            Functions = registry => registry.AddScalar<Utf8String, double, Classification>(
+            Functions = registry => registry.AddScalar<ReadOnlySpan<byte>, double, Classification>(
                 "classify_transaction",
                 (description, amount) =>
                 {

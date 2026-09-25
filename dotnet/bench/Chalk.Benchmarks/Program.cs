@@ -1300,8 +1300,8 @@ internal static class Program
 
     /// <summary>
     /// The two gates §4 and §9 add beside the existing local ones: a POCO <c>Utf8String</c> column
-    /// scans at zero bytes per row, and a Tier 1 function written in <c>Utf8String</c> adds nothing
-    /// per batch.
+    /// scans at zero bytes per row, and a Tier 1 function reading and answering the lane's bytes as a
+    /// <c>ReadOnlySpan&lt;byte&gt;</c> adds nothing per batch.
     /// </summary>
     /// <remarks>
     /// Measured on the pooled pipeline, like every other local gate: an output batch's Arrow graph
@@ -1336,10 +1336,10 @@ internal static class Program
             "SELECT symbol, seq FROM utf8_quotes WHERE price > 40",
             "SELECT symbol, seq FROM utf8_quotes WHERE price > 10").ConfigureAwait(false);
         passed &= await Utf8PerBatchAsync(
-            engine, arena, "Tier 1 upper_ascii(Utf8String) -> Utf8String",
+            engine, arena, "Tier 1 upper_ascii(ReadOnlySpan<byte>) -> ReadOnlySpan<byte>",
             "SELECT upper_ascii(symbol) AS s FROM utf8_quotes WHERE price > 10").ConfigureAwait(false);
         passed &= await Utf8PerBatchAsync(
-            engine, arena, "Tier 1 byte_length(Utf8String) -> I64",
+            engine, arena, "Tier 1 byte_length(ReadOnlySpan<byte>) -> I64",
             "SELECT byte_length(symbol) AS n FROM utf8_quotes WHERE price > 10").ConfigureAwait(false);
         passed &= await Utf8HostReadAsync(
             engine, "host reads symbol as ReadOnlySpan<byte> and looks it up in a string-keyed dictionary",

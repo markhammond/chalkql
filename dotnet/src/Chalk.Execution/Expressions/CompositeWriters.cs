@@ -28,6 +28,7 @@ namespace Chalk.Execution.Expressions;
 /// </remarks>
 /// <typeparam name="TOut">What the delegate returns: the record, or a <c>Nullable</c> of it.</typeparam>
 internal abstract class CompositeWriter<TOut>
+    where TOut : allows ref struct
 {
     /// <summary>Starts one batch of <paramref name="length"/> rows in <paramref name="result"/>'s fields.</summary>
     public abstract void Begin(ColumnWriter result, int length);
@@ -51,6 +52,7 @@ internal static class CompositeWriters
     /// properties read here are the fields, in the declaration's order.
     /// </summary>
     public static CompositeWriter<TOut> For<TOut>(ChalkType declared, string owner)
+        where TOut : allows ref struct
     {
         var underlying = Nullable.GetUnderlyingType(typeof(TOut));
         var record = underlying ?? typeof(TOut);
@@ -225,7 +227,7 @@ internal sealed class FieldWriter<TRecord, TField> : FieldWriter<TRecord>
         var column = _column!;
         if (Variable)
         {
-            LaneCodec.Append(column, _length, row, value);
+            LaneCodec.Append(column, _length, row, value, in _format);
             return;
         }
 

@@ -713,9 +713,15 @@ still costs what it always did:
   `ReadOnlyMemory<byte>` still map to BINARY — the marker type is what says
   "this is text". Such a column is binary-collated: keys, indexes, foreign keys
   and the build-time verification all compare bytes.
-- **A Tier 1 user function** may take and return `Utf8String`, in which case a
-  lane is lent to it without a copy and its answer is copied straight into the
-  result column.
+- **A Tier 1 user function** takes a STRING as `ReadOnlySpan<byte>`: the lane's
+  own bytes, lent for the call, which the compiler keeps inside it. It may
+  answer a `ReadOnlySpan<byte>` too — a slice of its input, or of a buffer it
+  owns — copied into the result column before the next call, or a `Utf8String`
+  over its own memory. A delegate is never handed a `Utf8String` over a lane:
+  registering one for a parameter is refused when the engine is created,
+  because that value could be kept past the call and the engine reuses the
+  memory. A span has no NULL, so a non-strict function, which sees every NULL,
+  spells a STRING parameter `string?`.
 - **Reading a result**: `GetUtf8(int)` on any Arrow string array — the view
   layout a STRING column arrives in by default, the classic one the host asks
   for with `ChalkEngineOptions.Output.Strings`, or the large one a batch of the
@@ -1025,13 +1031,13 @@ A Tier 1 delegate is written in the CLR types a POCO property maps from:
 | SQL type | CLR type |
 |---|---|
 | BOOL, I8, I16, I32, I64, FP32, FP64 | `bool`, `sbyte`, `short`, `int`, `long`, `float`, `double` |
-| STRING | `Utf8String`, or `string` |
+| STRING | `ReadOnlySpan<byte>` in; `ReadOnlySpan<byte>` or `Utf8String` out; `string` either way |
 | DECIMAL of up to 28 digits | `decimal` |
 | DATE, TIME | `DateOnly`, `TimeOnly` |
 | TIMESTAMP, TIMESTAMP_TZ | `DateTime`, `DateTimeOffset` (in UTC) |
 | INTERVAL_DAY | `TimeSpan` |
 | UUID | `Guid` |
-| BINARY | `ReadOnlyMemory<byte>`, or `byte[]` |
+| BINARY | `ReadOnlySpan<byte>`, `ReadOnlyMemory<byte>` or `byte[]`, declared BINARY explicitly for a span |
 
 A function that is not strict takes the nullable form of a value type, so it can
 see a NULL. `string` and `byte[]` cost an allocation per row. The other types do
@@ -1082,7 +1088,7 @@ public readonly record struct Classification(Utf8String Category, double Confide
 var source = new PocoSourceBuilder("mem")
     .AddTable("transactions", transactions)
     .AddFunction("classify_transaction", f => f
-        .Scalar<Utf8String, double, Classification>("description", "amount")
+        .Scalar<ReadOnlySpan<byte>, double, Classification>("description", "amount")
         .Strict()
         .Client())
     .Build();
@@ -1092,7 +1098,7 @@ await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
     ContextId = "app",
     Sources = [source],
     Planner = planner,
-    Functions = registry => registry.AddScalar<Utf8String, double, Classification>(
+    Functions = registry => registry.AddScalar<ReadOnlySpan<byte>, double, Classification>(
         "classify_transaction", (description, amount) => classifier.Classify(description, amount)),
 });
 ```

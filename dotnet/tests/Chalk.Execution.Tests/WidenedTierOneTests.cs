@@ -216,6 +216,9 @@ public sealed class WidenedTierOneTests
             new FunctionBuilder("same_key").Scalar<Guid, Guid>("k").Strict().Client().Build(),
             new FunctionBuilder("same_blob").Scalar<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>>("b").Strict().Client().Build(),
             new FunctionBuilder("reversed_blob").Scalar<byte[], byte[]>("b").Strict().Client().Build(),
+            // D304: a span is a STRING by inference, so a BINARY spelled as one is declared explicitly.
+            new FunctionBuilder("span_blob").Scalar()
+                .Parameter("b", ChalkType.Binary(nullable: true)).Returns(ChalkType.Binary()).Strict().Client().Build(),
         ];
         HostFunction[] hosts =
         [
@@ -228,6 +231,7 @@ public sealed class WidenedTierOneTests
             new HostScalar1<Guid, Guid>("same_key", static k => k),
             new HostScalar1<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>>("same_blob", static b => b),
             new HostScalar1<byte[], byte[]>("reversed_blob", static b => [.. b.Reverse()]),
+            new HostScalar1<ReadOnlySpan<byte>, ReadOnlySpan<byte>>("span_blob", static b => b[1..]),
         ];
 
         var plan = IrBuilder.Plan(Project(
@@ -243,6 +247,7 @@ public sealed class WidenedTierOneTests
                 ("key", Fn("same_key", Uuid(), Col("Key"))),
                 ("blob", Fn("same_blob", Binary(nullable: true), Col("Blob"))),
                 ("reversed", Fn("reversed_blob", Binary(nullable: true), Col("Blob"))),
+                ("tail", Fn("span_blob", Binary(nullable: true), Col("Blob"))),
             ]));
 
         var rows = await BothAsync(plan, declarations, hosts);
@@ -264,11 +269,15 @@ public sealed class WidenedTierOneTests
                 // STRICT over a NULL BINARY: the delegate is never called.
                 Assert.Null(row[8]);
                 Assert.Null(row[9]);
+                Assert.Null(row[10]);
             }
             else
             {
                 Assert.Equal(entry.Blob, (byte[])row[8]!);
                 Assert.Equal(entry.Blob.Reverse(), (byte[])row[9]!);
+
+                // A span answered over a BINARY is not validated as text; a slice of the input is legal.
+                Assert.Equal(entry.Blob.Skip(1), (byte[])row[10]!);
             }
         }
     }
@@ -640,6 +649,58 @@ public sealed class WidenedTierOneTests
 
         Assert.Contains("folds fixed-width values only", error.Message, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// F132: a STRING input is refused where the BINARY one is. The grouped accumulator reads
+    /// fixed-width lanes, and used to refuse a text input at its first row — after the engine had
+    /// been created and said nothing.
+    /// </summary>
+    [Fact]
+    public void A_string_aggregate_is_refused_at_registration()
+    {
+        var declaration = new FunctionBuilder("longest").Aggregate<string, long>("s").Client().Build();
+        var host = new HostAggregate<long, string, long>(
+            "longest",
+            new AggregateSpec<long, string, long>
+            {
+                Init = static () => 0,
+                Add = static (ref s, v) => s = Math.Max(s, v.Length),
+                Finish = static s => s,
+            });
+
+        var error = Assert.Throws<InvalidOperationException>(
+            () => UserFunctionBinding.Check(declaration, host, "engine creation"));
+
+        Assert.Contains("parameter 's' STRING?", error.Message, StringComparison.Ordinal);
+        Assert.Contains("folds fixed-width values only", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Aggregate a STRING with a Tier 2 kernel", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// D304: a table function's producer is called once with boxed arguments, which a span cannot be.
+    /// Its arguments are constants the producer may keep, so the owning spellings serve it.
+    /// </summary>
+    [Fact]
+    public void A_table_function_parameter_spelled_as_a_span_is_refused_at_registration()
+    {
+        var declaration = new FunctionBuilder("prefixed")
+            .TableFunction()
+            .Parameter<string>("prefix")
+            .Column<long>("n")
+            .Client()
+            .Build();
+        var host = new HostTable<Numbered>(
+            "prefixed", (Func<ReadOnlySpan<byte>, IEnumerable<Numbered>>)(static prefix => [new Numbered(prefix.Length)]));
+
+        var error = Assert.Throws<InvalidOperationException>(
+            () => UserFunctionBinding.Check(declaration, host, "engine creation"));
+
+        Assert.Contains("parameter 'prefix' is spelled ReadOnlySpan<byte>", error.Message, StringComparison.Ordinal);
+        Assert.Contains("called once with its arguments boxed", error.Message, StringComparison.Ordinal);
+        Assert.Contains("string or Utf8String", error.Message, StringComparison.Ordinal);
+    }
+
+    private sealed record Numbered(long N);
 
     // ---- what a lane costs ----
 

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Runtime.InteropServices;
 using Chalk.Catalog;
 using Chalk.Sources;
@@ -79,6 +80,20 @@ internal static class ClrBoxes
             };
         }
 
+        if (target == typeof(ReadOnlySpan<byte>))
+        {
+            // D304: a span cannot be boxed, so the reference path hands the delegate the bytes as an
+            // array and BoxedLanes.Cast makes the span over them — a per-call allocation this path
+            // is allowed and the vectorised one never makes.
+            return storage switch
+            {
+                string text => Encoding.UTF8.GetBytes(text),
+                ReadOnlyMemory<byte> memory => memory.ToArray(),
+                Utf8String text => text.ToArray(),
+                _ => storage,
+            };
+        }
+
         if (target == typeof(ReadOnlyMemory<byte>))
         {
             return storage is byte[] bytes ? new ReadOnlyMemory<byte>(bytes) : storage;
@@ -128,6 +143,9 @@ internal static class ClrBoxes
                 return null;
             case Utf8String text:
                 return text.ToString();
+            case byte[] bytes when format.Type.Kind == Ir.TypeKind.String:
+                // D304: a span a delegate answered for a STRING, boxed as its bytes.
+                return Encoding.UTF8.GetString(bytes);
             case sbyte v:
                 return (long)v;
             case short v:
