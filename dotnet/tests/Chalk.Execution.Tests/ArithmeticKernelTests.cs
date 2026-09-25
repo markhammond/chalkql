@@ -8,7 +8,7 @@ namespace Chalk.Execution.Tests;
 
 /// <summary>
 /// Arithmetic per <c>02-ir.md</c> §6: exact kinds are checked, division by zero raises for them and
-/// follows IEEE for floating point, and DECIMAL results round half-even to the declared scale.
+/// follows IEEE for floating point, and DECIMAL results round half away from zero to the declared scale (D306).
 /// </summary>
 public sealed class ArithmeticKernelTests
 {
@@ -130,21 +130,25 @@ public sealed class ArithmeticKernelTests
 
     [Theory]
     [MemberData(nameof(BatchSizes))]
-    public async Task Decimal_multiplication_rounds_half_even_to_the_target_scale(int batchSize)
+    public async Task Decimal_rescaling_rounds_half_away_from_zero_to_the_target_scale(int batchSize)
     {
         var table = TestData.Rounding;
         var row = table.RowType();
 
-        // DECIMAL(18,2) result from a DECIMAL(18,3) column: 0.125 -> 0.12 and 0.135 -> 0.14.
+        // DECIMAL(18,2) result from a DECIMAL(18,3) column: 0.125 -> 0.13 and 0.135 -> 0.14, as every
+        // source the engine pushes to rounds a midpoint (D306), and symmetric about zero.
         var expr = IrBuilder.Cast(IrBuilder.Ref(row, 0), IrBuilder.Dec(18, 2, true));
 
-        var values = await Runner.ProjectAsync(expr, Source, table, batchSize);
+        foreach (var reference in new[] { false, true })
+        {
+            var values = await Runner.ProjectAsync(expr, Source, table, batchSize, reference);
 
-        Assert.Equal(0.12m, values[0]);
-        Assert.Equal(0.14m, values[1]);
-        Assert.Equal(-0.12m, values[2]);
-        Assert.Equal(-0.14m, values[3]);
-        Assert.Null(values[4]);
+            Assert.Equal(0.13m, values[0]);
+            Assert.Equal(0.14m, values[1]);
+            Assert.Equal(-0.13m, values[2]);
+            Assert.Equal(-0.14m, values[3]);
+            Assert.Null(values[4]);
+        }
     }
 
     /// <summary>
@@ -154,8 +158,8 @@ public sealed class ArithmeticKernelTests
     /// asking about. Every expected value is Chalk's own (D163). See the repository's NOTICE.
     /// <para>
     /// Arithmetic at the widest whole number the 128-bit decimal carries (§5 C). Dividing
-    /// <c>decimal.MaxValue</c> by ten lands exactly on a midpoint — ...033.5 — and half-even takes
-    /// it to the even digit, at both signs; multiplying it by ten needs a thirtieth digit that
+    /// <c>decimal.MaxValue</c> by ten lands exactly on a midpoint — ...033.5 — which rounds away from
+    /// zero to ...034 at both signs; multiplying it by ten needs a thirtieth digit that
     /// DECIMAL(29,0) has not got, and the kernel says so rather than wrapping.
     /// </para>
     /// </summary>
@@ -172,7 +176,7 @@ public sealed class ArithmeticKernelTests
                 FunctionId.Divide, IrBuilder.Dec(29, 0, true), IrBuilder.Ref(row, 1), ten),
             Source, table, batchSize);
 
-        Assert.Equal(7922816251426433759354395034m, tenth[0]);    // ...033.5, up to even
+        Assert.Equal(7922816251426433759354395034m, tenth[0]);    // ...033.5, away from zero
         Assert.Equal(-7922816251426433759354395034m, tenth[1]);   // and the same below zero
         Assert.Equal(10_000_000_000_000_000_000m, tenth[2]);      // 10^20 / 10, no rounding at all
         Assert.Null(tenth[4]);
@@ -233,7 +237,7 @@ public sealed class ArithmeticKernelTests
         var values = await Runner.ProjectAsync(expr, Source, Table, batchSize);
 
         Assert.Equal(0.5m, values[0]);
-        Assert.Equal(4115.2263m, values[6]);   // 12345.6789 / 3, rounded half-even at scale 4
+        Assert.Equal(4115.2263m, values[6]);   // 12345.6789 / 3, exact at scale 4
     }
 
     [Theory]

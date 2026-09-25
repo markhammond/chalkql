@@ -1,4 +1,6 @@
+using System.Globalization;
 using Chalk.Execution.Tests.Harness;
+using Chalk.Catalog;
 using Chalk.Ir;
 using Chalk.Sources;
 using Chalk.TestKit;
@@ -64,19 +66,125 @@ public sealed class CastKernelTests
         Assert.Null(values[6]);          // 1e308 does not fit
     }
 
+    /// <summary>
+    /// A double becomes a DECIMAL by rounding its exact value half away from zero (F135, D306): 0.25 is
+    /// exactly a midpoint and goes up; the double spelled 0.35 is 0.34999999999999997… and goes down,
+    /// where a conversion through System.Decimal's fifteen digits went up.
+    /// </summary>
     [Theory]
     [MemberData(nameof(BatchSizes))]
-    public async Task Numeric_to_decimal_rounds_half_even_to_the_target_scale(int batchSize)
+    public async Task Floating_point_to_decimal_rounds_the_exact_value_half_away_from_zero(int batchSize)
     {
         var row = TestData.Casts.RowType();
         var expr = IrBuilder.Cast(IrBuilder.Ref(row, 0), IrBuilder.Dec(18, 1, true));
 
-        var values = await Runner.ProjectAsync(expr, Source, TestData.Casts, batchSize);
+        foreach (var reference in new[] { false, true })
+        {
+            var values = await Runner.ProjectAsync(expr, Source, TestData.Casts, batchSize, reference);
 
-        Assert.Equal(0.2m, values[0]);    // 0.25 -> 0.2
-        Assert.Equal(0.4m, values[1]);    // 0.35 -> 0.4
-        Assert.Null(values[4]);
+            Assert.Equal(0.3m, values[0]);    // 0.25 -> 0.3
+            Assert.Equal(0.3m, values[1]);    // 0.35 -> 0.3
+            Assert.Null(values[4]);
+        }
     }
+
+    /// <summary>
+    /// The casts between DECIMAL and floating point are exact in both directions (F135, F137): every
+    /// digit a double carries reaches a DECIMAL with room for it, a value wider than System.Decimal
+    /// becomes the nearest double, and a narrower one is correctly rounded — to a double or, once
+    /// from the exact quotient, to a float.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BatchSizes))]
+    public async Task Casts_between_decimal_and_floating_point_are_exact(int batchSize)
+    {
+        var source = TestData.Source(ExactCasts, WideDecimals);
+        var row = ExactCasts.RowType();
+        var wideRow = WideDecimals.RowType();
+
+        var toDecimal = IrBuilder.Cast(IrBuilder.Ref(row, 0), IrBuilder.Dec(38, 20, true));
+        var toDouble = IrBuilder.Cast(IrBuilder.Ref(wideRow, 0), IrBuilder.Fp64(true));
+        var toSingle = IrBuilder.Cast(IrBuilder.Ref(wideRow, 0), IrBuilder.Fp32(true));
+        var narrow = IrBuilder.Cast(IrBuilder.Ref(row, 1), IrBuilder.Fp64(true));
+
+        foreach (var reference in new[] { false, true })
+        {
+            // 0.30000000000000004 is exactly 0.3000000000000000444089209850062616…, and 0.1 is
+            // 0.1000000000000000055511151231257827…: twenty places of each, the last rounded away.
+            var decimals = await Runner.ProjectAsync(toDecimal, source, ExactCasts, batchSize, reference);
+            Assert.Equal(0.30000000000000004441m, (decimal)decimals[0]!);
+            Assert.Equal(0.10000000000000000555m, (decimal)decimals[1]!);
+            Assert.Equal(2.5m, (decimal)decimals[2]!);     // twenty places: the midpoint is kept, not rounded
+            Assert.Equal(-2.5m, (decimal)decimals[3]!);
+            Assert.Null(decimals[4]);
+        }
+
+        // The wide column holds 38 digits, which System.Decimal cannot; the doubles and floats are
+        // what a correctly rounded parse of the same digits gives.
+        var doubles = await Runner.ProjectAsync(toDouble, source, WideDecimals, batchSize);
+        Assert.Equal(double.Parse("1234567890123456789012345678.1234567890", CultureInfo.InvariantCulture), doubles[0]);
+        Assert.Equal(double.Parse("0.0000000001", CultureInfo.InvariantCulture), doubles[1]);
+        Assert.Equal(double.Parse("9999999999999999999999999999.9999999999", CultureInfo.InvariantCulture), doubles[2]);
+        Assert.Equal(double.Parse("-12345678901234567890.1234567890", CultureInfo.InvariantCulture), doubles[3]);
+        Assert.Null(doubles[4]);
+
+        var singles = await Runner.ProjectAsync(toSingle, source, WideDecimals, batchSize);
+        Assert.Equal(float.Parse("1234567890123456789012345678.1234567890", CultureInfo.InvariantCulture), singles[0]);
+        Assert.Equal(float.Parse("0.0000000001", CultureInfo.InvariantCulture), singles[1]);
+        Assert.Equal(float.Parse("9999999999999999999999999999.9999999999", CultureInfo.InvariantCulture), singles[2]);
+        Assert.Equal(float.Parse("-12345678901234567890.1234567890", CultureInfo.InvariantCulture), singles[3]);
+
+        // A DECIMAL(18,6) at its widest: the value System.Decimal converts a ulp off is exact here, in both engines.
+        foreach (var reference in new[] { false, true })
+        {
+            var narrowed = await Runner.ProjectAsync(narrow, source, ExactCasts, batchSize, reference);
+            Assert.Equal(double.Parse("999999999999.999999", CultureInfo.InvariantCulture), narrowed[0]);
+            Assert.Equal(double.Parse("123456789012.345678", CultureInfo.InvariantCulture), narrowed[1]);
+            Assert.Equal(double.Parse("0.000001", CultureInfo.InvariantCulture), narrowed[2]);
+            Assert.Equal(-double.Parse("0.1", CultureInfo.InvariantCulture), narrowed[3]);
+        }
+    }
+
+    /// <summary>A double with every digit it carries, and a DECIMAL(18,6) at its edges: both engines read these.</summary>
+    private static TestTable ExactCasts { get; } = new()
+    {
+        Name = "exact_casts",
+        Columns =
+        [
+            ("f", ChalkType.Float64(nullable: true)),
+            ("narrow", ChalkType.Decimal(18, 6, nullable: true)),
+        ],
+        Rows =
+        [
+            [0.30000000000000004d, 999999999999.999999m],
+            [0.1d, 123456789012.345678m],
+            [2.5d, 0.000001m],
+            [-2.5d, -0.1m],
+            [null, null],
+        ],
+    };
+
+    /// <summary>
+    /// A 38-digit DECIMAL(38,10), spelled as its unscaled integer since a C# decimal cannot hold it, and
+    /// read by the vectorised engine alone: the reference executor holds a DECIMAL as a decimal.
+    /// </summary>
+    private static TestTable WideDecimals { get; } = new()
+    {
+        Name = "wide_decimals",
+        Columns = [("wide", ChalkType.Decimal(38, 10, nullable: true))],
+        Rows =
+        [
+            [Wide("1234567890123456789012345678.1234567890")],
+            [Wide("0.0000000001")],
+            [Wide("9999999999999999999999999999.9999999999")],
+            [Wide("-12345678901234567890.1234567890")],
+            [null],
+        ],
+    };
+
+    /// <summary>The unscaled integer of a DECIMAL(38,10) spelled in digits with exactly ten places.</summary>
+    private static Int128 Wide(string digits) =>
+        Int128.Parse(digits.Replace(".", string.Empty, StringComparison.Ordinal), CultureInfo.InvariantCulture);
 
     /// <summary>
     /// <b>Provenance.</b> The value list is grafted from <c>ikvmnet/calcite-dotnet</c>
@@ -119,27 +227,32 @@ public sealed class CastKernelTests
     }
 
     /// <summary>
-    /// Half-even at the 29th significant digit, resolving both ways (§5 C): one tie whose last kept
-    /// digit is odd and rounds up, one whose last kept digit is even and rounds down, both landing
-    /// on the same even digit. Away-from-zero would have given the first ...568 and the second
-    /// ...569, so the two together are what tells the rules apart.
+    /// A tie at the 29th significant digit rounds away from zero (D306), whatever the last kept digit:
+    /// ...5675 goes to ...568 and ...5685 to ...569. Half-even would have taken both to ...568, so the
+    /// two together are what tells the rules apart, and both engines agree.
     /// </summary>
     [Theory]
     [MemberData(nameof(BatchSizes))]
-    public async Task A_tie_at_the_twenty_ninth_digit_resolves_to_even_in_both_directions(
+    public async Task A_tie_at_the_twenty_ninth_digit_rounds_away_from_zero_in_both_directions(
         int batchSize)
     {
         var row = TestData.Rounding.RowType();
         var narrowed = IrBuilder.Cast(IrBuilder.Ref(row, 2), IrBuilder.Dec(28, 27, true));
 
-        var values = await Runner.ProjectAsync(narrowed, Source, TestData.Rounding, batchSize);
+        foreach (var reference in new[] { false, true })
+        {
+            var values = await Runner.ProjectAsync(narrowed, Source, TestData.Rounding, batchSize, reference);
 
-        Assert.Equal(0.123456789012345678901234568m, values[3]);  // ...5675, up to even
-        Assert.Equal(0.123456789012345678901234568m, values[4]);  // ...5685, down to even
+            Assert.Equal(0.123456789012345678901234568m, values[3]);  // ...5675, away from zero
+            Assert.Equal(0.123456789012345678901234569m, values[4]);  // ...5685, away from zero
+            Assert.Equal(0m, values[2]);
+        }
+
+        var values2 = await Runner.ProjectAsync(narrowed, Source, TestData.Rounding, batchSize);
 
         // And the finest fraction there is disappears at a coarser scale rather than rounding to
         // anything: 1e-28 is below half of 1e-27.
-        Assert.Equal(0m, values[2]);
+        Assert.Equal(0m, values2[2]);
     }
 
     /// <summary>

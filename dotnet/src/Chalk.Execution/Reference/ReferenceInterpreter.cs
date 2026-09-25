@@ -974,8 +974,12 @@ internal sealed class ReferenceInterpreter
 
             return target.Kind switch
             {
+                // F137, F135: between DECIMAL and floating point, exactly, as the vectorised engine.
+                TypeKind.Fp32 when value is decimal exact => DecimalToSingle(exact),
                 TypeKind.Fp32 => (float)ToDouble(value),
+                TypeKind.Fp64 when value is decimal exact => DecimalToDouble(exact),
                 TypeKind.Fp64 => ToDouble(value),
+                TypeKind.Decimal when value is double or float => DoubleToDecimal(ToDouble(value), target),
                 TypeKind.Decimal => Rescale(ToDecimal(value), target),
                 TypeKind.Bool => ToDouble(value) != 0,
                 _ => CheckRange(ToInteger(value), target),
@@ -1002,7 +1006,7 @@ internal sealed class ReferenceInterpreter
         {
             const int MaxDecimalDigits = 28;
 
-            var rounded = Math.Round(value, Math.Min(target.Scale, MaxDecimalDigits), MidpointRounding.ToEven);
+            var rounded = Math.Round(value, Math.Min(target.Scale, MaxDecimalDigits), MidpointRounding.AwayFromZero);
             var integerDigits = target.Precision - target.Scale;
             if (integerDigits <= MaxDecimalDigits)
             {
@@ -1077,12 +1081,33 @@ internal sealed class ReferenceInterpreter
             return (((days * 86_400L) + secondOfDay) * unitsPerSecond) + subSecond;
         }
 
+        private static double DecimalToDouble(decimal value)
+        {
+            var (unscaled, scale) = Numeric.Decimals.Parts(value);
+            return Numeric.Decimals.ToDouble(unscaled, scale);
+        }
+
+        private static float DecimalToSingle(decimal value)
+        {
+            var (unscaled, scale) = Numeric.Decimals.Parts(value);
+            return Numeric.Decimals.ToSingle(unscaled, scale);
+        }
+
+        /// <summary>
+        /// The double's exact value rounded half away from zero to the target's scale, as the
+        /// vectorised cast does; the reference holds it as a decimal, so a value past 28 digits is
+        /// this executor's own limit rather than the cast's.
+        /// </summary>
+        private static decimal DoubleToDecimal(double value, ChalkType target) =>
+            Numeric.Decimals.FromUnscaled(
+                Numeric.Decimals.FromDouble(value, target.Precision, target.Scale), target.Scale);
+
         private static double ToDouble(object value) => value switch
         {
             long integer => integer,
             float single => single,
             double real => real,
-            decimal number => (double)number,
+            decimal number => DecimalToDouble(number),
             bool flag => flag ? 1 : 0,
             _ => throw new InvalidCastException($"cannot read {value.GetType().Name} as a number"),
         };

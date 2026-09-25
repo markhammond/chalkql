@@ -249,10 +249,10 @@ internal static class ReferenceValues
         };
     }
 
-    /// <summary>Encodes a DECIMAL lane, rounding half-even to the target scale.</summary>
+    /// <summary>Encodes a DECIMAL lane, rounding half away from zero to the target scale (D306).</summary>
     public static void WriteDecimal(Span<byte> lane, decimal value, int precision, int scale)
     {
-        var rounded = Math.Round(value, scale, MidpointRounding.ToEven);
+        var rounded = Math.Round(value, scale, MidpointRounding.AwayFromZero);
         var scaled = rounded;
         for (var i = 0; i < scale; i++)
         {
@@ -497,6 +497,11 @@ internal static class ReferenceValues
                     break;
                 case TypeKind.Fp64:
                     MemoryMarshal.Write(lane, (double)value);
+                    break;
+                case TypeKind.Decimal when value is Int128 unscaled:
+                    // A DECIMAL wider than System.Decimal, as its unscaled integer: the one form the
+                    // boxed vocabulary has for such a value, and only the vectorised engine reads it.
+                    Numeric.Decimals.WriteUnscaled(lane, unscaled);
                     break;
                 case TypeKind.Decimal:
                     WriteDecimal(lane, (decimal)value, type.Precision, type.Scale);

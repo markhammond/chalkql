@@ -285,14 +285,14 @@ internal static class TestData
     public const decimal SmallestAtScale28 = 0.0000000000000000000000000001m;
 
     /// <summary>
-    /// A tie at the 29th significant digit whose last kept digit is odd, so half-even rounds it
-    /// <em>up</em> to ...568.
+    /// A tie at the 29th significant digit whose last kept digit is odd: away from zero rounds it up
+    /// to ...568, as half-even would have.
     /// </summary>
     public const decimal TieUpAtScale28 = 0.1234567890123456789012345675m;
 
     /// <summary>
-    /// And one whose last kept digit is even, so half-even rounds it <em>down</em> — to the same
-    /// ...568, which is the whole point of the rule.
+    /// And one whose last kept digit is even: away from zero rounds it up to ...569, where half-even
+    /// would have gone down to ...568 — the pair is what tells the rules apart (D306).
     /// </summary>
     public const decimal TieDownAtScale28 = 0.1234567890123456789012345685m;
 

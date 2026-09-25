@@ -177,7 +177,7 @@ internal static class CatalogLiterals
     /// <summary>The decimal as a 16-byte little-endian two's-complement unscaled integer (02-ir.md §3).</summary>
     private static byte[] Unscaled(decimal value, ChalkType type)
     {
-        var scaled = decimal.Round(value, type.Scale, MidpointRounding.ToEven);
+        var scaled = decimal.Round(value, type.Scale, MidpointRounding.AwayFromZero);
         var unscaled = new BigInteger(scaled * Pow10(type.Scale));
         var bytes = new byte[16];
         if (!unscaled.TryWriteBytes(bytes, out _, isUnsigned: false, isBigEndian: false))

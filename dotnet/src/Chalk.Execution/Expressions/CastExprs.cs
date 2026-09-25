@@ -83,6 +83,31 @@ internal sealed class FixedCastExpr : CastExprBase
 
     private void Convert(in Vector operand, int row, Span<byte> lane)
     {
+        if (Source.Kind == TypeKind.Decimal && ColumnKinds.IsFloatingPoint(Type.Kind))
+        {
+            // F137: the nearest double or float of the exact value, wider than System.Decimal or not.
+            var unscaled = Decimals.ReadUnscaled(RawLanes.From(operand, 16)[row]);
+            if (Kind == ColumnKind.Double)
+            {
+                System.Runtime.InteropServices.MemoryMarshal.Write(lane, Decimals.ToDouble(unscaled, Source.Scale));
+            }
+            else
+            {
+                System.Runtime.InteropServices.MemoryMarshal.Write(lane, Decimals.ToSingle(unscaled, Source.Scale));
+            }
+
+            return;
+        }
+
+        if (ColumnKinds.IsFloatingPoint(Source.Kind) && Type.Kind == TypeKind.Decimal)
+        {
+            // F135: the double's exact value, rounded half away from zero to the declared scale.
+            Decimals.WriteUnscaled(
+                lane,
+                Decimals.FromDouble(NumberLanes.ReadDouble(operand, row, Source), Type.Precision, Type.Scale));
+            return;
+        }
+
         if (Source.Kind == TypeKind.Decimal || Type.Kind == TypeKind.Decimal)
         {
             var value = Source.Kind == TypeKind.Decimal

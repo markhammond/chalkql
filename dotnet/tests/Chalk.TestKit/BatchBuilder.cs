@@ -216,6 +216,9 @@ public static class BatchBuilder
                 case TypeKind.Uuid:
                     ((byte[])value).CopyTo(lane);
                     break;
+                case TypeKind.Decimal when value is System.Data.SqlTypes.SqlDecimal wide:
+                    WriteWideDecimal(lane, wide, type.Scale);
+                    break;
                 case TypeKind.Decimal:
                     WriteDecimal(lane, (decimal)value, type.Scale);
                     break;
@@ -248,7 +251,7 @@ public static class BatchBuilder
     /// </remarks>
     private static void WriteDecimal(Span<byte> lane, decimal value, int scale)
     {
-        var rounded = decimal.Round(value, scale, MidpointRounding.ToEven);
+        var rounded = decimal.Round(value, scale, MidpointRounding.AwayFromZero);
         Span<int> bits = stackalloc int[4];
         _ = decimal.GetBits(rounded, bits);
 
@@ -264,9 +267,44 @@ public static class BatchBuilder
             unscaled = -unscaled;
         }
 
+        WriteUnscaled(lane, unscaled);
+    }
+
+    /// <summary>
+    /// A DECIMAL(38, s) value spelled in digits — a <see cref="System.Data.SqlTypes.SqlDecimal"/>, which
+    /// holds 38 of them where a C# decimal holds 28 — rescaled to the column's scale, half away from
+    /// zero where it has more places than the column.
+    /// </summary>
+    private static void WriteWideDecimal(Span<byte> lane, System.Data.SqlTypes.SqlDecimal value, int scale)
+    {
+        var words = value.Data;
+        var mantissa = (new BigInteger((uint)words[3]) << 96)
+            | (new BigInteger((uint)words[2]) << 64)
+            | (new BigInteger((uint)words[1]) << 32)
+            | new BigInteger((uint)words[0]);
+        BigInteger unscaled;
+        if (value.Scale <= scale)
+        {
+            unscaled = mantissa * BigInteger.Pow(10, scale - value.Scale);
+        }
+        else
+        {
+            var divisor = BigInteger.Pow(10, value.Scale - scale);
+            unscaled = BigInteger.DivRem(mantissa, divisor, out var remainder);
+            if ((remainder << 1) >= divisor)
+            {
+                unscaled += BigInteger.One;
+            }
+        }
+
+        WriteUnscaled(lane, value.IsPositive ? unscaled : -unscaled);
+    }
+
+    private static void WriteUnscaled(Span<byte> lane, BigInteger unscaled)
+    {
         if (!unscaled.TryWriteBytes(lane, out _, isUnsigned: false, isBigEndian: false))
         {
-            throw new OverflowException($"{value} does not fit a 128-bit decimal at scale {scale}");
+            throw new OverflowException($"{unscaled} does not fit a 128-bit decimal lane");
         }
 
         if (unscaled.Sign < 0)
