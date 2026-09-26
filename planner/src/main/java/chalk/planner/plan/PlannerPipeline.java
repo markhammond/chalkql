@@ -962,7 +962,8 @@ public final class PlannerPipeline implements AutoCloseable {
       }
       disclosures = chalk.planner.entitlement.DisclosureReport.columns(fields.leftList(), flow);
       pushed =
-          chalk.planner.entitlement.DisclosureReport.pushedRowPredicates(optimised, throughJoins);
+          chalk.planner.entitlement.DisclosureReport.pushedRowPredicates(
+              optimised, rowPredicates, throughJoins);
     }
 
     RelNode physical = rootProject(optimised, fields);

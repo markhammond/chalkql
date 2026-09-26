@@ -324,7 +324,7 @@ public final class PushdownRequired {
    * Whether this folded predicate reads a context relation: a bound list above the fold ceiling,
    * which the fold leaves a sub-query over the relation rather than a literal list (§2).
    */
-  private static boolean readsContextRelation(RexNode predicate) {
+  static boolean readsContextRelation(RexNode predicate) {
     boolean[] found = {false};
     predicate.accept(
         new RexShuttle() {

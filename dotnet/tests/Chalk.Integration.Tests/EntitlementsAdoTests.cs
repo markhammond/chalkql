@@ -232,6 +232,43 @@ public sealed class EntitlementsAdoTests(SharedSidecar sidecar, SharedPostgres p
         Assert.Contains("PUSHDOWN_REQUIRED", refusal.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The statement's own conjunct travelling beside a membership the source cannot take is not the
+    /// row predicate reaching the source (F146): the report says so, and the text shows the postcode
+    /// went and the tenant set did not.
+    /// </summary>
+    [Fact]
+    public async Task Q21_a_travelling_conjunct_does_not_report_a_kept_membership_as_pushed()
+    {
+        const string Sql = "SELECT id FROM members WHERE postcode = '2000' ORDER BY id";
+        var permissive = Track(TenancyAdoFixture.CreateDuckDb(capabilities: WithoutInLists()));
+
+        var (report, text) = await PlanAsync(permissive, Sql, TwoOrgManager);
+
+        Assert.Contains("'2000'", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("IN (1, 2)", text, StringComparison.Ordinal);
+        Assert.False(Assert.Single(report.Entitlements.Tables, t => t.Table == "members").RowPredicatePushed);
+        Assert.Equal(["1"], await RemoteRowsAsync(permissive, Sql, TwoOrgManager));
+    }
+
+    /// <summary>
+    /// And <c>PUSHDOWN_REQUIRED</c> refuses that plan as it refuses the bare one (F146): before, the
+    /// travelling postcode satisfied the guard and the table was fetched whole, filtered here.
+    /// </summary>
+    [Fact]
+    public async Task Q21_pushdown_required_refuses_even_when_the_statements_own_conjunct_travels()
+    {
+        const string Sql = "SELECT id FROM members WHERE postcode = '2000' ORDER BY id";
+        var required = Track(
+            TenancyAdoFixture.CreateDuckDb(Enforcement.PushdownRequired, capabilities: WithoutInLists()));
+
+        var refusal = await Assert.ThrowsAsync<EntitlementException>(
+            async () => await PlanAsync(required, Sql, TwoOrgManager));
+
+        Assert.Contains("members", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("PUSHDOWN_REQUIRED", refusal.Message, StringComparison.Ordinal);
+    }
+
     /// <summary>And it is satisfied silently when the shape does reach the source.</summary>
     [Fact]
     public async Task Q21_pushdown_required_is_satisfied_by_a_source_that_takes_the_shape()

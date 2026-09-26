@@ -1,5 +1,6 @@
 package chalk.planner.entitlement;
 
+import chalk.planner.plan.ChalkKeySet;
 import chalk.planner.plan.rel.SourceRels;
 import chalk.planner.plan.rel.SourceScan;
 import chalk.planner.rpc.v1.ReportedDisclosure;
@@ -10,8 +11,21 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.apache.calcite.util.ImmutableIntList;
+import org.apache.calcite.plan.RelOptPredicateList;
 import org.apache.calcite.plan.RelOptTable;
+import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.TableScan;
+import org.apache.calcite.rex.RexBuilder;
+import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexInputRef;
+import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.rex.RexShuttle;
+import org.apache.calcite.rex.RexSimplify;
+import org.apache.calcite.rex.RexSubQuery;
+import org.apache.calcite.rex.RexUnknownAs;
+import org.apache.calcite.rex.RexUtil;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
@@ -112,12 +126,17 @@ public final class DisclosureReport {
    *
    * <p>Honestly empty for a local table, which has no source to push into, and for a source that
    * takes no queries — which is every table of this run's fixture. The question asked of the
-   * physical tree is the only one worth asking: did a pushed rel of this table end up carrying a
-   * filter.
+   * physical tree is whether a pushed filter over the table's scan carries <em>every conjunct of the
+   * table's own row predicate</em>, as the pass recorded it (F146): a statement's conjunct that
+   * travels beside a membership kept at home is not the row predicate reaching the source, and the
+   * flag this feeds — and {@code PUSHDOWN_REQUIRED}, which trusts it — must not say so. A conjunct
+   * that reads a context relation reaches the source as a key set over the same columns. A table the
+   * pass recorded no predicate for — folded away, or a trusted source — is judged as before, by any
+   * filter the source runs over it.
    */
-  public static Set<String> pushedRowPredicates(RelNode physical) {
+  public static Set<String> pushedRowPredicates(RelNode physical, Map<String, RexNode> rowPredicates) {
     Set<String> pushed = new HashSet<>();
-    collect(physical, pushed);
+    collect(physical, rowPredicates, physical.getCluster().getRexBuilder(), pushed);
     return pushed;
   }
 
@@ -133,8 +152,10 @@ public final class DisclosureReport {
    * a shape a source cannot take.
    */
   public static Set<String> pushedRowPredicates(
-      RelNode physical, java.util.List<TaintCheck.ThroughEvidence> throughJoins) {
-    Set<String> pushed = pushedRowPredicates(physical);
+      RelNode physical,
+      Map<String, RexNode> rowPredicates,
+      java.util.List<TaintCheck.ThroughEvidence> throughJoins) {
+    Set<String> pushed = pushedRowPredicates(physical, rowPredicates);
     if (throughJoins.isEmpty()) {
       return pushed;
     }
@@ -201,11 +222,16 @@ public final class DisclosureReport {
     return null;
   }
 
-  private static void collect(RelNode rel, Set<String> pushed) {
+  private static void collect(
+      RelNode rel, Map<String, RexNode> rowPredicates, RexBuilder rexBuilder, Set<String> pushed) {
     if (rel instanceof SourceRels.SourceFilter filter) {
-      String table = entitledTableUnder(filter.getInput());
-      if (table != null) {
-        pushed.add(table);
+      TableScan scan = entitledScanUnder(filter.getInput());
+      if (scan != null) {
+        String table = EntitledRelOptTable.disclosureOf(scan.getTable()).qualifiedName();
+        RexNode required = rowPredicates.get(table);
+        if (required == null || carries(filter.getCondition(), scan, required, rexBuilder)) {
+          pushed.add(table);
+        }
       }
     } else if (rel instanceof SourceScan scan) {
       // A scan the boundary rendered with its own predicate is a filter above it; a bare scan is
@@ -217,8 +243,105 @@ public final class DisclosureReport {
       }
     }
     for (RelNode input : rel.getInputs()) {
-      collect(input, pushed);
+      collect(input, rowPredicates, rexBuilder, pushed);
     }
+  }
+
+  /**
+   * Whether a pushed filter's condition carries every conjunct of a table's recorded row predicate
+   * (F146). Both sides are read in the table's own column numbering — the filter's references go
+   * through the scan's projection — and both are simplified and their {@code SEARCH} arguments
+   * expanded the same way before their text is compared, so the shape the optimiser left a conjunct
+   * in does not decide the answer. A recorded conjunct that reads a context relation is carried by a
+   * key set over the same columns, which is the only way such a list reaches a source.
+   */
+  private static boolean carries(RexNode condition, TableScan scan, RexNode required, RexBuilder rexBuilder) {
+    List<Integer> projection =
+        scan instanceof SourceScan source
+            ? source.projection()
+            : ImmutableIntList.identity(scan.getRowType().getFieldCount());
+    List<RexNode> carried = new ArrayList<>();
+    for (RexNode conjunct : RelOptUtil.conjunctions(condition)) {
+      carried.add(normalise(remap(conjunct, projection, rexBuilder), rexBuilder));
+    }
+    for (RexNode need : RelOptUtil.conjunctions(required)) {
+      if (PushdownRequired.readsContextRelation(need)) {
+        Set<Integer> columns = keyColumnsOf(need);
+        boolean found = false;
+        for (RexNode have : carried) {
+          if (ChalkKeySet.is(have) && keyColumnsOf(have).equals(columns)) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          return false;
+        }
+        continue;
+      }
+      String digest = normalise(need, rexBuilder).toString();
+      boolean found = false;
+      for (RexNode have : carried) {
+        if (have.toString().equals(digest)) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Input references renumbered through the scan's projection into the table's own columns. */
+  private static RexNode remap(RexNode node, List<Integer> projection, RexBuilder rexBuilder) {
+    return node.accept(
+        new RexShuttle() {
+          @Override
+          public RexNode visitInputRef(RexInputRef ref) {
+            int index = ref.getIndex();
+            return index < projection.size()
+                ? rexBuilder.makeInputRef(ref.getType(), projection.get(index))
+                : ref;
+          }
+        });
+  }
+
+  /** One canonical spelling for two conjuncts that mean the same thing: simplified, then no SEARCH. */
+  private static RexNode normalise(RexNode node, RexBuilder rexBuilder) {
+    RexNode simplified =
+        new RexSimplify(rexBuilder, RelOptPredicateList.EMPTY, RexUtil.EXECUTOR)
+            .simplifyUnknownAs(node, RexUnknownAs.UNKNOWN);
+    return RexUtil.expandSearch(rexBuilder, null, simplified);
+  }
+
+  /** The columns a membership is over: the left operands of an {@code IN} sub-query or of a key set. */
+  private static Set<Integer> keyColumnsOf(RexNode node) {
+    Set<Integer> columns = new java.util.TreeSet<>();
+    List<RexNode> operands =
+        node instanceof RexSubQuery subQuery
+            ? subQuery.getOperands()
+            : node instanceof RexCall call ? call.getOperands() : List.of();
+    for (RexNode operand : operands) {
+      if (operand instanceof RexInputRef ref) {
+        columns.add(ref.getIndex());
+      }
+    }
+    return columns;
+  }
+
+  private static @Nullable TableScan entitledScanUnder(RelNode rel) {
+    if (rel instanceof TableScan scan) {
+      return EntitledRelOptTable.disclosureOf(scan.getTable()) == null ? null : scan;
+    }
+    for (RelNode input : rel.getInputs()) {
+      TableScan found = entitledScanUnder(input);
+      if (found != null) {
+        return found;
+      }
+    }
+    return null;
   }
 
   private static String entitledTableUnder(RelNode rel) {
