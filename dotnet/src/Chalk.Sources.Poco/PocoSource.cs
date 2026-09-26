@@ -19,6 +19,7 @@ namespace Chalk.Sources.Poco;
 public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefreshableSource
 {
     private readonly PocoTableRuntime[] _tables;
+    private readonly string _zone;
     private readonly FunctionDescriptor[] _functions;
 
     /// <summary>One refresh of this source at a time; snapshots are built one table after another.</summary>
@@ -46,8 +47,10 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
         string schemaName,
         PocoTableRuntime[] tables,
         FunctionDescriptor[] functions,
-        IReadOnlyDictionary<string, PocoTableBinding>? bindings)
+        IReadOnlyDictionary<string, PocoTableBinding>? bindings,
+        string zone = "")
     {
+        _zone = zone;
         _runtime = new(sharing);
         SourceId = sourceId;
         SchemaName = schemaName;
@@ -272,6 +275,7 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
     {
         SourceId = SourceId,
         Name = SchemaName,
+        Zone = _zone,
         Kind = SourceKind.Local,
         Capabilities = SourceCapabilities.None,
         Tables = Array.ConvertAll(_tables, t => t.Describe()),

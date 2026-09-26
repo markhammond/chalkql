@@ -148,3 +148,4 @@ override Chalk.Sources.Poco.PocoTable<T>.ToString() -> string!
 static Chalk.Sources.Poco.PocoTable<T>.operator !=(Chalk.Sources.Poco.PocoTable<T> left, Chalk.Sources.Poco.PocoTable<T> right) -> bool
 static Chalk.Sources.Poco.PocoTable<T>.operator ==(Chalk.Sources.Poco.PocoTable<T> left, Chalk.Sources.Poco.PocoTable<T> right) -> bool
 ~override Chalk.Sources.Poco.PocoTable<T>.Equals(object obj) -> bool
+Chalk.Sources.Poco.PocoSourceBuilder.Zone(string! zone) -> Chalk.Sources.Poco.PocoSourceBuilder!

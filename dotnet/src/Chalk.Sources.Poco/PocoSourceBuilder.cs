@@ -21,6 +21,7 @@ public sealed class PocoSourceBuilder
     private SourceSharing _sharing = SourceSharing.Shared;
     private readonly List<TableRegistration> _tables = [];
     private PocoNamingPolicy _policy = PocoNamingPolicy.AsIs;
+    private string _zone = string.Empty;
     private int _decimalScale = 10;
 
     /// <param name="sourceId">Identifies this source in the catalog and in every <c>TableRef</c>.</param>
@@ -43,6 +44,18 @@ public sealed class PocoSourceBuilder
         return this;
     }
     
+    /// <summary>
+    /// The sovereign zone this source's rows belong to (D311). One catalog is one zone, so an engine
+    /// whose sources declare two zones, or where some declare one and others none, is refused when it
+    /// is created; a host serving several zones builds one engine per zone. Nothing in planning reads it.
+    /// </summary>
+    public PocoSourceBuilder Zone(string zone)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(zone);
+        _zone = zone;
+        return this;
+    }
+
     /// <summary>How member names become column names (D15). <see cref="PocoNamingPolicy.AsIs"/> by default.</summary>
     public PocoSourceBuilder NamingPolicy(PocoNamingPolicy policy)
     {
@@ -248,7 +261,7 @@ public sealed class PocoSourceBuilder
 
         var tables = _tables.Select(t => t.Build(SourceId, _policy, _decimalScale)).ToArray();
         ResolveForeignKeys(tables);
-        var source = new PocoSource(_sharing, SourceId, SchemaName, tables, [.. _functions], _handles);
+        var source = new PocoSource(_sharing, SourceId, SchemaName, tables, [.. _functions], _handles, _zone);
 
         // The same rules the planner applies (03-planner.md §3.1). Running them here turns a duplicate
         // column name or an out-of-range key index into a registration error rather than a planner one.

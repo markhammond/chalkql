@@ -30,6 +30,8 @@ public static class CatalogValidator
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(options);
 
+        ValidateZones(catalog);
+
         if (string.IsNullOrWhiteSpace(catalog.ContextId))
         {
             throw new CatalogValidationException("context_id", "the context id is empty");
@@ -2214,6 +2216,67 @@ public static class CatalogValidator
             throw new CatalogValidationException(
                 path,
                 $"{type.Kind} carries precision {type.Precision} / scale {type.Scale}; both must be zero");
+        }
+    }
+
+    /// <summary>
+    /// One catalog is one zone (D311). A source's zone is a declaration, checked here and read nowhere
+    /// else: a catalog whose sources declare two zones, or where some declare one and others none, is
+    /// refused naming the zones and the sources, because a host serving several zones runs one engine
+    /// per zone over that zone's sources alone. Zones match exactly, so one with white space around it
+    /// is refused where it is declared rather than becoming a zone of its own.
+    /// </summary>
+    private static void ValidateZones(CatalogContext catalog)
+    {
+        var declared = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
+        var undeclared = new List<string>();
+        for (var s = 0; s < catalog.Schemas.Count; s++)
+        {
+            var schema = catalog.Schemas[s];
+            var zone = schema.Zone ?? string.Empty;
+            if (zone.Length == 0)
+            {
+                undeclared.Add(schema.Name);
+                continue;
+            }
+
+            if (zone.Trim().Length != zone.Length || zone.Trim().Length == 0)
+            {
+                throw new CatalogValidationException(
+                    $"schemas[{s}] ({schema.Name}).zone",
+                    $"the zone '{zone}' begins or ends with white space. Zones match exactly, so it would "
+                    + "be a zone of its own rather than the one it looks like.");
+            }
+
+            if (!declared.TryGetValue(zone, out var sources))
+            {
+                declared[zone] = sources = [];
+            }
+
+            sources.Add(schema.Name);
+        }
+
+        if (declared.Count == 0)
+        {
+            return;
+        }
+
+        if (declared.Count > 1)
+        {
+            throw new CatalogValidationException(
+                "schemas",
+                "one catalog is one zone, and this one's sources declare "
+                + string.Join(" and ", declared.Select(z => $"'{z.Key}' ({string.Join(", ", z.Value)})"))
+                + ". Build one engine per zone over that zone's sources alone, and choose the engine per request.");
+        }
+
+        if (undeclared.Count > 0)
+        {
+            var (zone, sources) = (declared.First().Key, declared.First().Value);
+            throw new CatalogValidationException(
+                "schemas",
+                $"one catalog is one zone: {string.Join(", ", sources)} declare the zone '{zone}' and "
+                + $"{string.Join(", ", undeclared)} declare none. Declare it on every source of the catalog, or on none.");
         }
     }
 }

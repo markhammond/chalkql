@@ -67,6 +67,7 @@ public sealed class AdoSourceBuilder
     private IRemoteFetch _fetch = DbDataReaderFetch.Instance;
     private AdoProviderTraits? _traits;
     private bool _trustSourceRowLevelSecurity;
+    private string _zone = string.Empty;
 
     /// <param name="sourceId">Identifies this source in the catalog and in every <c>TableRef</c>.</param>
     /// <param name="factory">The provider's factory; the host references the provider package, Chalk does not.</param>
@@ -379,6 +380,19 @@ public sealed class AdoSourceBuilder
     }
 
     /// <summary>
+    /// The sovereign zone this source's data belongs to (D311): a jurisdiction, a residency boundary,
+    /// whatever the host governs by. One catalog is one zone, so an engine whose sources declare two
+    /// zones, or where some declare one and others none, is refused when it is created; a host serving
+    /// several zones builds one engine per zone. Nothing in planning reads the zone.
+    /// </summary>
+    public AdoSourceBuilder Zone(string zone)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(zone);
+        _zone = zone;
+        return this;
+    }
+
+    /// <summary>
     /// Declares a function on this schema (D77, D81). A <c>Native</c> body is the one that matters
     /// here: the source evaluates it itself, and its name is added to the capability list so the two
     /// claims cannot disagree.
@@ -470,7 +484,8 @@ public sealed class AdoSourceBuilder
             [.. _functions],
             _fetch,
             _traits,
-            _trustSourceRowLevelSecurity);
+            _trustSourceRowLevelSecurity,
+            _zone);
 
         // The handles taken at registration acquire the source they name now that there is one
         // (D271 (h)).

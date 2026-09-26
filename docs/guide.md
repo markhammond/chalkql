@@ -547,6 +547,47 @@ does.
 than that across a boundary into a local join fails **at planning**, naming the
 join and the estimate, instead of running for a minute and then answering.
 
+### Zones: one catalog is one zone
+
+A source's query is kept by the source — in its statement log, its slow-query
+log, its audit trail — so whatever a plan writes into that query, another
+source's keys or the principal's memberships, is learned by whoever runs it.
+Chalk does not try to police that inside a plan. The model is simpler: **a
+catalog is one sovereign zone**. A host that serves several zones builds one
+engine per zone, over that zone's sources alone, and chooses the engine per
+request by its own rule; a report that needs two zones is two statements against
+two engines, joined in application code, where the seam is visible and
+deliberate.
+
+Declare the zone on each source so the assumption is checked rather than
+assumed. A catalog whose sources declare two zones, or where some declare one
+and others none, is refused when the engine is created, naming the zones and the
+sources:
+
+```csharp
+var euOrders = DuckDbSources.AddDuckDbSource("orders", "DataSource=orders-eu.duckdb")
+    .Zone("eu")
+    .Capabilities(AdoCapabilities.For(DialectProfiles.DuckDb))
+    .DiscoverTables()
+    .Build();
+var euCatalogue = new PocoSourceBuilder("catalogue").Zone("eu").AddTable("items", items).Build();
+
+await using var eu = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+{
+    ContextId = "eu",
+    Sources = [euOrders, euCatalogue],      // one zone; a "us" source here is refused by name
+    Planner = planner,
+});
+
+// elsewhere: the same for "us", and the host picks `eu` or `us` per request.
+```
+
+Nothing in planning reads the zone, and a catalog that declares none is planned
+and sent exactly as before. What a source may learn of the *principal* is the
+separate, per-table question of the entitlements section: `Enforcement.Local`
+keeps a table's predicate, and the tenant set with it, out of the source's
+query.
+
 ### Partitioned tables
 
 A table's rows may live in several places. Declare where, and a scan becomes the

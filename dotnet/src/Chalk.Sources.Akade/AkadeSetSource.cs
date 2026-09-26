@@ -383,6 +383,7 @@ public abstract class AkadeSetSource<T, TSet> :
         Tables = schema.Tables,
         Functions = Options.Functions,
         TrustSourceRowLevelSecurity = Options.TrustSourceRowLevelSecurity,
+        Zone = Options.Zone,
     };
 
     /// <summary>
@@ -456,6 +457,7 @@ public abstract class AkadeSetSource<T, TSet> :
             Tables = [carriedTable],
             Functions = fresh.Functions,
             TrustSourceRowLevelSecurity = fresh.TrustSourceRowLevelSecurity,
+            Zone = fresh.Zone,
         };
     }
 

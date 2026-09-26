@@ -25,6 +25,31 @@ public sealed class CatalogRegistrationTests(SharedSidecar sidecar, ITestOutputH
 {
     private readonly List<DbConnection> _open = [];
 
+    /// <summary>
+    /// One catalog is one zone: two sources declaring two zones are refused when the engine is
+    /// created, naming both, before anything reaches the planner.
+    /// </summary>
+    [Fact]
+    public async Task Two_zones_in_one_engine_are_refused_at_creation()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var eu = new PocoSourceBuilder("eu", "eu").Zone("eu").AddTable("rows", new[] { new ZoneRow(1) }).Build();
+        var us = new PocoSourceBuilder("us", "us").Zone("us").AddTable("rows", new[] { new ZoneRow(2) }).Build();
+
+        var error = await Assert.ThrowsAsync<CatalogValidationException>(async () =>
+            await ChalkEngine.CreateAsync(new ChalkEngineOptions
+            {
+                ContextId = $"zones-{Guid.NewGuid():n}",
+                Sources = [eu, us],
+                Planner = sidecar.Sidecar.CreatePlanner(),
+            }));
+
+        Assert.Contains("'eu' (eu)", error.Message, StringComparison.Ordinal);
+        Assert.Contains("'us' (us)", error.Message, StringComparison.Ordinal);
+    }
+
+    private sealed record ZoneRow(int Id);
+
     // ------------------------------------------------------------------ §8, figure 1
 
     /// <summary>

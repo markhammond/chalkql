@@ -118,3 +118,4 @@ static Chalk.Sources.Ado.AdoTypeMapping.IsCompatible(object! value, Chalk.Catalo
 static Chalk.Sources.Ado.AdoTypeMapping.ToDbType(Chalk.Catalog.ChalkType type) -> System.Data.DbType
 static Chalk.Sources.Ado.DbDataReaderFetch.Instance.get -> Chalk.Sources.Ado.DbDataReaderFetch!
 ~override Chalk.Sources.Ado.AdoTable.Equals(object obj) -> bool
+Chalk.Sources.Ado.AdoSourceBuilder.Zone(string! zone) -> Chalk.Sources.Ado.AdoSourceBuilder!

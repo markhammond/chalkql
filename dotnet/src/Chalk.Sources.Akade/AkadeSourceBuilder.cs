@@ -22,6 +22,7 @@ internal sealed class AkadeSourceOptions<T>
     public Action<PocoTableBuilder<T>>? ConfigureTable { get; init; }
     public CostProfile CostProfile { get; init; } = CostProfile.Inherit;
     public bool TrustSourceRowLevelSecurity { get; init; }
+    public string Zone { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -42,6 +43,7 @@ public abstract class AkadeSourceBuilder<T, TSelf>
     private Action<PocoTableBuilder<T>>? _configureTable;
     private CostProfile _costProfile = Catalog.CostProfile.Inherit;
     private bool _trustSourceRowLevelSecurity;
+    private string _zone = string.Empty;
 
     protected AkadeSourceBuilder(string sourceId)
     {
@@ -117,6 +119,18 @@ public abstract class AkadeSourceBuilder<T, TSelf>
     {
         asserted.RequireAll(nameof(asserted));
         _trustSourceRowLevelSecurity = true;
+        return Self;
+    }
+
+    /// <summary>
+    /// The sovereign zone this set's rows belong to (D311). One catalog is one zone, so an engine whose
+    /// sources declare two zones, or where some declare one and others none, is refused when it is
+    /// created; a host serving several zones builds one engine per zone. Nothing in planning reads it.
+    /// </summary>
+    public TSelf Zone(string zone)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(zone);
+        _zone = zone;
         return Self;
     }
 
@@ -283,6 +297,7 @@ public abstract class AkadeSourceBuilder<T, TSelf>
         ConfigureTable = _configureTable,
         CostProfile = _costProfile,
         TrustSourceRowLevelSecurity = _trustSourceRowLevelSecurity,
+        Zone = _zone,
     };
 }
 

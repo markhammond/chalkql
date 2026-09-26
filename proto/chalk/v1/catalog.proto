@@ -121,6 +121,12 @@ message Schema {
   // enforced — is the default and what a host gets until it says otherwise. Column disclosures are
   // unaffected: masking and the query-field rule are Chalk's, whatever the source filters.
   bool trust_source_row_level_security = 10;
+  // The sovereign zone this source's data belongs to — a jurisdiction, a residency boundary, whatever
+  // the host governs by. A declaration the client checks and nothing in planning reads: the sources
+  // of one catalog declare one zone, and a catalog whose sources declare two, or where some declare
+  // one and others none, is refused when the engine is created. A host serving several zones runs
+  // one engine per zone. Empty adds no bytes.
+  string zone = 11;
 }
 
 // One user-defined function, with the PostgreSQL `CREATE FUNCTION` properties that have a counterpart

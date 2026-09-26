@@ -54,3 +54,4 @@ static Chalk.Sources.Akade.ChalkComparers.For<T>(bool descending = false) -> Sys
 [CHALK002]static Chalk.Sources.Akade.AkadeSource.From<T>(string! sourceId, System.Func<Akade.IndexedSet.Concurrency.ConcurrentIndexedSet<T>!>! set) -> Chalk.Sources.Akade.ConcurrentIndexedSetSourceBuilder<T>!
 [CHALK002]static Chalk.Sources.Akade.AkadeSource.FromConcurrent<T>(string! sourceId, Akade.IndexedSet.Concurrency.ConcurrentIndexedSet<T>! set) -> Chalk.Sources.Akade.ConcurrentIndexedSetSourceBuilder<T>!
 [CHALK002]static Chalk.Sources.Akade.AkadeSource.FromConcurrent<T>(string! sourceId, System.Func<Akade.IndexedSet.Concurrency.ConcurrentIndexedSet<T>!>! set) -> Chalk.Sources.Akade.ConcurrentIndexedSetSourceBuilder<T>!
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.Zone(string! zone) -> TSelf!

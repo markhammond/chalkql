@@ -640,3 +640,5 @@ Chalk.Entitlements.RowLevelSecurityPreconditions.PoliciesMatchEntitlements = 4 -
 Chalk.Entitlements.RowLevelSecurityPreconditionsExtensions
 static Chalk.Entitlements.RowLevelSecurityPreconditionsExtensions.Missing(this Chalk.Entitlements.RowLevelSecurityPreconditions asserted) -> Chalk.Entitlements.RowLevelSecurityPreconditions
 static Chalk.Entitlements.RowLevelSecurityPreconditionsExtensions.RequireAll(this Chalk.Entitlements.RowLevelSecurityPreconditions asserted, string! paramName) -> void
+Chalk.Catalog.SchemaDescriptor.Zone.get -> string!
+Chalk.Catalog.SchemaDescriptor.Zone.init -> void

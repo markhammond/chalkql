@@ -116,6 +116,16 @@ public sealed class SchemaDescriptor
     /// </summary>
     public bool TrustSourceRowLevelSecurity { get; init; }
 
+    /// <summary>
+    /// The sovereign zone this source's data belongs to (D311): a jurisdiction, a residency boundary,
+    /// whatever the host governs by. A declaration <see cref="CatalogValidator"/> checks and nothing in
+    /// planning reads: one catalog is one zone, so a catalog whose sources declare two zones, or where
+    /// some declare one and others none, is refused when the engine is created. A host serving several
+    /// zones builds one engine per zone over that zone's sources alone. Empty, the default, declares
+    /// nothing and changes nothing. Zones match exactly, as source ids do.
+    /// </summary>
+    public string Zone { get; init; } = string.Empty;
+
     /// <summary>Finds a table by name, case-insensitively (D15).</summary>
     public TableDescriptor? FindTable(string name) =>
         Tables.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));

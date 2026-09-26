@@ -151,6 +151,7 @@ internal static class CatalogProtoMapping
             DialectProfile = ToProto(schema.DialectProfile),
             CostProfile = ToProto(schema.CostProfile),
             TrustSourceRowLevelSecurity = schema.TrustSourceRowLevelSecurity,
+            Zone = schema.Zone ?? string.Empty,
         };
         message.Tables.AddRange(schema.Tables.Select(ToProto));
         message.Functions.AddRange(schema.Functions.Select(ToProto));
@@ -317,6 +318,7 @@ internal static class CatalogProtoMapping
             : FromProto(message.DialectProfile),
         CostProfile = FromProto(message.CostProfile),
         TrustSourceRowLevelSecurity = message.TrustSourceRowLevelSecurity,
+        Zone = message.Zone,
         Tables = message.Tables.Select(FromProto).ToArray(),
         Functions = message.Functions.Select(FromProto).ToArray(),
     };
