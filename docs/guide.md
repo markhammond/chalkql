@@ -834,6 +834,14 @@ await engine.PrepareAsync(
     new PrepareOptions { Conformance = SqlConformance.Lenient });
 ```
 
+`PrepareOptions` is a record, so a variant is composed from a base with `with`
+rather than copied field by field, and an option added later is carried along:
+
+```csharp
+var reporting = new PrepareOptions { IncludePlanText = true, IncludeRedactedSql = true };
+var lenient = reporting with { Conformance = SqlConformance.Lenient };
+```
+
 `SqlConformance` has one value per Calcite conformance level — `Default`,
 `Lenient`, `Babel`, `Strict92`, `Strict99`, `Pragmatic99`, `Strict2003`,
 `Pragmatic2003`, `MySql5`, `Oracle10`, `Oracle12`, `SqlServer2008`, `Presto`,

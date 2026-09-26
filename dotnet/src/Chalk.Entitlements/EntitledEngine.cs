@@ -97,21 +97,14 @@ public sealed class EntitledEngine
         return Disclosures.Explanation(Disclosures.Find<Rpc.EntitlementsExplain>(extensions));
     }
 
-    /// <summary>These prepare options with the entitlement extension added to their bag.</summary>
+    /// <summary>
+    /// The host's options with this engine's extension appended: a <c>with</c> over the record, so a
+    /// prepare option added later is carried without anyone remembering to copy it (F141).
+    /// </summary>
     private PrepareOptions With(PrepareOptions? options, bool explain = false)
     {
         options ??= new PrepareOptions();
-        return new PrepareOptions
-        {
-            Pushdown = options.Pushdown,
-            IncludePlanText = options.IncludePlanText,
-            ParameterTypes = options.ParameterTypes,
-            Conformance = options.Conformance,
-            Libraries = options.Libraries,
-            DisabledCapabilities = options.DisabledCapabilities,
-            JoinPolicy = options.JoinPolicy,
-            Extensions = [.. options.Extensions, Options.ToProto(explain)],
-        };
+        return options with { Extensions = [.. options.Extensions, Options.ToProto(explain)] };
     }
 }
 

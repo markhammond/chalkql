@@ -1525,3 +1525,10 @@ static Chalk.Arrow.RecordBatchExtensions.GetUtf8(this Apache.Arrow.RecordBatch! 
 static Chalk.Arrow.RecordBatchExtensions.TryGetUtf8(this Apache.Arrow.IArrowArray! array, int index, out System.ReadOnlySpan<byte> utf8) -> bool
 [CHALK001]Chalk.Client.FunctionRegistry.AddAggregate<TState, TIn, TOut>(string! name, Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>! spec) -> void
 [CHALK001]Chalk.Client.IFunctionRegistry.AddAggregate<TState, TIn, TOut>(string! name, Chalk.Sources.ArenaAggregateSpec<TState, TIn, TOut>! spec) -> void
+Chalk.Client.PrepareOptions.<Clone>$() -> Chalk.Client.PrepareOptions!
+Chalk.Client.PrepareOptions.Equals(Chalk.Client.PrepareOptions? other) -> bool
+override Chalk.Client.PrepareOptions.Equals(object? obj) -> bool
+override Chalk.Client.PrepareOptions.GetHashCode() -> int
+override Chalk.Client.PrepareOptions.ToString() -> string!
+static Chalk.Client.PrepareOptions.operator !=(Chalk.Client.PrepareOptions? left, Chalk.Client.PrepareOptions? right) -> bool
+static Chalk.Client.PrepareOptions.operator ==(Chalk.Client.PrepareOptions? left, Chalk.Client.PrepareOptions? right) -> bool

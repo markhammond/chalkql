@@ -362,7 +362,9 @@ public sealed class ArchitectureTests
     /// The four small value types are the only positional records in the public API (D26): each is a
     /// closed tuple of primitives that will never grow a member — an arena handle is an offset and a
     /// length — which is the one shape a positional record models honestly. Nothing else should have
-    /// quietly become one.
+    /// quietly become one. A record <em>class</em> with <c>init</c> properties and no positional
+    /// parameters is a different thing (D26 as amended for F141): it grows additively exactly as a
+    /// sealed class does, and it gives hosts <c>with</c> to compose options from, so it is allowed.
     /// </summary>
     [Fact]
     public void Only_the_documented_value_types_are_records()
@@ -370,7 +372,7 @@ public sealed class ArchitectureTests
         var recordStructs = ClientAssemblies
             .Where(a => a.GetName().Name is "Chalk.Catalog" or "Chalk.Sources.Abstractions" or "Chalk.Client")
             .SelectMany(a => a.GetExportedTypes())
-            .Where(IsRecord)
+            .Where(IsPositionalRecord)
             .Select(t => t.FullName!)
             .Order(StringComparer.Ordinal)
             .ToArray();
@@ -385,6 +387,11 @@ public sealed class ArchitectureTests
     /// <c>&lt;Clone&gt;$</c>; a record struct gets none, and is recognised instead by the
     /// <em>private</em> <c>PrintMembers</c> every record has — which is why the binding flags matter.
     /// </summary>
+    /// <summary>A record with a primary constructor, which is what cannot grow additively.</summary>
+    private static bool IsPositionalRecord(ClrType type) =>
+        IsRecord(type)
+        && type.GetMethods(BindingFlags.Instance | BindingFlags.Public).Any(m => m.Name == "Deconstruct");
+
     private static bool IsRecord(ClrType type) =>
         type.GetMethod("<Clone>$", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
             is not null

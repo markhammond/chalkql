@@ -35,6 +35,27 @@ public sealed class EntitlementsTests(SharedSidecar sidecar)
             rows);
     }
 
+    /// <summary>
+    /// An entitled prepare carries every prepare option the host set (F141): the redacted text and the
+    /// plan text arrive, because the entitled engine composes its options with <c>with</c> over the
+    /// record rather than copying the fields it knew about.
+    /// </summary>
+    [Fact]
+    public async Task An_entitled_prepare_carries_every_option_the_host_set()
+    {
+        await using var engine = await EngineAsync();
+
+        var prepared = await engine.WithEntitlements().PrepareAsync(
+            "SELECT id FROM members WHERE postcode = '2000' ORDER BY id",
+            TenancyFixture.U1,
+            new PrepareOptions { IncludeRedactedSql = true, IncludePlanText = true });
+
+        Assert.NotNull(prepared.Query.PlanText);
+        Assert.NotNull(prepared.Query.RedactedSql);
+        Assert.Contains("REDACTED", prepared.Query.RedactedSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("2000", prepared.Query.RedactedSql, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Q01_an_agent_sees_initials_and_an_auditor_a_token()
     {

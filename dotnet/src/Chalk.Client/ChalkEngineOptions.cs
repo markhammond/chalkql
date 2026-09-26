@@ -262,7 +262,7 @@ public sealed class ChalkEngineOptions
 }
 
 /// <summary>Per-statement planning options.</summary>
-public sealed class PrepareOptions
+public sealed record PrepareOptions
 {
     public PushdownLevel Pushdown { get; init; } = PushdownLevel.Full;
 
