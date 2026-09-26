@@ -70,7 +70,7 @@ public sealed class EntitledEngine
         var prepared = await Engine
             .PrepareAsync(sql, context, With(options), ct)
             .ConfigureAwait(false);
-        return new EntitledQuery(this, sql, prepared, _audit);
+        return new EntitledQuery(this, sql, prepared, options, _audit);
     }
 
     /// <summary>
@@ -123,14 +123,20 @@ public sealed class EntitledQuery
 {
     private readonly EntitledEngine _engine;
     private readonly string _sql;
+    private readonly PrepareOptions? _options;
 
     private readonly IEntitlementsAudit? _audit;
 
     internal EntitledQuery(
-        EntitledEngine engine, string sql, PreparedQuery prepared, IEntitlementsAudit? audit)
+        EntitledEngine engine,
+        string sql,
+        PreparedQuery prepared,
+        PrepareOptions? options,
+        IEntitlementsAudit? audit)
     {
         _engine = engine;
         _sql = sql;
+        _options = options;
         _audit = audit;
         Query = prepared;
         Entitlements = Disclosures.Report(prepared);
@@ -218,7 +224,7 @@ public sealed class EntitledQuery
 
     /// <summary>What the policy resolved to for this statement, in the policy's own terms (D207).</summary>
     public ValueTask<EntitlementsExplanation> ExplainAsync(CancellationToken ct = default) =>
-        _engine.ExplainAsync(_sql, Query.Context, options: null, ct);
+        _engine.ExplainAsync(_sql, Query.Context, _options, ct);
 
     /// <summary>
     /// This statement planned again with <paramref name="more"/>'s bindings folded into what this
@@ -234,7 +240,7 @@ public sealed class EntitledQuery
         RequestContext more, CancellationToken ct = default)
     {
         var narrowed = await Query.NarrowAsync(more, ct).ConfigureAwait(false);
-        return new EntitledQuery(_engine, _sql, narrowed, _audit);
+        return new EntitledQuery(_engine, _sql, narrowed, _options, _audit);
     }
 
     /// <summary>So an entitled query goes wherever a prepared one does.</summary>

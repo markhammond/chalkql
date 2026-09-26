@@ -109,6 +109,41 @@ public sealed class EntitlementsAdoTests(SharedSidecar sidecar, SharedPostgres p
         Assert.Equal(["1"], await RemoteRowsAsync(Duck(), Sql, TwoOrgManager));
     }
 
+    /// <summary>
+    /// An entitled query explains itself under the options it was prepared with (F142): a pair rule
+    /// that keeps a wide membership's key set home is seen by the prepared report and by the query's
+    /// own explanation alike, where before the explanation re-planned under no options and disagreed.
+    /// </summary>
+    [Fact]
+    public async Task An_entitled_query_explains_under_the_options_it_was_prepared_with()
+    {
+        var fixture = Track(TenancyAdoFixture.CreateDuckDb());
+        await using var engine = await RemoteEngineAsync(fixture);
+        var wide = TenancyFixture.Principal(
+            user: 1, managerOrgs: Enumerable.Range(1, 70).ToArray(), agentOrgs: [], auditorOrgs: [], subjectPairs: []);
+        var nothingIntoTheSource = new PrepareOptions
+        {
+            JoinPolicy = new Chalk.Catalog.CrossSourceJoinPolicy
+            {
+                Pairs =
+                [
+                    new Chalk.Catalog.SourcePairRule
+                    {
+                        LeftSource = "",
+                        RightSource = TenancyAdoFixture.SourceId,
+                        Allowed = [Chalk.Catalog.JoinStrategy.Local],
+                    },
+                ],
+            },
+        };
+
+        var kept = await engine.WithEntitlements().PrepareAsync("SELECT id FROM members", wide, nothingIntoTheSource);
+        var explained = await kept.ExplainAsync();
+
+        Assert.False(Assert.Single(kept.Entitlements.Tables, t => t.Table == "members").RowPredicatePushed);
+        Assert.False(Assert.Single(explained.Tables, t => t.Table == "members").RowPredicatePushed);
+    }
+
     // ---------------------------------------------------------------- the options class (§6, §8)
 
     /// <summary>
