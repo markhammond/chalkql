@@ -71,8 +71,18 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * cannot be driven from its right side; a child whose leaf is not a scan the key set can be put into;
  * a child source that takes no {@code IN} list, or a composite key without
  * {@code supports_row_value_in_list}; a parent whose visible keys could exceed
- * {@code max_in_list × lookup_max_calls}; and a child under {@code LOCAL} enforcement, where D156
- * keeps the tenant set — which a key set is — out of the source's query text.
+ * {@code max_in_list × lookup_max_calls}; a child under {@code LOCAL} enforcement, where D156
+ * keeps the tenant set — which a key set is — out of the source's query text; and a child whose
+ * source a pair rule of the join policy forbids looking up into (F139).
+ *
+ * <p><b>The join policy binds it (F139).</b> This rule used to read the policy for
+ * {@code lookup_max_calls} alone and never ask {@code allowed(left, right)}, so a host that had
+ * forbidden every look-up into a source could still have the entitlement pass send member keys
+ * there. The exchange is a {@code LOOKUP} by every other measure and the plan text shows it as one,
+ * so the pair rule binds it: every source the parent's visible keys are computed from is asked —
+ * the parent side need not be one source's (F55), and a context relation among its inputs is asked
+ * about as the empty id — and any one that may not look up into the child's source keeps the join
+ * here.
  */
 public final class ParentKeySetRule extends org.apache.calcite.plan.RelRule<ChalkRuleConfig> {
 
@@ -192,6 +202,11 @@ public final class ParentKeySetRule extends org.apache.calcite.plan.RelRule<Chal
       return;
     }
 
+    // F139: a pair rule that forbids looking up into the child's source forbids this exchange too.
+    if (!lookupAllowed(join.getRight(), childSource)) {
+      return;
+    }
+
     RexBuilder rex = join.getCluster().getRexBuilder();
     RelNode lookup = side.build(info.leftKeys, ChalkKeySet.KEY_SET_IN, maxInList, rex);
     if (lookup == null) {
@@ -209,6 +224,26 @@ public final class ParentKeySetRule extends org.apache.calcite.plan.RelRule<Chal
             JoinStrategy.JOIN_STRATEGY_LOOKUP);
 
     call.transformTo(asWritten(joined, join, side, rex));
+  }
+
+  /**
+   * Whether the join policy lets the parent side's keys be looked up in the child's source (F139):
+   * asked of every source the side's rows are computed from, the child's own excepted — keys that
+   * never left that source cross no pair — and with a context relation among them as the empty id,
+   * which is how a pair rule names "anything". A side that reads no table at all is asked about as
+   * the empty id too, so a rule forbidding every look-up into the child's source still binds it.
+   */
+  private boolean lookupAllowed(RelNode parentSide, String childSource) {
+    java.util.Set<String> driving = CrossSourceJoinRule.sourcesOf(parentSide);
+    if (driving.isEmpty()) {
+      return policy.allowsLookup("", childSource);
+    }
+    for (String source : driving) {
+      if (!source.equals(childSource) && !policy.allowsLookup(source, childSource)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**

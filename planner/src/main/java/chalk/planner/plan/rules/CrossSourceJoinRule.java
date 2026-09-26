@@ -313,6 +313,17 @@ public final class CrossSourceJoinRule
     return first.isEmpty() ? null : first;
   }
 
+  /**
+   * Every source a table under {@code rel} belongs to, in the order met, with the empty id for a
+   * relation that belongs to none — a context relation the executor materialises from the host's
+   * binding. What a pair rule is asked about when a driving side is not one source's (F139, F55).
+   */
+  static java.util.Set<String> sourcesOf(RelNode rel) {
+    List<String> sources = new ArrayList<>(2);
+    collect(rel, sources);
+    return new java.util.LinkedHashSet<>(sources);
+  }
+
   private static void collect(RelNode rel, List<String> into) {
     if (rel instanceof RelSubset subset) {
       RelNode best = subset.getBest();

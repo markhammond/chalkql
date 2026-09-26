@@ -38,6 +38,20 @@ public final class PushdownRequired {
   private PushdownRequired() {}
 
   /**
+   * What decides whether a key set may travel, for a refusal that has to say which of the host's
+   * settings kept one here (F139): the join policy's pair rules, and the source a schema's tables
+   * belong to, which is what a pair rule names.
+   */
+  public record Exchanges(
+      chalk.planner.plan.JoinPolicy joinPolicy,
+      Function<String, @Nullable String> sourceOfSchema) {
+
+    /** No pair rule anywhere: the shipped policy, under which every exchange is allowed. */
+    public static final Exchanges DEFAULT =
+        new Exchanges(chalk.planner.plan.JoinPolicy.DEFAULT, schema -> null);
+  }
+
+  /**
    * Refuses the plan when an entitled table under {@code PUSHDOWN_REQUIRED} kept its row predicate
    * local.
    *
@@ -70,10 +84,24 @@ public final class PushdownRequired {
       java.util.List<TaintCheck.ThroughEvidence> throughJoins,
       Set<String> pushed,
       Function<String, @Nullable PushdownGate> gates) {
+    check(physical, rowPredicates, throughJoins, pushed, gates, Exchanges.DEFAULT);
+  }
+
+  /**
+   * The same, with the settings that decide whether a key set may travel, so that a refusal whose
+   * cause is one of them names it rather than a shape the source does declare (F139).
+   */
+  public static void check(
+      RelNode physical,
+      Map<String, RexNode> rowPredicates,
+      java.util.List<TaintCheck.ThroughEvidence> throughJoins,
+      Set<String> pushed,
+      Function<String, @Nullable PushdownGate> gates,
+      Exchanges exchanges) {
     if (rowPredicates.isEmpty() && throughJoins.isEmpty()) {
       return;
     }
-    walk(physical, rowPredicates, throughJoins, pushed, gates);
+    walk(physical, rowPredicates, throughJoins, pushed, gates, exchanges);
   }
 
   private static void walk(
@@ -81,20 +109,21 @@ public final class PushdownRequired {
       Map<String, RexNode> rowPredicates,
       java.util.List<TaintCheck.ThroughEvidence> throughJoins,
       Set<String> pushed,
-      Function<String, @Nullable PushdownGate> gates) {
+      Function<String, @Nullable PushdownGate> gates,
+      Exchanges exchanges) {
     RelNode node = rel instanceof RelSubset subset ? best(subset) : rel;
     if (node == null) {
       return;
     }
-    checkLeaf(node, rowPredicates, throughJoins, pushed, gates);
+    checkLeaf(node, rowPredicates, throughJoins, pushed, gates, exchanges);
     for (RelNode input : node.getInputs()) {
-      walk(input, rowPredicates, throughJoins, pushed, gates);
+      walk(input, rowPredicates, throughJoins, pushed, gates, exchanges);
     }
     node.accept(
         new RexShuttle() {
           @Override
           public RexNode visitSubQuery(RexSubQuery subQuery) {
-            walk(subQuery.rel, rowPredicates, throughJoins, pushed, gates);
+            walk(subQuery.rel, rowPredicates, throughJoins, pushed, gates, exchanges);
             return super.visitSubQuery(subQuery);
           }
         });
@@ -105,7 +134,8 @@ public final class PushdownRequired {
       Map<String, RexNode> rowPredicates,
       java.util.List<TaintCheck.ThroughEvidence> throughJoins,
       Set<String> pushed,
-      Function<String, @Nullable PushdownGate> gates) {
+      Function<String, @Nullable PushdownGate> gates,
+      Exchanges exchanges) {
     RelOptTable table = tableOf(node);
     if (table == null) {
       return;
@@ -125,7 +155,7 @@ public final class PushdownRequired {
       // Either there is nothing to push — the predicate folded away, or this source's own row
       // security is trusted — or this is a child whose restriction is a join rather than a
       // predicate, which has a refusal of its own.
-      checkThrough(map, chalkTable, throughJoins, pushed, gates);
+      checkThrough(map, chalkTable, throughJoins, pushed, gates, exchanges);
       return;
     }
     if (!chalkTable.takesQueries()) {
@@ -138,6 +168,26 @@ public final class PushdownRequired {
     }
     if (pushed.contains(map.qualifiedName())) {
       return;
+    }
+
+    // F139: a bound list above the fold ceiling reaches a source only as a key set looked up from
+    // the request context, and a pair rule that forbids looking up into this source forbids that.
+    // Then the shape is not what stopped it, and the setting that did is the one to name.
+    String sourceId = chalkTable.sourceId();
+    if (readsContextRelation(predicate) && !exchanges.joinPolicy().allowsLookup("", sourceId)) {
+      throw new PolicyException(
+          "the entitlement of "
+              + map.qualifiedName()
+              + " is PUSHDOWN_REQUIRED and this plan would evaluate its row predicate locally: the"
+              + " predicate reads a bound list above the fold ceiling, which reaches a source only as"
+              + " a key set looked up from the request context, and the join policy forbids a"
+              + " LOOKUP into the source '"
+              + sourceId
+              + "'. Allow LOOKUP into '"
+              + sourceId
+              + "' — for this statement through PrepareOptions.JoinPolicy, or in the catalog's"
+              + " policy — or set the table's enforcement to PUSHDOWN and accept a local filter"
+              + " over a full fetch.");
     }
 
     throw new PolicyException(
@@ -163,7 +213,8 @@ public final class PushdownRequired {
       ChalkTable table,
       java.util.List<TaintCheck.ThroughEvidence> throughJoins,
       Set<String> pushed,
-      Function<String, @Nullable PushdownGate> gates) {
+      Function<String, @Nullable PushdownGate> gates,
+      Exchanges exchanges) {
     if (!table.takesQueries() || pushed.contains(map.qualifiedName())) {
       return;
     }
@@ -176,6 +227,32 @@ public final class PushdownRequired {
     }
     if (parent == null) {
       return;
+    }
+
+    // F139: the parent's visible keys travel as a LOOKUP into the child's source, and a pair rule
+    // may forbid that. Where one does, it is what stopped the exchange, and it is what to name.
+    String childSource = table.sourceId();
+    int dot = parent.indexOf('.');
+    String parentSource =
+        dot < 0 ? null : exchanges.sourceOfSchema().apply(parent.substring(0, dot));
+    if (parentSource != null
+        && !parentSource.equals(childSource)
+        && !exchanges.joinPolicy().allowsLookup(parentSource, childSource)) {
+      throw new PolicyException(
+          "the entitlement of "
+              + map.qualifiedName()
+              + " is PUSHDOWN_REQUIRED and this plan would evaluate its row predicate locally: its"
+              + " visibility derives through '"
+              + parent
+              + "', whose visible keys reach the source only as a key set looked up from '"
+              + parentSource
+              + "', and the join policy forbids a LOOKUP from '"
+              + parentSource
+              + "' into '"
+              + childSource
+              + "'. Allow LOOKUP for that pair — for this statement through"
+              + " PrepareOptions.JoinPolicy, or in the catalog's policy — or set the table's"
+              + " enforcement to PUSHDOWN and accept a local join over a full fetch.");
     }
 
     throw new PolicyException(
@@ -241,6 +318,41 @@ public final class PushdownRequired {
           + " columns, the collation of a string column, or a function it does not have.";
     }
     return "the source '" + sourceId + "' does not declare " + missing.name() + ".";
+  }
+
+  /**
+   * Whether this folded predicate reads a context relation: a bound list above the fold ceiling,
+   * which the fold leaves a sub-query over the relation rather than a literal list (§2).
+   */
+  private static boolean readsContextRelation(RexNode predicate) {
+    boolean[] found = {false};
+    predicate.accept(
+        new RexShuttle() {
+          @Override
+          public RexNode visitSubQuery(RexSubQuery subQuery) {
+            if (scansContextTable(subQuery.rel)) {
+              found[0] = true;
+            }
+            return super.visitSubQuery(subQuery);
+          }
+        });
+    return found[0];
+  }
+
+  private static boolean scansContextTable(RelNode rel) {
+    RelNode node = rel instanceof RelSubset subset ? best(subset) : rel;
+    if (node == null) {
+      return false;
+    }
+    if (node instanceof TableScan scan && scan.getTable().unwrap(ContextTable.class) != null) {
+      return true;
+    }
+    for (RelNode input : node.getInputs()) {
+      if (scansContextTable(input)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private static @Nullable RelOptTable tableOf(RelNode node) {

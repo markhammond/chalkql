@@ -563,6 +563,19 @@ public final class PlannerPipeline implements AutoCloseable {
   }
 
   /**
+   * The source a schema's tables belong to, or null for a schema this catalog does not have: what a
+   * pair rule of the join policy names, for a refusal that has to name one (F139).
+   */
+  private @Nullable String sourceOfSchema(String schemaName) {
+    for (chalk.ir.v1.Schema schema : catalog.descriptor().getSchemasList()) {
+      if (schema.getName().equalsIgnoreCase(schemaName)) {
+        return schema.getSourceId();
+      }
+    }
+    return null;
+  }
+
+  /**
    * The gate this request decides pushdown with for one source, or null for a source this catalog
    * does not have — which is what lets a refusal name the shape the host declared and did not (F46).
    */
@@ -963,7 +976,12 @@ public final class PlannerPipeline implements AutoCloseable {
     // PUSHDOWN_REQUIRED may not have its row predicate evaluated locally. It is here beside the
     // others because it too is about which alternative cost chose.
     chalk.planner.entitlement.PushdownRequired.check(
-        physical, rowPredicates, throughJoins, pushed, this::gateFor);
+        physical,
+        rowPredicates,
+        throughJoins,
+        pushed,
+        this::gateFor,
+        new chalk.planner.entitlement.PushdownRequired.Exchanges(joinPolicy, this::sourceOfSchema));
 
     long t4 = System.nanoTime();
     PlanningState state = planningState(governor);

@@ -142,6 +142,21 @@ public final class JoinPolicy {
     return allowed;
   }
 
+  /**
+   * Whether {@code driving}'s keys may be looked up in {@code lookup}: {@code LOOKUP} is among the
+   * strategies this ordered pair allows (F139).
+   *
+   * <p>The question the two entitlement exchanges ask — {@code ContextKeySetRule} with the request
+   * context as the driving side, which belongs to no source and is named by the empty id, and
+   * {@code ParentKeySetRule} with every source the parent's visible keys are computed from. Each is
+   * a {@code LOOKUP} by every other measure, and the plan text shows it as one, so a pair rule that
+   * forbids looking up into a source binds it as it binds a join the statement wrote. {@code
+   * preferred} is not read: it chooses among strategies, and these rules offer only the one.
+   */
+  public boolean allowsLookup(String driving, String lookup) {
+    return allowed(driving, lookup).contains(JoinStrategy.JOIN_STRATEGY_LOOKUP);
+  }
+
   /** The strategy this pair prefers outright, or {@code UNSPECIFIED} when cost decides. */
   public JoinStrategy preferred(String left, String right) {
     SourcePairRule rule = ruleFor(left, right);

@@ -3,6 +3,7 @@ package chalk.planner.plan.rules;
 import chalk.ir.v1.JoinStrategy;
 import chalk.planner.entitlement.ContextTable;
 import chalk.planner.plan.ChalkKeySet;
+import chalk.planner.plan.JoinPolicy;
 import chalk.planner.plan.PushdownGate;
 import chalk.planner.plan.PushdownPolicy;
 import chalk.planner.plan.SourceConvention;
@@ -68,21 +69,32 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * {@code row_predicate_pushed} is honestly true for the read, and the rows fetched never exceed the
  * principal's scope. The list's rows are still not in the plan — only its name and row type are,
  * which is the point of the fold ceiling.
+ *
+ * <p><b>The join policy binds it (F139).</b> The exchange is a {@code LOOKUP} by every other
+ * measure, and the plan text shows it as one, so a pair rule that forbids looking up into the
+ * table's source forbids this too. The driving side is the request context, which belongs to no
+ * source and is asked about as the empty id — so {@code {left_source: "", right_source: "pg",
+ * allowed: [LOCAL]}}, "nothing may look up into pg", keeps the semi-join here.
  */
 public final class ContextKeySetRule extends org.apache.calcite.plan.RelRule<ChalkRuleConfig> {
   private final List<SourceConvention> sources;
   private final PushdownPolicy pushdown;
+  private final JoinPolicy policy;
 
   private ContextKeySetRule(
-      ChalkRuleConfig config, List<SourceConvention> sources, PushdownPolicy pushdown) {
+      ChalkRuleConfig config,
+      List<SourceConvention> sources,
+      PushdownPolicy pushdown,
+      JoinPolicy policy) {
     super(config);
     this.sources = ImmutableList.copyOf(sources);
     this.pushdown = pushdown;
+    this.policy = policy;
   }
 
   /** The rule for this catalog's sources, or none when nothing could be pushed anyway. */
   public static @Nullable ContextKeySetRule create(
-      List<SourceConvention> sources, PushdownPolicy pushdown) {
+      List<SourceConvention> sources, PushdownPolicy pushdown, JoinPolicy policy) {
     if (sources.isEmpty() || !pushdown.allowsFullRemotePushdown()) {
       return null;
     }
@@ -93,9 +105,10 @@ public final class ContextKeySetRule extends org.apache.calcite.plan.RelRule<Cha
                 b.operand(LogicalJoin.class)
                     .trait(org.apache.calcite.plan.Convention.NONE)
                     .anyInputs(),
-            config -> new ContextKeySetRule(config, sources, pushdown)),
+            config -> new ContextKeySetRule(config, sources, pushdown, policy)),
         sources,
-        pushdown);
+        pushdown,
+        policy);
   }
 
   @Override
@@ -158,6 +171,12 @@ public final class ContextKeySetRule extends org.apache.calcite.plan.RelRule<Cha
     CrossSourceJoinRule.LookupSide side =
         CrossSourceJoinRule.LookupSide.of(join.getLeft(), convention, gate);
     if (side == null) {
+      return;
+    }
+
+    // F139: a pair rule that forbids looking up into this source forbids this exchange too. The
+    // context is the driving side and belongs to no source, so it is asked about as the empty id.
+    if (!policy.allowsLookup("", sourceId)) {
       return;
     }
 

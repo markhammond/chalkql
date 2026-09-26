@@ -353,7 +353,9 @@ public final class RuleSets {
 
     // And the one shape that rule cannot read: a semi-join against a *context relation*, which
     // belongs to no source and has to drive rather than be looked up (16-entitlements.md §2, F45).
-    RelOptRule contextKeySet = chalk.planner.plan.rules.ContextKeySetRule.create(sources, policy);
+    // It reads the join policy's pair rules as the statement's own joins do (F139).
+    RelOptRule contextKeySet =
+        chalk.planner.plan.rules.ContextKeySetRule.create(sources, policy, joinPolicy);
     if (contextKeySet != null) {
       rules.add(contextKeySet);
     }
