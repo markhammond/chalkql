@@ -7,7 +7,7 @@ Supported Akade indexes are discovered automatically and exposed to the ChalkQL 
 One `IndexedSet<T>` becomes one ChalkQL source containing one logical table.
 
 ```bash
-dotnet add package ChalkQL.Sources.Akade
+dotnet add package ChalkQL.Sources
 ```
 
 See the [ChalkQL guide](../../../docs/guide.md) for engine configuration, SQL behaviour, federation and the broader source lifecycle.
@@ -30,6 +30,7 @@ Expose it to ChalkQL:
 ```csharp
 var source = AkadeSource
     .From("purchases", purchases)
+    .NamingPolicy(PocoNamingPolicy.SnakeCase)
     .Build();
 ```
 
@@ -37,9 +38,10 @@ The source contains a single table named `purchases` by default. Override it onl
 
 ```csharp
 var source = AkadeSource
-.From("sales", purchases)
-.TableName("purchases")
-.Build();
+    .From("sales", purchases)
+    .NamingPolicy(PocoNamingPolicy.SnakeCase)
+    .TableName("purchases")
+    .Build();
 ````
 
 Add the source to the engine and query it normally:

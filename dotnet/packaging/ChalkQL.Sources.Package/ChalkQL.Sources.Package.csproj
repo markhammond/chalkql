@@ -13,7 +13,18 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      Initial public release of ChalkQL.
+      ChalkQL.Sources 0.3 adds composite columns for POCO and Akade sources,
+      sovereign-zone catalogue validation, stricter source row-level-security trust,
+      and source compatibility with ChalkQL's corrected numeric semantics.
+
+      Source builders now support Zone(...), catalogues are restricted to one declared
+      sovereign zone, TrustSourceRowLevelSecurity(...) requires explicit security
+      preconditions, and composite columns remain local-only and non-indexable.
+
+      Requires exactly ChalkQL 0.3.0.
+
+      Full release notes:
+      https://github.com/markhammond/chalkql/releases/tag/v0.3
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>
@@ -25,7 +36,7 @@
 
     <Authors>Mark Hammond</Authors>
     <Description>
-      Stock Chalk sources for POCO collections, ADO.NET and DuckDB, plus source conformance tooling.
+      Built-in ChalkQL sources for POCO and Akade.IndexedSet collections, ADO.NET and DuckDB + source conformance tooling.
     </Description>
 
     <PackageReadmeFile>README.md</PackageReadmeFile>
