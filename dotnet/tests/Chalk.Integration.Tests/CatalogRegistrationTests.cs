@@ -1,6 +1,7 @@
 using System.Data.Common;
 using Chalk.Catalog;
 using Chalk.Client;
+using Chalk.Entitlements;
 using Chalk.Sources;
 using Chalk.Sources.Ado;
 using Chalk.Sources.Poco;
@@ -49,6 +50,65 @@ public sealed class CatalogRegistrationTests(SharedSidecar sidecar, ITestOutputH
     }
 
     private sealed record ZoneRow(int Id);
+
+    /// <summary>
+    /// A refresh that moves only the cross-source join policy reaches the planner and strands no plan
+    /// (F145): the planner plans the next statement under the new policy, and a statement prepared
+    /// under the old one still runs.
+    /// </summary>
+    [Fact]
+    public async Task A_refresh_that_moves_only_the_join_policy_reaches_the_planner_and_strands_nothing()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        using var fixture = TenancyAdoFixture.CreateDuckDb();
+        var policy = new SwitchablePolicy();
+        var counter = new CountingPlanner(sidecar.Sidecar.CreatePlanner());
+        await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+        {
+            ContextId = $"policy-refresh-{Guid.NewGuid():n}",
+            Sources = fixture.Sources,
+            Planner = counter,
+            Functions = TenancyAdoFixture.RegisterFunctions,
+            JoinPolicy = policy,
+        });
+        var entitled = engine.WithEntitlements();
+        var wide = TenancyFixture.Principal(
+            user: 1, managerOrgs: Enumerable.Range(1, 70).ToArray(), agentOrgs: [], auditorOrgs: [], subjectPairs: []);
+        const string Sql = "SELECT id FROM members ORDER BY id";
+
+        var before = await entitled.PrepareAsync(Sql, wide);
+        Assert.Contains(Chalk.Ir.PlanWalker.Rels(before.Query.Plan.Root), r => r.KindCase is Chalk.Ir.Rel.KindOneofCase.LookupJoin);
+        counter.Reset();
+
+        // Nothing may look up into the warehouse from now on: a policy-only change.
+        policy.Current = new CrossSourceJoinPolicy
+        {
+            Pairs = [new SourcePairRule { LeftSource = "", RightSource = TenancyAdoFixture.SourceId, Allowed = [JoinStrategy.Local] }],
+        };
+        await engine.RefreshAsync();
+
+        Assert.Equal(1, counter.CatalogRegistrations);
+        var after = await entitled.PrepareAsync(Sql, wide);
+        Assert.DoesNotContain(Chalk.Ir.PlanWalker.Rels(after.Query.Plan.Root), r => r.KindCase is Chalk.Ir.Rel.KindOneofCase.LookupJoin);
+
+        // The statement prepared under the old policy is still current, and both answer alike.
+        await using var old = await engine.ExecuteAsync(before.Query);
+        var rows = 0;
+        await foreach (var batch in old.Batches)
+        {
+            rows += batch.Length;
+            batch.Dispose();
+        }
+
+        Assert.Equal(TenancyFixture.Members.Count(m => m.OrgId is >= 1 and <= 70), rows);
+    }
+
+    private sealed class SwitchablePolicy : ICrossSourceJoinPolicy
+    {
+        public CrossSourceJoinPolicy Current { get; set; } = new();
+
+        public CrossSourceJoinPolicy Build(CatalogContext catalog) => Current;
+    }
 
     // ------------------------------------------------------------------ §8, figure 1
 

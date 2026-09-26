@@ -1339,12 +1339,20 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         var moved = shape.StatisticsChangesSince(_shape);
         var schemaChange = changed.Count > 0 || removed.Count > 0;
 
-        var nextShapeVersion = schemaChange ? CatalogVersions.Mint() : _shapeVersion;
+        // The join policy and the cost profiles decide how the next plan is built and nothing about
+        // whether a prepared one is still right (F145): a refresh that moved only these registers a
+        // version of its own so the planner plans under them, and strands no plan doing so.
+        var policiesMoved = !schemaChange && shape.PoliciesChangedSince(_shape);
+        var nextShapeVersion = schemaChange || policiesMoved ? CatalogVersions.Mint() : _shapeVersion;
         var nextStatisticsVersion = moved.Count > 0 ? CatalogVersions.Mint() : _statisticsVersion;
 
         if (schemaChange)
         {
             await RegisterShapeAsync(next, nextShapeVersion, changed, removed, ct).ConfigureAwait(false);
+        }
+        else if (policiesMoved)
+        {
+            await RegisterPoliciesAsync(next, nextShapeVersion, ct).ConfigureAwait(false);
         }
 
         if (moved.Count > 0)
@@ -1377,9 +1385,14 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         }
         else
         {
-            // The numbers moved and the shape did not, so the per-table shapes are the ones already
-            // held; what is replaced is the statistics half, which is what the next comparison reads.
+            // The numbers or the policies moved and the shape did not, so the per-table shapes and
+            // their epochs are the ones already held; what is replaced is what the next comparison
+            // reads, and the version the planner now holds where a policy moved.
             _shape = shape;
+            if (policiesMoved)
+            {
+                _shapeVersion = nextShapeVersion;
+            }
         }
 
         _statisticsVersion = nextStatisticsVersion;
@@ -1393,7 +1406,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             schemas.Sum(s => s.Tables.Count),
             schemaChange
                 ? $"shape changed in {changed.Count} table(s), {removed.Count} removed"
-                : "data only",
+                : policiesMoved ? "policies only" : "data only",
             ShapeEpoch,
             moved.Count);
         return next.Epoch;
@@ -1404,11 +1417,29 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// the planner still holds the version this engine last registered, and the whole catalog
     /// otherwise — which is also what a delta falls back to when the planner reports its base gone.
     /// </summary>
+    private ValueTask RegisterShapeAsync(
+        CatalogContext next,
+        string shapeVersion,
+        IReadOnlyList<TableKey> changed,
+        IReadOnlyList<TableKey> removed,
+        CancellationToken ct) =>
+        RegisterShapeAsync(next, shapeVersion, changed, removed, policiesOnly: false, ct);
+
+    /// <summary>
+    /// The same for a refresh that moved the join policy or a cost profile and no table's shape
+    /// (F145): a delta that names every schema without its tables, so the planner replaces the
+    /// catalog's and each schema's properties and keeps every table — and every prepared plan stays
+    /// current, since no table's shape epoch moves.
+    /// </summary>
+    private ValueTask RegisterPoliciesAsync(CatalogContext next, string shapeVersion, CancellationToken ct) =>
+        RegisterShapeAsync(next, shapeVersion, [], [], policiesOnly: true, ct);
+
     private async ValueTask RegisterShapeAsync(
         CatalogContext next,
         string shapeVersion,
         IReadOnlyList<TableKey> changed,
         IReadOnlyList<TableKey> removed,
+        bool policiesOnly,
         CancellationToken ct)
     {
         var whole = new CatalogRegistration
@@ -1427,7 +1458,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
         var delta = new CatalogRegistration
         {
-            Catalog = Delta(next, changed),
+            Catalog = Delta(next, changed, propertiesOfEverySchema: policiesOnly),
             InstanceId = _instanceId,
             ShapeVersion = shapeVersion,
             BaseShapeVersion = _registeredShapeVersion,
@@ -1461,7 +1492,17 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// the id, the epoch, the join policy, the associations — travel whole, because they are small
     /// and a delta that could leave one of them behind would be a second thing to reason about.
     /// </summary>
-    private static CatalogContext Delta(CatalogContext next, IReadOnlyList<TableKey> changed)
+    private static CatalogContext Delta(CatalogContext next, IReadOnlyList<TableKey> changed) =>
+        Delta(next, changed, propertiesOfEverySchema: false);
+
+    /// <summary>
+    /// The delta a registration sends: the catalog's own properties whole, and the schemas whose tables
+    /// changed with only those tables. With <paramref name="propertiesOfEverySchema"/>, every schema
+    /// is named with no tables at all, which the planner reads as that schema's properties replaced and
+    /// its tables kept — the shape of a refresh that moved a policy and nothing else (F145).
+    /// </summary>
+    private static CatalogContext Delta(
+        CatalogContext next, IReadOnlyList<TableKey> changed, bool propertiesOfEverySchema)
     {
         var schemas = new List<SchemaDescriptor>();
         foreach (var schema in next.Schemas)
@@ -1469,7 +1510,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             var tables = schema.Tables
                 .Where(t => changed.Contains(new TableKey(schema.SourceId, schema.Name, t.Name)))
                 .ToList();
-            if (tables.Count == 0)
+            if (tables.Count == 0 && !propertiesOfEverySchema)
             {
                 continue;
             }
@@ -1486,6 +1527,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 Tables = tables,
                 Functions = schema.Functions,
                 TrustSourceRowLevelSecurity = schema.TrustSourceRowLevelSecurity,
+                Zone = schema.Zone,
             });
         }
 
