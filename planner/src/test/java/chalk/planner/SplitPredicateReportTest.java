@@ -127,6 +127,27 @@ class SplitPredicateReportTest {
         .hasMessageContaining("PUSHDOWN_REQUIRED");
   }
 
+  /**
+   * F147: under PUSHDOWN_REQUIRED cost is not free to keep the membership home. The boundary that
+   * would not carry the predicate is charged, so the key set is preferred over the local semi-join
+   * that wins under plain PUSHDOWN, the report says pushed, and nothing is refused.
+   */
+  @Test
+  void pushdown_required_makes_cost_prefer_the_key_set_over_a_local_semi_join() throws Exception {
+    PlannerPipeline.Result result =
+        plan(
+            TenancyCatalogs.remote(
+                Enforcement.ENFORCEMENT_PUSHDOWN_REQUIRED,
+                TestCatalogs.fullSqlCapabilities().build(),
+                false),
+            WITH_A_CONJUNCT,
+            aboveTheCeiling(),
+            JoinPolicy.DEFAULT);
+
+    assertThat(result.physicalPlanText()).contains("CHALK_KEY_SET_IN");
+    assertThat(result.pushedRowPredicates()).containsExactly("remote.members");
+  }
+
   private static RequestContext aboveTheCeiling() {
     return TenancyCatalogs.manager(1, 2).toBuilder().setFoldMaxRows(1).build();
   }

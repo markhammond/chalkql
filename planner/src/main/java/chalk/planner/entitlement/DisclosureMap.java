@@ -1,6 +1,8 @@
 package chalk.planner.entitlement;
 
 import com.google.common.collect.ImmutableList;
+import org.apache.calcite.rex.RexNode;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import java.util.List;
 import java.util.Map;
 
@@ -22,6 +24,7 @@ public final class DisclosureMap {
   private final ImmutableList<Disclosed> columns;
   private final Visibility visibility;
   private final ImmutableList<Integer> statistical;
+  private @Nullable RexNode rowPredicate;
   private String contradiction = "";
   private ImmutableList<Tested> tested = ImmutableList.of();
   private Map<Integer, ImmutableList<String>> shapes = Map.of();
@@ -69,6 +72,21 @@ public final class DisclosureMap {
     this.columns = ImmutableList.copyOf(columns);
     this.visibility = visibility;
     this.statistical = ImmutableList.copyOf(statistical);
+  }
+
+  /**
+   * The folded row predicate the pass recorded for this table, in the table's own column numbering,
+   * or null where it recorded none — folded away, or a trusted source. Set once by the pass and read
+   * by the boundary's cost (F147): a {@code PUSHDOWN_REQUIRED} table's boundary that does not carry
+   * it is charged so that cost prefers one that does.
+   */
+  public @Nullable RexNode rowPredicate() {
+    return rowPredicate;
+  }
+
+  /** Records the folded row predicate; see {@link #rowPredicate()}. */
+  public void recordRowPredicate(RexNode predicate) {
+    this.rowPredicate = predicate;
   }
 
   /**

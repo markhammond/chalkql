@@ -1708,6 +1708,7 @@ public final class EntitlementPass {
     // established by the relation still being scanned (§3.10, ADR 0025 V68) — which both branches
     // keep true, one through its semi-join and one through its anti-join.
     rowPredicates.put(fold.map().qualifiedName(), fold.predicate());
+    fold.map().recordRowPredicate(fold.predicate());
 
     List<RelNode> emitted = new ArrayList<>(branches.size());
     for (MembershipSplit.Branch branch : branches) {
@@ -1749,6 +1750,7 @@ public final class EntitlementPass {
     leaves.add(fold.map());
     if (branch == null && fold.predicate() != null && !fold.trusted()) {
       rowPredicates.put(fold.map().qualifiedName(), fold.predicate());
+      fold.map().recordRowPredicate(fold.predicate());
     }
     RelNode leaf = withDisclosure(scan, fold.map());
     if (branch != null) {
@@ -1808,6 +1810,7 @@ public final class EntitlementPass {
     // and a marker column does not survive above Project_D to be found textually.
     if (whole.predicate() != null && !whole.trusted()) {
       rowPredicates.put(whole.map().qualifiedName(), whole.predicate());
+      whole.map().recordRowPredicate(whole.predicate());
     }
 
     leaves.add(fold.map());

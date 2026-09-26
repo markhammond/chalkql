@@ -65,8 +65,57 @@ public final class SourceToLocalConverter extends SingleRel implements ChalkRel 
     double rows = mq.getRowCount(getInput());
     CostModel costs = CostModel.of(profileOf(getInput()));
     double work = costs.remoteCallCost() + (rows * costs.remoteRowCost());
-    return planner.getCostFactory().makeCost(work, work, 0);
+    RelOptCost cost = planner.getCostFactory().makeCost(work, work, 0);
+    if (!carriesRequiredPredicate()) {
+      // F147: a PUSHDOWN_REQUIRED table's boundary that does not ask the source for the table's own
+      // row predicate is a plan the guard will refuse. Charging it here, rather than only refusing
+      // it there, makes cost prefer a boundary that carries the predicate wherever one exists — a
+      // key set looked up from the context, say — and leaves the refusal for the case where none does.
+      cost = cost.plus(planner.getCostFactory().makeHugeCost());
+    }
+    return cost;
   }
+
+  /**
+   * Whether this boundary is one {@code PUSHDOWN_REQUIRED} allows: every boundary is, unless the
+   * entitled table beneath it requires its row predicate pushed and the source's side does not carry
+   * it. Decided once per instance, whose input is fixed for its life.
+   */
+  private boolean carriesRequiredPredicate() {
+    Boolean known = carriesRequired;
+    if (known == null) {
+      known =
+          requiredScanOf(getInput()) == null
+              || chalk.planner.entitlement.DisclosureReport.boundaryCarriesRowPredicate(
+                  getInput(), getCluster().getRexBuilder());
+      carriesRequired = known;
+    }
+    return known;
+  }
+
+  /** The entitled scan under {@code rel} whose table requires its row predicate pushed, or null. */
+  private static @Nullable SourceScan requiredScanOf(RelNode rel) {
+    RelNode node = rel;
+    if (node instanceof org.apache.calcite.plan.volcano.RelSubset subset) {
+      RelNode best = subset.getBest();
+      node = best != null ? best : subset.getOriginal();
+    }
+    if (node instanceof SourceScan scan) {
+      return scan.chalkTable().descriptor().getEntitlement().getEnforcement()
+              == chalk.ir.v1.Enforcement.ENFORCEMENT_PUSHDOWN_REQUIRED
+          ? scan
+          : null;
+    }
+    for (RelNode input : node.getInputs()) {
+      SourceScan found = requiredScanOf(input);
+      if (found != null) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  private transient @Nullable Boolean carriesRequired;
 
   /**
    * The cost profile of the table at the bottom of the pushed subtree, so a per-table

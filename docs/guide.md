@@ -1761,7 +1761,7 @@ Three settings, per table or per source:
 |---|---|
 | `Enforcement.Pushdown` (default) | The predicate travels where the source can take it, and the report says whether it did. |
 | `Enforcement.Local` | No predicate of the table is pushed at all; the source receives a projected scan and the tenant set never appears in another system's query log. |
-| `Enforcement.PushdownRequired` | A plan that would evaluate this table's row predicate locally is refused, naming the table, the source and the shape it does not take. For a source holding every tenancy's rows, a silent full fetch is the worse failure. |
+| `Enforcement.PushdownRequired` | The planner prefers a plan that pushes this table's row predicate wherever one exists, and a plan that would evaluate it locally is refused, naming the table, the source and the shape it does not take. For a source holding every tenancy's rows, a silent full fetch is the worse failure. |
 | `TrustSourceRowLevelSecurity(RowLevelSecurityPreconditions)` on a source builder | The host trusts this source's own row-level security: the pass emits no row predicate for its tables and **nothing else changes** — the column disclosures are still Chalk's. Chalk cannot check the claim, so the call states its three pre-conditions by name — the connection identifies the principal to the source, row-level security is enabled and forced on every entitled table, and the source's policies admit exactly the rows the entitlement would — and a call that asserts fewer is refused, naming the ones it left out. |
 
 ### The trust model, and the stated limit

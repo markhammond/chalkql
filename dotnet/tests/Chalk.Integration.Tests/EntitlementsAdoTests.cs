@@ -269,6 +269,27 @@ public sealed class EntitlementsAdoTests(SharedSidecar sidecar, SharedPostgres p
         Assert.Contains("PUSHDOWN_REQUIRED", refusal.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Under <c>PUSHDOWN_REQUIRED</c> cost is not free to keep a membership home (F147): with the
+    /// statement's conjunct pushed a local semi-join would be cheaper than the key set, and under plain
+    /// <c>PUSHDOWN</c> it wins; here the boundary that would not carry the predicate is charged, the
+    /// key set travels, the report says pushed, nothing is refused, and the rows are the same.
+    /// </summary>
+    [Fact]
+    public async Task Q21_pushdown_required_shapes_the_plan_to_the_key_set_when_cost_would_keep_the_membership_home()
+    {
+        const string Sql = "SELECT id FROM members WHERE postcode = '2000' ORDER BY id";
+        var wide = TenancyFixture.Principal(
+            user: 1, managerOrgs: Enumerable.Range(1, 70).ToArray(), agentOrgs: [], auditorOrgs: [], subjectPairs: []);
+        var required = Track(TenancyAdoFixture.CreateDuckDb(Enforcement.PushdownRequired));
+
+        var (report, text) = await PlanAsync(required, Sql, wide);
+
+        Assert.True(Assert.Single(report.Entitlements.Tables, t => t.Table == "members").RowPredicatePushed);
+        Assert.Contains("IN (?)", text, StringComparison.Ordinal);
+        Assert.Equal(await RemoteRowsAsync(Duck(), Sql, wide), await RemoteRowsAsync(required, Sql, wide));
+    }
+
     /// <summary>And it is satisfied silently when the shape does reach the source.</summary>
     [Fact]
     public async Task Q21_pushdown_required_is_satisfied_by_a_source_that_takes_the_shape()

@@ -15,6 +15,7 @@ import org.apache.calcite.util.ImmutableIntList;
 import org.apache.calcite.plan.RelOptPredicateList;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelOptUtil;
+import org.apache.calcite.plan.volcano.RelSubset;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rex.RexBuilder;
@@ -292,6 +293,69 @@ public final class DisclosureReport {
       }
     }
     return true;
+  }
+
+  /**
+   * Whether the source's side of one boundary carries the row predicate of the entitled table it
+   * scans (F147): the question the report asks of the physical tree, asked of a subtree that may
+   * still hold subsets while cost is being computed. Answers true where the table recorded no
+   * predicate, or no entitled scan is under the boundary — nothing is then owed. A subset is read by
+   * its best member, or by the member that created it before cost has settled.
+   */
+  public static boolean boundaryCarriesRowPredicate(RelNode pushed, RexBuilder rexBuilder) {
+    TableScan scan = entitledScanUnderResolving(pushed);
+    if (scan == null) {
+      return true;
+    }
+    DisclosureMap map = EntitledRelOptTable.disclosureOf(scan.getTable());
+    RexNode required = map == null ? null : map.rowPredicate();
+    if (required == null) {
+      return true;
+    }
+    return filterCarrying(pushed, scan, required, rexBuilder);
+  }
+
+  private static boolean filterCarrying(
+      RelNode rel, TableScan scan, RexNode required, RexBuilder rexBuilder) {
+    RelNode node = resolve(rel);
+    if (node == null) {
+      return false;
+    }
+    if (node instanceof SourceRels.SourceFilter filter
+        && carries(filter.getCondition(), scan, required, rexBuilder)) {
+      return true;
+    }
+    for (RelNode input : node.getInputs()) {
+      if (filterCarrying(input, scan, required, rexBuilder)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static @Nullable TableScan entitledScanUnderResolving(RelNode rel) {
+    RelNode node = resolve(rel);
+    if (node == null) {
+      return null;
+    }
+    if (node instanceof TableScan scan) {
+      return EntitledRelOptTable.disclosureOf(scan.getTable()) == null ? null : scan;
+    }
+    for (RelNode input : node.getInputs()) {
+      TableScan found = entitledScanUnderResolving(input);
+      if (found != null) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  private static @Nullable RelNode resolve(RelNode rel) {
+    if (rel instanceof RelSubset subset) {
+      RelNode best = subset.getBest();
+      return best != null ? best : subset.getOriginal();
+    }
+    return rel;
   }
 
   /** Input references renumbered through the scan's projection into the table's own columns. */
