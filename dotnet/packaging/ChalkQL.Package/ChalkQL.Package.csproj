@@ -23,7 +23,16 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      Initial public release of ChalkQL.
+      ChalkQL 0.3 adds composite types, native CLR types for functions and aggregates,
+      borrowed UTF-8/BINARY spans, population-safe aggregates, repeated-expression reuse,
+      and corrected DECIMAL/floating-point semantics.
+
+      Breaking changes include the borrowed-text API, PrepareOptions becoming a record,
+      explicit source row-level-security preconditions, and result changes for DECIMAL
+      rescaling and floating-point rounding.
+
+      Full release notes:
+      https://github.com/markhammond/chalkql/releases/tag/v0.3
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>
@@ -35,7 +44,7 @@
 
     <Authors>Mark Hammond</Authors>
     <Description>
-      Federated SQL query planning and execution for .NET, powered by Apache Calcite.
+      Zero-trust federated SQL + vectorised execution for .NET — query planning and optimisation powered by Apache Calcite.
     </Description>
     
     <PackageReadmeFile>README.md</PackageReadmeFile>
