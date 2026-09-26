@@ -80,6 +80,94 @@ public sealed class PlannerJarResolutionTests : IDisposable
         }
     }
 
+    /// <summary>A file at a relative path under the temp root, its directories created on the way.</summary>
+    private string TouchAt(string relative)
+    {
+        var path = Path.Combine(_dir, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, [0x50, 0x4B]);
+        return path;
+    }
+
+    /// <summary>
+    /// The case that kept recurring: a value written from a checkout's root, read by a test host or a
+    /// sample whose working directory is somewhere beneath it. The search climbs from the working
+    /// directory and finds it above.
+    /// </summary>
+    [Fact]
+    public void A_relative_path_is_found_above_the_directory_it_is_climbed_from()
+    {
+        var jar = TouchAt(Path.Combine("planner", "build", "libs", "x.jar"));
+        var nested = Directory.CreateDirectory(Path.Combine(_dir, "dotnet", "tests", "bin")).FullName;
+
+        var found = PlannerProcess.TryResolveNamedJar(
+            Path.Combine("planner", "build", "libs", "x.jar"), [nested], out var resolved, out var tried);
+
+        Assert.True(found);
+        Assert.Equal(Path.GetFullPath(jar), resolved);
+        Assert.Equal(new DirectoryInfo(nested).FullName, tried[0]);
+    }
+
+    [Fact]
+    public void The_nearest_match_wins()
+    {
+        var far = TouchAt(Path.Combine("planner", "x.jar"));
+        var near = TouchAt(Path.Combine("a", "planner", "x.jar"));
+        var start = Directory.CreateDirectory(Path.Combine(_dir, "a", "b", "c")).FullName;
+
+        var found = PlannerProcess.TryResolveNamedJar(Path.Combine("planner", "x.jar"), [start], out var resolved, out _);
+
+        Assert.True(found);
+        Assert.Equal(Path.GetFullPath(near), resolved);
+        Assert.NotEqual(Path.GetFullPath(far), resolved);
+    }
+
+    [Fact]
+    public void The_application_directory_is_climbed_after_the_working_directory()
+    {
+        var jar = TouchAt(Path.Combine("planner", "x.jar"));
+        var appDirectory = Directory.CreateDirectory(Path.Combine(_dir, "app", "bin")).FullName;
+        var elsewhere = Directory.CreateTempSubdirectory("chalk-elsewhere-").FullName;
+        try
+        {
+            var found = PlannerProcess.TryResolveNamedJar(
+                Path.Combine("planner", "x.jar"), [elsewhere, appDirectory], out var resolved, out var tried);
+
+            Assert.True(found);
+            Assert.Equal(Path.GetFullPath(jar), resolved);
+            Assert.Equal(new DirectoryInfo(elsewhere).FullName, tried[0]);
+            Assert.Contains(new DirectoryInfo(appDirectory).FullName, tried);
+        }
+        finally
+        {
+            Directory.Delete(elsewhere, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task A_relative_path_found_nowhere_is_refused_naming_every_directory_tried()
+    {
+        var start = Directory.CreateDirectory(Path.Combine(_dir, "a", "b")).FullName;
+
+        var found = PlannerProcess.TryResolveNamedJar("nowhere/x.jar", [start], out _, out var tried);
+
+        Assert.False(found);
+        Assert.Equal(new DirectoryInfo(start).FullName, tried[0]);
+        Assert.Contains(new DirectoryInfo(_dir).FullName, tried);
+        Assert.Equal(Path.GetPathRoot(start), tried[^1]);
+
+        var error = await Assert.ThrowsAsync<FileNotFoundException>(
+            async () => await PlannerProcess.ResolveJarAsync(
+                "nowhere/x.jar",
+                environment: null,
+                _dir,
+                TestContext.Current.CancellationToken));
+
+        Assert.Contains("'nowhere/x.jar' (PlannerProcessOptions.JarPath)", error.Message, StringComparison.Ordinal);
+        Assert.Contains("none of these has it", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Give an absolute path", error.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task A_configured_path_that_does_not_exist_is_refused_even_though_an_embedded_planner_exists()
     {

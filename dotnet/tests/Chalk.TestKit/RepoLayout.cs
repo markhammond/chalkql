@@ -87,9 +87,9 @@ public static class RepoLayout
     }
 
     /// <summary>
-    /// The jar the suites run: <c>CHALK_PLANNER_JAR</c> when it names a file — a relative value resolved
-    /// against the repository root rather than the test process's working directory (F106) — else
-    /// <see cref="PlannerJar"/>.
+    /// The jar the suites run: <c>CHALK_PLANNER_JAR</c> when it names a file — a relative value searched
+    /// for upward from the working directory and from this assembly's directory, by the client's own
+    /// rule (F106) — else <see cref="PlannerJar"/>.
     /// </summary>
     public static FileInfo? ResolvedPlannerJar
     {
@@ -101,8 +101,13 @@ public static class RepoLayout
                 return PlannerJar;
             }
 
-            var path = Path.IsPathRooted(configured) ? configured : Path.Combine(Root.FullName, configured);
-            return File.Exists(path) ? new FileInfo(path) : PlannerJar;
+            // The client's own rule, so a relative value means the same thing to a fixture as to a
+            // sample or a test that starts the sidecar itself: searched for from the working directory
+            // upward, then from this assembly's directory upward.
+            var climbFrom = new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
+            return Client.PlannerProcess.TryResolveNamedJar(configured, climbFrom, out var resolved, out _)
+                ? new FileInfo(resolved)
+                : PlannerJar;
         }
     }
 

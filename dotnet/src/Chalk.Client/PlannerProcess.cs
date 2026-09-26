@@ -248,7 +248,7 @@ public sealed class PlannerProcess : IAsyncDisposable
         {
             var address = await ReadListeningLineAsync(process, stderr, options.StartTimeout, ct)
                 .ConfigureAwait(false);
-            log.LogDebug("planner {Pid} listening on {Address}", process.Id, address);
+            log.LogDebug("planner {Pid} listening on {Address}, from {Jar}", process.Id, address, jar);
             return new PlannerProcess(process, address, socketPath, log, stderr);
         }
         catch
@@ -303,26 +303,89 @@ public sealed class PlannerProcess : IAsyncDisposable
     {
         if (!string.IsNullOrWhiteSpace(configured))
         {
-            return File.Exists(configured)
-                ? Path.GetFullPath(configured)
-                : throw new FileNotFoundException(
-                    $"no planner jar at {configured} (PlannerProcessOptions.JarPath)",
-                    configured);
+            return ResolveNamedJar(configured, "PlannerProcessOptions.JarPath");
         }
 
         if (!string.IsNullOrWhiteSpace(environment))
         {
-            return File.Exists(environment)
-                ? Path.GetFullPath(environment)
-                : throw new FileNotFoundException(
-                    $"no planner jar at {environment} "
-                    + $"({PlannerProcessOptions.JarEnvironmentVariable})",
-                    environment);
+            return ResolveNamedJar(environment, PlannerProcessOptions.JarEnvironmentVariable);
         }
 
         return await PlannerArtifact
             .MaterializeAsync(cacheDirectory, ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A jar the host named. An absolute path is taken as it is. A relative one is searched for from
+    /// the working directory upward and then from the application's directory upward, the nearest
+    /// match winning, so a value written from a repository's root holds from a test host's output
+    /// directory or a sample's without this library knowing any layout (F106). Refused by name when
+    /// nothing has it, with every directory that was tried.
+    /// </summary>
+    internal static string ResolveNamedJar(string path, string setting)
+    {
+        if (TryResolveNamedJar(path, [Directory.GetCurrentDirectory(), AppContext.BaseDirectory], out var resolved, out var tried))
+        {
+            return resolved;
+        }
+
+        var where = Path.IsPathRooted(path)
+            ? "nothing is at that path."
+            : "a relative path is tried from the working directory and each directory above it, then "
+              + "from the application's directory and each directory above that, and none of these has "
+              + $"it: {string.Join(", ", tried)}. Give an absolute path, or one relative to a directory "
+              + "above the process.";
+        throw new FileNotFoundException($"no planner jar at '{path}' ({setting}): {where}", path);
+    }
+
+    /// <summary>
+    /// The search behind <see cref="ResolveNamedJar"/>, with the directories it climbs from made
+    /// explicit so a test can hand it a tree of its own. <paramref name="tried"/> is every directory
+    /// the relative path was joined to, in the order tried; for an absolute path it is the path's own
+    /// directory.
+    /// </summary>
+    internal static bool TryResolveNamedJar(
+        string path, IReadOnlyList<string> climbFrom, out string resolved, out IReadOnlyList<string> tried)
+    {
+        if (Path.IsPathRooted(path))
+        {
+            resolved = Path.GetFullPath(path);
+            tried = [Path.GetDirectoryName(resolved) ?? resolved];
+            return File.Exists(resolved);
+        }
+
+        var bases = new List<string>();
+        foreach (var start in climbFrom)
+        {
+            if (string.IsNullOrEmpty(start))
+            {
+                continue;
+            }
+
+            for (var directory = new DirectoryInfo(start); directory is not null; directory = directory.Parent)
+            {
+                if (!bases.Contains(directory.FullName, StringComparer.Ordinal))
+                {
+                    bases.Add(directory.FullName);
+                }
+            }
+        }
+
+        foreach (var @base in bases)
+        {
+            var candidate = Path.GetFullPath(Path.Combine(@base, path));
+            if (File.Exists(candidate))
+            {
+                resolved = candidate;
+                tried = bases;
+                return true;
+            }
+        }
+
+        resolved = string.Empty;
+        tried = bases;
+        return false;
     }
 
     private static async Task StopAsync(Process process, string? socketPath, ILogger log)

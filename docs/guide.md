@@ -75,7 +75,11 @@ When first needed, `PlannerProcess` materialises the embedded planner into a
 content-addressed per-user cache and launches it from there. Subsequent starts reuse the
 same cached JAR. `PlannerProcessOptions.JarPath` or `CHALK_PLANNER_JAR` may instead name
 an external JAR explicitly; a path so named that does not exist is refused rather than
-silently replaced by the embedded planner.
+silently replaced by the embedded planner. A relative path is searched for from the working
+directory upward and then from the application's directory upward, the nearest match
+winning, so `planner/build/libs/chalk-planner-0.1.0-SNAPSHOT-all.jar` written from a
+checkout's root holds for a test host or a sample started from a directory beneath it. The
+refusal names every directory that was tried.
 
 The cache root may be overridden with `PlannerProcessOptions.ArtifactCacheDirectory` or
 `CHALK_PLANNER_CACHE`; otherwise ChalkQL uses the platform's normal per-user cache
