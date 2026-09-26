@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Globalization;
 using Chalk.Catalog;
+using Chalk.Entitlements;
 using Chalk.Sources;
 using Chalk.Sources.Ado;
 using PredicateShape = Chalk.Ir.PredicateShape;
@@ -125,7 +126,10 @@ public sealed class PolicyAdoFixture : IDisposable
 
         if (source == PolicySourceProfile.AdoDuckDbTrusted)
         {
-            builder.TrustSourceRowSecurity();
+            builder.TrustSourceRowLevelSecurity(
+                RowLevelSecurityPreconditions.ConnectionIdentifiesPrincipal
+                | RowLevelSecurityPreconditions.PoliciesEnabledAndForced
+                | RowLevelSecurityPreconditions.PoliciesMatchEntitlements);
         }
 
         var fixture = new PolicyAdoFixture(builder.Build(), profile.Dialect);

@@ -61,9 +61,9 @@ public sealed class AdoSource : ISourceRuntime
         FunctionDescriptor[] functions,
         IRemoteFetch? fetch = null,
         AdoProviderTraits? traits = null,
-        bool trustSourceRowSecurity = false)
+        bool trustSourceRowLevelSecurity = false)
     {
-        _trustSourceRowSecurity = trustSourceRowSecurity;
+        _trustSourceRowLevelSecurity = trustSourceRowLevelSecurity;
         SourceId = sourceId;
         SchemaName = schemaName;
         _connect = connect;
@@ -93,10 +93,10 @@ public sealed class AdoSource : ISourceRuntime
             CostProfile = _costProfile,
             Tables = Array.ConvertAll(tables, t => t.Descriptor),
             Functions = _functions,
-            TrustSourceRowSecurity = _trustSourceRowSecurity,
+            TrustSourceRowLevelSecurity = _trustSourceRowLevelSecurity,
         });
 
-    private readonly bool _trustSourceRowSecurity;
+    private readonly bool _trustSourceRowLevelSecurity;
 
     /// <summary>The SQL schema these tables live in, as Chalk addresses them.</summary>
     public string SchemaName { get; }

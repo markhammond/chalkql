@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using Akade.IndexedSet;
 using Akade.IndexedSet.Concurrency;
 using Chalk.Catalog;
+using Chalk.Entitlements;
 using Chalk.Sources.Poco;
 
 namespace Chalk.Sources.Akade;
@@ -20,7 +21,7 @@ internal sealed class AkadeSourceOptions<T>
     public required AkadeComparerBinding<T>[] Comparers { get; init; }
     public Action<PocoTableBuilder<T>>? ConfigureTable { get; init; }
     public CostProfile CostProfile { get; init; } = CostProfile.Inherit;
-    public bool TrustSourceRowSecurity { get; init; }
+    public bool TrustSourceRowLevelSecurity { get; init; }
 }
 
 /// <summary>
@@ -40,7 +41,7 @@ public abstract class AkadeSourceBuilder<T, TSelf>
     private int _decimalScale = 10;
     private Action<PocoTableBuilder<T>>? _configureTable;
     private CostProfile _costProfile = Catalog.CostProfile.Inherit;
-    private bool _trustSourceRowSecurity;
+    private bool _trustSourceRowLevelSecurity;
 
     protected AkadeSourceBuilder(string sourceId)
     {
@@ -107,9 +108,15 @@ public abstract class AkadeSourceBuilder<T, TSelf>
         return Self;
     }
 
-    public TSelf TrustSourceRowSecurity(bool trust = true)
+    /// <summary>
+    /// The host trusts this set to hold only the rows each principal may see, so no row predicate is
+    /// emitted over it (D156). The claim is stated by every pre-condition it rests on (D310); a call
+    /// that asserts fewer is refused, naming the ones it left out.
+    /// </summary>
+    public TSelf TrustSourceRowLevelSecurity(RowLevelSecurityPreconditions asserted)
     {
-        _trustSourceRowSecurity = trust;
+        asserted.RequireAll(nameof(asserted));
+        _trustSourceRowLevelSecurity = true;
         return Self;
     }
 
@@ -275,7 +282,7 @@ public abstract class AkadeSourceBuilder<T, TSelf>
         Comparers = [.. _comparers],
         ConfigureTable = _configureTable,
         CostProfile = _costProfile,
-        TrustSourceRowSecurity = _trustSourceRowSecurity,
+        TrustSourceRowLevelSecurity = _trustSourceRowLevelSecurity,
     };
 }
 

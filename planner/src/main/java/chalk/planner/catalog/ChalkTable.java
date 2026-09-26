@@ -194,8 +194,8 @@ public final class ChalkTable extends AbstractTable implements ScannableTable, T
    * Whether the host trusts this source's own row security (D156), in which case the entitlement
    * pass skips {@code Filter_R} for its tables and nothing else — the disclosures are still Chalk's.
    */
-  public boolean trustsSourceRowSecurity() {
-    return schema.getTrustSourceRowSecurity();
+  public boolean trustsSourceRowLevelSecurity() {
+    return schema.getTrustSourceRowLevelSecurity();
   }
 
   /** Whether this table's rows live in several physical tables (D106). */

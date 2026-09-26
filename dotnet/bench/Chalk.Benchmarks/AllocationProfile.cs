@@ -621,7 +621,7 @@ internal static class AllocationProfile
                 CostProfile = schema.CostProfile,
                 Tables = [.. schema.Tables.Select(Reprice)],
                 Functions = schema.Functions,
-                TrustSourceRowSecurity = schema.TrustSourceRowSecurity,
+                TrustSourceRowLevelSecurity = schema.TrustSourceRowLevelSecurity,
             };
         }
 

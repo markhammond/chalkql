@@ -26,7 +26,7 @@ Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.SchemaName(string! name) -> TSe
 Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.Self.get -> TSelf!
 Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.SourceId.get -> string!
 Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.TableName(string! name) -> TSelf!
-Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.TrustSourceRowSecurity(bool trust = true) -> TSelf!
+Chalk.Sources.Akade.AkadeSourceBuilder<T, TSelf>.TrustSourceRowLevelSecurity(Chalk.Entitlements.RowLevelSecurityPreconditions asserted) -> TSelf!
 Chalk.Sources.Akade.AkadeTable<T>
 Chalk.Sources.Akade.AkadeTable<T>.Runtime.get -> Chalk.Sources.ISourceRuntime!
 Chalk.Sources.Akade.AkadeTable<T>.Schema.get -> string!

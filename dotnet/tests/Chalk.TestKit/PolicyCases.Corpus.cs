@@ -4712,7 +4712,7 @@ public static partial class PolicyCases
         {
             Id = "157",
             Group = "K",
-            Covers = "D156 — trust_source_row_security",
+            Covers = "D156 — trust_source_row_level_security",
             File = "cases/157-members-trust-source-row-security-u2.sql",
             Principal = "u2",
             Source = PolicySourceProfile.AdoDuckDbTrusted,

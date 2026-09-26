@@ -382,7 +382,7 @@ public abstract class AkadeSetSource<T, TSet> :
         CostProfile = Options.CostProfile,
         Tables = schema.Tables,
         Functions = Options.Functions,
-        TrustSourceRowSecurity = Options.TrustSourceRowSecurity,
+        TrustSourceRowLevelSecurity = Options.TrustSourceRowLevelSecurity,
     };
 
     /// <summary>
@@ -455,7 +455,7 @@ public abstract class AkadeSetSource<T, TSet> :
             CostProfile = fresh.CostProfile,
             Tables = [carriedTable],
             Functions = fresh.Functions,
-            TrustSourceRowSecurity = fresh.TrustSourceRowSecurity,
+            TrustSourceRowLevelSecurity = fresh.TrustSourceRowLevelSecurity,
         };
     }
 

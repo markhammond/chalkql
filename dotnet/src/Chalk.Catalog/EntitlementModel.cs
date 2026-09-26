@@ -552,3 +552,61 @@ public enum Enforcement
     /// </summary>
     PushdownRequired = 3,
 }
+
+/// <summary>
+/// What a host asserts about a source before Chalk stops filtering its rows (D156, D310): the
+/// pre-conditions under which trusting the source's own row-level security is sound. Chalk can check
+/// none of them, and never tells a source who is asking; if any one is false, every row the source
+/// returns is disclosed. A builder's <c>TrustSourceRowLevelSecurity</c> takes all three by name and
+/// refuses fewer.
+/// </summary>
+[Flags]
+public enum RowLevelSecurityPreconditions
+{
+    /// <summary>Nothing asserted: the value a host has not filled in, refused where trust is declared.</summary>
+    None = 0,
+
+    /// <summary>
+    /// Every connection identifies the principal to the source — per-principal credentials, a session
+    /// role, or a session variable the source's policies read — because Chalk itself never does.
+    /// </summary>
+    ConnectionIdentifiesPrincipal = 1,
+
+    /// <summary>
+    /// Row-level security is enabled, and forced for the table owner too, on every entitled table of
+    /// the source.
+    /// </summary>
+    PoliciesEnabledAndForced = 2,
+
+    /// <summary>The source's policies admit exactly the rows the entitlement's row predicate would.</summary>
+    PoliciesMatchEntitlements = 4,
+}
+
+/// <summary>What <see cref="RowLevelSecurityPreconditions"/> leaves unasserted.</summary>
+public static class RowLevelSecurityPreconditionsExtensions
+{
+    private const RowLevelSecurityPreconditions Every =
+        RowLevelSecurityPreconditions.ConnectionIdentifiesPrincipal
+        | RowLevelSecurityPreconditions.PoliciesEnabledAndForced
+        | RowLevelSecurityPreconditions.PoliciesMatchEntitlements;
+
+    /// <summary>The pre-conditions <paramref name="asserted"/> does not name; <see cref="RowLevelSecurityPreconditions.None"/> when it names them all.</summary>
+    public static RowLevelSecurityPreconditions Missing(this RowLevelSecurityPreconditions asserted) => Every & ~asserted;
+
+    /// <summary>
+    /// Refuses an assertion short of every pre-condition, naming the ones left out: trusting a
+    /// source's row-level security is a claim Chalk cannot check, so the host states all of it.
+    /// </summary>
+    public static void RequireAll(this RowLevelSecurityPreconditions asserted, string paramName)
+    {
+        var missing = asserted.Missing();
+        if (missing != RowLevelSecurityPreconditions.None)
+        {
+            throw new ArgumentException(
+                "trusting a source's row-level security requires every pre-condition asserted by name, "
+                + $"and this call does not assert {missing}. Chalk cannot check any of them; if one is "
+                + "false, every row the source returns is disclosed.",
+                paramName);
+        }
+    }
+}

@@ -357,8 +357,8 @@ Chalk.Catalog.SchemaDescriptor.SourceId.get -> string!
 Chalk.Catalog.SchemaDescriptor.SourceId.init -> void
 Chalk.Catalog.SchemaDescriptor.Tables.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.TableDescriptor!>!
 Chalk.Catalog.SchemaDescriptor.Tables.init -> void
-Chalk.Catalog.SchemaDescriptor.TrustSourceRowSecurity.get -> bool
-Chalk.Catalog.SchemaDescriptor.TrustSourceRowSecurity.init -> void
+Chalk.Catalog.SchemaDescriptor.TrustSourceRowLevelSecurity.get -> bool
+Chalk.Catalog.SchemaDescriptor.TrustSourceRowLevelSecurity.init -> void
 Chalk.Catalog.SourceCapabilities
 Chalk.Catalog.SourceCapabilities.MaxInList.get -> int
 Chalk.Catalog.SourceCapabilities.MaxInList.init -> void
@@ -632,3 +632,11 @@ static Chalk.Entitlements.PopulationAggregates.Listing.get -> string!
 ~override Chalk.Catalog.ChalkType.Equals(object obj) -> bool
 ~override Chalk.Catalog.KeyOrder.Equals(object obj) -> bool
 ~override Chalk.Catalog.KeyOrder.ToString() -> string
+Chalk.Entitlements.RowLevelSecurityPreconditions
+Chalk.Entitlements.RowLevelSecurityPreconditions.None = 0 -> Chalk.Entitlements.RowLevelSecurityPreconditions
+Chalk.Entitlements.RowLevelSecurityPreconditions.ConnectionIdentifiesPrincipal = 1 -> Chalk.Entitlements.RowLevelSecurityPreconditions
+Chalk.Entitlements.RowLevelSecurityPreconditions.PoliciesEnabledAndForced = 2 -> Chalk.Entitlements.RowLevelSecurityPreconditions
+Chalk.Entitlements.RowLevelSecurityPreconditions.PoliciesMatchEntitlements = 4 -> Chalk.Entitlements.RowLevelSecurityPreconditions
+Chalk.Entitlements.RowLevelSecurityPreconditionsExtensions
+static Chalk.Entitlements.RowLevelSecurityPreconditionsExtensions.Missing(this Chalk.Entitlements.RowLevelSecurityPreconditions asserted) -> Chalk.Entitlements.RowLevelSecurityPreconditions
+static Chalk.Entitlements.RowLevelSecurityPreconditionsExtensions.RequireAll(this Chalk.Entitlements.RowLevelSecurityPreconditions asserted, string! paramName) -> void

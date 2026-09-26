@@ -134,7 +134,7 @@ public sealed class EntitlementsAdoTests(SharedSidecar sidecar, SharedPostgres p
     }
 
     /// <summary>
-    /// <c>trust_source_row_security</c> (D156) skips the row predicate for this source's tables and
+    /// <c>trust_source_row_level_security</c> (D156) skips the row predicate for this source's tables and
     /// <b>nothing else</b>. This fixture's database has no row security of its own, so trusting it
     /// returns every row — which is exactly the point of the setting being a statement about the
     /// database that Chalk cannot check — while the column disclosures are still Chalk's.
@@ -150,7 +150,7 @@ public sealed class EntitlementsAdoTests(SharedSidecar sidecar, SharedPostgres p
     [Fact]
     public async Task A_trusted_source_keeps_the_disclosures_and_loses_the_row_predicate()
     {
-        var trusted = Track(TenancyAdoFixture.CreateDuckDb(trustSourceRowSecurity: true));
+        var trusted = Track(TenancyAdoFixture.CreateDuckDb(trustSourceRowLevelSecurity: true));
         const string Sql = "SELECT id, first_name FROM members ORDER BY id";
 
         // Every row, because nothing filtered them — the agent's mask inside their scope and the

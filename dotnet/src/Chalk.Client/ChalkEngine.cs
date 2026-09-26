@@ -1485,7 +1485,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 CostProfile = schema.CostProfile,
                 Tables = tables,
                 Functions = schema.Functions,
-                TrustSourceRowSecurity = schema.TrustSourceRowSecurity,
+                TrustSourceRowLevelSecurity = schema.TrustSourceRowLevelSecurity,
             });
         }
 

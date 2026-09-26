@@ -1129,7 +1129,7 @@ public final class EntitlementPass {
     if (folded != null && folded.isAlwaysTrue()) {
       folded = null;
     }
-    return leafFold(scan, descriptor, statementConjuncts, folded, table.trustsSourceRowSecurity());
+    return leafFold(scan, descriptor, statementConjuncts, folded, table.trustsSourceRowLevelSecurity());
   }
 
   /**
@@ -1396,7 +1396,7 @@ public final class EntitlementPass {
         rewritten,
         statementConjuncts,
         folded,
-        table.trustsSourceRowSecurity(),
+        table.trustsSourceRowLevelSecurity(),
         visibility,
         through);
   }
@@ -1564,7 +1564,7 @@ public final class EntitlementPass {
     // under (§3.3). The statement's own conjuncts always; the row predicate's only where the pass
     // actually emits it as `Filter_R`.
     //
-    // Under `trust_source_row_security` (D156) it does not: the filter is skipped and the rows the
+    // Under `trust_source_row_level_security` (D156) it does not: the filter is skipped and the rows the
     // source returns are whatever the source's own row security let through, so assuming the
     // predicate here would fold a rule condition that is merely *implied by scope* to TRUE and hand
     // every row the mask — including rows outside the scope, whose masked value is a disclosure the

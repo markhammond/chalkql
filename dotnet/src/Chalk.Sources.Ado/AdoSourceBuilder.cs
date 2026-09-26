@@ -66,7 +66,7 @@ public sealed class AdoSourceBuilder
     private RowCountMode _rowCounts = RowCountMode.Unknown;
     private IRemoteFetch _fetch = DbDataReaderFetch.Instance;
     private AdoProviderTraits? _traits;
-    private bool _trustSourceRowSecurity;
+    private bool _trustSourceRowLevelSecurity;
 
     /// <param name="sourceId">Identifies this source in the catalog and in every <c>TableRef</c>.</param>
     /// <param name="factory">The provider's factory; the host references the provider package, Chalk does not.</param>
@@ -359,7 +359,7 @@ public sealed class AdoSourceBuilder
     }
 
     /// <summary>
-    /// The host trusts this source to enforce row visibility itself (D156,
+    /// The host trusts this source to enforce row-level security itself (D156,
     /// <c>docs/design/16-entitlements.md</c> §3.7). The entitlement pass then emits no row predicate
     /// for this source's tables — <b>and nothing else changes</b>: the column disclosures are still
     /// Chalk's, the masks are still applied here, and the report says the row predicate was not
@@ -367,12 +367,14 @@ public sealed class AdoSourceBuilder
     /// </summary>
     /// <remarks>
     /// Off by default, which is the safe default: a source nobody has said anything about is one
-    /// Chalk filters itself. Turning it on is a statement about the database's own policy, and
-    /// Chalk cannot check it.
+    /// Chalk filters itself. Turning it on is a claim about the database's own policy that Chalk
+    /// cannot check, so the host states every pre-condition of the claim by name (D310); a call that
+    /// asserts fewer is refused, naming the ones it left out.
     /// </remarks>
-    public AdoSourceBuilder TrustSourceRowSecurity()
+    public AdoSourceBuilder TrustSourceRowLevelSecurity(RowLevelSecurityPreconditions asserted)
     {
-        _trustSourceRowSecurity = true;
+        asserted.RequireAll(nameof(asserted));
+        _trustSourceRowLevelSecurity = true;
         return this;
     }
 
@@ -468,7 +470,7 @@ public sealed class AdoSourceBuilder
             [.. _functions],
             _fetch,
             _traits,
-            _trustSourceRowSecurity);
+            _trustSourceRowLevelSecurity);
 
         // The handles taken at registration acquire the source they name now that there is one
         // (D271 (h)).

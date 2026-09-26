@@ -150,7 +150,7 @@ internal static class CatalogProtoMapping
             Capabilities = ToProto(schema.Capabilities),
             DialectProfile = ToProto(schema.DialectProfile),
             CostProfile = ToProto(schema.CostProfile),
-            TrustSourceRowSecurity = schema.TrustSourceRowSecurity,
+            TrustSourceRowLevelSecurity = schema.TrustSourceRowLevelSecurity,
         };
         message.Tables.AddRange(schema.Tables.Select(ToProto));
         message.Functions.AddRange(schema.Functions.Select(ToProto));
@@ -316,7 +316,7 @@ internal static class CatalogProtoMapping
             ? DialectProfileDescriptor.None
             : FromProto(message.DialectProfile),
         CostProfile = FromProto(message.CostProfile),
-        TrustSourceRowSecurity = message.TrustSourceRowSecurity,
+        TrustSourceRowLevelSecurity = message.TrustSourceRowLevelSecurity,
         Tables = message.Tables.Select(FromProto).ToArray(),
         Functions = message.Functions.Select(FromProto).ToArray(),
     };

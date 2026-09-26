@@ -76,7 +76,7 @@ public static partial class PolicyCases
             + "in one call, because the DuckDB profile's `max_in_list` is 1000. What is still "
             + "disputed is the row count, which is the fixture's own error."),
         new("U10", ["157"], PolicyVerdict.Agreed,
-            "PerRow, and F44 is fixed. Under trust_source_row_security one origin is both masked "
+            "PerRow, and F44 is fixed. Under trust_source_row_level_security one origin is both masked "
             + "(inside the scope) and a placeholder (outside it), and §3.12's meet resolves that to "
             + "PerRow. The pass had been simplifying the rules under a row predicate it does not "
             + "emit for a trusted source, which folded the agent's rule to a constant and masked "

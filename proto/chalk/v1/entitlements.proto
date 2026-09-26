@@ -161,7 +161,7 @@ message EntitledTable {
   // The descriptor this plan was built against.
   string descriptor_hash = 3;
   // Whether the folded row predicate reached the source. Honestly false for a LOCAL table, a source
-  // with `trust_source_row_security`, a shape the source did not declare, PUSHDOWN_LEVEL_NONE — and
+  // with `trust_source_row_level_security`, a shape the source did not declare, PUSHDOWN_LEVEL_NONE — and
   // for a local table, which has no source to push into.
   bool row_predicate_pushed = 4;
   // How much of the table this principal can see, computed from the context and the statement alone

@@ -114,7 +114,7 @@ public sealed class SchemaDescriptor
     /// is the default. Column disclosures are unaffected: masking and the query-field rule are
     /// Chalk's, whatever the source filters.
     /// </summary>
-    public bool TrustSourceRowSecurity { get; init; }
+    public bool TrustSourceRowLevelSecurity { get; init; }
 
     /// <summary>Finds a table by name, case-insensitively (D15).</summary>
     public TableDescriptor? FindTable(string name) =>

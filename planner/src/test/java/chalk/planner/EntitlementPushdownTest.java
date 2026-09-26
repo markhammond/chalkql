@@ -257,7 +257,7 @@ class EntitlementPushdownTest {
   // ------------------------------------------------------------------ trust (D156)
 
   /**
-   * {@code trust_source_row_security} skips {@code Filter_R} for that source's tables <b>and
+   * {@code trust_source_row_level_security} skips {@code Filter_R} for that source's tables <b>and
    * nothing else</b>: the disclosures are still Chalk's, so an agent still sees the mask, and the
    * report says the row predicate was not pushed — because there was none to push.
    *

@@ -143,7 +143,7 @@ public final class TenancyCatalogs {
     CatalogContext catalog = remote();
     return catalog.toBuilder()
         .setSchemas(
-            1, catalog.getSchemas(1).toBuilder().setTrustSourceRowSecurity(true).build())
+            1, catalog.getSchemas(1).toBuilder().setTrustSourceRowLevelSecurity(true).build())
         .build();
   }
 

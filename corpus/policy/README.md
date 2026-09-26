@@ -56,7 +56,7 @@ not fit in two. The Calcite guards are numbered `c01` upward.
 | **H** folding | 126–132 | 7 | §2 items 1–3, D197 — an empty list, `NOT IN` over an empty list, a composite list, a single-column list, a list above `fold_max_rows`, a scalar wildcard |
 | **I** visibility, contradiction, refusal | 133–140 | 8 | §3.12 D207 — `visibility` NONE/SOME/ALL, `contradiction`, `RefuseWhenNoVisibleRows`, one report row per entitled table, none for an unentitled one |
 | **J** created-by, subject grants, the global grant | 141–148 | 8 | D204 (`within` and `Anywhere`), D205 (`AllowGlobalGrants`), D206 (`CreatorSees` Full and ByRules, on two tables and across a tenancy boundary) |
-| **K** pushdown, locality, the ADO variants | 149–159, 190 | 12 | §3.7 D199 (`row_predicate_pushed`, `PUSHDOWN_REQUIRED` over a profile with and without `IN`), §3.8 D200 (a mask stays local, a full column pushes), D156 (`LOCAL`, `trust_source_row_security`), the filter-residual rule of §3.7 item 3, the key-set path, and a composite list above the ceiling shipped as a key set (190; §2 item 2, F50) |
+| **K** pushdown, locality, the ADO variants | 149–159, 190 | 12 | §3.7 D199 (`row_predicate_pushed`, `PUSHDOWN_REQUIRED` over a profile with and without `IN`), §3.8 D200 (a mask stays local, a full column pushes), D156 (`LOCAL`, `trust_source_row_level_security`), the filter-residual rule of §3.7 item 3, the key-set path, and a composite list above the ceiling shipped as a key set (190; §2 item 2, F50) |
 | **L** `statistical` and execute-time binding | 160–170, 186 | 12 | D203 (a k-anonymous group key, a raw predicate under `MASKED` and under `AGGREGATE_ONLY`, group suppression, pinning refused, row-level output refused, a window refused, and the same statement without the opt-in), §2/D209 (execute-time binding, and `Omit` degrading) |
 | **M** disclosure sibling columns | 171–176 | 6 | §3.12 D207 — the sibling, the per-row meet on a derived column, no sibling for an unentitled origin, a suffix collision, a configured suffix, an undisclosed sibling |
 | **N** the fingerprint join | 177–179 | 3 | §8 corpus 19, §4 — an equality join on tokens within one tenancy, across two, and the contrast with a principal whose two orgs mask differently |
@@ -246,7 +246,7 @@ call's worth of keys bound into that one placeholder. The flag is `true`, as thi
 The 70 keys take **one** call, because the DuckDB profile's `max_in_list` is 1000; a smaller ceiling
 would batch them, and `max_keys_per_call` on the plan's lookup join is what says so.
 
-**U10 — the reported disclosure under `trust_source_row_security` (case 157). Settled.** With
+**U10 — the reported disclosure under `trust_source_row_level_security` (case 157). Settled.** With
 `Filter_R` skipped, rows outside the principal's scope come back and every protected column on them
 is a placeholder, while rows inside are masked. One origin is therefore both, and §3.12's meet
 resolves that to `PerRow`, which is what the case encoded and what the engine now says (F44, ADR

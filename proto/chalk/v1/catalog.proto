@@ -120,7 +120,7 @@ message Schema {
   // no entitlement predicate is injected over its tables. False — every source is
   // enforced — is the default and what a host gets until it says otherwise. Column disclosures are
   // unaffected: masking and the query-field rule are Chalk's, whatever the source filters.
-  bool trust_source_row_security = 10;
+  bool trust_source_row_level_security = 10;
 }
 
 // One user-defined function, with the PostgreSQL `CREATE FUNCTION` properties that have a counterpart

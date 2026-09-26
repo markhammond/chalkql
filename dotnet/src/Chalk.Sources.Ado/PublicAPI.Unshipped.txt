@@ -43,7 +43,7 @@ Chalk.Sources.Ado.AdoSourceBuilder.RowCountMode
 Chalk.Sources.Ado.AdoSourceBuilder.RowCountMode.Exact = 1 -> Chalk.Sources.Ado.AdoSourceBuilder.RowCountMode
 Chalk.Sources.Ado.AdoSourceBuilder.RowCountMode.Unknown = 0 -> Chalk.Sources.Ado.AdoSourceBuilder.RowCountMode
 Chalk.Sources.Ado.AdoSourceBuilder.RowCounts(Chalk.Sources.Ado.AdoSourceBuilder.RowCountMode mode) -> Chalk.Sources.Ado.AdoSourceBuilder!
-Chalk.Sources.Ado.AdoSourceBuilder.TrustSourceRowSecurity() -> Chalk.Sources.Ado.AdoSourceBuilder!
+Chalk.Sources.Ado.AdoSourceBuilder.TrustSourceRowLevelSecurity(Chalk.Entitlements.RowLevelSecurityPreconditions asserted) -> Chalk.Sources.Ado.AdoSourceBuilder!
 Chalk.Sources.Ado.AdoTable
 Chalk.Sources.Ado.AdoTable.AdoTable() -> void
 Chalk.Sources.Ado.AdoTable.Equals(Chalk.Sources.Ado.AdoTable other) -> bool

@@ -189,7 +189,7 @@ public sealed class RecordedPlannerTests
                     DialectProfile = schema.DialectProfile,
                     CostProfile = schema.CostProfile,
                     Functions = schema.Functions,
-                    TrustSourceRowSecurity = schema.TrustSourceRowSecurity,
+                    TrustSourceRowLevelSecurity = schema.TrustSourceRowLevelSecurity,
                     Tables =
                     [
                         .. schema.Tables.Select(t =>

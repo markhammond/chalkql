@@ -151,7 +151,7 @@ public sealed class TenancyAdoFixture : IDisposable
     /// or <c>PushdownRequired</c>.
     /// </param>
     /// <param name="pushMasks">The table's half of D153's mask opt-in.</param>
-    /// <param name="trustSourceRowSecurity">D156: the host trusts this source's own row security.</param>
+    /// <param name="trustSourceRowLevelSecurity">D156: the host trusts this source's own row security.</param>
     /// <param name="capabilities">
     /// What the source declares. Null takes the dialect's own, which is what a host gets.
     /// </param>
@@ -163,7 +163,7 @@ public sealed class TenancyAdoFixture : IDisposable
     public static TenancyAdoFixture CreateDuckDb(
         Enforcement enforcement = Enforcement.Pushdown,
         bool pushMasks = false,
-        bool trustSourceRowSecurity = false,
+        bool trustSourceRowLevelSecurity = false,
         SourceCapabilities? capabilities = null,
         ThroughPlacement placement = ThroughPlacement.OneSource,
         MarketplacePlacement marketplace = MarketplacePlacement.OneSource)
@@ -175,7 +175,7 @@ public sealed class TenancyAdoFixture : IDisposable
             connection => new DuckDBConnection(connection),
             enforcement,
             pushMasks,
-            trustSourceRowSecurity,
+            trustSourceRowLevelSecurity,
             capabilities,
             placement,
             marketplace);
@@ -192,7 +192,7 @@ public sealed class TenancyAdoFixture : IDisposable
         Func<string, DbConnection> connect,
         Enforcement enforcement = Enforcement.Pushdown,
         bool pushMasks = false,
-        bool trustSourceRowSecurity = false,
+        bool trustSourceRowLevelSecurity = false,
         SourceCapabilities? capabilities = null,
         ThroughPlacement placement = ThroughPlacement.OneSource,
         MarketplacePlacement marketplace = MarketplacePlacement.OneSource) =>
@@ -202,7 +202,7 @@ public sealed class TenancyAdoFixture : IDisposable
             connect,
             enforcement,
             pushMasks,
-            trustSourceRowSecurity,
+            trustSourceRowLevelSecurity,
             capabilities,
             placement,
             marketplace);
@@ -213,7 +213,7 @@ public sealed class TenancyAdoFixture : IDisposable
         Func<string, DbConnection> connect,
         Enforcement enforcement,
         bool pushMasks,
-        bool trustSourceRowSecurity,
+        bool trustSourceRowLevelSecurity,
         SourceCapabilities? capabilities,
         ThroughPlacement placement,
         MarketplacePlacement marketplace)
@@ -368,9 +368,12 @@ public sealed class TenancyAdoFixture : IDisposable
                 "items", Entitled(TenancyFixture.ItemsEntitlement(), enforcement, pushMasks));
         }
 
-        if (trustSourceRowSecurity)
+        if (trustSourceRowLevelSecurity)
         {
-            builder.TrustSourceRowSecurity();
+            builder.TrustSourceRowLevelSecurity(
+                RowLevelSecurityPreconditions.ConnectionIdentifiesPrincipal
+                | RowLevelSecurityPreconditions.PoliciesEnabledAndForced
+                | RowLevelSecurityPreconditions.PoliciesMatchEntitlements);
         }
 
         var fixture = new TenancyAdoFixture(
