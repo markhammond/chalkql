@@ -270,14 +270,15 @@ A bare SQL prefix pattern can use it:
 WHERE name LIKE 'Int%'
 ```
 
-A prefix pattern means:
+A bare prefix is a pattern's literal start followed by one trailing `%` and nothing else. With an
+`ESCAPE` clause the literal start is read through the escape, so these are prefixes too:
 
-* one trailing `%`;
-* no other `%`;
-* no `_`;
-* no `ESCAPE`.
+```sql
+WHERE name LIKE 'KB\_%' ESCAPE '\'   -- the prefix KB_
+WHERE name LIKE 'Int%' ESCAPE '!'     -- the prefix Int; the escape is simply unused
+```
 
-More general patterns remain ordinary predicates:
+A literal pattern that is not a bare prefix remains an ordinary predicate:
 
 ```sql
 WHERE name LIKE '%USDT'
@@ -285,7 +286,45 @@ WHERE name LIKE 'a%b%'
 WHERE name LIKE 'A_'
 ```
 
-An ordered string index can also serve a bare prefix query. ChalkQL converts the prefix into the corresponding half-open string range.
+### Parameter patterns
+
+A pattern may be a parameter:
+
+```csharp
+var query = await engine.PrepareAsync("SELECT id, name FROM terms WHERE name LIKE ?");
+await using var execution = await engine.ExecuteAsync(query, [search + "%"]);
+```
+
+The value is the pattern, exactly as with ADO.NET and Dapper: `%` and `_` in it are wildcards, and
+there is no escape character unless the statement names one. To match user input literally, name an
+escape and escape the input:
+
+```csharp
+var query = await engine.PrepareAsync("SELECT id, name FROM terms WHERE name LIKE ? ESCAPE '\\'");
+var pattern = search.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
+```
+
+Where the prefix index serves the lookup, it is asked for the value's literal start, and the lookup
+checks the rest of the pattern on the rows it reads. Any value is answered:
+
+* a bare prefix such as `Int%` reads exactly the rows it produces;
+* `Int_4` reads the rows starting with `Int` and keeps `Int64`;
+* `%USDT` has an empty literal start, so it reads the whole index;
+* `NULL` matches nothing and reads nothing.
+
+Where a scan is the cheaper plan, the same statement is an ordinary filter, with the pattern
+compiled once per execution.
+
+### Escapes
+
+The rules are the SQL standard's, which are also Calcite's: an `ESCAPE` is exactly one character,
+and in the pattern it must be followed by `%`, `_` or itself. A pattern ending in its escape
+character, an escape before an ordinary character, a two-character escape and `ESCAPE ''` are all
+refused — a literal when the statement is prepared, with its position, and a parameter's value when
+the statement is executed, before anything reaches a source. The escape itself must be a literal.
+
+An ordered string index can also serve a bare prefix query. ChalkQL converts the literal start into
+the corresponding half-open string range.
 
 A prefix trie itself claims no ordering.
 
