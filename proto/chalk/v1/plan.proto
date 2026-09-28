@@ -499,8 +499,12 @@ message Unnest {
 // order; rows come out in the index's key order. Several ranges are a union, and the executor
 // de-duplicates rows when there is more than one.
 //
-// `residual` is over the *emitted* row. The planner never sets it today — it emits Filter(IndexLookup)
-// instead — but the field stays so a later planner can fuse the two without an IR change.
+// `residual` is over the *emitted* row, and a row the lookup reads is emitted only when it holds.
+// The planner sets it for one thing (D314): the `LIKE` a prefix range was made from when its pattern
+// is a parameter, because the range can cover only the bound value's literal start and the rest of
+// the pattern is known at bind time. Everything else a lookup cannot enforce is still a Filter above
+// it. The executor may skip a residual the ranges are shown to enforce already — a `LIKE` whose
+// bound value turned out to be a bare prefix.
 message IndexLookup {
   TableRef table = 1;
   string index = 2;
@@ -527,17 +531,26 @@ message IndexRange {
   bool lower_inclusive = 2;
   repeated Expr upper = 3;
   bool upper_inclusive = 4;
-  // The range is `col LIKE p || '%'` on the last bound column: `lower` holds the equality prefix and
-  // then `p`, `upper` is empty, and both inclusive flags are unset. Additive and false by default,
-  // so a range that is not one is byte-identical to a range from before this field.
+  // The range is a `LIKE` on the last bound column: `lower` holds the equality prefix and then the
+  // pattern itself, `upper` is empty, and both inclusive flags are unset. Additive and false by
+  // default, so a range that is not one is byte-identical to a range from before this field.
   //
   // What the source is finally asked for depends on the index's kind, and the client resolves it
-  // when it binds the bounds: an ORDERED index gets the plain half-open range `[p, next(p))`, where
-  // `next(p)` increments the last code point of `p` and carries; an INDEX_KIND_PREFIX one gets the
-  // prefix itself. A bound that turns out not to be a bare prefix — a parameter whose text has a
-  // wildcard in the middle, or one that ends at the largest code point there is and therefore has no
-  // successor — is refused at bind time, because the plan was made for a prefix.
+  // when it binds the bounds. Call `p` the pattern's literal start — its text up to the first
+  // wildcard `escape` does not quote, with the escapes removed. An ORDERED index gets the plain
+  // half-open range `[p, next(p))`, where `next(p)` increments the last code point of `p` and
+  // carries (open above when `p` is empty or has no successor); an INDEX_KIND_PREFIX one gets `p`
+  // itself.
+  //
+  // A literal pattern the planner uses here is a bare prefix — `p` followed by one `%` — so the
+  // range is exactly the rows it matches. A parameter may be bound to any pattern (D314): the range
+  // covers every text that starts with `p`, and the lookup's `residual` decides the rest.
   bool prefix = 5;
+  // The pattern's escape character when the LIKE had an ESCAPE clause; empty when it had none
+  // (D313). Set only on a prefix range, and always one code point: a malformed escape is refused at
+  // planning, and so is a malformed literal pattern; a malformed parameter value is refused when
+  // the statement is executed.
+  string escape = 6;
 }
 
 // Opaque native query executed by an ISourceRuntime. Output row type is Rel.row_type.

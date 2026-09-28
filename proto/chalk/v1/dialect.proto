@@ -55,7 +55,8 @@ message DialectProfile {
 
   // How the source compares strings. Only BINARY lets a string predicate, a string ORDER BY or a
   // DISTINCT / GROUP BY over strings be pushed — anything else can disagree with Chalk's own
-  // code-point ordering (A7) and produce a different answer, silently.
+  // code-point ordering (A7) and produce a different answer, silently. `like_matches_code_points`
+  // is the one exception, and it is about LIKE alone.
   StringCollation string_collation = 14;
 
   // Whether the source may answer approximately. Each gates exactly one shape.
@@ -72,6 +73,14 @@ message DialectProfile {
   // driver that wants `$name` cannot be handed `?` and a driver that wants `?` cannot be handed
   // `$name`. Unspecified means `?`.
   ParameterPlaceholder parameter_placeholder = 19;
+
+  // The source's LIKE matches code point by code point and case-sensitively whatever
+  // `string_collation` says, so a LIKE may be pushed under a LOCALE collation too (D315, amending
+  // D89 for LIKE alone). True of PostgreSQL under any deterministic collation: its collation orders
+  // and compares, and LIKE never consults it. Nothing else follows from it — string equality,
+  // ranges, sorts and grouping stay under `string_collation`. Contradicts CASE_INSENSITIVE, and the
+  // catalog validator refuses the pair.
+  bool like_matches_code_points = 20;
 }
 
 // How a driver spells a bound parameter. Distinct from Chalk.Client's own ParameterStyle,
