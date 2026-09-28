@@ -160,6 +160,8 @@ Chalk.Catalog.DialectProfileDescriptor.Quoting.get -> Chalk.Ir.IdentifierQuoting
 Chalk.Catalog.DialectProfileDescriptor.Quoting.init -> void
 Chalk.Catalog.DialectProfileDescriptor.StringCollation.get -> Chalk.Ir.StringCollation
 Chalk.Catalog.DialectProfileDescriptor.StringCollation.init -> void
+Chalk.Catalog.DialectProfileDescriptor.LikeMatchesCodePoints.get -> bool
+Chalk.Catalog.DialectProfileDescriptor.LikeMatchesCodePoints.init -> void
 Chalk.Catalog.DialectProfileDescriptor.SupportsNullOrderingClause.get -> bool
 Chalk.Catalog.DialectProfileDescriptor.SupportsNullOrderingClause.init -> void
 Chalk.Catalog.DialectProfileDescriptor.TimeZone.get -> string!
@@ -621,7 +623,7 @@ static Chalk.Catalog.DialectProfiles.ByName(string? name) -> Chalk.Catalog.Diale
 static Chalk.Catalog.DialectProfiles.DuckDb.get -> Chalk.Catalog.DialectProfileDescriptor!
 static Chalk.Catalog.DialectProfiles.PostgreSql.get -> Chalk.Catalog.DialectProfileDescriptor!
 static Chalk.Catalog.DialectProfiles.Sqlite.get -> Chalk.Catalog.DialectProfileDescriptor!
-static Chalk.Catalog.DialectProfiles.With(this Chalk.Catalog.DialectProfileDescriptor! profile, Chalk.Ir.StringCollation? stringCollation = null, bool? supportsNullOrderingClause = null, Chalk.Ir.NullCollation? defaultNullCollation = null, Chalk.Ir.SqlConformance? conformance = null, System.Collections.Generic.IReadOnlyList<Chalk.Ir.SqlLibrary>? libraries = null, uint? maxNumericPrecision = null, uint? maxTimestampPrecision = null, bool? hasBoolean = null, string? timeZone = null, bool? approximateDecimal = null, bool? approximateDistinctCount = null, bool? approximateTopN = null, bool? implicitCoercionMatches = null, Chalk.Ir.ParameterPlaceholder? parameterPlaceholder = null) -> Chalk.Catalog.DialectProfileDescriptor!
+static Chalk.Catalog.DialectProfiles.With(this Chalk.Catalog.DialectProfileDescriptor! profile, Chalk.Ir.StringCollation? stringCollation = null, bool? supportsNullOrderingClause = null, Chalk.Ir.NullCollation? defaultNullCollation = null, Chalk.Ir.SqlConformance? conformance = null, System.Collections.Generic.IReadOnlyList<Chalk.Ir.SqlLibrary>? libraries = null, uint? maxNumericPrecision = null, uint? maxTimestampPrecision = null, bool? hasBoolean = null, string? timeZone = null, bool? approximateDecimal = null, bool? approximateDistinctCount = null, bool? approximateTopN = null, bool? implicitCoercionMatches = null, Chalk.Ir.ParameterPlaceholder? parameterPlaceholder = null, bool? likeMatchesCodePoints = null) -> Chalk.Catalog.DialectProfileDescriptor!
 static Chalk.Catalog.KeyOrder.operator !=(Chalk.Catalog.KeyOrder left, Chalk.Catalog.KeyOrder right) -> bool
 static Chalk.Catalog.KeyOrder.operator ==(Chalk.Catalog.KeyOrder left, Chalk.Catalog.KeyOrder right) -> bool
 static Chalk.Catalog.SourceCapabilities.None.get -> Chalk.Catalog.SourceCapabilities!

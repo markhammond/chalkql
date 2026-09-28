@@ -1,6 +1,6 @@
 Chalk source conformance: kit
 server: SQLite through Microsoft.Data.Sqlite, in-process
-PASSED — 26 checks, 0 failed, 1 skipped
+PASSED — 27 checks, 0 failed, 1 skipped
 
 SKIP text strategy: VARCHAR: declared (undeclared), observed String. Declare .Provider(new AdoProviderTraits { Text = TextStrategy.String }) on this source's builder to skip the measurement.
 PASS PredicateShape.Eq: declared pushable with Chalk's semantics, observed the same 1 rows the scan gives
@@ -25,6 +25,7 @@ PASS modulus of a negative: declared the sign of the dividend, as Chalk does, ob
 PASS decimal precision: declared 15, observed 1234567890.123456 came back as 1234567890.123460. The profile already says this source's decimals are approximate, and the planner refuses to push a comparison it would truncate.
 PASS timestamp precision: declared 3, observed 100 ns survived the round trip
 PASS LIKE escape handling: declared no LIKE shape declared, observed '100!%' ESCAPE '!' matched only the literal '100%'
+PASS LIKE default escape: declared no LIKE shape is pushable, observed '100\%' with no ESCAPE matched ids (none), so a backslash is an ordinary character
 PASS string cast truncation: declared an unbounded string cast keeps the value, as Chalk's does, observed all 82 characters survived CAST(... AS VARCHAR)
 PASS parameter round trip: declared the source takes parameters, observed a decimal at scale 6 did not match the row it came from (declared precision 15). The profile already says this source's values are coarser than Chalk's, and the planner refuses to push a comparison it would truncate.
 PASS unique key (id): declared unique, observed 16 distinct non-NULL keys over 16 rows

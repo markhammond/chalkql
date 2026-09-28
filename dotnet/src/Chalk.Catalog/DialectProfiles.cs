@@ -104,6 +104,15 @@ public static class DialectProfiles
     /// <see cref="StringCollation.Locale"/>: a PostgreSQL database's default collation comes from
     /// the cluster's locale, and only <c>C</c> / <c>POSIX</c> is binary. A host whose database is
     /// <c>C</c>-collated overrides the field and the kit's probe confirms it.
+    /// <para>
+    /// Its <c>LIKE</c> is Chalk's under any collation, though (D315): PostgreSQL's collation orders
+    /// and compares, and <c>LIKE</c> matches code point by code point, case-sensitively, without
+    /// consulting a deterministic one — and refuses outright under a nondeterministic one rather than
+    /// answering differently. So <see cref="DialectProfileDescriptor.LikeMatchesCodePoints"/> is set,
+    /// and a <c>LIKE</c> is pushed while equality, ranges and sorts on strings stay local. The
+    /// generated SQL writes <c>ESCAPE ''</c> on a <c>LIKE</c> that names no escape, because
+    /// PostgreSQL's default escape is a backslash and Chalk's is none.
+    /// </para>
     /// </summary>
     public static DialectProfileDescriptor PostgreSql { get; } = new()
     {
@@ -119,6 +128,7 @@ public static class DialectProfiles
         DefaultNullCollation = NullCollation.High,
         SupportsNullOrderingClause = true,
         StringCollation = StringCollation.Locale,
+        LikeMatchesCodePoints = true,
         ParameterPlaceholder = ParameterPlaceholder.NamedAt,
     };
 
@@ -150,7 +160,8 @@ public static class DialectProfiles
         bool? approximateDistinctCount = null,
         bool? approximateTopN = null,
         bool? implicitCoercionMatches = null,
-        ParameterPlaceholder? parameterPlaceholder = null)
+        ParameterPlaceholder? parameterPlaceholder = null,
+        bool? likeMatchesCodePoints = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
         return new DialectProfileDescriptor
@@ -170,6 +181,7 @@ public static class DialectProfiles
             SupportsNullOrderingClause =
                 supportsNullOrderingClause ?? profile.SupportsNullOrderingClause,
             StringCollation = stringCollation ?? profile.StringCollation,
+            LikeMatchesCodePoints = likeMatchesCodePoints ?? profile.LikeMatchesCodePoints,
             ApproximateDecimal = approximateDecimal ?? profile.ApproximateDecimal,
             ApproximateDistinctCount = approximateDistinctCount ?? profile.ApproximateDistinctCount,
             ApproximateTopN = approximateTopN ?? profile.ApproximateTopN,

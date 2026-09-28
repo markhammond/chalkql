@@ -41,14 +41,16 @@ public static class AdoCapabilities
 
         // A LIKE the source evaluates under another collation matches different rows, and the
         // catalog validator refuses the pair outright — so the shape is only claimed where the
-        // profile says the comparison is Chalk's own (D89).
+        // profile says the comparison is Chalk's own (D89), or where it says the source's LIKE never
+        // consults its collation at all (D315), which is PostgreSQL's under any deterministic one.
         //
         // SQLite is the exception, and the conformance kit is what found it: its `=` really is
         // binary, but its `LIKE` folds ASCII case unless the connection has set
         // `PRAGMA case_sensitive_like = ON`. So the preset does not claim the LIKE shapes there; a
         // host that has set the pragma adds them back and runs the kit to confirm.
-        if (profile.StringCollation == StringCollation.Binary
-            && !profile.Dialect.Equals("sqlite", StringComparison.OrdinalIgnoreCase))
+        var likeIsChalks = profile.StringCollation == StringCollation.Binary
+            || (profile.LikeMatchesCodePoints && profile.StringCollation != StringCollation.CaseInsensitive);
+        if (likeIsChalks && !profile.Dialect.Equals("sqlite", StringComparison.OrdinalIgnoreCase))
         {
             shapes.Add(PredicateShape.Like);
             shapes.Add(PredicateShape.LikePrefix);

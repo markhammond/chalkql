@@ -136,7 +136,10 @@ public sealed class CapabilityValidationTests
         Assert.Contains("MaxPushdownRows", error.Message, StringComparison.Ordinal);
     }
 
-    /// <summary>The contradiction the design names first: a LIKE shape under a locale collation.</summary>
+    /// <summary>
+    /// The contradiction the design names first: a LIKE shape under a locale collation — unless the
+    /// profile says its LIKE never consults the collation (D315), which the PostgreSQL preset does.
+    /// </summary>
     [Fact]
     public void A_like_shape_under_a_locale_collation_is_refused()
     {
@@ -146,10 +149,40 @@ public sealed class CapabilityValidationTests
                 QueryLanguage = QueryLanguage.Sql,
                 PushablePredicates = [PredicateShape.Like],
             },
-            DialectProfiles.PostgreSql));
+            DialectProfiles.PostgreSql.With(likeMatchesCodePoints: false)));
 
         Assert.Contains("StringCollation.Locale", error.Message, StringComparison.Ordinal);
         Assert.Contains("D89", error.Message, StringComparison.Ordinal);
+        Assert.Contains("LikeMatchesCodePoints", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>D315: PostgreSQL's LIKE is Chalk's under its locale collation, and the preset says so.</summary>
+    [Fact]
+    public void A_like_shape_under_a_locale_collation_whose_like_matches_code_points_is_accepted()
+    {
+        Assert.True(DialectProfiles.PostgreSql.LikeMatchesCodePoints);
+        Assert.Equal(StringCollation.Locale, DialectProfiles.PostgreSql.StringCollation);
+
+        CatalogValidator.Validate(Catalog(
+            new SourceCapabilities
+            {
+                QueryLanguage = QueryLanguage.Sql,
+                PushablePredicates = [PredicateShape.Like, PredicateShape.LikePrefix],
+            },
+            DialectProfiles.PostgreSql));
+    }
+
+    /// <summary>D315: a case-insensitive collation folds case in LIKE, so the flag beside it contradicts it.</summary>
+    [Fact]
+    public void Like_matching_code_points_beside_a_case_insensitive_collation_is_refused()
+    {
+        var error = Invalid(Catalog(
+            new SourceCapabilities { QueryLanguage = QueryLanguage.Sql },
+            DialectProfiles.Sqlite.With(
+                stringCollation: StringCollation.CaseInsensitive, likeMatchesCodePoints: true)));
+
+        Assert.Contains("contradict", error.Message, StringComparison.Ordinal);
+        Assert.Contains("D315", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
