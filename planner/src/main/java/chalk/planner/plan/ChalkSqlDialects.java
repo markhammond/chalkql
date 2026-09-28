@@ -228,6 +228,34 @@ public final class ChalkSqlDialects {
       super(context);
     }
 
+    /**
+     * A two-operand {@code LIKE} written with {@code ESCAPE ''} (D315, F150). PostgreSQL's LIKE
+     * takes a backslash as its escape when no ESCAPE clause names one, and Chalk's — the SQL
+     * standard's, and Calcite's — has no escape character at all, so {@code 'KB\_%'} would match
+     * {@code KB_1} there and {@code KB\x1} here. {@code ESCAPE ''} is PostgreSQL's own spelling
+     * of "no escape character". Every LIKE-kind operator is covered — {@code NOT LIKE} and the
+     * case-insensitive pair share the default — and a call that names its escape is written as it
+     * is.
+     */
+    @Override
+    public void unparseCall(SqlWriter writer, SqlCall call, int leftPrec, int rightPrec) {
+      if (call.getOperator() instanceof org.apache.calcite.sql.fun.SqlLikeOperator
+          && call.getKind() == SqlKind.LIKE
+          && call.operandCount() == 2) {
+        SqlCall escaped =
+            call.getOperator()
+                .createCall(
+                    call.getParserPosition(),
+                    call.operand(0),
+                    call.operand(1),
+                    org.apache.calcite.sql.SqlLiteral.createCharString("", SqlParserPos.ZERO));
+        super.unparseCall(writer, escaped, leftPrec, rightPrec);
+        return;
+      }
+
+      super.unparseCall(writer, call, leftPrec, rightPrec);
+    }
+
     @Override
     public @Nullable SqlNode getCastSpec(RelDataType type) {
       SqlNode chalk = castSpec(this, type);

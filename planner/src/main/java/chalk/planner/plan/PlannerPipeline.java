@@ -670,6 +670,11 @@ public final class PlannerPipeline implements AutoCloseable {
     // after conversion there is no correlate left to ask (ADR 0026).
     LateralCorrelationSupport.check(validated);
 
+    // A malformed LIKE escape, or a literal pattern malformed under one, refused with its position
+    // (D312). The rules are Calcite's runtime's; a pattern that is a literal only after folding is
+    // checked again where the plan is written.
+    LikeEscapeCheck.check(validated);
+
     // Where a composite value may not stand — a sort, grouping or partition key, a comparison, a CASE
     // or COALESCE result beside a scalar or a composite of another type (D295), a built-in
     // aggregate's argument — refused on the validated statement, while every expression

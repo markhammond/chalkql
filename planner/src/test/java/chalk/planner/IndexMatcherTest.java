@@ -184,9 +184,28 @@ class IndexMatcherTest {
             like(symbol, str("B_C%")), SYMBOL_TS, false, null, null),
         new Case("LIKE with no wildcard at all",
             like(symbol, str("BTCUSDT")), SYMBOL_TS, false, null, null),
-        new Case("LIKE with an ESCAPE clause",
+        // D313: the three-operand form is read through its escape. 'BTC!%' ESCAPE '!' is the literal
+        // text BTC% — an equality, not a prefix.
+        new Case("LIKE with an ESCAPE that quotes the only '%'",
             REX.makeCall(SqlStdOperatorTable.LIKE, symbol, str("BTC!%"), str("!")),
             SYMBOL_TS, false, null, null),
+        new Case("LIKE with an ESCAPE, a bare prefix under it",
+            likeEscape(symbol, str("BTC!_%"), str("!")), SYMBOL_TS, false,
+            "prefix['BTC!_%'] escape '!'", null),
+        new Case("LIKE with an ESCAPE quoting a '%' before the trailing one",
+            likeEscape(symbol, str("BTC!%%"), str("!")), SYMBOL_TS, false,
+            "prefix['BTC!%%'] escape '!'", null),
+        new Case("LIKE with an ESCAPE quoting the escape itself",
+            likeEscape(symbol, str("BTC!!%"), str("!")), SYMBOL_TS, false,
+            "prefix['BTC!!%'] escape '!'", null),
+        new Case("LIKE with an ESCAPE and an unquoted '_' is not a prefix",
+            likeEscape(symbol, str("BTC_!%"), str("!")), SYMBOL_TS, false, null, null),
+        new Case("LIKE with a malformed pattern under its ESCAPE is not a prefix",
+            likeEscape(symbol, str("BTC!x%"), str("!")), SYMBOL_TS, false, null, null),
+        new Case("LIKE with a two-character ESCAPE is not a prefix",
+            likeEscape(symbol, str("BTC%"), str("!!")), SYMBOL_TS, false, null, null),
+        new Case("LIKE a parameter pattern under an ESCAPE",
+            likeEscape(symbol, p0, str("!")), SYMBOL_TS, false, "prefix[?0] escape '!'", null),
         new Case("a hash index refuses a LIKE prefix",
             like(symbol, str("BTC%")), SYMBOL_TS, true, null, null),
         new Case("a bound on the column wins over a LIKE on it",
@@ -280,7 +299,7 @@ class IndexMatcherTest {
 
   private static String render(IndexMatcher.Range range) {
     if (range.prefix()) {
-      return "prefix" + range.lower();
+      return "prefix" + range.lower() + (range.escape() == null ? "" : " escape '" + range.escape() + "'");
     }
 
     String lower = range.lower().isEmpty() ? "[-inf]" : range.lower().toString();
@@ -401,6 +420,44 @@ class IndexMatcherTest {
 
   private static RexNode le(RexNode left, RexNode right) {
     return REX.makeCall(SqlStdOperatorTable.LESS_THAN_OR_EQUAL, left, right);
+  }
+
+  private static RexNode likeEscape(RexNode left, RexNode right, RexNode escape) {
+    return REX.makeCall(SqlStdOperatorTable.LIKE, left, right, escape);
+  }
+
+  /**
+   * D314: a parameter pattern is consumed — the lookup answers for it — and handed back as the
+   * lookup's own residual, because its range covers only the bound value's literal start. A literal
+   * prefix the matcher uses is bare and leaves the lookup nothing to re-check.
+   */
+  @Test
+  void a_parameter_pattern_is_the_lookups_own_residual_and_a_literal_one_is_not() {
+    RexNode symbol = ref(0);
+    RexNode pattern = like(symbol, param(0, TYPES.createSqlType(SqlTypeName.VARCHAR)));
+    IndexMatcher.Result parameter = IndexMatcher.split(pattern, SYMBOL_TS, ROW, false, REX);
+    assertThat(parameter.matched()).isTrue();
+    assertThat(parameter.residual()).as("nothing above the lookup").isNull();
+    assertThat(parameter.lookupResidual()).as("the lookup re-checks the LIKE").isEqualTo(pattern);
+
+    RexNode escaped =
+        likeEscape(symbol, param(0, TYPES.createSqlType(SqlTypeName.VARCHAR)), str("!"));
+    IndexMatcher.Result withEscape = IndexMatcher.split(escaped, SYMBOL_TS, ROW, false, REX);
+    assertThat(withEscape.lookupResidual()).isEqualTo(escaped);
+    assertThat(withEscape.ranges().get(0).escape()).isEqualTo("!");
+
+    RexNode literal = like(symbol, str("BTC%"));
+    IndexMatcher.Result bare = IndexMatcher.split(literal, SYMBOL_TS, ROW, false, REX);
+    assertThat(bare.matched()).isTrue();
+    assertThat(bare.residual()).isNull();
+    assertThat(bare.lookupResidual()).isNull();
+    assertThat(bare.ranges().get(0).escape()).isNull();
+
+    // The other conjuncts still go above the lookup; only the LIKE is the lookup's own.
+    RexNode both = and(pattern, gt(ref(2), real(100)));
+    IndexMatcher.Result split = IndexMatcher.split(both, SYMBOL_TS, ROW, false, REX);
+    assertThat(split.lookupResidual()).isEqualTo(pattern);
+    assertThat(split.residual()).hasToString(">($2, 100.0E0)");
   }
 
   private static RexNode like(RexNode left, RexNode right) {

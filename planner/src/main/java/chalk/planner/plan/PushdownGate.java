@@ -243,11 +243,7 @@ public final class PushdownGate {
   }
 
   private PredicateShape likeShape(RexCall call) {
-    boolean prefix =
-        call.getOperands().size() >= 2
-            && call.getOperands().get(1) instanceof RexLiteral literal
-            && isPrefixPattern(literal);
-    return prefix
+    return isPrefixLike(call)
         ? PredicateShape.PREDICATE_SHAPE_LIKE_PREFIX
         : PredicateShape.PREDICATE_SHAPE_LIKE;
   }
@@ -367,32 +363,56 @@ public final class PushdownGate {
   }
 
   /**
-   * A {@code LIKE} is pushed only under a binary collation (D89), and only for the shape the source
-   * declared: a pattern that is a plain prefix needs {@code LIKE_PREFIX}, anything else needs
-   * {@code LIKE}. A non-literal pattern is never a prefix, so it needs the general shape.
+   * A {@code LIKE} is pushed only where the source's LIKE is Chalk's — under a binary collation
+   * (D89), or where the profile says its LIKE matches code points whatever the collation (D315) —
+   * and only for the shape the source declared: a pattern that is a plain prefix needs
+   * {@code LIKE_PREFIX}, anything else needs {@code LIKE}. A non-literal pattern is never a prefix,
+   * so it needs the general shape.
    */
   private boolean like(RexCall call) {
-    if (!binaryCollation() || !allPushable(call)) {
+    if (!likeIsChalks() || !allPushable(call)) {
       return false;
     }
-    boolean prefix =
-        call.getOperands().size() >= 2
-            && call.getOperands().get(1) instanceof RexLiteral literal
-            && isPrefixPattern(literal);
-    return prefix
+    return isPrefixLike(call)
         ? shapes.contains(PredicateShape.PREDICATE_SHAPE_LIKE_PREFIX)
             || shapes.contains(PredicateShape.PREDICATE_SHAPE_LIKE)
         : shapes.contains(PredicateShape.PREDICATE_SHAPE_LIKE);
   }
 
-  /** {@code 'abc%'}: wildcards nowhere but the very end, and no escape to reason about. */
-  private static boolean isPrefixPattern(RexLiteral literal) {
-    Object value = literal.getValue2();
-    if (!(value instanceof String pattern) || pattern.isEmpty()) {
+  /**
+   * Whether the source's LIKE matches exactly the rows Chalk's does: under a binary collation, or
+   * under a locale one when the profile says its LIKE never consults it (D315). A case-insensitive
+   * collation folds case in LIKE by definition, and the validator refuses the flag beside it; the
+   * check here is the same refusal, made where it matters.
+   */
+  private boolean likeIsChalks() {
+    return binaryCollation()
+        || (profile.getLikeMatchesCodePoints()
+            && profile.getStringCollation() != StringCollation.STRING_COLLATION_CASE_INSENSITIVE);
+  }
+
+  /**
+   * {@code 'abc%'} and its escaped kin: a literal pattern whose only unquoted wildcard is one
+   * {@code %} at the very end (D313). {@code 'a!%' ESCAPE '!'} is an equality with the text
+   * {@code a%}, not a prefix, and is read as one.
+   */
+  private static boolean isPrefixLike(RexCall call) {
+    if (call.getOperands().size() < 2) {
       return false;
     }
-    int percent = pattern.indexOf('%');
-    return percent == pattern.length() - 1 && pattern.indexOf('_') < 0;
+    String pattern = LikePatterns.characterLiteral(call.getOperands().get(1));
+    String escape =
+        call.getOperands().size() > 2
+            ? LikePatterns.characterLiteral(call.getOperands().get(2))
+            : null;
+    if (pattern == null
+        || pattern.isEmpty()
+        || (call.getOperands().size() > 2 && escape == null)
+        || LikePatterns.escapeDefect(escape) != null
+        || LikePatterns.patternDefect(pattern, escape) != null) {
+      return false;
+    }
+    return LikePatterns.prefix(pattern, escape).bare();
   }
 
   /**
