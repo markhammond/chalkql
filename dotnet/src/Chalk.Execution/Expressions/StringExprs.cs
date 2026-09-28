@@ -276,6 +276,86 @@ internal sealed class LikeExpr : VectorExprBase
 }
 
 /// <summary>
+/// A LIKE whose pattern is a parameter (D314): the pattern is fixed for an execution, so it is
+/// checked and compiled once, when the first batch arrives, rather than once per plan — which is
+/// what a literal pattern gets — or once per row.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A NULL pattern makes every row's answer NULL, as <c>x LIKE NULL</c> is in SQL. A malformed one is
+/// refused with the <see cref="ArgumentException"/> the client raises before the execution starts
+/// (D312); reaching it here means something executed a plan without going through the client.
+/// </para>
+/// <para>
+/// The compiled matcher is kept beside the text it was compiled from and reused while the value is
+/// the same. An expression is compiled per execution, so that is always true after the first batch;
+/// the comparison is what keeps it true if one were ever shared, and costs one ordinal comparison of
+/// the pattern per batch.
+/// </para>
+/// </remarks>
+internal sealed class ParameterLikeExpr : VectorExprBase
+{
+    private readonly IVectorExpr _value;
+    private readonly int _slot;
+    private readonly string? _escape;
+    private Compiled? _compiled;
+
+    public ParameterLikeExpr(ChalkType type, IVectorExpr value, int slot, string? escape)
+        : base(type)
+    {
+        _value = value;
+        _slot = slot;
+        _escape = escape;
+    }
+
+    public override Vector Evaluate(EvalContext context)
+    {
+        var length = context.Length;
+        var scalar = context.Parameters[_slot];
+        if (scalar.IsNull)
+        {
+            return Vector.FromScalar(ScalarValue.Null(Type), length);
+        }
+
+        var matcher = MatcherFor(Chalk.Sources.IndexPrefix.AsText(scalar.ToClr()) ?? string.Empty);
+        var value = _value.Evaluate(context);
+        var nulls = InheritValidity(length, value, context.SelectionMask);
+        var result = Scratch.Values<byte>(length);
+        var lanes = VarOperand.From(value);
+        for (var i = 0; i < length; i++)
+        {
+            result[i] = (byte)(IsValidAt(value, i) && matcher.Matches(lanes[i]) ? 1 : 0);
+        }
+
+        return Scratch.Finish(length, nulls);
+    }
+
+    private LikeMatcher MatcherFor(string pattern)
+    {
+        var compiled = System.Threading.Volatile.Read(ref _compiled);
+        if (compiled is not null && string.Equals(compiled.Pattern, pattern, StringComparison.Ordinal))
+        {
+            return compiled.Matcher;
+        }
+
+        Chalk.Sources.LikePattern.Validate(pattern, _escape);
+        var matcher = LikeMatcher.Compile(
+            System.Text.Encoding.UTF8.GetBytes(pattern),
+            _escape is null ? [] : System.Text.Encoding.UTF8.GetBytes(_escape));
+        System.Threading.Volatile.Write(ref _compiled, new Compiled(pattern, matcher));
+        return matcher;
+    }
+
+    /// <summary>A pattern's text and its matcher, published together so a reader sees a matched pair.</summary>
+    private sealed class Compiled(string pattern, LikeMatcher matcher)
+    {
+        public string Pattern { get; } = pattern;
+
+        public LikeMatcher Matcher { get; } = matcher;
+    }
+}
+
+/// <summary>
 /// A compiled LIKE pattern. <c>%</c> matches any run of code points, <c>_</c> exactly one; an escape
 /// character makes the next character literal. Runs of <c>%</c> collapse, so the matcher backtracks
 /// over at most one wildcard position at a time.

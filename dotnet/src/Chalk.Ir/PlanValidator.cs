@@ -730,6 +730,26 @@ public static class PlanValidator
             {
                 var range = lookup.Ranges[r];
                 var rangePath = $"{path}.ranges[{r}]";
+                if (range.Escape.Length > 0)
+                {
+                    // D313: an escape belongs to a LIKE pattern, and a LIKE escape is one character.
+                    if (!range.Prefix)
+                    {
+                        throw Invalid(
+                            "I-IR-6",
+                            rangePath,
+                            "the range carries a LIKE escape but is not a prefix range");
+                    }
+
+                    if (range.Escape.EnumerateRunes().Count() != 1)
+                    {
+                        throw Invalid(
+                            "I-IR-6",
+                            rangePath,
+                            "the range's LIKE escape is not exactly one character");
+                    }
+                }
+
                 if (range.Lower.Count == 0 && range.Upper.Count == 0)
                 {
                     continue; // the whole index, in key order

@@ -8,13 +8,21 @@ namespace Chalk.Execution.Operators;
 
 /// <summary>
 /// The other leaf: a range lookup through the source's <c>IndexLookupAsync</c> (§5, D37). The
-/// residual a lookup cannot enforce is an ordinary <see cref="FilterOperator"/> above it — nothing
-/// is fused in M2 — so all this operator does is bind the bounds and hand the ranges over.
+/// residual a lookup cannot enforce is an ordinary <see cref="FilterOperator"/> above it, so all this
+/// operator does is bind the bounds and hand the ranges over.
 /// </summary>
 /// <remarks>
+/// <para>
 /// A bound is a literal or a parameter, so binding happens once per execution rather than per row.
 /// A parameter bound to NULL collapses its range to nothing, because <c>x = NULL</c> matches nothing
 /// in SQL; when every range collapses the lookup produces no rows without touching the source.
+/// </para>
+/// <para>
+/// A lookup's own residual (D314) — the <c>LIKE</c> a prefix range was made from, when its pattern is
+/// a parameter — is applied by a <see cref="FilterOperator"/> the compiler puts over this one. Whether
+/// it needs to run is known here, at bind: when every prefix range's value turned out to be a bare
+/// prefix, the ranges are the whole answer, and <see cref="ResidualGate"/> says so.
+/// </para>
 /// </remarks>
 internal sealed class IndexLookupOperator : OperatorBase
 {
@@ -26,6 +34,7 @@ internal sealed class IndexLookupOperator : OperatorBase
     private readonly int _keyColumns;
     private readonly long? _rowGoal;
     private readonly bool _reverse;
+    private readonly ResidualGate? _gate;
     private readonly ColumnarBatch _output;
     private readonly ColumnView[]?[] _children;
 
@@ -40,7 +49,8 @@ internal sealed class IndexLookupOperator : OperatorBase
         ArrowSchema schema,
         IReadOnlyList<ChalkType> columnTypes,
         long? rowGoal = null,
-        bool reverse = false)
+        bool reverse = false,
+        ResidualGate? gate = null)
         : base(context, schema, columnTypes, path)
     {
         _source = source;
@@ -50,6 +60,7 @@ internal sealed class IndexLookupOperator : OperatorBase
         _projection = projection;
         _rowGoal = rowGoal;
         _reverse = reverse;
+        _gate = gate;
         _keyColumns = ranges.Count == 0 ? 0 : ranges.Max(r => Math.Max(r.Lower.Count, r.Upper.Count));
         _output = NewOutput();
         _children = ArrowBatchViews.ChildHolders(columnTypes);
@@ -61,14 +72,30 @@ internal sealed class IndexLookupOperator : OperatorBase
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         var bound = new List<IndexKeyRange>(_ranges.Count);
+        var decided = true;
         foreach (var range in _ranges)
         {
-            var value = range.Bind(Context.Parameters);
+            var value = range.Bind(Context.Parameters, out var whole);
             if (value is not null)
             {
                 bound.Add(value);
+                decided &= whole;
             }
         }
+
+        if (!decided && _gate is null)
+        {
+            // A range that covers more than its pattern matches, and nothing to decide the rest
+            // with. The planner never writes one — a literal prefix it uses is bare, and a parameter
+            // brings its residual — so this is a plan from somewhere else, refused rather than
+            // answered with the extra rows.
+            throw new UnsupportedFeatureException(
+                $"a LIKE lookup on index '{_index}' that its ranges do not decide",
+                $"The lookup on '{_table}' binds a pattern that is not a bare prefix, and the plan "
+                + "gives it no residual to check the rest of the pattern with (D314).");
+        }
+
+        _gate?.Bound(decided);
 
         if (bound.Count == 0)
         {
@@ -152,6 +179,27 @@ internal sealed class IndexLookupOperator : OperatorBase
     public int KeyColumns => _keyColumns;
 
     /// <summary>
+    /// What a lookup tells its own residual at bind (D314): whether the ranges already decide every
+    /// row, so the residual can pass each batch through untouched. One per execution, shared by the
+    /// lookup and the residual's condition, and written before the first batch is produced.
+    /// </summary>
+    internal sealed class ResidualGate
+    {
+        private readonly bool _skippable;
+
+        /// <param name="skippable">
+        /// Whether the residual is the prefix ranges' own LIKE and nothing else, which the compiler
+        /// checks against the plan. Only then does "the ranges decide every row" make it redundant.
+        /// </param>
+        public ResidualGate(bool skippable) => _skippable = skippable;
+
+        /// <summary>True once bound when the residual has nothing left to decide.</summary>
+        public bool Redundant { get; private set; }
+
+        public void Bound(bool decided) => Redundant = _skippable && decided;
+    }
+
+    /// <summary>
     /// One range, with its bounds already reduced to "a literal" or "parameter n". Binding is then a
     /// lookup rather than an evaluation, which is what keeps a lookup off the expression path.
     /// </summary>
@@ -174,6 +222,9 @@ internal sealed class IndexLookupOperator : OperatorBase
         /// </summary>
         public bool PrefixIndex { get; init; }
 
+        /// <summary>The prefix pattern's escape character, or null when its LIKE had none (D313).</summary>
+        public string? Escape { get; init; }
+
         public string IndexName { get; init; } = string.Empty;
 
         public string Table { get; init; } = string.Empty;
@@ -181,8 +232,16 @@ internal sealed class IndexLookupOperator : OperatorBase
         public string SourceId { get; init; } = string.Empty;
 
         /// <summary>The bound range, or null when a NULL parameter emptied it.</summary>
-        public IndexKeyRange? Bind(IReadOnlyList<ScalarValue> parameters)
+        public IndexKeyRange? Bind(IReadOnlyList<ScalarValue> parameters) => Bind(parameters, out _);
+
+        /// <summary>
+        /// The bound range, or null when a NULL parameter emptied it; <paramref name="decided"/> says
+        /// whether the range is exactly the rows its predicate selects, which every range but a prefix
+        /// one bound to a pattern that is not a bare prefix is (D314).
+        /// </summary>
+        public IndexKeyRange? Bind(IReadOnlyList<ScalarValue> parameters, out bool decided)
         {
+            decided = true;
             var lower = new object?[Lower.Count];
             for (var i = 0; i < lower.Length; i++)
             {
@@ -203,7 +262,7 @@ internal sealed class IndexLookupOperator : OperatorBase
 
             if (Prefix)
             {
-                return BindPrefix(lower);
+                return BindPrefix(lower, out decided);
             }
 
             return new IndexKeyRange
@@ -216,34 +275,29 @@ internal sealed class IndexLookupOperator : OperatorBase
         }
 
         /// <summary>
-        /// What a <c>LIKE 'p%'</c> range becomes, resolved by the index's kind (D282).
+        /// What a <c>LIKE</c> range becomes, resolved by the index's kind (D282) through the
+        /// pattern's escape (D313).
         /// </summary>
         /// <remarks>
         /// <para>
-        /// A prefix index is sent the prefix. Every other kind is sent the plain half-open range
-        /// <c>[p, next(p))</c>, where <c>next(p)</c> is the smallest text above every text that
-        /// starts with <c>p</c> — so an ordinary ordered string index serves a <c>LIKE</c> with no
-        /// change at all.
+        /// The range is over the pattern's literal start <c>p</c>. A prefix index is sent <c>p</c>.
+        /// Every other kind is sent the plain half-open range <c>[p, next(p))</c>, where
+        /// <c>next(p)</c> is the smallest text above every text that starts with <c>p</c> — so an
+        /// ordinary ordered string index serves a <c>LIKE</c> with no change at all.
         /// </para>
         /// <para>
-        /// A pattern that turns out not to be a bare prefix is refused here, by name. The plan was
-        /// made for a prefix, and a parameter's text is the one thing about it that was not known
-        /// when the plan was made.
+        /// A pattern that is not a bare prefix — a parameter bound to <c>'%BLK'</c>, say, or to
+        /// <c>'KB-%-BLK'</c> — gets the range over its literal start, which holds every row it
+        /// matches and some it does not, and <paramref name="decided"/> is false: the lookup's
+        /// residual decides the rest (D314). A malformed pattern is refused, as the client refuses
+        /// it before the execution starts (D312).
         /// </para>
         /// </remarks>
-        private IndexKeyRange BindPrefix(object?[] lower)
+        private IndexKeyRange BindPrefix(object?[] lower, out bool decided)
         {
-            var pattern = IndexPrefix.AsText(lower[^1]);
-            if (!IndexPrefix.IsBarePrefix(pattern))
-            {
-                throw new UnsupportedFeatureException(
-                    $"LIKE '{pattern}' as a lookup on index '{IndexName}'",
-                    $"The lookup on '{Table}' was planned for a LIKE prefix, and a prefix ends in "
-                    + "one '%' and holds no other wildcard. Anything else is a predicate and has to "
-                    + "be evaluated per row, which this plan has nothing left to do it with.");
-            }
-
-            var prefix = IndexPrefix.Of(pattern!);
+            var pattern = IndexPrefix.AsText(lower[^1]) ?? string.Empty;
+            LikePattern.Validate(pattern, Escape);
+            var prefix = LikePattern.LiteralStart(pattern, Escape, out decided);
 
             if (PrefixIndex)
             {
@@ -258,7 +312,9 @@ internal sealed class IndexLookupOperator : OperatorBase
             }
 
             // An empty prefix matches every text, so the range is open above — and still bounds the
-            // column, which is what keeps a NULL out of it.
+            // column, which is what keeps a NULL out of it. The upper side is the equality columns
+            // alone, inclusive: exclusive, a key equal to them would compare equal to the bound and
+            // fall outside it, and the lookup would answer nothing (F153).
             if (prefix.Length == 0)
             {
                 return new IndexKeyRange
@@ -266,17 +322,23 @@ internal sealed class IndexLookupOperator : OperatorBase
                     Lower = lower[..^1].Append((object?)string.Empty).ToArray(),
                     LowerInclusive = true,
                     Upper = lower[..^1],
-                    UpperInclusive = false,
+                    UpperInclusive = true,
                 };
             }
 
             if (!IndexPrefix.TryNext(prefix, out var next))
             {
-                throw new UnsupportedFeatureException(
-                    $"LIKE '{pattern}' as a lookup on index '{IndexName}'",
-                    $"The lookup on '{Table}' was planned for a LIKE prefix, and this one ends at "
-                    + "the largest code point there is, so there is no text above it to close the "
-                    + "range with.");
+                // No text sorts above every text that starts with this one — it ends at the largest
+                // code point there is — so the range can only be open above, which covers rows the
+                // pattern does not match. The residual decides them; without one, the lookup refuses.
+                decided = false;
+                return new IndexKeyRange
+                {
+                    Lower = lower[..^1].Append((object?)prefix).ToArray(),
+                    LowerInclusive = true,
+                    Upper = lower[..^1],
+                    UpperInclusive = true,
+                };
             }
 
             var start = lower.ToArray();
@@ -333,4 +395,28 @@ internal sealed class IndexLookupOperator : OperatorBase
             return value is not null;
         }
     }
+}
+
+/// <summary>
+/// A lookup's residual as a <see cref="FilterOperator"/> condition (D314): the residual itself, or —
+/// when the lookup has found at bind that its ranges already decide every row — true, which the
+/// filter forwards a batch on without looking at a row.
+/// </summary>
+internal sealed class ResidualGateExpr : Expressions.IVectorExpr
+{
+    private static readonly ScalarValue True = new() { Type = ChalkType.Bool(), Integer = 1 };
+
+    private readonly Expressions.IVectorExpr _residual;
+    private readonly IndexLookupOperator.ResidualGate _gate;
+
+    public ResidualGateExpr(Expressions.IVectorExpr residual, IndexLookupOperator.ResidualGate gate)
+    {
+        _residual = residual;
+        _gate = gate;
+    }
+
+    public ChalkType Type => _residual.Type;
+
+    public Vector Evaluate(Expressions.EvalContext context) =>
+        _gate.Redundant ? Vector.FromScalar(True, context.Length) : _residual.Evaluate(context);
 }

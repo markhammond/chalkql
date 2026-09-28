@@ -32,6 +32,9 @@ internal sealed class ParameterExpr : IVectorExpr
 
     public ChalkType Type { get; }
 
+    /// <summary>The parameter slot this reads — for a kernel that needs the value itself, once (D314).</summary>
+    public int Index => _index;
+
     public Vector Evaluate(EvalContext context) =>
         Vector.FromScalar(context.Parameters[_index], context.Length);
 }

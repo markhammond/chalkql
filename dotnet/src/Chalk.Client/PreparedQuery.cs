@@ -745,6 +745,10 @@ public sealed class QueryExecution : IAsyncDisposable
         CancellationToken ct,
         Microsoft.Extensions.Logging.ILogger log)
     {
+        // D312: a value used as a LIKE pattern and malformed under its escape is refused here, when
+        // the execution is asked for — before any source is touched, and the same whether the LIKE
+        // would have run in the engine or in a source.
+        compiled.LikeParameters.Validate(parameters);
         _compiled = compiled;
         _parameters = parameters;
         _relations = relations;

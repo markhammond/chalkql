@@ -1,6 +1,7 @@
 using Chalk.Ir;
 using Chalk.Sources;
 using Chalk.Sources.Poco;
+using Chalk.Execution.Operators;
 using Chalk.TestKit;
 using CatalogContext = Chalk.Catalog.CatalogContext;
 using IrField = Chalk.Ir.Field;
@@ -176,12 +177,13 @@ public sealed class IndexLookupOperatorTests
     }
 
     /// <summary>
-    /// A parameter's text is the one thing about a prefix the plan could not know, so it is checked
-    /// when it is bound — and a pattern that is not a bare prefix is refused by name rather than
-    /// answered as though it were one.
+    /// A parameter's text is the one thing about a prefix the plan could not know. The planner gives
+    /// a parameter prefix a residual that decides the rest of the pattern (D314); a plan without one
+    /// — which the planner never writes — refuses a value its ranges would over-answer, by name,
+    /// rather than answering with the extra rows.
     /// </summary>
     [Fact]
-    public async Task A_parameter_that_is_not_a_bare_prefix_is_refused_at_bind_time()
+    public async Task A_parameter_that_is_not_a_bare_prefix_needs_a_residual()
     {
         var plan = Plan(
             [IrBuilder.Range([IrBuilder.Param(0, IrBuilder.Str(nullable: true))], [], prefix: true)],
@@ -191,26 +193,171 @@ public sealed class IndexLookupOperatorTests
         var refusal = Assert.IsType<UnsupportedFeatureException>(error.InnerException);
 
         Assert.Contains("ix_points_Group", refusal.Message, StringComparison.Ordinal);
-        Assert.Contains("planned for a LIKE prefix", refusal.Message, StringComparison.Ordinal);
-        Assert.Contains("a%b%", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("ranges do not decide", refusal.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("a%b%", refusal.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// And a prefix that ends at the largest code point there is has no text above it to close the
-    /// range with, which is the other shape the fast-fail rule covers.
+    /// D314: with its residual the same lookup answers any value — the range over the value's
+    /// literal start, then the LIKE — and a bare prefix reads only the rows it produces, because the
+    /// lookup switches the residual off when its ranges already decide.
     /// </summary>
     [Fact]
-    public async Task A_prefix_with_no_successor_is_refused_at_bind_time()
+    public async Task A_parameter_prefix_with_its_residual_answers_any_value()
     {
-        var plan = Plan(
+        var plan = RechecksItsLike(escape: null);
+
+        var (bare, bareStats) = await RunAsync(plan, ["b%"]);
+        Assert.Equal(2, bare.Count);
+        Assert.Equal(2, bareStats.RowsScanned);
+
+        var (some, _) = await RunAsync(plan, ["%"]);
+        Assert.Equal(Points.Length, some.Count);
+
+        var (none, _) = await RunAsync(plan, ["_x%"]);
+        Assert.Empty(none);
+
+        var (nulls, nullStats) = await RunAsync(plan, [null]);
+        Assert.Empty(nulls);
+        Assert.Equal(0, nullStats.RowsScanned);
+    }
+
+    /// <summary>
+    /// A prefix that ends at the largest code point there is has no text above it, so its range is
+    /// open above and covers texts it does not match. With the residual that is answered; without
+    /// one it is refused, as any range that does not decide is.
+    /// </summary>
+    [Fact]
+    public async Task A_prefix_with_no_successor_is_answered_through_the_residual()
+    {
+        var bareRange = Plan(
             [IrBuilder.Range([IrBuilder.Param(0, IrBuilder.Str(nullable: true))], [], prefix: true)],
             IrBuilder.Str(nullable: true));
-
         var error = await Assert.ThrowsAsync<ExecutionException>(
-            () => RunAsync(plan, ["\U0010FFFF%"]));
-        var refusal = Assert.IsType<UnsupportedFeatureException>(error.InnerException);
+            () => RunAsync(bareRange, ["\U0010FFFF%"]));
+        Assert.IsType<UnsupportedFeatureException>(error.InnerException);
 
-        Assert.Contains("no text above it", refusal.Message, StringComparison.Ordinal);
+        var (rows, _) = await RunAsync(RechecksItsLike(escape: null), ["\U0010FFFF%"]);
+        Assert.Empty(rows);
+    }
+
+    /// <summary>
+    /// D313: a range carries its pattern's escape, and the client reads the pattern's literal start
+    /// through it — here 'KB\_%' ESCAPE '\' is the prefix KB_, and only KB_1 starts with it.
+    /// </summary>
+    [Fact]
+    public async Task A_prefix_range_reads_its_pattern_through_its_escape()
+    {
+        var range = IrBuilder.Range([Text("KB\\_%")], [], prefix: true);
+        range.Escape = "\\";
+        var (rows, stats) = await RunTagsAsync(TagsPlan([range]));
+
+        Assert.Equal(["KB_1"], rows.Select(r => (string)r[0]!));
+        Assert.Equal(1, stats.RowsScanned);
+    }
+
+    /// <summary>
+    /// F153: an empty prefix after an equality prefix covers every key equal to it. Its upper side is
+    /// the equality columns alone, and by the range contract — <see cref="IndexKeyRange.Contains"/>,
+    /// which the conformance kit holds every index to — it has to be inclusive: exclusive, every key
+    /// compared equal to it and fell outside, and a source that reads ranges as the contract says (an
+    /// Akade tuple index does) answered nothing. POCO's own search happened to read it the intended
+    /// way, which is why the end-to-end half of this passed before.
+    /// </summary>
+    [Fact]
+    public async Task An_empty_prefix_after_an_equality_prefix_covers_the_equality()
+    {
+        var plan = new IndexLookupOperator.RangePlan
+        {
+            Lower = [IndexLookupOperator.BoundPlan.Constant("x"), IndexLookupOperator.BoundPlan.Constant("%")],
+            LowerInclusive = true,
+            Upper = [],
+            UpperInclusive = false,
+            Prefix = true,
+        };
+
+        var range = plan.Bind([], out var decided)!;
+
+        Assert.True(decided);
+        Assert.True(range.Contains(["x", "KB_1"], [SortDirection.AscNullsLast, SortDirection.AscNullsLast]));
+        Assert.True(range.Contains(["x", string.Empty], [SortDirection.AscNullsLast, SortDirection.AscNullsLast]));
+        Assert.False(range.Contains(["y", "100%"], [SortDirection.AscNullsLast, SortDirection.AscNullsLast]));
+        Assert.False(range.Contains(["x", null], [SortDirection.AscNullsLast, SortDirection.AscNullsLast]));
+
+        var (rows, _) = await RunTagsAsync(
+            TagsPlan([IrBuilder.Range([Text("x"), Text("%")], [], prefix: true)], compound: true),
+            compound: true);
+        Assert.Equal(3, rows.Count);
+    }
+
+    private sealed record Tag(string Kind, string Name);
+
+    private static readonly Tag[] Tags =
+    [
+        new("x", "KB_1"),
+        new("x", "KBx1"),
+        new("x", "KB\\x1"),
+        new("y", "100%"),
+        new("y", "1000"),
+    ];
+
+    private static PocoSource TagsSource(bool compound) =>
+        new PocoSourceBuilder("mem")
+            .AddTable("tags", Tags, t =>
+            {
+                if (compound)
+                {
+                    t.Index("ix_tags_kind_name", Chalk.Ir.IndexKind.Ordered, unique: false, x => x.Kind, x => x.Name);
+                }
+                else
+                {
+                    t.Index("ix_tags_name", Chalk.Ir.IndexKind.Ordered, unique: false, x => x.Name);
+                }
+            })
+            .Build();
+
+    private static Plan TagsPlan(IReadOnlyList<IndexRange> ranges, bool compound = false)
+    {
+        var source = TagsSource(compound);
+        var table = source.DescribeSchema().FindTable("tags")!;
+        var row = new RowType();
+        foreach (var column in new[] { 1, 0 })
+        {
+            row.Fields.Add(new IrField { Name = table.Columns[column].Name, Type = table.Columns[column].Type.ToProto() });
+        }
+
+        return IrBuilder.Plan(IrBuilder.IndexLookup(
+            "tags", compound ? "ix_tags_kind_name" : "ix_tags_name", row, ranges, projection: [1, 0]));
+    }
+
+    private static Task<(List<object?[]> Rows, ExecutionStats Stats)> RunTagsAsync(
+        Plan plan, bool compound = false) =>
+        RunAsync(plan, source: TagsSource(compound));
+
+    /// <summary>A lookup on <c>Group</c> whose pattern is parameter 0, and whose residual is its LIKE.</summary>
+    private static Plan RechecksItsLike(string? escape)
+    {
+        var row = Row(Source(), [0, 1, 2]);
+        var range = IrBuilder.Range([IrBuilder.Param(0, IrBuilder.Str(nullable: true))], [], prefix: true);
+        if (escape is not null)
+        {
+            range.Escape = escape;
+        }
+
+        var lookup = IrBuilder.IndexLookup("points", "ix_points_Group", row, [range]);
+        lookup.IndexLookup.Residual = escape is null
+            ? IrBuilder.Call(
+                FunctionId.Like,
+                IrBuilder.Bool(true),
+                IrBuilder.Ref(row, 0),
+                IrBuilder.Param(0, IrBuilder.Str(nullable: true)))
+            : IrBuilder.Call(
+                FunctionId.Like,
+                IrBuilder.Bool(true),
+                IrBuilder.Ref(row, 0),
+                IrBuilder.Param(0, IrBuilder.Str(nullable: true)),
+                IrBuilder.Lit(escape));
+        return IrBuilder.Plan(lookup, parameterTypes: [IrBuilder.Str(nullable: true)]);
     }
 
     private static Expr Text(string value) => IrBuilder.Lit(value);

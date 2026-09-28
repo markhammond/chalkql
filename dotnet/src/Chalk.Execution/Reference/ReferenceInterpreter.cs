@@ -672,8 +672,13 @@ internal sealed class ReferenceInterpreter
             return builder.ToString();
         }
 
+        /// <summary>
+        /// The oracle's LIKE: strict about the escape as the engine is (D312), so the two refuse the
+        /// same patterns, and otherwise read token by token with no compilation to share with it.
+        /// </summary>
         public static bool Like(string value, string pattern, string? escape)
         {
+            Chalk.Sources.LikePattern.Validate(pattern, escape);
             var text = ToRunes(value);
             var tokens = new List<(char Kind, System.Text.Rune Literal)>();
             var patternRunes = ToRunes(pattern);

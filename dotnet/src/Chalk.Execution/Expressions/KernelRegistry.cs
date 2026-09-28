@@ -349,28 +349,58 @@ internal static class KernelRegistry
             };
     }
 
+    /// <summary>
+    /// A literal pattern is compiled once, here (§6.4); a parameter pattern once per execution, when
+    /// its value is known (D314). The escape is always a literal — the planner refuses anything else
+    /// (D312) — and both are held to the escape rules of <see cref="LikePattern"/>.
+    /// </summary>
     private static IVectorExpr Like(ScalarCall call, ChalkType result, Func<Expr, IVectorExpr> compile)
     {
-        var pattern = ConstantUtf8(call.Args[1], "LIKE pattern");
-        var escape = call.Args.Count > 2 ? ConstantUtf8(call.Args[2], "LIKE escape") : [];
-        return new LikeExpr(result, compile(call.Args[0]), LikeMatcher.Compile(pattern, escape));
+        var escape = call.Args.Count > 2 ? ConstantText(call.Args[2], "LIKE escape") : null;
+        var defect = LikePattern.EscapeDefect(escape);
+        if (defect is not null)
+        {
+            throw new ArgumentException(defect, nameof(call));
+        }
+
+        var value = compile(call.Args[0]);
+        var pattern = call.Args[1];
+        if (pattern.KindCase == Expr.KindOneofCase.Literal
+            && pattern.Literal.ValueCase == Literal.ValueOneofCase.StringValue)
+        {
+            LikePattern.Validate(pattern.Literal.StringValue, escape);
+            return new LikeExpr(
+                result,
+                value,
+                LikeMatcher.Compile(
+                    System.Text.Encoding.UTF8.GetBytes(pattern.Literal.StringValue),
+                    escape is null ? [] : System.Text.Encoding.UTF8.GetBytes(escape)));
+        }
+
+        if (pattern.KindCase == Expr.KindOneofCase.Param && compile(pattern) is ParameterExpr parameter)
+        {
+            return new ParameterLikeExpr(result, value, parameter.Index, escape);
+        }
+
+        throw new UnsupportedFeatureException(
+            "LIKE with a pattern that is neither a literal nor a parameter",
+            "A pattern is compiled once per plan when it is a literal and once per execution when it "
+            + "is a parameter; one that could differ from row to row is not implemented "
+            + "(docs/design/02-ir.md §6).");
     }
 
-    /// <summary>
-    /// LIKE compiles its pattern once (§6.4), so the pattern has to be a literal. A column pattern is
-    /// legal IR and simply not implemented in M1.
-    /// </summary>
-    private static byte[] ConstantUtf8(Expr expr, string what)
+    /// <summary>The text of a string literal, which is what a LIKE escape has to be.</summary>
+    private static string ConstantText(Expr expr, string what)
     {
         if (expr.KindCase != Expr.KindOneofCase.Literal
             || expr.Literal.ValueCase != Literal.ValueOneofCase.StringValue)
         {
             throw new UnsupportedFeatureException(
                 $"LIKE with a non-constant {what}",
-                "M1 compiles the pattern once per plan (docs/design/02-ir.md §6, 'constant pattern').");
+                "The escape decides what the pattern means, so it has to be a literal (D312).");
         }
 
-        return System.Text.Encoding.UTF8.GetBytes(expr.Literal.StringValue);
+        return expr.Literal.StringValue;
     }
 
     private static IVectorExpr Extract(ScalarCall call, ChalkType result, Func<Expr, IVectorExpr> compile)

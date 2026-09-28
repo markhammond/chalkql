@@ -113,11 +113,12 @@ internal static class PlanCompiler
         // The context scalars this plan reads at execution, and the slots they take after the
         // statement's own parameters (16-entitlements.md §2, D209). Empty under prepare-time binding.
         var boundScalars = Chalk.Ir.BoundScalars.Of(plan);
+        var boundSlots = BoundSlots.Of(boundScalars, plan.ParameterTypes.Count);
         var compilation = new Compilation(
             catalog,
             sourcesBySourceId,
             settings.Functions,
-            BoundSlots.Of(boundScalars, plan.ParameterTypes.Count),
+            boundSlots,
             settings.ForceBufferedWindows,
             redactedQueryText);
         var root = compilation.Node(plan.Root, "root");
@@ -139,6 +140,7 @@ internal static class PlanCompiler
             settings)
         {
             Sharing = compilation.Tallies,
+            LikeParameters = LikeParameters.Of(plan, boundSlots),
         };
 
         // Build the tree once and discard, so that a missing kernel, an unbindable source or an
@@ -623,18 +625,16 @@ internal static class PlanCompiler
         /// slots here, so an execution binds them by reading a list rather than by evaluating
         /// anything; a bound that is neither a literal nor a parameter is a planner bug.
         /// </summary>
+        /// <remarks>
+        /// A lookup's own residual (D314) is a <see cref="FilterOperator"/> over it whose condition
+        /// the lookup can switch off at bind: when the residual is the prefix ranges' own
+        /// <c>LIKE</c> and every value bound to them is a bare prefix, the ranges are the answer and
+        /// each batch passes through untouched.
+        /// </remarks>
         public OperatorFactory IndexLookup(Rel rel, string path)
         {
             var lookup = rel.IndexLookup;
             var table = lookup.Table;
-
-            if (lookup.Residual is not null)
-            {
-                throw new UnsupportedFeatureException(
-                    "IndexLookup.residual",
-                    "An M2 planner emits Filter(IndexLookup) rather than fusing the residual "
-                    + "(docs/design/11-m2-index-support.md §3).");
-            }
 
             if (!_sources.TryGetValue(table.SourceId, out var source))
             {
@@ -688,6 +688,20 @@ internal static class PlanCompiler
                         + "an ordered, clustered or prefix index answers one");
                 }
 
+                if (range.Escape.Length > 0 && !range.Prefix)
+                {
+                    throw new InvalidPlanException(
+                        "I-IR-6",
+                        path,
+                        "an IndexRange carries an escape but is not a LIKE prefix range (D313)");
+                }
+
+                if (LikePattern.EscapeDefect(range.Prefix && range.Escape.Length > 0 ? range.Escape : null)
+                    is { } defect)
+                {
+                    throw new InvalidPlanException("I-IR-6", path, $"{defect} (D312)");
+                }
+
                 ranges.Add(new IndexLookupOperator.RangePlan
                 {
                     Lower = [.. range.Lower.Select(b => Bound(b, path))],
@@ -699,6 +713,7 @@ internal static class PlanCompiler
                     // other kind is sent the plain half-open range it stands for.
                     Prefix = range.Prefix,
                     PrefixIndex = index.Kind == IndexKind.Prefix,
+                    Escape = range.Escape.Length > 0 ? range.Escape : null,
                     IndexName = index.Name,
                     Table = descriptor.Table.Name,
                     SourceId = table.SourceId,
@@ -729,9 +744,79 @@ internal static class PlanCompiler
                 }
             }
 
-            return context => new IndexLookupOperator(
-                context, path, source, descriptor.Table.Name, index.Name, ranges, projection, schema,
-                columnTypes, rowGoal, lookup.Reverse);
+            if (lookup.Residual is not { } residual)
+            {
+                return context => new IndexLookupOperator(
+                    context, path, source, descriptor.Table.Name, index.Name, ranges, projection, schema,
+                    columnTypes, rowGoal, lookup.Reverse);
+            }
+
+            // D314: the residual reads the lookup's own row, which is a Filter's input row, so the
+            // FilterOperator applies it exactly as it would a Filter above the lookup.
+            var skippable = IsRangesOwnLike(residual, lookup, index, projection);
+            return context =>
+            {
+                var gate = new IndexLookupOperator.ResidualGate(skippable);
+                var inner = new IndexLookupOperator(
+                    context, path, source, descriptor.Table.Name, index.Name, ranges, projection, schema,
+                    columnTypes, rowGoal, lookup.Reverse, gate);
+                return new FilterOperator(
+                    context, path, schema, columnTypes, inner,
+                    new ResidualGateExpr(Expressions(path).Compile(residual), gate));
+            };
+        }
+
+        /// <summary>
+        /// Whether <paramref name="residual"/> is exactly the <c>LIKE</c> every one of the lookup's
+        /// ranges is a prefix of: the same parameter pattern, the same escape, over the emitted
+        /// column that is each range's last bound key column (D314). Only then may the lookup switch
+        /// it off when the bound value is a bare prefix; any other residual always runs.
+        /// </summary>
+        private static bool IsRangesOwnLike(
+            Expr residual, Ir.IndexLookup lookup, IndexDescriptor index, IReadOnlyList<int> projection)
+        {
+            if (residual.KindCase != Expr.KindOneofCase.Call
+                || residual.Call.Function != FunctionId.Like
+                || residual.Call.Args.Count is < 2 or > 3
+                || residual.Call.Args[0].KindCase != Expr.KindOneofCase.FieldRef
+                || residual.Call.Args[1].KindCase != Expr.KindOneofCase.Param)
+            {
+                return false;
+            }
+
+            var escape = string.Empty;
+            if (residual.Call.Args.Count == 3)
+            {
+                var literal = residual.Call.Args[2];
+                if (literal.KindCase != Expr.KindOneofCase.Literal
+                    || literal.Literal.ValueCase != Literal.ValueOneofCase.StringValue)
+                {
+                    return false;
+                }
+
+                escape = literal.Literal.StringValue;
+            }
+
+            var column = (int)residual.Call.Args[0].FieldRef.Index;
+            foreach (var range in lookup.Ranges)
+            {
+                if (!range.Prefix
+                    || range.Lower.Count == 0
+                    || range.Lower[^1].KindCase != Expr.KindOneofCase.Param
+                    || !range.Lower[^1].Param.Equals(residual.Call.Args[1].Param)
+                    || !string.Equals(range.Escape, escape, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                var key = index.Columns[range.Lower.Count - 1];
+                if (column >= projection.Count || projection[column] != key)
+                {
+                    return false;
+                }
+            }
+
+            return lookup.Ranges.Count > 0;
         }
 
         /// <summary>A range bound: a literal the planner wrote down, or a parameter slot.</summary>
