@@ -1,0 +1,98 @@
+{
+  "irVersion": 1,
+  "planDigest": "11123133940116821585",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "name",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      },
+      {
+        "name": "text",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "name",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        },
+        {
+          "name": "text",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        }
+      ]
+    },
+    "estRowCount": 501.75,
+    "indexLookup": {
+      "table": {
+        "sourceId": "mem",
+        "schema": "main",
+        "table": "terms"
+      },
+      "index": "ix_terms_name",
+      "ranges": [
+        {
+          "lower": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING",
+                "nullable": true
+              },
+              "param": {}
+            }
+          ],
+          "lowerInclusive": true,
+          "prefix": true
+        }
+      ],
+      "projection": [
+        0,
+        1
+      ],
+      "residual": {
+        "type": {
+          "kind": "TYPE_KIND_BOOL",
+          "nullable": true
+        },
+        "call": {
+          "function": "FUNCTION_ID_LIKE",
+          "args": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING",
+                "nullable": true
+              },
+              "param": {}
+            }
+          ]
+        }
+      }
+    }
+  },
+  "parameterTypes": [
+    {
+      "kind": "TYPE_KIND_STRING",
+      "nullable": true
+    }
+  ]
+}

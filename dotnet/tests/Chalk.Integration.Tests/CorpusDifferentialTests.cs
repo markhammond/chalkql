@@ -79,6 +79,11 @@ public sealed class CorpusDifferentialTests(SharedSidecar sidecar)
     /// must read exactly the rows it hands back, which is the M2 exit criterion and a stronger claim
     /// than any bound.
     /// </para>
+    /// <para>
+    /// And one that says <c>rows_scanned=all</c> is a lookup that reads the whole of its index on
+    /// purpose: a parameter pattern bound to a value whose literal start is empty (D314), which the
+    /// lookup's residual then narrows. It reads exactly the table's rows, as a scan does.
+    /// </para>
     /// </summary>
     /// <summary>
     /// The rows-scanned baseline's queries: every one this class runs whose plan has no window. A
@@ -168,6 +173,11 @@ public sealed class CorpusDifferentialTests(SharedSidecar sidecar)
         {
             Assert.True(lookup, $"{name}: rows_scanned=produced but the plan has no IndexLookup");
             Assert.Equal(produced, stats.RowsScanned);
+        }
+        else if (query.Expectations.Contains("rows_scanned=all"))
+        {
+            Assert.True(lookup, $"{name}: rows_scanned=all but the plan has no IndexLookup");
+            Assert.Equal(scanned, stats.RowsScanned);
         }
         else if (lookup)
         {
