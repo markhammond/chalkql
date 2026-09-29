@@ -307,6 +307,30 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 }
             }
 
+            // D318: the same for a profile's conformance and libraries, which are names the sidecar
+            // either has or refuses; checked here only against a list GetInfo actually reported.
+            foreach (var schema in catalog.Schemas)
+            {
+                var profile = schema.DialectProfile;
+                if (profile.Conformance is { } conformance && Unknown(conformance.Name, info.Conformances.Select(c => c.Name)))
+                {
+                    throw new CatalogValidationException(
+                        $"schemas ({schema.SourceId})",
+                        $"conformance '{conformance}' is not a level this planner accepts: "
+                        + string.Join(", ", info.Conformances) + ".");
+                }
+
+                foreach (var library in profile.Libraries)
+                {
+                    if (Unknown(library.Name, info.Libraries.Select(l => l.Name)))
+                    {
+                        throw new CatalogValidationException(
+                            $"schemas ({schema.SourceId})",
+                            $"library '{library}' is not one this planner has: " + string.Join(", ", info.Libraries) + ".");
+                    }
+                }
+            }
+
             // Registered once, under the versions this engine mints — not once per prepare, as it was
             // before D271 (b). The shape goes first and the numbers follow on their own version; a plan
             // names both, and the planner joins them.
@@ -662,6 +686,42 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             StatisticsVersion = statisticsVersion,
             Tables = updates,
         };
+    }
+
+    /// <summary>
+    /// Whether <paramref name="name"/> is missing from a list GetInfo reported (D318). A recorded
+    /// planner reports none (D250), and an empty list refuses nothing.
+    /// </summary>
+    private static bool Unknown(string name, IEnumerable<string> known)
+    {
+        var names = known.ToList();
+        return names.Count > 0 && !names.Contains(name, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// A statement's conformance and libraries, refused here when the planner said it has no such
+    /// name (D318) — naming the option, before the round trip. The sidecar refuses them anyway.
+    /// </summary>
+    private void CheckVocabulary(PrepareOptions options)
+    {
+        if (Unknown(options.Conformance.Name, PlannerInfo.Conformances.Select(c => c.Name)))
+        {
+            throw new ArgumentException(
+                $"PrepareOptions.Conformance '{options.Conformance}' is not a level this planner accepts: "
+                + string.Join(", ", PlannerInfo.Conformances) + ".",
+                nameof(options));
+        }
+
+        foreach (var library in options.Libraries)
+        {
+            if (Unknown(library.Name, PlannerInfo.Libraries.Select(l => l.Name)))
+            {
+                throw new ArgumentException(
+                    $"PrepareOptions.Libraries names '{library}', which is not a library this planner has: "
+                    + string.Join(", ", PlannerInfo.Libraries) + ".",
+                    nameof(options));
+            }
+        }
     }
 
     /// <summary>
@@ -1639,6 +1699,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         IReadOnlyList<ParameterValueHint> hints,
         CancellationToken ct)
     {
+        CheckVocabulary(options);
         await EnsureSharedCatalogCurrentAsync(ct).ConfigureAwait(false);
 
         // Nothing is registered here since D271 (b): the catalog crossed the wire when its version

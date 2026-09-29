@@ -102,7 +102,7 @@ class Calcite143DefectsTest {
             .setQuotedCasing(chalk.ir.v1.IdentifierCasing.IDENTIFIER_CASING_UNCHANGED)
             .setUnquotedCasing(chalk.ir.v1.IdentifierCasing.IDENTIFIER_CASING_TO_LOWER)
             .setCaseSensitiveIdentifiers(false)
-            .setConformance(chalk.ir.v1.SqlConformance.SQL_CONFORMANCE_LENIENT)
+            .setConformance("LENIENT")
             .setMaxNumericPrecision(38)
             .setMaxTimestampPrecision(6)
             .setHasBoolean(true)

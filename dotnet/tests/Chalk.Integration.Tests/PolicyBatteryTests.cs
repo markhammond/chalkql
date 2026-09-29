@@ -186,7 +186,7 @@ public sealed class PolicyBatteryTests(
             var execute = battery.Binding == PolicyBinding.Execute;
             // A case may ask for a dialect of its own; conformance is per request (D34).
             var prepare = battery.Options.Lenient
-                ? new PrepareOptions { Conformance = Chalk.Client.SqlConformance.Lenient }
+                ? new PrepareOptions { Conformance = Chalk.Catalog.SqlConformance.Lenient }
                 : null;
             var prepared = await engine
                 .WithEntitlements(Options(battery.Options))

@@ -1,4 +1,5 @@
 using System.Globalization;
+using Chalk.Catalog;
 using Chalk.Client;
 
 namespace Chalk.TestKit;
@@ -477,8 +478,8 @@ public static class CorpusQueries
             .ToArray();
 
     /// <summary>
-    /// The <c>-- conformance: &lt;NAME&gt;</c> header, naming a Calcite conformance level the way the
-    /// proto spells it (<c>LENIENT</c>, <c>STRICT_2003</c>, …). Absent means <c>DEFAULT</c>.
+    /// The <c>-- conformance: &lt;NAME&gt;</c> header, naming a Calcite conformance level as Calcite
+    /// spells it (<c>LENIENT</c>, <c>STRICT_2003</c>, …). Absent means <c>DEFAULT</c>.
     /// </summary>
     private static SqlConformance Conformance(string name, string text)
     {
@@ -489,16 +490,14 @@ public static class CorpusQueries
             return SqlConformance.Default;
         }
 
-        var wanted = line["-- conformance:".Length..].Trim().Replace("_", string.Empty, StringComparison.Ordinal);
-        foreach (var value in Enum.GetValues<SqlConformance>())
+        try
         {
-            if (string.Equals(value.ToString(), wanted, StringComparison.OrdinalIgnoreCase))
-            {
-                return value;
-            }
+            return SqlConformance.Named(line["-- conformance:".Length..].Trim());
         }
-
-        throw new FormatException($"{name}: unknown '-- conformance:' level '{line.Trim()}'");
+        catch (ArgumentException e)
+        {
+            throw new FormatException($"{name}: '-- conformance:' {e.Message}", e);
+        }
     }
 
     /// <summary>
@@ -653,20 +652,20 @@ public static class CorpusQueries
         var libraries = new List<SqlLibrary>();
         foreach (var part in line["-- libraries:".Length..].Split(','))
         {
-            var wanted = part.Trim().Replace("_", string.Empty, StringComparison.Ordinal);
+            var wanted = part.Trim();
             if (wanted.Length == 0)
             {
                 continue;
             }
 
-            var match = Enum.GetValues<SqlLibrary>()
-                .FirstOrDefault(v => string.Equals(v.ToString(), wanted, StringComparison.OrdinalIgnoreCase));
-            if (match == default)
+            try
             {
-                throw new FormatException($"{name}: unknown '-- libraries:' entry '{part.Trim()}'");
+                libraries.Add(SqlLibrary.Named(wanted));
             }
-
-            libraries.Add(match);
+            catch (ArgumentException e)
+            {
+                throw new FormatException($"{name}: '-- libraries:' {e.Message}", e);
+            }
         }
 
         return libraries;

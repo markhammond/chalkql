@@ -186,7 +186,7 @@ class RedactionServiceTest {
         client.redactSql(
             RedactSqlRequest.newBuilder()
                 .setSql("SELECT o_orderkey::VARCHAR FROM orders WHERE o_comment = 'a secret'")
-                .setConformance(chalk.ir.v1.SqlConformance.SQL_CONFORMANCE_BABEL)
+                .setConformance("BABEL")
                 .setRedaction(redaction())
                 .build());
 

@@ -65,7 +65,7 @@ public sealed class PerformanceTest
         _scanFilter = _engine.PrepareAsync(
             // "SELECT symbol FROM bars",
         "SELECT symbol, ts, \"close\" FROM bars WHERE volume > 5000",
-        new PrepareOptions { Conformance = Chalk.Client.SqlConformance.Lenient, IncludePlanText = true, RequireCurrentCatalog = false}
+        new PrepareOptions { Conformance = Chalk.Catalog.SqlConformance.Lenient, IncludePlanText = true, RequireCurrentCatalog = false}
         ).Result;
         
         var t = Task.Run(async () =>

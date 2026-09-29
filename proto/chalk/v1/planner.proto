@@ -5,7 +5,6 @@ syntax = "proto3";
 package chalk.v1;
 
 import "chalk/v1/catalog.proto";
-import "chalk/v1/dialect.proto";
 import "chalk/v1/expr.proto";
 import "chalk/v1/plan.proto";
 import "chalk/v1/types.proto";
@@ -54,12 +53,14 @@ message GetInfoResponse {
   uint32 planner_config_hash = 5;
   // What this sidecar accepts as a source's DialectProfile.dialect.
   repeated DialectInfo dialects = 6;
+  // Numbered enums until 0.4 (D318).
+  reserved 7, 8;
   // Every level this sidecar's parser accepts, for a source's DialectProfile.conformance or a
-  // request's PlannerOptions.conformance.
-  repeated SqlConformance conformances = 7;
+  // request's PlannerOptions.conformance: Calcite's SqlConformanceEnum constant names.
+  repeated string conformances = 10;
   // Every library this sidecar can load, for a source's DialectProfile.libraries or a request's
-  // PlannerOptions.libraries.
-  repeated SqlLibrary libraries = 8;
+  // PlannerOptions.libraries: Calcite's SqlLibrary constant names, STANDARD included.
+  repeated string libraries = 11;
   // The planning scheduler's worker count in force: the sidecar's --planning-workers and
   // --planning-load-factor arguments, resolved, or every available processor when neither was
   // given. Part of the client's planner identity, like the rest of this message.
@@ -270,9 +271,11 @@ enum RedactionScope {
 // One statement to redact, outside any planning.
 message RedactSqlRequest {
   string sql = 1;
+  // A numbered enum until 0.4 (D318).
+  reserved 2;
   // Which dialect to parse it as, so the token fallback lexes it with the same grammar a prepare
-  // would. UNSPECIFIED means DEFAULT.
-  SqlConformance conformance = 2;
+  // would: a Calcite SqlConformanceEnum constant name. Empty means DEFAULT.
+  string conformance = 5;
   // Required: a request that carries none is refused, because a redaction with no salt is not a
   // redaction this service may invent a key for.
   RedactionOptions redaction = 3;
@@ -457,13 +460,17 @@ message PlannerOptions {
   bool include_plan_text = 2;
   // Plan as if no index existed.
   bool disable_index_lookup = 3;
-  // Which SQL dialect this statement is written in. UNSPECIFIED means DEFAULT.
+  // Numbered enums until 0.4 (D318).
+  reserved 4, 5;
+  // Which SQL dialect this statement is written in, as a Calcite SqlConformanceEnum constant name.
+  // Empty means DEFAULT; a name the sidecar does not know is INVALID_ARGUMENT.
   // A request option like `pushdown`, so it is not part of GetInfoResponse.planner_config_hash.
-  SqlConformance conformance = 4;
-  // Which of Calcite's dialect function libraries this statement may call. STANDARD is always
-  // present and need not be listed. A request option like `conformance`, so it is not part of
+  string conformance = 9;
+  // Which of Calcite's dialect function libraries this statement may call, as SqlLibrary constant
+  // names. STANDARD is always present and need not be listed; a name the sidecar does not know is
+  // INVALID_ARGUMENT. A request option like `conformance`, so it is not part of
   // GetInfoResponse.planner_config_hash — but it does belong in a client's plan-cache key.
-  repeated SqlLibrary libraries = 5;
+  repeated string libraries = 10;
   // Capabilities to plan as if no source had declared them, whatever their descriptors say.
   // The capability property test turns each off in turn and the
   // conformance kit compares a source with and without each one; results must not move.

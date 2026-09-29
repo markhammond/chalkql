@@ -2,7 +2,7 @@ using Chalk.Client;
 using Chalk.TestKit;
 using PlanErrorKind = Chalk.Client.Rpc.PlanErrorKind;
 using PlanRequest = Chalk.Client.PlanRequest;
-using SqlConformance = Chalk.Client.SqlConformance;
+using SqlConformance = Chalk.Catalog.SqlConformance;
 
 namespace Chalk.Integration.Tests;
 
@@ -144,34 +144,68 @@ public sealed class ConformanceTests(SharedSidecar sidecar)
     public void A_recorded_plan_key_separates_the_dialects()
     {
         const string Sql = "SELECT symbol FROM bars";
-        var keys = Enum.GetValues<SqlConformance>()
+        var keys = Levels
             .Select(c => RecordedPlanner.KeyFor(Sql, PushdownLevel.Full, c, [], "corpus"))
             .ToArray();
 
         Assert.Equal(keys.Length, keys.Distinct(StringComparer.Ordinal).Count());
     }
 
-    /// <summary>A value that is not a dialect fails at the call rather than on the wire.</summary>
+    /// <summary>
+    /// A key spells a level and a library as 0.3's enums did, so a directory recorded before names
+    /// went on the wire keeps its keys (D318): these are 0.3's keys for the corpus's own headers.
+    /// </summary>
     [Fact]
-    public async Task An_undefined_conformance_value_is_refused_by_the_client()
+    public void A_recorded_plan_key_is_the_one_0_3_wrote()
     {
-        await using var planner = new GrpcQueryPlanner(new GrpcPlannerOptions
+        Assert.Equal(
+            "73b9f0135fd904cdcaf8210bbc479f02",
+            RecordedPlanner.KeyFor("SELECT 1", PushdownLevel.Full, SqlConformance.Lenient, [Chalk.Catalog.SqlLibrary.Postgresql, Chalk.Catalog.SqlLibrary.BigQuery], "corpus"));
+    }
+
+    /// <summary>A level the sidecar does not have is refused at prepare, naming the option and the levels it does (D318).</summary>
+    [Fact]
+    public async Task An_unknown_level_is_refused_at_prepare()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+
+        await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
         {
-            Address = new Uri("http://127.0.0.1:1"),
-            Deadline = TimeSpan.FromSeconds(5),
+            ContextId = CorpusFixture.ContextId,
+            Functions = CorpusFunctions.Register,
+            Sources = Fixture.Sources,
+            Planner = sidecar.CreatePlanner(),
         });
 
-        var error = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => planner.PlanAsync(new PlanRequest
-            {
-                Sql = "SELECT symbol FROM bars",
-                ContextId = "corpus",
-                CatalogEpoch = 1,
-                Options = new Chalk.Client.PlannerOptions { Conformance = (SqlConformance)99 },
-            }).AsTask());
+        var error = await Assert.ThrowsAsync<ArgumentException>(
+            () => engine.PrepareAsync(
+                "SELECT symbol FROM bars",
+                new PrepareOptions { Conformance = SqlConformance.Named("POSTGRES_16") }).AsTask());
 
-        Assert.Contains("Conformance", error.Message, StringComparison.Ordinal);
+        Assert.Contains("PrepareOptions.Conformance 'POSTGRES_16'", error.Message, StringComparison.Ordinal);
+        Assert.Contains("LENIENT", error.Message, StringComparison.Ordinal);
     }
+
+    /// <summary>The sidecar is the authority: a request that reaches it with an unknown name is refused there too.</summary>
+    [Fact]
+    public async Task The_sidecar_refuses_an_unknown_level_itself()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+
+        var error = await Assert.ThrowsAnyAsync<Exception>(
+            () => PlanAsync("SELECT 1 AS n", SqlConformance.Named("POSTGRES_16")).AsTask());
+
+        Assert.Contains("'POSTGRES_16' is not a conformance level this planner knows", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>Every level 0.4 has a member for.</summary>
+    private static readonly SqlConformance[] Levels =
+    [
+        SqlConformance.Default, SqlConformance.Lenient, SqlConformance.Babel, SqlConformance.Strict92,
+        SqlConformance.Strict99, SqlConformance.Pragmatic99, SqlConformance.Strict2003,
+        SqlConformance.Pragmatic2003, SqlConformance.MySql5, SqlConformance.Oracle10, SqlConformance.Oracle12,
+        SqlConformance.SqlServer2008, SqlConformance.Presto, SqlConformance.BigQuery,
+    ];
 
     /// <summary>An engine-level statement carries its dialect too, not only a raw plan request.</summary>
     [Fact]

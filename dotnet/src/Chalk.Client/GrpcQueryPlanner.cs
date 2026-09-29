@@ -174,12 +174,10 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
                 Tuned = d.Tuned,
                 Aliases = [.. d.Aliases],
             })],
-            // A wire value this build has never heard of — a newer sidecar's enum grew — is
-            // skipped rather than thrown, so an older client survives it (D250). Cast first and
-            // filter on the client's own enum, not the wire one: what "known" means here is
-            // whether *this* SqlConformance/SqlLibrary has a member for it.
-            Conformances = [.. response.Conformances.Select(c => (SqlConformance)c).Where(Enum.IsDefined)],
-            Libraries = [.. response.Libraries.Select(l => (SqlLibrary)l).Where(Enum.IsDefined)],
+            // Names, so a level or library a newer sidecar's Calcite has is listed here too, and
+            // usable, whether or not this build has a member for it (D318).
+            Conformances = [.. response.Conformances.Select(SqlConformance.Named)],
+            Libraries = [.. response.Libraries.Select(SqlLibrary.Named)],
             PlanningWorkers = response.PlanningWorkers,
         };
     }
@@ -297,32 +295,12 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // The wire enum is this one's twin, value for value (D34), so the map is a cast — but a
-        // value that is not one of ours would travel as a number the planner then refuses, and the
-        // caller is better served by hearing about it here.
-        if (!Enum.IsDefined(request.Options.Conformance))
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(request),
-                request.Options.Conformance,
-                "PlannerOptions.Conformance is not a SqlConformance value");
-        }
-
         if (!Enum.IsDefined(request.Options.Pushdown))
         {
             throw new ArgumentOutOfRangeException(
                 nameof(request),
                 request.Options.Pushdown,
                 "PlannerOptions.Pushdown is not a PushdownLevel value");
-        }
-
-        foreach (var library in request.Options.Libraries)
-        {
-            if (!Enum.IsDefined(library))
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(request), library, "PlannerOptions.Libraries holds a value that is not a SqlLibrary");
-            }
         }
 
         foreach (var capability in request.Options.DisabledCapabilities)
@@ -365,11 +343,10 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
                 Pushdown = (Rpc.PushdownLevel)request.Options.Pushdown,
                 IncludePlanText = request.Options.IncludePlanText,
                 DisableIndexLookup = request.Options.DisableIndexLookup,
-                Conformance = (Chalk.Ir.SqlConformance)request.Options.Conformance,
+                Conformance = request.Options.Conformance.Name,
             },
         };
-        message.Options.Libraries.AddRange(
-            request.Options.Libraries.Select(l => (Chalk.Ir.SqlLibrary)l));
+        message.Options.Libraries.AddRange(request.Options.Libraries.Select(l => l.Name));
         message.Options.DisabledCapabilities.AddRange(
             request.Options.DisabledCapabilities.Select(c => (Rpc.DisabledCapability)c));
         if (request.Options.JoinPolicy is { } joinPolicy)
@@ -503,18 +480,11 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
         RedactSqlRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (!Enum.IsDefined(request.Conformance))
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(request),
-                request.Conformance,
-                "RedactSqlRequest.Conformance is not a SqlConformance value");
-        }
 
         var message = new Rpc.RedactSqlRequest
         {
             Sql = request.Sql,
-            Conformance = (Chalk.Ir.SqlConformance)request.Conformance,
+            Conformance = request.Conformance.Name,
             Redaction = ToProto(request.Redaction),
         };
         if (request.Context?.ToProto() is { } context)

@@ -1,11 +1,12 @@
 package chalk.planner.rpc;
 
-import chalk.ir.v1.SqlConformance;
-import chalk.ir.v1.SqlLibrary;
 import chalk.planner.plan.SourceDialects;
 import chalk.planner.rpc.v1.DialectInfo;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import org.apache.calcite.sql.fun.SqlLibrary;
+import org.apache.calcite.sql.validate.SqlConformanceEnum;
 
 /**
  * The three {@code GetInfo} lists D248 added — every dialect preset, conformance level and library
@@ -35,35 +36,18 @@ final class DialectDiscovery {
   }
 
   /**
-   * Every level {@code dialect.proto}'s {@code SqlConformance} names, mirroring Calcite's one for
-   * one (D248) — the planner's parser accepts every one, via {@code SqlConfigs.conformance}, so the
-   * honest list is the whole enum. {@code UNSPECIFIED} is the wire's "nothing said" marker, not a
-   * level, and {@code UNRECOGNIZED} is protobuf's own placeholder for a number this build has never
-   * heard of; neither is something the sidecar "accepts".
+   * Every level this build of Calcite has, by name (D248, D318) — the planner's parser accepts
+   * every one, via {@code SqlConfigs.conformance}, so the honest list is the whole enum.
    */
-  static List<SqlConformance> conformances() {
-    List<SqlConformance> levels = new ArrayList<>();
-    for (SqlConformance level : SqlConformance.values()) {
-      if (level != SqlConformance.SQL_CONFORMANCE_UNSPECIFIED && level != SqlConformance.UNRECOGNIZED) {
-        levels.add(level);
-      }
-    }
-    return levels;
+  static List<String> conformances() {
+    return Arrays.stream(SqlConformanceEnum.values()).map(Enum::name).toList();
   }
 
   /**
-   * Every library {@code dialect.proto}'s {@code SqlLibrary} names (D248), {@code STANDARD}
-   * included: it is a real, distinct enum value (always available, per {@code SqlConfigs.libraries}),
-   * not the wire's "nothing said" marker — that is {@code UNSPECIFIED}, excluded for the reason
-   * {@link #conformances} excludes it, along with {@code UNRECOGNIZED}.
+   * Every library this build of Calcite has, by name (D248, D318), {@code STANDARD} included: it is
+   * a real library, always available, per {@code SqlConfigs.libraries}.
    */
-  static List<SqlLibrary> libraries() {
-    List<SqlLibrary> libraries = new ArrayList<>();
-    for (SqlLibrary library : SqlLibrary.values()) {
-      if (library != SqlLibrary.SQL_LIBRARY_UNSPECIFIED && library != SqlLibrary.UNRECOGNIZED) {
-        libraries.add(library);
-      }
-    }
-    return libraries;
+  static List<String> libraries() {
+    return Arrays.stream(SqlLibrary.values()).map(Enum::name).toList();
   }
 }

@@ -902,8 +902,11 @@ public sealed class DialectProfileDescriptor
 
     public bool CaseSensitiveIdentifiers { get; init; }
 
-    /// <summary>What SQL the <em>source</em> accepts. Distinct from the request's level (D34).</summary>
-    public SqlConformance Conformance { get; init; } = SqlConformance.Unspecified;
+    /// <summary>
+    /// What SQL the <em>source</em> accepts. Distinct from the request's level (D34). Null keeps the
+    /// <see cref="Dialect"/> preset's own level.
+    /// </summary>
+    public SqlConformance? Conformance { get; init; }
 
     /// <summary>Function libraries the source implements natively.</summary>
     public IReadOnlyList<SqlLibrary> Libraries { get; init; } = [];

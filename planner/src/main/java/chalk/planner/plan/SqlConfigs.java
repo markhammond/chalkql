@@ -1,8 +1,9 @@
 package chalk.planner.plan;
 
-import chalk.ir.v1.SqlConformance;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 import org.apache.calcite.config.CalciteConnectionConfig;
 import org.apache.calcite.config.CalciteConnectionConfigImpl;
 import org.apache.calcite.config.CalciteConnectionProperty;
@@ -75,85 +76,54 @@ public final class SqlConfigs {
   }
 
   /**
-   * The request's dialect, one for one with Calcite's own enum.
+   * The request's dialect, by the name of Calcite's own constant (D318): {@code "LENIENT"} is
+   * {@link SqlConformanceEnum#LENIENT}. Empty — nothing said — is {@code DEFAULT}.
    *
-   * <p>Reads the raw number rather than the generated constant, because a client built against a
-   * newer proto can send a value this planner has never heard of; proto3 turns that into {@code
-   * UNRECOGNIZED}, and the honest answer is to name the number rather than silently plan something
-   * else. The resulting {@link IllegalArgumentException} becomes {@code INVALID_ARGUMENT}.
+   * <p>A name this build of Calcite does not have is refused with the names it does, rather than
+   * planned under some other level. The resulting {@link IllegalArgumentException} becomes {@code
+   * INVALID_ARGUMENT}.
    */
-  public static SqlConformanceEnum conformance(int value) {
-    return switch (value) {
-      case 0, 1 -> SqlConformanceEnum.DEFAULT; // UNSPECIFIED means DEFAULT.
-      case 2 -> SqlConformanceEnum.LENIENT;
-      case 3 -> SqlConformanceEnum.BABEL;
-      case 4 -> SqlConformanceEnum.STRICT_92;
-      case 5 -> SqlConformanceEnum.STRICT_99;
-      case 6 -> SqlConformanceEnum.PRAGMATIC_99;
-      case 7 -> SqlConformanceEnum.STRICT_2003;
-      case 8 -> SqlConformanceEnum.PRAGMATIC_2003;
-      case 9 -> SqlConformanceEnum.MYSQL_5;
-      case 10 -> SqlConformanceEnum.ORACLE_10;
-      case 11 -> SqlConformanceEnum.ORACLE_12;
-      case 12 -> SqlConformanceEnum.SQL_SERVER_2008;
-      case 13 -> SqlConformanceEnum.PRESTO;
-      case 14 -> SqlConformanceEnum.BIG_QUERY;
-      default ->
-          throw new IllegalArgumentException(
-              "PlannerOptions.conformance "
-                  + value
-                  + " is not a SqlConformance this planner knows; it serves "
-                  + SqlConformance.SQL_CONFORMANCE_UNSPECIFIED.getNumber()
-                  + ".."
-                  + SqlConformance.SQL_CONFORMANCE_BIG_QUERY.getNumber()
-                  + ".");
-    };
+  public static SqlConformanceEnum conformance(String name) {
+    return name.isEmpty() ? DEFAULT_CONFORMANCE : named(SqlConformanceEnum.class, name, "conformance level");
   }
 
   /**
-   * The dialect function libraries a request asked for (D60), one for one with Calcite's
-   * {@code SqlLibrary}.
-   *
-   * <p>Reads the raw numbers rather than the generated constants, for the reason {@link
-   * #conformance} does: a client built against a newer proto can send a value this planner has never
-   * heard of, and the honest answer is to name the number. {@code STANDARD} is always present and is
-   * dropped here, because {@code ChalkOperatorTable} chains the standard table first anyway.
+   * The dialect function libraries a request asked for (D60), by the names of Calcite's own {@code
+   * SqlLibrary} constants (D318). {@code STANDARD} is always present and is dropped here, because
+   * {@code ChalkOperatorTable} chains the standard table first anyway; a name this build does not
+   * have is refused, for the reason {@link #conformance} refuses one.
    */
-  public static List<SqlLibrary> libraries(List<Integer> values) {
-    List<SqlLibrary> libraries = new ArrayList<>(values.size());
-    for (int value : values) {
-      SqlLibrary library =
-          switch (value) {
-            case 0, 1 -> null; // UNSPECIFIED and STANDARD: always available.
-            case 2 -> SqlLibrary.BIG_QUERY;
-            case 3 -> SqlLibrary.CALCITE;
-            case 4 -> SqlLibrary.CLICKHOUSE;
-            case 5 -> SqlLibrary.HIVE;
-            case 6 -> SqlLibrary.MSSQL;
-            case 7 -> SqlLibrary.MYSQL;
-            case 8 -> SqlLibrary.ORACLE;
-            case 9 -> SqlLibrary.POSTGRESQL;
-            case 10 -> SqlLibrary.REDSHIFT;
-            case 11 -> SqlLibrary.SNOWFLAKE;
-            case 12 -> SqlLibrary.SPARK;
-            case 13 -> SqlLibrary.SPATIAL;
-            case 14 -> SqlLibrary.ALL;
-            default ->
-                throw new IllegalArgumentException(
-                    "PlannerOptions.libraries "
-                        + value
-                        + " is not a SqlLibrary this planner knows; it serves "
-                        + chalk.ir.v1.SqlLibrary.SQL_LIBRARY_UNSPECIFIED.getNumber()
-                        + ".."
-                        + chalk.ir.v1.SqlLibrary.SQL_LIBRARY_ALL.getNumber()
-                        + ".");
-          };
-      if (library != null && !libraries.contains(library)) {
+  public static List<SqlLibrary> libraries(List<String> names) {
+    List<SqlLibrary> libraries = new ArrayList<>(names.size());
+    for (String name : names) {
+      SqlLibrary library = named(SqlLibrary.class, name, "library");
+      if (library != SqlLibrary.STANDARD && !libraries.contains(library)) {
         libraries.add(library);
       }
     }
 
     return List.copyOf(libraries);
+  }
+
+  /**
+   * The constant {@code name} spells, exactly — {@code "lenient"} is not {@code LENIENT} — or a
+   * refusal naming every constant there is.
+   */
+  public static <E extends Enum<E>> E named(Class<E> type, String name, String what) {
+    for (E constant : type.getEnumConstants()) {
+      if (constant.name().equals(name)) {
+        return constant;
+      }
+    }
+
+    throw new IllegalArgumentException(
+        "'"
+            + name
+            + "' is not a "
+            + what
+            + " this planner knows; it knows "
+            + Arrays.stream(type.getEnumConstants()).map(Enum::name).collect(Collectors.joining(", "))
+            + ".");
   }
 
   /**

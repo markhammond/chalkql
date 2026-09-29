@@ -107,57 +107,13 @@ class PlanningSchedulerTest {
             .setOptions(
                 PlannerOptions.newBuilder()
                     .setPushdown(PushdownLevel.PUSHDOWN_LEVEL_FULL)
-                    .setConformanceValue(wireConformance(query.conformance()))
-                    .addAllLibrariesValue(
-                        query.libraries().stream().map(PlanningSchedulerTest::wireLibrary).toList()))
+                    .setConformance(query.conformance().name())
+                    .addAllLibraries(query.libraries().stream().map(Enum::name).toList()))
             .setPlanningOptions(
                 PlanningOptions.newBuilder()
                     .setConvergenceEvaluationInterval(interval)
                     .setPriority(PlanningPriority.PLANNING_PRIORITY_NORMAL));
     return service.planOrThrow(request.build());
-  }
-
-  /** The wire number for a corpus query's conformance (D34) — {@link SqlConfigs#conformance(int)}, inverted. */
-  private static int wireConformance(org.apache.calcite.sql.validate.SqlConformanceEnum conformance) {
-    return switch (conformance) {
-      case DEFAULT -> 0;
-      case LENIENT -> 2;
-      case BABEL -> 3;
-      case STRICT_92 -> 4;
-      case STRICT_99 -> 5;
-      case PRAGMATIC_99 -> 6;
-      case STRICT_2003 -> 7;
-      case PRAGMATIC_2003 -> 8;
-      case MYSQL_5 -> 9;
-      case ORACLE_10 -> 10;
-      case ORACLE_12 -> 11;
-      case SQL_SERVER_2008 -> 12;
-      case PRESTO -> 13;
-      case BIG_QUERY -> 14;
-      default ->
-          throw new IllegalArgumentException("no wire value in this corpus test for " + conformance);
-    };
-  }
-
-  /** The wire number for a corpus query's library (D60) — {@link SqlConfigs#libraries}, inverted. */
-  private static int wireLibrary(org.apache.calcite.sql.fun.SqlLibrary library) {
-    return switch (library) {
-      case BIG_QUERY -> 2;
-      case CALCITE -> 3;
-      case CLICKHOUSE -> 4;
-      case HIVE -> 5;
-      case MSSQL -> 6;
-      case MYSQL -> 7;
-      case ORACLE -> 8;
-      case POSTGRESQL -> 9;
-      case REDSHIFT -> 10;
-      case SNOWFLAKE -> 11;
-      case SPARK -> 12;
-      case SPATIAL -> 13;
-      case ALL -> 14;
-      default ->
-          throw new IllegalArgumentException("no wire value in this corpus test for " + library);
-    };
   }
 
   /** The worker count in force is readable off GetInfo (D243), whatever the scheduler was built with. */

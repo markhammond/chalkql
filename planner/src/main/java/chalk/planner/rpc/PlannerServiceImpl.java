@@ -235,7 +235,7 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
       chalk.planner.redact.SqlRedactor.Result result =
           chalk.planner.redact.SqlRedactor.redact(
               request.getSql(),
-              SqlConfigs.conformance(request.getConformanceValue()),
+              SqlConfigs.conformance(request.getConformance()),
               policy,
               labels);
       observer.onNext(
@@ -296,10 +296,10 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
             options.getDisabledCapabilitiesList());
     // Per request, and checked before anything is parsed: a dialect this planner does not know is
     // an INVALID_ARGUMENT naming the value, not a statement quietly planned as something else (D34).
-    SqlConformanceEnum conformance = SqlConfigs.conformance(options.getConformanceValue());
+    SqlConformanceEnum conformance = SqlConfigs.conformance(options.getConformance());
     // The same rule for the dialect function libraries (D60): unknown value, named error.
     java.util.List<org.apache.calcite.sql.fun.SqlLibrary> libraries =
-        SqlConfigs.libraries(options.getLibrariesValueList());
+        SqlConfigs.libraries(options.getLibrariesList());
     // The cross-source join policy the catalog carries, with this request's merged over it (D104).
     chalk.planner.plan.JoinPolicy joinPolicy =
         chalk.planner.plan.JoinPolicy.of(catalog.joinPolicy(), options.getJoinPolicy());

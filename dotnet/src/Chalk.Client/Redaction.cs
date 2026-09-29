@@ -1,3 +1,5 @@
+using Chalk.Catalog;
+
 namespace Chalk.Client;
 
 /// <summary>
