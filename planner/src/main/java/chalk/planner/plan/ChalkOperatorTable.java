@@ -78,9 +78,23 @@ public final class ChalkOperatorTable {
           OperandTypes.ANY,
           SqlFunctionCategory.SYSTEM);
 
+  /**
+   * {@code ILIKE} and {@code NOT ILIKE}, always (D316). Calcite keeps them in its POSTGRESQL library,
+   * but Chalk defines what ILIKE means itself — LIKE with both sides folded as LOWER folds — so it is
+   * not PostgreSQL's to lend, and asking for that library would bring every other PostgreSQL function
+   * with it (and refuse a catalog whose user functions share a name with one).
+   */
+  private static final ImmutableList<org.apache.calcite.sql.SqlOperator> OWN =
+      ImmutableList.of(
+          TIME_BUCKET,
+          FINGERPRINT,
+          PRESENT,
+          org.apache.calcite.sql.fun.SqlLibraryOperators.ILIKE,
+          org.apache.calcite.sql.fun.SqlLibraryOperators.NOT_ILIKE);
+
   /** Just Chalk's own operators, for the clash check a user function is registered through. */
   public static SqlOperatorTable chalkOperators() {
-    return SqlOperatorTables.of(ImmutableList.of(TIME_BUCKET, FINGERPRINT, PRESENT));
+    return SqlOperatorTables.of(OWN);
   }
 
   /** The standard table with Chalk's functions chained after it. */
@@ -112,7 +126,7 @@ public final class ChalkOperatorTable {
     SqlOperatorTable table =
         SqlOperatorTables.chain(
             SqlStdOperatorTable.instance(),
-            SqlOperatorTables.of(ImmutableList.of(TIME_BUCKET, FINGERPRINT, PRESENT)));
+            SqlOperatorTables.of(OWN));
     if (!libraries.isEmpty()) {
       table =
           SqlOperatorTables.chain(
@@ -130,6 +144,6 @@ public final class ChalkOperatorTable {
    * puts it in its own cache key (D60).
    */
   public static String summary() {
-    return "operators=std+TIME_BUCKET+FINGERPRINT+PRESENT";
+    return "operators=std+TIME_BUCKET+FINGERPRINT+PRESENT+ILIKE";
   }
 }

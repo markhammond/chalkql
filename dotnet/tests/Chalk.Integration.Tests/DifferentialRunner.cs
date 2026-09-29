@@ -71,6 +71,10 @@ internal static class DifferentialRunner
         {
             ["p0"] = Utf8String.FromAsciiString("_TC%"),
         },
+        "28_ilike_with_a_parameter_pattern" => new Dictionary<string, object?>
+        {
+            ["p0"] = Utf8String.FromAsciiString("iNT%"),
+        },
         "25_like_parameter_after_an_equality_prefix" => new Dictionary<string, object?>
         {
             ["p0"] = new DateTime(2026, 1, 3),

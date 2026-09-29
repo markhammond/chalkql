@@ -302,6 +302,13 @@ enum FunctionId {
   // (any value) -> BOOL NOT NULL. Whether there is a value at all: not NULL, and for a string not
   // empty. What a consumer of a masked column asks when the mask hides whether a value exists.
   FUNCTION_ID_PRESENT = 82;
+  // (value, pattern) or (value, pattern, escape) -> BOOL: LIKE, case-insensitively (D316). Each
+  // character of the value and each literal character of the pattern is folded by the
+  // culture-invariant simple lowercase mapping FUNCTION_ID_LOWER applies, so `x ILIKE p` is
+  // `LOWER(x) LIKE p` with p's literal characters lowered; `%`, `_` and the escape are matched as
+  // written, and the escape rules are LIKE's. Evaluated by the client only: no source's ILIKE folds
+  // exactly so, and no index answers it.
+  FUNCTION_ID_ILIKE = 83;
 }
 
 // Aggregate functions. Argument and result types are on the Measure.

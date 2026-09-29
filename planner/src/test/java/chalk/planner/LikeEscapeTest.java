@@ -151,6 +151,85 @@ class LikeEscapeTest {
     assertThat(text).contains("ChalkFilter").doesNotContain("ChalkIndexLookup");
   }
 
+  // ---- D316: ILIKE is its own function, never a lookup ----
+
+  /** ILIKE is Chalk's own operator (D316): no library needs naming, and naming PostgreSQL's is harmless. */
+  @Test
+  void ilike_needs_no_library() {
+    assertThat(functions(ir("SELECT name FROM terms WHERE name ILIKE 'INT%'")))
+        .contains(chalk.ir.v1.FunctionId.FUNCTION_ID_ILIKE);
+    assertThat(functions(ir("SELECT name FROM terms WHERE name NOT ILIKE 'INT%'")))
+        .contains(chalk.ir.v1.FunctionId.FUNCTION_ID_ILIKE);
+  }
+
+  @Test
+  void ilike_is_its_own_function_and_never_an_index_lookup() {
+    Plan plan = ir("SELECT name FROM terms WHERE name ILIKE 'INT%'", POSTGRESQL);
+
+    assertThat(IrNodes.of(plan, Rel.KindCase.INDEX_LOOKUP)).isEmpty();
+    assertThat(functions(plan))
+        .contains(chalk.ir.v1.FunctionId.FUNCTION_ID_ILIKE)
+        .doesNotContain(chalk.ir.v1.FunctionId.FUNCTION_ID_LIKE);
+  }
+
+  @Test
+  void a_not_ilike_is_the_negation_of_ilike() {
+    Plan plan = ir("SELECT name FROM terms WHERE name NOT ILIKE ?", POSTGRESQL);
+
+    assertThat(functions(plan))
+        .contains(chalk.ir.v1.FunctionId.FUNCTION_ID_NOT, chalk.ir.v1.FunctionId.FUNCTION_ID_ILIKE)
+        .doesNotContain(chalk.ir.v1.FunctionId.FUNCTION_ID_LIKE);
+  }
+
+  @Test
+  void an_ilike_escape_is_held_to_the_same_rules() {
+    assertThatThrownBy(
+            () -> plan("SELECT name FROM terms WHERE name ILIKE 'Int!' ESCAPE '!'", POSTGRESQL))
+        .isInstanceOf(CalciteContextException.class)
+        .hasMessageContaining("ends with its escape character");
+  }
+
+  /** F154: a LIKE-kind operator that is neither LIKE nor ILIKE is refused, not planned as LIKE. */
+  @Test
+  void another_like_kind_operator_is_refused_by_name() {
+    org.apache.calcite.sql.SqlOperator stranger =
+        new org.apache.calcite.sql.SqlBinaryOperator(
+            "SOUNDS_LIKE",
+            org.apache.calcite.sql.SqlKind.LIKE,
+            32,
+            false,
+            org.apache.calcite.sql.type.ReturnTypes.BOOLEAN_NULLABLE,
+            org.apache.calcite.sql.type.InferTypes.FIRST_KNOWN,
+            org.apache.calcite.sql.type.OperandTypes.STRING_SAME_SAME);
+
+    assertThatThrownBy(() -> chalk.planner.ir.FunctionMapping.scalar(stranger, false))
+        .isInstanceOf(chalk.planner.UnsupportedFeatureException.class)
+        .hasMessageContaining("SOUNDS_LIKE");
+    assertThat(
+            chalk.planner.ir.FunctionMapping.scalar(
+                org.apache.calcite.sql.fun.SqlLibraryOperators.ILIKE, false))
+        .isEqualTo(chalk.ir.v1.FunctionId.FUNCTION_ID_ILIKE);
+  }
+
+  private static final List<org.apache.calcite.sql.fun.SqlLibrary> POSTGRESQL =
+      List.of(org.apache.calcite.sql.fun.SqlLibrary.POSTGRESQL);
+
+  private static List<chalk.ir.v1.FunctionId> functions(Plan plan) {
+    List<chalk.ir.v1.FunctionId> found = new ArrayList<>();
+    collectFunctions(plan.getRoot(), found);
+    return found;
+  }
+
+  private static void collectFunctions(Rel rel, List<chalk.ir.v1.FunctionId> found) {
+    String text = rel.toString();
+    for (chalk.ir.v1.FunctionId id : chalk.ir.v1.FunctionId.values()) {
+      if (id != chalk.ir.v1.FunctionId.UNRECOGNIZED
+          && java.util.regex.Pattern.compile("\\bfunction: " + id.name() + "\\b").matcher(text).find()) {
+        found.add(id);
+      }
+    }
+  }
+
   private static IndexLookup lookupOf(Plan plan) {
     List<IndexLookup> found = new ArrayList<>();
     collect(plan.getRoot(), found);
@@ -172,13 +251,18 @@ class LikeEscapeTest {
   }
 
   private static PlannerPipeline.Result plan(String sql) {
+    return plan(sql, List.of());
+  }
+
+  private static PlannerPipeline.Result plan(
+      String sql, List<org.apache.calcite.sql.fun.SqlLibrary> libraries) {
     assumeTrue(
         Files.exists(CorpusQueries.corpusDir().resolve("schemas/corpus.binpb")),
         "the recorded corpus catalog carries the statistics the cost model reads");
     CorpusPlanner planner = new CorpusPlanner();
     try (PlannerPipeline pipeline =
         PlannerPipeline.create(
-            planner.catalog(), PushdownPolicy.full(), SqlConfigs.DEFAULT_CONFORMANCE)) {
+            planner.catalog(), PushdownPolicy.full(), SqlConfigs.DEFAULT_CONFORMANCE, libraries)) {
       return pipeline.plan(sql, true);
     } catch (RuntimeException e) {
       throw e;
@@ -188,7 +272,11 @@ class LikeEscapeTest {
   }
 
   private static Plan ir(String sql) {
-    PlannerPipeline.Result result = plan(sql);
+    return ir(sql, List.of());
+  }
+
+  private static Plan ir(String sql, List<org.apache.calcite.sql.fun.SqlLibrary> libraries) {
+    PlannerPipeline.Result result = plan(sql, libraries);
     return new RelToIr(
             new chalk.planner.types.TypeMapper(result.physical().getCluster().getTypeFactory()),
             result.physical().getCluster().getRexBuilder(),

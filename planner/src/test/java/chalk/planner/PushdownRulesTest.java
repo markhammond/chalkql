@@ -291,6 +291,46 @@ class PushdownRulesTest {
         .doesNotContain("ChalkFilter");
   }
 
+  /**
+   * D316: ILIKE is never pushed — PostgreSQL folds by its database's locale and DuckDB folds a Turkish
+   * capital Chalk's LOWER leaves alone — while a LIKE beside it travels as before.
+   */
+  @Test
+  public void ilike_is_never_pushed() {
+    for (DialectProfile profile : java.util.List.of(duck(), TestCatalogs.postgresProfile())) {
+      String plan =
+          planWithPostgresLibrary(
+              full(),
+              profile,
+              "SELECT c_name FROM db.customer WHERE c_name ILIKE 'customer%' AND c_name LIKE 'C%'");
+      assertThat(plan).as(profile.getDialect()).contains("ChalkFilter").contains("ILIKE");
+      assertThat(plan.substring(plan.indexOf("ChalkFilter")))
+          .as(profile.getDialect())
+          .doesNotContain("condition=[AND(");
+    }
+  }
+
+  private static String planWithPostgresLibrary(
+      SourceCapabilities capabilities, DialectProfile profile, String sql) {
+    // The test catalog declares a user function md5, which the POSTGRESQL library has too.
+    chalk.ir.v1.CatalogContext.Builder builder =
+        TestCatalogs.withRemote("db", capabilities, profile).toBuilder();
+    for (int i = 0; i < builder.getSchemasCount(); i++) {
+      builder.setSchemas(i, builder.getSchemas(i).toBuilder().clearFunctions());
+    }
+    RegisteredCatalog catalog = new CatalogRegistry().register(builder.build());
+    try (PlannerPipeline pipeline =
+        PlannerPipeline.create(
+            catalog,
+            PushdownPolicy.full(),
+            chalk.planner.plan.SqlConfigs.DEFAULT_CONFORMANCE,
+            java.util.List.of(org.apache.calcite.sql.fun.SqlLibrary.POSTGRESQL))) {
+      return pipeline.plan(sql, true).physicalPlanText();
+    } catch (Exception failure) {
+      throw new AssertionError("planning failed for: " + sql, failure);
+    }
+  }
+
   /** The same predicate on a numeric column is unaffected by the collation. */
   @Test
   public void a_numeric_predicate_is_pushed_under_any_collation() {

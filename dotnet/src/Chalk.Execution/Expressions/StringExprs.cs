@@ -251,12 +251,18 @@ internal sealed class LikeExpr : VectorExprBase
 {
     private readonly IVectorExpr _value;
     private readonly LikeMatcher _matcher;
+    private readonly Utf8Lowerer? _fold;
 
-    public LikeExpr(ChalkType type, IVectorExpr value, LikeMatcher matcher)
+    /// <param name="fold">
+    /// ILIKE (D316): each value is lowered as LOWER lowers it before it is matched, and the matcher
+    /// was compiled with its literals lowered the same way.
+    /// </param>
+    public LikeExpr(ChalkType type, IVectorExpr value, LikeMatcher matcher, bool fold = false)
         : base(type)
     {
         _value = value;
         _matcher = matcher;
+        _fold = fold ? new Utf8Lowerer() : null;
     }
 
     public override Vector Evaluate(EvalContext context)
@@ -268,11 +274,65 @@ internal sealed class LikeExpr : VectorExprBase
         var lanes = VarOperand.From(value);
         for (var i = 0; i < length; i++)
         {
-            result[i] = (byte)(IsValidAt(value, i) && _matcher.Matches(lanes[i]) ? 1 : 0);
+            result[i] = (byte)(IsValidAt(value, i)
+                && _matcher.Matches(_fold is null ? lanes[i] : _fold.Lower(lanes[i])) ? 1 : 0);
         }
 
         return Scratch.Finish(length, nulls);
     }
+}
+
+/// <summary>
+/// The culture-invariant simple lowercase mapping LOWER applies (<see cref="CaseMapExpr"/>), over
+/// UTF-8, into a buffer the instance owns and reuses: what ILIKE folds a value with (D316). The
+/// mapping is one code point to one code point, so a folded value has the characters it had and
+/// <c>_</c> still matches exactly one of them. ASCII — the common case — is folded in place, byte by
+/// byte, without decoding.
+/// </summary>
+internal sealed class Utf8Lowerer
+{
+    private char[] _chars = new char[64];
+    private char[] _lowered = new char[64];
+    private byte[] _bytes = new byte[64];
+
+    public ReadOnlySpan<byte> Lower(ReadOnlySpan<byte> utf8)
+    {
+        if (System.Text.Ascii.IsValid(utf8))
+        {
+            if (_bytes.Length < utf8.Length)
+            {
+                _bytes = new byte[Math.Max(utf8.Length, _bytes.Length * 2)];
+            }
+
+            var target = _bytes.AsSpan(0, utf8.Length);
+            System.Text.Ascii.ToLower(utf8, target, out _);
+            return target;
+        }
+
+        var charCount = Encoding.UTF8.GetCharCount(utf8);
+        if (_chars.Length < charCount)
+        {
+            _chars = new char[charCount];
+            _lowered = new char[charCount];
+        }
+
+        var decoded = Encoding.UTF8.GetChars(utf8, _chars);
+        var lowered = _lowered.AsSpan(0, decoded);
+        _ = _chars.AsSpan(0, decoded).ToLowerInvariant(lowered);
+
+        var maxBytes = Encoding.UTF8.GetMaxByteCount(decoded);
+        if (_bytes.Length < maxBytes)
+        {
+            _bytes = new byte[maxBytes];
+        }
+
+        var written = Encoding.UTF8.GetBytes(lowered, _bytes);
+        return _bytes.AsSpan(0, written);
+    }
+
+    /// <summary>A pattern literal lowered the same way, once, when a matcher is compiled.</summary>
+    public static byte[] LowerOnce(ReadOnlySpan<byte> utf8) =>
+        Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(utf8).ToLowerInvariant());
 }
 
 /// <summary>
@@ -298,14 +358,17 @@ internal sealed class ParameterLikeExpr : VectorExprBase
     private readonly IVectorExpr _value;
     private readonly int _slot;
     private readonly string? _escape;
+    private readonly Utf8Lowerer? _fold;
     private Compiled? _compiled;
 
-    public ParameterLikeExpr(ChalkType type, IVectorExpr value, int slot, string? escape)
+    /// <param name="fold">ILIKE (D316): values and the pattern's literals lowered as LOWER lowers.</param>
+    public ParameterLikeExpr(ChalkType type, IVectorExpr value, int slot, string? escape, bool fold = false)
         : base(type)
     {
         _value = value;
         _slot = slot;
         _escape = escape;
+        _fold = fold ? new Utf8Lowerer() : null;
     }
 
     public override Vector Evaluate(EvalContext context)
@@ -324,7 +387,8 @@ internal sealed class ParameterLikeExpr : VectorExprBase
         var lanes = VarOperand.From(value);
         for (var i = 0; i < length; i++)
         {
-            result[i] = (byte)(IsValidAt(value, i) && matcher.Matches(lanes[i]) ? 1 : 0);
+            result[i] = (byte)(IsValidAt(value, i)
+                && matcher.Matches(_fold is null ? lanes[i] : _fold.Lower(lanes[i])) ? 1 : 0);
         }
 
         return Scratch.Finish(length, nulls);
@@ -341,7 +405,8 @@ internal sealed class ParameterLikeExpr : VectorExprBase
         Chalk.Sources.LikePattern.Validate(pattern, _escape);
         var matcher = LikeMatcher.Compile(
             System.Text.Encoding.UTF8.GetBytes(pattern),
-            _escape is null ? [] : System.Text.Encoding.UTF8.GetBytes(_escape));
+            _escape is null ? [] : System.Text.Encoding.UTF8.GetBytes(_escape),
+            fold: _fold is not null);
         System.Threading.Volatile.Write(ref _compiled, new Compiled(pattern, matcher));
         return matcher;
     }
@@ -378,8 +443,12 @@ internal sealed class LikeMatcher
         _literals = literals;
     }
 
-    /// <summary>Compiles a UTF-8 pattern, with an optional single-code-point escape.</summary>
-    public static LikeMatcher Compile(ReadOnlySpan<byte> pattern, ReadOnlySpan<byte> escape)
+    /// <summary>
+    /// Compiles a UTF-8 pattern, with an optional single-code-point escape. With
+    /// <paramref name="fold"/>, each literal is lowered as LOWER lowers (ILIKE, D316); wildcards and
+    /// the escape are read before that, as written.
+    /// </summary>
+    public static LikeMatcher Compile(ReadOnlySpan<byte> pattern, ReadOnlySpan<byte> escape, bool fold = false)
     {
         var kinds = new List<TokenKind>();
         var literals = new List<byte[]>();
@@ -393,7 +462,7 @@ internal sealed class LikeMatcher
             }
 
             kinds.Add(TokenKind.Literal);
-            literals.Add(current.ToArray());
+            literals.Add(fold ? Utf8Lowerer.LowerOnce(current.ToArray()) : current.ToArray());
             current.Clear();
         }
 

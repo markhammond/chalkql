@@ -38,7 +38,7 @@ internal sealed class LikeParameters
             foreach (var expr in PlanWalker.OwnExprs(rel).SelectMany(PlanWalker.Exprs))
             {
                 if (expr.KindCase == Expr.KindOneofCase.Call
-                    && expr.Call.Function == FunctionId.Like
+                    && expr.Call.Function is FunctionId.Like or FunctionId.Ilike
                     && expr.Call.Args.Count >= 2
                     && expr.Call.Args[1].KindCase == Expr.KindOneofCase.Param)
                 {

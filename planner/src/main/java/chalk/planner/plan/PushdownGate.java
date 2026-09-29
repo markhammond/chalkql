@@ -243,6 +243,9 @@ public final class PushdownGate {
   }
 
   private PredicateShape likeShape(RexCall call) {
+    if (!isLike(call)) {
+      return PredicateShape.PREDICATE_SHAPE_UNSPECIFIED;
+    }
     return isPrefixLike(call)
         ? PredicateShape.PREDICATE_SHAPE_LIKE_PREFIX
         : PredicateShape.PREDICATE_SHAPE_LIKE;
@@ -370,13 +373,22 @@ public final class PushdownGate {
    * so it needs the general shape.
    */
   private boolean like(RexCall call) {
-    if (!likeIsChalks() || !allPushable(call)) {
+    if (!isLike(call) || !likeIsChalks() || !allPushable(call)) {
       return false;
     }
     return isPrefixLike(call)
         ? shapes.contains(PredicateShape.PREDICATE_SHAPE_LIKE_PREFIX)
             || shapes.contains(PredicateShape.PREDICATE_SHAPE_LIKE)
         : shapes.contains(PredicateShape.PREDICATE_SHAPE_LIKE);
+  }
+
+  /**
+   * Whether the call is {@code LIKE} itself rather than another member of its kind. {@code ILIKE} is
+   * never pushed (D316): no source folds case exactly as Chalk's {@code LOWER} does — PostgreSQL's
+   * follows its database's locale, DuckDB's differs on a Turkish capital — so it runs locally.
+   */
+  private static boolean isLike(RexCall call) {
+    return "LIKE".equals(call.getOperator().getName());
   }
 
   /**

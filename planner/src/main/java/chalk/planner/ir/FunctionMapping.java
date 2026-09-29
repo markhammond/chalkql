@@ -56,7 +56,6 @@ public final class FunctionMapping {
     map.put(SqlKind.MOD, FunctionId.FUNCTION_ID_MODULUS);
     map.put(SqlKind.MINUS_PREFIX, FunctionId.FUNCTION_ID_NEGATE);
 
-    map.put(SqlKind.LIKE, FunctionId.FUNCTION_ID_LIKE);
     map.put(SqlKind.EXTRACT, FunctionId.FUNCTION_ID_EXTRACT);
     map.put(SqlKind.COALESCE, FunctionId.FUNCTION_ID_COALESCE);
     map.put(SqlKind.NULLIF, FunctionId.FUNCTION_ID_NULLIF);
@@ -129,6 +128,10 @@ public final class FunctionMapping {
           : FunctionId.FUNCTION_ID_CEIL;
     }
 
+    if (operator.getKind() == SqlKind.LIKE) {
+      return like(operator);
+    }
+
     FunctionId byKind = BY_KIND.get(operator.getKind());
     if (byKind != null) {
       return byKind;
@@ -140,6 +143,24 @@ public final class FunctionMapping {
     throw new UnsupportedFeatureException(
         "function " + operator.getName() + " (" + operator.getKind() + ")",
         "docs/design/02-ir.md §6 lists the functions the IR carries; this is not one of them.");
+  }
+
+  /**
+   * The LIKE family, by name rather than by kind (D316, F154): {@code ILIKE} shares {@code LIKE}'s
+   * {@link SqlKind}, and mapping by kind planned it as the case-sensitive {@code LIKE} — a silent
+   * wrong answer. A negated form never reaches here ({@code NOT LIKE} becomes {@code NOT(LIKE)} in
+   * conversion); any other operator of the kind is refused by name rather than guessed at.
+   */
+  private static FunctionId like(SqlOperator operator) {
+    return switch (operator.getName().toUpperCase(Locale.ROOT)) {
+      case "LIKE" -> FunctionId.FUNCTION_ID_LIKE;
+      case "ILIKE" -> FunctionId.FUNCTION_ID_ILIKE;
+      default ->
+          throw new UnsupportedFeatureException(
+              "the LIKE-kind operator " + operator.getName(),
+              "Only LIKE and ILIKE are implemented; another member of the family would be "
+                  + "evaluated as one of them, and answer differently (docs/design/02-ir.md §6).");
+    };
   }
 
   /**

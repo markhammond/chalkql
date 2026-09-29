@@ -152,6 +152,46 @@ public sealed class LikePortabilityTests(SharedSidecar sidecar, SharedPostgres p
     }
 
     /// <summary>
+    /// D316: ILIKE folds as LOWER does — the same rows everywhere, literal or parameter — and is never
+    /// sent to a source: DuckDB folds a Turkish capital LOWER leaves alone, and PostgreSQL folds by its
+    /// database's locale.
+    /// </summary>
+    [Theory]
+    [InlineData("kb%", null)]
+    [InlineData("KB!_%", "!")]
+    [InlineData("\u00c9", null)]
+    [InlineData("_", null)]
+    [InlineData("AB", null)]
+    [InlineData("A!!B", "!")]
+    public async Task Ilike_matches_the_same_rows_everywhere_and_stays_here(string pattern, string? escape)
+    {
+        var suffix = escape is null ? string.Empty : $" ESCAPE '{escape}'";
+        var expected = ExpectedIlike(pattern, escape);
+        await foreach (var (name, engine) in EnginesAsync())
+        {
+            await using (engine)
+            {
+                // ILIKE is Chalk's own (D316): no library needed — and naming PostgreSQL's changes nothing.
+                var literal = $"SELECT id FROM items WHERE sku ILIKE '{pattern}'{suffix}";
+                Assert.True(expected.SequenceEqual(await IdsAsync(engine, literal, [])), $"{name}: {literal}");
+
+                var parameter = $"SELECT id FROM items WHERE sku ILIKE ?{suffix}";
+                Assert.True(
+                    expected.SequenceEqual(await IdsAsync(engine, parameter, [pattern], Postgresql)),
+                    $"{name}: {parameter} with '{pattern}'");
+
+                var query = await engine.PrepareAsync(literal);
+                if (PlanWalker.Has(query.Plan, Rel.KindOneofCase.RemoteQuery))
+                {
+                    Assert.True(PlanWalker.Has(query.Plan, Rel.KindOneofCase.Filter), $"{name}: ILIKE was pushed");
+                }
+            }
+        }
+    }
+
+    private static readonly PrepareOptions Postgresql = new() { Libraries = [Chalk.Client.SqlLibrary.Postgresql] };
+
+    /// <summary>
     /// D315: under the preset a LIKE is pushed to PostgreSQL — with <c>ESCAPE ''</c> when it names no
     /// escape — while a string equality, which the collation does decide, stays here.
     /// </summary>
@@ -247,9 +287,10 @@ public sealed class LikePortabilityTests(SharedSidecar sidecar, SharedPostgres p
                 .DiscoverTables("public")
                 .Build());
 
-    private static async Task<List<int>> IdsAsync(ChalkEngine engine, string sql, IReadOnlyList<object?> parameters)
+    private static async Task<List<int>> IdsAsync(
+        ChalkEngine engine, string sql, IReadOnlyList<object?> parameters, PrepareOptions? options = null)
     {
-        var query = await engine.PrepareAsync(sql);
+        var query = options is null ? await engine.PrepareAsync(sql) : await engine.PrepareAsync(sql, options);
         await using var execution = await engine.ExecuteAsync(query, parameters);
         var ids = new List<int>();
         await foreach (var batch in execution.Batches)
@@ -291,6 +332,35 @@ public sealed class LikePortabilityTests(SharedSidecar sidecar, SharedPostgres p
 
         var matcher = new Regex(regex.Append('$').ToString(), RegexOptions.Singleline | RegexOptions.CultureInvariant);
         return [.. Rows.Where(r => matcher.IsMatch(r.Sku)).Select(r => r.Id).Order()];
+    }
+
+    /// <summary>ILIKE as D316 defines it: the standard LIKE over the rows and the pattern, both lowered as LOWER lowers.</summary>
+    private static List<int> ExpectedIlike(string pattern, string? escape)
+    {
+        var regex = new StringBuilder("^");
+        for (var i = 0; i < pattern.Length; i++)
+        {
+            var c = pattern[i];
+            if (escape is not null && c == escape[0] && i + 1 < pattern.Length)
+            {
+                regex.Append(Regex.Escape(pattern[++i].ToString().ToLowerInvariant()));
+            }
+            else if (c == '%')
+            {
+                regex.Append(".*");
+            }
+            else if (c == '_')
+            {
+                regex.Append("(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|.)");
+            }
+            else
+            {
+                regex.Append(Regex.Escape(c.ToString().ToLowerInvariant()));
+            }
+        }
+
+        var matcher = new Regex(regex.Append('$').ToString(), RegexOptions.Singleline | RegexOptions.CultureInvariant);
+        return [.. Rows.Where(r => matcher.IsMatch(r.Sku.ToLowerInvariant())).Select(r => r.Id).Order()];
     }
 
     private PostgresFixture RequirePostgres()

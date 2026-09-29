@@ -57,7 +57,8 @@ internal static class KernelRegistry
                 compile(call.Args[0]),
                 compile(call.Args[1]),
                 call.Args.Count > 2 ? compile(call.Args[2]) : null),
-            FunctionId.Like => Like(call, result, compile),
+            FunctionId.Like => Like(call, result, compile, fold: false),
+            FunctionId.Ilike => Like(call, result, compile, fold: true),
 
             FunctionId.Coalesce => new CoalesceExpr(result, Map(call.Args, compile)),
 
@@ -352,9 +353,11 @@ internal static class KernelRegistry
     /// <summary>
     /// A literal pattern is compiled once, here (§6.4); a parameter pattern once per execution, when
     /// its value is known (D314). The escape is always a literal — the planner refuses anything else
-    /// (D312) — and both are held to the escape rules of <see cref="LikePattern"/>.
+    /// (D312) — and both are held to the escape rules of <see cref="LikePattern"/>. ILIKE is the same
+    /// with <paramref name="fold"/>: the value and the pattern's literals lowered as LOWER lowers (D316).
     /// </summary>
-    private static IVectorExpr Like(ScalarCall call, ChalkType result, Func<Expr, IVectorExpr> compile)
+    private static IVectorExpr Like(
+        ScalarCall call, ChalkType result, Func<Expr, IVectorExpr> compile, bool fold)
     {
         var escape = call.Args.Count > 2 ? ConstantText(call.Args[2], "LIKE escape") : null;
         var defect = LikePattern.EscapeDefect(escape);
@@ -374,12 +377,14 @@ internal static class KernelRegistry
                 value,
                 LikeMatcher.Compile(
                     System.Text.Encoding.UTF8.GetBytes(pattern.Literal.StringValue),
-                    escape is null ? [] : System.Text.Encoding.UTF8.GetBytes(escape)));
+                    escape is null ? [] : System.Text.Encoding.UTF8.GetBytes(escape),
+                    fold),
+                fold);
         }
 
         if (pattern.KindCase == Expr.KindOneofCase.Param && compile(pattern) is ParameterExpr parameter)
         {
-            return new ParameterLikeExpr(result, value, parameter.Index, escape);
+            return new ParameterLikeExpr(result, value, parameter.Index, escape, fold);
         }
 
         throw new UnsupportedFeatureException(
