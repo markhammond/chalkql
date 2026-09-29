@@ -783,21 +783,25 @@ class PlanningSchedulerTest {
                       }));
       eldestStarted.await();
 
-      runNamed(scheduler, "middle", 1);
-      assertThat(scheduler.sessionRegistrySizeForTest()).isEqualTo(2);
+      // Released however the assertions go: the scheduler's close waits for the eldest planning, so
+      // a failure that left it parked would surface as a timeout instead of the failure.
+      try {
+        runNamed(scheduler, "middle", 1);
+        assertThat(scheduler.sessionRegistrySizeForTest()).isEqualTo(2);
 
-      runNamed(scheduler, "newcomer", 1);
+        runNamed(scheduler, "newcomer", 1);
 
-      assertThat(scheduler.sessionRegistrySizeForTest()).isEqualTo(2);
-      assertThat(scheduler.sessionCapForTest("eldest"))
-          .as("a session with a planning still running is never evicted, whatever its age")
-          .isEqualTo(1);
-      assertThat(scheduler.sessionCapForTest("middle"))
-          .as("a younger, idle session is evicted in its place")
-          .isEqualTo(-1);
-      assertThat(scheduler.sessionCapForTest("newcomer")).isEqualTo(1);
-
-      releaseEldest.countDown();
+        assertThat(scheduler.sessionRegistrySizeForTest()).isEqualTo(2);
+        assertThat(scheduler.sessionCapForTest("eldest"))
+            .as("a session with a planning still running is never evicted, whatever its age")
+            .isEqualTo(1);
+        assertThat(scheduler.sessionCapForTest("middle"))
+            .as("a younger, idle session is evicted in its place")
+            .isEqualTo(-1);
+        assertThat(scheduler.sessionCapForTest("newcomer")).isEqualTo(1);
+      } finally {
+        releaseEldest.countDown();
+      }
       eldest.get();
     } finally {
       pool.shutdownNow();
@@ -832,6 +836,35 @@ class PlanningSchedulerTest {
       assertThat(scheduler.sessionCapForTest("victim2"))
           .as("an evicted session named again with a cap is registered afresh at exactly that cap")
           .isEqualTo(7);
+    }
+  }
+
+  /**
+   * A planning's session is released before its caller sees the answer: once {@code run} returns,
+   * the session it named is idle, and the next session named evicts it. The release used to follow
+   * the answer, so a caller naming a new session at once could find the old one still in use — as
+   * CI's runners did. The hook holds the moment before the release open, so the order is what is
+   * tested, not the machine's speed.
+   */
+  @Test
+  void a_session_is_idle_by_the_time_its_planning_returns() throws Exception {
+    try (PlanningScheduler scheduler = new PlanningScheduler(4, 1)) {
+      scheduler.beforeReleaseForTest =
+          () -> {
+            try {
+              Thread.sleep(50);
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+            }
+          };
+
+      runNamed(scheduler, "first", 1);
+      runNamed(scheduler, "second", 1);
+
+      assertThat(scheduler.sessionCapForTest("first"))
+          .as("the first session was idle when its planning returned, so the second evicted it")
+          .isEqualTo(-1);
+      assertThat(scheduler.sessionRegistrySizeForTest()).isEqualTo(1);
     }
   }
 
