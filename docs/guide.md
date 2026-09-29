@@ -1579,9 +1579,10 @@ chapter 11 is three principals reading one statement over such a table.
 
 **Binding at execution, for a host with many principals.** Prepare with
 `context.Shape()` — the names, kinds and types of the bindings and none of their
-values — and the planner folds nothing: the tenancy predicate becomes a bound
-relation, each `@ctx` scalar a parameter carrying its own name, and two principals
-of the same shape share one plan and one digest.
+values — and the planner folds nothing: each membership of the tenancy predicate
+becomes a lookup the engine answers from the list bound at execution, each `@ctx`
+scalar a parameter carrying its own name, and two principals of the same shape
+share one plan and one digest.
 `engine.ExecuteAsync(query, context)` then binds the values, and a context of
 another shape is refused before anything runs.
 
@@ -1933,9 +1934,10 @@ combination it declares all of them:
   not declare is not that table's, and is passed over;
 - subject grants keep `Subject(name, within: …)`.
 
-Fewer tests matter most where the context is bound at execution: every test is a
-bound list there, and a table that binds more than about forty of them cannot be
-prepared as a shape.
+Fewer tests are fewer lists to bind and fewer lookups a row is put through. Bound at
+execution, each test is a lookup the engine answers from the list it holds, so a
+policy that declares nothing prepares as a shape however many tests it compiles —
+it is only slower to plan and to run than one that declares what it grants.
 
 ### Pushdown and locality
 

@@ -132,6 +132,35 @@ internal static class Runner
         return [.. rows.Select(r => r[0])];
     }
 
+    /// <summary>
+    /// The same, with the context relations the execution binds by name — what a membership over a
+    /// context list reads (F161).
+    /// </summary>
+    public static async Task<List<object?>> ProjectAsync(
+        Expr expr,
+        TestSource source,
+        TestTable table,
+        IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>> relations,
+        int batchSize = 4096,
+        bool reference = false)
+    {
+        var compiled = Compile(ProjectionPlan(expr, table), source, batchSize, reference);
+        var batches = new List<RecordBatch>();
+        await foreach (var batch in compiled.ExecuteAsync(
+            [], new ExecutionStats(), relations, arena: null, CancellationToken.None))
+        {
+            batches.Add(batch);
+        }
+
+        var rows = ResultComparer.Rows(batches);
+        foreach (var batch in batches)
+        {
+            batch.Dispose();
+        }
+
+        return [.. rows.Select(r => r[0])];
+    }
+
     public static Plan ProjectionPlan(Expr expr, TestTable table, IrType[]? parameterTypes = null)
     {
         var row = table.RowType();

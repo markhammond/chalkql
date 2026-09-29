@@ -19,6 +19,14 @@ public sealed class PlanValidationOptions
     public bool AllowReadFilter { get; init; }
 
     /// <summary>
+    /// How deep the plan may nest, in protobuf message levels (F102, F161): the planner's
+    /// <c>PlanNestingLimit</c>, so that the one limit a host sets is the one every read of the plan
+    /// applies. A deeper plan is refused with <see cref="PlanTooDeepException"/> before anything
+    /// recurses over it.
+    /// </summary>
+    public int NestingLimit { get; init; } = PlanLimits.DefaultNestingLimit;
+
+    /// <summary>
     /// The client's own catalog, as the one question <b>I-IR-E</b> asks of it: how many columns does
     /// this table have, when it carries an entitlement, and null when it does not
     /// (<c>docs/design/16-entitlements.md</c> §3.10, D201).

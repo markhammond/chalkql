@@ -173,9 +173,26 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
         if (chalk.planner.plan.ChalkKeySet.is(call)) {
           return keySet(call, type);
         }
+        if (chalk.planner.plan.ChalkContextMembership.is(call)) {
+          return contextMembership(call, type);
+        }
         return scalarCall(call, type);
       }
     }
+  }
+
+  /**
+   * A membership over a context list the executor holds (F161): the list's name, and each key in
+   * the list's column order, already at the type it is compared in.
+   */
+  private Expr contextMembership(RexCall call, Type type) {
+    chalk.ir.v1.ContextMembership.Builder membership =
+        chalk.ir.v1.ContextMembership.newBuilder()
+            .setList(chalk.planner.plan.ChalkContextMembership.list(call));
+    for (RexNode column : chalk.planner.plan.ChalkContextMembership.columns(call)) {
+      membership.addColumns(convert(column));
+    }
+    return Expr.newBuilder().setType(type).setContextMembership(membership).build();
   }
 
   /**

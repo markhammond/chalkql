@@ -147,6 +147,7 @@ public sealed class EntitledQuery
                     PopulationAggregates = engine.Engine.IsPopulationAggregate,
                     ReportedDisclosures = Disclosures.Outcomes(prepared),
                     ReportedDescriptorHashes = DescriptorHashOf,
+                    NestingLimit = engine.Engine.PlanNestingLimit,
                 });
         }
 

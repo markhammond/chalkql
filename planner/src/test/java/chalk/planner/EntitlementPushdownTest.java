@@ -668,8 +668,8 @@ class EntitlementPushdownTest {
 
   /**
    * A context with an <b>open half</b> — D209's shape, or the open half of D232's partial binding —
-   * makes the parent's entitled leaf a <em>local</em> subtree: every membership is a join to a
-   * context table, and a context table belongs to no source. The join a {@code through} compiles
+   * makes the parent's entitled leaf a <em>local</em> subtree: every membership reads a context
+   * list, by a lookup since F161 and by a join before it, and a context list belongs to no source. The join a {@code through} compiles
    * into then has a local driving side and a remote child, in one source or in two, and what the
    * driving side is made of is not the rule's business: the parent's visible keys are computed
    * here and travel as the key set either way.
@@ -690,8 +690,10 @@ class EntitlementPushdownTest {
     assertThat(text).contains("ChalkLookupJoin");
     assertThat(text).contains("strategy=[JOIN_STRATEGY_LOOKUP]");
     assertThat(text).contains("CHALK_KEY_SET_IN($1)");
-    // The marker joins are the driving side, above the parent's own scan and below the key set.
-    assertThat(text.indexOf("ChalkContextScan")).isLessThan(text.indexOf("CHALK_KEY_SET_IN"));
+    // The parent's set lookups are the driving side, above its own scan and below the key set: the
+    // lists are read here, so the side belongs to no one source and its keys travel (F55, F161).
+    assertThat(text.indexOf("CHALK_CONTEXT_MEMBERSHIP")).isNotNegative();
+    assertThat(text.indexOf("CHALK_CONTEXT_MEMBERSHIP")).isLessThan(text.indexOf("CHALK_KEY_SET_IN"));
     assertThat(result.pushedRowPredicates()).contains("remote.messages");
 
     assertThat(remoteFor(result, "messages"))

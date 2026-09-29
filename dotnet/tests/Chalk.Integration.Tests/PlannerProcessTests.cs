@@ -193,6 +193,24 @@ public sealed class PlannerProcessTests
         Assert.Contains("must be absolute", error.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A planner the sidecar creates reads plans at the host's limit, not the default: the limit is
+    /// the one option a host raises when its threads have the stack for it.
+    /// </summary>
+    [Fact]
+    public async Task A_planner_it_creates_keeps_the_hosts_nesting_limit()
+    {
+        SkipWithoutJar();
+
+        await using var sidecar = await PlannerProcess.StartAsync(
+            new PlannerProcessOptions { JarPath = Jar },
+            TestContext.Current.CancellationToken);
+        await using var planner = sidecar.CreatePlanner(
+            new GrpcPlannerOptions { Address = sidecar.Address, PlanNestingLimit = 7 });
+
+        Assert.Equal(7, planner.PlanNestingLimit);
+    }
+
     private static void SkipWithoutJar() =>
         Assert.SkipWhen(
             RepoLayout.PlannerJar is null,

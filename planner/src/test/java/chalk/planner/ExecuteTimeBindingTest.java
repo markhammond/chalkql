@@ -78,11 +78,15 @@ class ExecuteTimeBindingTest {
   }
 
   @Test
-  void a_membership_is_one_marker_per_list_and_not_one_per_column() throws Exception {
+  void a_membership_is_a_set_lookup_and_not_a_join() throws Exception {
     // members reads manager_orgs and agent_orgs in its row predicate and in both column rules —
-    // eight uses, two lists, and therefore two scans of a bound relation and no more (§3.2).
+    // eight uses, two lists: each use is a lookup the executor answers from the list it holds, and
+    // no list is scanned or joined, so the plan's depth does not grow with the lists (§3.2, F161).
     String text = plan("SELECT * FROM members", TenancyCatalogs.shape()).physicalPlanText();
-    assertThat(count(text, "ChalkContextScan")).isEqualTo(2);
+    assertThat(count(text, "ChalkContextScan")).isZero();
+    assertThat(text).doesNotContain("Join");
+    assertThat(text).contains("CHALK_CONTEXT_MEMBERSHIP('manager_orgs'");
+    assertThat(text).contains("CHALK_CONTEXT_MEMBERSHIP('agent_orgs'");
   }
 
   @Test
@@ -111,7 +115,7 @@ class ExecuteTimeBindingTest {
   // ------------------------------------------------------------------ partial binding (§2.1, D232)
 
   @Test
-  void a_partly_bound_leaf_carries_a_folded_list_and_a_marker_at_once() throws Exception {
+  void a_partly_bound_leaf_carries_a_folded_list_and_a_lookup_at_once() throws Exception {
     PlannerPipeline.Result result =
         plan("SELECT * FROM members", TenancyCatalogs.managerWithAgentShape(1));
 
@@ -119,11 +123,11 @@ class ExecuteTimeBindingTest {
     assertThat(result.requiredRelations()).containsExactly("agent_orgs");
     assertThat(result.requiredScalars()).isEmpty();
 
-    // One bound relation scanned — the open one — and the folded one is a literal in the leaf's own
-    // filter rather than a scan of anything.
+    // One bound list read — the open one, by a lookup — and the folded one is a literal in the
+    // leaf's own filter rather than a read of anything.
     String text = result.physicalPlanText();
-    assertThat(count(text, "ChalkContextScan")).isEqualTo(1);
-    assertThat(text).contains("agent_orgs");
+    assertThat(count(text, "ChalkContextScan")).isZero();
+    assertThat(text).contains("CHALK_CONTEXT_MEMBERSHIP('agent_orgs'");
     assertThat(text).doesNotContain("manager_orgs");
   }
 

@@ -1475,77 +1475,14 @@ where its own principals differ.
 ```
 -- the base plan: the customer and the caller left open, one plan for everybody
 plan:
-    Plan ir_version=1 digest=af176e16e558d00d context_id=tutorial-13 catalog_epoch=1
-      HashJoin Semi left_keys=[0] right_keys=[0] rows=37.5 out=[order_id:I32, product_id:I32, quantity:I32] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
-        Sort [$0 ASC NULLS LAST, $1 ASC NULLS LAST] rows=150 out=[order_id:I32, product_id:I32, quantity:I32] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
-          RemoteQuery source=facts dialect=duckdb sql='SELECT "order_id", "product_id", "quantity" FROM "order_details"' pushed_plan=yes rows=150 out=[order_id:I32, product_id:I32, quantity:I32]
-        Project [$0] rows=15 out=[$chalk$key:I32]
-          Filter OR(ISNOTNULL($5), ISNOTNULL($7), ISNOTNULL($10), ISNOTNULL($12), ISNOTNULL($15), ISNOTNULL($17), ISNOTNULL($20), ISNOTNULL($22), ISNOTNULL($25), ISNOTNULL($27), ISNOTNULL($30), ISNOTNULL($32), ISNOTNULL($35), ISNOTNULL($37), ISNOTNULL($40), ISNOTNULL($42)) rows=15 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?, id2:I32?, i2:BOOL?, id3:I32?, region1:I32?, i3:BOOL?, id4:I32?, i4:BOOL?, id5:I32?, region2:I32?, i5:BOOL?, id6:I32?, i6:BOOL?, id7:I32?, region3:I32?, i7:BOOL?, id8:I32?, i8:BOOL?, id9:I32?, region4:I32?, i9:BOOL?, id10:I32?, i10:BOOL?, id11:I32?, region5:I32?, i11:BOOL?, id12:I32?, i12:BOOL?, id13:I32?, region6:I32?, i13:BOOL?, id14:I32?, i14:BOOL?]
-            NestedLoopJoin Left on EQ($1, $41) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?, id2:I32?, i2:BOOL?, id3:I32?, region1:I32?, i3:BOOL?, id4:I32?, i4:BOOL?, id5:I32?, region2:I32?, i5:BOOL?, id6:I32?, i6:BOOL?, id7:I32?, region3:I32?, i7:BOOL?, id8:I32?, i8:BOOL?, id9:I32?, region4:I32?, i9:BOOL?, id10:I32?, i10:BOOL?, id11:I32?, region5:I32?, i11:BOOL?, id12:I32?, i12:BOOL?, id13:I32?, region6:I32?, i13:BOOL?, id14:I32?, i14:BOOL?]
-              NestedLoopJoin Left on AND(EQ($1, $38), EQ($2, $39)) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?, id2:I32?, i2:BOOL?, id3:I32?, region1:I32?, i3:BOOL?, id4:I32?, i4:BOOL?, id5:I32?, region2:I32?, i5:BOOL?, id6:I32?, i6:BOOL?, id7:I32?, region3:I32?, i7:BOOL?, id8:I32?, i8:BOOL?, id9:I32?, region4:I32?, i9:BOOL?, id10:I32?, i10:BOOL?, id11:I32?, region5:I32?, i11:BOOL?, id12:I32?, i12:BOOL?, id13:I32?, region6:I32?, i13:BOOL?]
-                NestedLoopJoin Left on EQ($1, $36) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?, id2:I32?, i2:BOOL?, id3:I32?, region1:I32?, i3:BOOL?, id4:I32?, i4:BOOL?, id5:I32?, region2:I32?, i5:BOOL?, id6:I32?, i6:BOOL?, id7:I32?, region3:I32?, i7:BOOL?, id8:I32?, i8:BOOL?, id9:I32?, region4:I32?, i9:BOOL?, id10:I32?, i10:BOOL?, id11:I32?, region5:I32?, i11:BOOL?, id12:I32?, i12:BOOL?]
-                  NestedLoopJoin Left on AND(EQ($1, $33), EQ($2, $34)) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?, id2:I32?, i2:BOOL?, id3:I32?, region1:I32?, i3:BOOL?, id4:I32?, i4:BOOL?, id5:I32?, region2:I32?, i5:BOOL?, id6:I32?, i6:BOOL?, id7:I32?, region3:I32?, i7:BOOL?, id8:I32?, i8:BOOL?, id9:I32?, region4:I32?, i9:BOOL?, id10:I32?, i10:BOOL?, id11:I32?, region5:I32?, i11:BOOL?]
-                    NestedLoopJoin Left on EQ($1, $31) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?, id2:I32?, i2:BOOL?, id3:I32?, region1:I32?, i3:BOOL?, id4:I32?, i4:BOOL?, id5:I32?, region2:I32?, i5:BOOL?, id6:I32?, i6:BOOL?, id7:I32?, region3:I32?, i7:BOOL?, id8:I32?, i8:BOOL?, id9:I32?, region4:I32?, i9:BOOL?, id10:I32?, i10:BOOL?]
-                      NestedLoopJoin Left on AND(EQ($1, $28), EQ($2, $29)) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?, id2:I32?, i2:BOOL?, id3:I32?, region1:I32?, i3:BOOL?, id4:I32?, i4:BOOL?, id5:I32?, region2:I32?, i5:BOOL?, id6:I32?, i6:BOOL?, id7:I32?, region3:I32?, i7:BOOL?, id8:I32?, i8:BOOL?, id9:I32?, region4:I32?, i9:BOOL?]
-                        NestedLoopJoin Left on EQ($1, $26) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?, id2:I32?, i2:BOOL?, id3:I32?, region1:I32?, i3:BOOL?, id4:I32?, i4:BOOL?, id5:I32?, region2:I32?, i5:BOOL?, id6:I32?, i6:BOOL?, id7:I32?, region3:I32?, i7:BOOL?, id8:I32?, i8:BOOL?]
-                          NestedLoopJoin Left on AND(EQ($1, $23), EQ($2, $24)) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?, id2:I32?, i2:BOOL?, id3:I32?, region1:I32?, i3:BOOL?, id4:I32?, i4:BOOL?, id5:I32?, region2:I32?, i5:BOOL?, id6:I32?, i6:BOOL?, id7:I32?, region3:I32?, i7:BOOL?]
-                            NestedLoopJoin Left on EQ($1, $21) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?, id2:I32?, i2:BOOL?, id3:I32?, region1:I32?, i3:BOOL?, id4:I32?, i4:BOOL?, id5:I32?, region2:I32?, i5:BOOL?, id6:I32?, i6:BOOL?]
-                              NestedLoopJoin Left on AND(EQ($1, $18), EQ($2, $19)) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?, id2:I32?, i2:BOOL?, id3:I32?, region1:I32?, i3:BOOL?, id4:I32?, i4:BOOL?, id5:I32?, region2:I32?, i5:BOOL?]
-                                NestedLoopJoin Left on EQ($1, $16) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?, id2:I32?, i2:BOOL?, id3:I32?, region1:I32?, i3:BOOL?, id4:I32?, i4:BOOL?]
-                                  NestedLoopJoin Left on AND(EQ($1, $13), EQ($2, $14)) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?, id2:I32?, i2:BOOL?, id3:I32?, region1:I32?, i3:BOOL?]
-                                    NestedLoopJoin Left on EQ($1, $11) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?, id2:I32?, i2:BOOL?]
-                                      NestedLoopJoin Left on AND(EQ($1, $8), EQ($2, $9)) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?, id1:I32?, region0:I32?, i1:BOOL?]
-                                        NestedLoopJoin Left on EQ($1, $6) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?, id0:I32?, i0:BOOL?]
-                                          NestedLoopJoin Left on AND(EQ($1, $3), EQ($2, $4)) rows=60 out=[order_id:I32, customer_id:I32, region_id:I32, id:I32?, region:I32?, i:BOOL?]
-                                            RemoteQuery source=facts dialect=duckdb sql='SELECT "order_id", "customer_id", "region_id" FROM "orders"' pushed_plan=yes rows=60 out=[order_id:I32, customer_id:I32, region_id:I32]
-                                            Project [$0, $1, true] rows=1 out=[id:I32, region:I32, i:BOOL]
-                                              HashAggregate keys=[0,1] measures=[] rows=1 out=[id:I32, region:I32]
-                                                BoundTable customer_buyer_within_region rows=1 out=[id:I32, region:I32]
-                                          Project [$0, true] rows=1 out=[id:I32, i:BOOL]
-                                            HashAggregate keys=[0] measures=[] rows=1 out=[id:I32]
-                                              BoundTable customer_buyer rows=1 out=[id:I32]
-                                        Project [$0, $1, true] rows=1 out=[id:I32, region:I32, i:BOOL]
-                                          HashAggregate keys=[0,1] measures=[] rows=1 out=[id:I32, region:I32]
-                                            BoundTable customer_sales_within_region rows=1 out=[id:I32, region:I32]
-                                      Project [$0, true] rows=1 out=[id:I32, i:BOOL]
-                                        HashAggregate keys=[0] measures=[] rows=1 out=[id:I32]
-                                          BoundTable customer_sales rows=1 out=[id:I32]
-                                    Project [$0, $1, true] rows=1 out=[id:I32, region:I32, i:BOOL]
-                                      HashAggregate keys=[0,1] measures=[] rows=1 out=[id:I32, region:I32]
-                                        BoundTable customer_representative_within_region rows=1 out=[id:I32, region:I32]
-                                  Project [$0, true] rows=1 out=[id:I32, i:BOOL]
-                                    HashAggregate keys=[0] measures=[] rows=1 out=[id:I32]
-                                      BoundTable customer_representative rows=1 out=[id:I32]
-                                Project [$0, $1, true] rows=1 out=[id:I32, region:I32, i:BOOL]
-                                  HashAggregate keys=[0,1] measures=[] rows=1 out=[id:I32, region:I32]
-                                    BoundTable customer_reviewer_within_region rows=1 out=[id:I32, region:I32]
-                              Project [$0, true] rows=1 out=[id:I32, i:BOOL]
-                                HashAggregate keys=[0] measures=[] rows=1 out=[id:I32]
-                                  BoundTable customer_reviewer rows=1 out=[id:I32]
-                            Project [$0, $1, true] rows=1 out=[id:I32, region:I32, i:BOOL]
-                              HashAggregate keys=[0,1] measures=[] rows=1 out=[id:I32, region:I32]
-                                BoundTable customer_operator_within_region rows=1 out=[id:I32, region:I32]
-                          Project [$0, true] rows=1 out=[id:I32, i:BOOL]
-                            HashAggregate keys=[0] measures=[] rows=1 out=[id:I32]
-                              BoundTable customer_operator rows=1 out=[id:I32]
-                        Project [$0, $1, true] rows=1 out=[id:I32, region:I32, i:BOOL]
-                          HashAggregate keys=[0,1] measures=[] rows=1 out=[id:I32, region:I32]
-                            BoundTable customer_self_within_region rows=1 out=[id:I32, region:I32]
-                      Project [$0, true] rows=1 out=[id:I32, i:BOOL]
-                        HashAggregate keys=[0] measures=[] rows=1 out=[id:I32]
-                          BoundTable customer_self rows=1 out=[id:I32]
-                    Project [$0, $1, true] rows=1 out=[id:I32, region:I32, i:BOOL]
-                      HashAggregate keys=[0,1] measures=[] rows=1 out=[id:I32, region:I32]
-                        BoundTable customer_auditor_within_region rows=1 out=[id:I32, region:I32]
-                  Project [$0, true] rows=1 out=[id:I32, i:BOOL]
-                    HashAggregate keys=[0] measures=[] rows=1 out=[id:I32]
-                      BoundTable customer_auditor rows=1 out=[id:I32]
-                Project [$0, $1, true] rows=1 out=[id:I32, region:I32, i:BOOL]
-                  HashAggregate keys=[0,1] measures=[] rows=1 out=[id:I32, region:I32]
-                    BoundTable customer_finance_within_region rows=1 out=[id:I32, region:I32]
-              Project [$0, true] rows=1 out=[id:I32, i:BOOL]
-                HashAggregate keys=[0] measures=[] rows=1 out=[id:I32]
-                  BoundTable customer_finance rows=1 out=[id:I32]
+    Plan ir_version=1 digest=0ab4a7b2a8c077c9 context_id=tutorial-13 catalog_epoch=1
+      Sort [$0 ASC NULLS LAST, $1 ASC NULLS LAST] rows=84.375 out=[order_id:I32, product_id:I32, quantity:I32] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
+        Project [$1, $2, $3] rows=84.375 out=[order_id:I32, product_id:I32, quantity:I32]
+          LookupJoin Inner driving_keys=[0] lookup_keys=[0] max_keys_per_call=1000 key_set=in rows=84.375 out=[$chalk$key:I32, order_id:I32, product_id:I32, quantity:I32]
+            Project [$0] rows=15 out=[$chalk$key:I32]
+              Filter OR(($1, $2) IN @ctx.customer_buyer_within_region, $1 IN @ctx.customer_buyer, ($1, $2) IN @ctx.customer_sales_within_region, $1 IN @ctx.customer_sales, ($1, $2) IN @ctx.customer_representative_within_region, $1 IN @ctx.customer_representative, ($1, $2) IN @ctx.customer_reviewer_within_region, $1 IN @ctx.customer_reviewer, ($1, $2) IN @ctx.customer_operator_within_region, $1 IN @ctx.customer_operator, ($1, $2) IN @ctx.customer_self_within_region, $1 IN @ctx.customer_self, ($1, $2) IN @ctx.customer_auditor_within_region, $1 IN @ctx.customer_auditor, ($1, $2) IN @ctx.customer_finance_within_region, $1 IN @ctx.customer_finance) rows=15 out=[order_id:I32, customer_id:I32, region_id:I32]
+                RemoteQuery source=facts dialect=duckdb sql='SELECT "order_id", "customer_id", "region_id" FROM "orders"' pushed_plan=yes rows=60 out=[order_id:I32, customer_id:I32, region_id:I32]
+            RemoteQuery source=facts dialect=duckdb sql='SELECT "order_id", "product_id", "quantity" FROM "order_details" WHERE "order_id" IN (?)' pushed_plan=yes rows=37.5 out=[order_id:I32, product_id:I32, quantity:I32]
 
 context:
     folded    33 names, over global, region, supplier
@@ -1556,8 +1493,8 @@ report:
     tables   order_details: Some rows
 
 remote queries:
-    facts (duckdb): SELECT "order_id", "product_id", "quantity" FROM "order_details"
     facts (duckdb): SELECT "order_id", "customer_id", "region_id" FROM "orders"
+    facts (duckdb): SELECT "order_id", "product_id", "quantity" FROM "order_details" WHERE "order_id" IN (?)
 
     as Harbour Partners' buyer:
     order_id  product_id  quantity
@@ -1586,8 +1523,8 @@ remote queries:
     … 6 more rows
 
     One plan, one digest, two principals. Nothing about either customer
-    is in it: every membership is a join to a table the executor
-    materialises from the binding, and no customer is named in the SQL.
+    is in it: every membership is a lookup the executor answers from the
+    list bound at execution, and no customer is named in the SQL.
 
     `Shape(names)` is what chose the line: the supplier, region and
     warehouse axes are bound, because every principal on the customer's
@@ -1597,7 +1534,7 @@ remote queries:
 ```
 
 Now the customer's grants are folded. `customer_id = 3` is in the SQL, inside an `EXISTS`
-the database can answer, and the marker joins that carried it are gone.
+the database can answer, and the lookups that carried it are gone.
 
 ```
 -- the tenant plan: the customer's grants folded, the person left open
@@ -1617,7 +1554,7 @@ remote queries:
     facts (duckdb): SELECT "order_id", "product_id", "quantity" FROM "order_details" AS "t" WHERE EXISTS (SELECT 1 FROM (SELECT "order_id" AS "$chalk$key" FROM (SELECT "order_id", "customer_id" FROM "orders") AS "t0" WHERE "customer_id" = 3) AS "t2" WHERE "t"."order_id" = "t2"."$chalk$key") ORDER BY "order_id", "product_id"
 
 stages:
-    narrowed from af176e16e558d00d -> entitlements -> hep -> volcano -> root-project
+    narrowed from 0ab4a7b2a8c077c9 -> entitlements -> hep -> volcano -> root-project
 
     as Harbour Partners' buyer:
     order_id  product_id  quantity
@@ -1632,13 +1569,13 @@ stages:
     19        14          24
     … 16 more rows
 
-    `customer_id = 3` is in the SQL now, and the marker joins that carried
-    it are gone: the customer is decided, so the predicate is something the
-    database can be asked, and the source returns the lines this binding
-    reaches rather than all of them. That is what a fold is for, reached by
-    a plan built before the tenant was known. What is still open is who is
-    asking, which is what lets every one of that customer's staff share
-    this plan.
+    `customer_id = 3` is in the SQL now, and the lookups that carried it
+    are gone: the customer is decided, so the predicate is something the
+    database can be asked, and one query returns the lines this binding
+    reaches without the orders leaving the database to be looked up here.
+    That is what a fold is for, reached by a plan built before the tenant
+    was known. What is still open is who is asking, which is what lets
+    every one of that customer's staff share this plan.
 ```
 
 And the last tier: everything folded, nothing required at execution. This is the plan

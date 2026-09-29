@@ -27,6 +27,12 @@ public sealed class RecordedPlanner : IQueryPlanner
     public string Directory => _directory.FullName;
 
     /// <summary>
+    /// How deep a recorded plan may nest (F102, F161): the one limit its read and every validation of
+    /// it apply, as <see cref="GrpcPlannerOptions.PlanNestingLimit"/> is for the sidecar's.
+    /// </summary>
+    public int PlanNestingLimit { get; init; } = PlanLimits.DefaultNestingLimit;
+
+    /// <summary>
     /// False (D271 (d)): this transport holds one catalog and no history, so there is no base a
     /// delta could be applied to. The engine registers whole against it.
     /// </summary>
@@ -79,7 +85,19 @@ public sealed class RecordedPlanner : IQueryPlanner
             throw new RecordedPlanMissingException(request.Sql, request.Options.Pushdown, key, Directory);
         }
 
-        var plan = Plan.Parser.ParseFrom(File.ReadAllBytes(file.FullName));
+        Plan plan;
+        try
+        {
+            using var bytes = File.OpenRead(file.FullName);
+            plan = Plan.Parser.ParseFrom(
+                Google.Protobuf.CodedInputStream.CreateWithLimits(bytes, int.MaxValue, PlanNestingLimit));
+        }
+        catch (Google.Protobuf.InvalidProtocolBufferException e)
+            when (e.Message.Contains("nesting", StringComparison.OrdinalIgnoreCase))
+        {
+            var tooDeep = new PlanTooDeepException(PlanNestingLimit, e);
+            throw new PlanningException(Chalk.Client.Rpc.PlanErrorKind.Internal, tooDeep.Message, position: null, tooDeep);
+        }
 
         // A recorded plan is only valid against a catalog whose *shape* it still fits; serving it
         // against another is exactly the wrong-answer bug this check exists to stop. Since D271 (a)

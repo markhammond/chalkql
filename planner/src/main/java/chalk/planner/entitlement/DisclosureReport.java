@@ -422,7 +422,10 @@ public final class DisclosureReport {
     return null;
   }
 
-  /** The names a plan still needs bound at execution: none under prepare-time binding (§2). */
+  /**
+   * The names a plan still needs bound at execution: none under prepare-time binding (§2). A list
+   * is needed where the plan scans it, and where a membership over it reads it (F161).
+   */
   public static List<String> requiredRelations(RelNode physical) {
     List<String> names = new ArrayList<>();
     collectContextTables(physical, names);
@@ -434,6 +437,19 @@ public final class DisclosureReport {
         && !names.contains(scan.contextName())) {
       names.add(scan.contextName());
     }
+    rel.accept(
+        new org.apache.calcite.rex.RexShuttle() {
+          @Override
+          public org.apache.calcite.rex.RexNode visitCall(org.apache.calcite.rex.RexCall call) {
+            if (chalk.planner.plan.ChalkContextMembership.is(call)) {
+              String list = chalk.planner.plan.ChalkContextMembership.list(call);
+              if (!names.contains(list)) {
+                names.add(list);
+              }
+            }
+            return super.visitCall(call);
+          }
+        });
     for (RelNode input : rel.getInputs()) {
       collectContextTables(input, names);
     }

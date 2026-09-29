@@ -105,7 +105,8 @@ internal sealed class ExpressionCompiler
         or Expr.KindOneofCase.Cast
         or Expr.KindOneofCase.IfThen
         or Expr.KindOneofCase.InList
-        or Expr.KindOneofCase.FieldAccess;
+        or Expr.KindOneofCase.FieldAccess
+        or Expr.KindOneofCase.ContextMembership;
 
     /// <summary>Whether <paramref name="expr"/> calls a <c>VOLATILE</c> user function anywhere in it.</summary>
     private bool ContainsVolatile(Expr expr)
@@ -156,6 +157,16 @@ internal sealed class ExpressionCompiler
                 return false;
             case Expr.KindOneofCase.FieldAccess:
                 return ContainsVolatile(expr.FieldAccess.Input);
+            case Expr.KindOneofCase.ContextMembership:
+                foreach (var column in expr.ContextMembership.Columns)
+                {
+                    if (ContainsVolatile(column))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
             default:
                 return false;
         }
@@ -206,6 +217,12 @@ internal sealed class ExpressionCompiler
                 type,
                 Compile(expr.InList.Value),
                 [.. expr.InList.Options.Select(Compile)]),
+
+            // F161: a membership over a context list the executor holds, one lookup per row.
+            Expr.KindOneofCase.ContextMembership => new ContextMembershipExpr(
+                type,
+                expr.ContextMembership.List,
+                [.. expr.ContextMembership.Columns.Select(Compile)]),
 
             // D291: a field of a composite value, a view of the composite's field column.
             Expr.KindOneofCase.FieldAccess => new FieldAccessExpr(

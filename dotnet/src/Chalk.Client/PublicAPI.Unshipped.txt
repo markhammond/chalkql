@@ -1513,3 +1513,7 @@ override Chalk.Client.PrepareOptions.GetHashCode() -> int
 override Chalk.Client.PrepareOptions.ToString() -> string!
 static Chalk.Client.PrepareOptions.operator !=(Chalk.Client.PrepareOptions? left, Chalk.Client.PrepareOptions? right) -> bool
 static Chalk.Client.PrepareOptions.operator ==(Chalk.Client.PrepareOptions? left, Chalk.Client.PrepareOptions? right) -> bool
+Chalk.Client.GrpcQueryPlanner.PlanNestingLimit.get -> int
+Chalk.Client.IQueryPlanner.PlanNestingLimit.get -> int
+Chalk.Client.RecordedPlanner.PlanNestingLimit.get -> int
+Chalk.Client.RecordedPlanner.PlanNestingLimit.init -> void

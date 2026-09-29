@@ -6,8 +6,9 @@ namespace Chalk.Integration.Tests;
 
 /// <summary>
 /// The plan response is read under <see cref="GrpcPlannerOptions.PlanNestingLimit"/> rather than
-/// protobuf's default of a hundred levels (F102), and a plan that nests deeper than the limit is a
-/// plan-shaped refusal that names the limit, never an unavailability.
+/// protobuf's default of a hundred levels (F102) — the one limit every read of the plan applies
+/// (F161) — and a plan that nests deeper than the limit is a plan-shaped refusal that names the
+/// limit, never an unavailability and never the stack overflow reading it could be.
 /// </summary>
 public sealed class PlanNestingLimitTests
 {
@@ -41,13 +42,25 @@ public sealed class PlanNestingLimitTests
     }
 
     [Fact]
+    public void A_plan_too_deep_says_so_by_its_inner_exception()
+    {
+        var refused = Assert.Throws<PlanningException>(() => GrpcQueryPlanner.ParsePlanResponse(DeepPlan(300), 100));
+
+        var tooDeep = Assert.IsType<PlanTooDeepException>(refused.InnerException);
+        Assert.Equal(100, tooDeep.Limit);
+    }
+
+    [Fact]
     public void The_default_limit_reads_a_plan_protobufs_default_would_refuse()
     {
-        var payload = DeepPlan(300);
+        // About two hundred levels: past protobuf's hundred, inside the default.
+        var payload = DeepPlan(100);
 
         var parsed = GrpcQueryPlanner.ParsePlanResponse(payload, new GrpcPlannerOptions { Address = new Uri("http://localhost:1") }.PlanNestingLimit);
 
         Assert.Equal(Rel.KindOneofCase.Filter, parsed.Plan.Root.KindCase);
+        Assert.Throws<PlanningException>(() => GrpcQueryPlanner.ParsePlanResponse(
+            DeepPlan(300), new GrpcPlannerOptions { Address = new Uri("http://localhost:1") }.PlanNestingLimit));
     }
 
     [Fact]

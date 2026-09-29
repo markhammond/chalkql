@@ -55,6 +55,7 @@ internal sealed class ReferenceExecutor
             BoundSlots.Of(_plan.BoundScalars, _plan.ParameterTypes.Count))
         {
             Now = _settings.TimeProvider.GetUtcNow(),
+            ContextRelations = name => _relations.TryGetValue(name, out var rows) ? rows : null,
         };
 
         List<object?[]> rows;
@@ -90,7 +91,7 @@ internal sealed class ReferenceExecutor
     }
 
     /// <summary>The parameter binder is shared with the engine (§8); its scalars are unpacked here.</summary>
-    private static object? ToReferenceValue(ScalarValue scalar)
+    internal static object? ToReferenceValue(ScalarValue scalar)
     {
         if (scalar.IsNull)
         {

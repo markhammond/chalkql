@@ -481,6 +481,13 @@ public static class PlanWalker
                 }
 
                 break;
+            case Expr.KindOneofCase.ContextMembership:
+                foreach (var column in expr.ContextMembership.Columns)
+                {
+                    yield return column;
+                }
+
+                break;
             case Expr.KindOneofCase.FieldAccess:
                 // D291: one field of a COMPOSITE. The composite is the only operand, so whatever reads a
                 // column through a field access reads it through the composite's expression.
