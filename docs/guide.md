@@ -1876,6 +1876,63 @@ three-valued verdict per table on how much of it the principal can see — `Agre
 `Disagrees`, or `Indeterminate` for a host predicate outside the small grammar it
 reads, because a guess that happened to agree would be worse than no answer.
 
+### Grants that hold several kinds at once
+
+**`Within` conjoins; everything else disjoins.**
+`Grant.ForTenancy(classification, "SECRET", analyst).Within(mission, "KESTREL")`
+reaches a row whose classification is SECRET *and* whose mission is KESTREL. Two
+grants are two alternatives, and so are a table's restrictions: a table that
+declares a classification and a releasability is reached along either, so a grant
+naming one kind alone reaches every row with that value, whatever the others hold.
+The conjunction lives in the grant, not in the table.
+
+**A grant reaches a table where its kinds resolve together** — on the row itself,
+on one path's endpoint read beside the row, or on a parent's row — and nothing of a
+table where they do not. A grant naming fewer kinds is the broader one on a table
+that carries more.
+
+**A grant is its set of kinds.** Which kind it names first is a spelling:
+`ForTenancy(releasability, …).Within(classification, …)` and the reverse reach the
+same rows, on every table, including one that holds a classification of its own
+and inherits its releasability along a path.
+
+**A kind the table declares is read off the table's own row.** Where a table holds
+a kind directly and reaches another along a path whose endpoint holds the first
+kind too, a grant confined along it is decided by the table's value, not the
+endpoint's: a grant confined to SECRET does not reach a TOP SECRET row whose
+parent is SECRET, and one confined to TOP SECRET does. A kind the table reaches
+along a *different* path confines nothing on this one, because its value is on
+another row. A subject's path keeps reading the endpoint's.
+
+**Declaring the combinations.** Left to itself the compiler writes a membership
+test for every subset of the kinds a row carries, per role: five kinds on one row
+are eighty tests per role, and it refuses to write more than four confining kinds
+for a dimension. A policy that declares the combinations its grants hold compiles
+those and nothing else:
+
+```csharp
+policy
+    .Combination([analyst, commander], classification, mission, compartment, releasability, environment)
+    .Combination([planner], classification, releasability);
+```
+
+Each combination is one test per admitted role on each route that answers it, so
+the five-kind table compiles two tests where it compiled a hundred and sixty, and
+there is no limit on the kinds. Declaring is opt-in, and once a policy declares one
+combination it declares all of them:
+
+- a tenancy grant must be one of the combinations its role declares — a grant on
+  one kind alone as well — or it is refused at binding, naming the ones it has;
+- a combination whose kinds a table declares but that no one route answers — its
+  kinds reached along two different paths, say — is refused when the policy
+  compiles, naming the table and the role; a combination with a kind a table does
+  not declare is not that table's, and is passed over;
+- subject grants keep `Subject(name, within: …)`.
+
+Fewer tests matter most where the context is bound at execution: every test is a
+bound list there, and a table that binds more than about forty of them cannot be
+prepared as a shape.
+
 ### Pushdown and locality
 
 Enforcement on the tenancy column has to reach the source, or a table of any size
