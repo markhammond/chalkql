@@ -37,6 +37,22 @@ public sealed class TenancyPartialBindingTests(SharedSidecar sidecar)
     private static readonly DirectoryInfo Goldens =
         new(Path.Combine(RepoLayout.Corpus.FullName, "plans", "m7-tenancy-partial"));
 
+    /// <summary>
+    /// The principals a statement's <c>policy(…)</c> expectation refuses with everything folded and
+    /// this mode answers, with the reason (F162, D328).
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, string[]> AnsweredWhenPartiallyBound =
+        new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            // u9 counts in organisations 1 and 2 and holds no subject grant. Folded, its row filter
+            // is exactly org_id IN (1, 2), so the counting rule holds on every row the filter admits:
+            // national_id is population-only and the star is refused, though WHERE org_id = 3 keeps
+            // no row. Here the subject lookup stands beside the organisations, and the statement's own
+            // org_id = 3 settles the rule instead: national_id is withheld on every row the statement
+            // can return, and the star runs.
+            ["20_members_outside_the_scope"] = ["u9"],
+        };
+
     public static TheoryData<string> Queries()
     {
         var data = new TheoryData<string>();
@@ -66,6 +82,10 @@ public sealed class TenancyPartialBindingTests(SharedSidecar sidecar)
             .Where(e => e.StartsWith("policy(", StringComparison.Ordinal))
             .Select(e => e["policy(".Length..^1])
             .ToHashSet(StringComparer.Ordinal);
+        if (AnsweredWhenPartiallyBound.TryGetValue(name, out var answered))
+        {
+            refused.ExceptWith(answered);
+        }
 
         await using var engine = await EngineAsync();
         var recorded = new StringBuilder();

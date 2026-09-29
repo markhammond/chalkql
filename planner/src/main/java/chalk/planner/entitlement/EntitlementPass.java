@@ -1581,6 +1581,7 @@ public final class EntitlementPass {
         conjuncts.isEmpty()
             ? simplify
             : simplify.withPredicates(RelOptPredicateList.of(rexBuilder, conjuncts));
+    Map<Integer, RexNode> constants = constants(admitted);
 
     // A `through` leaf's visibility is derived from its parents' own folds rather than from
     // Filter_R, whose markers no simplifier can settle (§3.13, D230).
@@ -1605,7 +1606,7 @@ public final class EntitlementPass {
     java.util.Set<Integer> declaredStatistical = new java.util.LinkedHashSet<>();
     for (int column = 0; column < rowType.getFieldCount(); column++) {
       DescriptorExpressions.Column entitled = descriptor.column(column);
-      Reachable names = reachable(entitled, entitlement, underFilter, conjuncts);
+      Reachable names = reachable(entitled, entitlement, underFilter, conjuncts, constants);
       reachable.add(names);
       Set<Disclosure> reachableNames = names.names(entitled);
       // The statistical opt-in (D203): where the rules would mask or restrict this column to a
@@ -1717,7 +1718,8 @@ public final class EntitlementPass {
         org.apache.calcite.util.ImmutableBitSet.builder();
     for (int column = 0; column < rowType.getFieldCount(); column++) {
       DescriptorExpressions.Column entitled = descriptor.column(column);
-      Set<Disclosure> names = reachable(entitled, entitlement, underOwn, own).names(entitled);
+      Set<Disclosure> names =
+          reachable(entitled, entitlement, underOwn, own, Map.of()).names(entitled);
       if (outcome(names) == Disclosed.FULL) {
         raw.set(column);
       } else if (withheldAsNull(names, entitled, rowType.getFieldList().get(column).getType())) {
@@ -1767,6 +1769,57 @@ public final class EntitlementPass {
       }
     }
     return true;
+  }
+
+  /**
+   * The constants the statement's own equalities give its columns, read from the admitted conjuncts
+   * that are equalities and from nothing else (F162).
+   *
+   * <p>Calcite reduces with the constants of what is known of a node's input, and leaves out any
+   * column that anything other than an equality mentions. Beside a list read by lookup the leaf's
+   * filter is {@code org_id IN (1, 2) OR CHALK_CONTEXT_MEMBERSHIP('people', id)}, which mentions
+   * {@code org_id}, so {@code WHERE org_id = 3} merged into it no longer made {@code org_id} a
+   * constant and a rule over the organisations stayed a {@code CASE}. Read from the equalities alone,
+   * it is one again.
+   *
+   * <p>Only admitted conjuncts (F163), and only where a literal is the value. A rule settled by the
+   * constant is right for every row the statement keeps. The statement's filter still reads the
+   * column's disclosed value, which on a kept row is the raw value, or a NULL no equality passes.
+   * The constant goes into rule conditions only, never into what a column discloses: there it
+   * would make the statement's filter hold of every row.
+   */
+  private Map<Integer, RexNode> constants(List<RexNode> admitted) {
+    List<RexNode> equalities = new ArrayList<>();
+    for (RexNode conjunct : admitted) {
+      if (conjunct.isA(org.apache.calcite.sql.SqlKind.EQUALS)) {
+        equalities.add(conjunct);
+      }
+    }
+    if (equalities.isEmpty()) {
+      return Map.of();
+    }
+    Map<Integer, RexNode> constants = new java.util.HashMap<>();
+    RexUtil.predicateConstants(RexNode.class, rexBuilder, equalities)
+        .forEach(
+            (column, value) -> {
+              if (column instanceof org.apache.calcite.rex.RexInputRef ref
+                  && value instanceof org.apache.calcite.rex.RexLiteral) {
+                constants.put(ref.getIndex(), value);
+              }
+            });
+    return constants;
+  }
+
+  /** {@code expression} with each column {@code constants} names replaced by its constant. */
+  private RexNode substitute(RexNode expression, Map<Integer, RexNode> constants) {
+    return expression.accept(
+        new RexShuttle() {
+          @Override
+          public RexNode visitInputRef(org.apache.calcite.rex.RexInputRef ref) {
+            RexNode value = constants.get(ref.getIndex());
+            return value == null ? ref : rexBuilder.ensureType(ref.getType(), value, false);
+          }
+        });
   }
 
   /**
@@ -2941,12 +2994,18 @@ public final class EntitlementPass {
    * <p>A condition is read as {@code IS TRUE}: first match wins means the rule matches when its
    * condition holds, not when it is unknown — and it keeps the sanitiser's own nullability off the
    * conditions, which is what stops a NOT NULL column widening for no reason.
+   *
+   * <p>A condition the simplifier leaves open is tried again with the statement's own constants
+   * put in its columns ({@link #constants}), and taken in that form only where that settles it: a
+   * rule the constant decides is decided, and one it leaves open — a lookup of the constant, which
+   * only the execution can answer — keeps the plan it had.
    */
   private Reachable reachable(
       DescriptorExpressions.@Nullable Column entitled,
       TableEntitlement entitlement,
       RexSimplify underFilter,
-      List<RexNode> conjuncts) {
+      List<RexNode> conjuncts,
+      Map<Integer, RexNode> constants) {
     Disclosure otherwise =
         entitled == null
             ? defaultDisclosure(entitlement)
@@ -2966,6 +3025,15 @@ public final class EntitlementPass {
               ? rexBuilder.makeLiteral(true)
               : underFilter.simplifyUnknownAsFalse(
                   rexBuilder.makeCall(SqlStdOperatorTable.IS_TRUE, entitled.condition(i)));
+      if (!constants.isEmpty() && !condition.isAlwaysTrue() && !condition.isAlwaysFalse()) {
+        RexNode settled =
+            underFilter.simplifyUnknownAsFalse(
+                rexBuilder.makeCall(
+                    SqlStdOperatorTable.IS_TRUE, substitute(entitled.condition(i), constants)));
+        if (settled.isAlwaysTrue() || settled.isAlwaysFalse()) {
+          condition = settled;
+        }
+      }
       if (condition.isAlwaysFalse()) {
         continue;
       }

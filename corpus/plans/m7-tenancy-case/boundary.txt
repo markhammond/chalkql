@@ -33,7 +33,7 @@
 19_fingerprint_join                        execute-time remote=30   above=30   pushed=0    sql-case=0    refused=0   failed=0
 19_fingerprint_join                        folded       remote=29   above=10   pushed=0    sql-case=0    refused=0   failed=0
 20_members_outside_the_scope               execute-time remote=0    above=0    pushed=0    sql-case=0    refused=15  failed=0
-20_members_outside_the_scope               folded       remote=14   above=2    pushed=0    sql-case=0    refused=1   failed=0
+20_members_outside_the_scope               folded       remote=15   above=0    pushed=0    sql-case=0    refused=0   failed=0
 26_messages_through_thread                 execute-time remote=30   above=15   pushed=0    sql-case=0    refused=0   failed=0
 26_messages_through_thread                 folded       remote=29   above=16   pushed=0    sql-case=0    refused=0   failed=0
 27_messages_join_threads                   execute-time remote=45   above=15   pushed=0    sql-case=0    refused=0   failed=0
