@@ -295,6 +295,40 @@ embedded planner to disk and never starts it. The embedded copy is still useful.
 the official planner for that version of the ChalkQL client, and an easy source for
 deployment tools.
 
+### How deep a plan may nest
+
+A plan is a tree. Each step takes its rows from the steps below it, and an expression
+can hold other expressions. The client reads the plan it receives from the top down: the
+parser, the validator and the compiler each go one level deeper on their thread's stack
+for every level of the tree. A plan deep enough to use up the stack would crash the
+whole process, and nothing can catch that.
+
+So when you prepare a statement, the client refuses a plan that nests more deeply than a
+limit, before it reads any further. The refusal is a `PlanningException`, and its inner
+exception is a `PlanTooDeepException` that names the limit.
+
+The limit is 256 levels by default. (A level here is one protobuf message; each step or
+expression in a plan takes about two.) That is less than half the depth measured to run
+safely. Ordinary statements come nowhere near it, and neither do entitlement policies,
+however many lists they test. A statement reaches it only if it is nested by the
+hundred: an expression such as `a + 1 + 1 + …` with hundreds of terms, for example.
+
+To change the limit, set `PlanNestingLimit` where you create the planner:
+
+```csharp
+var planner = new GrpcQueryPlanner(new GrpcPlannerOptions
+{
+    Address = new Uri("http://planner.internal:7433"),
+    PlanNestingLimit = 128,   // stricter than the default
+});
+```
+
+`PlannerProcess.CreatePlanner(options)` keeps the limit you pass it, and
+`RecordedPlanner` has the same setting. `GrpcQueryPlanner` refuses a limit below 1, and
+there is no "unlimited" setting, because the limit is what protects the stack. Raise it
+only for statements that need it, and only on a host whose threads have the stack space
+to match.
+
 
 ## Sources
 
