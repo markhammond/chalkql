@@ -642,17 +642,24 @@ public sealed class ConfinementTests
     }
 
     /// <summary>
-    /// And where the endpoint holds the confining kind on its own row, that sibling still wins for a
-    /// <em>subject's</em> path: the group stays the endpoint's, written over one row, and no path
-    /// predicate is emitted (ADR 0071 §3). A tenancy kind's path reads the target's own column since
-    /// F159 — <see cref="A_kind_the_target_holds_confines_a_tenancy_path_off_the_targets_row"/>.
+    /// <b>F159</b>, for a <em>subject's</em> path as for a tenancy kind's: where the target holds
+    /// the confining kind itself, its own column confines the path, even where the endpoint holds one
+    /// too. The group is cross-row — the member read off the endpoint's row, the organisation off
+    /// the order's — and the path predicate decides it over both. Before, the endpoint's sibling won
+    /// (ADR 0071 §3): a member grant confined to one organisation reached an order of another whose
+    /// member was in the first.
     /// </summary>
+    /// <remarks>
+    /// Here the order's organisation is read through the very foreign key the path follows
+    /// (<c>member.org</c>), so both columns hold one value on every row and no answer changes — only
+    /// the descriptor, which now writes the term over both rows rather than the endpoint's alone.
+    /// </remarks>
     [Fact]
-    public void An_endpoints_own_sibling_wins_over_the_targets_column()
+    public void A_kind_the_target_holds_confines_a_subjects_path_off_the_targets_row()
     {
         var policy = TenancyPolicy.Declare(Catalog);
         var source = policy.Source(TenancyPolicyFixture.SourceName);
-        var keeper = policy.Role("keeper");
+        policy.Role("keeper");
         var org = policy.Tenancy("org");
         var member = policy.Subject("member", within: [org]);
 
@@ -670,13 +677,45 @@ public sealed class ConfinementTests
         var compiled = policy.Compile([Schema]);
         var path = Assert.Single(compiled.For(orders)!.Inherited);
 
-        // No cross-row group, so no decider above the join; the conjunction is one term over the
-        // endpoint's own row, exactly as it was written before D279.
+        // The admission, over the endpoint's row: the pair list's projection onto the member.
+        Assert.Equal(
+            "(id IN (@ctx.member_keeper_pairs_ids) OR id IN (@ctx.member_keeper_ids) "
+            + "OR @ctx.global_keeper)",
+            path.EndpointPredicate);
+
+        // And the decider, over both rows: the member the endpoint's, the organisation the order's.
+        Assert.Equal(
+            "((members.id, org_id) IN (@ctx.member_keeper_pairs) "
+            + "OR members.id IN (@ctx.member_keeper_ids) OR @ctx.global_keeper)",
+            path.PathPredicate);
+    }
+
+    /// <summary>
+    /// And where the target does not declare the confining kind, the endpoint's own value still
+    /// confines a subject's path, on the endpoint's row alone: nothing is cross-row, and no path
+    /// predicate is written.
+    /// </summary>
+    [Fact]
+    public void A_kind_only_the_endpoint_holds_confines_a_subjects_path_off_the_endpoints_row()
+    {
+        var policy = TenancyPolicy.Declare(Catalog);
+        var source = policy.Source(TenancyPolicyFixture.SourceName);
+        policy.Role("keeper");
+        var org = policy.Tenancy("org");
+        var member = policy.Subject("member", within: [org]);
+
+        var members = source.Table("members");
+        members.Tenancy(r => r
+            .Direct(org, members.Column("org_id"))
+            .Direct(member, members.Column("id")));
+
+        var orders = source.Table("orders");
+        orders.Tenancy(r => r.Inherited(member).Through(members));
+
+        var path = Assert.Single(policy.Compile([Schema]).For(orders)!.Inherited);
+
         Assert.Equal("", path.PathPredicate);
-        Assert.Contains(
-            $"IN (@ctx.member_{keeper.Name}_pairs)",
-            path.EndpointPredicate,
-            StringComparison.Ordinal);
+        Assert.Contains("(id, org_id) IN (@ctx.member_keeper_pairs)", path.EndpointPredicate, StringComparison.Ordinal);
         Assert.DoesNotContain("_pairs_ids", path.EndpointPredicate, StringComparison.Ordinal);
     }
 

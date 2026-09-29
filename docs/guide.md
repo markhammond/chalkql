@@ -1902,7 +1902,11 @@ kind too, a grant confined along it is decided by the table's value, not the
 endpoint's: a grant confined to SECRET does not reach a TOP SECRET row whose
 parent is SECRET, and one confined to TOP SECRET does. A kind the table reaches
 along a *different* path confines nothing on this one, because its value is on
-another row. A subject's path keeps reading the endpoint's.
+another row. A subject's path reads the same way:
+`Grant.ForSubject(person, "P-7", self, within: "SECRET")` reaches the SECRET
+availability entries about P-7 and not a TOP SECRET one, whatever P-7's personnel
+record holds. Only where the table declares no such kind does the endpoint's value
+confine it — P-7's training records, say, are reached where P-7's record is SECRET.
 
 **Declaring the combinations.** Left to itself the compiler writes a membership
 test for every subset of the kinds a row carries, per role: five kinds on one row

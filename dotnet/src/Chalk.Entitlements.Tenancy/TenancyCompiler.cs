@@ -898,13 +898,13 @@ internal static class TenancyCompiler
     /// F159).
     /// </summary>
     /// <remarks>
-    /// On a tenancy kind's path — <paramref name="crossRow"/> the target's own dimensions — a kind
-    /// the target declares is read where the target declares it: off the target's row when the
-    /// target holds it directly, even where the endpoint holds one too, and not at all when the
-    /// target reaches it along another path, which is another row. The endpoint's own value confines
-    /// only a kind the target does not declare. Before F159 the endpoint's sibling won, so a grant
-    /// confined to one classification reached a row of another whose parent had it. A subject's
-    /// path is left as ADR 0071 §3 built it.
+    /// On a path — <paramref name="crossRow"/> the target's own dimensions — a kind the target
+    /// declares is read where the target declares it: off the target's row when the target holds it
+    /// directly, even where the endpoint holds one too, and not at all when the target reaches it
+    /// along another path, which is another row. The endpoint's own value confines only a kind the
+    /// target does not declare. So for a subject's path as for a tenancy kind's: before F159 the
+    /// endpoint's sibling won (ADR 0071 §3), and a grant confined to one classification reached a
+    /// row of another whose parent had it.
     /// </remarks>
     internal static List<ConfiningDimension> Available(
         ResolvedDimension dimension,
@@ -927,25 +927,18 @@ internal static class TenancyCompiler
                 continue;
             }
 
-            // F159, for a tenancy kind's path: what the target declares, it answers for.
-            if (crossRow is not null && !declared.IsSubject)
-            {
-                if (Add(available, crossRow, kind, onTarget: true)
+            // F159, on a path: what the target declares, it answers for.
+            if (crossRow is not null
+                && (Add(available, crossRow, kind, onTarget: true)
                     || (via is not null
                         && rules.Paths.Any(other =>
                             string.Equals(other.Kind, kind, StringComparison.Ordinal)
-                            && !SameSteps(other, via))))
-                {
-                    continue;
-                }
+                            && !SameSteps(other, via)))))
+            {
+                continue;
             }
 
-            // A subject's path keeps ADR 0071 §3: the endpoint's own sibling wins, and the target's
-            // column is taken only where the endpoint holds none.
-            if (!Add(available, siblings, kind, onTarget: false) && crossRow is not null && declared.IsSubject)
-            {
-                Add(available, crossRow, kind, onTarget: true);
-            }
+            Add(available, siblings, kind, onTarget: false);
         }
 
         return available;
