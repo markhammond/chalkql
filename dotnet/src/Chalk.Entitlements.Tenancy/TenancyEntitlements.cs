@@ -414,20 +414,23 @@ public sealed class TenancyEntitlements
     /// <summary>
     /// The row a tenancy grant puts in a list, or null where the list is not the grant's: every list
     /// of the grant's role whose <b>set</b> of kinds is the grant's, whatever kind the list is
-    /// anchored on, with the identifiers in the list's own column order (F158 option 2, D320).
+    /// anchored on, with the identifiers in the list's own column order (F158 option 2, D321) — in
+    /// every policy, declaring or not.
     /// </summary>
     /// <remarks>
     /// Which kind a grant names first is a spelling. The compiler anchors a group where it can write
-    /// it — a path's kind for a group read across a path, so <c>ForTenancy(releasability, …)
-    /// .Within(classification, …)</c> was the one spelling that reached such a table — and a grant
-    /// filling only the list anchored on its own kind reached nothing through the others.
+    /// it — a path's kind for a group read on or across a path's endpoint, so
+    /// <c>ForTenancy(releasability, …).Within(classification, …)</c> was the one spelling that reached
+    /// such a table — and a grant filling only the list anchored on its own kind reached nothing
+    /// through the others. A table holding both kinds on one row carries a group in each anchor, and
+    /// the grant fills both: the same rows, and a term the planner's simplification folds into the
+    /// other.
     /// </remarks>
     private List<object?>? TenancyRow(Grant grant, TenancyCompiler.BoundList list)
     {
         var kinds = KindsOf(grant);
         if (kinds.Count != 1 + list.Confining.Count
-            || !kinds.TryGetValue(list.Kind, out var head)
-            || !Canonical(list, grant.Kind))
+            || !kinds.TryGetValue(list.Kind, out var head))
         {
             return null;
         }
@@ -476,19 +479,6 @@ public sealed class TenancyEntitlements
 
         return row;
     }
-
-    /// <summary>
-    /// Whether a list of the grant's set of kinds is one it fills whatever its anchor: every such list
-    /// in a declaring policy, whose groups are one per combination and route (D320); in any other,
-    /// the lists anchored on the grant's own kind, as ever, and a group read across a path — the one
-    /// the compiler anchors on the path's kind and nothing else answers (F158 option 2). A table
-    /// holding both kinds on one row carries a group in each anchor already, and filling the other
-    /// too would add a term that changes no row.
-    /// </summary>
-    private bool Canonical(TenancyCompiler.BoundList list, string anchor) =>
-        _policy.Combinations.Count > 0
-        || list.IsCrossRow
-        || string.Equals(list.Kind, anchor, StringComparison.Ordinal);
 
     /// <summary>A tenancy grant's kinds and identifiers, its own kind among them: one set (D320).</summary>
     private Dictionary<string, object> KindsOf(Grant grant)
@@ -752,7 +742,7 @@ public sealed class TenancyEntitlements
         if (named.Count == 0)
         {
             // F99: the role has to be one some list of this dimension carries.
-            if (!_lists.Any(list => Answers(list, grant.Role, kinds) && Canonical(list, grant.Kind)))
+            if (!_lists.Any(list => Answers(list, grant.Role, kinds)))
             {
                 throw new CatalogValidationException(
                     "tenancy.grants",
@@ -769,7 +759,7 @@ public sealed class TenancyEntitlements
 
         // F80: some table answers the conjunction, on one row or across one path, in whatever
         // spelling the compiler anchored it.
-        if (!_lists.Any(list => Answers(list, grant.Role, kinds) && Canonical(list, grant.Kind)))
+        if (!_lists.Any(list => Answers(list, grant.Role, kinds)))
         {
             throw new CatalogValidationException(
                 "tenancy.grants",
@@ -1341,13 +1331,10 @@ public sealed class TenancyEntitlements
             return false;
         }
 
-        var ownAnchor = string.Equals(dimension.Declared.Kind, grant.Kind, StringComparison.Ordinal);
         foreach (var group in TenancyCompiler.Groups(
             dimension, grant.Role, siblings, model.Rules, crossRow, via))
         {
-            if (group.Kinds.Count == confining
-                && group.Kinds.All(kinds.ContainsKey)
-                && (grant.IsSubject || ownAnchor || group.IsCrossRow || _policy.Combinations.Count > 0))
+            if (group.Kinds.Count == confining && group.Kinds.All(kinds.ContainsKey))
             {
                 return true;
             }

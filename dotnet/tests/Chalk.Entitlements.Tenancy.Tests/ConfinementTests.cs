@@ -596,6 +596,52 @@ public sealed class ConfinementTests
     }
 
     /// <summary>
+    /// And a group a path reads off its endpoint's row alone is anchored on the path's kind too, so
+    /// it is filled in either spelling as well. The parent below holds both kinds and the child
+    /// neither: filling only the lists anchored on the grant's own kind, and those read across a
+    /// path, a grant spelt classification-first bound, reached the parent through the parent's own
+    /// list, and reached no child — F158's silent case, on a group that is not cross-row.
+    /// </summary>
+    [Fact]
+    public void Either_spelling_fills_a_path_group_read_off_the_endpoints_row()
+    {
+        var policy = TenancyPolicy.Declare(DirectionFixture.Catalog);
+        var classification = policy.Tenancy("classification");
+        var releasability = policy.Tenancy("releasability");
+        var reader = policy.Role("reader");
+        var parents = policy.Source(DirectionFixture.Source).Table("parents");
+        var children = policy.Source(DirectionFixture.Source).Table("children");
+        parents.Tenancy(t => t
+            .Direct(releasability, parents.Column("Releasability"))
+            .Direct(classification, parents.Column("ParentClassification")));
+        children.Tenancy(t => t.Inherited(releasability).Through(parents));
+        var compiled = policy.Compile(DirectionFixture.Catalog);
+
+        var path = Assert.Single(compiled.For(children)!.Inherited);
+        Assert.Equal("", path.PathPredicate);
+        Assert.Contains(
+            "IN (@ctx.releasability_reader_within_classification)",
+            path.EndpointPredicate,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("classification_reader", path.EndpointPredicate, StringComparison.Ordinal);
+
+        foreach (var grant in new[]
+        {
+            Grant.ForTenancy(classification, "SECRET", reader).Within(releasability, "REL_FVEY"),
+            Grant.ForTenancy(releasability, "REL_FVEY", reader).Within(classification, "SECRET"),
+        })
+        {
+            var bound = compiled.Bind(new TenancyPrincipal { User = 1, Grants = [grant] });
+            Assert.Equal(
+                [["REL_FVEY", "SECRET"]],
+                bound.Lists["releasability_reader_within_classification"].Rows.Select(r => r.ToArray()));
+            Assert.Equal(
+                [["SECRET", "REL_FVEY"]],
+                bound.Lists["classification_reader_within_releasability"].Rows.Select(r => r.ToArray()));
+        }
+    }
+
+    /// <summary>
     /// And where the endpoint holds the confining kind on its own row, that sibling still wins for a
     /// <em>subject's</em> path: the group stays the endpoint's, written over one row, and no path
     /// predicate is emitted (ADR 0071 §3). A tenancy kind's path reads the target's own column since

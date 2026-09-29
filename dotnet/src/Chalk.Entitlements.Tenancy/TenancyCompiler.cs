@@ -144,15 +144,6 @@ internal static class TenancyCompiler
                 if (listNames.Add(list.Name))
                 {
                     lists.Add(list);
-                    continue;
-                }
-
-                // One name is one list across every table, and a group read across a path on one of
-                // them makes it a list a grant fills whatever it names first (F158 option 2).
-                var at = lists.FindIndex(known => string.Equals(known.Name, list.Name, StringComparison.Ordinal));
-                if (list.IsCrossRow && !lists[at].IsCrossRow)
-                {
-                    lists[at] = lists[at].CrossRow();
                 }
             }
 
@@ -571,29 +562,8 @@ internal static class TenancyCompiler
         /// </summary>
         internal bool IsProjection { get; init; }
 
-        /// <summary>
-        /// Whether its group is read across a path, over the target's row and the endpoint's at once
-        /// (D279 §2) — the one kind of group a grant fills whatever kind it names first in a policy
-        /// that declares no combinations (F158 option 2).
-        /// </summary>
-        internal bool IsCrossRow { get; init; }
-
         /// <summary>Whether it holds tuples rather than bare identifiers.</summary>
         internal bool IsPair => Confining.Count > 0 && !IsProjection;
-
-        /// <summary>The same list, marked as read across a path on some table.</summary>
-        internal BoundList CrossRow() => new()
-        {
-            Name = Name,
-            Columns = Columns,
-            Types = Types,
-            Kind = Kind,
-            Role = Role,
-            IsSubject = IsSubject,
-            Confining = Confining,
-            IsProjection = IsProjection,
-            IsCrossRow = true,
-        };
     }
 
     /// <summary>One table, resolved: what its predicate reads and which roles may see its rows.</summary>
@@ -1125,7 +1095,6 @@ internal static class TenancyCompiler
                 Role = role,
                 IsSubject = dimension.Declared.IsSubject,
                 Confining = group.Kinds,
-                IsCrossRow = group.IsCrossRow,
             };
 
             if (!group.IsCrossRow)
@@ -1143,7 +1112,6 @@ internal static class TenancyCompiler
                 IsSubject = dimension.Declared.IsSubject,
                 Confining = group.Kinds,
                 IsProjection = true,
-                IsCrossRow = true,
             };
         }
     }

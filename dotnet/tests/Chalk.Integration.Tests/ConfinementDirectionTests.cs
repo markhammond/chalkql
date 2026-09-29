@@ -23,7 +23,8 @@ namespace Chalk.Integration.Tests;
 /// <para>
 /// Every spelling must read the tasking's own classification: a SECRET grant sees
 /// <c>T-SECRET</c> and a TOP SECRET grant sees <c>T-TOPSECRET</c>, whichever kind the grant names
-/// first and whatever the asset's classification is.
+/// first and whatever the asset's classification is. And a fourth layout, where the tasking declares
+/// no classification at all (C), is confined by the asset's in either spelling.
 /// </para>
 /// </remarks>
 [Collection(SidecarCollection.Name)]
@@ -65,7 +66,32 @@ public sealed class ConfinementDirectionTests(SharedSidecar sidecar)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
 
-        var endpointHoldsClassification = layout == "B";
+        Assert.Equal(expected, await TaskingsAsync(layout, classificationFirst, classificationId));
+    }
+
+    /// <summary>
+    /// And where the tasking declares no classification, the asset's confines it, read off the
+    /// asset's row alone (C) — in either spelling. Filling only the lists anchored on the grant's own
+    /// kind and those read across a path, the classification-first grant bound through the asset's
+    /// own list, reached the asset, and silently reached no tasking (F158).
+    /// </summary>
+    [Theory]
+    [InlineData(true, "SECRET", new[] { "T-SECRET", "T-TOPSECRET" })]
+    [InlineData(false, "SECRET", new[] { "T-SECRET", "T-TOPSECRET" })]
+    [InlineData(true, "TOP SECRET", new string[0])]
+    [InlineData(false, "TOP SECRET", new string[0])]
+    public async Task Either_spelling_reaches_a_tasking_the_assets_row_confines(
+        bool classificationFirst, string classificationId, string[] expected)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+
+        Assert.Equal(expected, await TaskingsAsync("C", classificationFirst, classificationId));
+    }
+
+    private async Task<string[]> TaskingsAsync(string layout, bool classificationFirst, string classificationId)
+    {
+        var endpointHoldsClassification = layout is "B" or "C";
+        var targetHoldsClassification = layout != "C";
         var withReports = layout == "A'";
         var catalog = Catalog(null, withReports);
         var policy = TenancyPolicy.Declare(catalog);
@@ -83,9 +109,15 @@ public sealed class ConfinementDirectionTests(SharedSidecar sidecar)
             }
         });
         var tasking = policy.Source("coalition").Table("tasking");
-        tasking.Tenancy(t => t
-            .Direct(classification, tasking.Column("Classification"))
-            .Inherited(releasability).Through(assets));
+        tasking.Tenancy(t =>
+        {
+            if (targetHoldsClassification)
+            {
+                t.Direct(classification, tasking.Column("Classification"));
+            }
+
+            t.Inherited(releasability).Through(assets);
+        });
         tasking.Column("AssetId").References(assets.Column("AssetId"));
         if (withReports)
         {
@@ -111,7 +143,7 @@ public sealed class ConfinementDirectionTests(SharedSidecar sidecar)
             "SELECT TaskingId FROM coalition.tasking ORDER BY TaskingId",
             entitlements.Bind(new TenancyPrincipal { User = "u", Grants = [grant] }));
 
-        Assert.Equal(expected, await RowsAsync(engine, prepared));
+        return await RowsAsync(engine, prepared);
     }
 
     private static CatalogContext Catalog(TenancyEntitlements? entitlements, bool withReports) => new()
