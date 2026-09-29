@@ -172,14 +172,40 @@ public sealed class CapabilityValidationTests
             DialectProfiles.PostgreSql));
     }
 
+    /// <summary>
+    /// D315: the flag has an overload of its own, so the 0.3 <c>With</c> is still the method a host
+    /// compiled against 0.3 binds to — and each copies what the other set.
+    /// </summary>
+    [Fact]
+    public void The_like_flag_has_its_own_with_and_the_other_keeps_it()
+    {
+        var local = DialectProfiles.PostgreSql.With(likeMatchesCodePoints: false);
+        Assert.False(local.LikeMatchesCodePoints);
+        Assert.Equal(DialectProfiles.PostgreSql.StringCollation, local.StringCollation);
+        Assert.Equal(DialectProfiles.PostgreSql.DefaultNullCollation, local.DefaultNullCollation);
+
+        var binary = local.With(stringCollation: StringCollation.Binary);
+        Assert.False(binary.LikeMatchesCodePoints);
+        Assert.Equal(StringCollation.Binary, binary.StringCollation);
+        Assert.True(DialectProfiles.PostgreSql.With(stringCollation: StringCollation.Binary).LikeMatchesCodePoints);
+
+        var original = typeof(DialectProfiles).GetMethods()
+            .Where(m => m.Name == nameof(DialectProfiles.With))
+            .Select(m => m.GetParameters().Length)
+            .Order()
+            .ToArray();
+        Assert.Equal([2, 15], original);
+    }
+
     /// <summary>D315: a case-insensitive collation folds case in LIKE, so the flag beside it contradicts it.</summary>
     [Fact]
     public void Like_matching_code_points_beside_a_case_insensitive_collation_is_refused()
     {
         var error = Invalid(Catalog(
             new SourceCapabilities { QueryLanguage = QueryLanguage.Sql },
-            DialectProfiles.Sqlite.With(
-                stringCollation: StringCollation.CaseInsensitive, likeMatchesCodePoints: true)));
+            DialectProfiles.Sqlite
+                .With(stringCollation: StringCollation.CaseInsensitive)
+                .With(likeMatchesCodePoints: true)));
 
         Assert.Contains("contradict", error.Message, StringComparison.Ordinal);
         Assert.Contains("D315", error.Message, StringComparison.Ordinal);

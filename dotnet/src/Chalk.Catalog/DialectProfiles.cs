@@ -160,33 +160,94 @@ public static class DialectProfiles
         bool? approximateDistinctCount = null,
         bool? approximateTopN = null,
         bool? implicitCoercionMatches = null,
-        ParameterPlaceholder? parameterPlaceholder = null,
-        bool? likeMatchesCodePoints = null)
+        ParameterPlaceholder? parameterPlaceholder = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
-        return new DialectProfileDescriptor
-        {
-            Dialect = profile.Dialect,
-            Quoting = profile.Quoting,
-            QuotedCasing = profile.QuotedCasing,
-            UnquotedCasing = profile.UnquotedCasing,
-            CaseSensitiveIdentifiers = profile.CaseSensitiveIdentifiers,
-            Conformance = conformance ?? profile.Conformance,
-            Libraries = libraries ?? profile.Libraries,
-            MaxNumericPrecision = maxNumericPrecision ?? profile.MaxNumericPrecision,
-            MaxTimestampPrecision = maxTimestampPrecision ?? profile.MaxTimestampPrecision,
-            HasBoolean = hasBoolean ?? profile.HasBoolean,
-            TimeZone = timeZone ?? profile.TimeZone,
-            DefaultNullCollation = defaultNullCollation ?? profile.DefaultNullCollation,
-            SupportsNullOrderingClause =
-                supportsNullOrderingClause ?? profile.SupportsNullOrderingClause,
-            StringCollation = stringCollation ?? profile.StringCollation,
-            LikeMatchesCodePoints = likeMatchesCodePoints ?? profile.LikeMatchesCodePoints,
-            ApproximateDecimal = approximateDecimal ?? profile.ApproximateDecimal,
-            ApproximateDistinctCount = approximateDistinctCount ?? profile.ApproximateDistinctCount,
-            ApproximateTopN = approximateTopN ?? profile.ApproximateTopN,
-            ImplicitCoercionMatches = implicitCoercionMatches ?? profile.ImplicitCoercionMatches,
-            ParameterPlaceholder = parameterPlaceholder ?? profile.ParameterPlaceholder,
-        };
+        return Copy(
+            profile,
+            stringCollation,
+            supportsNullOrderingClause,
+            defaultNullCollation,
+            conformance,
+            libraries,
+            maxNumericPrecision,
+            maxTimestampPrecision,
+            hasBoolean,
+            timeZone,
+            approximateDecimal,
+            approximateDistinctCount,
+            approximateTopN,
+            implicitCoercionMatches,
+            parameterPlaceholder,
+            likeMatchesCodePoints: null);
     }
+
+    /// <summary>
+    /// A copy of <paramref name="profile"/> that says whether its source's <c>LIKE</c> matches code
+    /// points whatever its collation (D315). An overload of its own rather than another optional
+    /// parameter above, so that a host compiled against 0.3 binds to the same method it did; chain it
+    /// with the other: <c>profile.With(stringCollation: …).With(likeMatchesCodePoints: true)</c>.
+    /// </summary>
+    public static DialectProfileDescriptor With(
+        this DialectProfileDescriptor profile, bool likeMatchesCodePoints)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        return Copy(
+            profile,
+            stringCollation: null,
+            supportsNullOrderingClause: null,
+            defaultNullCollation: null,
+            conformance: null,
+            libraries: null,
+            maxNumericPrecision: null,
+            maxTimestampPrecision: null,
+            hasBoolean: null,
+            timeZone: null,
+            approximateDecimal: null,
+            approximateDistinctCount: null,
+            approximateTopN: null,
+            implicitCoercionMatches: null,
+            parameterPlaceholder: null,
+            likeMatchesCodePoints);
+    }
+
+    private static DialectProfileDescriptor Copy(
+        DialectProfileDescriptor profile,
+        StringCollation? stringCollation,
+        bool? supportsNullOrderingClause,
+        NullCollation? defaultNullCollation,
+        SqlConformance? conformance,
+        IReadOnlyList<SqlLibrary>? libraries,
+        uint? maxNumericPrecision,
+        uint? maxTimestampPrecision,
+        bool? hasBoolean,
+        string? timeZone,
+        bool? approximateDecimal,
+        bool? approximateDistinctCount,
+        bool? approximateTopN,
+        bool? implicitCoercionMatches,
+        ParameterPlaceholder? parameterPlaceholder,
+        bool? likeMatchesCodePoints) => new()
+    {
+        Dialect = profile.Dialect,
+        Quoting = profile.Quoting,
+        QuotedCasing = profile.QuotedCasing,
+        UnquotedCasing = profile.UnquotedCasing,
+        CaseSensitiveIdentifiers = profile.CaseSensitiveIdentifiers,
+        Conformance = conformance ?? profile.Conformance,
+        Libraries = libraries ?? profile.Libraries,
+        MaxNumericPrecision = maxNumericPrecision ?? profile.MaxNumericPrecision,
+        MaxTimestampPrecision = maxTimestampPrecision ?? profile.MaxTimestampPrecision,
+        HasBoolean = hasBoolean ?? profile.HasBoolean,
+        TimeZone = timeZone ?? profile.TimeZone,
+        DefaultNullCollation = defaultNullCollation ?? profile.DefaultNullCollation,
+        SupportsNullOrderingClause = supportsNullOrderingClause ?? profile.SupportsNullOrderingClause,
+        StringCollation = stringCollation ?? profile.StringCollation,
+        LikeMatchesCodePoints = likeMatchesCodePoints ?? profile.LikeMatchesCodePoints,
+        ApproximateDecimal = approximateDecimal ?? profile.ApproximateDecimal,
+        ApproximateDistinctCount = approximateDistinctCount ?? profile.ApproximateDistinctCount,
+        ApproximateTopN = approximateTopN ?? profile.ApproximateTopN,
+        ImplicitCoercionMatches = implicitCoercionMatches ?? profile.ImplicitCoercionMatches,
+        ParameterPlaceholder = parameterPlaceholder ?? profile.ParameterPlaceholder,
+    };
 }
