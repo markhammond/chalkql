@@ -627,8 +627,6 @@ static Chalk.Catalog.ColumnStatistics.Unknown.get -> Chalk.Catalog.ColumnStatist
 static Chalk.Catalog.CompositeField.operator !=(Chalk.Catalog.CompositeField left, Chalk.Catalog.CompositeField right) -> bool
 static Chalk.Catalog.CompositeField.operator ==(Chalk.Catalog.CompositeField left, Chalk.Catalog.CompositeField right) -> bool
 static Chalk.Catalog.ContextValues.InferType(object! value) -> Chalk.Catalog.ChalkType
-static Chalk.Catalog.ContextValues.ToLiteral(object? value, Chalk.Catalog.ChalkType type, string! what) -> Chalk.Ir.Expr!
-static Chalk.Catalog.ContextValues.ToLiteral(object? value, string! what) -> Chalk.Ir.Expr!
 static Chalk.Catalog.CostProfile.Inherit.get -> Chalk.Catalog.CostProfile!
 static Chalk.Catalog.CrossSourceJoinPolicy.Default.get -> Chalk.Catalog.CrossSourceJoinPolicy!
 static Chalk.Catalog.DialectProfileDescriptor.None.get -> Chalk.Catalog.DialectProfileDescriptor!

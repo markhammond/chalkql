@@ -1,4 +1,6 @@
 #nullable enable
+abstract Chalk.Client.BindingConverter.ValueType.get -> System.Type!
+abstract Chalk.Client.BindingConverter<T>.TryConvert(T value, Chalk.Catalog.ChalkType target, out object? converted) -> bool
 Chalk.Arrow.RecordBatchExtensions
 Chalk.Client.ArenaPool
 Chalk.Client.ArenaPool.ArenaPool(Chalk.Sources.ArenaOptions! options, int capacity, string? name = null) -> void
@@ -9,6 +11,10 @@ Chalk.Client.ArenaPool.Name.get -> string?
 Chalk.Client.ArenaPool.Options.get -> Chalk.Sources.ArenaOptions!
 Chalk.Client.ArenaPool.RetainedBytes.get -> long
 Chalk.Client.ArenaPool.WorstCaseBytes.get -> long
+Chalk.Client.BindingConverter
+Chalk.Client.BindingConverter.BindingConverter() -> void
+Chalk.Client.BindingConverter<T>
+Chalk.Client.BindingConverter<T>.BindingConverter() -> void
 Chalk.Client.CatalogRegistration
 Chalk.Client.CatalogRegistration.BaseShapeVersion.get -> string!
 Chalk.Client.CatalogRegistration.BaseShapeVersion.init -> void
@@ -53,6 +59,8 @@ Chalk.Client.ChalkEngine.ShapeEpoch.get -> long
 Chalk.Client.ChalkEngineOptions
 Chalk.Client.ChalkEngineOptions.Associations.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.AssociationDescriptor!>!
 Chalk.Client.ChalkEngineOptions.Associations.init -> void
+Chalk.Client.ChalkEngineOptions.BindingConverters.get -> System.Collections.Generic.IReadOnlyList<Chalk.Client.BindingConverter!>!
+Chalk.Client.ChalkEngineOptions.BindingConverters.init -> void
 Chalk.Client.ChalkEngineOptions.ChalkEngineOptions() -> void
 Chalk.Client.ChalkEngineOptions.ContextId.get -> string?
 Chalk.Client.ChalkEngineOptions.ContextId.init -> void
@@ -907,7 +915,10 @@ const Chalk.Client.Rpc.PlannerOptions.ConformanceFieldNumber = 9 -> int
 const Chalk.Client.Rpc.PlannerOptions.LibrariesFieldNumber = 10 -> int
 const Chalk.Client.Rpc.PlanRequest.ParameterHintsFieldNumber = 16 -> int
 const Chalk.Client.Rpc.RedactSqlRequest.ConformanceFieldNumber = 5 -> int
+override Chalk.Client.BindingConverter.ToString() -> string!
 override Chalk.Client.Rpc.ParameterHint.GetHashCode() -> int
+override sealed Chalk.Client.BindingConverter<T>.ValueType.get -> System.Type!
+static Chalk.Client.BindingConverter.From<T>(System.Func<T, object?>! convert) -> Chalk.Client.BindingConverter<T>!
 static Chalk.Client.PlannerArtifact.CopyToAsync(System.IO.Stream! destination, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 static Chalk.Client.PlannerArtifact.Open() -> System.IO.Stream!
 static Chalk.Client.PlannerArtifact.Sha256Async(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<string!>

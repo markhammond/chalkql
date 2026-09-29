@@ -259,6 +259,14 @@ public sealed class ChalkEngineOptions
     /// asks generates no salt, sends no redaction message and costs nothing at all.
     /// </summary>
     public RedactionOptions Redaction { get; init; } = new();
+
+    /// <summary>
+    /// Conversions of the host's own CLR types into values this engine binds (D323): one per type,
+    /// chosen by a value's exact runtime type, for a statement's parameters and for every context
+    /// value whose type is known. What a converter returns is held to the same exact rule as any other
+    /// value (D317). Empty — the default — converts nothing.
+    /// </summary>
+    public IReadOnlyList<BindingConverter> BindingConverters { get; init; } = [];
 }
 
 /// <summary>Per-statement planning options.</summary>

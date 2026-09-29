@@ -336,7 +336,8 @@ internal static class ParameterBinder
         IReadOnlyList<ParameterDescriptor> parameters,
         object?[] values,
         IReadOnlyList<PlaceholderSlot> slots,
-        IReadOnlyList<ChalkType> placeholderTypes)
+        IReadOnlyList<ChalkType> placeholderTypes,
+        ValueBinding binding)
     {
         if (placeholderTypes.Count != slots.Count)
         {
@@ -380,19 +381,20 @@ internal static class ParameterBinder
                     break;
             }
 
-            flat[i] = Convert(value, type, parameter);
+            flat[i] = Convert(value, type, parameter, binding);
         }
 
         return flat;
     }
 
     /// <summary>
-    /// The reverse of §7.2 plus safe widening: an <c>int</c> binds to an I64 parameter, a
-    /// <c>float</c> to FP64, a <c>DateTime</c> to TIMESTAMP(9). Anything else names the parameter.
+    /// The value the parameter's inferred type holds exactly, after the engine's converters, or a
+    /// refusal naming the parameter as the statement wrote it (F155, D317, D323). The engine's binder
+    /// applies the same rule again.
     /// </summary>
-    private static object? Convert(object? value, ChalkType type, ParameterDescriptor parameter)
+    private static object? Convert(object? value, ChalkType type, ParameterDescriptor parameter, ValueBinding binding)
     {
-        if (value is null)
+        if (value is null or DBNull)
         {
             return type.Nullable
                 ? null
@@ -400,80 +402,6 @@ internal static class ParameterBinder
                     $"null was bound to parameter {parameter}, whose inferred type {type} is not nullable");
         }
 
-        try
-        {
-            return type.Kind switch
-            {
-                TypeKind.Bool => System.Convert.ToBoolean(value, CultureInfo.InvariantCulture),
-                TypeKind.I8 => System.Convert.ToSByte(value, CultureInfo.InvariantCulture),
-                TypeKind.I16 => System.Convert.ToInt16(value, CultureInfo.InvariantCulture),
-                TypeKind.I32 => System.Convert.ToInt32(value, CultureInfo.InvariantCulture),
-                TypeKind.I64 => System.Convert.ToInt64(value, CultureInfo.InvariantCulture),
-                TypeKind.Fp32 => System.Convert.ToSingle(value, CultureInfo.InvariantCulture),
-                TypeKind.Fp64 => System.Convert.ToDouble(value, CultureInfo.InvariantCulture),
-                TypeKind.String => value as string ?? System.Convert.ToString(value, CultureInfo.InvariantCulture),
-                TypeKind.Binary => AsBytes(value),
-                TypeKind.Date => AsDate(value),
-                TypeKind.Time => AsTime(value),
-                TypeKind.Timestamp => AsTimestamp(value),
-                TypeKind.TimestampTz => AsTimestampTz(value),
-                TypeKind.Decimal => System.Convert.ToDecimal(value, CultureInfo.InvariantCulture),
-                TypeKind.Uuid => value is Guid guid ? guid : Guid.Parse((string)value, CultureInfo.InvariantCulture),
-                TypeKind.IntervalDay => value is TimeSpan span ? span : TimeSpan.Parse((string)value, CultureInfo.InvariantCulture),
-                TypeKind.IntervalYear => System.Convert.ToInt32(value, CultureInfo.InvariantCulture),
-                _ => throw new ArgumentException(
-                    $"parameter {parameter} has inferred type {type}, which cannot be bound from a "
-                    + $"{value.GetType().Name}"),
-            };
-        }
-        catch (Exception e) when (e is InvalidCastException or FormatException or OverflowException)
-        {
-            throw new ArgumentException(
-                $"the value bound to parameter {parameter} ({value.GetType().Name}) does not fit its "
-                + $"inferred type {type}",
-                e);
-        }
+        return binding.Bind(value, type, $"Parameter {parameter}");
     }
-
-    private static byte[] AsBytes(object value) => value switch
-    {
-        byte[] bytes => bytes,
-        ReadOnlyMemory<byte> memory => memory.ToArray(),
-        _ => throw new InvalidCastException($"cannot bind a {value.GetType().Name} to a BINARY parameter"),
-    };
-
-    private static DateOnly AsDate(object value) => value switch
-    {
-        DateOnly date => date,
-        DateTime dateTime => DateOnly.FromDateTime(dateTime),
-        string text => DateOnly.Parse(text, CultureInfo.InvariantCulture),
-        _ => throw new InvalidCastException($"cannot bind a {value.GetType().Name} to a DATE parameter"),
-    };
-
-    private static TimeOnly AsTime(object value) => value switch
-    {
-        TimeOnly time => time,
-        TimeSpan span => TimeOnly.FromTimeSpan(span),
-        DateTime dateTime => TimeOnly.FromDateTime(dateTime),
-        string text => TimeOnly.Parse(text, CultureInfo.InvariantCulture),
-        _ => throw new InvalidCastException($"cannot bind a {value.GetType().Name} to a TIME parameter"),
-    };
-
-    private static DateTime AsTimestamp(object value) => value switch
-    {
-        DateTime dateTime => dateTime,
-        DateOnly date => date.ToDateTime(TimeOnly.MinValue),
-        DateTimeOffset offset => offset.UtcDateTime,
-        string text => DateTime.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.None),
-        _ => throw new InvalidCastException($"cannot bind a {value.GetType().Name} to a TIMESTAMP parameter"),
-    };
-
-    private static DateTimeOffset AsTimestampTz(object value) => value switch
-    {
-        DateTimeOffset offset => offset.ToUniversalTime(),
-        DateTime dateTime => new DateTimeOffset(DateTime.SpecifyKind(dateTime, DateTimeKind.Utc)),
-        string text => DateTimeOffset.Parse(text, CultureInfo.InvariantCulture).ToUniversalTime(),
-        _ => throw new InvalidCastException(
-            $"cannot bind a {value.GetType().Name} to a TIMESTAMP_TZ parameter"),
-    };
 }

@@ -191,6 +191,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// <summary>What the planner said about itself when the engine was created.</summary>
     public PlannerInfo PlannerInfo { get; }
 
+    /// <summary>This engine's rule for a bound value: its converters, then D317's exact rule.</summary>
+    internal ValueBinding Binding { get; private init; } = ValueBinding.None;
+
     /// <summary>
     /// Describes every source, assembles and validates the catalog, checks the planner speaks a
     /// compatible IR version, and registers the catalog. Any failure means no engine.
@@ -221,6 +224,10 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 + "name Utf8, Utf8View, or both (Any)",
                 nameof(options));
         }
+
+        // D323: two converters for one type, or one for a type no value's runtime type is, can only
+        // ever be a mistake. Refused before a source is claimed.
+        var binding = new ValueBinding(options.BindingConverters);
 
         var identity = new object();
         var claimed = new List<SourceRegistration>(options.Sources.Count);
@@ -358,7 +365,10 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 versions,
                 identity,
                 sourceRegistrations,
-                sharedSourceStates);
+                sharedSourceStates)
+            {
+                Binding = binding,
+            };
             engine.CaptureSharedRevisions();
             return engine;
         }
@@ -782,6 +792,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
         options ??= new PrepareOptions();
+        context = context?.Bound(Binding);
 
         var rewriter = ParameterRewriter.Parse(sql);
         var rendered = rewriter.Render(rewriter.PrepareShape());
@@ -816,6 +827,10 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 + $"{RequestContext.DefaultFoldMaxRows}.",
                 nameof(context));
         }
+
+        // The values the planner folds are held to the rule a parameter is (D317, D323, F160), here,
+        // at the call that binds them — and the prepared query keeps the bound copy.
+        context = context?.Bound(Binding);
 
         var rewriter = ParameterRewriter.Parse(sql);
         var shape = rewriter.PrepareShape();
