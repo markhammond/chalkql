@@ -213,20 +213,26 @@ public final class PlanningScheduler implements AutoCloseable {
     CompletableFuture<T> result = new CompletableFuture<>();
     plannerExecutor.execute(
         () -> {
+          T value;
           try {
             ticket.awaitGrant();
             // The very first grant (D242): every later one is recorded by the governor itself, the
             // instant SliceGate.yield() returns, because only ruleAttempted knows a look happened.
             governor.recordGranted();
             try {
-              result.complete(body.call());
+              value = body.call();
             } finally {
               governor.recordFinished();
+              beforeReleaseForTest.run();
               release(ticket);
             }
           } catch (Throwable t) {
             result.completeExceptionally(t);
+            return;
           }
+          // Only now: the permit and the session are back before the caller sees the answer, so a
+          // caller that names another session at once finds this one idle.
+          result.complete(value);
         });
     enqueueFirst(ticket);
 
@@ -240,6 +246,12 @@ public final class PlanningScheduler implements AutoCloseable {
       throw e;
     }
   }
+
+  /**
+   * Test-only: runs on a planning's own thread just before its ticket is released, so a test can
+   * hold that moment open. Package-private, and never set outside a test in this package.
+   */
+  volatile Runnable beforeReleaseForTest = () -> {};
 
   /** Every grant so far, by which queue it was drawn from (D241). Package-private test hook. */
   List<Priority> grantLog() {
