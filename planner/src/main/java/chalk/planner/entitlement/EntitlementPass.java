@@ -1561,8 +1561,8 @@ public final class EntitlementPass {
     RelDataType rowType = fullRowType(scan);
 
     // What every row reaching this leaf satisfies, and therefore what the rules may be simplified
-    // under (§3.3). The statement's own conjuncts always; the row predicate's only where the pass
-    // actually emits it as `Filter_R`.
+    // under (§3.3). The row predicate's where the pass actually emits it as `Filter_R`; the
+    // statement's own conjuncts only where they say something about the raw row (F163).
     //
     // Under `trust_source_row_level_security` (D156) it does not: the filter is skipped and the rows the
     // source returns are whatever the source's own row security let through, so assuming the
@@ -1570,10 +1570,13 @@ public final class EntitlementPass {
     // every row the mask — including rows outside the scope, whose masked value is a disclosure the
     // policy never granted. So a trusted leaf is simplified over all the rows the source returns,
     // which makes a column masked in scope and redacted out of it exactly what it is: PER_ROW (F44).
-    List<RexNode> conjuncts = new ArrayList<>(statementConjuncts);
+    List<RexNode> own = new ArrayList<>();
     if (folded != null && !folded.isAlwaysFalse() && !trusted) {
-      conjuncts.addAll(RelOptUtilConjunctions.of(folded));
+      own.addAll(RelOptUtilConjunctions.of(folded));
     }
+    List<RexNode> admitted = rawOnly(statementConjuncts, descriptor, entitlement, rowType, own);
+    List<RexNode> conjuncts = new ArrayList<>(admitted);
+    conjuncts.addAll(own);
     RexSimplify underFilter =
         conjuncts.isEmpty()
             ? simplify
@@ -1656,7 +1659,7 @@ public final class EntitlementPass {
             visibility,
             statistical)
             .permitting(permitted);
-    String contradiction = contradiction(statementConjuncts, folded, rowType);
+    String contradiction = contradiction(admitted, folded, rowType);
     if (!contradiction.isEmpty()) {
       map = map.contradicting(contradiction);
     }
@@ -1668,10 +1671,102 @@ public final class EntitlementPass {
         underFilter,
         reachable,
         map,
-        statementConjuncts,
+        admitted,
         statistical,
         declaredStatistical,
         through);
+  }
+
+  /**
+   * The statement's own conjuncts this leaf may take as facts about the raw row (F163): those whose
+   * every column is disclosed raw on every row, as the leaf's own restriction decides it with no
+   * help from the statement.
+   *
+   * <p>The conjuncts are collected over the scan the statement was converted against, but once the
+   * leaf is rewritten the statement's filter reads {@code Project_D}: over a column this principal
+   * sees masked, a conjunct says what the mask gives, not what the row holds. {@code WHERE last_name =
+   * 'S'} over a mask to the initial holds for Smith, and a rule {@code WHEN last_name = 'S'} decided
+   * under it as though it were the raw value would disclose Smith's row to a principal the rule
+   * withholds it from. Where every column the conjunct reads is the raw column itself — the columns
+   * a filter can pass through {@code Project_D} on — the conjunct is the same on either side of it.
+   *
+   * <p>A column withheld as NULL where it is not disclosed whole is as good, for a conjunct that
+   * cannot hold of a NULL there: every row the statement keeps then carries the raw value, since the
+   * rows that carry the NULL fail the conjunct. {@code WHERE org_id = 1} over an {@code org_id} a
+   * vendor's rows withhold is a fact about the raw row of every row it keeps; {@code WHERE org_id <>
+   * 2} over one withheld as {@code 0} is not, and neither is {@code WHERE COALESCE(org_id, 1) = 1}.
+   *
+   * <p>The columns are decided without the statement's conjuncts because a conjunct must not vouch
+   * for itself: assuming it, a rule over its own column could fold to {@code FULL}, and the column
+   * would then look raw.
+   */
+  private List<RexNode> rawOnly(
+      List<RexNode> statementConjuncts,
+      DescriptorExpressions descriptor,
+      TableEntitlement entitlement,
+      RelDataType rowType,
+      List<RexNode> own) {
+    if (statementConjuncts.isEmpty()) {
+      return statementConjuncts;
+    }
+    RexSimplify underOwn =
+        own.isEmpty() ? simplify : simplify.withPredicates(RelOptPredicateList.of(rexBuilder, own));
+    org.apache.calcite.util.ImmutableBitSet.Builder raw =
+        org.apache.calcite.util.ImmutableBitSet.builder();
+    org.apache.calcite.util.ImmutableBitSet.Builder rawOrNull =
+        org.apache.calcite.util.ImmutableBitSet.builder();
+    for (int column = 0; column < rowType.getFieldCount(); column++) {
+      DescriptorExpressions.Column entitled = descriptor.column(column);
+      Set<Disclosure> names = reachable(entitled, entitlement, underOwn, own).names(entitled);
+      if (outcome(names) == Disclosed.FULL) {
+        raw.set(column);
+      } else if (withheldAsNull(names, entitled, rowType.getFieldList().get(column).getType())) {
+        rawOrNull.set(column);
+      }
+    }
+    org.apache.calcite.util.ImmutableBitSet rawColumns = raw.build();
+    org.apache.calcite.util.ImmutableBitSet rawOrNullColumns = rawOrNull.build();
+
+    List<RexNode> admitted = new ArrayList<>(statementConjuncts.size());
+    for (RexNode conjunct : statementConjuncts) {
+      boolean holdsOfTheRawRow = true;
+      for (int column : RelOptUtil.InputFinder.bits(conjunct)) {
+        holdsOfTheRawRow &=
+            rawColumns.get(column)
+                || (rawOrNullColumns.get(column)
+                    && org.apache.calcite.plan.Strong.isNotTrue(
+                        conjunct, org.apache.calcite.util.ImmutableBitSet.of(column)));
+      }
+      if (holdsOfTheRawRow) {
+        admitted.add(conjunct);
+      }
+    }
+    return admitted;
+  }
+
+  /**
+   * Whether a column's every value is its raw value or a NULL (F163): the rules this principal
+   * reaches disclose it whole or withhold it, and whatever withholds it stands a NULL in its place —
+   * every rule's placeholder, and the {@code otherwise} branch's, checked whether it is reached or
+   * not.
+   */
+  private boolean withheldAsNull(
+      Set<Disclosure> names, DescriptorExpressions.@Nullable Column entitled, RelDataType type) {
+    for (Disclosure name : names) {
+      Disclosure normalised = normalise(name);
+      if (normalised != Disclosure.DISCLOSURE_FULL && normalised != Disclosure.DISCLOSURE_NONE) {
+        return false;
+      }
+    }
+    if (!RexUtil.isNullLiteral(placeholder(entitled, -1, type), true)) {
+      return false;
+    }
+    for (int rule = 0; entitled != null && rule < entitled.rules().size(); rule++) {
+      if (!RexUtil.isNullLiteral(placeholder(entitled, rule, type), true)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
