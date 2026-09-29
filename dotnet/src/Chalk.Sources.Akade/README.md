@@ -323,6 +323,12 @@ character, an escape before an ordinary character, a two-character escape and `E
 refused — a literal when the statement is prepared, with its position, and a parameter's value when
 the statement is executed, before anything reaches a source. The escape itself must be a literal.
 
+`ILIKE` is never served by a prefix or ordered index: the index is case-sensitive, and `ILIKE` folds
+case as `LOWER` does. It is a per-row predicate over the scan. An index over values the host has
+already lowered — a `.WithPrefixIndex(x => x.NameLower)` beside `.Name` — serves
+`name_lower LIKE ?` bound to the search text lowered by the host (`search.ToLowerInvariant() + "%"`),
+which folds as `ILIKE` does.
+
 An ordered string index can also serve a bare prefix query. ChalkQL converts the literal start into
 the corresponding half-open string range.
 

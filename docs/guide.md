@@ -901,6 +901,18 @@ PostgreSQL's default escape is a backslash; DuckDB has none, like Chalk. A bare
 prefix — a pattern's literal start and one trailing `%` — is a lookup on an ordered
 or prefix index, with or without an `ESCAPE` clause.
 
+`string ILIKE pattern [ESCAPE escape]` (and `NOT ILIKE`) is `LIKE` with case folded
+the way `LOWER` folds it — culture-invariant, one character to one character — so
+`x ILIKE p` is `LOWER(x) LIKE p` with `p`'s literal characters lowered too: `É`
+matches `é`, `Σ` matches `σ`, the Kelvin sign matches `k`; `ß` does not match `SS`,
+and the Turkish capital `İ` does not match `i`. `%`, `_` and the escape are read as
+written, and the escape rules are `LIKE`'s. It needs no function library.
+
+Databases disagree about case: PostgreSQL folds by its database's locale (ASCII
+only under `C`), DuckDB folds a Turkish capital `LOWER` leaves alone, and Calcite's
+own runtime folds ASCII only. So an `ILIKE` is always evaluated by Chalk, over the
+rows a source returns, and no index answers it — an index is case-sensitive.
+
 ### `Babel` also changes the parser
 
 `Babel` is the one level that swaps the parser itself: the sidecar ships
