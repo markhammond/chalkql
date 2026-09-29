@@ -237,16 +237,16 @@ public sealed class ConfinementTests
                 .Within(Region, 1));
 
         Assert.Contains(
-            "the grant on 'vendor' is confined along 'region', and no table of this policy resolves "
-            + "'vendor' and 'region' on one row",
+            "the grant holds {vendor, region} in role 'vendor', and no table of this policy answers "
+            + "those kinds together — on one row, or on one path's endpoint read beside the row",
             error.Message,
             StringComparison.Ordinal);
         Assert.Contains(
-            "What 'vendor' can be confined along here for role 'vendor' is: nothing",
+            "What this policy answers for 'vendor' with 'vendor' among them is: {vendor}",
             error.Message,
             StringComparison.Ordinal);
         Assert.Contains(
-            "hold the grant unconfined, or declare the dimension on a table that has both",
+            "Declare the kinds together on one row, or hold the grant confined along fewer",
             error.Message,
             StringComparison.Ordinal);
     }
@@ -297,13 +297,15 @@ public sealed class ConfinementTests
             }));
 
         Assert.Contains(
-            "no table of this policy resolves 'org' and 'region' on one row",
+            "the grant holds {org, region} in role 'self', and no table of this policy answers those "
+            + "kinds together",
             error.Message,
             StringComparison.Ordinal);
         Assert.Contains(
-            "What 'org' can be confined along here for role 'self' is: 'desk'",
+            "What this policy answers for 'self' with 'org' among them is: ",
             error.Message,
             StringComparison.Ordinal);
+        Assert.Contains("{desk, org}", error.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -490,8 +492,114 @@ public sealed class ConfinementTests
     }
 
     /// <summary>
-    /// And where the endpoint holds the confining kind on its own row, that sibling still wins: the
-    /// group stays the endpoint's, written over one row, and no path predicate is emitted.
+    /// <b>F159.</b> A tenancy kind's path is confined off the target's own row where the target holds
+    /// the confining kind itself — even where the endpoint holds one too. The group is cross-row and
+    /// the path predicate decides it over both rows; before, the parent's classification decided a
+    /// grant the child's own classification should have.
+    /// </summary>
+    [Fact]
+    public void A_kind_the_target_holds_confines_a_tenancy_path_off_the_targets_row()
+    {
+        var policy = TenancyPolicy.Declare(DirectionFixture.Catalog);
+        var classification = policy.Tenancy("classification");
+        var releasability = policy.Tenancy("releasability");
+        policy.Role("reader");
+        var parents = policy.Source(DirectionFixture.Source).Table("parents");
+        var children = policy.Source(DirectionFixture.Source).Table("children");
+        parents.Tenancy(t => t
+            .Direct(releasability, parents.Column("Releasability"))
+            .Direct(classification, parents.Column("ParentClassification")));
+        children.Tenancy(t => t
+            .Direct(classification, children.Column("Classification"))
+            .Inherited(releasability).Through(parents));
+
+        var path = Assert.Single(policy.Compile(DirectionFixture.Catalog).For(children)!.Inherited);
+
+        Assert.Contains(
+            "(parents.Releasability, Classification) IN (@ctx.releasability_reader_within_classification)",
+            path.PathPredicate,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Releasability IN (@ctx.releasability_reader_within_classification_ids)",
+            path.EndpointPredicate,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ParentClassification", path.PathPredicate + path.EndpointPredicate, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// And a kind the target reaches along <em>another</em> path confines nothing on this one: its
+    /// value is another row's (F159). The endpoint below holds a classification, and the target's is
+    /// the grade's, so the releasability path carries no classification group at all.
+    /// </summary>
+    [Fact]
+    public void A_kind_the_target_reaches_along_another_path_does_not_confine_this_one()
+    {
+        var policy = TenancyPolicy.Declare(DirectionFixture.Catalog);
+        var classification = policy.Tenancy("classification");
+        var releasability = policy.Tenancy("releasability");
+        policy.Role("reader");
+        var source = policy.Source(DirectionFixture.Source);
+        var parents = source.Table("parents");
+        var grades = source.Table("grades");
+        var twins = source.Table("twins");
+        parents.Tenancy(t => t
+            .Direct(releasability, parents.Column("Releasability"))
+            .Direct(classification, parents.Column("ParentClassification")));
+        grades.Tenancy(t => t.Direct(classification, grades.Column("Classification")));
+        twins.Tenancy(t => t
+            .Inherited(releasability).Through(parents)
+            .Inherited(classification).Through(grades));
+
+        var paths = policy.Compile(DirectionFixture.Catalog).For(twins)!.Inherited;
+        var toParents = Assert.Single(paths, p => p.EndpointTable == "parents");
+
+        Assert.DoesNotContain("within_classification", toParents.EndpointPredicate, StringComparison.Ordinal);
+        Assert.Equal("", toParents.PathPredicate);
+    }
+
+    /// <summary>
+    /// <b>F158.</b> Either spelling of one conjunction fills the same group. The compiler anchors a
+    /// group read across a path on the path's kind, and a grant that filled only the list anchored
+    /// on its own kind reached nothing when spelt the other way round — refused at binding where no
+    /// other table answered it, and silent where one did.
+    /// </summary>
+    [Fact]
+    public void Either_spelling_of_a_conjunction_fills_the_group_the_compiler_anchored()
+    {
+        var policy = TenancyPolicy.Declare(DirectionFixture.Catalog);
+        var classification = policy.Tenancy("classification");
+        var releasability = policy.Tenancy("releasability");
+        var reader = policy.Role("reader");
+        var parents = policy.Source(DirectionFixture.Source).Table("parents");
+        var children = policy.Source(DirectionFixture.Source).Table("children");
+        parents.Tenancy(t => t.Direct(releasability, parents.Column("Releasability")));
+        children.Tenancy(t => t
+            .Direct(classification, children.Column("Classification"))
+            .Inherited(releasability).Through(parents));
+        var compiled = policy.Compile(DirectionFixture.Catalog);
+
+        foreach (var grant in new[]
+        {
+            Grant.ForTenancy(classification, "SECRET", reader).Within(releasability, "REL_FVEY"),
+            Grant.ForTenancy(releasability, "REL_FVEY", reader).Within(classification, "SECRET"),
+        })
+        {
+            var bound = compiled.Bind(new TenancyPrincipal { User = 1, Grants = [grant] });
+            Assert.Equal(
+                [["REL_FVEY", "SECRET"]],
+                bound.Lists["releasability_reader_within_classification"].Rows.Select(r => r.ToArray()));
+            Assert.Equal(
+                [["REL_FVEY"]],
+                bound.Lists["releasability_reader_within_classification_ids"].Rows.Select(r => r.ToArray()));
+        }
+    }
+
+    /// <summary>
+    /// And where the endpoint holds the confining kind on its own row, that sibling still wins for a
+    /// <em>subject's</em> path: the group stays the endpoint's, written over one row, and no path
+    /// predicate is emitted (ADR 0071 §3). A tenancy kind's path reads the target's own column since
+    /// F159 — <see cref="A_kind_the_target_holds_confines_a_tenancy_path_off_the_targets_row"/>.
     /// </summary>
     [Fact]
     public void An_endpoints_own_sibling_wins_over_the_targets_column()

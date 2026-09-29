@@ -385,35 +385,13 @@ public sealed class TenancyEntitlements
             if (grant.IsGlobal
                 || !Admits(grant, principal)
                 || grant.IsSubject != list.IsSubject
-                || !string.Equals(grant.Kind, list.Kind, StringComparison.Ordinal)
                 || !string.Equals(grant.Role, list.Role, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            // The group is the grant's own: its dimension, its role and the ordered set of kinds
-            // confining it. A grant fills one list and never another, which is what makes an
-            // unconfined grant and a confined one answer separately (D266 §4).
-            var confinements = Confinements(grant);
-            if (confinements.Count != list.Confining.Count)
-            {
-                continue;
-            }
-
-            var row = new List<object?>(1 + list.Confining.Count) { grant.Id };
-            var matches = true;
-            foreach (var kind in list.Confining)
-            {
-                if (!confinements.TryGetValue(kind, out var id))
-                {
-                    matches = false;
-                    break;
-                }
-
-                row.Add(id);
-            }
-
-            if (!matches)
+            var row = grant.IsSubject ? SubjectRow(grant, list) : TenancyRow(grant, list);
+            if (row is null)
             {
                 continue;
             }
@@ -432,6 +410,102 @@ public sealed class TenancyEntitlements
             ColumnTypes = list.Types,
         };
     }
+
+    /// <summary>
+    /// The row a tenancy grant puts in a list, or null where the list is not the grant's: every list
+    /// of the grant's role whose <b>set</b> of kinds is the grant's, whatever kind the list is
+    /// anchored on, with the identifiers in the list's own column order (F158 option 2, D320).
+    /// </summary>
+    /// <remarks>
+    /// Which kind a grant names first is a spelling. The compiler anchors a group where it can write
+    /// it — a path's kind for a group read across a path, so <c>ForTenancy(releasability, …)
+    /// .Within(classification, …)</c> was the one spelling that reached such a table — and a grant
+    /// filling only the list anchored on its own kind reached nothing through the others.
+    /// </remarks>
+    private List<object?>? TenancyRow(Grant grant, TenancyCompiler.BoundList list)
+    {
+        var kinds = KindsOf(grant);
+        if (kinds.Count != 1 + list.Confining.Count
+            || !kinds.TryGetValue(list.Kind, out var head)
+            || !Canonical(list, grant.Kind))
+        {
+            return null;
+        }
+
+        var row = new List<object?>(kinds.Count) { head };
+        foreach (var kind in list.Confining)
+        {
+            if (!kinds.TryGetValue(kind, out var id))
+            {
+                return null;
+            }
+
+            row.Add(id);
+        }
+
+        return row;
+    }
+
+    /// <summary>
+    /// The row a subject grant puts in a list: its own dimension's, anchored on the subject kind,
+    /// which confines nothing and is always the grant's own (D266 §4).
+    /// </summary>
+    private List<object?>? SubjectRow(Grant grant, TenancyCompiler.BoundList list)
+    {
+        if (!string.Equals(grant.Kind, list.Kind, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var confinements = Confinements(grant);
+        if (confinements.Count != list.Confining.Count)
+        {
+            return null;
+        }
+
+        var row = new List<object?>(1 + list.Confining.Count) { grant.Id };
+        foreach (var kind in list.Confining)
+        {
+            if (!confinements.TryGetValue(kind, out var id))
+            {
+                return null;
+            }
+
+            row.Add(id);
+        }
+
+        return row;
+    }
+
+    /// <summary>
+    /// Whether a list of the grant's set of kinds is one it fills whatever its anchor: every such list
+    /// in a declaring policy, whose groups are one per combination and route (D320); in any other,
+    /// the lists anchored on the grant's own kind, as ever, and a group read across a path — the one
+    /// the compiler anchors on the path's kind and nothing else answers (F158 option 2). A table
+    /// holding both kinds on one row carries a group in each anchor already, and filling the other
+    /// too would add a term that changes no row.
+    /// </summary>
+    private bool Canonical(TenancyCompiler.BoundList list, string anchor) =>
+        _policy.Combinations.Count > 0
+        || list.IsCrossRow
+        || string.Equals(list.Kind, anchor, StringComparison.Ordinal);
+
+    /// <summary>A tenancy grant's kinds and identifiers, its own kind among them: one set (D320).</summary>
+    private Dictionary<string, object> KindsOf(Grant grant)
+    {
+        var kinds = Confinements(grant);
+        kinds[grant.Kind] = grant.Id;
+        return kinds;
+    }
+
+    /// <summary>Whether this list is one the tenancy grant fills (<see cref="TenancyRow"/>).</summary>
+    private static bool Answers(TenancyCompiler.BoundList list, string role, IReadOnlyCollection<string> kinds) =>
+        !list.IsSubject
+        && !list.IsProjection
+        && string.Equals(list.Role, role, StringComparison.Ordinal)
+        && list.Confining.Count + 1 == kinds.Count
+        && kinds.Contains(list.Kind, StringComparer.Ordinal)
+        && list.Confining.All(kind => kinds.Contains(kind, StringComparer.Ordinal));
 
     /// <summary>
     /// A grant's confinements with every kind resolved: the sugar's unnamed one becomes the first
@@ -501,7 +575,10 @@ public sealed class TenancyEntitlements
             return;
         }
 
-        if (!_lists.Any(list =>
+        // In a declaring policy a tenancy kind binds a list only as the anchor the compiler chose for
+        // a combination, so whether a table declares it is asked of the combination (D320).
+        if ((grant.IsSubject || _policy.Combinations.Count == 0)
+            && !_lists.Any(list =>
                 string.Equals(list.Kind, grant.Kind, StringComparison.Ordinal)
                 && list.IsSubject == grant.IsSubject))
         {
@@ -573,6 +650,12 @@ public sealed class TenancyEntitlements
             named.Add(kind);
         }
 
+        if (!grant.IsSubject)
+        {
+            CheckTenancy(grant, named);
+            return;
+        }
+
         // The role has to be one some list of this dimension carries. The first clause of this
         // method asks whether the *policy* declares the role at all; a role is declared once and
         // admitted per table, so a role declared for one dimension and named on another is a role
@@ -615,6 +698,123 @@ public sealed class TenancyEntitlements
         }
 
         _ = principal;
+    }
+
+    /// <summary>
+    /// A tenancy grant's own checks: in a declaring policy it is one of the combinations its role
+    /// declares (D320), and in any policy some list answers its set of kinds, whatever the list is
+    /// anchored on (F158 option 2).
+    /// </summary>
+    /// <remarks>
+    /// Where either fails the grant would reach nothing — or, in a declaring policy, be a shape the
+    /// policy was written not to answer — so it is refused where it is bound, naming what would
+    /// have answered. This is what closes F158's silent case: before, a grant spelt the other way
+    /// round bound quietly and reached nothing on a table another table's list let it past.
+    /// </remarks>
+    private void CheckTenancy(Grant grant, IReadOnlyList<string> named)
+    {
+        var kinds = new List<string>(1 + named.Count) { grant.Kind };
+        kinds.AddRange(named);
+
+        if (_policy.Combinations.Count > 0)
+        {
+            var declared = _policy.Combinations.Where(c => c.Holds(grant.Role)).ToList();
+            if (!declared.Any(c => c.Is(kinds)))
+            {
+                throw new CatalogValidationException(
+                    "tenancy.grants",
+                    $"the grant holds {{{string.Join(", ", kinds)}}} in role '{grant.Role}', which is "
+                    + $"no combination this policy declares for '{grant.Role}' — "
+                    + (declared.Count == 0
+                        ? "it declares none for that role"
+                        : $"it declares {string.Join(", ", declared)}")
+                    + ". A policy that declares combinations compiles those and nothing else, so a "
+                    + "grant of any other shape, one kind alone included, is refused rather than "
+                    + "left to reach less, or more, than was meant "
+                    + "(docs/design/59-declared-combinations.md §3, D320).");
+            }
+
+            if (!_lists.Any(list => Answers(list, grant.Role, kinds)))
+            {
+                throw new CatalogValidationException(
+                    "tenancy.grants",
+                    $"the grant holds {{{string.Join(", ", kinds)}}} in role '{grant.Role}', a "
+                    + "combination this policy declares, and no table of the policy admits "
+                    + $"'{grant.Role}' where that combination has a route — so it would reach nothing. "
+                    + $"Admit '{grant.Role}' on a table that holds those kinds on one row, or on one "
+                    + "path's endpoint read beside the row "
+                    + "(docs/design/59-declared-combinations.md §2, D320).");
+            }
+
+            return;
+        }
+
+        if (named.Count == 0)
+        {
+            // F99: the role has to be one some list of this dimension carries.
+            if (!_lists.Any(list => Answers(list, grant.Role, kinds) && Canonical(list, grant.Kind)))
+            {
+                throw new CatalogValidationException(
+                    "tenancy.grants",
+                    $"the grant on tenancy dimension '{grant.Kind}' names role '{grant.Role}', and no "
+                    + $"table that resolves '{grant.Kind}' admits that role — so there is no "
+                    + "membership the grant could fill and it would reach nothing. The roles this "
+                    + $"policy holds a membership of '{grant.Kind}' for are {AnswerableRoles(grant)}. "
+                    + $"Name one of those, or admit '{grant.Role}' on a table that resolves "
+                    + $"'{grant.Kind}' (docs/design/40-conjoined-confinement.md §3, D266, F99).");
+            }
+
+            return;
+        }
+
+        // F80: some table answers the conjunction, on one row or across one path, in whatever
+        // spelling the compiler anchored it.
+        if (!_lists.Any(list => Answers(list, grant.Role, kinds) && Canonical(list, grant.Kind)))
+        {
+            throw new CatalogValidationException(
+                "tenancy.grants",
+                $"the grant holds {{{string.Join(", ", kinds)}}} in role '{grant.Role}', and no "
+                + "table of this policy answers those kinds together — on one row, or on one path's "
+                + "endpoint read beside the row — so the grant would reach nothing. What this policy "
+                + $"answers for '{grant.Role}' with '{grant.Kind}' among them is: "
+                + $"{AnswerableSets(grant.Role, grant.Kind)}. "
+                + AlongAPath(grant, named)
+                + "Declare the kinds together on one row, or hold the grant confined along fewer "
+                + "(docs/design/40-conjoined-confinement.md §3, D266; F158).");
+        }
+    }
+
+    /// <summary>
+    /// The sets of kinds this policy answers for a role, among those that include
+    /// <paramref name="kind"/>, as a message names them — or <c>nothing</c>.
+    /// </summary>
+    private string AnswerableSets(string role, string kind)
+    {
+        var sets = new List<string>();
+        foreach (var list in _lists)
+        {
+            if (list.IsSubject
+                || list.IsProjection
+                || !string.Equals(list.Role, role, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var kinds = new List<string>(1 + list.Confining.Count) { list.Kind };
+            kinds.AddRange(list.Confining);
+            if (!kinds.Contains(kind, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            var named = "{" + string.Join(", ", kinds.Order(StringComparer.Ordinal)) + "}";
+            if (!sets.Contains(named, StringComparer.Ordinal))
+            {
+                sets.Add(named);
+            }
+        }
+
+        return sets.Count == 0 ? "nothing" : string.Join("; ", sets);
     }
 
     /// <summary>
@@ -1057,9 +1257,11 @@ public sealed class TenancyEntitlements
 
                 reaches |= Reaches(
                     grant,
+                    model,
                     declaredPath.EndpointDimension,
                     declaredPath.EndpointDimensions,
-                    declaredPath.IsRelated ? null : model.Dimensions);
+                    declaredPath.IsRelated ? null : model.Dimensions,
+                    declaredPath);
             }
 
             var term = !reaches
@@ -1096,7 +1298,7 @@ public sealed class TenancyEntitlements
 
             foreach (var dimension in model.Dimensions)
             {
-                if (Reaches(grant, dimension, model.Dimensions))
+                if (Reaches(grant, model, dimension, model.Dimensions))
                 {
                     return TableVisibility.Some;
                 }
@@ -1107,51 +1309,51 @@ public sealed class TenancyEntitlements
     }
 
     /// <summary>
-    /// Whether one grant reaches one dimension on the row <paramref name="siblings"/> describes
-    /// (D266 §3): its own kind resolves there, and so does <b>every kind confining it</b> — where one
-    /// does not, the compiler wrote no term for the group and the grant reaches nothing of that
-    /// table at all.
+    /// Whether one grant reaches one route of this table (D266 §3): the compiler wrote a group there,
+    /// in the grant's role, whose set of kinds is the grant's — anchored on whichever kind the
+    /// compiler chose (F158 option 2), with each kind read off the row F159 names, and only where the
+    /// policy's combinations put one (D320). Asking the compiler rather than restating it is what
+    /// keeps the prediction the fold.
     /// </summary>
     private bool Reaches(
         Grant grant,
+        TenancyCompiler.TableModel model,
         TenancyCompiler.ResolvedDimension dimension,
         IReadOnlyList<TenancyCompiler.ResolvedDimension> siblings,
-        IReadOnlyList<TenancyCompiler.ResolvedDimension>? crossRow = null)
+        IReadOnlyList<TenancyCompiler.ResolvedDimension>? crossRow = null,
+        TenancyCompiler.ResolvedPath? via = null)
     {
-        if (!string.Equals(dimension.Declared.Kind, grant.Kind, StringComparison.Ordinal)
-            || dimension.Declared.IsSubject != grant.IsSubject)
+        if (dimension.Declared.IsSubject != grant.IsSubject)
         {
             return false;
         }
 
-        foreach (var kind in Confinements(grant).Keys)
+        if (grant.IsSubject
+            && !string.Equals(dimension.Declared.Kind, grant.Kind, StringComparison.Ordinal))
         {
-            var resolves = false;
-            foreach (var sibling in siblings)
-            {
-                resolves |= !sibling.Declared.IsSubject
-                    && string.Equals(sibling.Declared.Kind, kind, StringComparison.Ordinal);
-            }
+            return false;
+        }
 
-            // Or on the target's own row, which is the cross-row group of D279 §2: the compiler
-            // wrote the term over both rows and the pass decides it above the join, so a grant
-            // confined that way does reach the table.
-            if (!resolves && crossRow is not null)
-            {
-                foreach (var target in crossRow)
-                {
-                    resolves |= !target.Declared.IsSubject
-                        && string.Equals(target.Declared.Kind, kind, StringComparison.Ordinal);
-                }
-            }
+        var kinds = grant.IsSubject ? Confinements(grant) : KindsOf(grant);
+        var confining = grant.IsSubject ? kinds.Count : kinds.Count - 1;
+        if (!grant.IsSubject && !kinds.ContainsKey(dimension.Declared.Kind))
+        {
+            return false;
+        }
 
-            if (!resolves)
+        var ownAnchor = string.Equals(dimension.Declared.Kind, grant.Kind, StringComparison.Ordinal);
+        foreach (var group in TenancyCompiler.Groups(
+            dimension, grant.Role, siblings, model.Rules, crossRow, via))
+        {
+            if (group.Kinds.Count == confining
+                && group.Kinds.All(kinds.ContainsKey)
+                && (grant.IsSubject || ownAnchor || group.IsCrossRow || _policy.Combinations.Count > 0))
             {
-                return false;
+                return true;
             }
         }
 
-        return true;
+        return false;
     }
 
     /// <summary>A host predicate, in the shapes the package can read (D215); null otherwise.</summary>
@@ -1397,9 +1599,11 @@ public sealed class TenancyEntitlements
 
                 if (Reaches(
                     grant,
+                    model,
                     declaredPath.EndpointDimension,
                     declaredPath.EndpointDimensions,
-                    declaredPath.IsRelated ? null : model.Dimensions))
+                    declaredPath.IsRelated ? null : model.Dimensions,
+                    declaredPath))
                 {
                     tenancies.Add(Tenancy(grant));
                 }
@@ -1442,13 +1646,21 @@ public sealed class TenancyEntitlements
     /// </summary>
     private string Tenancy(Grant grant)
     {
-        var key = grant.Kind + "/" + grant.Id;
-        foreach (var (kind, id) in Confinements(grant).OrderBy(c => c.Key, StringComparer.Ordinal))
+        // One tenancy whichever kind the grant names first (F158 option 2): the key is the set of
+        // kinds and identifiers, and a subject grant keeps its subject at the head.
+        var parts = new List<string>();
+        if (grant.IsSubject)
         {
-            key += "/" + kind + "=" + id;
+            parts.Add("subject:" + grant.Kind + "=" + grant.Id);
         }
 
-        return key;
+        var kinds = grant.IsSubject ? Confinements(grant) : KindsOf(grant);
+        foreach (var (kind, id) in kinds.OrderBy(c => c.Key, StringComparer.Ordinal))
+        {
+            parts.Add(kind + "=" + id);
+        }
+
+        return string.Join("/", parts);
     }
 
     /// <summary>
@@ -1483,7 +1695,7 @@ public sealed class TenancyEntitlements
             var reachesADimensionOfItsOwn = false;
             foreach (var dimension in model.Dimensions)
             {
-                reachesADimensionOfItsOwn |= Reaches(grant, dimension, model.Dimensions);
+                reachesADimensionOfItsOwn |= Reaches(grant, model, dimension, model.Dimensions);
             }
 
             declares |= reachesADimensionOfItsOwn;
@@ -1495,7 +1707,7 @@ public sealed class TenancyEntitlements
             {
                 foreach (var dimension in parent.ParentDimensions)
                 {
-                    declares |= Reaches(grant, dimension, parent.ParentDimensions);
+                    declares |= Reaches(grant, model, dimension, parent.ParentDimensions);
                 }
             }
 
@@ -1506,9 +1718,11 @@ public sealed class TenancyEntitlements
             {
                 declares |= Reaches(
                     grant,
+                    model,
                     declaredPath.EndpointDimension,
                     declaredPath.EndpointDimensions,
-                    declaredPath.IsRelated ? null : model.Dimensions);
+                    declaredPath.IsRelated ? null : model.Dimensions,
+                    declaredPath);
             }
 
             if (!declares)

@@ -203,6 +203,38 @@ internal sealed class TenancyKind
     public string Within => WithinKinds.Count > 0 ? WithinKinds[0] : "";
 }
 
+/// <summary>
+/// One combination of tenancy kinds the policy declares that grants in these roles hold together
+/// (<c>docs/design/59-declared-combinations.md</c>, D320).
+/// </summary>
+/// <remarks>
+/// A set: <see cref="Kinds"/> keeps the order the host wrote, which is the order a group's columns
+/// are named in, and nothing else reads it. Which kind a grant names first is a spelling.
+/// </remarks>
+internal sealed class DeclaredCombination
+{
+    /// <summary>The roles whose tenancy grants may take this shape.</summary>
+    public required IReadOnlyList<string> Roles { get; init; }
+
+    /// <summary>The kinds, as declared.</summary>
+    public required IReadOnlyList<string> Kinds { get; init; }
+
+    /// <summary>Whether a grant in <paramref name="role"/> may hold this combination.</summary>
+    public bool Holds(string role) => Roles.Contains(role, StringComparer.Ordinal);
+
+    /// <summary>Whether <paramref name="kinds"/> is this combination's set of kinds.</summary>
+    public bool Is(IEnumerable<string> kinds) => SameSet(Kinds, kinds);
+
+    public override string ToString() => "{" + string.Join(", ", Kinds) + "}";
+
+    internal static bool SameSet(IEnumerable<string> a, IEnumerable<string> b)
+    {
+        var left = new HashSet<string>(a, StringComparer.Ordinal);
+        var right = new HashSet<string>(b, StringComparer.Ordinal);
+        return left.SetEquals(right);
+    }
+}
+
 /// <summary>Which of the three kinds a <see cref="Restriction"/> is (§5, D215).</summary>
 internal enum RestrictionKind
 {

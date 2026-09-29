@@ -144,6 +144,15 @@ internal static class TenancyCompiler
                 if (listNames.Add(list.Name))
                 {
                     lists.Add(list);
+                    continue;
+                }
+
+                // One name is one list across every table, and a group read across a path on one of
+                // them makes it a list a grant fills whatever it names first (F158 option 2).
+                var at = lists.FindIndex(known => string.Equals(known.Name, list.Name, StringComparison.Ordinal));
+                if (list.IsCrossRow && !lists[at].IsCrossRow)
+                {
+                    lists[at] = lists[at].CrossRow();
                 }
             }
 
@@ -186,7 +195,7 @@ internal static class TenancyCompiler
     /// directly, which is a row the endpoint predicate cannot see: the term is then written over both
     /// rows at once and belongs to the path predicate rather than to the admission.
     /// </remarks>
-    private sealed class ConfiningDimension
+    internal sealed class ConfiningDimension
     {
         internal required ResolvedDimension Dimension { get; init; }
 
@@ -205,7 +214,7 @@ internal static class TenancyCompiler
     /// the confining kinds the policy permits that <b>resolves</b> gets a term, and a principal
     /// holding no grant of that group binds the list empty, which folds the term away.
     /// </remarks>
-    private sealed class ConfinementGroup
+    internal sealed class ConfinementGroup
     {
         internal required IReadOnlyList<ConfiningDimension> Confining { get; init; }
 
@@ -222,6 +231,225 @@ internal static class TenancyCompiler
         /// chain admits its endpoint rows through the derived list instead.
         /// </summary>
         internal bool IsCrossRow => Confining.Any(dimension => dimension.OnTarget);
+    }
+
+    /// <summary>
+    /// What decides the groups one table's dimensions bind (D266 §4, D279 §2, F159, D320): which kinds
+    /// may confine which, the table's own row, paths and parents, and the declared combinations —
+    /// null for a policy that declares none, which binds every subset.
+    /// </summary>
+    internal sealed class GroupRules
+    {
+        private readonly Dictionary<string, IReadOnlyList<CombinationRoute>> _routes =
+            new(StringComparer.Ordinal);
+
+        internal required IReadOnlyDictionary<string, IReadOnlyList<string>> Confinable { get; init; }
+
+        /// <summary>Where a refusal about this table says it is.</summary>
+        internal required string Path { get; init; }
+
+        /// <summary>The table's own dimensions.</summary>
+        internal required IReadOnlyList<ResolvedDimension> Dimensions { get; init; }
+
+        /// <summary>The table's declared paths, in declaration order.</summary>
+        internal required IReadOnlyList<ResolvedPath> Paths { get; init; }
+
+        /// <summary>The parents the table's visibility derives through.</summary>
+        internal required IReadOnlyList<ResolvedThrough> Through { get; init; }
+
+        /// <summary>The declared combinations (D320), or null to bind every subset.</summary>
+        internal IReadOnlyList<DeclaredCombination>? Combinations { get; init; }
+
+        /// <summary>Every route of every combination declared for <paramref name="role"/> (D320).</summary>
+        internal IReadOnlyList<CombinationRoute> Routes(string role)
+        {
+            if (Combinations is null)
+            {
+                return [];
+            }
+
+            if (_routes.TryGetValue(role, out var known))
+            {
+                return known;
+            }
+
+            var routes = new List<CombinationRoute>();
+            foreach (var combination in Combinations)
+            {
+                if (combination.Holds(role))
+                {
+                    routes.AddRange(RoutesOf(combination));
+                }
+            }
+
+            _routes[role] = routes;
+            return routes;
+        }
+
+        /// <summary>
+        /// The routes that answer one combination on this table (D320): the row itself where it
+        /// holds every kind, each distinct path whose endpoint — read beside the row — answers the
+        /// rest, and each parent whose row holds every kind.
+        /// </summary>
+        /// <remarks>
+        /// Two paths down the same steps reach the same endpoint row, so the second answers nothing
+        /// the first did not and is left out. A <c>Related</c> path carries its own kind alone
+        /// (design 40 §7).
+        /// </remarks>
+        internal IReadOnlyList<CombinationRoute> RoutesOf(DeclaredCombination combination)
+        {
+            var kinds = combination.Kinds;
+            var routes = new List<CombinationRoute>();
+
+            if (OnOneRow(Dimensions, kinds) is { } own)
+            {
+                routes.Add(Route(combination, own));
+            }
+
+            var answered = new List<ResolvedPath>();
+            foreach (var declaredPath in Paths)
+            {
+                if (!kinds.Contains(declaredPath.Kind, StringComparer.Ordinal)
+                    || answered.Any(seen => SameSteps(seen, declaredPath)))
+                {
+                    continue;
+                }
+
+                if (declaredPath.IsRelated)
+                {
+                    if (kinds.Count == 1)
+                    {
+                        routes.Add(new CombinationRoute
+                        {
+                            Combination = combination,
+                            Anchor = declaredPath.EndpointDimension,
+                            Via = declaredPath,
+                            Confining = [],
+                        });
+                        answered.Add(declaredPath);
+                    }
+
+                    continue;
+                }
+
+                var available = Available(
+                    declaredPath.EndpointDimension,
+                    declaredPath.EndpointDimensions,
+                    this,
+                    Dimensions,
+                    declaredPath);
+                List<ConfiningDimension>? confining = new(kinds.Count - 1);
+                foreach (var kind in kinds)
+                {
+                    if (string.Equals(kind, declaredPath.Kind, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    var found = available.FirstOrDefault(
+                        a => string.Equals(a.Dimension.Declared.Kind, kind, StringComparison.Ordinal));
+                    if (found is null)
+                    {
+                        confining = null;
+                        break;
+                    }
+
+                    confining.Add(found);
+                }
+
+                if (confining is not null)
+                {
+                    routes.Add(new CombinationRoute
+                    {
+                        Combination = combination,
+                        Anchor = declaredPath.EndpointDimension,
+                        Via = declaredPath,
+                        Confining = confining,
+                    });
+                    answered.Add(declaredPath);
+                }
+            }
+
+            foreach (var parent in Through)
+            {
+                if (OnOneRow(parent.ParentDimensions, kinds) is { } onParent)
+                {
+                    routes.Add(Route(combination, onParent));
+                }
+            }
+
+            return routes;
+        }
+
+        /// <summary>
+        /// Where this table declares <paramref name="kind"/>, as a refusal names it, or null where it
+        /// does not declare it at all.
+        /// </summary>
+        internal string? Where(string kind)
+        {
+            if (Dimensions.Any(d => !d.Declared.IsSubject
+                    && string.Equals(d.Declared.Kind, kind, StringComparison.Ordinal)))
+            {
+                return $"'{kind}' on its own row";
+            }
+
+            var onPath = Paths.FirstOrDefault(
+                p => string.Equals(p.Kind, kind, StringComparison.Ordinal));
+            if (onPath is not null)
+            {
+                return $"'{kind}' along the path to '{onPath.EndpointTable}'";
+            }
+
+            var onParent = Through.FirstOrDefault(t => t.ParentDimensions.Any(
+                d => !d.Declared.IsSubject
+                    && string.Equals(d.Declared.Kind, kind, StringComparison.Ordinal)));
+            return onParent is null ? null : $"'{kind}' on its parent '{onParent.ParentTable}'";
+        }
+
+        private static CombinationRoute Route(
+            DeclaredCombination combination, IReadOnlyList<ResolvedDimension> row) =>
+            new()
+            {
+                Combination = combination,
+                Anchor = row[0],
+                Confining = [.. row.Skip(1).Select(d => new ConfiningDimension { Dimension = d, OnTarget = false })],
+            };
+
+        /// <summary>One dimension per kind, in the kinds' order, where one row holds them all.</summary>
+        private static List<ResolvedDimension>? OnOneRow(
+            IReadOnlyList<ResolvedDimension> row, IReadOnlyList<string> kinds)
+        {
+            var found = new List<ResolvedDimension>(kinds.Count);
+            foreach (var kind in kinds)
+            {
+                var dimension = row.FirstOrDefault(d => !d.Declared.IsSubject
+                    && string.Equals(d.Declared.Kind, kind, StringComparison.Ordinal));
+                if (dimension is null)
+                {
+                    return null;
+                }
+
+                found.Add(dimension);
+            }
+
+            return found;
+        }
+    }
+
+    /// <summary>
+    /// One route of a declared combination (D320): the dimension its group is anchored on, the path
+    /// that reaches it where it is an endpoint's, and the dimensions confining it, each read off its
+    /// own row.
+    /// </summary>
+    internal sealed class CombinationRoute
+    {
+        internal required DeclaredCombination Combination { get; init; }
+
+        internal required ResolvedDimension Anchor { get; init; }
+
+        internal ResolvedPath? Via { get; init; }
+
+        internal required IReadOnlyList<ConfiningDimension> Confining { get; init; }
     }
 
     /// <summary>One <c>Through</c> restriction, resolved against the schema (§3.13, D227).</summary>
@@ -343,8 +571,29 @@ internal static class TenancyCompiler
         /// </summary>
         internal bool IsProjection { get; init; }
 
+        /// <summary>
+        /// Whether its group is read across a path, over the target's row and the endpoint's at once
+        /// (D279 §2) — the one kind of group a grant fills whatever kind it names first in a policy
+        /// that declares no combinations (F158 option 2).
+        /// </summary>
+        internal bool IsCrossRow { get; init; }
+
         /// <summary>Whether it holds tuples rather than bare identifiers.</summary>
         internal bool IsPair => Confining.Count > 0 && !IsProjection;
+
+        /// <summary>The same list, marked as read across a path on some table.</summary>
+        internal BoundList CrossRow() => new()
+        {
+            Name = Name,
+            Columns = Columns,
+            Types = Types,
+            Kind = Kind,
+            Role = Role,
+            IsSubject = IsSubject,
+            Confining = Confining,
+            IsProjection = IsProjection,
+            IsCrossRow = true,
+        };
     }
 
     /// <summary>One table, resolved: what its predicate reads and which roles may see its rows.</summary>
@@ -372,6 +621,9 @@ internal static class TenancyCompiler
 
         /// <summary>Which tenancy kinds this policy declares may confine which (D266 §2).</summary>
         internal required IReadOnlyDictionary<string, IReadOnlyList<string>> Confinable { get; init; }
+
+        /// <summary>What decides the groups this table's dimensions bind (D266, D279, F159, D320).</summary>
+        internal required GroupRules Rules { get; init; }
 
         /// <summary>Where a refusal about this table says it is.</summary>
         internal required string Path { get; init; }
@@ -438,12 +690,24 @@ internal static class TenancyCompiler
             admitted.AddRange(roles);
         }
 
+        var rules = new GroupRules
+        {
+            Confinable = confinable,
+            Path = path,
+            Dimensions = dimensions,
+            Paths = paths,
+            Through = through,
+            Combinations = policy.Combinations.Count > 0 ? policy.Combinations : null,
+        };
+
         var lists = new List<BoundList>();
         foreach (var role in admitted)
         {
+            RefuseUnanswered(rules, role, declared.Name);
+
             foreach (var dimension in dimensions)
             {
-                lists.AddRange(ListsOf(dimension, role, dimensions, confinable, path));
+                lists.AddRange(ListsOf(dimension, role, dimensions, rules));
             }
 
             // The child's rules are decided by the roles held in the *parent's* tenancy (§3.13,
@@ -453,8 +717,7 @@ internal static class TenancyCompiler
             {
                 foreach (var dimension in parent.ParentDimensions)
                 {
-                    lists.AddRange(
-                        ListsOf(dimension, role, parent.ParentDimensions, confinable, path));
+                    lists.AddRange(ListsOf(dimension, role, parent.ParentDimensions, rules));
                 }
             }
 
@@ -472,9 +735,9 @@ internal static class TenancyCompiler
                     declaredPath.EndpointDimension,
                     role,
                     declaredPath.EndpointDimensions,
-                    confinable,
-                    path,
-                    declaredPath.IsRelated ? null : dimensions));
+                    rules,
+                    declaredPath.IsRelated ? null : dimensions,
+                    declaredPath));
             }
         }
 
@@ -552,8 +815,48 @@ internal static class TenancyCompiler
             ScopeTest = scopeTest.ToString(),
             Scopes = ruleScopes,
             Confinable = confinable,
+            Rules = rules,
             Path = path,
         };
+    }
+
+    /// <summary>
+    /// Refuses a combination declared for <paramref name="role"/> whose kinds this table declares
+    /// but that no one route answers (D320): a conjoined test is decided on one row, or on one
+    /// path's endpoint read beside the row, and a grant of it would reach nothing here although every
+    /// kind it names is the table's. A combination with a kind the table does not declare is not
+    /// this table's, and is passed over.
+    /// </summary>
+    private static void RefuseUnanswered(GroupRules rules, string role, string table)
+    {
+        if (rules.Combinations is null)
+        {
+            return;
+        }
+
+        foreach (var combination in rules.Combinations)
+        {
+            if (!combination.Holds(role) || rules.RoutesOf(combination).Count > 0)
+            {
+                continue;
+            }
+
+            var where = combination.Kinds.Select(rules.Where).ToList();
+            if (where.Any(w => w is null))
+            {
+                continue;
+            }
+
+            throw new CatalogValidationException(
+                rules.Path,
+                $"the combination {combination} declared for role '{role}' resolves on '{table}' — "
+                + string.Join(", ", where)
+                + " — and no one route answers it: a conjoined test is decided on one row, or on one "
+                + "path's endpoint read beside the row, so a grant of it would reach nothing here. "
+                + $"Declare its kinds on one row of '{table}' or reach them along one path, or do "
+                + $"not admit '{role}' on '{table}' "
+                + "(docs/design/59-declared-combinations.md §2, D320).");
+        }
     }
 
     /// <summary>
@@ -573,66 +876,40 @@ internal static class TenancyCompiler
     /// list were emitted in before D266, so a policy with one confining kind compiles to the text it
     /// compiled to.
     /// </remarks>
-    private static IReadOnlyList<ConfinementGroup> Groups(
+    internal static IReadOnlyList<ConfinementGroup> Groups(
         ResolvedDimension dimension,
         string role,
         IReadOnlyList<ResolvedDimension> siblings,
-        IReadOnlyDictionary<string, IReadOnlyList<string>> confinable,
-        string path,
-        IReadOnlyList<ResolvedDimension>? crossRow = null)
+        GroupRules rules,
+        IReadOnlyList<ResolvedDimension>? crossRow = null,
+        ResolvedPath? via = null)
     {
-        var declared = dimension.Declared;
-        var available = new List<ConfiningDimension>();
-        if (confinable.TryGetValue(declared.Kind, out var permitted))
+        // A declaring policy binds its combinations and nothing else (D320): one group per route of
+        // each combination anchored here. A subject dimension keeps its `within:` subsets.
+        if (rules.Combinations is not null && !dimension.Declared.IsSubject)
         {
-            foreach (var kind in permitted)
+            var declared = new List<ConfinementGroup>();
+            foreach (var route in rules.Routes(role))
             {
-                if (string.Equals(kind, declared.Kind, StringComparison.Ordinal))
+                if (ReferenceEquals(route.Anchor, dimension) && ReferenceEquals(route.Via, via))
                 {
-                    continue;
-                }
-
-                var found = false;
-                foreach (var sibling in siblings)
-                {
-                    if (!sibling.Declared.IsSubject
-                        && string.Equals(sibling.Declared.Kind, kind, StringComparison.Ordinal)
-                        && !available.Any(c => ReferenceEquals(c.Dimension, sibling)))
-                    {
-                        available.Add(new ConfiningDimension { Dimension = sibling, OnTarget = false });
-                        found = true;
-                    }
-                }
-
-                // A kind this row does not hold, held <em>directly</em> by the target of a path: the
-                // cross-row group of D279 §2. The row's own sibling wins where there is one, which is
-                // what keeps every policy that compiles today compiling to the text it compiled to.
-                if (found || crossRow is null)
-                {
-                    continue;
-                }
-
-                foreach (var target in crossRow)
-                {
-                    if (!target.Declared.IsSubject
-                        && string.Equals(target.Declared.Kind, kind, StringComparison.Ordinal)
-                        && !available.Any(c => ReferenceEquals(c.Dimension, target)))
-                    {
-                        available.Add(new ConfiningDimension { Dimension = target, OnTarget = true });
-                    }
+                    declared.Add(Group(dimension, role, route.Confining));
                 }
             }
+
+            return declared;
         }
 
+        var available = Available(dimension, siblings, rules, crossRow, via);
         if (available.Count > MaxConfiningKinds)
         {
             throw new CatalogValidationException(
-                path,
-                $"the dimension '{declared.Kind}' may be confined by {available.Count} tenancy kinds "
-                + $"that this table resolves, and the compiler emits one membership test per subset "
-                + $"of them — {1 << available.Count} per role. {MaxConfiningKinds} is the most it "
-                + "will write. Narrow the kinds that may confine it "
-                + "(docs/design/40-conjoined-confinement.md §2, §4, D266).");
+                rules.Path,
+                $"the dimension '{dimension.Declared.Kind}' may be confined by {available.Count} tenancy "
+                + $"kinds that this table resolves, and the compiler emits one membership test per "
+                + $"subset of them — {1 << available.Count} per role. {MaxConfiningKinds} is the most "
+                + "it will write. Declare the combinations grants hold, and only those are written "
+                + "(docs/design/59-declared-combinations.md §1, D320; design 40 §2, §4, D266).");
         }
 
         var groups = new List<ConfinementGroup>();
@@ -643,6 +920,118 @@ internal static class TenancyCompiler
 
         groups.Add(Group(dimension, role, []));
         return groups;
+    }
+
+    /// <summary>
+    /// The dimensions that may confine <paramref name="dimension"/> on the row
+    /// <paramref name="siblings"/> describes, each read off the row it belongs to (D266 §3, D279 §2,
+    /// F159).
+    /// </summary>
+    /// <remarks>
+    /// On a tenancy kind's path — <paramref name="crossRow"/> the target's own dimensions — a kind
+    /// the target declares is read where the target declares it: off the target's row when the
+    /// target holds it directly, even where the endpoint holds one too, and not at all when the
+    /// target reaches it along another path, which is another row. The endpoint's own value confines
+    /// only a kind the target does not declare. Before F159 the endpoint's sibling won, so a grant
+    /// confined to one classification reached a row of another whose parent had it. A subject's
+    /// path is left as ADR 0071 §3 built it.
+    /// </remarks>
+    internal static List<ConfiningDimension> Available(
+        ResolvedDimension dimension,
+        IReadOnlyList<ResolvedDimension> siblings,
+        GroupRules rules,
+        IReadOnlyList<ResolvedDimension>? crossRow,
+        ResolvedPath? via)
+    {
+        var declared = dimension.Declared;
+        var available = new List<ConfiningDimension>();
+        if (!rules.Confinable.TryGetValue(declared.Kind, out var permitted))
+        {
+            return available;
+        }
+
+        foreach (var kind in permitted)
+        {
+            if (string.Equals(kind, declared.Kind, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // F159, for a tenancy kind's path: what the target declares, it answers for.
+            if (crossRow is not null && !declared.IsSubject)
+            {
+                if (Add(available, crossRow, kind, onTarget: true)
+                    || (via is not null
+                        && rules.Paths.Any(other =>
+                            string.Equals(other.Kind, kind, StringComparison.Ordinal)
+                            && !SameSteps(other, via))))
+                {
+                    continue;
+                }
+            }
+
+            // A subject's path keeps ADR 0071 §3: the endpoint's own sibling wins, and the target's
+            // column is taken only where the endpoint holds none.
+            if (!Add(available, siblings, kind, onTarget: false) && crossRow is not null && declared.IsSubject)
+            {
+                Add(available, crossRow, kind, onTarget: true);
+            }
+        }
+
+        return available;
+    }
+
+    /// <summary>Adds every tenancy dimension of <paramref name="kind"/> on a row, and says whether there was one.</summary>
+    private static bool Add(
+        List<ConfiningDimension> available,
+        IReadOnlyList<ResolvedDimension> row,
+        string kind,
+        bool onTarget)
+    {
+        var found = false;
+        foreach (var dimension in row)
+        {
+            if (!dimension.Declared.IsSubject
+                && string.Equals(dimension.Declared.Kind, kind, StringComparison.Ordinal)
+                && !available.Any(c => ReferenceEquals(c.Dimension, dimension)))
+            {
+                available.Add(new ConfiningDimension { Dimension = dimension, OnTarget = onTarget });
+                found = true;
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>Whether two paths go down the same steps, and so reach the same endpoint row.</summary>
+    internal static bool SameSteps(ResolvedPath a, ResolvedPath b)
+    {
+        if (ReferenceEquals(a, b))
+        {
+            return true;
+        }
+
+        if (a.IsRelated != b.IsRelated || a.Steps.Count != b.Steps.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < a.Steps.Count; i++)
+        {
+            var x = a.Steps[i];
+            var y = b.Steps[i];
+            if (!string.Equals(x.FromTable, y.FromTable, StringComparison.OrdinalIgnoreCase)
+                || x.FromOrdinal != y.FromOrdinal
+                || !string.Equals(x.ToTable, y.ToTable, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(x.ToSchema, y.ToSchema, StringComparison.OrdinalIgnoreCase)
+                || x.ToOrdinal != y.ToOrdinal
+                || x.Down != y.Down)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static List<ConfiningDimension> Subset(IReadOnlyList<ConfiningDimension> of, int mask)
@@ -721,11 +1110,11 @@ internal static class TenancyCompiler
         ResolvedDimension dimension,
         string role,
         IReadOnlyList<ResolvedDimension> siblings,
-        IReadOnlyDictionary<string, IReadOnlyList<string>> confinable,
-        string path,
-        IReadOnlyList<ResolvedDimension>? crossRow = null)
+        GroupRules rules,
+        IReadOnlyList<ResolvedDimension>? crossRow = null,
+        ResolvedPath? via = null)
     {
-        foreach (var group in Groups(dimension, role, siblings, confinable, path, crossRow))
+        foreach (var group in Groups(dimension, role, siblings, rules, crossRow, via))
         {
             yield return new BoundList
             {
@@ -736,6 +1125,7 @@ internal static class TenancyCompiler
                 Role = role,
                 IsSubject = dimension.Declared.IsSubject,
                 Confining = group.Kinds,
+                IsCrossRow = group.IsCrossRow,
             };
 
             if (!group.IsCrossRow)
@@ -753,6 +1143,7 @@ internal static class TenancyCompiler
                 IsSubject = dimension.Declared.IsSubject,
                 Confining = group.Kinds,
                 IsProjection = true,
+                IsCrossRow = true,
             };
         }
     }
@@ -1720,9 +2111,9 @@ internal static class TenancyCompiler
                 role,
                 "",
                 declaredPath.EndpointDimensions,
-                model.Confinable,
-                model.Path,
+                model.Rules,
                 CrossRow(model, declaredPath),
+                declaredPath,
                 admission: true);
             parts.Add($"@ctx.global_{role}");
             scopes.Add(parts.Count == 1 ? parts[0] : "(" + string.Join(" OR ", parts) + ")");
@@ -1780,9 +2171,9 @@ internal static class TenancyCompiler
                 role,
                 declaredPath.EndpointTable + ".",
                 declaredPath.EndpointDimensions,
-                model.Confinable,
-                model.Path,
-                crossRow);
+                model.Rules,
+                crossRow,
+                declaredPath);
             parts.Add($"@ctx.global_{role}");
             scopes.Add(parts.Count == 1 ? parts[0] : "(" + string.Join(" OR ", parts) + ")");
         }
@@ -1805,9 +2196,9 @@ internal static class TenancyCompiler
                 declaredPath.EndpointDimension,
                 role,
                 declaredPath.EndpointDimensions,
-                model.Confinable,
-                model.Path,
-                crossRow))
+                model.Rules,
+                crossRow,
+                declaredPath))
             {
                 if (group.IsCrossRow)
                 {
@@ -2130,7 +2521,7 @@ internal static class TenancyCompiler
         var parts = new List<string>();
         foreach (var dimension in model.Dimensions)
         {
-            Membership(parts, dimension, role, "", model.Dimensions, model.Confinable, model.Path);
+            Membership(parts, dimension, role, "", model.Dimensions, model.Rules);
         }
 
         if (!derived)
@@ -2155,8 +2546,7 @@ internal static class TenancyCompiler
                     role,
                     parent.ParentTable + ".",
                     parent.ParentDimensions,
-                    model.Confinable,
-                    model.Path);
+                    model.Rules);
             }
         }
 
@@ -2175,9 +2565,9 @@ internal static class TenancyCompiler
                 role,
                 declaredPath.EndpointTable + ".",
                 declaredPath.EndpointDimensions,
-                model.Confinable,
-                model.Path,
-                CrossRow(model, declaredPath));
+                model.Rules,
+                CrossRow(model, declaredPath),
+                declaredPath);
         }
 
         parts.Add($"@ctx.global_{role}");
@@ -2194,12 +2584,12 @@ internal static class TenancyCompiler
         string role,
         string qualifier,
         IReadOnlyList<ResolvedDimension> siblings,
-        IReadOnlyDictionary<string, IReadOnlyList<string>> confinable,
-        string path,
+        GroupRules rules,
         IReadOnlyList<ResolvedDimension>? crossRow = null,
+        ResolvedPath? via = null,
         bool admission = false)
     {
-        foreach (var group in Groups(dimension, role, siblings, confinable, path, crossRow))
+        foreach (var group in Groups(dimension, role, siblings, rules, crossRow, via))
         {
             if (group.Confining.Count == 0)
             {
