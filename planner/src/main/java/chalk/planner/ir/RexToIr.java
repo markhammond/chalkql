@@ -254,6 +254,12 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
             .anyMatch(operand -> operand.getType().getSqlTypeName() == SqlTypeName.SYMBOL);
     FunctionId function = FunctionMapping.scalar(call.getOperator(), temporalUnit);
 
+    // D312: the statement's own LIKEs were checked at validation, with positions; this catches a
+    // pattern that became a literal only once constants were folded, wherever the call will run.
+    if (function == FunctionId.FUNCTION_ID_LIKE || function == FunctionId.FUNCTION_ID_ILIKE) {
+      chalk.planner.plan.LikePatterns.checkCall(call);
+    }
+
     List<Expr> args = new ArrayList<>(call.getOperands().size());
     for (RexNode operand : call.getOperands()) {
       args.add(convert(operand));

@@ -62,6 +62,13 @@ internal sealed class CompiledPlan
         new Dictionary<string, Expressions.SharingTally>();
 
     /// <summary>
+    /// The parameters this plan uses as LIKE patterns (D312), checked when it is executed —
+    /// <see cref="ExecuteAsync(IReadOnlyList{object?}, ExecutionStats, ExecutionArena?, CancellationToken)"/>
+    /// checks them eagerly, and so does the client before it starts an execution.
+    /// </summary>
+    internal LikeParameters LikeParameters { get; init; } = LikeParameters.None;
+
+    /// <summary>
     /// The context scalars this plan reads at execution, in slot order after
     /// <see cref="ParameterTypes"/> Empty under prepare-time binding.
     /// </summary>
@@ -108,6 +115,7 @@ internal sealed class CompiledPlan
     {
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentNullException.ThrowIfNull(stats);
+        LikeParameters.Validate(parameters);
         // The statement's own parameters, then this plan's bound scalars: one array, one index each.
         var bound = ParameterBinder.Bind(parameters, _boundTypes);
         return Run(bound, stats, relations, arena, ct);
@@ -238,6 +246,7 @@ internal sealed class CompiledPlan
             _settings)
         {
             Sharing = Sharing,
+            LikeParameters = LikeParameters,
         };
     }
 
@@ -268,6 +277,7 @@ internal sealed class CompiledPlan
         })
     {
         Sharing = Sharing,
+        LikeParameters = LikeParameters,
     };
 
     /// <summary>Builds the immutable half of an execution context.</summary>

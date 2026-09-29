@@ -391,6 +391,11 @@ internal sealed class ReferenceInterpreter
                 (string)operands[0]!,
                 (string)operands[1]!,
                 operands.Length > 2 ? (string)operands[2]! : null),
+            FunctionId.Ilike => Text.Like(
+                (string)operands[0]!,
+                (string)operands[1]!,
+                operands.Length > 2 ? (string)operands[2]! : null,
+                foldCase: true),
 
             // Lists (D58). CARDINALITY counts, ITEM is 1-based and total, ARRAY_TO_STRING joins the
             // non-NULL elements.
@@ -672,9 +677,16 @@ internal sealed class ReferenceInterpreter
             return builder.ToString();
         }
 
-        public static bool Like(string value, string pattern, string? escape)
+        /// <summary>
+        /// The oracle's LIKE: strict about the escape as the engine is (D312), so the two refuse the
+        /// same patterns, and otherwise read token by token with no compilation to share with it.
+        /// ILIKE (D316) lowers the value, and each literal as it is read, with the string mapping
+        /// LOWER uses — after the escape has been read, never before.
+        /// </summary>
+        public static bool Like(string value, string pattern, string? escape, bool foldCase = false)
         {
-            var text = ToRunes(value);
+            Chalk.Sources.LikePattern.Validate(pattern, escape);
+            var text = ToRunes(foldCase ? value.ToLowerInvariant() : value);
             var tokens = new List<(char Kind, System.Text.Rune Literal)>();
             var patternRunes = ToRunes(pattern);
             var escapeRune = string.IsNullOrEmpty(escape) ? (System.Text.Rune?)null : ToRunes(escape)[0];
@@ -684,7 +696,7 @@ internal sealed class ReferenceInterpreter
                 var rune = patternRunes[i];
                 if (escapeRune is { } marker && rune == marker && i + 1 < patternRunes.Count)
                 {
-                    tokens.Add(('l', patternRunes[++i]));
+                    tokens.Add(('l', Fold(patternRunes[++i], foldCase)));
                     continue;
                 }
 
@@ -692,11 +704,23 @@ internal sealed class ReferenceInterpreter
                 {
                     '%' => ('%', rune),
                     '_' => ('_', rune),
-                    _ => ('l', rune),
+                    _ => ('l', Fold(rune, foldCase)),
                 });
             }
 
             return Match(text, 0, tokens, 0);
+        }
+
+        /// <summary>One literal lowered by the same string mapping the value was, which keeps it one rune.</summary>
+        private static System.Text.Rune Fold(System.Text.Rune rune, bool foldCase)
+        {
+            if (!foldCase)
+            {
+                return rune;
+            }
+
+            var lowered = rune.ToString().ToLowerInvariant();
+            return System.Text.Rune.GetRuneAt(lowered, 0);
         }
 
         private static bool Match(

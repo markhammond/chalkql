@@ -452,7 +452,8 @@ public final class TestCatalogs {
   /**
    * The PostgreSQL profile the .NET presets ship. Its string collation is the locale's, not
    * Chalk's, which is what the preset says: only a {@code C} or {@code POSIX} cluster compares by
-   * code point, and a host whose cluster does says so itself.
+   * code point, and a host whose cluster does says so itself. Its LIKE is Chalk's whatever the
+   * collation (D315), which the preset says too.
    */
   public static chalk.ir.v1.DialectProfile postgresProfile() {
     return chalk.ir.v1.DialectProfile.newBuilder()
@@ -468,6 +469,7 @@ public final class TestCatalogs {
         .setDefaultNullCollation(chalk.ir.v1.NullCollation.NULL_COLLATION_HIGH)
         .setSupportsNullOrderingClause(true)
         .setStringCollation(chalk.ir.v1.StringCollation.STRING_COLLATION_LOCALE)
+        .setLikeMatchesCodePoints(true)
         .build();
   }
 

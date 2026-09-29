@@ -312,7 +312,8 @@ class GeneratedSqlTest {
    */
   private static String inDialect(DialectProfile profile, String sql) {
     SourceCapabilities.Builder capabilities = TestCatalogs.fullSqlCapabilities();
-    if (profile.getStringCollation() != chalk.ir.v1.StringCollation.STRING_COLLATION_BINARY) {
+    if (profile.getStringCollation() != chalk.ir.v1.StringCollation.STRING_COLLATION_BINARY
+        && !profile.getLikeMatchesCodePoints()) {
       List<chalk.ir.v1.PredicateShape> shapes =
           new ArrayList<>(capabilities.getPushablePredicatesList());
       shapes.remove(chalk.ir.v1.PredicateShape.PREDICATE_SHAPE_LIKE);
@@ -321,6 +322,37 @@ class GeneratedSqlTest {
     }
 
     return remoteQuery(capabilities.build(), profile, sql).getQueryText();
+  }
+
+  /**
+   * D315: PostgreSQL's LIKE takes a backslash as its escape when no ESCAPE clause names one, and
+   * Chalk's has none, so every LIKE pushed there without one is written with {@code ESCAPE ''}.
+   * One that names its escape is written as it is, and no other dialect gains a clause.
+   */
+  @Test
+  void a_like_pushed_to_postgresql_names_no_escape_character() {
+    assertThat(
+            inDialect(
+                TestCatalogs.postgresProfile(),
+                "SELECT c_name FROM db.customer WHERE c_name LIKE 'Customer\\_%'"))
+        .contains("LIKE 'Customer\\_%' ESCAPE ''");
+    assertThat(
+            inDialect(
+                TestCatalogs.postgresProfile(),
+                "SELECT c_name FROM db.customer WHERE c_name NOT LIKE '%#0001%'"))
+        .contains("NOT LIKE '%#0001%' ESCAPE ''");
+    assertThat(
+            inDialect(
+                TestCatalogs.postgresProfile(),
+                "SELECT c_name FROM db.customer WHERE c_name LIKE 'Customer!_%' ESCAPE '!'"))
+        .contains("LIKE 'Customer!_%' ESCAPE '!'")
+        .doesNotContain("ESCAPE ''");
+    assertThat(
+            inDialect(
+                TestCatalogs.duckDbProfile(),
+                "SELECT c_name FROM db.customer WHERE c_name LIKE 'Customer%'"))
+        .contains("LIKE 'Customer%'")
+        .doesNotContain("ESCAPE");
   }
 
   /** A dynamic parameter becomes a positional placeholder, and the plan records it. */

@@ -1226,10 +1226,22 @@ public static class CatalogValidator
                 + "positive.");
         }
 
+        // D315: a case-insensitive collation folds case in LIKE by definition, so a profile that
+        // says its LIKE matches code points under one contradicts itself.
+        if (profile.LikeMatchesCodePoints && profile.StringCollation == StringCollation.CaseInsensitive)
+        {
+            throw new CatalogValidationException(
+                path,
+                "The dialect profile says LikeMatchesCodePoints and StringCollation.CaseInsensitive. "
+                + "A case-insensitive collation folds case in LIKE, so the two contradict (D315).");
+        }
+
         // D89's string rules are applied by the planner regardless of the descriptor, but a
         // descriptor that declares a string shape it can never use is a mistake worth naming rather
-        // than silently ignoring.
-        if (profile.StringCollation is StringCollation.CaseInsensitive or StringCollation.Locale)
+        // than silently ignoring. D315 lets a LIKE through under a locale collation when the profile
+        // says the source's LIKE never consults it.
+        if (profile.StringCollation is StringCollation.CaseInsensitive
+            || (profile.StringCollation is StringCollation.Locale && !profile.LikeMatchesCodePoints))
         {
             foreach (var shape in capabilities.PushablePredicates)
             {
@@ -1240,8 +1252,9 @@ public static class CatalogValidator
                         $"PredicateShape.{shape} is declared pushable but the dialect profile says "
                         + $"StringCollation.{profile.StringCollation}. A LIKE the source evaluates "
                         + "under a different collation than Chalk's can match different rows, so it "
-                        + "is never pushed (D89). Drop the shape, or declare "
-                        + "StringCollation.Binary if the source really compares by code point.");
+                        + "is never pushed (D89). Drop the shape, declare StringCollation.Binary if "
+                        + "the source really compares by code point, or LikeMatchesCodePoints if its "
+                        + "LIKE does whatever its collation (D315).");
                 }
             }
         }

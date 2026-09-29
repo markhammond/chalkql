@@ -967,8 +967,9 @@ public final class RelToIr {
 
   /**
    * An index lookup and its ranges (D37). The bounds are literals and parameters the matcher
-   * already checked, so this is a straight conversion; {@code residual} is never set, because an M2
-   * planner emits {@code Filter(IndexLookup)} and fuses nothing.
+   * already checked, so this is a straight conversion. {@code residual} is set only for the one
+   * thing a lookup re-checks itself — a parameter LIKE its prefix range covers the literal start of
+   * (D314); everything else it cannot enforce is a {@code Filter} above it.
    */
   private IndexLookup indexLookup(ChalkIndexLookup lookup) {
     ChalkTable table = lookup.chalkTable();
@@ -1005,6 +1006,12 @@ public final class RelToIr {
         bounds.setPrefix(true);
       }
 
+      // D313: the pattern's escape, written only when the LIKE had one, so a two-operand prefix
+      // range is byte-identical to one from before the field existed.
+      if (range.escape() != null) {
+        bounds.setEscape(range.escape());
+      }
+
       for (int i = 0; i < range.lower().size(); i++) {
         bounds.addLower(bound(range.lower().get(i), lookup, i));
       }
@@ -1012,6 +1019,11 @@ public final class RelToIr {
         bounds.addUpper(bound(range.upper().get(i), lookup, i));
       }
       ir.addRanges(bounds);
+    }
+
+    // D314: over the lookup's own row, which is the row a Filter above it would have read.
+    if (lookup.residual() != null) {
+      ir.setResidual(rex.convert(lookup.residual()));
     }
 
     return ir.build();

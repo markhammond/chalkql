@@ -52,6 +52,35 @@ internal static class DifferentialRunner
             ["symbols"] = Array.Empty<Utf8String>(),
         },
 
+        // D314: a parameter LIKE pattern on an index, bound to a bare prefix, to a pattern the lookup
+        // has to re-check, and to one whose literal start is empty — and, for F153, after an
+        // equality on the first key column.
+        "22_like_parameter_bare_prefix_on_a_prefix_index" => new Dictionary<string, object?>
+        {
+            ["p0"] = Utf8String.FromAsciiString("Int%"),
+        },
+        "23_like_parameter_rechecked_by_the_lookup" => new Dictionary<string, object?>
+        {
+            ["p0"] = Utf8String.FromAsciiString("Int_4"),
+        },
+        "24_like_parameter_with_an_empty_literal_start" => new Dictionary<string, object?>
+        {
+            ["p0"] = Utf8String.FromAsciiString("_nt%"),
+        },
+        "26_like_parameter_as_a_per_row_filter" => new Dictionary<string, object?>
+        {
+            ["p0"] = Utf8String.FromAsciiString("_TC%"),
+        },
+        "28_ilike_with_a_parameter_pattern" => new Dictionary<string, object?>
+        {
+            ["p0"] = Utf8String.FromAsciiString("iNT%"),
+        },
+        "25_like_parameter_after_an_equality_prefix" => new Dictionary<string, object?>
+        {
+            ["p0"] = new DateTime(2026, 1, 3),
+            ["p1"] = Utf8String.FromAsciiString("%USDT"),
+        },
+
         // The parameterised bounds (D285). The values are ordinary counts: what is being proved is
         // that a bound the planner never saw is read when the execution starts and honoured exactly,
         // and that the oracle and the engine agree about which rows that leaves.

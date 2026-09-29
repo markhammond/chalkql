@@ -1,0 +1,92 @@
+{
+  "irVersion": 1,
+  "planDigest": "9957222355665511225",
+  "contextId": "corpus",
+  "catalogEpoch": "1",
+  "outputType": {
+    "fields": [
+      {
+        "name": "name",
+        "type": {
+          "kind": "TYPE_KIND_STRING"
+        }
+      }
+    ]
+  },
+  "root": {
+    "rowType": {
+      "fields": [
+        {
+          "name": "name",
+          "type": {
+            "kind": "TYPE_KIND_STRING"
+          }
+        }
+      ]
+    },
+    "estRowCount": 501.75,
+    "filter": {
+      "input": {
+        "rowType": {
+          "fields": [
+            {
+              "name": "name",
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              }
+            }
+          ]
+        },
+        "estRowCount": 2007,
+        "read": {
+          "table": {
+            "sourceId": "mem",
+            "schema": "main",
+            "table": "terms"
+          },
+          "projection": [
+            0
+          ]
+        }
+      },
+      "condition": {
+        "type": {
+          "kind": "TYPE_KIND_BOOL",
+          "nullable": true
+        },
+        "call": {
+          "function": "FUNCTION_ID_ILIKE",
+          "args": [
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "fieldRef": {}
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING",
+                "nullable": true
+              },
+              "param": {}
+            },
+            {
+              "type": {
+                "kind": "TYPE_KIND_STRING"
+              },
+              "literal": {
+                "stringValue": "!"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "parameterTypes": [
+    {
+      "kind": "TYPE_KIND_STRING",
+      "nullable": true
+    }
+  ]
+}

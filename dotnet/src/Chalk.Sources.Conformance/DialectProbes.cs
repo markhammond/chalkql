@@ -44,6 +44,7 @@ internal static class DialectProbes
         findings.Add(await DecimalPrecisionAsync(context, ct).ConfigureAwait(false));
         findings.Add(await TimestampPrecisionAsync(context, ct).ConfigureAwait(false));
         findings.Add(await LikeEscapeAsync(context, ct).ConfigureAwait(false));
+        findings.Add(await LikeDefaultEscapeAsync(context, ct).ConfigureAwait(false));
 
         // D168 (25-coverage-graft.md §5 E): two more, from findings the assessment of
         // ikvmnet/calcite-dotnet measured on dialects Chalk does not serve but could meet.
@@ -572,6 +573,69 @@ internal static class DialectProbes
                 Outcome = ConformanceOutcome.Fail,
                 Advice = "The source does not honour ESCAPE, so a pattern containing a literal "
                     + "wildcard would match different rows. Remove PredicateShape.Like.",
+            };
+    }
+
+    /// <summary>
+    /// Whether a <c>LIKE</c> with no <c>ESCAPE</c> clause has an escape character anyway (D315).
+    /// Chalk's has none — the SQL standard's and Calcite's — so a backslash is an ordinary
+    /// character; PostgreSQL's and MySQL's take a backslash as the escape unless told otherwise.
+    /// </summary>
+    /// <remarks>
+    /// Row 9's text is <c>100%</c>. Read as Chalk reads it, <c>'100\%'</c> wants a backslash after
+    /// <c>100</c> and matches nothing; read with a backslash escape, it is the literal <c>100%</c>
+    /// and matches row 9. Chalk writes <c>ESCAPE ''</c> on every LIKE it pushes to PostgreSQL, so
+    /// there the default does not reach the answer and the probe says so; anywhere else a source
+    /// with a default escape and a LIKE shape would answer a backslash pattern differently.
+    /// </remarks>
+    private static async Task<ConformanceFinding> LikeDefaultEscapeAsync(
+        ConformanceContext context, CancellationToken ct)
+    {
+        var declaresLike = context.Capabilities.PushablePredicates.Contains(PredicateShape.Like)
+            || context.Capabilities.PushablePredicates.Contains(PredicateShape.LikePrefix);
+        var text = context.Column("text_value");
+        var sql = context.SelectIdsWhere($"{text} LIKE '100\\%'");
+        var (rows, failure) = await TryAsync(context, sql, ct).ConfigureAwait(false);
+        if (failure is not null)
+        {
+            return Refused("LIKE default escape", sql, failure);
+        }
+
+        var escapes = rows.Count == 1 && ConformanceValues.Ids(rows) == "9";
+        var neutralised = context.Profile.Dialect.Equals("postgresql", StringComparison.OrdinalIgnoreCase);
+        var declared = declaresLike ? "a LIKE shape is pushable" : "no LIKE shape is pushable";
+        if (!escapes)
+        {
+            return new ConformanceFinding
+            {
+                Subject = "LIKE default escape",
+                Declared = declared,
+                Observed = $"'100\\%' with no ESCAPE matched ids {ConformanceValues.Ids(rows)}, so a "
+                    + "backslash is an ordinary character",
+                Outcome = ConformanceOutcome.Pass,
+            };
+        }
+
+        return !declaresLike || neutralised
+            ? new ConformanceFinding
+            {
+                Subject = "LIKE default escape",
+                Declared = declared,
+                Observed = "'100\\%' with no ESCAPE matched only the literal '100%', so a backslash "
+                    + "is an escape by default"
+                    + (neutralised ? "; Chalk writes ESCAPE '' on every LIKE it pushes here" : string.Empty),
+                Outcome = ConformanceOutcome.Pass,
+            }
+            : new ConformanceFinding
+            {
+                Subject = "LIKE default escape",
+                Declared = declared,
+                Observed = "'100\\%' with no ESCAPE matched only the literal '100%', so a backslash "
+                    + "is an escape by default",
+                Outcome = ConformanceOutcome.Fail,
+                Advice = "Chalk's LIKE has no escape character unless ESCAPE names one, so a pattern "
+                    + "holding a backslash would match different rows here. Remove the LIKE shapes "
+                    + "from PushablePredicates (D315).",
             };
     }
 

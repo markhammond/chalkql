@@ -858,7 +858,12 @@ internal sealed class ReferenceExecutor
         return Side(row, keyFields, range.Upper, range.UpperInclusive, below: false, interpreter);
     }
 
-    /// <summary>A prefix range: an equality prefix, and then "starts with this text" (D282).</summary>
+    /// <summary>
+    /// A prefix range: an equality prefix, and then "starts with the pattern's literal start" (D282),
+    /// read through the pattern's escape (D313). For a pattern that is not a bare prefix that holds
+    /// more rows than the pattern matches, and the lookup's residual decides the rest (D314) — which
+    /// this oracle applies to every row it keeps.
+    /// </summary>
     private static bool InPrefix(
         object?[] row, IReadOnlyList<int> keyFields, IndexRange range, ReferenceInterpreter interpreter)
     {
@@ -873,16 +878,16 @@ internal sealed class ReferenceExecutor
 
         var last = range.Lower.Count - 1;
         var pattern = IndexPrefix.AsText(interpreter.Evaluate(range.Lower[last], row));
-        if (!IndexPrefix.IsBarePrefix(pattern))
+        if (pattern is null)
         {
-            throw new UnsupportedFeatureException(
-                $"LIKE '{pattern}' as a lookup",
-                "The lookup was planned for a LIKE prefix, and a prefix ends in one '%' and holds "
-                + "no other wildcard.");
+            return false;
         }
 
+        var escape = range.Escape.Length > 0 ? range.Escape : null;
+        LikePattern.Validate(pattern, escape);
+        var start = LikePattern.LiteralStart(pattern, escape, out _);
         return IndexPrefix.AsText(row[keyFields[last]]) is { } text
-            && text.StartsWith(IndexPrefix.Of(pattern!), StringComparison.Ordinal);
+            && text.StartsWith(start, StringComparison.Ordinal);
     }
 
     /// <summary>One side of a range, compared column by column until the first difference.</summary>

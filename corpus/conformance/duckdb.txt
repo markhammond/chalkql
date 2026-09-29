@@ -1,6 +1,6 @@
 Chalk source conformance: kit
 server: DuckDB through DuckDB.NET, in-process
-PASSED — 28 checks, 0 failed, 1 skipped
+PASSED — 29 checks, 0 failed, 1 skipped
 
 SKIP text strategy: Varchar: declared (undeclared), observed String. Declare .Provider(new AdoProviderTraits { Text = TextStrategy.String }) on this source's builder to skip the measurement.
 PASS PredicateShape.Eq: declared pushable with Chalk's semantics, observed the same 1 rows the scan gives
@@ -27,6 +27,7 @@ PASS modulus of a negative: declared the sign of the dividend, as Chalk does, ob
 PASS decimal precision: declared 38, observed 1234567890.123456 survived the round trip exactly
 PASS timestamp precision: declared 6, observed came back as 2026-01-01T00:00:00.0000000Z
 PASS LIKE escape handling: declared PredicateShape.Like is pushable, observed '100!%' ESCAPE '!' matched only the literal '100%'
+PASS LIKE default escape: declared a LIKE shape is pushable, observed '100\%' with no ESCAPE matched ids (none), so a backslash is an ordinary character
 PASS string cast truncation: declared an unbounded string cast keeps the value, as Chalk's does, observed all 82 characters survived CAST(... AS VARCHAR)
 PASS parameter round trip: declared the source takes parameters, observed a timestamp with fractional seconds and a decimal at scale 6 each matched the row they came from
 PASS unique key (id): declared unique, observed 16 distinct non-NULL keys over 16 rows

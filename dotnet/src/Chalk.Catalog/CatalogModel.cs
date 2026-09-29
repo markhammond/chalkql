@@ -930,6 +930,17 @@ public sealed class DialectProfileDescriptor
     /// </summary>
     public StringCollation StringCollation { get; init; } = StringCollation.Unspecified;
 
+    /// <summary>
+    /// The source's <c>LIKE</c> matches code point by code point and case-sensitively whatever
+    /// <see cref="StringCollation"/> says, so a <c>LIKE</c> may be pushed under
+    /// <see cref="StringCollation.Locale"/> too (D315, amending D89 for <c>LIKE</c> alone). True of
+    /// PostgreSQL under any deterministic collation, and set by <see cref="DialectProfiles.PostgreSql"/>.
+    /// Nothing else follows from it: string equality, ranges, sorts and grouping stay under
+    /// <see cref="StringCollation"/>. It contradicts <see cref="StringCollation.CaseInsensitive"/>,
+    /// and the catalog validator refuses the pair.
+    /// </summary>
+    public bool LikeMatchesCodePoints { get; init; }
+
     public bool ApproximateDecimal { get; init; }
 
     public bool ApproximateDistinctCount { get; init; }

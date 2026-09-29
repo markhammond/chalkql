@@ -27,8 +27,10 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * <p>The residual is the load-bearing half. A conjunct this class consumes disappears from the
  * filter above the lookup, so consuming one it cannot actually enforce is a silent wrong-answer bug.
  * Everything it does not understand — {@code IS NULL}, a top-level {@code OR} that is not an IN
- * list, {@code LIKE}, a cast on either side, a comparison between two columns — stays residual, and
- * {@code IndexMatcherTest} asserts consumed against residual for every shape.
+ * list, a literal {@code LIKE} that is not a bare prefix, a cast on either side, a comparison between
+ * two columns — stays residual, and {@code IndexMatcherTest} asserts consumed against residual for
+ * every shape. A parameter {@code LIKE} is consumed and handed back as the lookup's own residual
+ * (D314), because a range can answer only its literal start.
  */
 public final class IndexMatcher {
   private IndexMatcher() {}
@@ -42,7 +44,8 @@ public final class IndexMatcher {
       boolean lowerInclusive,
       ImmutableList<RexNode> upper,
       boolean upperInclusive,
-      boolean prefix) {
+      boolean prefix,
+      @Nullable String escape) {
 
     /** An ordinary bounded range: the four bounds, and no prefix (D37). */
     public Range(
@@ -50,7 +53,7 @@ public final class IndexMatcher {
         boolean lowerInclusive,
         ImmutableList<RexNode> upper,
         boolean upperInclusive) {
-      this(lower, lowerInclusive, upper, upperInclusive, false);
+      this(lower, lowerInclusive, upper, upperInclusive, false, null);
     }
 
     /** How many leading key columns this range constrains at all. */
@@ -80,7 +83,9 @@ public final class IndexMatcher {
      */
     public String describe(java.util.function.UnaryOperator<RexNode> render) {
       if (prefix) {
-        return "prefix" + render(lower, render);
+        // D313: the escape is part of what the pattern means, so it is part of the text — written
+        // only when there is one, so a two-operand prefix reads exactly as it did before.
+        return "prefix" + render(lower, render) + (escape == null ? "" : " escape '" + escape + "'");
       }
 
       String low = lower.isEmpty() ? "-inf" : render(lower, render);
@@ -105,10 +110,20 @@ public final class IndexMatcher {
    * What an index can and cannot answer about one condition.
    *
    * @param ranges the ranges to union; empty means the index is no use here
-   * @param residual what still has to be checked per row, or null when nothing does
+   * @param residual what still has to be checked per row above the lookup, or null when nothing
+   *     does
+   * @param lookupResidual what the lookup itself re-checks per row, or null when nothing: the
+   *     {@code LIKE} a prefix range was made from when its pattern is a parameter, because the range
+   *     covers only the bound value's literal start (D314). Part of what the lookup consumes, never
+   *     of {@code residual}.
    */
-  public record Result(ImmutableList<Range> ranges, @Nullable RexNode residual) {
-    public static final Result NONE = new Result(ImmutableList.of(), null);
+  public record Result(
+      ImmutableList<Range> ranges, @Nullable RexNode residual, @Nullable RexNode lookupResidual) {
+    public static final Result NONE = new Result(ImmutableList.of(), null, null);
+
+    public Result(ImmutableList<Range> ranges, @Nullable RexNode residual) {
+      this(ranges, residual, null);
+    }
 
     public boolean matched() {
       return !ranges.isEmpty();
@@ -215,12 +230,15 @@ public final class IndexMatcher {
       if (comparison == null) {
         int pattern = shape == Shape.EQUALITY ? -1 : prefixPattern(conjunct, keyFields, keyLength, rowType);
         if (pattern >= 0 && patternBound.get(pattern) == null) {
-          // `col LIKE 'p%'` on a STRING key column: one prefix range, and nothing left to re-check
-          // (D282). The pattern travels whole and the client strips its '%' when it binds the bound,
-          // because a parameter's text is only known then.
+          // `col LIKE 'p%'` on a STRING key column: one prefix range (D282). The pattern travels
+          // whole, with its escape (D313), and the client resolves its literal start when it binds
+          // the bound, because a parameter's text is only known then. A literal pattern here is a
+          // bare prefix and leaves nothing to re-check; a parameter may be any pattern, and the
+          // lookup re-checks it (D314).
+          RexCall like = (RexCall) conjunct;
           patternBound.set(
               pattern,
-              new Bound(((RexCall) conjunct).getOperands().get(1), true, conjunct));
+              new Bound(like.getOperands().get(1), true, conjunct, LikePatterns.escapeOf(like)));
           continue;
         }
 
@@ -336,9 +354,15 @@ public final class IndexMatcher {
       }
     }
 
+    // D314: a parameter pattern is consumed like a literal one — the lookup answers for it — but
+    // only its literal start is a range, so the lookup re-checks the whole LIKE itself.
+    RexNode lookupResidual =
+        pattern != null && pattern.value() instanceof RexDynamicParam ? pattern.conjunct() : null;
+
     return new Result(
         ranges,
-        residual.isEmpty() ? null : RexUtil.composeConjunction(rexBuilder, residual));
+        residual.isEmpty() ? null : RexUtil.composeConjunction(rexBuilder, residual),
+        lookupResidual);
   }
 
   /** The ranges for one prefix, expanded over the leading IN list when there is one. */
@@ -386,24 +410,27 @@ public final class IndexMatcher {
     ImmutableList.Builder<RexNode> lower = ImmutableList.builder();
     lower.addAll(prefix);
     lower.add(pattern.value());
-    return new Range(lower.build(), true, ImmutableList.of(), false, true);
+    return new Range(lower.build(), true, ImmutableList.of(), false, true, pattern.escape());
   }
 
   /**
-   * {@code col LIKE p} on a key column whose type is STRING, where {@code p} is a bare prefix
-   * pattern — a literal ending in one {@code %} with no other wildcard, or a parameter, whose text
-   * the client checks when it binds it. Returns the key position, or -1.
+   * {@code col LIKE p [ESCAPE e]} on a key column whose type is STRING, where {@code p} is a
+   * literal bare prefix under its escape — its literal start followed by one {@code %} and nothing
+   * else — or a parameter, whose text is known only at bind time and is re-checked by the lookup
+   * (D314). Returns the key position, or -1.
    *
-   * <p>{@code ESCAPE} is refused: its three-operand form can hide a wildcard behind an escape
-   * character, and a range that consumed such a pattern would drop rows. A case-insensitive
-   * {@code LIKE} carries the same {@link SqlKind}, so the operator is checked by name rather than by
-   * kind.
+   * <p>The three-operand form is read through its escape (D313): {@code 'KB\_%' ESCAPE '\'} is the
+   * prefix {@code KB_}, and a range for it is exactly the rows it matches. An escape that is not a
+   * one-character literal, and a literal pattern malformed under it, are refused at validation;
+   * here they are simply not a prefix. A case-insensitive {@code LIKE} carries the same
+   * {@link SqlKind}, so the operator is checked by name rather than by kind.
    */
   private static int prefixPattern(
       RexNode conjunct, List<Integer> keyFields, int keyLength, RelDataType rowType) {
     if (!(conjunct instanceof RexCall call)
         || call.getKind() != SqlKind.LIKE
-        || call.getOperands().size() != 2
+        || call.getOperands().size() < 2
+        || call.getOperands().size() > 3
         || !"LIKE".equals(call.getOperator().getName())) {
       return -1;
     }
@@ -417,10 +444,20 @@ public final class IndexMatcher {
       return -1;
     }
 
+    String escape = null;
+    if (call.getOperands().size() == 3) {
+      escape = LikePatterns.characterLiteral(call.getOperands().get(2));
+      if (escape == null || LikePatterns.escapeDefect(escape) != null) {
+        return -1;
+      }
+    }
+
     RexNode pattern = call.getOperands().get(1);
-    if (pattern instanceof RexLiteral literal) {
-      if (literal.getType().getSqlTypeName().getFamily() != SqlTypeFamily.CHARACTER
-          || !isBarePrefix(literal.getValueAs(String.class))) {
+    if (pattern instanceof RexLiteral) {
+      String text = LikePatterns.characterLiteral(pattern);
+      if (text == null
+          || LikePatterns.patternDefect(text, escape) != null
+          || !LikePatterns.prefix(text, escape).bare()) {
         return -1;
       }
     } else if (!(pattern instanceof RexDynamicParam parameter)
@@ -432,22 +469,11 @@ public final class IndexMatcher {
   }
 
   /**
-   * Whether {@code pattern} is {@code p%}: one trailing {@code %}, and no {@code %} or {@code _}
-   * anywhere before it. The same rule the client applies to a parameter's text at bind time.
+   * Whether {@code pattern} is {@code p%} with no escape: one trailing {@code %}, and no {@code %}
+   * or {@code _} anywhere before it. {@link LikePatterns#prefix} says the same under an escape.
    */
   public static boolean isBarePrefix(@Nullable String pattern) {
-    if (pattern == null || pattern.isEmpty() || pattern.charAt(pattern.length() - 1) != '%') {
-      return false;
-    }
-
-    for (int i = 0; i < pattern.length() - 1; i++) {
-      char c = pattern.charAt(i);
-      if (c == '%' || c == '_') {
-        return false;
-      }
-    }
-
-    return true;
+    return pattern != null && LikePatterns.prefix(pattern, null).bare();
   }
 
   private static Range range(
@@ -642,5 +668,10 @@ public final class IndexMatcher {
 
   private record Comparison(int key, SqlKind kind, RexNode value) {}
 
-  private record Bound(RexNode value, boolean inclusive, RexNode conjunct) {}
+  /** One bound, the conjunct it came from, and — for a LIKE pattern — the pattern's escape. */
+  private record Bound(RexNode value, boolean inclusive, RexNode conjunct, @Nullable String escape) {
+    Bound(RexNode value, boolean inclusive, RexNode conjunct) {
+      this(value, inclusive, conjunct, null);
+    }
+  }
 }

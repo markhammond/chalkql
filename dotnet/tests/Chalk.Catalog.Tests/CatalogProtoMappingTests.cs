@@ -256,6 +256,36 @@ public sealed class CatalogProtoMappingTests
         ],
     };
 
+    /// <summary>D315: the LIKE flag travels to the planner and back, which is what its pushdown gate reads.</summary>
+    [Fact]
+    public void The_like_flag_round_trips_through_the_profile()
+    {
+        var catalog = Catalog(new SourceCapabilities { QueryLanguage = QueryLanguage.Sql });
+        var postgres = new CatalogContext
+        {
+            ContextId = catalog.ContextId,
+            Epoch = catalog.Epoch,
+            Schemas =
+            [
+                new SchemaDescriptor
+                {
+                    SourceId = "crm",
+                    Name = "public",
+                    Kind = SourceKind.Remote,
+                    Dialect = "postgresql",
+                    Capabilities = catalog.Schemas[0].Capabilities,
+                    DialectProfile = DialectProfiles.PostgreSql,
+                    Tables = catalog.Schemas[0].Tables,
+                },
+            ],
+        };
+
+        var message = postgres.ToProto();
+        Assert.True(message.Schemas[0].DialectProfile.LikeMatchesCodePoints);
+        Assert.True(CatalogProtoMapping.FromProto(message).Schemas[0].DialectProfile!.LikeMatchesCodePoints);
+        Assert.False(catalog.ToProto().Schemas[0].DialectProfile.LikeMatchesCodePoints);
+    }
+
     [Fact]
     public void Chalk_type_round_trips_through_its_proto()
     {

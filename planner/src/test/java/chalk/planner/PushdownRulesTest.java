@@ -1,6 +1,7 @@
 package chalk.planner;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import chalk.ir.v1.DialectProfile;
 import chalk.ir.v1.PredicateShape;
@@ -206,6 +207,128 @@ class PushdownRulesTest {
                 insensitive,
                 "SELECT c_name FROM db.customer WHERE c_mktsegment = 'BUILDING'"))
         .contains("ChalkFilter");
+  }
+
+  /**
+   * D315: PostgreSQL's LIKE is Chalk's under its locale collation, so a LIKE is pushed there while
+   * a string equality — which the collation does decide — stays local.
+   */
+  @Test
+  public void a_like_is_pushed_under_a_locale_collation_whose_like_matches_code_points() {
+    DialectProfile postgres = TestCatalogs.postgresProfile();
+
+    assertThat(
+            plan(full(), postgres, "SELECT c_name FROM db.customer WHERE c_name LIKE 'Customer%'"))
+        .doesNotContain("ChalkFilter");
+    assertThat(
+            plan(full(), postgres, "SELECT c_name FROM db.customer WHERE c_name LIKE ? ESCAPE '!'"))
+        .doesNotContain("ChalkFilter");
+    assertThat(
+            plan(full(), postgres, "SELECT c_name FROM db.customer WHERE c_mktsegment = 'BUILDING'"))
+        .contains("ChalkFilter");
+  }
+
+  /** Without the flag, a locale collation keeps a LIKE local, as D89 always did. */
+  @Test
+  public void a_like_stays_local_under_a_locale_collation_without_the_flag() {
+    DialectProfile locale =
+        TestCatalogs.postgresProfile().toBuilder().setLikeMatchesCodePoints(false).build();
+
+    assertThat(
+            plan(
+                withoutLikeShapes(),
+                locale,
+                "SELECT c_name FROM db.customer WHERE c_name LIKE 'Customer%'"))
+        .contains("ChalkFilter");
+    assertThatThrownBy(
+            () -> new CatalogRegistry().register(TestCatalogs.withRemote("db", full(), locale)))
+        .hasMessageContaining("like_matches_code_points");
+  }
+
+  /** The flag contradicts a case-insensitive collation, and the catalog is refused for it. */
+  @Test
+  public void the_flag_beside_a_case_insensitive_collation_is_refused() {
+    DialectProfile contradiction =
+        duck().toBuilder()
+            .setStringCollation(StringCollation.STRING_COLLATION_CASE_INSENSITIVE)
+            .setLikeMatchesCodePoints(true)
+            .build();
+
+    assertThatThrownBy(
+            () ->
+                new CatalogRegistry()
+                    .register(TestCatalogs.withRemote("db", withoutLikeShapes(), contradiction)))
+        .hasMessageContaining("contradict");
+  }
+
+  /**
+   * D313: {@code 'Customer!%' ESCAPE '!'} is the literal text {@code Customer%}, not a prefix, so a
+   * source that declares only LIKE_PREFIX is not sent it; {@code 'Customer!_%' ESCAPE '!'} is a
+   * prefix and is.
+   */
+  @Test
+  public void an_escaped_equality_is_not_a_prefix_shape() {
+    SourceCapabilities prefixOnly =
+        TestCatalogs.fullSqlCapabilities()
+            .clearPushablePredicates()
+            .addAllPushablePredicates(
+                java.util.List.of(PredicateShape.PREDICATE_SHAPE_LIKE_PREFIX, PredicateShape.PREDICATE_SHAPE_AND))
+            .setMaxInList(0)
+            .setSupportsValuesJoin(false)
+            .build();
+
+    assertThat(
+            plan(
+                prefixOnly,
+                duck(),
+                "SELECT c_name FROM db.customer WHERE c_name LIKE 'Customer!%' ESCAPE '!'"))
+        .contains("ChalkFilter");
+    assertThat(
+            plan(
+                prefixOnly,
+                duck(),
+                "SELECT c_name FROM db.customer WHERE c_name LIKE 'Customer!_%' ESCAPE '!'"))
+        .doesNotContain("ChalkFilter");
+  }
+
+  /**
+   * D316: ILIKE is never pushed — PostgreSQL folds by its database's locale and DuckDB folds a Turkish
+   * capital Chalk's LOWER leaves alone — while a LIKE beside it travels as before.
+   */
+  @Test
+  public void ilike_is_never_pushed() {
+    for (DialectProfile profile : java.util.List.of(duck(), TestCatalogs.postgresProfile())) {
+      String plan =
+          planWithPostgresLibrary(
+              full(),
+              profile,
+              "SELECT c_name FROM db.customer WHERE c_name ILIKE 'customer%' AND c_name LIKE 'C%'");
+      assertThat(plan).as(profile.getDialect()).contains("ChalkFilter").contains("ILIKE");
+      assertThat(plan.substring(plan.indexOf("ChalkFilter")))
+          .as(profile.getDialect())
+          .doesNotContain("condition=[AND(");
+    }
+  }
+
+  private static String planWithPostgresLibrary(
+      SourceCapabilities capabilities, DialectProfile profile, String sql) {
+    // The test catalog declares a user function md5, which the POSTGRESQL library has too.
+    chalk.ir.v1.CatalogContext.Builder builder =
+        TestCatalogs.withRemote("db", capabilities, profile).toBuilder();
+    for (int i = 0; i < builder.getSchemasCount(); i++) {
+      builder.setSchemas(i, builder.getSchemas(i).toBuilder().clearFunctions());
+    }
+    RegisteredCatalog catalog = new CatalogRegistry().register(builder.build());
+    try (PlannerPipeline pipeline =
+        PlannerPipeline.create(
+            catalog,
+            PushdownPolicy.full(),
+            chalk.planner.plan.SqlConfigs.DEFAULT_CONFORMANCE,
+            java.util.List.of(org.apache.calcite.sql.fun.SqlLibrary.POSTGRESQL))) {
+      return pipeline.plan(sql, true).physicalPlanText();
+    } catch (Exception failure) {
+      throw new AssertionError("planning failed for: " + sql, failure);
+    }
   }
 
   /** The same predicate on a numeric column is unaffected by the collation. */

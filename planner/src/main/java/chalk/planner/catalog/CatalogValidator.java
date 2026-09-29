@@ -335,8 +335,18 @@ public final class CatalogValidator {
               + capabilities.getMaxPushdownRows()
               + "; it must be zero (unlimited) or positive");
     }
+    // D315: a profile may say its LIKE matches code points whatever its collation; a
+    // case-insensitive collation folds case in LIKE by definition, so the two contradict.
+    if (profile.getLikeMatchesCodePoints()
+        && profile.getStringCollation() == StringCollation.STRING_COLLATION_CASE_INSENSITIVE) {
+      throw new InvalidCatalogException(
+          path,
+          "the dialect profile says like_matches_code_points and STRING_COLLATION_CASE_INSENSITIVE;"
+              + " a case-insensitive collation folds case in LIKE, so the two contradict (D315)");
+    }
     if (profile.getStringCollation() == StringCollation.STRING_COLLATION_CASE_INSENSITIVE
-        || profile.getStringCollation() == StringCollation.STRING_COLLATION_LOCALE) {
+        || (profile.getStringCollation() == StringCollation.STRING_COLLATION_LOCALE
+            && !profile.getLikeMatchesCodePoints())) {
       for (PredicateShape shape : capabilities.getPushablePredicatesList()) {
         if (shape == PredicateShape.PREDICATE_SHAPE_LIKE
             || shape == PredicateShape.PREDICATE_SHAPE_LIKE_PREFIX) {
@@ -345,7 +355,8 @@ public final class CatalogValidator {
               shape
                   + " is declared pushable but the dialect profile says "
                   + profile.getStringCollation()
-                  + "; a LIKE evaluated under another collation can match different rows (D89)");
+                  + "; a LIKE evaluated under another collation can match different rows (D89)"
+                  + ", unless the profile says like_matches_code_points (D315)");
         }
       }
     }

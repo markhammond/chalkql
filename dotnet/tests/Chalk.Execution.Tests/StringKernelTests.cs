@@ -2,6 +2,7 @@ using Chalk.Execution.Tests.Harness;
 using Chalk.Ir;
 using Chalk.Sources;
 using Chalk.TestKit;
+using IrType = Chalk.Ir.Type;
 
 namespace Chalk.Execution.Tests;
 
@@ -144,6 +145,88 @@ public sealed class StringKernelTests
         Assert.Equal(
             [false, false, true, false, false, null],
             await Runner.ProjectAsync(Like(row, "_p_e"), Source, Table, batchSize));
+    }
+
+    /// <summary>
+    /// D314: a parameter pattern is compiled once per execution, when its value is known, and gives
+    /// exactly what the same pattern as a literal gives — on both engines. A NULL pattern makes every
+    /// row's answer NULL.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BatchSizes))]
+    public async Task Like_with_a_parameter_pattern_is_the_literal_pattern_bound_late(int batchSize)
+    {
+        var row = Table.RowType();
+        IrType[] types = [IrBuilder.Str(true)];
+        var pattern = IrBuilder.Call(
+            FunctionId.Like, IrBuilder.Bool(true), IrBuilder.Ref(row, 0), IrBuilder.Param(0, IrBuilder.Str(true)));
+        var escaped = IrBuilder.Call(
+            FunctionId.Like,
+            IrBuilder.Bool(true),
+            IrBuilder.Ref(row, 0),
+            IrBuilder.Param(0, IrBuilder.Str(true)),
+            IrBuilder.Lit("!"));
+
+        foreach (var reference in new[] { false, true })
+        {
+            foreach (var value in new[] { "abc%", "a_c%", "%", string.Empty, "_p_e" })
+            {
+                Assert.Equal(
+                    await Runner.ProjectAsync(Like(row, value), Source, Table, batchSize),
+                    await Runner.ProjectAsync(
+                        pattern, Source, Table, batchSize, reference, [value], types));
+            }
+
+            Assert.Equal(
+                await Runner.ProjectAsync(Like(row, "%100!%", "!"), Source, Table, batchSize),
+                await Runner.ProjectAsync(
+                    escaped, Source, Table, batchSize, reference, ["%100!%"], types));
+
+            Assert.All(
+                await Runner.ProjectAsync(pattern, Source, Table, batchSize, reference, [null], types),
+                Assert.Null);
+        }
+    }
+
+    /// <summary>
+    /// D312: a parameter's value malformed under its escape is refused before the execution starts,
+    /// on both engines, with the rule it breaks and without the value.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Like_with_a_malformed_parameter_pattern_is_refused_before_it_runs(bool reference)
+    {
+        var row = Table.RowType();
+        var escaped = IrBuilder.Call(
+            FunctionId.Like,
+            IrBuilder.Bool(true),
+            IrBuilder.Ref(row, 0),
+            IrBuilder.Param(0, IrBuilder.Str(true)),
+            IrBuilder.Lit("!"));
+
+        var error = await Assert.ThrowsAsync<ArgumentException>(
+            () => Runner.ProjectAsync(
+                escaped, Source, Table, 4096, reference, ["secret!"], [IrBuilder.Str(true)]));
+
+        Assert.Contains("ends with its escape character", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>D312: a literal pattern or escape the rules refuse is refused at compilation.</summary>
+    [Theory]
+    [InlineData("ab!", "!", "ends with its escape character")]
+    [InlineData("a!b", "!", "before an ordinary character")]
+    [InlineData("abc%", "!!", "exactly one character")]
+    [InlineData("abc%", "", "not the empty string")]
+    public void Like_with_a_malformed_literal_is_refused_at_compilation(
+        string pattern, string escape, string defect)
+    {
+        var plan = Runner.ProjectionPlan(Like(Table.RowType(), pattern, escape), Table);
+
+        var error = Assert.Throws<ArgumentException>(() => Runner.Compile(plan, Source));
+
+        Assert.Contains(defect, error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

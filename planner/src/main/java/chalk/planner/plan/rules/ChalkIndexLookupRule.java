@@ -103,8 +103,13 @@ public final class ChalkIndexLookupRule extends RelRule<ChalkRuleConfig> {
 
       ImmutableList<IndexMatcher.Range> ranges = ImmutableList.copyOf(result.ranges());
       RexNode residual = result.residual();
+      // D314: a parameter LIKE the ranges cover only the literal start of, re-checked by the lookup
+      // itself rather than by a Filter above it. The selectivity above already counts it: it is
+      // consumed, not residual.
+      RexNode recheck = result.lookupResidual();
 
-      ChalkIndexLookup lookup = ChalkIndexLookup.create(scan, index, ranges, selectivity);
+      ChalkIndexLookup lookup =
+          ChalkIndexLookup.create(scan, index, ranges, selectivity, false, recheck);
       call.transformTo(residual == null ? lookup : ChalkFilter.create(lookup, residual));
 
       // D283: the same rows in the reverse of the index's key order, offered beside the forward
@@ -112,7 +117,7 @@ public final class ChalkIndexLookupRule extends RelRule<ChalkRuleConfig> {
       // takes it only when a parent wants that order.
       if (ChalkIndexLookup.canReverse(index, ranges)) {
         ChalkIndexLookup backwards =
-            ChalkIndexLookup.create(scan, index, ranges, selectivity, true);
+            ChalkIndexLookup.create(scan, index, ranges, selectivity, true, recheck);
         call.transformTo(residual == null ? backwards : ChalkFilter.create(backwards, residual));
       }
     }

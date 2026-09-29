@@ -191,6 +191,7 @@ Chalk.Sources.IndexLookupRequest.RowGoal.init -> void
 Chalk.Sources.IndexLookupRequest.Table.get -> string!
 Chalk.Sources.IndexLookupRequest.Table.init -> void
 Chalk.Sources.IndexPrefix
+Chalk.Sources.LikePattern
 Chalk.Sources.InvalidUtf8Exception
 Chalk.Sources.InvalidUtf8Exception.InvalidUtf8Exception(string! subject, long row) -> void
 Chalk.Sources.InvalidUtf8Exception.Row.get -> long
@@ -441,6 +442,10 @@ static Chalk.Sources.IndexPrefix.AsText(object? value) -> string?
 static Chalk.Sources.IndexPrefix.IsBarePrefix(string? pattern) -> bool
 static Chalk.Sources.IndexPrefix.Of(string! pattern) -> string!
 static Chalk.Sources.IndexPrefix.TryNext(string! prefix, out string! next) -> bool
+static Chalk.Sources.LikePattern.EscapeDefect(string? escape) -> string?
+static Chalk.Sources.LikePattern.LiteralStart(string! pattern, string? escape, out bool barePrefix) -> string!
+static Chalk.Sources.LikePattern.PatternDefect(string! pattern, string? escape) -> string?
+static Chalk.Sources.LikePattern.Validate(string! pattern, string? escape) -> void
 static Chalk.Sources.RefreshTarget.Source(string! sourceId) -> Chalk.Sources.IRefreshTarget!
 static Chalk.Sources.RefreshTarget.Table(string! schema, string! table) -> Chalk.Sources.IRefreshTarget!
 static Chalk.Sources.SourceEncoding.WriteDecimal(decimal value, int precision, int scale, System.Span<byte> destination, string! sourceId, string! table, string! column) -> void

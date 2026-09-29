@@ -373,6 +373,14 @@ aggregates, whether projection, sorts, limits, grouping and joins travel, and
 ceilings on pushed rows and `IN` list length. `PlannerInfo.Dialects` lists
 every name a running sidecar accepts.
 
+The PostgreSQL preset declares `StringCollation.Locale`, because a database's
+default collation comes from its cluster's locale, so string equality, ranges and
+sorts are evaluated here unless the host says its database is `C`-collated. Its
+`LIKE` is pushed all the same: PostgreSQL's collation orders and compares, and its
+`LIKE` matches code point by code point, case-sensitively, without consulting a
+deterministic one — which the preset says with `LikeMatchesCodePoints`, and the
+conformance kit checks.
+
 **Nothing is pushed that is not declared.** A source you have only pointed at is
 a source nobody has checked, and the safe reading of a silent descriptor is
 "scan it". Two settings are worth knowing about:
@@ -722,6 +730,23 @@ A non-string enumerable bound to a parameter that always follows `IN` / `NOT IN`
 expands into an `IN (?, ?, …)` list, Dapper-style; the empty list yields no rows
 for `IN` and all rows for `NOT IN`.
 
+A `LIKE` pattern may be a parameter, and its value is the pattern exactly as
+ADO.NET and Dapper pass it: `%` and `_` in it are wildcards, and there is no
+escape character unless the statement names one with `ESCAPE`. Any value is
+answered, on every source — where an index serves the lookup it is asked for the
+value's literal start and the rest of the pattern is checked on the rows it reads,
+and elsewhere the pattern is compiled once per execution. A value that is
+malformed under the statement's escape (see [`LIKE`](#like)) is refused by
+`ExecuteAsync` with an `ArgumentException` naming the parameter, before anything
+reaches a source. To match user input literally, name an escape and escape the
+input:
+
+```csharp
+var query = await engine.PrepareAsync("SELECT id FROM items WHERE sku LIKE ? ESCAPE '\\'");
+var pattern = input.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
+await using var execution = await engine.ExecuteAsync(query, [pattern]);
+```
+
 ## UTF-8 strings
 
 Everything inside Chalk is UTF-8 already: a STRING column is Arrow UTF-8 in
@@ -852,6 +877,41 @@ requires a `FROM` clause, so `SELECT 1` fails under `Strict2003` and plans under
 
 Identifier quoting and case sensitivity are *not* part of this. They are the same
 under every dialect (see [Identifiers](#identifiers)), and that includes `Babel`.
+
+### `LIKE`
+
+`string LIKE pattern [ESCAPE escape]` is the SQL standard's, which is also
+Calcite's: `%` matches any run of characters, `_` exactly one (a character is a
+code point), matching is case-sensitive, and a `NULL` on either side answers
+`NULL`. There is no escape character unless `ESCAPE` names one — a backslash is
+an ordinary character in `LIKE 'KB\_%'`.
+
+An escape is exactly one character, and in the pattern it must be followed by `%`,
+`_` or itself. Anything else — a pattern that ends with its escape, an escape
+before an ordinary character, `ESCAPE '!!'`, `ESCAPE ''` — is refused rather than
+guessed at: a literal when the statement is prepared, as a validation error with
+its position, and a parameter's value when the statement is executed. The escape
+itself must be a literal. PostgreSQL and DuckDB each accept some of these and
+disagree about what they mean, so a refusal is what keeps the answer the same
+wherever the `LIKE` runs.
+
+The result does not depend on where the table lives. A `LIKE` pushed to
+PostgreSQL is written with `ESCAPE ''` when the statement named no escape, because
+PostgreSQL's default escape is a backslash; DuckDB has none, like Chalk. A bare
+prefix — a pattern's literal start and one trailing `%` — is a lookup on an ordered
+or prefix index, with or without an `ESCAPE` clause.
+
+`string ILIKE pattern [ESCAPE escape]` (and `NOT ILIKE`) is `LIKE` with case folded
+the way `LOWER` folds it — culture-invariant, one character to one character — so
+`x ILIKE p` is `LOWER(x) LIKE p` with `p`'s literal characters lowered too: `É`
+matches `é`, `Σ` matches `σ`, the Kelvin sign matches `k`; `ß` does not match `SS`,
+and the Turkish capital `İ` does not match `i`. `%`, `_` and the escape are read as
+written, and the escape rules are `LIKE`'s. It needs no function library.
+
+Databases disagree about case: PostgreSQL folds by its database's locale (ASCII
+only under `C`), DuckDB folds a Turkish capital `LOWER` leaves alone, and Calcite's
+own runtime folds ASCII only. So an `ILIKE` is always evaluated by Chalk, over the
+rows a source returns, and no index answers it — an index is case-sensitive.
 
 ### `Babel` also changes the parser
 

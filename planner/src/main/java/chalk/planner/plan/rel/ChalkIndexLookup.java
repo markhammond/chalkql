@@ -26,6 +26,7 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.apache.calcite.util.ImmutableIntList;
@@ -36,8 +37,10 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * {@code IndexLookupAsync}. Maps to the IR's {@code IndexLookup} (D37).
  *
  * <p>A leaf, like {@link ChalkTableScan}: the index is the input. The residual a lookup cannot
- * enforce becomes a {@link ChalkFilter} above it — nothing is fused in M2 — so this node's output is
- * exactly the rows its ranges cover, in the index's key order.
+ * enforce becomes a {@link ChalkFilter} above it, so this node's output is the rows its ranges cover,
+ * in the index's key order — less the rows its own {@link #residual} rejects. That is set for one
+ * thing only (D314): the {@code LIKE} a prefix range was made from when the pattern is a parameter,
+ * whose range covers the bound value's literal start and no more.
  */
 public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel {
   private final RelOptTable table;
@@ -48,6 +51,7 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
   private final ChalkSelectivity.Estimate selectivity;
   private final long rowGoal;
   private final boolean reverse;
+  private final @Nullable RexNode residual;
 
   private ChalkIndexLookup(
       RelOptCluster cluster,
@@ -60,7 +64,8 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
       RelDataType rowType,
       ChalkSelectivity.Estimate selectivity,
       long rowGoal,
-      boolean reverse) {
+      boolean reverse,
+      @Nullable RexNode residual) {
     super(cluster, traits);
     this.table = table;
     this.chalkTable = chalkTable;
@@ -71,6 +76,7 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
     this.selectivity = selectivity;
     this.rowGoal = rowGoal;
     this.reverse = reverse;
+    this.residual = residual;
   }
 
   /**
@@ -96,6 +102,20 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
       ImmutableList<IndexMatcher.Range> ranges,
       ChalkSelectivity.Estimate selectivity,
       boolean reverse) {
+    return create(scan, index, ranges, selectivity, reverse, null);
+  }
+
+  /**
+   * The same lookup, re-checking {@code residual} — a predicate over this node's own row — on every
+   * row it reads (D314).
+   */
+  public static ChalkIndexLookup create(
+      ChalkTableScan scan,
+      Index index,
+      ImmutableList<IndexMatcher.Range> ranges,
+      ChalkSelectivity.Estimate selectivity,
+      boolean reverse,
+      @Nullable RexNode residual) {
     RelOptCluster cluster = scan.getCluster();
     ChalkTable chalkTable = scan.chalkTable();
     ImmutableIntList projection = ImmutableIntList.copyOf(scan.projection());
@@ -115,12 +135,21 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
         scan.getRowType(),
         selectivity,
         0L,
-        reverse);
+        reverse,
+        residual);
   }
 
   /** Whether this lookup reads its ranges backwards (D283). */
   public boolean reverse() {
     return reverse;
+  }
+
+  /**
+   * What this lookup re-checks on every row it reads, over its own row, or null when its ranges are
+   * the whole answer (D314).
+   */
+  public @Nullable RexNode residual() {
+    return residual;
   }
 
   /**
@@ -204,7 +233,8 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
         rowType,
         selectivity,
         wanted,
-        reverse);
+        reverse,
+        residual);
   }
 
   /**
@@ -374,7 +404,8 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
         rowType,
         selectivity,
         rowGoal,
-        reverse);
+        reverse,
+        residual);
   }
 
   /** A leaf: it delivers the index's key order and there is nothing below to derive from. */
@@ -409,6 +440,13 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
     // when set, so no plan that reads forwards gains a term.
     if (reverse) {
       writer.item("reverse", true);
+    }
+
+    // D314: what the lookup re-checks is a digest item, because a lookup that re-checks a LIKE emits
+    // fewer rows than the same ranges without it. Written only when set, so no other lookup gains a
+    // term.
+    if (residual != null) {
+      writer.item("residual", residual);
     }
 
     // D257: the kind, and what the copy is for. Written only for a clustered index — every lookup
@@ -484,6 +522,11 @@ public final class ChalkIndexLookup extends AbstractRelNode implements ChalkRel 
     double rows = mq.getRowCount(this);
     double work =
         covered() ? costs.clusteredLookup(ranges.size(), rows) : costs.lookup(ranges.size(), rows);
+    if (residual != null) {
+      // What a Filter above would have cost for the same predicate: one unit per row, and whatever
+      // the functions in it declare (D78).
+      work += rows * (1 + CostModel.expressionFunctionCost(residual));
+    }
     return planner.getCostFactory().makeCost(work, work, 0);
   }
 }
