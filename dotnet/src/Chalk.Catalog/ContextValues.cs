@@ -32,6 +32,8 @@ public static class ContextValues
             byte[] => ChalkType.Binary(),
             DateOnly => ChalkType.Date(),
             TimeOnly => ChalkType.Time(),
+            // Npgsql 6's reading (D317): a UTC DateTime is an instant, any other a wall clock.
+            DateTime { Kind: DateTimeKind.Utc } => ChalkType.TimestampTz(),
             DateTime => ChalkType.Timestamp(),
             DateTimeOffset => ChalkType.TimestampTz(),
             Guid => ChalkType.Uuid(),
@@ -44,15 +46,21 @@ public static class ContextValues
         };
     }
 
-    /// <summary>The value as an IR literal expression of <paramref name="type"/>.</summary>
-    public static Expr ToLiteral(object? value, ChalkType type, string what)
+    /// <summary>
+    /// The value as an IR literal expression of <paramref name="type"/>. Encodes only: the client
+    /// holds a value of a stated type to D317's exact rule before it gets here.
+    /// </summary>
+    internal static Expr ToLiteral(object? value, ChalkType type, string what)
     {
         var literal = CatalogLiterals.ToProto(value, type, what) ?? new Literal { IsNull = true };
         return new Expr { Type = type.ToProto(), Literal = literal };
     }
 
-    /// <summary>The same, with the type inferred from the value. A null value needs a type.</summary>
-    public static Expr ToLiteral(object? value, string what)
+    /// <summary>
+    /// The same, with the type inferred from the value — which holds the value exactly by
+    /// construction. A null value needs a type.
+    /// </summary>
+    internal static Expr ToLiteral(object? value, string what)
     {
         if (value is null or DBNull)
         {

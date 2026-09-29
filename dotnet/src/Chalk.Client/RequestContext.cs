@@ -143,7 +143,7 @@ public sealed class RequestContext
     private IReadOnlyList<string>? _shapeNames;
 
     /// <summary>Every name this context binds, as a value or as a shape.</summary>
-    private IEnumerable<string> Names() =>
+    internal IEnumerable<string> Names() =>
         Scalars.Keys
             .Concat(ScalarTypes.Keys)
             .Concat(Lists.Keys)
@@ -364,6 +364,64 @@ public sealed class RequestContext
             Purpose = Purpose,
             Actor = Actor,
         };
+
+    /// <summary>
+    /// This context with every value whose type is known checked by <paramref name="binding"/> — the
+    /// engine's converters, then the exact rule (D317, D323) — and every binding's column types
+    /// stated, so the values the planner folds or the executor binds are the values that would have
+    /// been bound as parameters. A value whose type is read off it is left for <see cref="ToProto"/>
+    /// to type. Applied once, where the host hands a context over: a prepare, an execution.
+    /// </summary>
+    /// <param name="binding">The engine's converters and the exact rule.</param>
+    /// <param name="only">
+    /// The names to check, when the rest were checked already — a narrowing's own names, beside the
+    /// prepared context's. Null checks every name.
+    /// </param>
+    internal RequestContext Bound(ValueBinding binding, IReadOnlySet<string>? only = null)
+    {
+        if (ShapeOnly || (ScalarTypes.Count == 0 && Lists.Count == 0 && Relations.Count == 0))
+        {
+            return this;
+        }
+
+        var scalars = new Dictionary<string, object?>(Scalars.Count, StringComparer.Ordinal);
+        foreach (var (name, value) in Scalars)
+        {
+            scalars[name] = (only is null || only.Contains(name)) && ScalarTypes.TryGetValue(name, out var declared)
+                ? binding.Checked(value, declared, $"Context scalar '{name}'")
+                : value;
+        }
+
+        return new RequestContext
+        {
+            Scalars = scalars,
+            ScalarTypes = ScalarTypes,
+            Lists = BoundRelations(Lists, binding, only),
+            Relations = BoundRelations(Relations, binding, only),
+            FoldMaxRows = FoldMaxRows,
+            Purpose = Purpose,
+            Actor = Actor,
+        };
+    }
+
+    private static IReadOnlyDictionary<string, ContextRelation> BoundRelations(
+        IReadOnlyDictionary<string, ContextRelation> bindings, ValueBinding binding, IReadOnlySet<string>? only)
+    {
+        if (bindings.Count == 0)
+        {
+            return bindings;
+        }
+
+        var bound = new Dictionary<string, ContextRelation>(bindings.Count, StringComparer.Ordinal);
+        foreach (var (name, relation) in bindings)
+        {
+            bound[name] = relation.IsShape || (only is not null && !only.Contains(name))
+                ? relation
+                : relation.Bound(name, binding);
+        }
+
+        return bound;
+    }
 
     /// <summary>
     /// The same names, kinds and types with every value dropped — what a prepare binds under
@@ -606,7 +664,7 @@ public sealed class RequestContext
             {
                 Name = name,
                 Value = ScalarTypes.TryGetValue(name, out var declared)
-                    ? ContextValues.ToLiteral(value, declared, $"context scalar '{name}'")
+                    ? Literal(value, declared, $"Context scalar '{name}'")
                     : ContextValues.ToLiteral(value, $"context scalar '{name}'"),
             });
         }
@@ -631,6 +689,20 @@ public sealed class RequestContext
 
         return message;
     }
+
+    /// <summary>
+    /// A value of a stated type as a literal, held to the exact rule first (D317, F160): a context
+    /// value the planner folds is a value that would have bound as a parameter, and nothing else.
+    /// </summary>
+    internal static Chalk.Ir.Expr Literal(object? value, ChalkType type, string what) =>
+        ContextValues.ToLiteral(
+            value is null or DBNull ? null : Chalk.Execution.ParameterValues.Exact(value, type, what) switch
+            {
+                Utf8String text => text.ToString(),
+                var exact => exact,
+            },
+            type,
+            what);
 
     /// <summary>
     /// Names in ordinal order, so a dictionary's iteration order never reaches the wire — the same
@@ -757,6 +829,44 @@ public sealed class ContextRelation
             IsShape = true,
         };
 
+    /// <summary>
+    /// The same binding with every row checked by <paramref name="binding"/> against its column
+    /// types, which the copy states: a converted value no longer says what it was bound as (D317,
+    /// D323).
+    /// </summary>
+    internal ContextRelation Bound(string name, ValueBinding binding)
+    {
+        var types = ResolveTypes(name);
+        var rows = new IReadOnlyList<object?>[Rows.Count];
+        for (var r = 0; r < Rows.Count; r++)
+        {
+            var row = Rows[r];
+            if (row.Count != Columns.Count)
+            {
+                throw new ArgumentException(
+                    $"context binding '{name}' has a row of {row.Count} values and {Columns.Count} "
+                    + "column(s).",
+                    nameof(name));
+            }
+
+            var bound = new object?[row.Count];
+            for (var c = 0; c < row.Count; c++)
+            {
+                bound[c] = binding.Checked(row[c], types[c], $"Context binding '{name}' column '{Columns[c]}'");
+            }
+
+            rows[r] = bound;
+        }
+
+        return new ContextRelation
+        {
+            Columns = Columns,
+            Rows = rows,
+            ColumnTypes = types,
+            EstimatedRowCount = EstimatedRowCount,
+        };
+    }
+
     /// <summary>The same binding with its rows dropped: names, kinds and types alone (D209).</summary>
     internal ContextRelation Shape(string name)
     {
@@ -831,7 +941,7 @@ public sealed class ContextRelation
             for (var c = 0; c < row.Count; c++)
             {
                 virtualRow.Values.Add(
-                    ContextValues.ToLiteral(row[c], types[c], $"context binding '{name}' column '{Columns[c]}'"));
+                    RequestContext.Literal(row[c], types[c], $"Context binding '{name}' column '{Columns[c]}'"));
             }
 
             message.Rows.Add(virtualRow);

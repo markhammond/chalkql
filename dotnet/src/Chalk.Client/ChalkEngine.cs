@@ -191,6 +191,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// <summary>What the planner said about itself when the engine was created.</summary>
     public PlannerInfo PlannerInfo { get; }
 
+    /// <summary>This engine's rule for a bound value: its converters, then D317's exact rule.</summary>
+    internal ValueBinding Binding { get; private init; } = ValueBinding.None;
+
     /// <summary>
     /// Describes every source, assembles and validates the catalog, checks the planner speaks a
     /// compatible IR version, and registers the catalog. Any failure means no engine.
@@ -221,6 +224,10 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 + "name Utf8, Utf8View, or both (Any)",
                 nameof(options));
         }
+
+        // D323: two converters for one type, or one for a type no value's runtime type is, can only
+        // ever be a mistake. Refused before a source is claimed.
+        var binding = new ValueBinding(options.BindingConverters);
 
         var identity = new object();
         var claimed = new List<SourceRegistration>(options.Sources.Count);
@@ -307,6 +314,30 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 }
             }
 
+            // D318: the same for a profile's conformance and libraries, which are names the sidecar
+            // either has or refuses; checked here only against a list GetInfo actually reported.
+            foreach (var schema in catalog.Schemas)
+            {
+                var profile = schema.DialectProfile;
+                if (profile.Conformance is { } conformance && Unknown(conformance.Name, info.Conformances.Select(c => c.Name)))
+                {
+                    throw new CatalogValidationException(
+                        $"schemas ({schema.SourceId})",
+                        $"conformance '{conformance}' is not a level this planner accepts: "
+                        + string.Join(", ", info.Conformances) + ".");
+                }
+
+                foreach (var library in profile.Libraries)
+                {
+                    if (Unknown(library.Name, info.Libraries.Select(l => l.Name)))
+                    {
+                        throw new CatalogValidationException(
+                            $"schemas ({schema.SourceId})",
+                            $"library '{library}' is not one this planner has: " + string.Join(", ", info.Libraries) + ".");
+                    }
+                }
+            }
+
             // Registered once, under the versions this engine mints — not once per prepare, as it was
             // before D271 (b). The shape goes first and the numbers follow on their own version; a plan
             // names both, and the planner joins them.
@@ -334,7 +365,10 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 versions,
                 identity,
                 sourceRegistrations,
-                sharedSourceStates);
+                sharedSourceStates)
+            {
+                Binding = binding,
+            };
             engine.CaptureSharedRevisions();
             return engine;
         }
@@ -665,6 +699,42 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     }
 
     /// <summary>
+    /// Whether <paramref name="name"/> is missing from a list GetInfo reported (D318). A recorded
+    /// planner reports none (D250), and an empty list refuses nothing.
+    /// </summary>
+    private static bool Unknown(string name, IEnumerable<string> known)
+    {
+        var names = known.ToList();
+        return names.Count > 0 && !names.Contains(name, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// A statement's conformance and libraries, refused here when the planner said it has no such
+    /// name (D318) — naming the option, before the round trip. The sidecar refuses them anyway.
+    /// </summary>
+    private void CheckVocabulary(PrepareOptions options)
+    {
+        if (Unknown(options.Conformance.Name, PlannerInfo.Conformances.Select(c => c.Name)))
+        {
+            throw new ArgumentException(
+                $"PrepareOptions.Conformance '{options.Conformance}' is not a level this planner accepts: "
+                + string.Join(", ", PlannerInfo.Conformances) + ".",
+                nameof(options));
+        }
+
+        foreach (var library in options.Libraries)
+        {
+            if (Unknown(library.Name, PlannerInfo.Libraries.Select(l => l.Name)))
+            {
+                throw new ArgumentException(
+                    $"PrepareOptions.Libraries names '{library}', which is not a library this planner has: "
+                    + string.Join(", ", PlannerInfo.Libraries) + ".",
+                    nameof(options));
+            }
+        }
+    }
+
+    /// <summary>
     /// Whether <paramref name="name"/> is <paramref name="dialects"/>' own name for a preset or one
     /// of its aliases, matched the way <c>SourceDialects.of</c> matches a <c>DatabaseProduct</c>
     /// (D249): case-insensitively, <c>-</c> and <c>_</c> interchangeable.
@@ -722,6 +792,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
         options ??= new PrepareOptions();
+        context = context?.Bound(Binding);
 
         var rewriter = ParameterRewriter.Parse(sql);
         var rendered = rewriter.Render(rewriter.PrepareShape());
@@ -756,6 +827,10 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 + $"{RequestContext.DefaultFoldMaxRows}.",
                 nameof(context));
         }
+
+        // The values the planner folds are held to the rule a parameter is (D317, D323, F160), here,
+        // at the call that binds them — and the prepared query keeps the bound copy.
+        context = context?.Bound(Binding);
 
         var rewriter = ParameterRewriter.Parse(sql);
         var shape = rewriter.PrepareShape();
@@ -1639,6 +1714,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         IReadOnlyList<ParameterValueHint> hints,
         CancellationToken ct)
     {
+        CheckVocabulary(options);
         await EnsureSharedCatalogCurrentAsync(ct).ConfigureAwait(false);
 
         // Nothing is registered here since D271 (b): the catalog crossed the wire when its version

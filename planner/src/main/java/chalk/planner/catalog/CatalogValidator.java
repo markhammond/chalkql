@@ -26,10 +26,13 @@ import chalk.ir.v1.Type;
 import chalk.ir.v1.TypeKind;
 import chalk.ir.v1.UniqueKey;
 import chalk.planner.plan.SourceDialects;
+import chalk.planner.plan.SqlConfigs;
 import chalk.planner.types.ChalkTypeSystem;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
+import org.apache.calcite.sql.fun.SqlLibrary;
+import org.apache.calcite.sql.validate.SqlConformanceEnum;
 
 /**
  * The planner's half of catalog validation (docs/design/03-planner.md §3.1). It applies the same
@@ -302,6 +305,19 @@ public final class CatalogValidator {
               + "' is not one of the presets this planner accepts: "
               + String.join(", ", SourceDialects.presetNames())
               + ". Leave it empty for ANSI.");
+    }
+
+    // D318: the profile names its conformance and libraries as Calcite does; a name this build of
+    // Calcite does not have is refused here rather than read as the dialect's own default.
+    try {
+      if (!profile.getConformance().isEmpty()) {
+        SqlConfigs.named(SqlConformanceEnum.class, profile.getConformance(), "conformance level");
+      }
+      for (String library : profile.getLibrariesList()) {
+        SqlConfigs.named(SqlLibrary.class, library, "library");
+      }
+    } catch (IllegalArgumentException e) {
+      throw new InvalidCatalogException(path, "dialect_profile: " + e.getMessage());
     }
 
     if (capabilities.getQueryLanguage() == QueryLanguage.QUERY_LANGUAGE_NONE && pushes(capabilities)) {

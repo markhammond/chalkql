@@ -133,7 +133,7 @@ Chalk.Catalog.DialectProfileDescriptor.ApproximateTopN.get -> bool
 Chalk.Catalog.DialectProfileDescriptor.ApproximateTopN.init -> void
 Chalk.Catalog.DialectProfileDescriptor.CaseSensitiveIdentifiers.get -> bool
 Chalk.Catalog.DialectProfileDescriptor.CaseSensitiveIdentifiers.init -> void
-Chalk.Catalog.DialectProfileDescriptor.Conformance.get -> Chalk.Ir.SqlConformance
+Chalk.Catalog.DialectProfileDescriptor.Conformance.get -> Chalk.Catalog.SqlConformance?
 Chalk.Catalog.DialectProfileDescriptor.Conformance.init -> void
 Chalk.Catalog.DialectProfileDescriptor.DefaultNullCollation.get -> Chalk.Ir.NullCollation
 Chalk.Catalog.DialectProfileDescriptor.DefaultNullCollation.init -> void
@@ -146,7 +146,7 @@ Chalk.Catalog.DialectProfileDescriptor.HasBoolean.get -> bool
 Chalk.Catalog.DialectProfileDescriptor.HasBoolean.init -> void
 Chalk.Catalog.DialectProfileDescriptor.ImplicitCoercionMatches.get -> bool
 Chalk.Catalog.DialectProfileDescriptor.ImplicitCoercionMatches.init -> void
-Chalk.Catalog.DialectProfileDescriptor.Libraries.get -> System.Collections.Generic.IReadOnlyList<Chalk.Ir.SqlLibrary>!
+Chalk.Catalog.DialectProfileDescriptor.Libraries.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.SqlLibrary>!
 Chalk.Catalog.DialectProfileDescriptor.Libraries.init -> void
 Chalk.Catalog.DialectProfileDescriptor.MaxNumericPrecision.get -> uint
 Chalk.Catalog.DialectProfileDescriptor.MaxNumericPrecision.init -> void
@@ -421,10 +421,18 @@ Chalk.Catalog.SourcePairRule.Preferred.init -> void
 Chalk.Catalog.SourcePairRule.RightSource.get -> string!
 Chalk.Catalog.SourcePairRule.RightSource.init -> void
 Chalk.Catalog.SourcePairRule.SourcePairRule() -> void
+Chalk.Catalog.SqlConformance
+Chalk.Catalog.SqlConformance.Equals(Chalk.Catalog.SqlConformance other) -> bool
+Chalk.Catalog.SqlConformance.Name.get -> string!
+Chalk.Catalog.SqlConformance.SqlConformance() -> void
 Chalk.Catalog.SqlFunctionBody
 Chalk.Catalog.SqlFunctionBody.SqlFunctionBody() -> void
 Chalk.Catalog.SqlFunctionBody.Text.get -> string!
 Chalk.Catalog.SqlFunctionBody.Text.init -> void
+Chalk.Catalog.SqlLibrary
+Chalk.Catalog.SqlLibrary.Equals(Chalk.Catalog.SqlLibrary other) -> bool
+Chalk.Catalog.SqlLibrary.Name.get -> string!
+Chalk.Catalog.SqlLibrary.SqlLibrary() -> void
 Chalk.Catalog.TableDescriptor
 Chalk.Catalog.TableDescriptor.Collations.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.CollationDescriptor!>!
 Chalk.Catalog.TableDescriptor.Collations.init -> void
@@ -579,6 +587,12 @@ override Chalk.Catalog.CompositeField.Equals(object? obj) -> bool
 override Chalk.Catalog.CompositeField.GetHashCode() -> int
 override Chalk.Catalog.CompositeField.ToString() -> string!
 override Chalk.Catalog.KeyOrder.GetHashCode() -> int
+override Chalk.Catalog.SqlConformance.Equals(object? obj) -> bool
+override Chalk.Catalog.SqlConformance.GetHashCode() -> int
+override Chalk.Catalog.SqlConformance.ToString() -> string!
+override Chalk.Catalog.SqlLibrary.Equals(object? obj) -> bool
+override Chalk.Catalog.SqlLibrary.GetHashCode() -> int
+override Chalk.Catalog.SqlLibrary.ToString() -> string!
 static Chalk.Catalog.AssociationDescriptor.Same(Chalk.Catalog.AssociationDescriptor! left, Chalk.Catalog.AssociationDescriptor! right) -> bool
 static Chalk.Catalog.CatalogSerialization.FromProto(Chalk.Ir.CatalogContext! message) -> Chalk.Catalog.CatalogContext!
 static Chalk.Catalog.CatalogSerialization.ToProto(Chalk.Catalog.CatalogContext! catalog) -> Chalk.Ir.CatalogContext!
@@ -613,8 +627,6 @@ static Chalk.Catalog.ColumnStatistics.Unknown.get -> Chalk.Catalog.ColumnStatist
 static Chalk.Catalog.CompositeField.operator !=(Chalk.Catalog.CompositeField left, Chalk.Catalog.CompositeField right) -> bool
 static Chalk.Catalog.CompositeField.operator ==(Chalk.Catalog.CompositeField left, Chalk.Catalog.CompositeField right) -> bool
 static Chalk.Catalog.ContextValues.InferType(object! value) -> Chalk.Catalog.ChalkType
-static Chalk.Catalog.ContextValues.ToLiteral(object? value, Chalk.Catalog.ChalkType type, string! what) -> Chalk.Ir.Expr!
-static Chalk.Catalog.ContextValues.ToLiteral(object? value, string! what) -> Chalk.Ir.Expr!
 static Chalk.Catalog.CostProfile.Inherit.get -> Chalk.Catalog.CostProfile!
 static Chalk.Catalog.CrossSourceJoinPolicy.Default.get -> Chalk.Catalog.CrossSourceJoinPolicy!
 static Chalk.Catalog.DialectProfileDescriptor.None.get -> Chalk.Catalog.DialectProfileDescriptor!
@@ -623,11 +635,45 @@ static Chalk.Catalog.DialectProfiles.ByName(string? name) -> Chalk.Catalog.Diale
 static Chalk.Catalog.DialectProfiles.DuckDb.get -> Chalk.Catalog.DialectProfileDescriptor!
 static Chalk.Catalog.DialectProfiles.PostgreSql.get -> Chalk.Catalog.DialectProfileDescriptor!
 static Chalk.Catalog.DialectProfiles.Sqlite.get -> Chalk.Catalog.DialectProfileDescriptor!
-static Chalk.Catalog.DialectProfiles.With(this Chalk.Catalog.DialectProfileDescriptor! profile, Chalk.Ir.StringCollation? stringCollation = null, bool? supportsNullOrderingClause = null, Chalk.Ir.NullCollation? defaultNullCollation = null, Chalk.Ir.SqlConformance? conformance = null, System.Collections.Generic.IReadOnlyList<Chalk.Ir.SqlLibrary>? libraries = null, uint? maxNumericPrecision = null, uint? maxTimestampPrecision = null, bool? hasBoolean = null, string? timeZone = null, bool? approximateDecimal = null, bool? approximateDistinctCount = null, bool? approximateTopN = null, bool? implicitCoercionMatches = null, Chalk.Ir.ParameterPlaceholder? parameterPlaceholder = null) -> Chalk.Catalog.DialectProfileDescriptor!
 static Chalk.Catalog.DialectProfiles.With(this Chalk.Catalog.DialectProfileDescriptor! profile, bool likeMatchesCodePoints) -> Chalk.Catalog.DialectProfileDescriptor!
+static Chalk.Catalog.DialectProfiles.With(this Chalk.Catalog.DialectProfileDescriptor! profile, Chalk.Ir.StringCollation? stringCollation = null, bool? supportsNullOrderingClause = null, Chalk.Ir.NullCollation? defaultNullCollation = null, Chalk.Catalog.SqlConformance? conformance = null, System.Collections.Generic.IReadOnlyList<Chalk.Catalog.SqlLibrary>? libraries = null, uint? maxNumericPrecision = null, uint? maxTimestampPrecision = null, bool? hasBoolean = null, string? timeZone = null, bool? approximateDecimal = null, bool? approximateDistinctCount = null, bool? approximateTopN = null, bool? implicitCoercionMatches = null, Chalk.Ir.ParameterPlaceholder? parameterPlaceholder = null) -> Chalk.Catalog.DialectProfileDescriptor!
 static Chalk.Catalog.KeyOrder.operator !=(Chalk.Catalog.KeyOrder left, Chalk.Catalog.KeyOrder right) -> bool
 static Chalk.Catalog.KeyOrder.operator ==(Chalk.Catalog.KeyOrder left, Chalk.Catalog.KeyOrder right) -> bool
 static Chalk.Catalog.SourceCapabilities.None.get -> Chalk.Catalog.SourceCapabilities!
+static Chalk.Catalog.SqlConformance.Babel.get -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlConformance.BigQuery.get -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlConformance.Default.get -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlConformance.Lenient.get -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlConformance.MySql5.get -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlConformance.Named(string! name) -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlConformance.operator !=(Chalk.Catalog.SqlConformance left, Chalk.Catalog.SqlConformance right) -> bool
+static Chalk.Catalog.SqlConformance.operator ==(Chalk.Catalog.SqlConformance left, Chalk.Catalog.SqlConformance right) -> bool
+static Chalk.Catalog.SqlConformance.Oracle10.get -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlConformance.Oracle12.get -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlConformance.Pragmatic2003.get -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlConformance.Pragmatic99.get -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlConformance.Presto.get -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlConformance.SqlServer2008.get -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlConformance.Strict2003.get -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlConformance.Strict92.get -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlConformance.Strict99.get -> Chalk.Catalog.SqlConformance
+static Chalk.Catalog.SqlLibrary.All.get -> Chalk.Catalog.SqlLibrary
+static Chalk.Catalog.SqlLibrary.BigQuery.get -> Chalk.Catalog.SqlLibrary
+static Chalk.Catalog.SqlLibrary.Calcite.get -> Chalk.Catalog.SqlLibrary
+static Chalk.Catalog.SqlLibrary.Clickhouse.get -> Chalk.Catalog.SqlLibrary
+static Chalk.Catalog.SqlLibrary.Hive.get -> Chalk.Catalog.SqlLibrary
+static Chalk.Catalog.SqlLibrary.Mssql.get -> Chalk.Catalog.SqlLibrary
+static Chalk.Catalog.SqlLibrary.Mysql.get -> Chalk.Catalog.SqlLibrary
+static Chalk.Catalog.SqlLibrary.Named(string! name) -> Chalk.Catalog.SqlLibrary
+static Chalk.Catalog.SqlLibrary.operator !=(Chalk.Catalog.SqlLibrary left, Chalk.Catalog.SqlLibrary right) -> bool
+static Chalk.Catalog.SqlLibrary.operator ==(Chalk.Catalog.SqlLibrary left, Chalk.Catalog.SqlLibrary right) -> bool
+static Chalk.Catalog.SqlLibrary.Oracle.get -> Chalk.Catalog.SqlLibrary
+static Chalk.Catalog.SqlLibrary.Postgresql.get -> Chalk.Catalog.SqlLibrary
+static Chalk.Catalog.SqlLibrary.Redshift.get -> Chalk.Catalog.SqlLibrary
+static Chalk.Catalog.SqlLibrary.Snowflake.get -> Chalk.Catalog.SqlLibrary
+static Chalk.Catalog.SqlLibrary.Spark.get -> Chalk.Catalog.SqlLibrary
+static Chalk.Catalog.SqlLibrary.Spatial.get -> Chalk.Catalog.SqlLibrary
+static Chalk.Catalog.SqlLibrary.Standard.get -> Chalk.Catalog.SqlLibrary
 static Chalk.Entitlements.CatalogOptions.Default.get -> Chalk.Entitlements.CatalogOptions!
 static Chalk.Entitlements.PopulationAggregates.IsPermitted(string! function) -> bool
 static Chalk.Entitlements.PopulationAggregates.IsPermitted(string! function, Chalk.Catalog.CatalogContext! catalog) -> bool

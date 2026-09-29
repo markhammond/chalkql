@@ -1,4 +1,5 @@
 using Apache.Arrow;
+using Chalk.Catalog;
 using Chalk.Client;
 using Chalk.TestKit;
 using PlanErrorKind = Chalk.Client.Rpc.PlanErrorKind;

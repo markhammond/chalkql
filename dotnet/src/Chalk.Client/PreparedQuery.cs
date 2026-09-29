@@ -399,7 +399,12 @@ public sealed class PreparedQuery
         RequestContext more, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(more);
-        var union = Context is null ? more : Context.Narrow(more);
+
+        // The names this narrowing binds are checked as a prepare's are; the rest were, when this
+        // query was prepared, and are not converted twice (D317, D323).
+        var union = Context is null
+            ? more.Bound(_engine.Binding)
+            : Context.Narrow(more).Bound(_engine.Binding, more.Names().ToHashSet(StringComparer.Ordinal));
         var result = await _engine
             .PlanAsync(_prepared.Sql, _options, union, PlanDigest, _hints, ct)
             .ConfigureAwait(false);
@@ -473,7 +478,8 @@ public sealed class PreparedQuery
         CancellationToken ct,
         ArenaPool? pool = null)
     {
-        var bindings = Bindings(context);
+        // An execution's own context is checked as a prepare's is, once, here (D317, D323).
+        var bindings = Bindings(context?.Bound(_engine.Binding));
         if (bindings is null && RequiredContext.Count > 0)
         {
             throw new ContextRequiredException(RequiredContext);
@@ -508,7 +514,7 @@ public sealed class PreparedQuery
         }
 
         var flat = ParameterBinder.Flatten(
-            Parameters, values, plan.Rendered.Slots, plan.Compiled.ParameterTypes);
+            Parameters, values, plan.Rendered.Slots, plan.Compiled.ParameterTypes, _engine.Binding);
 
         return new QueryExecution(
             plan.Compiled,
@@ -599,7 +605,9 @@ public sealed class PreparedQuery
 
     /// <summary>
     /// The statement's own values, then this plan's bound scalars in slot order — one array, which is
-    /// what makes a context scalar an ordinary parameter to everything below (D209).
+    /// what makes a context scalar an ordinary parameter to everything below (D209). Each is held to
+    /// the exact rule against the type the plan declares for it, named as the host named it (D317);
+    /// the context's converters ran when it was handed over.
     /// </summary>
     private static object?[] WithBoundScalars(
         object?[] values, IReadOnlyList<BoundScalar> bound, RequestContext? context)
@@ -616,7 +624,8 @@ public sealed class PreparedQuery
         {
             if (context is not null && context.Scalars.TryGetValue(bound[i].Name, out var value))
             {
-                all[values.Length + i] = value;
+                all[values.Length + i] = ValueBinding.None.Bind(
+                    value, ChalkType.FromProto(bound[i].Type), $"Context scalar '{bound[i].Name}'");
                 continue;
             }
 

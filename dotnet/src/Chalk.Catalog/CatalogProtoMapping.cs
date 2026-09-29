@@ -670,7 +670,7 @@ internal static class CatalogProtoMapping
             QuotedCasing = profile.QuotedCasing,
             UnquotedCasing = profile.UnquotedCasing,
             CaseSensitiveIdentifiers = profile.CaseSensitiveIdentifiers,
-            Conformance = profile.Conformance,
+            Conformance = profile.Conformance?.Name ?? string.Empty,
             MaxNumericPrecision = profile.MaxNumericPrecision,
             MaxTimestampPrecision = profile.MaxTimestampPrecision,
             HasBoolean = profile.HasBoolean,
@@ -685,7 +685,7 @@ internal static class CatalogProtoMapping
             ImplicitCoercionMatches = profile.ImplicitCoercionMatches,
             ParameterPlaceholder = profile.ParameterPlaceholder,
         };
-        message.Libraries.AddRange(profile.Libraries);
+        message.Libraries.AddRange(profile.Libraries.Select(l => l.Name));
         return message;
     }
 
@@ -696,8 +696,8 @@ internal static class CatalogProtoMapping
         QuotedCasing = message.QuotedCasing,
         UnquotedCasing = message.UnquotedCasing,
         CaseSensitiveIdentifiers = message.CaseSensitiveIdentifiers,
-        Conformance = message.Conformance,
-        Libraries = message.Libraries.ToArray(),
+        Conformance = message.Conformance.Length == 0 ? null : SqlConformance.Named(message.Conformance),
+        Libraries = [.. message.Libraries.Select(SqlLibrary.Named)],
         MaxNumericPrecision = message.MaxNumericPrecision,
         MaxTimestampPrecision = message.MaxTimestampPrecision,
         HasBoolean = message.HasBoolean,

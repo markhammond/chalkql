@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Chalk.Catalog;
 using Chalk.Ir;
 using Google.Protobuf;
 using CatalogContext = Chalk.Catalog.CatalogContext;
@@ -211,6 +212,12 @@ public sealed class RecordedPlanner : IQueryPlanner
     /// rather than from a recording, so nothing is recorded under the longer form today.
     /// </remarks>
     /// <remarks>
+    /// A level and a library are spelled in the key as 0.3's enums spelled them — <c>Default</c>,
+    /// <c>Postgresql</c>, <c>BigQuery</c>: Calcite's name in Pascal case (D318) — so a directory
+    /// recorded under 0.3 keeps its keys now that they travel as names. <c>MYSQL_5</c>, 0.3's
+    /// <c>MySql5</c>, is the one name that spells differently.
+    /// </remarks>
+    /// <remarks>
     /// The planning options join them from this milestone (D234): a budget and a convergence test
     /// can both change which plan the optimiser returns, so two prepares that differ only in them
     /// are two plans. Appended only when they are not the run-to-completion default, so a corpus
@@ -228,16 +235,22 @@ public sealed class RecordedPlanner : IQueryPlanner
         PlanningOptions? planning = null,
         IReadOnlyList<ParameterValueHint>? parameterHints = null)
     {
-        var named = string.Join(",", libraries.Select(l => l.ToString()));
+        var named = string.Join(",", libraries.Select(l => Pascal(l.Name)));
         var off = disabledCapabilities is { Count: > 0 }
             ? "\n" + string.Join(",", disabledCapabilities.Select(c => c.ToString()))
             : string.Empty;
         var budget = planning?.CacheKeyPart is { Length: > 0 } part ? "\n" + part : string.Empty;
         var hinted = parameterHints is { Count: > 0 } hints ? "\n" + Fingerprint(hints) : string.Empty;
-        var material = $"{contextId}\n{pushdown}\n{conformance}\n{named}{off}{budget}{hinted}\n{sql.Trim()}";
+        var material = $"{contextId}\n{pushdown}\n{Pascal(conformance.Name)}\n{named}{off}{budget}{hinted}\n{sql.Trim()}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(material));
         return Convert.ToHexStringLower(hash.AsSpan(0, 16));
     }
+
+    /// <summary><c>BIG_QUERY</c> as <c>BigQuery</c>: how the key has always spelled a name.</summary>
+    private static string Pascal(string name) => string.Concat(
+        name.Split('_').Select(part => part.Length == 0
+            ? part
+            : char.ToUpperInvariant(part[0]) + part[1..].ToLowerInvariant()));
 
     /// <summary>
     /// A request's parameter value hints as one opaque fingerprint (D284). The same statement with

@@ -9,11 +9,12 @@ import chalk.planner.diag.PlanText;
 import chalk.planner.plan.PlannerPipeline;
 import chalk.planner.plan.PushdownPolicy;
 import chalk.planner.plan.SqlConfigs;
-import chalk.ir.v1.SqlConformance;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.stream.Stream;
+import org.apache.calcite.sql.fun.SqlLibrary;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.apache.calcite.tools.ValidationException;
@@ -106,18 +107,17 @@ class PipelineTest {
   /**
    * D34: the request's conformance reaches both halves of the front end.
    *
-   * <p>One case per value of the proto enum, and the expectation is asked of Calcite rather than
-   * written down here — {@code isOffsetLimitAllowed} is a parser rule and {@code isGroupByAlias} is
-   * a validator rule, so a level that reached only one of the two configs would fail on the other.
+   * <p>One case per level Calcite has, by name (D318), and the expectation is asked of Calcite
+   * rather than written down here — {@code isOffsetLimitAllowed} is a parser rule and {@code
+   * isGroupByAlias} is a validator rule, so a level that reached only one of the two configs would
+   * fail on the other.
    */
   @ParameterizedTest(name = "{0}")
-  @EnumSource(
-      value = SqlConformance.class,
-      names = "UNRECOGNIZED",
-      mode = EnumSource.Mode.EXCLUDE)
-  void the_requested_conformance_reaches_the_parser_and_the_validator(SqlConformance requested) {
-    SqlConformanceEnum conformance = SqlConfigs.conformance(requested.getNumber());
+  @EnumSource(SqlConformanceEnum.class)
+  void the_requested_conformance_reaches_the_parser_and_the_validator(SqlConformanceEnum requested) {
+    SqlConformanceEnum conformance = SqlConfigs.conformance(requested.name());
 
+    assertThat(conformance).isEqualTo(requested);
     assertThat(plans("SELECT symbol, ts FROM bars ORDER BY ts OFFSET 3 LIMIT 5", conformance))
         .as("%s: OFFSET before LIMIT is a parser rule", requested)
         .isEqualTo(conformance.isOffsetLimitAllowed());
@@ -127,21 +127,36 @@ class PipelineTest {
         .isEqualTo(conformance.isGroupByAlias());
   }
 
-  /** UNSPECIFIED means DEFAULT, which is the standard dialect and not D15's pinned LENIENT. */
+  /** Nothing said means DEFAULT, which is the standard dialect and not D15's pinned LENIENT. */
   @Test
   void an_unset_conformance_is_the_default_dialect() {
-    assertThat(SqlConfigs.conformance(SqlConformance.SQL_CONFORMANCE_UNSPECIFIED.getNumber()))
+    assertThat(SqlConfigs.conformance(""))
         .isEqualTo(SqlConformanceEnum.DEFAULT)
         .isEqualTo(SqlConfigs.DEFAULT_CONFORMANCE);
     assertThat(SqlConfigs.summary()).contains("conformance=DEFAULT");
   }
 
-  /** A value from a newer client is named, not silently planned as something else. */
+  /** A name this Calcite does not have is refused with the names it does, not planned as another level (D318). */
   @Test
-  void an_unknown_conformance_value_is_rejected_by_number() {
-    assertThatThrownBy(() -> SqlConfigs.conformance(99))
+  void an_unknown_conformance_name_is_refused_with_the_known_ones() {
+    assertThatThrownBy(() -> SqlConfigs.conformance("POSTGRES_16"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("99");
+        .hasMessageContaining("'POSTGRES_16'")
+        .hasMessageContaining("LENIENT, BABEL");
+    assertThatThrownBy(() -> SqlConfigs.conformance("lenient"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("'lenient'");
+  }
+
+  /** STANDARD is always there and is dropped; a library this Calcite does not have is refused (D318). */
+  @Test
+  void libraries_are_read_by_name() {
+    assertThat(SqlConfigs.libraries(List.of("STANDARD", "POSTGRESQL", "POSTGRESQL", "BIG_QUERY")))
+        .containsExactly(SqlLibrary.POSTGRESQL, SqlLibrary.BIG_QUERY);
+    assertThatThrownBy(() -> SqlConfigs.libraries(List.of("DB2")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("'DB2'")
+        .hasMessageContaining("POSTGRESQL");
   }
 
   private static boolean plans(String sql, SqlConformanceEnum conformance) {

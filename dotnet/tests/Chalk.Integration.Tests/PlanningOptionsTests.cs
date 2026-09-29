@@ -1,3 +1,4 @@
+using Chalk.Catalog;
 using Chalk.Client;
 using Chalk.Entitlements;
 using Chalk.TestKit;

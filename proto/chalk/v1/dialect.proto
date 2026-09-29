@@ -1,10 +1,10 @@
-// Chalk plan IR — the per-source dialect profile and the SQL vocabulary it shares with the
-// request options.
+// Chalk plan IR — the per-source dialect profile.
 //
-// SqlConformance and SqlLibrary live here rather than in planner.proto because two different things
-// name them: a *request* says which dialect its own SQL is written in and which function libraries
-// it may call, and a *source* says which SQL it accepts and which libraries it implements natively.
-// The vocabulary is one; the two uses are not.
+// A conformance level and a function library are named here and in the request options by
+// Calcite's own constant names — `SqlConformanceEnum.LENIENT` is "LENIENT", `SqlLibrary.BIG_QUERY`
+// is "BIG_QUERY" — never by a number this file would have to mirror (D318): a level or library a
+// newer Calcite adds is accepted without a change here. `GetInfoResponse` lists what the sidecar
+// accepts, and a name it does not know is refused, never ignored.
 syntax = "proto3";
 
 package chalk.v1;
@@ -30,13 +30,19 @@ message DialectProfile {
   IdentifierCasing unquoted_casing = 4;
   bool case_sensitive_identifiers = 5;
 
-  // What the SOURCE accepts — OFFSET/LIMIT order, `!=`, `%`, APPLY. Distinct from the request's
-  // conformance, which is about the SQL the host wrote.
-  SqlConformance conformance = 6;
+  // Numbered enums until 0.4 (D318).
+  reserved 6, 7;
 
-  // Libraries the source implements natively. Gates pushdown of the scalar calls and aggregates
-  // that belong to a library rather than to the standard operator table.
-  repeated SqlLibrary libraries = 7;
+  // What the SOURCE accepts — OFFSET/LIMIT order, `!=`, `%`, APPLY — as a Calcite
+  // SqlConformanceEnum constant name. Empty keeps the dialect preset's own level. Distinct from the
+  // request's conformance, which is about the SQL the host wrote. A name the sidecar does not know
+  // is refused at registration.
+  string conformance = 21;
+
+  // Libraries the source implements natively, as Calcite SqlLibrary constant names. Gates pushdown
+  // of the scalar calls and aggregates that belong to a library rather than to the standard
+  // operator table. A name the sidecar does not know is refused at registration.
+  repeated string libraries = 22;
 
   // The source's type system. Zero means "as Chalk's": DECIMAL(38), TIMESTAMP(9).
   uint32 max_numeric_precision = 8;
@@ -136,52 +142,4 @@ enum StringCollation {
   STRING_COLLATION_CASE_INSENSITIVE = 2;
   // A locale's collation: accents, contractions, culture-dependent ordering.
   STRING_COLLATION_LOCALE = 3;
-}
-
-// One of Calcite's `SqlLibrary` operator tables, mirroring
-// the enum one for one. The standard operators are always available; naming a library adds that
-// dialect's functions — `STRING_AGG` and `ARRAY_AGG` from POSTGRESQL, `ARRAY_TO_STRING` from
-// BIG_QUERY, and so on. A library function the IR has no mapping for fails at planning as
-// UNSUPPORTED naming the function, never silently.
-enum SqlLibrary {
-  SQL_LIBRARY_UNSPECIFIED = 0;
-  SQL_LIBRARY_STANDARD = 1;
-  SQL_LIBRARY_BIG_QUERY = 2;
-  SQL_LIBRARY_CALCITE = 3;
-  SQL_LIBRARY_CLICKHOUSE = 4;
-  SQL_LIBRARY_HIVE = 5;
-  SQL_LIBRARY_MSSQL = 6;
-  SQL_LIBRARY_MYSQL = 7;
-  SQL_LIBRARY_ORACLE = 8;
-  SQL_LIBRARY_POSTGRESQL = 9;
-  SQL_LIBRARY_REDSHIFT = 10;
-  SQL_LIBRARY_SNOWFLAKE = 11;
-  SQL_LIBRARY_SPARK = 12;
-  SQL_LIBRARY_SPATIAL = 13;
-  // Every library at once. Calcite's own `ALL`.
-  SQL_LIBRARY_ALL = 14;
-}
-
-// A SQL dialect level, mirroring Calcite's SqlConformanceEnum one for one. A request uses it to say
-// which dialect its own SQL is written in; a DialectProfile uses it to say which SQL a source
-// will accept. DEFAULT is standard SQL: `!=`, `%`, GROUP BY on a SELECT alias, `OFFSET start LIMIT
-// count` and `LIMIT start, count` are rejected under it and accepted under LENIENT and BABEL.
-// Identifier quoting and case sensitivity are not part of this; for a request they are pinned
-// separately, and for a source they are the DialectProfile's own fields.
-enum SqlConformance {
-  SQL_CONFORMANCE_UNSPECIFIED = 0;
-  SQL_CONFORMANCE_DEFAULT = 1;
-  SQL_CONFORMANCE_LENIENT = 2;
-  SQL_CONFORMANCE_BABEL = 3;
-  SQL_CONFORMANCE_STRICT_92 = 4;
-  SQL_CONFORMANCE_STRICT_99 = 5;
-  SQL_CONFORMANCE_PRAGMATIC_99 = 6;
-  SQL_CONFORMANCE_STRICT_2003 = 7;
-  SQL_CONFORMANCE_PRAGMATIC_2003 = 8;
-  SQL_CONFORMANCE_MYSQL_5 = 9;
-  SQL_CONFORMANCE_ORACLE_10 = 10;
-  SQL_CONFORMANCE_ORACLE_12 = 11;
-  SQL_CONFORMANCE_SQL_SERVER_2008 = 12;
-  SQL_CONFORMANCE_PRESTO = 13;
-  SQL_CONFORMANCE_BIG_QUERY = 14;
 }

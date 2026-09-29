@@ -335,24 +335,13 @@ public final class SourceDialects {
     };
   }
 
-  /** What SQL the source accepts. Null keeps the dialect's own default conformance. */
+  /**
+   * What SQL the source accepts. Null keeps the dialect's own default conformance. A name Calcite
+   * does not have was refused at registration, by the catalog validator.
+   */
   private static SqlConformanceEnum conformance(DialectProfile profile) {
-    return switch (profile.getConformance()) {
-      case SQL_CONFORMANCE_DEFAULT -> SqlConformanceEnum.DEFAULT;
-      case SQL_CONFORMANCE_LENIENT -> SqlConformanceEnum.LENIENT;
-      case SQL_CONFORMANCE_BABEL -> SqlConformanceEnum.BABEL;
-      case SQL_CONFORMANCE_STRICT_92 -> SqlConformanceEnum.STRICT_92;
-      case SQL_CONFORMANCE_STRICT_99 -> SqlConformanceEnum.STRICT_99;
-      case SQL_CONFORMANCE_PRAGMATIC_99 -> SqlConformanceEnum.PRAGMATIC_99;
-      case SQL_CONFORMANCE_STRICT_2003 -> SqlConformanceEnum.STRICT_2003;
-      case SQL_CONFORMANCE_PRAGMATIC_2003 -> SqlConformanceEnum.PRAGMATIC_2003;
-      case SQL_CONFORMANCE_MYSQL_5 -> SqlConformanceEnum.MYSQL_5;
-      case SQL_CONFORMANCE_ORACLE_10 -> SqlConformanceEnum.ORACLE_10;
-      case SQL_CONFORMANCE_ORACLE_12 -> SqlConformanceEnum.ORACLE_12;
-      case SQL_CONFORMANCE_SQL_SERVER_2008 -> SqlConformanceEnum.SQL_SERVER_2008;
-      case SQL_CONFORMANCE_PRESTO -> SqlConformanceEnum.PRESTO;
-      case SQL_CONFORMANCE_BIG_QUERY -> SqlConformanceEnum.BIG_QUERY;
-      default -> null;
-    };
+    return profile.getConformance().isEmpty()
+        ? null
+        : SqlConfigs.named(SqlConformanceEnum.class, profile.getConformance(), "conformance level");
   }
 }

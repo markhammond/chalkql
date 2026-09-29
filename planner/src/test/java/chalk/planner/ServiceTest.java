@@ -136,24 +136,19 @@ class ServiceTest {
     // (V196, ADR 0032); the sidecar does not offer it as a name it accepts.
     assertThat(byName).doesNotContainKey("jethro");
 
-    // Every level and library dialect.proto declares, `UNSPECIFIED` (the wire's "nothing said") and
-    // protobuf's own `UNRECOGNIZED` excepted — neither is a value the sidecar "accepts".
+    // Every level and library this build of Calcite has, by name (D318): a level a newer Calcite
+    // adds is offered without a change to the wire.
     assertThat(info.getConformancesList())
         .containsExactlyInAnyOrderElementsOf(
-            java.util.Arrays.stream(chalk.ir.v1.SqlConformance.values())
-                .filter(
-                    c ->
-                        c != chalk.ir.v1.SqlConformance.SQL_CONFORMANCE_UNSPECIFIED
-                            && c != chalk.ir.v1.SqlConformance.UNRECOGNIZED)
+            java.util.Arrays.stream(org.apache.calcite.sql.validate.SqlConformanceEnum.values())
+                .map(Enum::name)
                 .toList());
     assertThat(info.getLibrariesList())
         .containsExactlyInAnyOrderElementsOf(
-            java.util.Arrays.stream(chalk.ir.v1.SqlLibrary.values())
-                .filter(
-                    l ->
-                        l != chalk.ir.v1.SqlLibrary.SQL_LIBRARY_UNSPECIFIED
-                            && l != chalk.ir.v1.SqlLibrary.UNRECOGNIZED)
-                .toList());
+            java.util.Arrays.stream(org.apache.calcite.sql.fun.SqlLibrary.values())
+                .map(Enum::name)
+                .toList())
+        .contains("STANDARD", "POSTGRESQL", "BIG_QUERY");
   }
 
   @Test

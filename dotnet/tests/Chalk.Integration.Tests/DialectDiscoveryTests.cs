@@ -1,3 +1,4 @@
+using Chalk.Catalog;
 using Chalk.Client;
 using Chalk.TestKit;
 
@@ -44,9 +45,15 @@ public sealed class DialectDiscoveryTests(SharedSidecar sidecar)
         // is not offered as a name this sidecar accepts.
         Assert.False(byName.ContainsKey("jethro"));
 
-        Assert.Equal(
-            Enum.GetValues<SqlConformance>().OrderBy(v => v),
-            info.Conformances.OrderBy(v => v));
-        Assert.Equal(Enum.GetValues<SqlLibrary>().OrderBy(v => v), info.Libraries.OrderBy(v => v));
+        // Names from the sidecar's own Calcite (D318). Each has a member here, so a Calcite that
+        // adds one fails this until the member is added — though Named reaches it meanwhile.
+        Assert.Equal(Members<SqlConformance>(), info.Conformances.Select(c => c.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(Members<SqlLibrary>(), info.Libraries.Select(l => l.Name).Order(StringComparer.Ordinal));
     }
+
+    private static IEnumerable<string> Members<T>() => typeof(T)
+        .GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+        .Where(p => p.PropertyType == typeof(T))
+        .Select(p => p.GetValue(null)!.ToString()!)
+        .Order(StringComparer.Ordinal);
 }

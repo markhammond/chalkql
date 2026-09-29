@@ -189,7 +189,7 @@ public sealed class LikePortabilityTests(SharedSidecar sidecar, SharedPostgres p
         }
     }
 
-    private static readonly PrepareOptions Postgresql = new() { Libraries = [Chalk.Client.SqlLibrary.Postgresql] };
+    private static readonly PrepareOptions Postgresql = new() { Libraries = [Chalk.Catalog.SqlLibrary.Postgresql] };
 
     /// <summary>
     /// D315: under the preset a LIKE is pushed to PostgreSQL — with <c>ESCAPE ''</c> when it names no
