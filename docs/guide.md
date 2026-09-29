@@ -730,6 +730,77 @@ A non-string enumerable bound to a parameter that always follows `IN` / `NOT IN`
 expands into an `IN (?, ?, …)` list, Dapper-style; the empty list yields no rows
 for `IN` and all rows for `NOT IN`.
 
+### What a value binds to
+
+A parameter's type is the one the statement gives it — the column it is compared
+with, the function it is passed to, or `ParameterTypes` — and a value binds only
+if that type holds it **exactly**. Anything else is refused by `ExecuteAsync`
+with an `ArgumentException` naming the parameter (`@amount`, `$2`, or its
+position) and the CLR type bound, never the value, before anything reaches a
+source:
+
+| Parameter (as a refusal names it) | Binds from |
+|---|---|
+| `TINYINT` … `BIGINT` (`I8` … `I64`) | any integer type, and an enum as its number, when the value is in range |
+| `DECIMAL(p, s)` | an integer, a `decimal`, or a `float`/`double` read as its shortest round-trip decimal (`0.1` is 0.1), when it fits `p` and `s` without rounding |
+| `DOUBLE` (`FP64`) | a `double`, a `float`, an integer or a `decimal` (at the nearest double) |
+| `REAL` (`FP32`) | a `float`, or any number a float holds exactly |
+| `VARCHAR` (`STRING`) | a `string`, a `Utf8String` or a `char` |
+| `BOOLEAN` (`BOOL`) | a `bool` |
+| `DATE` | a `DateOnly`, or a `DateTime` at midnight |
+| `TIME` | a `TimeOnly`, or a `TimeSpan` within one day |
+| `TIMESTAMP` | a `DateTime` of kind `Local` or `Unspecified` (a wall clock), or a `DateOnly` |
+| `TIMESTAMP WITH TIME ZONE` (`TIMESTAMP_TZ`) | a `DateTimeOffset`, or a `DateTime` of kind `Utc` (an instant) |
+| `UUID` | a `Guid` |
+| `VARBINARY` (`BINARY`) | a `byte[]` or a `ReadOnlyMemory<byte>` |
+
+So `3.5` is refused for an `INTEGER` (and so is `3.0` — a fraction type is never
+bound to an integer), `25.555m` for a `DECIMAL(10, 2)`, `42` for a `VARCHAR`, and
+`"2026-01-03"` for a `DATE`: nothing is parsed from text and nothing is turned
+into it. The two kinds of timestamp follow Npgsql 6, so a `DateTime.UtcNow` bound
+to a `TIMESTAMP` is refused rather than read as a wall clock. Time finer than the
+parameter's precision is the one thing tolerated: it is truncated, as Npgsql
+truncates it, because a microsecond column cannot hold the rest.
+
+### Your own types
+
+A host type — a strongly typed identifier, a money type — binds through a
+`BindingConverter` registered on the engine. It is chosen by the value's exact
+runtime type, asked with the type the value is bound to, and what it returns is
+held to the rule above, so a converter widens what may be bound without making
+a lossy conversion silent:
+
+```csharp
+readonly record struct OrderId(long Value);
+
+sealed class GuidText : BindingConverter<string>
+{
+    // A 36-character string where a UUID is wanted; left alone everywhere else.
+    public override bool TryConvert(string value, ChalkType target, out object? converted)
+    {
+        converted = target.Kind == TypeKind.Uuid && value.Length == 36 && Guid.TryParse(value, out var id) ? id : null;
+        return converted is not null;
+    }
+}
+
+await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+{
+    Sources = sources,
+    Planner = planner,
+    BindingConverters = [BindingConverter.From<OrderId>(id => id.Value), new GuidText()],
+});
+
+await using var execution = await engine.ExecuteAsync(query, [new OrderId(42)]);
+```
+
+Converters apply wherever the target type is known: a statement's parameters,
+and every context value whose type is stated or which a shape declares. A value
+whose type is read off the value itself — a parameter value hint, a context value
+with no stated type — is not converted, because there is nothing to convert it
+to; state the type. One converter per type, of a concrete type (an interface, an
+abstract class or `int?` would never be chosen): anything else is refused when
+the engine is created.
+
 A `LIKE` pattern may be a parameter, and its value is the pattern exactly as
 ADO.NET and Dapper pass it: `%` and `_` in it are wildcards, and there is no
 escape character unless the statement names one with `ESCAPE`. Any value is
@@ -867,13 +938,21 @@ var reporting = new PrepareOptions { IncludePlanText = true, IncludeRedactedSql 
 var lenient = reporting with { Conformance = SqlConformance.Lenient };
 ```
 
-`SqlConformance` has one value per Calcite conformance level — `Default`,
-`Lenient`, `Babel`, `Strict92`, `Strict99`, `Pragmatic99`, `Strict2003`,
-`Pragmatic2003`, `MySql5`, `Oracle10`, `Oracle12`, `SqlServer2008`, `Presto`,
-`BigQuery` — and it is chosen per statement, so one engine can serve queries
-written to different rules. Stricter levels reject more, not less: SQL:2003
-requires a `FROM` clause, so `SELECT 1` fails under `Strict2003` and plans under
-`Default`.
+`SqlConformance` names a Calcite conformance level, and has a member for each
+one the sidecar's Calcite has — `Default`, `Lenient`, `Babel`, `Strict92`,
+`Strict99`, `Pragmatic99`, `Strict2003`, `Pragmatic2003`, `MySql5`, `Oracle10`,
+`Oracle12`, `SqlServer2008`, `Presto`, `BigQuery`. It is chosen per statement, so
+one engine can serve queries written to different rules. Stricter levels reject
+more, not less: SQL:2003 requires a `FROM` clause, so `SELECT 1` fails under
+`Strict2003` and plans under `Default`.
+
+`SqlConformance` and `SqlLibrary` (both in `Chalk.Catalog`) are names, not
+numbers: `SqlConformance.Lenient.Name` is `"LENIENT"`, Calcite's own constant, and
+that is what travels to the sidecar. A level or library a newer Calcite adds is
+usable before ChalkQL has a member for it, as `SqlConformance.Named("…")`, spelled
+as Calcite spells it. `engine.PlannerInfo.Conformances` and `.Libraries` list what
+the sidecar has, and a name it does not have is refused — at prepare for a
+statement, and when the engine is created for a source's `DialectProfile`.
 
 Identifier quoting and case sensitivity are *not* part of this. They are the same
 under every dialect (see [Identifiers](#identifiers)), and that includes `Babel`.
@@ -1599,6 +1678,14 @@ in a real source — the SQL each tier asks it for.
   small list becomes an `IN` list, an empty list makes its membership test
   `FALSE`, and a list too large to fold stays a relation the executor
   materialises — so its rows are never in the plan, the digest or a cache key.
+  A value whose type is stated — in `ScalarTypes`, or a binding's `ColumnTypes`
+  — is held to the rule a statement's parameter is (see
+  [What a value binds to](#what-a-value-binds-to)), and converted by the engine's
+  `BindingConverters`: `1.5` bound to an `I32` list is refused by `PrepareAsync`
+  (or by `ExecuteAsync`, for a value bound at execution) naming the binding and
+  the column, never granting organisation 2. A value with no stated type takes
+  its type from its CLR type, as before; a `DateTime` of kind `Utc` is a
+  `TIMESTAMP WITH TIME ZONE`.
 - **The rewrite.** Every scan of an entitled table becomes a projection of
   per-column sanitisers over the folded row predicate over the scan, and nothing
   else in the tree changes. A predicate, a join key, a grouping, an ordering or a
