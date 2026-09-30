@@ -126,17 +126,109 @@ public sealed class CombinationTests
     // ------------------------------------------------------------------ what is compiled
 
     /// <summary>
-    /// A policy that declares no combination compiles every subset, as it always has: five kinds on
-    /// one row and two roles are 5 × 2⁴ groups per role.
+    /// A policy that declares no combination compiles each set of the row's kinds once, anchored on
+    /// the first of its kinds in the policy's order (F165): five kinds on one row are 2⁵ − 1 groups
+    /// per role, where one per anchor was 5 × 2⁴.
     /// </summary>
     [Fact]
-    public void A_policy_that_declares_none_compiles_every_subset_as_before()
+    public void A_policy_that_declares_none_compiles_each_set_of_kinds_once()
     {
         var shape = new Shape();
 
         var lists = ListsIn(shape.Compile().For(shape.Reports)!.RowPredicate);
 
-        Assert.Equal(5 * 16 * 3, lists.Length);
+        Assert.Equal(31 * 3, lists.Length);
+        Assert.Contains("classification_analyst_within_mission_compartment_releasability_environment", lists);
+        Assert.Contains("mission_analyst_within_compartment_releasability", lists);
+        Assert.DoesNotContain(lists, list => list.StartsWith("mission_analyst_within_classification", StringComparison.Ordinal));
+        Assert.DoesNotContain("environment_analyst_within_classification_mission_compartment_releasability", lists);
+    }
+
+    /// <summary>
+    /// Along a path only the path's kinds anchor a set (F165): the tasking holds its mission, and
+    /// reaches the asset's classification and releasability down the same steps, so {classification,
+    /// releasability} and the three-kind set are anchored on classification alone, while
+    /// {releasability, mission} keeps its group on the releasability path although mission comes
+    /// first — the tasking's own row cannot answer releasability.
+    /// </summary>
+    [Fact]
+    public void Along_a_path_a_set_is_anchored_on_a_path_kind()
+    {
+        Table tasking = default;
+        var shape = new Shape(s =>
+        {
+            var source = s.Policy.Source("k");
+            var assets = source.Table("assets");
+            tasking = source.Table("tasking");
+            assets.Tenancy(t => t
+                .Direct(s.Classification, assets.Column("Classification"))
+                .Direct(s.Releasability, assets.Column("Releasability")));
+            tasking.Tenancy(t => t
+                .Direct(s.Mission, tasking.Column("MissionId"))
+                .Inherited(s.Classification).Through(assets)
+                .Inherited(s.Releasability).Through(assets));
+        });
+
+        var descriptor = shape.Compile().For(tasking)!;
+        var lists = ListsIn(string.Join(
+            " ", descriptor.Inherited.Select(p => p.EndpointPredicate + " " + p.PathPredicate)
+                .Append(descriptor.RowPredicate)));
+
+        Assert.Equal(
+            [
+                "classification_tasking_reader",
+                "classification_tasking_reader_within_mission",
+                "classification_tasking_reader_within_mission_ids",
+                "classification_tasking_reader_within_mission_releasability",
+                "classification_tasking_reader_within_mission_releasability_ids",
+                "classification_tasking_reader_within_releasability",
+                "mission_tasking_reader",
+                "releasability_tasking_reader",
+                "releasability_tasking_reader_within_mission",
+                "releasability_tasking_reader_within_mission_ids",
+            ],
+            lists.Where(list => list.Contains("tasking_reader", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// And a grant fills its set's one list whichever kind it names first (D321): spelt from
+    /// releasability, the tasking reader's three-kind grant fills the list anchored on classification,
+    /// and its projection.
+    /// </summary>
+    [Fact]
+    public void A_grant_spelt_from_any_kind_fills_its_sets_one_list()
+    {
+        var shape = new Shape(s =>
+        {
+            var source = s.Policy.Source("k");
+            var assets = source.Table("assets");
+            var tasking = source.Table("tasking");
+            assets.Tenancy(t => t
+                .Direct(s.Classification, assets.Column("Classification"))
+                .Direct(s.Releasability, assets.Column("Releasability")));
+            tasking.Tenancy(t => t
+                .Direct(s.Mission, tasking.Column("MissionId"))
+                .Inherited(s.Classification).Through(assets)
+                .Inherited(s.Releasability).Through(assets));
+        });
+
+        var bound = shape.Compile().Bind(new TenancyPrincipal
+        {
+            User = 1,
+            Grants =
+            [
+                Grant.ForTenancy(shape.Releasability, "REL_FVEY", shape.TaskingReader)
+                    .Within(shape.Mission, "KESTREL")
+                    .Within(shape.Classification, "SECRET"),
+            ],
+        });
+
+        Assert.Equal(
+            ["classification_tasking_reader_within_mission_releasability", "classification_tasking_reader_within_mission_releasability_ids"],
+            bound.Lists.Where(l => l.Value.Rows.Count > 0).Select(l => l.Key).Order(StringComparer.Ordinal));
+        Assert.Equal(
+            ["SECRET", "KESTREL", "REL_FVEY"],
+            bound.Lists["classification_tasking_reader_within_mission_releasability"].Rows.Single());
     }
 
     /// <summary>

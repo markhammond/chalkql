@@ -1116,10 +1116,10 @@ handled, whoever bought.
 ```
 -- employee 5, everywhere: the orders they handled, whoever bought
 plan:
-    Plan ir_version=1 digest=2be82e0120c8e249 context_id=tutorial-10 catalog_epoch=1
+    Plan ir_version=1 digest=ad95f4095ce5571b context_id=tutorial-10 catalog_epoch=1
       Project [$0, $1, 5, $3, $4] rows=9 out=[order_id:I32, customer_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
         Filter EQ($2, 5) rows=9 out=[order_id:I32, customer_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
-          Read shop.main.orders projection=[0,1,2,3,4] descriptor=5654c31a2f4b8c0f2808586e5178d4ba entitled rows=60 out=[order_id:I32, customer_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
+          Read shop.main.orders projection=[0,1,2,3,4] descriptor=ca1fbcf1ae27e535c2b521c9b1f66164 entitled rows=60 out=[order_id:I32, customer_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
 
     order_id  customer_id  employee_id  region_id  order_date
     --------  -----------  -----------  ---------  -------------------
@@ -1140,10 +1140,10 @@ employee 5 did on their account and nothing of any other customer.
 ```
 -- employee 5, within customer 7: one auditor, one account
 plan:
-    Plan ir_version=1 digest=9ce8906027e40d7a context_id=tutorial-10 catalog_epoch=1
+    Plan ir_version=1 digest=e1f0dbe7587783e4 context_id=tutorial-10 catalog_epoch=1
       Project [$0, 7, 5, $3, $4] rows=1.35 out=[order_id:I32, customer_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
         Filter AND(EQ($2, 5), EQ($1, 7)) rows=1.35 out=[order_id:I32, customer_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
-          Read shop.main.orders projection=[0,1,2,3,4] descriptor=5654c31a2f4b8c0f2808586e5178d4ba entitled rows=60 out=[order_id:I32, customer_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
+          Read shop.main.orders projection=[0,1,2,3,4] descriptor=ca1fbcf1ae27e535c2b521c9b1f66164 entitled rows=60 out=[order_id:I32, customer_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
 
     order_id  customer_id  employee_id  region_id  order_date
     --------  -----------  -----------  ---------  -------------------
@@ -1164,10 +1164,10 @@ plan:
 ```
 -- And the third axis: a region, on orders and on nothing else
 plan:
-    Plan ir_version=1 digest=091f7b7a63f98924 context_id=tutorial-10 catalog_epoch=1
+    Plan ir_version=1 digest=6babf06f35814b90 context_id=tutorial-10 catalog_epoch=1
       Project [$0, $1, $2, 7, $4] rows=9 out=[order_id:I32, customer_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
         Filter EQ($3, 7) rows=9 out=[order_id:I32, customer_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
-          Read shop.main.orders projection=[0,1,2,3,4] descriptor=5654c31a2f4b8c0f2808586e5178d4ba entitled rows=60 out=[order_id:I32, customer_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
+          Read shop.main.orders projection=[0,1,2,3,4] descriptor=ca1fbcf1ae27e535c2b521c9b1f66164 entitled rows=60 out=[order_id:I32, customer_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
 
     order_id  customer_id  employee_id  region_id  order_date
     --------  -----------  -----------  ---------  -------------------
@@ -1212,7 +1212,7 @@ The customer's hop: a line is visible when its order is.
 ```
 -- the customer's hop: a line is visible when its order is
 plan:
-    Plan ir_version=1 digest=60256cb744b4a8eb context_id=tutorial-11 catalog_epoch=1
+    Plan ir_version=1 digest=bc36fccab6c55393 context_id=tutorial-11 catalog_epoch=1
       Project [$0, $1, $2, $4] rows=22.5 out=[order_id:I32, product_id:I32, quantity:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
         HashJoin Inner left_keys=[0] right_keys=[0] rows=22.5 out=[order_id:I32, product_id:I32, quantity:I32, order_id0:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
           HashJoin Semi left_keys=[0] right_keys=[0] rows=150 out=[order_id:I32, product_id:I32, quantity:I32] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
@@ -1222,7 +1222,7 @@ plan:
                 Read shop.main.orders projection=[0,1] entitled rows=60 out=[order_id:I32, customer_id:I32] collations=[($0 ASC NULLS LAST)]
           Project [$0, $2] rows=9 out=[order_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
             Filter EQ($1, 3) rows=9 out=[order_id:I32, customer_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
-              Read shop.main.orders projection=[0,1,4] descriptor=5654c31a2f4b8c0f2808586e5178d4ba entitled rows=60 out=[order_id:I32, customer_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
+              Read shop.main.orders projection=[0,1,4] descriptor=ca1fbcf1ae27e535c2b521c9b1f66164 entitled rows=60 out=[order_id:I32, customer_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
 
 report:
     columns  order_id:Full, product_id:Full, quantity:Full, order_date:Full
@@ -1252,7 +1252,7 @@ never mentions `products` — the policy brought it.
 ```
 -- the supplier's hop: the same line, visible because of its product
 plan:
-    Plan ir_version=1 digest=9765799b38918758 context_id=tutorial-11 catalog_epoch=1
+    Plan ir_version=1 digest=ae80c7f61c02bd53 context_id=tutorial-11 catalog_epoch=1
       Project [$0, $1, $2, $4] rows=137.944 out=[order_id:I32, product_id:I32, quantity:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
         HashJoin Inner left_keys=[0] right_keys=[0] rows=137.944 out=[order_id:I32, product_id:I32, quantity:I32, order_id0:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
           HashJoin Semi left_keys=[1] right_keys=[0] rows=150 out=[order_id:I32, product_id:I32, quantity:I32] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
@@ -1261,7 +1261,7 @@ plan:
               Filter EQ($1, 'A') rows=3.333 out=[product_id:I32, supplier_id:STRING] collations=[($0 ASC NULLS LAST)]
                 Read shop.main.products projection=[0,1] entitled rows=20 out=[product_id:I32, supplier_id:STRING] collations=[($0 ASC NULLS LAST)]
           HashJoin Semi left_keys=[0] right_keys=[0] rows=55.178 out=[order_id:I32, order_date:TIMESTAMP(9)]
-            Read shop.main.orders projection=[0,4] disclosures=[1:TESTED, 5:REDACTED] descriptor=5654c31a2f4b8c0f2808586e5178d4ba entitled rows=60 out=[order_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
+            Read shop.main.orders projection=[0,4] disclosures=[1:TESTED, 5:REDACTED] descriptor=ca1fbcf1ae27e535c2b521c9b1f66164 entitled rows=60 out=[order_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
             HashJoin Inner left_keys=[1] right_keys=[0] rows=150 out=[order_id:I32, product_id:I32, product_id0:I32]
               Read shop.main.order_details projection=[0,1] entitled rows=150 out=[order_id:I32, product_id:I32] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
               Project [$0] rows=3.333 out=[product_id:I32] collations=[($0 ASC NULLS LAST)]
@@ -1296,11 +1296,11 @@ And a grant that reaches everywhere, where both joins disappear.
 ```
 -- Finance reaches everywhere — and the joins disappear
 plan:
-    Plan ir_version=1 digest=a7d4abbfe10bc23f context_id=tutorial-11 catalog_epoch=1
+    Plan ir_version=1 digest=340bcef2d41f05c7 context_id=tutorial-11 catalog_epoch=1
       Project [$0, $1, $2, $4] rows=150 out=[order_id:I32, product_id:I32, quantity:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
         HashJoin Inner left_keys=[0] right_keys=[0] rows=150 out=[order_id:I32, product_id:I32, quantity:I32, order_id0:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
           Read shop.main.order_details projection=[0,1,3] descriptor=add2eaf8e4e15354898f3ee1c559d415 entitled rows=150 out=[order_id:I32, product_id:I32, quantity:I32] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
-          Read shop.main.orders projection=[0,4] descriptor=5654c31a2f4b8c0f2808586e5178d4ba entitled rows=60 out=[order_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
+          Read shop.main.orders projection=[0,4] descriptor=ca1fbcf1ae27e535c2b521c9b1f66164 entitled rows=60 out=[order_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
 
 report:
     columns  order_id:Full, product_id:Full, quantity:Full, order_date:Full
@@ -1364,7 +1364,7 @@ which is exactly the layout the schema was arranged for.
 ```
 -- supplier A's representative asks for orders
 plan:
-    Plan ir_version=1 digest=969bf3f0986f2ee1 context_id=tutorial-12 catalog_epoch=1
+    Plan ir_version=1 digest=5bf741360a491508 context_id=tutorial-12 catalog_epoch=1
       Sort [$0 ASC NULLS LAST] rows=7.5 out=[order_id:I32, order_date:TIMESTAMP(9), employee_id:I32] collations=[($0 ASC NULLS LAST)]
         Project [$0, $2, $1] rows=7.5 out=[order_id:I32, order_date:TIMESTAMP(9), employee_id:I32]
           Project [$1, $2, $3] rows=7.5 out=[order_id:I32, employee_id:I32, order_date:TIMESTAMP(9)]
@@ -1412,7 +1412,7 @@ asked.
 ```
 -- and the customer, who reaches the same table the other way
 plan:
-    Plan ir_version=1 digest=7a62b1010de35d01 context_id=tutorial-12 catalog_epoch=1
+    Plan ir_version=1 digest=cd64ec27d2d2ba23 context_id=tutorial-12 catalog_epoch=1
       RemoteQuery source=facts dialect=duckdb sql='SELECT "order_id", "order_date", "employee_id" FROM (SELECT "order_id", "customer_id", "employee_id", "order_date" FROM "orders") AS "t" WHERE "customer_id" = 3 AND "order_id" <= 40 ORDER BY "order_id"' pushed_plan=yes rows=4.5 out=[order_id:I32, order_date:TIMESTAMP(9), employee_id:I32] collations=[($0 ASC NULLS LAST)]
 
 what each source was asked to run:
@@ -1485,7 +1485,7 @@ plan:
             RemoteQuery source=facts dialect=duckdb sql='SELECT "order_id", "product_id", "quantity" FROM "order_details" WHERE "order_id" IN (?)' pushed_plan=yes rows=37.5 out=[order_id:I32, product_id:I32, quantity:I32]
 
 context:
-    folded    33 names, over global, region, supplier
+    folded    25 names, over global, region, supplier
     required  16 names, over customer
 
 report:
@@ -1543,7 +1543,7 @@ plan:
       RemoteQuery source=facts dialect=duckdb sql='SELECT "order_id", "product_id", "quantity" FROM "order_details" AS "t" WHERE EXISTS (SELECT 1 FROM (SELECT "order_id" AS "$chalk$key" FROM (SELECT "order_id", "customer_id" FROM "orders") AS "t0" WHERE "customer_id" = 3) AS "t2" WHERE "t"."order_id" = "t2"."$chalk$key") ORDER BY "order_id", "product_id"' pushed_plan=yes rows=22.5 out=[order_id:I32, product_id:I32, quantity:I32] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
 
 context:
-    folded    49 names, over customer, global, region, supplier
+    folded    41 names, over customer, global, region, supplier
     required  (none)
 
 report:
@@ -1589,7 +1589,7 @@ plan:
       RemoteQuery source=facts dialect=duckdb sql='SELECT "order_id", "product_id", "quantity" FROM "order_details" AS "t" WHERE EXISTS (SELECT 1 FROM (SELECT "order_id" AS "$chalk$key" FROM (SELECT "order_id", "customer_id" FROM "orders") AS "t0" WHERE "customer_id" = 3) AS "t2" WHERE "t"."order_id" = "t2"."$chalk$key") ORDER BY "order_id", "product_id"' pushed_plan=yes rows=22.5 out=[order_id:I32, product_id:I32, quantity:I32] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
 
 context:
-    folded    67 names, over customer, employee, global, mask, region, supplier, user
+    folded    59 names, over customer, employee, global, mask, region, supplier, user
     required  (none)
 
 report:
@@ -2316,17 +2316,17 @@ getting the list wrong later.
 ```
 -- what that configuration compiled to
 orders, row predicate:
-    (((customer_id, region_id) IN (@ctx.customer_buyer_within_region) OR customer_id IN (@ctx.customer_buyer) OR (region_id, customer_id) IN (@ctx.region_buyer_within_customer) OR region_id IN (@ctx.region_buyer) OR (employee_id, customer_id) IN (@ctx.employee_buyer_pairs) OR employee_id IN (@ctx.employee_buyer_ids) OR @ctx.global_buyer) OR ((customer_id, region_id) IN (@ctx.customer_representative_within_region) OR customer_id IN (@ctx.customer_representative) OR (region_id, customer_id) IN (@ctx.region_representative_within_customer) OR region_id IN (@ctx.region_representative) OR (employee_id, customer_id) IN (@ctx.employee_representative_pairs) OR employee_id IN (@ctx.employee_representative_ids) OR @ctx.global_representative) OR ((customer_id, region_id) IN (@ctx.customer_sales_within_region) OR customer_id IN (@ctx.customer_sales) OR (region_id, customer_id) IN (@ctx.region_sales_within_customer) OR region_id IN (@ctx.region_sales) OR (employee_id, customer_id) IN (@ctx.employee_sales_pairs) OR employee_id IN (@ctx.employee_sales_ids) OR @ctx.global_sales)) OR employee_id = @ctx.user OR @ctx.global
+    (((customer_id, region_id) IN (@ctx.customer_buyer_within_region) OR customer_id IN (@ctx.customer_buyer) OR region_id IN (@ctx.region_buyer) OR (employee_id, customer_id) IN (@ctx.employee_buyer_pairs) OR employee_id IN (@ctx.employee_buyer_ids) OR @ctx.global_buyer) OR ((customer_id, region_id) IN (@ctx.customer_representative_within_region) OR customer_id IN (@ctx.customer_representative) OR region_id IN (@ctx.region_representative) OR (employee_id, customer_id) IN (@ctx.employee_representative_pairs) OR employee_id IN (@ctx.employee_representative_ids) OR @ctx.global_representative) OR ((customer_id, region_id) IN (@ctx.customer_sales_within_region) OR customer_id IN (@ctx.customer_sales) OR region_id IN (@ctx.region_sales) OR (employee_id, customer_id) IN (@ctx.employee_sales_pairs) OR employee_id IN (@ctx.employee_sales_ids) OR @ctx.global_sales)) OR employee_id = @ctx.user OR @ctx.global
 
     inherited paths:
       supplier -> products via order_details -> products
 
     column rules:
       column 4: Full when employee_id = @ctx.user
-      column 4: Full when (((customer_id, region_id) IN (@ctx.customer_buyer_within_region) OR customer_id IN (@ctx.custom… (1117 characters)
+      column 4: Full when (((customer_id, region_id) IN (@ctx.customer_buyer_within_region) OR customer_id IN (@ctx.custom… (907 characters)
       column 5: Full when employee_id = @ctx.user
       column 5: Full when employee_id = @ctx.user
-      column 5: None placeholder CAST(NULL AS DECIMAL(19,2)) when ((customer_id, region_id) IN (@ctx.customer_representative_within_region) OR customer_id IN (@ct… (455 characters)
+      column 5: None placeholder CAST(NULL AS DECIMAL(19,2)) when ((customer_id, region_id) IN (@ctx.customer_representative_within_region) OR customer_id IN (@ct… (379 characters)
 
     Two of those rules name a marker rather than a role. `owner` is the
     row's resource owner, and the rule's condition gains
@@ -2347,10 +2347,10 @@ And the result is a policy like any other.
     ORDER BY order_id
 
 plan:
-    Plan ir_version=1 digest=4fcef75c47f95670 context_id=tutorial-18 catalog_epoch=1
+    Plan ir_version=1 digest=c070b3bdf97ab79c context_id=tutorial-18 catalog_epoch=1
       Project [$0, $2, $1, $3, CAST(CASE WHEN EQ($1, 4) THEN $4 ELSE NULL:DECIMAL(28,2)? END AS DECIMAL(28,2)?)] rows=15 out=[order_id:I32, region_id:I32, employee_id:I32, order_date:TIMESTAMP(9), freight:DECIMAL(28,2)?] collations=[($0 ASC NULLS LAST)]
         Filter OR(EQ($2, 4), EQ($1, 4)) rows=15 out=[order_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9), freight:DECIMAL(28,2)] collations=[($0 ASC NULLS LAST)]
-          Read shop.main.orders projection=[0,2,3,4,5] disclosures=[5:PER_ROW] descriptor=f92cda3b39f90d54b3eaa48af97a811a entitled rows=60 out=[order_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9), freight:DECIMAL(28,2)] collations=[($0 ASC NULLS LAST)]
+          Read shop.main.orders projection=[0,2,3,4,5] disclosures=[5:PER_ROW] descriptor=39aa86eb278e4561b1de7a9ee000e687 entitled rows=60 out=[order_id:I32, employee_id:I32, region_id:I32, order_date:TIMESTAMP(9), freight:DECIMAL(28,2)] collations=[($0 ASC NULLS LAST)]
 
 report:
     columns  order_id:Full, region_id:Full, employee_id:Full, order_date:Full, freight:PerRow
