@@ -9,6 +9,12 @@ internal sealed class ExecutionSettings
     /// <summary>Upper bound on rows per batch, end to end: sources, operators and output.</summary>
     public int BatchSize { get; init; } = 4096;
 
+    /// <summary>
+    /// How deep a plan the compiler's own validation reads (F102, F161): the planner's limit, which
+    /// the engine validated the plan at already.
+    /// </summary>
+    public int PlanNestingLimit { get; init; } = Chalk.Ir.PlanLimits.DefaultNestingLimit;
+
     /// <summary>Run the row-at-a-time reference interpreter instead (D13, invariant I4).</summary>
     public bool UseReferenceEngine { get; init; }
 

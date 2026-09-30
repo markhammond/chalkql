@@ -1,6 +1,7 @@
 package chalk.planner.entitlement;
 
 import chalk.planner.catalog.ChalkTable;
+import com.google.common.collect.ImmutableList;
 import java.util.List;
 import org.apache.calcite.config.CalciteConnectionConfig;
 import org.apache.calcite.jdbc.CalciteSchema;
@@ -11,12 +12,22 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelRoot;
 import org.apache.calcite.rel.core.Project;
 import org.apache.calcite.rel.core.TableScan;
+import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.schema.SchemaPlus;
+import org.apache.calcite.sql.SqlCall;
+import org.apache.calcite.sql.SqlIdentifier;
+import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlOperatorTable;
+import org.apache.calcite.sql.SqlSelect;
+import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParser;
+import org.apache.calcite.sql.parser.SqlParserPos;
+import org.apache.calcite.sql.util.SqlShuttle;
+import org.apache.calcite.sql.validate.SqlNameMatcher;
 import org.apache.calcite.sql.validate.SqlValidator;
 import org.apache.calcite.sql.validate.SqlValidatorUtil;
 import org.apache.calcite.sql2rel.SqlToRelConverter;
@@ -205,7 +216,9 @@ public final class DescriptorConverter {
 
     SqlNode validated;
     try {
-      validated = validator.validate(folded.node());
+      validated =
+          validator.validate(
+              parents.isEmpty() ? folded.node() : qualifyTarget(folded.node(), qualified));
     } catch (RuntimeException e) {
       throw new PolicyException(
           "the entitlement on "
@@ -235,6 +248,71 @@ public final class DescriptorConverter {
       refuseCatalogSubQuery(expression, where);
     }
     return converted;
+  }
+
+  /**
+   * Qualifies every bare identifier that names a column of the target with the target's own name
+   * (F157).
+   *
+   * <p>The vocabulary reads a bare name as the target's column and {@code <table>.<column>} as a
+   * parent's or an endpoint's. With parents in the {@code FROM} beside the target, Calcite resolves
+   * a bare name against every table there, so a name the target shares with a parent — {@code
+   * org_id} on a line and on its order — was refused as ambiguous at prepare, for every principal
+   * whose grants left a term naming it. What the typed surface resolved to a column of one table
+   * reaches the validator as that table's column again.
+   *
+   * <p>Only the select items' expressions are read, never an item's alias, the {@code FROM} or the
+   * inside of a sub-query, whose bare names are a context relation's own columns. A bare name the
+   * target does not hold is left as it is. The table's quoting is exact, and the column keeps the
+   * quoting it was written with.
+   */
+  private SqlNode qualifyTarget(SqlNode node, List<String> qualified) {
+    RelOptTable target = catalogReader.getTableForMember(qualified);
+    if (target == null || !(node instanceof SqlSelect select)) {
+      return node;
+    }
+    RelDataType row = target.getRowType();
+    SqlNameMatcher matcher = catalogReader.nameMatcher();
+    String alias = qualified.get(qualified.size() - 1);
+    SqlShuttle shuttle =
+        new SqlShuttle() {
+          @Override
+          public SqlNode visit(SqlIdentifier id) {
+            if (id.isSimple() && !id.isStar() && matcher.field(row, id.getSimple()) != null) {
+              return new SqlIdentifier(
+                  ImmutableList.of(alias, id.getSimple()),
+                  null,
+                  id.getParserPosition(),
+                  ImmutableList.of(SqlParserPos.QUOTED_ZERO, id.getComponentParserPosition(0)));
+            }
+            return id;
+          }
+
+          @Override
+          public @Nullable SqlNode visit(SqlCall call) {
+            if (call.getKind().belongsTo(SqlKind.QUERY)) {
+              return call;
+            }
+            if (call.getKind() == SqlKind.ARGUMENT_ASSIGNMENT) {
+              // `name => value`: the name is the parameter's, never a column.
+              return SqlStdOperatorTable.ARGUMENT_ASSIGNMENT.createCall(
+                  call.getParserPosition(), call.operand(0).accept(this), call.operand(1));
+            }
+            return super.visit(call);
+          }
+        };
+    SqlNodeList items = new SqlNodeList(select.getSelectList().getParserPosition());
+    for (SqlNode item : select.getSelectList()) {
+      if (item instanceof SqlCall call && call.getKind() == SqlKind.AS) {
+        items.add(
+            SqlStdOperatorTable.AS.createCall(
+                call.getParserPosition(), call.operand(0).accept(shuttle), call.operand(1)));
+      } else {
+        items.add(item.accept(shuttle));
+      }
+    }
+    select.setSelectList(items);
+    return select;
   }
 
   /**

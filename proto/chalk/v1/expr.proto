@@ -25,6 +25,7 @@ message Expr {
     KeySetParam key_set = 10;
     KeySetMatch key_set_match = 11;
     FieldAccess field_access = 12;
+    ContextMembership context_membership = 13;
   }
 }
 
@@ -63,6 +64,24 @@ message KeySetMatch {
   repeated Expr columns = 1;
   // Which key set. Always 0 in v1, as KeySetParam's is.
   KeySetParam key_set = 2;
+}
+
+// A membership over a context list the executor holds: the tuple `(columns…)` is one of the rows
+// of the list the host bound as `@ctx.<list>`, compared column by column in the list's own column
+// order. The entitlement pass writes it where a list is bound at execution, or is too large to fold
+// and past what the split of F36 carries, in place of one join per list; the executor answers it
+// from a hash set of the list's rows, built once per execution. Never inside a Read's `filter` or a
+// RemoteQuery's `pushed_plan` or `parameters`: the list is the executor's and not a source's.
+//
+// SQL's IN over a tuple: TRUE where some row equals the tuple in every column, UNKNOWN where none
+// does and some row differs from it only where one side is NULL, FALSE otherwise — so an empty list
+// is FALSE for every row. Each column's type is the list column's: the planner casts a key that
+// differs. Expr.type is BOOL.
+message ContextMembership {
+  // The name the host bound the list under.
+  string list = 1;
+  // One per list column, in the list's column order.
+  repeated Expr columns = 2;
 }
 
 // A field of the enclosing relation's input row. For binary relations (joins) the input

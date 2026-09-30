@@ -169,6 +169,7 @@ internal sealed class ReferenceInterpreter
             expr.Cast.OnFailure),
         Expr.KindOneofCase.IfThen => IfThen(expr, row),
         Expr.KindOneofCase.InList => InList(expr, row),
+        Expr.KindOneofCase.ContextMembership => ContextMembership(expr, row),
         Expr.KindOneofCase.Call => Call(expr, row),
 
         // D291: a field of the composite value, which a NULL composite answers NULL for.
@@ -252,7 +253,81 @@ internal sealed class ReferenceInterpreter
         return sawNull ? null : false;
     }
 
-    private object? Call(Expr expr, object?[] row)
+    /// <summary>
+    /// The rows this execution bound under a name, as the host handed them over — what a membership
+    /// over a context list reads (F161). Null answers "bound none".
+    /// </summary>
+    public Func<string, IReadOnlyList<IReadOnlyList<object?>>?>? ContextRelations { get; init; }
+
+    private readonly Dictionary<string, object?[][]> _lists = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// F161: the tuple is one of the rows bound under the list's name — SQL's <c>IN</c> over a tuple
+    /// read row by row as its definition says, the way <see cref="InList"/> reads a list of options:
+    /// TRUE where some row equals the tuple in every column, UNKNOWN where none does and some row is
+    /// unequal in no column, FALSE otherwise.
+    /// </summary>
+    private object? ContextMembership(Expr expr, object?[] row)
+    {
+        var membership = expr.ContextMembership;
+        var tuple = new object?[membership.Columns.Count];
+        for (var c = 0; c < tuple.Length; c++)
+        {
+            tuple[c] = Evaluate(membership.Columns[c], row);
+        }
+
+        var unknown = false;
+        foreach (var candidate in ListRows(membership))
+        {
+            var agrees = true;
+            var sawNull = false;
+            for (var c = 0; c < tuple.Length && agrees; c++)
+            {
+                if (tuple[c] is null || candidate[c] is null)
+                {
+                    sawNull = true;
+                }
+                else if (Equal(tuple[c], candidate[c]) is not true)
+                {
+                    agrees = false;
+                }
+            }
+
+            if (agrees && !sawNull)
+            {
+                return true;
+            }
+
+            unknown |= agrees;
+        }
+
+        return unknown ? null : false;
+    }
+
+    /// <summary>A list's rows, bound as the parameter binder binds them (§8), once per execution.</summary>
+    private object?[][] ListRows(ContextMembership membership)
+    {
+        if (_lists.TryGetValue(membership.List, out var known))
+        {
+            return known;
+        }
+
+        var supplied = ContextRelations?.Invoke(membership.List)
+            ?? throw new InvalidOperationException(
+                $"the plan tests membership of the context list '{membership.List}' and the "
+                + "execution bound none.");
+        var types = membership.Columns.Select(c => ChalkType.FromProto(c.Type).WithNullable(true)).ToList();
+        var rows = new object?[supplied.Count][];
+        for (var r = 0; r < rows.Length; r++)
+        {
+            rows[r] = [.. ParameterBinder.Bind(supplied[r], types).Select(ReferenceExecutor.ToReferenceValue)];
+        }
+
+        _lists[membership.List] = rows;
+        return rows;
+    }
+
+        private object? Call(Expr expr, object?[] row)
     {
         var call = expr.Call;
         var type = ChalkType.FromProto(expr.Type);

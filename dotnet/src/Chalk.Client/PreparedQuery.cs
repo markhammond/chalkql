@@ -260,12 +260,21 @@ public sealed class PreparedQuery
         List<string>? names = null;
         foreach (var rel in PlanWalker.ExecutedRels(plan))
         {
-            if (rel.KindCase != Rel.KindOneofCase.BoundTable)
+            if (rel.KindCase == Rel.KindOneofCase.BoundTable)
             {
+                Require(rel.BoundTable.Name, context, ref names);
                 continue;
             }
 
-            Require(rel.BoundTable.Name, context, ref names);
+            // A membership over a context list reads the list by name, as a bound relation does, and
+            // is answered here from what the execution binds (F161).
+            foreach (var expr in PlanWalker.OwnExprs(rel).SelectMany(PlanWalker.Exprs))
+            {
+                if (expr.KindCase == Expr.KindOneofCase.ContextMembership)
+                {
+                    Require(expr.ContextMembership.List, context, ref names);
+                }
+            }
         }
 
         foreach (var expr in PlanWalker.AllExprs(plan))

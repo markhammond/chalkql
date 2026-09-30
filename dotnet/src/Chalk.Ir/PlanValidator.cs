@@ -177,7 +177,23 @@ public static class PlanValidator
             // An unknown field on a known message is also "newer IR" (02-ir.md §2 rule 2). Google.Protobuf
             // keeps unknown fields on the message and round-trips them, so re-parsing with them discarded
             // and comparing is the cheapest faithful detection.
-            var stripped = Plan.Parser.WithDiscardUnknownFields(true).ParseFrom(plan.ToByteArray());
+            //
+            // The re-parse is also where the plan's depth is held to the one limit (F102, F161): read
+            // at protobuf's default of 100 it overrode the limit the host set, and read unbounded it
+            // would let a plan deep enough to overflow this validator's own recursion through.
+            Plan stripped;
+            try
+            {
+                using var bytes = new MemoryStream(plan.ToByteArray(), writable: false);
+                stripped = Plan.Parser.WithDiscardUnknownFields(true).ParseFrom(
+                    CodedInputStream.CreateWithLimits(bytes, int.MaxValue, options.NestingLimit));
+            }
+            catch (InvalidProtocolBufferException e)
+                when (e.Message.Contains("nesting", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new PlanTooDeepException(options.NestingLimit, e);
+            }
+
             if (!stripped.Equals(plan))
             {
                 throw new IrVersionMismatchException(
@@ -577,6 +593,17 @@ public static class PlanValidator
 
                     RenderedBounds(rel.RemoteQuery, kindPath);
                     RefuseCompositeColumns(output, kindPath, "a column a source returns");
+                    if (rel.RemoteQuery.Parameters.Any(HoldsContextMembership)
+                        || (rel.RemoteQuery.PushedPlan is { } pushed
+                            && PlanWalker.Rels(pushed).SelectMany(PlanWalker.OwnExprs).Any(HoldsContextMembership)))
+                    {
+                        throw Invalid(
+                            "I-IR-24",
+                            kindPath,
+                            "the source is sent a membership of a context list, which the executor "
+                            + "holds and the source does not");
+                    }
+
                     break;
 
                 case Chalk.Ir.Rel.KindOneofCase.LookupJoin:
@@ -634,6 +661,15 @@ public static class PlanValidator
                     "I-IR-6",
                     path,
                     $"Read.projection has {rel.Read.Projection.Count} entries but the row type has {rel.RowType.Fields.Count} fields");
+            }
+
+            if (rel.Read.Filter is not null && HoldsContextMembership(rel.Read.Filter))
+            {
+                throw Invalid(
+                    "I-IR-24",
+                    path,
+                    "Read.filter tests membership of a context list, which the executor holds and the "
+                    + "source does not");
             }
 
             if (rel.Read.Filter is not null && !options.AllowReadFilter)
@@ -1848,6 +1884,10 @@ public static class PlanValidator
                     KeySetMatch(expr, input, path);
                     break;
 
+                case Expr.KindOneofCase.ContextMembership:
+                    ContextMembership(expr, input, path);
+                    break;
+
                 case Expr.KindOneofCase.FieldAccess:
                     FieldAccess(expr, input, path);
                     break;
@@ -1988,7 +2028,41 @@ public static class PlanValidator
             }
         }
 
-        private void Call(Expr expr, RowType input, string path)
+        /// <summary>
+        /// A membership over a context list the executor holds (F161): a list named, one column or
+        /// more, and BOOL, because it is a predicate. Where it may stand is I-IR-24's question, asked
+        /// of the relations that hold it.
+        /// </summary>
+        private void ContextMembership(Expr expr, RowType input, string path)
+        {
+            var membership = expr.ContextMembership;
+            if (membership.List.Length == 0)
+            {
+                throw Invalid("I-IR-24", path, "a ContextMembership names no context list");
+            }
+
+            if (membership.Columns.Count == 0)
+            {
+                throw Invalid(
+                    "I-IR-24",
+                    path,
+                    $"a ContextMembership over '{membership.List}' compares no column; it compares one "
+                    + "per column of the list");
+            }
+
+            if (expr.Type is null || expr.Type.Kind != TypeKind.Bool)
+            {
+                throw Invalid("I-IR-2", path, "a ContextMembership is a predicate, so its type is BOOL");
+            }
+
+            for (var i = 0; i < membership.Columns.Count; i++)
+            {
+                Expression(membership.Columns[i], input, $"{path}.columns[{i}]");
+                RefuseComposite(membership.Columns[i].Type, $"{path}.columns[{i}]", "a list column");
+            }
+        }
+
+                private void Call(Expr expr, RowType input, string path)
         {
             var call = expr.Call;
             if (call.UserFunction.Length > 0)
@@ -2452,7 +2526,14 @@ public static class PlanValidator
         /// COALESCE's, D295), a table function's or a VALUES row's column. A table's column may be
         /// one, on an in-process source (D302).
         /// </summary>
-        private void RefuseComposite(Type? type, string path, string what)
+        /// <summary>
+        /// Whether <paramref name="expr"/> tests membership of a context list anywhere in it —
+        /// I-IR-24: the executor's to answer, never a source's (F161).
+        /// </summary>
+        private static bool HoldsContextMembership(Expr expr) =>
+            PlanWalker.Exprs(expr).Any(e => e.KindCase == Expr.KindOneofCase.ContextMembership);
+
+                private void RefuseComposite(Type? type, string path, string what)
         {
             if (type?.Kind == TypeKind.Composite)
             {

@@ -81,6 +81,16 @@ internal sealed class EvalContext : Vectors.IArenaScratch
     public int Generation => _execution.Generation;
 
     /// <summary>
+    /// The rows this execution bound under <paramref name="name"/>, or null when it bound none — what
+    /// a membership over a context list builds its set from (F161).
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<object?>>? ContextRelation(string name) =>
+        _execution.ContextRelation(name);
+
+    /// <summary>The plan being executed, for an <c>ExecutionException</c> to name (§6.7).</summary>
+    public ulong PlanDigest => _execution.PlanDigest;
+
+    /// <summary>
     /// Changes with every batch this context is pointed at, so a node shared by several expressions
     /// of one operator knows whether it has already answered for this one (D293). It starts at zero,
     /// which is also the answer for evaluation that never points the context at a batch at all.

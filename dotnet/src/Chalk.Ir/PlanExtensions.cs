@@ -396,6 +396,31 @@ public static class PlanExtensions
                     .Append(expr.KeySet.Slot.ToString(CultureInfo.InvariantCulture))
                     .Append('>');
                 break;
+            case Expr.KindOneofCase.ContextMembership:
+                // `$1 IN @ctx.orgs`, `($1, $2) IN @ctx.pairs` (F161): the list the executor holds,
+                // by the name the host bound it under.
+                if (expr.ContextMembership.Columns.Count == 1)
+                {
+                    Append(sb, expr.ContextMembership.Columns[0]);
+                }
+                else
+                {
+                    sb.Append('(');
+                    for (var i = 0; i < expr.ContextMembership.Columns.Count; i++)
+                    {
+                        if (i > 0)
+                        {
+                            sb.Append(", ");
+                        }
+
+                        Append(sb, expr.ContextMembership.Columns[i]);
+                    }
+
+                    sb.Append(')');
+                }
+
+                sb.Append(" IN @ctx.").Append(expr.ContextMembership.List);
+                break;
             case Expr.KindOneofCase.KeySetMatch:
                 // `(a, b) IN <key set 0>` — the row-valued twin of an InList over a KeySetParam
                 // (F50), printed the way the generated SQL spells it.

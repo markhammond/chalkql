@@ -12,6 +12,14 @@ namespace Chalk.Client;
 /// </summary>
 public interface IQueryPlanner : IAsyncDisposable
 {
+    /// <summary>
+    /// How deep a plan this planner returns may nest, in protobuf message levels (F102, F161): the one
+    /// limit every read of the plan applies — the transport's own parse, and each validation the
+    /// engine makes before anything recurses over the plan. A deeper plan is a
+    /// <see cref="PlanningException"/> whose inner exception is a <see cref="PlanTooDeepException"/>.
+    /// </summary>
+    int PlanNestingLimit => PlanLimits.DefaultNestingLimit;
+
     /// <summary>The planner's IR range, versions and config hash. Called once when an engine is created.</summary>
     ValueTask<PlannerInfo> GetInfoAsync(CancellationToken ct = default);
 

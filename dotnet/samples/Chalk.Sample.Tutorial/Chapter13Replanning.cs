@@ -12,7 +12,7 @@ namespace Chalk.Sample.Tutorial;
 /// <remarks>
 /// The tables are in DuckDB rather than in memory, because the point of folding a tenant's grants is
 /// what the fold does on the other side of a boundary: the tenant plan's <c>customer_id = 3</c> is
-/// in the SQL the source is asked to run, and the base plan's marker joins are not.
+/// in the SQL the source is asked to run, and the base plan's lookups are not.
 /// </remarks>
 public static class Chapter13Replanning
 {
@@ -118,8 +118,8 @@ public static class Chapter13Replanning
 
         Console.WriteLine();
         Console.WriteLine("    One plan, one digest, two principals. Nothing about either customer");
-        Console.WriteLine("    is in it: every membership is a join to a table the executor");
-        Console.WriteLine("    materialises from the binding, and no customer is named in the SQL.");
+        Console.WriteLine("    is in it: every membership is a lookup the executor answers from the");
+        Console.WriteLine("    list bound at execution, and no customer is named in the SQL.");
         Console.WriteLine();
         Console.WriteLine("    `Shape(names)` is what chose the line: the supplier, region and");
         Console.WriteLine("    warehouse axes are bound, because every principal on the customer's");
@@ -144,13 +144,13 @@ public static class Chapter13Replanning
         await PrintAsync(engine, tenantPlan, entitlements.Bind(harbour), "as Harbour Partners' buyer");
 
         Console.WriteLine();
-        Console.WriteLine("    `customer_id = 3` is in the SQL now, and the marker joins that carried");
-        Console.WriteLine("    it are gone: the customer is decided, so the predicate is something the");
-        Console.WriteLine("    database can be asked, and the source returns the lines this binding");
-        Console.WriteLine("    reaches rather than all of them. That is what a fold is for, reached by");
-        Console.WriteLine("    a plan built before the tenant was known. What is still open is who is");
-        Console.WriteLine("    asking, which is what lets every one of that customer's staff share");
-        Console.WriteLine("    this plan.");
+        Console.WriteLine("    `customer_id = 3` is in the SQL now, and the lookups that carried it");
+        Console.WriteLine("    are gone: the customer is decided, so the predicate is something the");
+        Console.WriteLine("    database can be asked, and one query returns the lines this binding");
+        Console.WriteLine("    reaches without the orders leaving the database to be looked up here.");
+        Console.WriteLine("    That is what a fold is for, reached by a plan built before the tenant");
+        Console.WriteLine("    was known. What is still open is who is asking, which is what lets");
+        Console.WriteLine("    every one of that customer's staff share this plan.");
 
         // ------------------------------------------------------------ the person's plan
 

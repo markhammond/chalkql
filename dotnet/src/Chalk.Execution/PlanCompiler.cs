@@ -107,7 +107,7 @@ internal static class PlanCompiler
 
         if (validate)
         {
-            PlanValidator.Validate(plan);
+            PlanValidator.Validate(plan, new PlanValidationOptions { NestingLimit = settings.PlanNestingLimit });
         }
 
         // The context scalars this plan reads at execution, and the slots they take after the

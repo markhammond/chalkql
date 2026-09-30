@@ -289,6 +289,13 @@ public final class ChalkSelectivity {
       return new Estimate(conjunct.getKind() == SqlKind.IS_NULL ? nulls : 1.0 - nulls, false);
     }
 
+    // A membership over a context list is no comparison, whatever its operand count: its first
+    // operand is the list's name, and what the list holds is the execution's (F161). A guess, as the
+    // filter over a marker column it replaced was.
+    if (ChalkContextMembership.is(conjunct)) {
+      return guess(conjunct);
+    }
+
     if (!(conjunct instanceof RexCall call) || call.getOperands().size() != 2) {
       return guess(conjunct);
     }

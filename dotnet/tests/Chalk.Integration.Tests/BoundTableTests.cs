@@ -13,8 +13,9 @@ namespace Chalk.Integration.Tests;
 /// <para>
 /// A list of at most <c>FoldMaxRows</c> rows becomes literals in the plan; a larger one stays a
 /// relation, and the row predicate becomes a semi-join against a <c>BoundTable</c> the executor
-/// materialises at execution start. That is what a host with a tenancy of any size actually gets,
-/// and its rows are then in no plan text, no digest and no plan cache key.
+/// materialises at execution start — or, past the split of F36 or on a table held along a path, a
+/// lookup the executor answers from the same list. That is what a host with a tenancy of any size
+/// actually gets, and its rows are then in no plan text, no digest and no plan cache key.
 /// </para>
 /// <para>
 /// The fixture's lists are small, so the ceiling is lowered instead of the fixture being made large:
@@ -138,10 +139,10 @@ public sealed class BoundTableTests(SharedSidecar sidecar)
         Assert.Equal(TableVisibility.Some, orders.Visibility);
         Assert.False(orders.RowPredicatePushed);
 
-        // The rows the host bound are in no artefact the plan leaves behind, however many branches
-        // the split made: the plan names the relation, never its members.
+        // The rows the host bound are in no artefact the plan leaves behind: the plan names the list —
+        // here a lookup, the table being held along a path as well — and never its members.
         var text = PlanExtensions.ToPlanText(prepared.Plan);
-        Assert.Contains("BoundTable", text, StringComparison.Ordinal);
+        Assert.Contains("IN @ctx.manager_orgs", text, StringComparison.Ordinal);
         Assert.DoesNotContain("1199", text, StringComparison.Ordinal);
     }
 

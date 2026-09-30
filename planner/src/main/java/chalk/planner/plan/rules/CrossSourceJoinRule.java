@@ -316,7 +316,8 @@ public final class CrossSourceJoinRule
   /**
    * Every source a table under {@code rel} belongs to, in the order met, with the empty id for a
    * relation that belongs to none — a context relation the executor materialises from the host's
-   * binding. What a pair rule is asked about when a driving side is not one source's (F139, F55).
+   * binding, whether scanned or read by a membership over it (F161). What a pair rule is asked
+   * about when a driving side is not one source's (F139, F55).
    */
   static java.util.Set<String> sourcesOf(RelNode rel) {
     List<String> sources = new ArrayList<>(2);
@@ -335,9 +336,32 @@ public final class CrossSourceJoinRule
       into.add(table == null ? "" : table.sourceId());
       return;
     }
+    // A membership over a context list reads the list as surely as a scan of it did when the
+    // membership was a join (F161): the subtree is computed here, whatever sources its tables are
+    // in, and the one-remote-query reading of a single source does not hold of it (F55).
+    if (readsContextList(rel)) {
+      into.add("");
+    }
     for (RelNode input : rel.getInputs()) {
       collect(input, into);
     }
+  }
+
+  /** Whether one of {@code rel}'s own expressions is a membership over a context list. */
+  private static boolean readsContextList(RelNode rel) {
+    boolean[] found = {false};
+    rel.accept(
+        new org.apache.calcite.rex.RexShuttle() {
+          @Override
+          public RexNode visitCall(org.apache.calcite.rex.RexCall call) {
+            if (chalk.planner.plan.ChalkContextMembership.is(call)) {
+              found[0] = true;
+              return call;
+            }
+            return super.visitCall(call);
+          }
+        });
+    return found[0];
   }
 
   // ------------------------------------------------------------------ orientation

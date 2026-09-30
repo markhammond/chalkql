@@ -531,6 +531,12 @@ public final class PushdownGate {
       // is written down where the next reader looks for it.
       return false;
     }
+    if (ChalkContextMembership.is(node)) {
+      // F161: a membership over a context list is answered from the list the executor holds, which
+      // no source has. A list that should reach a source goes as a key set, which is a semi-join's
+      // business (F45) and not this call's. Declined by name for the same reason as above.
+      return false;
+    }
     if (!(node instanceof RexCall call)) {
       return false;
     }

@@ -271,6 +271,7 @@ public sealed class PlannerProcess : IAsyncDisposable
             Address = Address,
             Deadline = template.Deadline,
             MaxReceiveMessageSizeMb = template.MaxReceiveMessageSizeMb,
+            PlanNestingLimit = template.PlanNestingLimit,
             LoggerFactory = template.LoggerFactory,
         });
     }

@@ -1581,6 +1581,7 @@ public final class EntitlementPass {
         conjuncts.isEmpty()
             ? simplify
             : simplify.withPredicates(RelOptPredicateList.of(rexBuilder, conjuncts));
+    Map<Integer, RexNode> constants = constants(admitted);
 
     // A `through` leaf's visibility is derived from its parents' own folds rather than from
     // Filter_R, whose markers no simplifier can settle (§3.13, D230).
@@ -1605,7 +1606,7 @@ public final class EntitlementPass {
     java.util.Set<Integer> declaredStatistical = new java.util.LinkedHashSet<>();
     for (int column = 0; column < rowType.getFieldCount(); column++) {
       DescriptorExpressions.Column entitled = descriptor.column(column);
-      Reachable names = reachable(entitled, entitlement, underFilter, conjuncts);
+      Reachable names = reachable(entitled, entitlement, underFilter, conjuncts, constants);
       reachable.add(names);
       Set<Disclosure> reachableNames = names.names(entitled);
       // The statistical opt-in (D203): where the rules would mask or restrict this column to a
@@ -1717,7 +1718,8 @@ public final class EntitlementPass {
         org.apache.calcite.util.ImmutableBitSet.builder();
     for (int column = 0; column < rowType.getFieldCount(); column++) {
       DescriptorExpressions.Column entitled = descriptor.column(column);
-      Set<Disclosure> names = reachable(entitled, entitlement, underOwn, own).names(entitled);
+      Set<Disclosure> names =
+          reachable(entitled, entitlement, underOwn, own, Map.of()).names(entitled);
       if (outcome(names) == Disclosed.FULL) {
         raw.set(column);
       } else if (withheldAsNull(names, entitled, rowType.getFieldList().get(column).getType())) {
@@ -1770,6 +1772,57 @@ public final class EntitlementPass {
   }
 
   /**
+   * The constants the statement's own equalities give its columns, read from the admitted conjuncts
+   * that are equalities and from nothing else (F162).
+   *
+   * <p>Calcite reduces with the constants of what is known of a node's input, and leaves out any
+   * column that anything other than an equality mentions. Beside a list read by lookup the leaf's
+   * filter is {@code org_id IN (1, 2) OR CHALK_CONTEXT_MEMBERSHIP('people', id)}, which mentions
+   * {@code org_id}, so {@code WHERE org_id = 3} merged into it no longer made {@code org_id} a
+   * constant and a rule over the organisations stayed a {@code CASE}. Read from the equalities alone,
+   * it is one again.
+   *
+   * <p>Only admitted conjuncts (F163), and only where a literal is the value. A rule settled by the
+   * constant is right for every row the statement keeps. The statement's filter still reads the
+   * column's disclosed value, which on a kept row is the raw value, or a NULL no equality passes.
+   * The constant goes into rule conditions only, never into what a column discloses: there it
+   * would make the statement's filter hold of every row.
+   */
+  private Map<Integer, RexNode> constants(List<RexNode> admitted) {
+    List<RexNode> equalities = new ArrayList<>();
+    for (RexNode conjunct : admitted) {
+      if (conjunct.isA(org.apache.calcite.sql.SqlKind.EQUALS)) {
+        equalities.add(conjunct);
+      }
+    }
+    if (equalities.isEmpty()) {
+      return Map.of();
+    }
+    Map<Integer, RexNode> constants = new java.util.HashMap<>();
+    RexUtil.predicateConstants(RexNode.class, rexBuilder, equalities)
+        .forEach(
+            (column, value) -> {
+              if (column instanceof org.apache.calcite.rex.RexInputRef ref
+                  && value instanceof org.apache.calcite.rex.RexLiteral) {
+                constants.put(ref.getIndex(), value);
+              }
+            });
+    return constants;
+  }
+
+  /** {@code expression} with each column {@code constants} names replaced by its constant. */
+  private RexNode substitute(RexNode expression, Map<Integer, RexNode> constants) {
+    return expression.accept(
+        new RexShuttle() {
+          @Override
+          public RexNode visitInputRef(org.apache.calcite.rex.RexInputRef ref) {
+            RexNode value = constants.get(ref.getIndex());
+            return value == null ? ref : rexBuilder.ensureType(ref.getType(), value, false);
+          }
+        });
+  }
+
+  /**
    * {@code Project_D(Filter_R(Scan))} for one leaf occurrence.
    *
    * <p>The scan is of the table's every column, whatever the scan the pass replaced projected, and
@@ -1795,7 +1848,7 @@ public final class EntitlementPass {
             : MembershipSplit.of(
                 fold.predicate(), fold.descriptor().expressions(), rexBuilder);
     if (branches == null) {
-      return emitLeaf(scan, fold, null);
+      return emitLeaf(scan, lookedUp(scan, fold), null);
     }
 
     // The whole folded predicate, recorded once for the table: clause 3 of the taint check asks for
@@ -1900,12 +1953,15 @@ public final class EntitlementPass {
     LeafFold fold =
         leafFold(scan, descriptor, whole.statementConjuncts(), predicate, whole.trusted());
 
-    // What clause 3 looks for is the predicate as it was *before* the markers (§3.10, V68): its
-    // memberships are relations the plan still scans, which is the evidence the check reads them by,
-    // and a marker column does not survive above Project_D to be found textually.
+    // What clause 3 looks for is the predicate with its set lookups in place and nothing else
+    // (§3.10, V68; F161): a lookup is a predicate the filter holds and the plan pulls up, and a
+    // membership that took a marker stays the sub-query whose relation the plan still scans, which is
+    // the evidence the check reads it by — a marker column does not survive above Project_D to be
+    // found textually.
     if (whole.predicate() != null && !whole.trusted()) {
-      rowPredicates.put(whole.map().qualifiedName(), whole.predicate());
-      whole.map().recordRowPredicate(whole.predicate());
+      RexNode recorded = markers.lookupsOnly(whole.predicate());
+      rowPredicates.put(whole.map().qualifiedName(), recorded);
+      whole.map().recordRowPredicate(recorded);
     }
 
     leaves.add(fold.map());
@@ -1925,6 +1981,138 @@ public final class EntitlementPass {
         scan, fold, leaf, new ParentProjection(asParent.keyColumn(), substituted));
   }
 
+  /**
+   * A folded leaf the split of F36 does not take, with every membership over a whole context list
+   * that Calcite would otherwise join made a set lookup (F161).
+   *
+   * <p>That is past the split's four memberships, under a negation the split cannot prove itself on,
+   * and in every rule condition: Calcite rewrites each such membership as a join against its list,
+   * one after another, which nests the plan a level deeper per list. A membership standing alone as
+   * a top-level conjunct of the row predicate keeps its sub-query, because Calcite makes that the
+   * semi-join {@code ContextKeySetRule} ships to a remote source as a key set (F45, F50) — which a
+   * lookup, answered here, never could be.
+   */
+  private LeafFold lookedUp(TableScan scan, LeafFold whole) {
+    return lookedUp(scan, whole, lookupsOf(expressionsOf(whole)));
+  }
+
+  /** The same, with the lookups already chosen — a parent side's include its verdicts' too. */
+  private LeafFold lookedUp(TableScan scan, LeafFold whole, Map<String, RexNode> lookups) {
+    if (lookups.isEmpty()) {
+      return whole;
+    }
+
+    Map<String, RexNode> inPredicate =
+        whole.predicate() == null || whole.trusted()
+            ? lookups
+            : besideLoneConjuncts(lookups, whole.predicate());
+    DescriptorExpressions rules =
+        whole.descriptor().rewrite(expression -> replaceMemberships(expression, lookups));
+    DescriptorExpressions descriptor =
+        whole.descriptor().rowPredicate() == null
+            ? rules
+            : rules.withRowPredicate(
+                replaceMemberships(whole.descriptor().rowPredicate(), inPredicate));
+    RexNode predicate =
+        whole.predicate() == null ? null : replaceMemberships(whole.predicate(), inPredicate);
+    return leafFold(scan, descriptor, whole.statementConjuncts(), predicate, whole.trusted());
+  }
+
+  /** A leaf's rule conditions and its row predicate: every expression a membership can stand in. */
+  private static List<RexNode> expressionsOf(LeafFold whole) {
+    List<RexNode> expressions = new ArrayList<>(whole.descriptor().expressions());
+    if (whole.predicate() != null) {
+      expressions.add(whole.predicate());
+    }
+    return expressions;
+  }
+
+  /**
+   * Each membership over a whole context list in {@code expressions}, keyed by its digest, and the
+   * set lookup that stands for it (F161).
+   */
+  private Map<String, RexNode> lookupsOf(List<RexNode> expressions) {
+    Map<String, RexSubQuery> memberships = new java.util.LinkedHashMap<>();
+    for (RexNode expression : expressions) {
+      MembershipSplit.collect(expression, memberships);
+    }
+    Map<String, RexNode> lookups = new java.util.LinkedHashMap<>();
+    for (RexSubQuery membership : memberships.values()) {
+      RexNode lookup = chalk.planner.plan.ChalkContextMembership.of(membership, rexBuilder);
+      if (lookup != null) {
+        lookups.put(membership.toString(), lookup);
+      }
+    }
+    return lookups;
+  }
+
+  /**
+   * {@code lookups} less every membership that stands alone as a conjunct of {@code predicate}:
+   * Calcite makes that one the semi-join {@code ContextKeySetRule} ships to a remote source as a key
+   * set (F45, F50), which a lookup, answered here, never could be.
+   */
+  private static Map<String, RexNode> besideLoneConjuncts(
+      Map<String, RexNode> lookups, RexNode predicate) {
+    Map<String, RexNode> kept = new java.util.LinkedHashMap<>(lookups);
+    for (RexNode conjunct : RelOptUtil.conjunctions(predicate)) {
+      if (conjunct instanceof RexSubQuery) {
+        kept.remove(conjunct.toString());
+      }
+    }
+    return kept;
+  }
+
+  /**
+   * A {@code through} leaf with its lookups in place: in what it restricts, in its rules, and in the
+   * restriction clause 3 reads where the optimiser removed a marker's join (F69) — the same filter
+   * the plan holds, so the same pulled-up predicates prove it.
+   */
+  private LeafFold lookedUpThrough(TableScan scan, LeafFold whole, Map<String, RexNode> lookups) {
+    Through through = whole.through();
+    Map<String, RexNode> inPredicate =
+        whole.predicate() == null || whole.trusted()
+            ? lookups
+            : besideLoneConjuncts(lookups, whole.predicate());
+    RexNode predicate =
+        whole.predicate() == null ? null : replaceMemberships(whole.predicate(), inPredicate);
+    DescriptorExpressions descriptor =
+        whole
+            .descriptor()
+            .rewrite(expression -> replaceMemberships(expression, lookups))
+            .withRowPredicate(predicate);
+    Through looked =
+        new Through(
+            through.layout(),
+            through.plan(),
+            through.elided(),
+            through.dropped(),
+            through.offsets(),
+            through.verdicts(),
+            through.inner(),
+            through.markers(),
+            through.own() == null ? null : replaceMemberships(through.own(), inPredicate));
+    return leafFold(
+        scan,
+        descriptor,
+        whole.statementConjuncts(),
+        predicate,
+        whole.trusted(),
+        whole.map().visibility(),
+        looked);
+  }
+
+  /** {@code node} with every membership {@code with} names replaced by what it maps it to. */
+  private static RexNode replaceMemberships(RexNode node, Map<String, RexNode> with) {
+    return node.accept(
+        new RexShuttle() {
+          @Override
+          public RexNode visitSubQuery(RexSubQuery subQuery) {
+            RexNode stands = with.get(subQuery.toString());
+            return stands == null ? super.visitSubQuery(subQuery) : stands;
+          }
+        });
+  }
+
   // ------------------------------------------------------------------ through: the joins (§3.13)
 
   /**
@@ -1937,7 +2125,26 @@ public final class EntitlementPass {
    * beneath the child's sanitiser, which is what lets the mechanism work without the key being
    * disclosed to the statement.
    */
-  private RelNode emitThrough(TableScan scan, LeafFold fold, @Nullable ParentProjection asParent) {
+  private RelNode emitThrough(
+      TableScan scan, LeafFold whole, @Nullable ParentProjection asParent) {
+    // The leaf's own memberships — of what it restricts by itself, and of its rules — are set lookups
+    // as a leaf's without a parent are (F161): nothing splits a `through` leaf, and Calcite would join
+    // each against its list, a level deeper per list, twice over — once for the filter and once for
+    // the sanitisers.
+    List<RexNode> expressions = expressionsOf(whole);
+    if (asParent != null) {
+      expressions.addAll(asParent.verdicts());
+    }
+    Map<String, RexNode> lookups = lookupsOf(expressions);
+    LeafFold fold = lookups.isEmpty() ? whole : lookedUpThrough(scan, whole, lookups);
+    if (asParent != null && !lookups.isEmpty()) {
+      List<RexNode> verdicts = new ArrayList<>(asParent.verdicts().size());
+      for (RexNode verdict : asParent.verdicts()) {
+        verdicts.add(replaceMemberships(verdict, lookups));
+      }
+      asParent = new ParentProjection(asParent.keyColumn(), verdicts);
+    }
+
     Through through = fold.through();
     leaves.add(fold.map());
 
@@ -2043,7 +2250,24 @@ public final class EntitlementPass {
     if (context.anyShape()) {
       return emitMarked(scan, fold, projection);
     }
-    return emitLeaf(scan, fold, null, projection);
+    // A list too large to fold is still a sub-query here, and the split of F36 is a leaf's alone:
+    // every membership over one is the lookup it is past the split, the child's verdicts' included,
+    // or Calcite joins each against its list (F161, D325).
+    List<RexNode> expressions = expressionsOf(fold);
+    expressions.addAll(verdicts);
+    Map<String, RexNode> lookups = lookupsOf(expressions);
+    if (lookups.isEmpty()) {
+      return emitLeaf(scan, fold, null, projection);
+    }
+    List<RexNode> looked = new ArrayList<>(verdicts.size());
+    for (RexNode verdict : verdicts) {
+      looked.add(replaceMemberships(verdict, lookups));
+    }
+    return emitLeaf(
+        scan,
+        lookedUp(scan, fold, lookups),
+        null,
+        new ParentProjection(entry.parentColumn(), looked));
   }
 
   /**
@@ -2138,8 +2362,19 @@ public final class EntitlementPass {
     // where the last step's table does.
     int endpoint = at;
     RexNode predicate = path.endpointPredicate();
+
+    // A membership over a list bound at execution, or too large to fold, is a set lookup here as it
+    // is in a leaf (F161): the endpoint's filter is no leaf's, so nothing splits it, and Calcite
+    // would join each membership against its list — a chain one level deeper per list, which is
+    // what a wide policy's key set was. One standing alone as a conjunct keeps its sub-query.
+    List<RexNode> expressions = new ArrayList<>(verdicts);
     if (predicate != null) {
-      RexNode folded = simplify.simplifyUnknownAsFalse(shift(predicate, endpoint));
+      expressions.add(predicate);
+    }
+    Map<String, RexNode> lookups = lookupsOf(expressions);
+    if (predicate != null) {
+      RexNode looked = replaceMemberships(predicate, besideLoneConjuncts(lookups, predicate));
+      RexNode folded = simplify.simplifyUnknownAsFalse(shift(looked, endpoint));
       if (!folded.isAlwaysTrue()) {
         rel = LogicalFilter.create(rel, folded);
       }
@@ -2150,7 +2385,7 @@ public final class EntitlementPass {
     grouped.add(rexBuilder.makeInputRef(rel, path.baseKey()));
     names.add(chalk.planner.ReservedNames.PREFIX + "key");
     for (int i = 0; i < verdicts.size(); i++) {
-      grouped.add(shift(verdicts.get(i), endpoint));
+      grouped.add(shift(replaceMemberships(verdicts.get(i), lookups), endpoint));
       names.add(chalk.planner.ReservedNames.PREFIX + "verdict" + i);
     }
 
@@ -2759,12 +2994,18 @@ public final class EntitlementPass {
    * <p>A condition is read as {@code IS TRUE}: first match wins means the rule matches when its
    * condition holds, not when it is unknown — and it keeps the sanitiser's own nullability off the
    * conditions, which is what stops a NOT NULL column widening for no reason.
+   *
+   * <p>A condition the simplifier leaves open is tried again with the statement's own constants
+   * put in its columns ({@link #constants}), and taken in that form only where that settles it: a
+   * rule the constant decides is decided, and one it leaves open — a lookup of the constant, which
+   * only the execution can answer — keeps the plan it had.
    */
   private Reachable reachable(
       DescriptorExpressions.@Nullable Column entitled,
       TableEntitlement entitlement,
       RexSimplify underFilter,
-      List<RexNode> conjuncts) {
+      List<RexNode> conjuncts,
+      Map<Integer, RexNode> constants) {
     Disclosure otherwise =
         entitled == null
             ? defaultDisclosure(entitlement)
@@ -2784,6 +3025,15 @@ public final class EntitlementPass {
               ? rexBuilder.makeLiteral(true)
               : underFilter.simplifyUnknownAsFalse(
                   rexBuilder.makeCall(SqlStdOperatorTable.IS_TRUE, entitled.condition(i)));
+      if (!constants.isEmpty() && !condition.isAlwaysTrue() && !condition.isAlwaysFalse()) {
+        RexNode settled =
+            underFilter.simplifyUnknownAsFalse(
+                rexBuilder.makeCall(
+                    SqlStdOperatorTable.IS_TRUE, substitute(entitled.condition(i), constants)));
+        if (settled.isAlwaysTrue() || settled.isAlwaysFalse()) {
+          condition = settled;
+        }
+      }
       if (condition.isAlwaysFalse()) {
         continue;
       }

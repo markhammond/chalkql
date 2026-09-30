@@ -37,6 +37,7 @@ public sealed class TenancyPolicy
     private readonly Dictionary<string, RealmDeclaration> _realms = new(StringComparer.Ordinal);
     private readonly List<TableDeclaration> _tables = [];
     private readonly List<AssociationDescriptor> _associations = [];
+    private readonly List<DeclaredCombination> _combinations = [];
 
     private TenancyPolicy(CatalogContext catalog)
     {
@@ -196,6 +197,99 @@ public sealed class TenancyPolicy
     public bool AllowsGlobalGrants { get; private set; }
 
     /// <summary>
+    /// Declares a combination of tenancy kinds that grants in <paramref name="roles"/> hold
+    /// together (<c>docs/design/59-declared-combinations.md</c>, D320).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A policy that declares none compiles as it always has: every subset of the kinds a row
+    /// resolves is a membership test per role, under the four-kind cap. A policy that declares any
+    /// compiles its combinations and nothing else — one membership test per combination and admitted
+    /// role on each route that answers it: the row itself, one path's endpoint read beside the row,
+    /// or a parent's row. A combination whose kinds the table declares but that no one route
+    /// answers is refused when the policy compiles, naming the table.
+    /// </para>
+    /// <para>
+    /// A combination is a set: the kind a grant names first is a spelling, so
+    /// <c>ForTenancy(releasability, …).Within(classification, …)</c> and the reverse fill the same
+    /// test. In a declaring policy every tenancy grant must be one of the combinations its role
+    /// declares — a grant on one kind alone as well — or it is refused at binding, naming them.
+    /// Subject grants keep <c>Subject(name, within: …)</c>.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="CatalogValidationException">
+    /// No role or no kind, a marker role, a role or a kind named twice, or a handle of another policy.
+    /// </exception>
+    public TenancyPolicy Combination(IReadOnlyList<Role> roles, params Kind[] kinds)
+    {
+        ArgumentNullException.ThrowIfNull(roles);
+        ArgumentNullException.ThrowIfNull(kinds);
+        const string where = "tenancy.combinations";
+
+        if (roles.Count == 0 || kinds.Length == 0)
+        {
+            throw new CatalogValidationException(
+                where,
+                $"a combination names {(roles.Count == 0 ? "no role" : "no kind")}. It is the roles "
+                + "whose grants hold it and the tenancy kinds they hold together: "
+                + "Combination([analyst], classification, mission) "
+                + "(docs/design/59-declared-combinations.md §1, D320).");
+        }
+
+        var roleNames = new List<string>(roles.Count);
+        foreach (var role in roles)
+        {
+            var declaration = Require(role, where);
+            if (declaration.Marker != RoleMarker.None)
+            {
+                throw new CatalogValidationException(
+                    where,
+                    $"a combination names '{role.Name}', which stands for a relation to a row rather "
+                    + "than a role a grant is held in. Name the roles grants are held in "
+                    + "(docs/design/59-declared-combinations.md §1, D320).");
+            }
+
+            if (roleNames.Contains(role.Name, StringComparer.Ordinal))
+            {
+                throw new CatalogValidationException(
+                    where,
+                    $"a combination names role '{role.Name}' twice "
+                    + "(docs/design/59-declared-combinations.md §1, D320).");
+            }
+
+            roleNames.Add(role.Name);
+        }
+
+        var kindNames = new List<string>(kinds.Length);
+        foreach (var kind in kinds)
+        {
+            var name = Require(kind, where).Name;
+            if (kindNames.Contains(name, StringComparer.Ordinal))
+            {
+                throw new CatalogValidationException(
+                    where,
+                    $"a combination names kind '{name}' twice. A combination is a set of kinds held "
+                    + "at once, and one kind cannot take two values in one grant "
+                    + "(docs/design/59-declared-combinations.md §1, D320).");
+            }
+
+            kindNames.Add(name);
+        }
+
+        // Declared twice is declared once.
+        foreach (var known in _combinations)
+        {
+            if (DeclaredCombination.SameSet(known.Roles, roleNames) && known.Is(kindNames))
+            {
+                return this;
+            }
+        }
+
+        _combinations.Add(new DeclaredCombination { Roles = roleNames, Kinds = kindNames });
+        return this;
+    }
+
+    /// <summary>
     /// The cross-source associations this policy's <see cref="Column.References(Column)"/> calls
     /// declared, for the <see cref="CatalogContext.Associations"/> the host registers (§3, D270 (c)).
     /// </summary>
@@ -262,6 +356,12 @@ public sealed class TenancyPolicy
     /// <summary>Every request scope a grant or a visibility rule may name.</summary>
     internal IReadOnlyList<string> Scopes { get; private set; } = [];
 
+    /// <summary>
+    /// The declared combinations (D320), or empty for a policy that declares none, which compiles
+    /// every subset as before.
+    /// </summary>
+    internal IReadOnlyList<DeclaredCombination> Combinations { get; private set; } = [];
+
     /// <summary>The tables this policy speaks about, in declaration order.</summary>
     internal IReadOnlyList<TenancyTable> Tables { get; private set; } = [];
 
@@ -322,6 +422,7 @@ public sealed class TenancyPolicy
         Kinds = kinds;
         Roles = [.. _roles.Values.Select(r => r.Name)];
         Scopes = [.. _scopes.Values.Select(s => s.Name)];
+        Combinations = [.. _combinations];
 
         var tables = new List<TenancyTable>(_tables.Count);
         foreach (var declaration in _tables)

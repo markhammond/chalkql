@@ -27,14 +27,16 @@ public sealed class GrpcPlannerOptions
     public int MaxReceiveMessageSizeMb { get; init; } = 64;
 
     /// <summary>
-    /// How deep the plan message the sidecar returns may nest (F102). Protobuf's parser guards its
-    /// own stack with a recursion limit of 100 levels, which an entirely unbound prepare over a wide
-    /// policy — several tenancy kinds, a subject, many roles, D266's confinement pairs — can exceed
-    /// in the predicate the pass writes. The limit is applied to the plan response alone; every
-    /// other message keeps protobuf's default. Must be at least 1; unbounded is not offered, because
-    /// the limit is what keeps a hostile message from overflowing the parser's stack.
+    /// How deep a plan the sidecar returns may nest, in protobuf message levels (F102, F161): the one
+    /// limit the plan response's parse and every validation of the plan apply
+    /// (<see cref="IQueryPlanner.PlanNestingLimit"/>). The default is
+    /// <see cref="Chalk.Ir.PlanLimits.DefaultNestingLimit"/>, under half the depth every reader of a
+    /// plan was measured to survive. Must be at least 1; unbounded is not offered, because the limit
+    /// is what keeps a plan from exhausting the stack of the code that reads it — the parser, the
+    /// validator and the compiler all recurse once per level — so raise it only on a host whose
+    /// threads have the stack to match.
     /// </summary>
-    public int PlanNestingLimit { get; init; } = 1000;
+    public int PlanNestingLimit { get; init; } = Chalk.Ir.PlanLimits.DefaultNestingLimit;
 
     public ILoggerFactory? LoggerFactory { get; init; }
 }
@@ -135,14 +137,8 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
         catch (Google.Protobuf.InvalidProtocolBufferException e)
             when (e.Message.Contains("nesting", StringComparison.OrdinalIgnoreCase))
         {
-            throw new PlanningException(
-                PlanErrorKind.Internal,
-                $"the plan the planner returned nests deeper than this client's limit of "
-                + $"{nestingLimit} levels (GrpcPlannerOptions.PlanNestingLimit). An entirely unbound "
-                + "prepare over a wide policy writes a deep predicate: bind the axes every principal "
-                + "binds alike with Shape(names), or raise the limit.",
-                position: null,
-                e);
+            var tooDeep = new Chalk.Ir.PlanTooDeepException(nestingLimit, e);
+            throw new PlanningException(PlanErrorKind.Internal, tooDeep.Message, position: null, tooDeep);
         }
 
         return response;
@@ -150,6 +146,9 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
 
     /// <summary>The address this planner talks to, for diagnostics.</summary>
     public Uri Address => _options.Address;
+
+    /// <inheritdoc/>
+    public int PlanNestingLimit => _options.PlanNestingLimit;
 
     public async ValueTask<PlannerInfo> GetInfoAsync(CancellationToken ct = default)
     {

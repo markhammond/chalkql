@@ -184,6 +184,7 @@ Chalk.Entitlements.Tenancy.TenancyPolicy
 Chalk.Entitlements.Tenancy.TenancyPolicy.AllowGlobalGrants(bool allow = true) -> Chalk.Entitlements.Tenancy.TenancyPolicy!
 Chalk.Entitlements.Tenancy.TenancyPolicy.AllowsGlobalGrants.get -> bool
 Chalk.Entitlements.Tenancy.TenancyPolicy.Associations.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.AssociationDescriptor!>!
+Chalk.Entitlements.Tenancy.TenancyPolicy.Combination(System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.Tenancy.Role>! roles, params Chalk.Entitlements.Tenancy.Kind[]! kinds) -> Chalk.Entitlements.Tenancy.TenancyPolicy!
 Chalk.Entitlements.Tenancy.TenancyPolicy.Compile(Chalk.Catalog.CatalogContext! catalog) -> Chalk.Entitlements.Tenancy.TenancyEntitlements!
 Chalk.Entitlements.Tenancy.TenancyPolicy.Compile(System.Collections.Generic.IReadOnlyList<Chalk.Catalog.SchemaDescriptor!>! schemas) -> Chalk.Entitlements.Tenancy.TenancyEntitlements!
 Chalk.Entitlements.Tenancy.TenancyPolicy.Realm(string! name) -> Chalk.Entitlements.Tenancy.Realm

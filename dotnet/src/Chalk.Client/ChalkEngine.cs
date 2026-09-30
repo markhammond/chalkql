@@ -128,6 +128,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         _settings = new ExecutionSettings
         {
             BatchSize = options.Execution.BatchSize,
+            PlanNestingLimit = options.Planner.PlanNestingLimit,
             UseReferenceEngine = options.Execution.Engine == ExecutionEngine.Reference,
             ForceBufferedWindows =
                 options.Execution.WindowExecution == WindowExecution.Buffered,
@@ -1805,13 +1806,24 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         // and how many columns has it", and it walks the physical plan to see whether that can be believed.
         // The clause that compares the plan against a *report* needs the report, so it is the entitlement
         // wrapper that asks for it; this clause is catalog data and stays here, where every prepare passes.
-        PlanValidator.Validate(
-            result.Plan,
-            new PlanValidationOptions
-            {
-                EntitledTables = EntitledColumnCount,
-                PopulationAggregates = IsPopulationAggregate,
-            });
+        try
+        {
+            PlanValidator.Validate(
+                result.Plan,
+                new PlanValidationOptions
+                {
+                    EntitledTables = EntitledColumnCount,
+                    PopulationAggregates = IsPopulationAggregate,
+                    NestingLimit = PlanNestingLimit,
+                });
+        }
+        catch (PlanTooDeepException tooDeep)
+        {
+            // The one limit, held here for a planner that hands over a plan without parsing one
+            // (F102, F161): refused by name, never as the stack overflow reading it could be.
+            throw new PlanningException(PlanErrorKind.Internal, tooDeep.Message, position: null, tooDeep);
+        }
+
         return result;
     }
 
@@ -1965,6 +1977,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             StructuralHash = redacted.StructuralHash,
         };
     }
+
+    /// <summary>The one nesting limit every read of a plan applies: the planner's (F102, F161).</summary>
+    internal int PlanNestingLimit => _options.Planner.PlanNestingLimit;
 
     /// <summary>
     /// How many columns this table has, when this client's own catalog says it carries an
