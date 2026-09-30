@@ -31,6 +31,13 @@ namespace Chalk.Entitlements;
 public sealed class EntitlementException : ChalkException
 {
     public EntitlementException(string message, SqlPosition? position, Exception? innerException = null)
+        : this(message, position, refusal: null, innerException)
+    {
+    }
+
+    /// <summary>The same, carrying what was refused and the result the statement would have had.</summary>
+    internal EntitlementException(
+        string message, SqlPosition? position, EntitlementRefusal? refusal, Exception? innerException)
         : base(
             position is { Line: > 0 }
                 ? $"Refused by the entitlements at {position}: {message}"
@@ -38,6 +45,8 @@ public sealed class EntitlementException : ChalkException
             innerException)
     {
         Position = position;
+        PlannerMessage = message;
+        Refusal = refusal;
     }
 
     /// <summary>Always <see cref="PlanErrorKind.Policy"/>, so the two exceptions read alike.</summary>
@@ -45,4 +54,17 @@ public sealed class EntitlementException : ChalkException
 
     /// <summary>Where in the SQL, when the planner reported it.</summary>
     public SqlPosition? Position { get; }
+
+    /// <summary>
+    /// What was refused and the result the statement would have had (D329): the reason, the table,
+    /// column and use, and the table model in the same form as a prepared statement's schema. Null
+    /// where the planner said nothing more than the message, as one older than this client does.
+    /// </summary>
+    public EntitlementRefusal? Refusal { get; internal set; }
+
+    /// <summary>The planner's own message, before this exception's prefix, for a refusal answered again.</summary>
+    internal string PlannerMessage { get; }
+
+    /// <summary>The refusal as the wire carried it, which the engine turns into <see cref="Refusal"/>.</summary>
+    internal PolicyRefusal? WireRefusal { get; init; }
 }

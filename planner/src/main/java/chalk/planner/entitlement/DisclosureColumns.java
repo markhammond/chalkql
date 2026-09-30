@@ -3,6 +3,7 @@ package chalk.planner.entitlement;
 import chalk.ir.v1.Disclosure;
 import chalk.ir.v1.Type;
 import chalk.ir.v1.TypeKind;
+import chalk.planner.rpc.v1.PolicyRefusalReason;
 import chalk.planner.types.TypeMapper;
 import com.google.common.collect.ImmutableList;
 import java.math.BigDecimal;
@@ -366,6 +367,11 @@ public final class DisclosureColumns {
       String sibling = name + suffix;
       if (taken.contains(sibling)) {
         throw new PolicyException(
+            PolicyRefusalReason.POLICY_REFUSAL_REASON_NAME_COLLISION,
+            "",
+            sibling,
+            "",
+            List.of(),
             "this statement already produces a column called '"
                 + sibling
                 + "', and PrepareOptions.IncludeDisclosureColumns would name the sibling of '"

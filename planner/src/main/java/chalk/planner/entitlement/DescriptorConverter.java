@@ -1,6 +1,7 @@
 package chalk.planner.entitlement;
 
 import chalk.planner.catalog.ChalkTable;
+import chalk.planner.rpc.v1.PolicyRefusalReason;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
 import org.apache.calcite.config.CalciteConnectionConfig;
@@ -197,6 +198,7 @@ public final class DescriptorConverter {
       parsed = SqlParser.create(text, parserConfig).parseQuery();
     } catch (org.apache.calcite.sql.parser.SqlParseException e) {
       throw new PolicyException(
+          PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
           "the entitlement on "
               + where
               + " does not parse: "
@@ -221,6 +223,7 @@ public final class DescriptorConverter {
               parents.isEmpty() ? folded.node() : qualifyTarget(folded.node(), qualified));
     } catch (RuntimeException e) {
       throw new PolicyException(
+          PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
           "the entitlement on "
               + where
               + " does not type-check against the table: "
@@ -237,6 +240,7 @@ public final class DescriptorConverter {
     Project project = projectOf(root.rel);
     if (project == null) {
       throw new PolicyException(
+          PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
           "the entitlement on "
               + where
               + " converts to a shape the pass cannot place on a leaf. Its expressions must be"
@@ -334,6 +338,7 @@ public final class DescriptorConverter {
             String table = catalogTableIn(subQuery.rel);
             if (table != null) {
               throw new PolicyException(
+                  PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
                   "the entitlement on "
                       + where
                       + " reads the catalog table "
@@ -406,7 +411,9 @@ public final class DescriptorConverter {
     try {
       return context == null ? ContextSql.rewriteForRegistration(sql) : ContextSql.rewrite(sql, context);
     } catch (IllegalArgumentException e) {
-      throw new PolicyException("the entitlement on " + where + ": " + e.getMessage());
+      throw new PolicyException(
+              PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
+              "the entitlement on " + where + ": " + e.getMessage());
     }
   }
 

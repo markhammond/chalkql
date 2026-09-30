@@ -17,7 +17,7 @@ namespace Chalk.Entitlements;
 internal static class Disclosures
 {
     /// <summary>The Arrow field metadata key a typed consumer reads (D161).</summary>
-    internal const string MetadataKey = "chalk.disclosure";
+    internal const string MetadataKey = Chalk.Client.DisclosureLabels.MetadataKey;
 
     /// <summary>The message of type <typeparamref name="T"/> one of these extensions carries.</summary>
     internal static T? Find<T>(IReadOnlyList<Google.Protobuf.WellKnownTypes.Any> extensions)
@@ -277,12 +277,12 @@ internal static class Disclosures
     /// </summary>
     internal static string Name(ReportedDisclosure disclosure) => disclosure switch
     {
-        ReportedDisclosure.Masked => "MASKED",
-        ReportedDisclosure.Redacted => "REDACTED",
-        ReportedDisclosure.PerRow => "PER_ROW",
-        ReportedDisclosure.Aggregate => "AGGREGATE",
-        ReportedDisclosure.Tested => "TESTED",
-        _ => "FULL",
+        ReportedDisclosure.Masked => Chalk.Client.DisclosureLabels.Masked,
+        ReportedDisclosure.Redacted => Chalk.Client.DisclosureLabels.Redacted,
+        ReportedDisclosure.PerRow => Chalk.Client.DisclosureLabels.PerRow,
+        ReportedDisclosure.Aggregate => Chalk.Client.DisclosureLabels.Aggregate,
+        ReportedDisclosure.Tested => Chalk.Client.DisclosureLabels.Tested,
+        _ => Chalk.Client.DisclosureLabels.Full,
     };
 
     private static ReportedDisclosure Map(Rpc.ReportedDisclosure reported) => reported switch

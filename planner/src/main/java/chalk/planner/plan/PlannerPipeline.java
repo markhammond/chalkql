@@ -31,6 +31,7 @@ import org.apache.calcite.rel.core.RelFactories;
 import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexUtil;
@@ -87,6 +88,9 @@ public final class PlannerPipeline implements AutoCloseable {
 
   /** This run's governor, or null for a run no option can end early (D235). */
   private chalk.planner.diag.@Nullable PlanningGovernor governor;
+
+  /** What a refusal raised in this run is told of, once the pass has decided it (D329). */
+  private @Nullable RefusalModel refusalModel;
 
   /**
    * The listener that carries whichever governor this run has. One per pipeline and registered once,
@@ -757,6 +761,59 @@ public final class PlannerPipeline implements AutoCloseable {
       chalk.planner.diag.@Nullable PlanningGovernor governor,
       chalk.planner.redact.@Nullable PlanTextRedactor redactor)
       throws RelConversionException {
+    // A refusal raised once the pass has decided the statement's columns takes the result the
+    // statement would have had with it, so a host can still return the table model (D329). The
+    // statement's own columns, whatever stage refused it: disclosure siblings and Omit's trimming
+    // are for a result that runs.
+    refusalModel = null;
+    try {
+      return run(front, context, includePlanText, narrowedFrom, governor, redactor);
+    } catch (chalk.planner.entitlement.PolicyException refused) {
+      RefusalModel model = refusalModel;
+      org.apache.calcite.rel.RelNode tree = refused.tree();
+      if (model == null && tree != null) {
+        // Refused inside the pass, which rewrote the statement to say what it would have returned.
+        model = new RefusalModel(front.root().fields, tree, refused.flow());
+      }
+      throw model == null ? refused : model.attach(refused);
+    }
+  }
+
+  /**
+   * The output columns and disclosures a refusal is told of: the fields the caller would have been
+   * given, over the tree whose row type they index, and the flow that labels them.
+   */
+  private record RefusalModel(
+      ImmutablePairList<Integer, String> fields,
+      RelNode tree,
+      List<chalk.planner.entitlement.Disclosed> flow) {
+
+    chalk.planner.entitlement.PolicyException attach(
+        chalk.planner.entitlement.PolicyException refused) {
+      chalk.planner.types.TypeMapper types =
+          new chalk.planner.types.TypeMapper(tree.getCluster().getTypeFactory());
+      chalk.ir.v1.RowType.Builder output = chalk.ir.v1.RowType.newBuilder();
+      List<RelDataTypeField> row = tree.getRowType().getFieldList();
+      for (int i = 0; i < fields.size(); i++) {
+        output.addFields(
+            chalk.ir.v1.Field.newBuilder()
+                .setName(fields.rightList().get(i))
+                .setType(types.toIr(row.get(fields.leftList().get(i)).getType())));
+      }
+      return refused.withOutput(
+          output.build(),
+          chalk.planner.entitlement.DisclosureReport.columns(fields.leftList(), flow));
+    }
+  }
+
+  private Result run(
+      Front front,
+      chalk.planner.entitlement.BoundContext context,
+      boolean includePlanText,
+      @Nullable String narrowedFrom,
+      chalk.planner.diag.@Nullable PlanningGovernor governor,
+      chalk.planner.redact.@Nullable PlanTextRedactor redactor)
+      throws RelConversionException {
     this.governor = governor;
     long t3start = System.nanoTime();
     if (front.metadataProvider() != null) {
@@ -796,6 +853,7 @@ public final class PlannerPipeline implements AutoCloseable {
       // Refusing it by name is the fail-closed answer, and it now names both ways out (§2, D209).
       if (context.isEmpty() && !context.shapeOnly()) {
         throw new chalk.planner.entitlement.PolicyException(
+            chalk.planner.rpc.v1.PolicyRefusalReason.POLICY_REFUSAL_REASON_NO_CONTEXT,
             "this catalog carries an entitlement and the request binds no execution context, so"
                 + " there is nothing for the policy's @ctx names to resolve against. Prepare with a"
                 + " context — the primary mode — or with a shape-only one and bind the values at"
@@ -817,6 +875,7 @@ public final class PlannerPipeline implements AutoCloseable {
       siblings = rewritten.siblings();
       rowPredicates = rewritten.rowPredicates();
       throughJoins = rewritten.throughJoins();
+      refusalModel = new RefusalModel(root.fields, logical, flow);
       // Clause 1 of the taint check, here and not later: AGGREGATE_REDUCE_FUNCTIONS rewrites AVG
       // into SUM0 and COUNT in the Hep pass below, and a physical check against a host's list of
       // AVG alone would refuse a correct plan (§3.10).

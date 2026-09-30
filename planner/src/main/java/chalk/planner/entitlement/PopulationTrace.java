@@ -1,5 +1,6 @@
 package chalk.planner.entitlement;
 
+import chalk.planner.rpc.v1.PolicyRefusalReason;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
@@ -105,11 +106,21 @@ final class PopulationTrace {
   /** Left-hand taints by correlation id, for the field accesses inside a correlated sub-query. */
   private final Map<CorrelationId, Map<Integer, Taint>> correlations = new HashMap<>();
 
+  /**
+   * Walking a statement already refused, to place every guard its permitted aggregates would take
+   * (D329): no use is refused, the walk goes on past each, and nothing it finds is ever a refusal.
+   */
+  private final boolean describing;
+
   private PopulationTrace(
-      Map<TableScan, EntitlementPass.LeafFold> folds, PolicyOptions options, TestLift.Plan lifts) {
+      Map<TableScan, EntitlementPass.LeafFold> folds,
+      PolicyOptions options,
+      TestLift.Plan lifts,
+      boolean describing) {
     this.folds = folds;
     this.options = options;
     this.lifts = lifts;
+    this.describing = describing;
   }
 
   /**
@@ -134,12 +145,30 @@ final class PopulationTrace {
       return new Result(java.util.Collections.emptyMap(), java.util.Collections.emptyMap());
     }
 
-    PopulationTrace trace = new PopulationTrace(folds, options, lifts);
+    PopulationTrace trace = new PopulationTrace(folds, options, lifts, false);
     Map<Integer, Taint> atRoot = trace.visit(root);
     if (!atRoot.isEmpty()) {
       Taint taint = atRoot.values().iterator().next();
       throw refuse(taint, "a projection to the result", null);
     }
+    return new Result(trace.guards, trace.suppressions);
+  }
+
+  /**
+   * The guards and suppressions of a statement already refused, from a walk that refuses nothing
+   * (D329). A refusal the trace raises partway stops it before the guards of what it had not reached
+   * are placed; this walk goes on past every use {@link #run} would refuse, so each permitted
+   * population aggregate takes the guard it would take in a statement that runs, and a pass
+   * describing the refused statement gives it the nullable type the guard makes. It decides nothing:
+   * which refusal is raised is {@link #run}'s.
+   */
+  static Result describe(
+      RelNode root,
+      Map<TableScan, EntitlementPass.LeafFold> folds,
+      PolicyOptions options,
+      TestLift.Plan lifts) {
+    PopulationTrace trace = new PopulationTrace(folds, options, lifts, true);
+    trace.visit(root);
     return new Result(trace.guards, trace.suppressions);
   }
 
@@ -181,7 +210,7 @@ final class PopulationTrace {
       for (org.apache.calcite.rel.RelFieldCollation field : sort.getCollation().getFieldCollations()) {
         Taint taint = in.get(field.getFieldIndex());
         if (taint != null) {
-          throw refuse(taint, "a sort key", null);
+          refused(taint, "a sort key", null);
         }
       }
       return in;
@@ -208,7 +237,7 @@ final class PopulationTrace {
     // exactly the escape the layer exists to close.
     Map<Integer, Taint> in = concatenatedInputs(rel);
     if (!in.isEmpty()) {
-      throw refuse(in.values().iterator().next(), rel.getRelTypeName(), null);
+      refused(in.values().iterator().next(), rel.getRelTypeName(), null);
     }
     return Map.of();
   }
@@ -299,7 +328,8 @@ final class PopulationTrace {
         continue;
       }
       if (!taint.statistical()) {
-        throw refuse(taint, "a grouping key", null);
+        refused(taint, "a grouping key", null);
+        continue;
       }
       // A raw grouping key is k-anonymous, and that is the whole of what makes it safe (D203).
       floor = Math.max(floor, taint.floor());
@@ -324,7 +354,8 @@ final class PopulationTrace {
       if (call.filterArg >= 0 && in.containsKey(call.filterArg)) {
         Taint filtered = in.get(call.filterArg);
         if (filtered == null || !filtered.statistical()) {
-          throw refuse(taint, "an aggregate's FILTER clause", function);
+          refused(taint, "an aggregate's FILTER clause", function);
+          continue;
         }
         // A statistical FILTER is permitted, and this call reads nothing else of the column:
         // COUNT(*) FILTER (WHERE …) takes no argument at all.
@@ -333,10 +364,12 @@ final class PopulationTrace {
         }
       }
       if (call.getArgList().size() != 1) {
-        throw refuse(taint, "an aggregate over more than this column", function);
+        refused(taint, "an aggregate over more than this column", function);
+        continue;
       }
       if (!taint.allowList().contains(function)) {
-        throw refuse(taint, "an aggregate outside this column's allow-list", function);
+        refused(taint, "an aggregate outside this column's allow-list", function);
+        continue;
       }
       // An effective floor of one or less is no guard at all (D211): no COUNT(c), no projection.
       // The refusals above still ran — the floor decides what a permitted aggregate costs, never
@@ -434,7 +467,7 @@ final class PopulationTrace {
                 pendingFloor = Math.max(pendingFloor, taint.floor());
                 return null;
               }
-              throw refuse(taint, use, null);
+              refused(taint, use, null);
             }
             return null;
           }
@@ -448,7 +481,7 @@ final class PopulationTrace {
                     public Void visitInputRef(RexInputRef ref) {
                       Taint taint = in.get(ref.getIndex());
                       if (taint != null) {
-                        throw refuse(taint, "a window aggregate", over.getAggOperator().getName());
+                        refused(taint, "a window aggregate", over.getAggOperator().getName());
                       }
                       return null;
                     }
@@ -463,7 +496,7 @@ final class PopulationTrace {
               Map<Integer, Taint> outer = correlations.get(variable.id);
               Taint taint = outer == null ? null : outer.get(access.getField().getIndex());
               if (taint != null) {
-                throw refuse(taint, use, null);
+                refused(taint, use, null);
               }
               return null;
             }
@@ -476,11 +509,21 @@ final class PopulationTrace {
             // query use of the value by whatever the sub-query feeds.
             Map<Integer, Taint> inner = visit(subQuery.rel);
             if (!inner.isEmpty()) {
-              throw refuse(inner.values().iterator().next(), "a sub-query's result", null);
+              refused(inner.values().iterator().next(), "a sub-query's result", null);
             }
             return super.visitSubQuery(subQuery);
           }
         });
+  }
+
+  /**
+   * A use no disclosure permits: refused, or, walking a statement already refused, passed over so
+   * the walk can go on to the guards beyond it.
+   */
+  private void refused(Taint taint, String use, @Nullable String function) {
+    if (!describing) {
+      throw refuse(taint, use, function);
+    }
   }
 
   private static PolicyException refuse(Taint taint, String use, @Nullable String function) {
@@ -502,6 +545,12 @@ final class PopulationTrace {
         .append(" type. A predicate, a grouping key, a sort key, a FILTER clause, a window aggregate")
         .append(" or a value use of the raw value is refused for every principal, because a")
         .append(" comparison on a raw value is an oracle (docs/design/16-entitlements.md §3.4).");
-    return new PolicyException(message.toString());
+    return new PolicyException(
+        PolicyRefusalReason.POLICY_REFUSAL_REASON_POPULATION_ONLY,
+        taint.table(),
+        taint.column(),
+        function == null ? use : use + ": " + function,
+        taint.allowList(),
+        message.toString());
   }
 }

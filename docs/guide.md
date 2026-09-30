@@ -329,6 +329,41 @@ there is no "unlimited" setting, because the limit is what protects the stack. R
 only for statements that need it, and only on a host whose threads have the stack space
 to match.
 
+### The shape of a result, before it runs
+
+`PrepareAsync` plans and compiles a statement, and reads no rows. The `PreparedQuery` it
+returns already knows the shape of the result. `OutputSchema` is an Arrow schema holding
+each column's name, type and nullability. You can read it before you run the statement, or
+without running it at all. Every batch carries the same schema, so a result with no rows
+has the same shape as a full one.
+
+This is what other APIs call *describing* a statement. JDBC puts it on the prepared
+statement (`PreparedStatement.getMetaData()`), and so does Chalk. ADO.NET needs
+`CommandBehavior.SchemaOnly` for it, because `DbCommand.Prepare()` returns nothing.
+
+For code that works with `System.Data`, `ToDataTable()` turns a schema into an empty
+`DataTable`, as `DbDataAdapter.FillSchema` does:
+
+```csharp
+var q = await engine.PrepareAsync("SELECT currency, ts, rate FROM usd_rates");
+DataTable table = q.OutputSchema.ToDataTable("usd_rates");   // three columns, no rows
+```
+
+- Each column has the .NET type Chalk reads the value as: `DateOnly` for a date,
+  `TimeOnly` for a time, `DateTime` for a timestamp and `DateTimeOffset` for one with a
+  time zone, `TimeSpan` for a day-to-second interval, an `int` of months for a year-month
+  one, and `Guid` for a UUID. `AllowDBNull` is the column's nullability.
+- A `DataTable` has no nested columns. So a composite column is one column of type
+  `object`, and its fields are described in `ExtendedProperties["chalk.fields"]`.
+- Where two columns of the result share a name, the second is numbered, as `FillSchema`
+  numbers it: `id`, then `id1`.
+- Where the schema carries a column's disclosure (see
+  [Entitlements](#entitlements--row-and-column-disclosure)), it is in
+  `ExtendedProperties["chalk.disclosure"]` too.
+
+A statement the entitlements refuse still has a shape, and the refusal carries it: see
+[When a statement is refused](#when-a-statement-is-refused).
+
 
 ## Sources
 
@@ -1722,7 +1757,8 @@ rule. So POCO, ADO.NET, DuckDB and federated queries are all covered in the same
 For a catalog that carries an entitlement, Chalk:
 
 - rewrites each statement;
-- refuses a statement where a disclosure forbids it;
+- refuses a statement where a disclosure forbids it, and says what it refused and what the
+  result would have been;
 - reports what each column disclosed;
 - enforces all of this whether the table is a POCO collection, or a table in a database
   on the other side of a network.
@@ -1884,7 +1920,9 @@ source for.
 - **Population-only columns.** Say an auditor may aggregate a column but not read it.
   Chalk follows that column upward to everything that uses it. Unless every use is an
   allow-listed population aggregate that takes the column directly, as a bare reference,
-  the statement is refused, naming the table, the column and the use. A user-defined
+  the statement is refused, naming the table, the column and the use, and the aggregates
+  the column allows (see [When a statement is refused](#when-a-statement-is-refused)). A
+  user-defined
   aggregate counts only when its declaration says `.Population()` (see *Composite
   results*). Where the host asks for a floor, each aggregate that uses the column is
   guarded: `CASE WHEN COUNT(c) >= k THEN agg ELSE NULL END`. No floor ships, so a
@@ -1924,6 +1962,8 @@ source for.
   - An `IEntitlementsAudit` passed to `WithEntitlements` observes each execution. It
     sees the digest, the hashes, the row counts of the context lists, and the host's
     `Purpose` and `Actor` — and no value.
+  - A statement that is refused is told what was refused and what its result would have
+    been: see [When a statement is refused](#when-a-statement-is-refused).
 - **Fail closed, twice.** Chalk proves the model for every plan, rather than assuming
   it.
   1. In the planner, a four-clause *taint check* proves that:
@@ -1953,6 +1993,54 @@ source for.
   Beside it, the report says when the statement asked for a tenancy *outside* the
   principal's scope, naming the column. An empty result and an empty table look the
   same, and this is how to tell them apart.
+
+### When a statement is refused
+
+A refusal is an `EntitlementException`. Its message names the table, the column and the
+use. Its `Refusal` property says the same things in a form your code can act on, and adds
+the result the statement would have had:
+
+```csharp
+try
+{
+    await entitled.PrepareAsync("SELECT * FROM members", context);
+}
+catch (EntitlementException refused) when (refused.Refusal is { } refusal)
+{
+    // PopulationOnly  main.members.national_id  a projection to the result  COUNT
+    Console.WriteLine(
+        $"{refusal.Reason}  {refusal.Table}.{refusal.Column}  {refusal.Use}  "
+        + string.Join(", ", refusal.Permitted));
+
+    // The columns the statement would have returned, in the form OutputSchema takes.
+    DataTable shape = refusal.OutputSchema?.ToDataTable() ?? new DataTable();
+}
+```
+
+- **`Reason`** says what kind of refusal it is. `PopulationOnly` means a column the
+  principal may only aggregate was used some other way, and `Permitted` then names the
+  aggregates it allows, such as `COUNT`. The others include `Statistical`, `Redacted` (a
+  column that discloses nothing, under a redaction policy that refuses it), `Star`,
+  `NoVisibleRows`, `PushdownRequired`, `NoContext` and `InvalidEntitlement`. `Internal`
+  means the planner caught itself in a bug, which is worth reporting.
+- **`OutputSchema`** has the same form as a prepared statement's `OutputSchema`. It holds
+  the statement's own columns, typed as they would come back. Whenever any column
+  discloses less than its full value, every field carries `chalk.disclosure`, as a
+  prepared statement's schema does. Nullability is what the policy makes it: a column the
+  principal is not shown is nullable, and so is an aggregate that the group-size floor can
+  hide. Companion disclosure columns and `Omit` apply only to a result that runs, so
+  neither is in it.
+- It is **null** where the refusal came before the columns were known: a star under a
+  refusing star policy, a prepare with no context, or an entitlement that does not parse.
+- **The engine remembers each refusal.** The same request is refused again without asking
+  the planner, and carries the same `Refusal` object. A different statement, context or
+  catalog is a different request.
+
+Whether a statement is refused can depend on when the principal's values are bound. Bound
+as the statement is prepared, the planner knows this principal's lists, so a `WHERE` clause
+can lift the refusal by ruling out the rows the column is counted on. Prepared from a
+shape, the planner plans once for every principal of that shape, and refuses a use that
+would be unsafe for any of them.
 
 ### The tenancy package
 
