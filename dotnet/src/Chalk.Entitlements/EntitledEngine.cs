@@ -156,7 +156,7 @@ public sealed class EntitledQuery
         // extension; a plan with nothing to say leaves the compiler's own schema by reference.
         prepared.Decorate(
             schema => Disclosures.Decorate(schema, Entitlements.Columns),
-            audit is null || Entitlements.Tables.Count == 0 ? null : q => Audit(audit, q));
+            audit is null || Entitlements.Tables.Count == 0 ? null : (q, context) => Audit(audit, q, context));
     }
 
     /// <summary>
@@ -252,10 +252,17 @@ public sealed class EntitledQuery
     /// policy and the request and never a context value: the digest, the descriptor hashes, the row
     /// counts of the bound lists and the host's own purpose and actor.
     /// </summary>
-    private void Audit(IEntitlementsAudit observer, PreparedQuery query)
+    /// <remarks>
+    /// The request is the execution's: <paramref name="context"/> is the context it runs with — the
+    /// one it binds, for a plan prepared with shapes, or the one it was prepared with, for a plan that
+    /// folded its values. Read off the prepared query instead, a plan prepared once for a shape and run
+    /// for many principals was audited with the preparer's purpose and actor, and with every list it
+    /// binds at execution counted as empty (F166).
+    /// </remarks>
+    private void Audit(IEntitlementsAudit observer, PreparedQuery query, RequestContext? context)
     {
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-        if (query.Context is { } context)
+        if (context is not null)
         {
             foreach (var (name, list) in context.Lists)
             {
@@ -274,8 +281,8 @@ public sealed class EntitledQuery
             DescriptorHashes = Entitlements.DescriptorHashes,
             Tables = Entitlements.Tables,
             ContextListRowCounts = counts,
-            Purpose = query.Context?.Purpose ?? "",
-            Actor = query.Context?.Actor ?? "",
+            Purpose = context?.Purpose ?? "",
+            Actor = context?.Actor ?? "",
         });
     }
 }

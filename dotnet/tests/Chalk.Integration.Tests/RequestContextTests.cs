@@ -67,6 +67,30 @@ public sealed class RequestContextTests(SharedSidecar sidecar)
         Assert.Equal(baseline.CanonicalHash, annotated.CanonicalHash);
     }
 
+    /// <summary>
+    /// A shape is what every principal of it shares, so it carries no purpose or actor: those describe
+    /// one request, and each execution brings its own (F166). A partial shape is still one
+    /// principal's — the rest of it is folded — and keeps them.
+    /// </summary>
+    [Fact]
+    public void A_shape_carries_no_purpose_or_actor()
+    {
+        var baseline = Manager(org: 1);
+        var annotated = new RequestContext
+        {
+            Scalars = baseline.Scalars,
+            Lists = baseline.Lists,
+            Purpose = "support ticket 4711",
+            Actor = "agent-7",
+        };
+
+        var shape = annotated.Shape();
+        Assert.Equal(("", ""), (shape.Purpose, shape.Actor));
+
+        var partial = annotated.Shape([annotated.Lists.Keys.First()]);
+        Assert.Equal(("support ticket 4711", "agent-7"), (partial.Purpose, partial.Actor));
+    }
+
     /// <summary>A dictionary's iteration order must never reach the wire or the hash.</summary>
     [Fact]
     public void The_binding_order_does_not_change_the_hash()

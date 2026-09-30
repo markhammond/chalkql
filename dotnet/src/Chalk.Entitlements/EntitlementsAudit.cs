@@ -12,6 +12,12 @@ namespace Chalk.Entitlements;
 /// audit metadata. A tenancy identifier is a value and is not here — an audit log is not a place to
 /// put one, and the digest already tells two role sets apart.
 /// </para>
+/// <para>
+/// The request is the execution's (F166). The counts, purpose and actor are those of the context
+/// the execution runs with: the one it binds, where the statement was prepared for a context's
+/// shape, or the one it was prepared with, where it folded its values. One plan prepared for a shape
+/// and run for many principals is audited as each of them in turn.
+/// </para>
 /// </remarks>
 public sealed class EntitlementsAuditEvent
 {
@@ -33,13 +39,13 @@ public sealed class EntitlementsAuditEvent
     /// </remarks>
     public required IReadOnlyList<EntitledTableReport> Tables { get; init; }
 
-    /// <summary>How many rows each bound context list held, by name. Counts, never members.</summary>
+    /// <summary>How many rows each context list this execution runs with held, by name. Counts, never members.</summary>
     public required IReadOnlyDictionary<string, int> ContextListRowCounts { get; init; }
 
-    /// <summary>Why the host says this statement is being run (D205). Empty when it said nothing.</summary>
+    /// <summary>Why the host says this execution is being run (D205). Empty when it said nothing.</summary>
     public required string Purpose { get; init; }
 
-    /// <summary>Who the host says is running it (D205). Empty when it said nothing.</summary>
+    /// <summary>Who the host says is running this execution (D205). Empty when it said nothing.</summary>
     public required string Actor { get; init; }
 }
 

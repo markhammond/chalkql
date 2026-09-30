@@ -1850,8 +1850,9 @@ context, and the planner writes that principal's values straight into the plan. 
 then fits those values only, so a principal with other values needs another plan. A host
 with many principals can prepare once with `context.Shape()` instead. A shape lists the
 context's names, and says whether each is a single value or a list and what type it has,
-but it holds no values. The planner folds nothing, and the plan leaves a gap wherever a
-value belongs:
+but it holds no values, and no `Purpose` or `Actor` either: those describe one request,
+and each execution brings its own. The planner folds nothing, and the plan leaves a gap
+wherever a value belongs:
 
 - A test of whether a row's value is in a context list, such as
   `org_id IN (@ctx.manager_orgs)`, is answered at execution, from the list you bind
@@ -1960,8 +1961,10 @@ source for.
     predicate reached the source, and how much of the table this principal holds any
     grant on.
   - An `IEntitlementsAudit` passed to `WithEntitlements` observes each execution. It
-    sees the digest, the hashes, the row counts of the context lists, and the host's
-    `Purpose` and `Actor` — and no value.
+    sees the digest, the hashes, and, from the context that execution runs with, the row
+    counts of its lists and its `Purpose` and `Actor` — and no value. For a plan prepared
+    with `context.Shape()`, that is the context bound at execution, so one plan run for
+    many principals is audited as each of them in turn.
   - A statement that is refused is told what was refused and what its result would have
     been: see [When a statement is refused](#when-a-statement-is-refused).
 - **Fail closed, twice.** Chalk proves the model for every plan, rather than assuming
