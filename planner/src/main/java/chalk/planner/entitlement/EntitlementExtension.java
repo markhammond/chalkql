@@ -10,6 +10,7 @@ import chalk.planner.rpc.v1.EntitlementsOptions;
 import chalk.planner.rpc.v1.EntitlementsReport;
 import chalk.planner.rpc.v1.ExplainedColumn;
 import chalk.planner.rpc.v1.ExplainedTable;
+import chalk.planner.rpc.v1.PolicyRefusalReason;
 import chalk.planner.rpc.v1.Visibility;
 import com.google.protobuf.Any;
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -77,6 +78,18 @@ public final class EntitlementExtension implements PlanExtensionHandler {
    * entitled table's descriptor was and how much of it this principal can see, and what execution
    * must still bind.
    */
+  /**
+   * A refusal raised once the statement is planned, with the result it would have had: the plan's
+   * output row and the labels the report would have carried (D329).
+   */
+  private static PolicyException planned(PolicyException refused, PlannerPipeline.Result result) {
+    org.apache.calcite.rel.RelNode physical = result.physical();
+    return refused.withOutput(
+        new chalk.planner.types.TypeMapper(physical.getCluster().getTypeFactory())
+            .toIrRow(physical.getRowType()),
+        result.columnDisclosures());
+  }
+
   private static EntitlementsReport report(
       PlannerPipeline.Result result, PolicyOptions policyOptions) {
     EntitlementsReport.Builder report = EntitlementsReport.newBuilder();
@@ -99,22 +112,36 @@ public final class EntitlementExtension implements PlanExtensionHandler {
         // D207: an acknowledgement may depend on the principal's own context and the statement,
         // never on hidden rows. That this principal holds no grant on the table at all is such an
         // acknowledgement, and a host may ask for an exception rather than an empty result.
-        throw new PolicyException(
-            "this principal holds no grant on "
-                + table.qualifiedName()
-                + ", so the statement can return no row, and "
-                + "PrepareOptions.RefuseWhenNoVisibleRows asks for an error rather than an empty "
-                + "result (docs/design/16-entitlements.md §3.12).");
+        throw planned(
+            new PolicyException(
+                PolicyRefusalReason.POLICY_REFUSAL_REASON_NO_VISIBLE_ROWS,
+                table.qualifiedName(),
+                "",
+                "",
+                List.of(),
+                "this principal holds no grant on "
+                    + table.qualifiedName()
+                    + ", so the statement can return no row, and "
+                    + "PrepareOptions.RefuseWhenNoVisibleRows asks for an error rather than an empty "
+                    + "result (docs/design/16-entitlements.md §3.12)."),
+            result);
       }
       if (!table.contradiction().isEmpty() && policyOptions.refuseWhenNoVisibleRows()) {
-        throw new PolicyException(
-            "this statement asks "
-                + table.qualifiedName()
-                + " for a '"
-                + table.contradiction()
-                + "' outside this principal's scope, so it can return no row, and "
-                + "PrepareOptions.RefuseWhenNoVisibleRows asks for an error rather than an empty "
-                + "result (docs/design/16-entitlements.md §3.12).");
+        throw planned(
+            new PolicyException(
+                PolicyRefusalReason.POLICY_REFUSAL_REASON_NO_VISIBLE_ROWS,
+                table.qualifiedName(),
+                "",
+                "",
+                List.of(),
+                "this statement asks "
+                    + table.qualifiedName()
+                    + " for a '"
+                    + table.contradiction()
+                    + "' outside this principal's scope, so it can return no row, and "
+                    + "PrepareOptions.RefuseWhenNoVisibleRows asks for an error rather than an "
+                    + "empty result (docs/design/16-entitlements.md §3.12)."),
+            result);
       }
       EntitledTable.Builder entitled =
           EntitledTable.newBuilder()

@@ -1,5 +1,6 @@
 package chalk.planner.entitlement;
 
+import chalk.planner.rpc.v1.PolicyRefusalReason;
 import java.util.List;
 import org.apache.calcite.runtime.ImmutablePairList;
 
@@ -60,6 +61,11 @@ public final class RedactionPolicy {
       // named is the policy's `named_columns` member's business (D217).
       if (at(flow, fields.leftList().get(i)) == Disclosed.REDACTED && !stars.isNamed(i)) {
         throw new PolicyException(
+            PolicyRefusalReason.POLICY_REFUSAL_REASON_REDACTED,
+            "",
+            fields.rightList().get(i),
+            "",
+            List.of(),
             "the output column '"
                 + fields.rightList().get(i)
                 + "' is one this statement's star surfaced, it discloses nothing for this "
@@ -81,6 +87,11 @@ public final class RedactionPolicy {
     for (int i = 0; i < fields.size(); i++) {
       if (at(flow, fields.leftList().get(i)) == Disclosed.REDACTED && stars.isNamed(i)) {
         throw new PolicyException(
+            PolicyRefusalReason.POLICY_REFUSAL_REASON_REDACTED,
+            "",
+            fields.rightList().get(i),
+            "",
+            List.of(),
             "the output column '"
                 + fields.rightList().get(i)
                 + "' is named by this statement, it discloses nothing for this principal, and "

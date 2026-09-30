@@ -290,7 +290,11 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
         }
     }
 
-    public async ValueTask<PlanResult> PlanAsync(PlanRequest request, CancellationToken ct = default)
+    /// <summary>
+    /// The request as it crosses the wire, validated first. Also what an engine's memory of its
+    /// refusals keys on (D330), so the key is exactly what the planner would have been asked.
+    /// </summary>
+    internal static Rpc.PlanRequest ToWire(PlanRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -431,6 +435,12 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
             };
         }
 
+        return message;
+    }
+
+    public async ValueTask<PlanResult> PlanAsync(PlanRequest request, CancellationToken ct = default)
+    {
+        var message = ToWire(request);
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
         Rpc.PlanResponse response;
         try
@@ -652,7 +662,12 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
             : null;
         if (planError.Kind == PlanErrorKind.Policy)
         {
-            return new EntitlementException(planError.Message, position, error);
+            // What was refused and the table model travel as the wire said them (D329); the engine
+            // makes the public refusal of them, in the layouts it declares its schemas in.
+            return new EntitlementException(planError.Message, position, error)
+            {
+                WireRefusal = planError.PolicyRefusal,
+            };
         }
 
         // A search this request's own options ended before there was a plan (D235). The state is

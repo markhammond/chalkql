@@ -1,6 +1,7 @@
 package chalk.planner.entitlement;
 
 import chalk.planner.plan.ChalkContextMembership;
+import chalk.planner.rpc.v1.PolicyRefusalReason;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -144,6 +145,7 @@ final class MembershipMarkers {
         for (RexNode expression : expressions) {
           if (!MembershipSplit.monotone(expression, membership.toString())) {
             throw new PolicyException(
+                PolicyRefusalReason.POLICY_REFUSAL_REASON_BINDING,
                 "the entitlement on "
                     + where
                     + " tests membership of a bound relation under a negation, and this request "

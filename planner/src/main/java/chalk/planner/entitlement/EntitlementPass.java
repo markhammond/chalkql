@@ -5,6 +5,7 @@ import chalk.ir.v1.DisclosureRule;
 import chalk.ir.v1.TableEntitlement;
 import chalk.planner.catalog.ChalkTable;
 import chalk.planner.rpc.v1.PlaceholderPolicy;
+import chalk.planner.rpc.v1.PolicyRefusalReason;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -158,38 +159,30 @@ public final class EntitlementPass {
     // it is answered before any leaf decides what to emit.
     pass.statisticalStatement = StatisticalScope.qualifies(occurrences);
     pass.fold(occurrences, List.of());
-    // A window over a statistical column is refused whatever the statement's shape (D203, F43):
-    // the opt-in is query-set-size control and a partition can be one row, so a window cannot be
-    // controlled — and degrading to the mask instead would be refusing it silently.
-    StatisticalScope.refuseWindow(occurrences, pass.folds);
-    if (pass.anyStatistical()) {
-      // On the received tree, before Filter_R is there: a subject grant's own `id IN (@ctx.…)` reads
-      // exactly like the pinning this refuses.
-      StatisticalScope.refusePinning(occurrences, pass.folds);
+    PopulationTrace.Result traced;
+    try {
+      // A window over a statistical column is refused whatever the statement's shape (D203, F43):
+      // the opt-in is query-set-size control and a partition can be one row, so a window cannot be
+      // controlled — and degrading to the mask instead would be refusing it silently.
+      StatisticalScope.refuseWindow(occurrences, pass.folds);
+      if (pass.anyStatistical()) {
+        // On the received tree, before Filter_R is there: a subject grant's own `id IN (@ctx.…)`
+        // reads exactly like the pinning this refuses.
+        StatisticalScope.refusePinning(occurrences, pass.folds);
+      }
+      // The comparisons a tested column's rules permit, found on the tree the pass received — where
+      // a column reference is still the scan's own (D261, 36-test-verdict.md §2). It runs before the
+      // trace, because a comparison the leaf will compute is not a use of the raw value here, which
+      // is exactly what §3.4 would otherwise refuse an aggregate's FILTER for.
+      pass.lifts =
+          TestLift.run(occurrences, pass.folds, options, rel.getCluster().getRexBuilder());
+      traced = PopulationTrace.run(occurrences, pass.folds, options, pass.lifts);
+    } catch (PolicyException refused) {
+      throw pass.described(refused, occurrences);
     }
-    // The comparisons a tested column's rules permit, found on the tree the pass received — where a
-    // column reference is still the scan's own (D261, 36-test-verdict.md §2). It runs before the
-    // trace, because a comparison the leaf will compute is not a use of the raw value here, which is
-    // exactly what §3.4 would otherwise refuse an aggregate's FILTER for.
-    pass.lifts =
-        TestLift.run(occurrences, pass.folds, options, rel.getCluster().getRexBuilder());
-    PopulationTrace.Result traced =
-        PopulationTrace.run(occurrences, pass.folds, options, pass.lifts);
     pass.guards = new java.util.IdentityHashMap<>(traced.guards());
     pass.suppressions = traced.suppressions();
-    // The aggregate form's own guards (§2, D261): a permitted aggregate whose FILTER is a lifted
-    // test is guarded over the population that filter leaves, which is the population it reports on.
-    for (Map.Entry<org.apache.calcite.rel.core.Aggregate, List<TestLift.FilteredGuard>> entry :
-        pass.lifts.guards().entrySet()) {
-      List<PopulationTrace.Guard> here =
-          pass.guards.computeIfAbsent(entry.getKey(), key -> new ArrayList<>());
-      for (TestLift.FilteredGuard guard : entry.getValue()) {
-        // COUNT(*) is the guarding count: §3.6 guards on COUNT(c), which for a NOT NULL column is
-        // COUNT(*) by the time the converter is done with it (F43), and a filtered count reads no
-        // column of the aggregate's input for a COUNT(c) to be formed over. ADR 0042.
-        here.add(new PopulationTrace.Guard(guard.callIndex(), /* argument= */ -1, guard.floor()));
-      }
-    }
+    pass.guardLiftedFilters();
     RelNode rewritten = pass.narrow(pass.rewrite(occurrences), occurrences);
     if (pass.carriers.isEmpty()) {
       return new Result(
@@ -224,6 +217,46 @@ public final class EntitlementPass {
         pass.explain(options),
         new Siblings(width, present),
         ImmutableList.copyOf(pass.throughEvidence));
+  }
+
+  /**
+   * The aggregate form's own guards (§2, D261): a permitted aggregate whose FILTER is a lifted test
+   * is guarded over the population that filter leaves, which is the population it reports on.
+   */
+  private void guardLiftedFilters() {
+    for (Map.Entry<org.apache.calcite.rel.core.Aggregate, List<TestLift.FilteredGuard>> entry :
+        lifts.guards().entrySet()) {
+      List<PopulationTrace.Guard> here =
+          guards.computeIfAbsent(entry.getKey(), key -> new ArrayList<>());
+      for (TestLift.FilteredGuard guard : entry.getValue()) {
+        // COUNT(*) is the guarding count: §3.6 guards on COUNT(c), which for a NOT NULL column is
+        // COUNT(*) by the time the converter is done with it (F43), and a filtered count reads no
+        // column of the aggregate's input for a COUNT(c) to be formed over. ADR 0042.
+        here.add(new PopulationTrace.Guard(guard.callIndex(), /* argument= */ -1, guard.floor()));
+      }
+    }
+  }
+
+  /**
+   * A refusal raised before the rewrite, with the rewrite of what it refused, from which the pipeline
+   * describes the result the statement would have had (D329). The guards are the describing trace's,
+   * which walks past every use the refusing one stops at, so each permitted population aggregate
+   * takes the guard it would take in a statement that runs and is described with the nullable type
+   * the guard makes, however early the refusal came. Whatever this cannot do leaves the refusal as
+   * it was: it only describes a statement already refused, and never changes which refusal is raised.
+   */
+  private PolicyException described(PolicyException refused, RelNode occurrences) {
+    try {
+      lifts = TestLift.run(occurrences, folds, options, rexBuilder);
+      PopulationTrace.Result complete = PopulationTrace.describe(occurrences, folds, options, lifts);
+      guards = new java.util.IdentityHashMap<>(complete.guards());
+      suppressions = complete.suppressions();
+      guardLiftedFilters();
+      RelNode rewritten = narrow(rewrite(occurrences), occurrences);
+      return refused.withTree(rewritten, List.of(DisclosureFlow.of(rewritten, emitted)));
+    } catch (RuntimeException | AssertionError unable) {
+      return refused;
+    }
   }
 
   // ------------------------------------------------------------------ phase 0: the occurrences
@@ -766,6 +799,7 @@ public final class EntitlementPass {
         // Registration proved the parent is in the catalog (D225), so this is a catalog the
         // planner did not register — a bug rather than a policy, and refused as one.
         throw new PolicyException(
+            PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
             "the entitlement on "
                 + table.schemaName()
                 + "."
@@ -935,6 +969,11 @@ public final class EntitlementPass {
       }
       if (bit < block[0] || bit >= block[0] + block[1]) {
         throw new PolicyException(
+            PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
+            table.schemaName() + "." + table.tableName(),
+            "",
+            "",
+            List.of(),
             "the entitlement on "
                 + table.schemaName()
                 + "."
@@ -992,6 +1031,11 @@ public final class EntitlementPass {
     }
 
     throw new PolicyException(
+        PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
+        target.schemaName() + "." + target.tableName(),
+        "",
+        "",
+        List.of(),
         "the entitlement on "
             + target.schemaName()
             + "."
@@ -1057,6 +1101,7 @@ public final class EntitlementPass {
       // Registration proved every step is in the catalog (D265 §3), so this is a catalog the
       // planner did not register — a bug rather than a policy, and refused as one.
       throw new PolicyException(
+          PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
           "the entitlement on "
               + table.schemaName()
               + "."
@@ -3196,6 +3241,7 @@ public final class EntitlementPass {
       return simplified;
     }
     throw new PolicyException(
+        PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
         "a composite column's disclosure folded to " + simplified + ", which is neither the column,"
             + " its NULL composite nor a choice between the two. This is a bug in the entitlement"
             + " rewrite: please report the statement and the catalog.");
@@ -3216,6 +3262,11 @@ public final class EntitlementPass {
         RexNode mask = entitled == null ? null : rule < 0 ? entitled.mask() : entitled.maskOf(rule);
         if (mask == null) {
           throw new PolicyException(
+              PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
+              table.schemaName() + "." + table.tableName(),
+              columnName,
+              "",
+              List.of(),
               table.schemaName()
                   + "."
                   + table.tableName()

@@ -619,6 +619,58 @@ message PlanError {
   // Set on a PLANNING_ABORTED failure: what the governor had measured when it ended a search
   // that had no complete plan to return. Absent on every other kind.
   PlanningState planning_state = 7;
+  // Set on a POLICY failure: what the entitlements refused, and the result the statement would have
+  // had. Absent on every other kind.
+  PolicyRefusal policy_refusal = 8;
+}
+
+// What the entitlements refused, and the statement's result as the policy would shape it: the table
+// model a host can still return beside the error.
+message PolicyRefusal {
+  PolicyRefusalReason reason = 1;
+  // The table the refusal is about, as schema.table, and the column. Empty where it is about neither.
+  string table = 2;
+  string column = 3;
+  // What the statement did that was refused, in the message's own words: "a projection to the
+  // result", "SUM", "a window aggregate".
+  string use = 4;
+  // What the column does permit this principal: the population aggregates a population-only column
+  // allows. Empty for every other reason.
+  repeated string permitted = 5;
+  // The statement's output columns as the policy would shape them (a withheld column is nullable),
+  // and each one's disclosure as the word a batch's `chalk.disclosure` metadata carries — FULL,
+  // MASKED, REDACTED, PER_ROW, AGGREGATE or TESTED — in the same order. Both are empty where the
+  // refusal came before the entitlement pass had decided them.
+  RowType output = 6;
+  repeated string disclosures = 7;
+}
+
+enum PolicyRefusalReason {
+  POLICY_REFUSAL_REASON_UNSPECIFIED = 0;
+  // A column the principal may only aggregate, used some other way.
+  POLICY_REFUSAL_REASON_POPULATION_ONLY = 1;
+  // A statistical column read under a window, or a declared unique key of its table compared or
+  // grouped by.
+  POLICY_REFUSAL_REASON_STATISTICAL = 2;
+  // A column that discloses nothing, under a redaction policy that refuses it rather than returning
+  // a placeholder.
+  POLICY_REFUSAL_REASON_REDACTED = 3;
+  // A star, or a ROW over a table's columns, under a star policy that refuses it.
+  POLICY_REFUSAL_REASON_STAR = 4;
+  // A statement that can return no row, under RefuseWhenNoVisibleRows.
+  POLICY_REFUSAL_REASON_NO_VISIBLE_ROWS = 5;
+  // A row predicate declared PUSHDOWN_REQUIRED that this plan would evaluate locally.
+  POLICY_REFUSAL_REASON_PUSHDOWN_REQUIRED = 6;
+  // A request that binds no execution context against a catalog that carries an entitlement.
+  POLICY_REFUSAL_REASON_NO_CONTEXT = 7;
+  // An entitlement this request's binding time cannot apply.
+  POLICY_REFUSAL_REASON_BINDING = 8;
+  // An entitlement that does not parse, does not type-check, or does not fit its table.
+  POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT = 9;
+  // A disclosure column whose name the statement already produces.
+  POLICY_REFUSAL_REASON_NAME_COLLISION = 10;
+  // A guard the planner holds itself to. Reaching one is a bug, to be reported with the statement.
+  POLICY_REFUSAL_REASON_INTERNAL = 11;
 }
 
 enum PlanErrorKind {

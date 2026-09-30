@@ -4,6 +4,8 @@ import chalk.ir.v1.Enforcement;
 import chalk.ir.v1.PredicateShape;
 import chalk.planner.catalog.ChalkTable;
 import chalk.planner.plan.PushdownGate;
+import chalk.planner.rpc.v1.PolicyRefusalReason;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
@@ -176,6 +178,11 @@ public final class PushdownRequired {
     String sourceId = chalkTable.sourceId();
     if (readsContextRelation(predicate) && !exchanges.joinPolicy().allowsLookup("", sourceId)) {
       throw new PolicyException(
+          PolicyRefusalReason.POLICY_REFUSAL_REASON_PUSHDOWN_REQUIRED,
+          map.qualifiedName(),
+          "",
+          "",
+          List.of(),
           "the entitlement of "
               + map.qualifiedName()
               + " is PUSHDOWN_REQUIRED and this plan would evaluate its row predicate locally: the"
@@ -191,6 +198,11 @@ public final class PushdownRequired {
     }
 
     throw new PolicyException(
+        PolicyRefusalReason.POLICY_REFUSAL_REASON_PUSHDOWN_REQUIRED,
+        map.qualifiedName(),
+        "",
+        "",
+        List.of(),
         "the entitlement of "
             + map.qualifiedName()
             + " is PUSHDOWN_REQUIRED and this plan would evaluate its row predicate locally: "
@@ -239,6 +251,11 @@ public final class PushdownRequired {
         && !parentSource.equals(childSource)
         && !exchanges.joinPolicy().allowsLookup(parentSource, childSource)) {
       throw new PolicyException(
+          PolicyRefusalReason.POLICY_REFUSAL_REASON_PUSHDOWN_REQUIRED,
+          map.qualifiedName(),
+          "",
+          "",
+          List.of(),
           "the entitlement of "
               + map.qualifiedName()
               + " is PUSHDOWN_REQUIRED and this plan would evaluate its row predicate locally: its"
@@ -256,6 +273,11 @@ public final class PushdownRequired {
     }
 
     throw new PolicyException(
+        PolicyRefusalReason.POLICY_REFUSAL_REASON_PUSHDOWN_REQUIRED,
+        map.qualifiedName(),
+        "",
+        "",
+        List.of(),
         "the entitlement of "
             + map.qualifiedName()
             + " is PUSHDOWN_REQUIRED and this plan would evaluate its row predicate locally: its"

@@ -25,6 +25,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     private readonly ChalkEngineOptions _options;
     private readonly Dictionary<string, ISourceRuntime> _sources;
     private readonly ExecutionSettings _settings;
+
+    /// <summary>The refusals this engine has answered, by request (D330).</summary>
+    private readonly RefusalMemo _refusals = new();
     private readonly ArenaPool _arenas;
     private readonly ILogger _log;
 
@@ -1783,22 +1786,48 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 (_options.Planner, requestId, _log))
             : default;
 
+        // A request this engine has already seen refused is refused again without asking the planner
+        // (D330), carrying the one model the first refusal built. No key is computed until something
+        // has been remembered, so an engine that is never refused pays nothing for this.
+        var refusalKey = _refusals.Any ? RefusalMemo.Key(request) : null;
+        if (refusalKey is not null && _refusals.Find(refusalKey) is { } remembered)
+        {
+            throw remembered.Refuse();
+        }
+
         PlanResult result;
         try
         {
-            result = await _options.Planner.PlanAsync(request, ct).ConfigureAwait(false);
+            try
+            {
+                result = await _options.Planner.PlanAsync(request, ct).ConfigureAwait(false);
+            }
+            catch (PlanningException failure) when (failure.Kind == Chalk.Client.Rpc.PlanErrorKind.UnknownCatalogVersion)
+            {
+                // The planner evicted this version, or it restarted (D271 (b), (e)). Memory policy
+                // and never correctness: register the version again and retry exactly once. A host
+                // sees nothing — no callback, no re-prepare, no error — which is what makes the
+                // planner's bounds and its lifetime its own business.
+                _log.LogDebug(
+                    "the planner does not hold catalog version {Version}; registering it and retrying once",
+                    request.ShapeVersion);
+                await ReregisterAsync(ct).ConfigureAwait(false);
+                result = await _options.Planner.PlanAsync(request, ct).ConfigureAwait(false);
+            }
         }
-        catch (PlanningException failure) when (failure.Kind == Chalk.Client.Rpc.PlanErrorKind.UnknownCatalogVersion)
+        catch (Chalk.Entitlements.EntitlementException refused)
         {
-            // The planner evicted this version, or it restarted (D271 (b), (e)). Memory policy and
-            // never correctness: register the version again and retry exactly once. A host sees
-            // nothing — no callback, no re-prepare, no error — which is what makes the planner's
-            // bounds and its lifetime its own business.
-            _log.LogDebug(
-                "the planner does not hold catalog version {Version}; registering it and retrying once",
-                request.ShapeVersion);
-            await ReregisterAsync(ct).ConfigureAwait(false);
-            result = await _options.Planner.PlanAsync(request, ct).ConfigureAwait(false);
+            // What was refused as a host reads it, and the table model in the layouts this engine
+            // declares its schemas in (D329); remembered for the next identical request (D330).
+            refused.Refusal ??= refused.WireRefusal is { } wire
+                ? Chalk.Entitlements.EntitlementRefusal.From(wire, _settings.OutputStrings)
+                : null;
+            _refusals.Remember(new RefusalMemo.Remembered(
+                refusalKey ?? RefusalMemo.Key(request),
+                refused.PlannerMessage,
+                refused.Position,
+                refused.Refusal));
+            throw;
         }
 
         //The entitlement invariant, re-established from *this* catalog and never from the planner's claim,

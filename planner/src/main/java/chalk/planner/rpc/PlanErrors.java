@@ -4,6 +4,7 @@ import chalk.planner.UnsupportedFeatureException;
 import chalk.planner.catalog.InvalidCatalogException;
 import chalk.planner.rpc.v1.PlanError;
 import chalk.planner.rpc.v1.PlanErrorKind;
+import chalk.planner.rpc.v1.PolicyRefusal;
 import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
@@ -64,8 +65,7 @@ public final class PlanErrors {
     // statement is well formed and the planner could express it perfectly well; it is declining to,
     // and a client that retries with different values will be declined again.
     if (error instanceof chalk.planner.entitlement.PolicyException policy) {
-      return build(
-          Status.PERMISSION_DENIED, PlanErrorKind.PLAN_ERROR_KIND_POLICY, policy.getMessage(), null);
+      return policy(policy);
     }
     // A statement naming one of the planner's own markers (D223). INVALID_REQUEST rather than PARSE:
     // the text parses perfectly well and the planner is declining to plan it, because the name would
@@ -110,7 +110,8 @@ public final class PlanErrors {
           0,
           0,
           0,
-          PlannerServiceImpl.planningState(aborted.state(), 0L, 0L));
+          PlannerServiceImpl.planningState(aborted.state(), 0L, 0L),
+          null);
     }
     if (error instanceof UnsupportedFeatureException unsupported) {
       return build(
@@ -182,7 +183,36 @@ public final class PlanErrors {
 
   private static StatusRuntimeException build(
       Status status, PlanErrorKind kind, String message, int line, int column, int endLine, int endColumn) {
-    return build(status, kind, message, line, column, endLine, endColumn, null);
+    return build(status, kind, message, line, column, endLine, endColumn, null, null);
+  }
+
+  /**
+   * A refusal, carrying what was refused and the result the statement would have had (D329), so a
+   * host can answer in its own words and still return the table model.
+   */
+  private static StatusRuntimeException policy(chalk.planner.entitlement.PolicyException policy) {
+    PolicyRefusal.Builder refusal =
+        PolicyRefusal.newBuilder()
+            .setReason(policy.reason())
+            .setTable(policy.table())
+            .setColumn(policy.column())
+            .setUse(policy.use())
+            .addAllPermitted(policy.permitted())
+            .addAllDisclosures(policy.disclosures().stream().map(PlanErrors::word).toList());
+    chalk.ir.v1.RowType output = policy.output();
+    if (output != null) {
+      refusal.setOutput(output);
+    }
+    return build(
+        Status.PERMISSION_DENIED,
+        PlanErrorKind.PLAN_ERROR_KIND_POLICY,
+        policy.getMessage(),
+        0,
+        0,
+        0,
+        0,
+        null,
+        refusal.build());
   }
 
   private static StatusRuntimeException build(
@@ -193,7 +223,8 @@ public final class PlanErrors {
       int column,
       int endLine,
       int endColumn,
-      chalk.planner.rpc.v1.@org.checkerframework.checker.nullness.qual.Nullable PlanningState state) {
+      chalk.planner.rpc.v1.@org.checkerframework.checker.nullness.qual.Nullable PlanningState state,
+      @org.checkerframework.checker.nullness.qual.Nullable PolicyRefusal refusal) {
     String text = message == null ? kind.name() : message;
     PlanError.Builder builder =
         PlanError.newBuilder()
@@ -206,10 +237,24 @@ public final class PlanErrors {
     if (state != null) {
       builder.setPlanningState(state);
     }
+    if (refusal != null) {
+      builder.setPolicyRefusal(refusal);
+    }
     PlanError error = builder.build();
     Metadata trailers = new Metadata();
     trailers.put(TRAILER, error.toByteArray());
     return status.withDescription(text).asRuntimeException(trailers);
+  }
+
+  /**
+   * A disclosure as the word a batch's {@code chalk.disclosure} metadata carries (D218 amended): the
+   * wire enum's name with its prefix dropped, and FULL for none.
+   */
+  private static String word(chalk.planner.rpc.v1.ReportedDisclosure disclosure) {
+    return switch (disclosure) {
+      case REPORTED_DISCLOSURE_UNSPECIFIED, UNRECOGNIZED -> "FULL";
+      default -> disclosure.name().substring("REPORTED_DISCLOSURE_".length());
+    };
   }
 
   private static String message(Throwable error) {

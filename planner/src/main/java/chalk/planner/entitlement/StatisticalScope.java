@@ -1,6 +1,7 @@
 package chalk.planner.entitlement;
 
 import chalk.planner.catalog.ChalkTable;
+import chalk.planner.rpc.v1.PolicyRefusalReason;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -225,6 +226,11 @@ final class StatisticalScope {
 
   private static PolicyException windowRefusal(String table, String column) {
     return new PolicyException(
+        PolicyRefusalReason.POLICY_REFUSAL_REASON_STATISTICAL,
+        table,
+        column,
+        "a window function",
+        List.of(),
         table
             + "."
             + column
@@ -312,6 +318,11 @@ final class StatisticalScope {
 
   private static PolicyException refusal(Key key) {
     return new PolicyException(
+        PolicyRefusalReason.POLICY_REFUSAL_REASON_STATISTICAL,
+        key.table(),
+        key.column(),
+        "a comparison or a grouping",
+        List.of(),
         key.table()
             + "."
             + key.column()
