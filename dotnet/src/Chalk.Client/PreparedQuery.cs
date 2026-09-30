@@ -160,8 +160,14 @@ public sealed class PreparedQuery
     /// not itself know: today the entitlement wrapper puts <c>chalk.disclosure</c> on the fields and
     /// raises its audit event through it, and nothing in this package names either.
     /// </summary>
+    /// <param name="decorateSchema">What every batch's schema becomes.</param>
+    /// <param name="beforeExecute">
+    /// Heard before each execution, with the context that execution runs with: the one it binds, for
+    /// a query prepared with shapes, or the one it was prepared with, for a query that folded its
+    /// values (F166). Never the prepare's shape, which holds no values and belongs to no request.
+    /// </param>
     internal void Decorate(
-        Func<ArrowSchema, ArrowSchema>? decorateSchema, Action<PreparedQuery>? beforeExecute)
+        Func<ArrowSchema, ArrowSchema>? decorateSchema, Action<PreparedQuery, RequestContext?>? beforeExecute)
     {
         _decorateSchema = decorateSchema;
         _beforeExecute = beforeExecute;
@@ -182,7 +188,7 @@ public sealed class PreparedQuery
     }
 
     private Func<ArrowSchema, ArrowSchema>? _decorateSchema;
-    private Action<PreparedQuery>? _beforeExecute;
+    private Action<PreparedQuery, RequestContext?>? _beforeExecute;
     private CompiledPlan _compiled;
     private readonly IReadOnlyList<int> _prepareShape;
 
@@ -494,7 +500,7 @@ public sealed class PreparedQuery
             throw new ContextRequiredException(RequiredContext);
         }
         
-        _beforeExecute?.Invoke(this);
+        _beforeExecute?.Invoke(this, bindings);
 
         var shape = ParameterBinder.ShapeOf(Parameters, values);
         var key = Key(shape);

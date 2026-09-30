@@ -428,10 +428,17 @@ public sealed class RequestContext
     /// execute-time binding (D209).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A host that holds one principal's bindings gets the shape every principal shares by calling
     /// this; a host that holds none states <see cref="ScalarTypes"/> and
     /// <see cref="ContextRelation.ColumnTypes"/> and sets <see cref="ShapeOnly"/> itself. Either way
     /// no value reaches the planner, which is the property the mode exists for.
+    /// </para>
+    /// <para>
+    /// The shape carries no <see cref="Purpose"/> or <see cref="Actor"/> either. They describe one
+    /// request, and a plan prepared for a shape serves every principal of it: each execution brings
+    /// its own, and that is what the audit event reports (F166).
+    /// </para>
     /// </remarks>
     public RequestContext Shape()
     {
@@ -467,8 +474,6 @@ public sealed class RequestContext
             Lists = Shapes(Lists),
             Relations = Shapes(Relations),
             FoldMaxRows = FoldMaxRows,
-            Purpose = Purpose,
-            Actor = Actor,
         };
     }
 
