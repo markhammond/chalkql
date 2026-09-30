@@ -422,9 +422,9 @@ public sealed class TenancyEntitlements
     /// it — a path's kind for a group read on or across a path's endpoint, so
     /// <c>ForTenancy(releasability, …).Within(classification, …)</c> was the one spelling that reached
     /// such a table — and a grant filling only the list anchored on its own kind reached nothing
-    /// through the others. A table holding both kinds on one row carries a group in each anchor, and
-    /// the grant fills both: the same rows, and a term the planner's simplification folds into the
-    /// other.
+    /// through the others. Each set of kinds has one group on each route, anchored on the first of
+    /// its kinds that can anchor it there (F165), and the grant fills it whichever kind it names
+    /// first.
     /// </remarks>
     private List<object?>? TenancyRow(Grant grant, TenancyCompiler.BoundList list)
     {

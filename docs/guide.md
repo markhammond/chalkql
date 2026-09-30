@@ -2221,11 +2221,11 @@ record holds. Only where the table declares no such kind does the endpoint's val
 confine the grant. For example, P-7's training records are reached where P-7's record is
 SECRET.
 
-**Declaring the combinations.** Left to itself, the compiler writes a membership test
-for every subset of the kinds a row carries, for each role. Five kinds on one row are
-eighty tests per role, and the compiler refuses to write more than four confining kinds
-for a dimension. A policy that declares the combinations its grants hold compiles those
-and nothing else:
+**Declaring the combinations.** Left to itself, the compiler writes one membership test
+for each set of the kinds a row carries, for each role, and a grant fills the one test
+its set has. Five kinds on one row are thirty-one tests per role, and the compiler
+refuses to write more than four confining kinds for a dimension. A policy that declares
+the combinations its grants hold compiles those and nothing else:
 
 ```csharp
 policy
@@ -2234,8 +2234,8 @@ policy
 ```
 
 Each combination is one test per admitted role, on each route that answers it. So the
-five-kind table compiles two tests where it compiled a hundred and sixty, and there is
-no limit on the number of kinds. Declaring is opt-in. But once a policy declares one
+five-kind table, read by two roles, compiles two tests where it compiled sixty-two, and
+there is no limit on the number of kinds. Declaring is opt-in. But once a policy declares one
 combination, it must declare all of them:
 
 - A tenancy grant must be one of the combinations its role declares — a grant on one

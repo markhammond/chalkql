@@ -227,7 +227,7 @@ internal static class TenancyCompiler
     /// <summary>
     /// What decides the groups one table's dimensions bind (D266 §4, D279 §2, F159, D320): which kinds
     /// may confine which, the table's own row, paths and parents, and the declared combinations —
-    /// null for a policy that declares none, which binds every subset.
+    /// null for a policy that declares none, which binds every set of kinds once on each route.
     /// </summary>
     internal sealed class GroupRules
     {
@@ -235,6 +235,13 @@ internal static class TenancyCompiler
             new(StringComparer.Ordinal);
 
         internal required IReadOnlyDictionary<string, IReadOnlyList<string>> Confinable { get; init; }
+
+        /// <summary>
+        /// Each kind's place in the policy's declaration: in a policy that declares no combination,
+        /// what picks the one kind a set of kinds is anchored on (F165).
+        /// </summary>
+        internal IReadOnlyDictionary<string, int> Order { get; init; } =
+            new Dictionary<string, int>(StringComparer.Ordinal);
 
         /// <summary>Where a refusal about this table says it is.</summary>
         internal required string Path { get; init; }
@@ -663,6 +670,9 @@ internal static class TenancyCompiler
         var rules = new GroupRules
         {
             Confinable = confinable,
+            Order = policy.Kinds
+                .Select((kind, index) => (kind.Name, index))
+                .ToDictionary(k => k.Name, k => k.index, StringComparer.Ordinal),
             Path = path,
             Dimensions = dimensions,
             Paths = paths,
@@ -838,13 +848,23 @@ internal static class TenancyCompiler
 
     /// <summary>
     /// Every group a dimension binds a list for, over the row <paramref name="siblings"/> describes
-    /// (D266 §4): the ordered subsets of the confining kinds this policy permits that resolve there.
+    /// (D266 §4): the ordered subsets of the confining kinds this policy permits that resolve there,
+    /// less those another kind of the set anchors (F165).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The non-empty subsets come first, in the order the declaration names their kinds, and the
     /// empty one last — which is exactly the order a subject dimension's pair list and identifier
     /// list were emitted in before D266, so a policy with one confining kind compiles to the text it
     /// compiled to.
+    /// </para>
+    /// <para>
+    /// A set of tenancy kinds that several of its kinds could anchor on one route is written once,
+    /// anchored on the first of them in the policy's order (<see cref="AnchorsSet"/>). A grant fills
+    /// every list of its set whatever the anchor (D321), so the others only repeated the same test,
+    /// and a grant over three kinds on one row folded to its conjunction three times. A subject
+    /// dimension keeps every subset of its <c>within:</c> kinds, since only its own kind anchors it.
+    /// </para>
     /// </remarks>
     internal static IReadOnlyList<ConfinementGroup> Groups(
         ResolvedDimension dimension,
@@ -876,21 +896,116 @@ internal static class TenancyCompiler
             throw new CatalogValidationException(
                 rules.Path,
                 $"the dimension '{dimension.Declared.Kind}' may be confined by {available.Count} tenancy "
-                + $"kinds that this table resolves, and the compiler emits one membership test per "
-                + $"subset of them — {1 << available.Count} per role. {MaxConfiningKinds} is the most "
-                + "it will write. Declare the combinations grants hold, and only those are written "
+                + $"kinds that this table resolves, and the compiler writes a membership test for every "
+                + $"set of them — up to {1 << available.Count} per role for this kind alone. "
+                + $"{MaxConfiningKinds} is the most it will write. Declare the combinations grants hold, "
+                + "and only those are written "
                 + "(docs/design/59-declared-combinations.md §1, D320; design 40 §2, §4, D266).");
         }
 
         var groups = new List<ConfinementGroup>();
         for (var mask = 1; mask < 1 << available.Count; mask++)
         {
-            groups.Add(Group(dimension, role, Subset(available, mask)));
+            var confining = Subset(available, mask);
+            if (dimension.Declared.IsSubject
+                || AnchorsSet(dimension, confining, siblings, rules, crossRow, via))
+            {
+                groups.Add(Group(dimension, role, confining));
+            }
         }
 
         groups.Add(Group(dimension, role, []));
         return groups;
     }
+
+    /// <summary>
+    /// Whether <paramref name="dimension"/> is the one kind a set of tenancy kinds — it and
+    /// <paramref name="confining"/> — is anchored on along this route (F165): of the set's dimensions
+    /// that could anchor it here, the first in the policy's order of kinds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On a table's own row, or a parent's, any dimension of the set that the rest may confine could
+    /// anchor it. Along a path the group is tested on the endpoint's row beside the target's, so only
+    /// the kind of a path down the same steps could (D279 §2): a set holding a kind the target has on
+    /// its own row keeps its group on the path even where that kind comes first, since the target's
+    /// row alone cannot answer the rest.
+    /// </para>
+    /// <para>
+    /// A dimension is known by its row, its kind and its column, since two paths down the same steps
+    /// resolve the endpoint's dimensions separately.
+    /// </para>
+    /// </remarks>
+    private static bool AnchorsSet(
+        ResolvedDimension dimension,
+        IReadOnlyList<ConfiningDimension> confining,
+        IReadOnlyList<ResolvedDimension> siblings,
+        GroupRules rules,
+        IReadOnlyList<ResolvedDimension>? crossRow,
+        ResolvedPath? via)
+    {
+        var set = new HashSet<(bool OnTarget, string Kind, string Column)>(
+            confining.Select(c => Key(c.Dimension, c.OnTarget)))
+        {
+            Key(dimension, onTarget: false),
+        };
+
+        bool Answers(ResolvedDimension anchor, IReadOnlyList<ResolvedDimension> row, ResolvedPath? path)
+        {
+            var anchorKey = Key(anchor, onTarget: false);
+            if (!set.Contains(anchorKey))
+            {
+                return false;
+            }
+
+            var rest = Available(anchor, row, rules, crossRow, path)
+                .Select(c => Key(c.Dimension, c.OnTarget))
+                .ToHashSet();
+            return set.All(key => key == anchorKey || rest.Contains(key));
+        }
+
+        int Place(ResolvedDimension anchor) =>
+            rules.Order.TryGetValue(anchor.Declared.Kind, out var place) ? place : int.MaxValue;
+
+        if (via is null)
+        {
+            ResolvedDimension? first = null;
+            foreach (var candidate in siblings)
+            {
+                if (!candidate.Declared.IsSubject
+                    && Answers(candidate, siblings, null)
+                    && (first is null || Place(candidate) < Place(first)))
+                {
+                    first = candidate;
+                }
+            }
+
+            return ReferenceEquals(first, dimension);
+        }
+
+        // A Related path answers its own kind alone (design 40 §7): it has no set to share.
+        if (via.IsRelated)
+        {
+            return true;
+        }
+
+        ResolvedPath? chosen = null;
+        foreach (var path in rules.Paths)
+        {
+            if (!path.IsRelated
+                && SameSteps(path, via)
+                && Answers(path.EndpointDimension, path.EndpointDimensions, path)
+                && (chosen is null || Place(path.EndpointDimension) < Place(chosen.EndpointDimension)))
+            {
+                chosen = path;
+            }
+        }
+
+        return ReferenceEquals(chosen, via);
+    }
+
+    private static (bool OnTarget, string Kind, string Column) Key(ResolvedDimension dimension, bool onTarget) =>
+        (onTarget, dimension.Declared.Kind, dimension.Column);
 
     /// <summary>
     /// The dimensions that may confine <paramref name="dimension"/> on the row
