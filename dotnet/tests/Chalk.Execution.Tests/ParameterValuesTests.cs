@@ -117,17 +117,20 @@ public sealed class ParameterValuesTests
     [MemberData(nameof(Refused))]
     public void A_value_the_type_does_not_hold_exactly_is_refused_by_name(object value, ChalkType type, string reason)
     {
-        var error = Assert.Throws<ArgumentException>(() => ParameterValues.Exact(value, type, "Parameter @amount"));
+        var error = Assert.Throws<ParameterBindingException>(
+            () => ParameterValues.Exact(value, type, "Parameter @amount"));
 
         Assert.StartsWith("Parameter @amount is ", error.Message, StringComparison.Ordinal);
         Assert.Contains(reason, error.Message, StringComparison.Ordinal);
-        Assert.Contains("D317", error.Message, StringComparison.Ordinal);
+        Assert.Equal(ChalkErrorCodes.ParameterBinding, error.Code);
+        Assert.EndsWith(" [ParameterBinding]", error.Message, StringComparison.Ordinal);
+        Assert.Equal("Parameter @amount", error.Subject);
     }
 
     [Fact]
     public void A_refusal_names_the_clr_type_and_never_the_value()
     {
-        var error = Assert.Throws<ArgumentException>(
+        var error = Assert.Throws<ParameterBindingException>(
             () => ParameterValues.Exact("secret-42", ChalkType.Int32(), "Parameter @amount"));
 
         Assert.Contains("String", error.Message, StringComparison.Ordinal);
@@ -137,7 +140,7 @@ public sealed class ParameterValuesTests
     [Fact]
     public void A_refusal_of_a_converted_value_names_the_converter()
     {
-        var error = Assert.Throws<ArgumentException>(
+        var error = Assert.Throws<ParameterBindingException>(
             () => ParameterValues.Exact(3.5, ChalkType.Int32(), "Context scalar 'tenant'", "TenantIdConverter"));
 
         Assert.StartsWith(
@@ -166,8 +169,9 @@ public sealed class ParameterValuesTests
     [Fact]
     public void The_engine_binder_refuses_what_the_client_refuses()
     {
-        var error = Assert.Throws<ArgumentException>(() => ParameterBinder.Bind([3.5], [ChalkType.Int32()]));
+        var error = Assert.Throws<ParameterBindingException>(() => ParameterBinder.Bind([3.5], [ChalkType.Int32()]));
 
-        Assert.Contains("D317", error.Message, StringComparison.Ordinal);
+        Assert.Equal(ChalkErrorCodes.ParameterBinding, error.Code);
+        Assert.StartsWith("Parameter 0 is I32", error.Message, StringComparison.Ordinal);
     }
 }

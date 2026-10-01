@@ -333,8 +333,9 @@ public sealed class CompositeValidatorTests
         var ex = AssertInvalid(IrBuilder.Plan(HashAggregate(Read("symbols", rowType), [0], [])));
 
         Assert.Equal("I-IR-12", ex.Invariant);
+        Assert.Equal(ChalkErrorCodes.Internal, ex.Code);
         Assert.Contains(
-            "a LIST cannot be grouped by; v1 lists are produced, projected and indexed into only",
+            "a LIST cannot be grouped by; a list is produced, projected and indexed into only",
             ex.Message,
             StringComparison.Ordinal);
     }

@@ -1,5 +1,6 @@
 package chalk.planner.plan;
 
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import chalk.planner.plan.rel.ChalkNestedLoopJoin;
 import chalk.planner.plan.rel.SourceToLocalConverter;
@@ -45,6 +46,7 @@ public final class CrossSourceSupport {
     if (node instanceof ChalkNestedLoopJoin nested
         && chalk.planner.plan.rel.SourceCosts.fetchesRemotely(nested.getRight())) {
       throw new UnsupportedFeatureException(
+          ErrorCode.CROSS_SOURCE_JOIN_REFUSED,
           "a remote query on the inner side of a nested-loop join",
           "The plan puts source '"
               + sourceOf(nested.getRight())
@@ -85,6 +87,7 @@ public final class CrossSourceSupport {
     }
 
     throw new UnsupportedFeatureException(
+        ErrorCode.CROSS_SOURCE_JOIN_REFUSED,
         "a local cross-source join over " + Math.round(fetched) + " fetched rows",
         String.format(
             Locale.ROOT,

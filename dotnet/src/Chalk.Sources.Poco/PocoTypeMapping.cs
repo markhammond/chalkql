@@ -108,6 +108,7 @@ internal static class PocoTypeMapping
                 && !explicitType.Equals(inferred with { Nullable = explicitType.Nullable }))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.TypeMismatch,
                     what,
                     $"the declared type {explicitType} does not match {inferred}, which is what "
                     + $"{Describe(clrType)} reads as. A composite column's fields are its record's "
@@ -117,6 +118,7 @@ internal static class PocoTypeMapping
             if (explicitType.Kind != inferred.Kind)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.TypeMismatch,
                     what,
                     $"the declared type {explicitType} does not match {inferred}, which is what {Describe(clrType)} maps to. "
                     + "A type override may change nullability, precision and scale only; use Column(name, projection) "
@@ -369,9 +371,10 @@ internal static class PocoTypeMapping
             if (ElementTypeOf(elementUnderlying) is not null)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.UnsupportedType,
                     what,
-                    $"{Describe(declared)} is a list of lists; v1 lists are exactly one level deep "
-                    + "(docs/design/14-windows-ii.md §5).");
+                    $"{Describe(declared)} is a list of lists; a list is exactly one level deep, and its "
+                    + "elements are scalars.");
             }
 
             // D302 keeps a composite one level deep and a list's elements scalars: a list of
@@ -379,6 +382,7 @@ internal static class PocoTypeMapping
             if (CompositeInference.IsCandidate(elementUnderlying))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.UnsupportedType,
                     what,
                     $"{Describe(declared)} is a list of {elementUnderlying.Name} records; a LIST holds "
                     + "scalars, and a composite column is never nested in another column.");
@@ -402,8 +406,9 @@ internal static class PocoTypeMapping
         }
 
         throw new CatalogValidationException(
+            ChalkErrorCodes.UnsupportedType,
             what,
-            $"{Describe(declared)} has no mapping in the CLR type table (docs/design/04-client.md §5.2). "
+            $"{Describe(declared)} has no mapping in the CLR type table. "
             + "Map it with Column(name, row => …) to project it into a supported type, or leave it out with "
             + "Ignore(row => …) or [ChalkIgnore].");
     }
@@ -434,8 +439,10 @@ internal static class PocoTypeMapping
         TypeKind.IntervalDay => PocoStorageKind.Duration,
         TypeKind.Uuid => PocoStorageKind.Uuid,
         _ => throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedType,
             $"POCO column of kind {kind}",
-            "The POCO source writes only the kinds in docs/design/04-client.md §5.2."),
+            "The POCO source writes BOOL, the integer and floating kinds, DECIMAL, STRING, BINARY, "
+            + "DATE, TIME, TIMESTAMP, TIMESTAMP_TZ, INTERVAL_DAY and UUID columns."),
     };
 
     /// <summary>The expression that turns a present value of <paramref name="underlying"/> into its storage element.</summary>
@@ -476,8 +483,10 @@ internal static class PocoTypeMapping
             TypeKind.IntervalDay => value => Expression.Call(IntervalMicrosMethod, value),
             TypeKind.Uuid => value => value,
             _ => throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedType,
                 $"POCO column of kind {type.Kind}",
-                "The POCO source writes only the kinds in docs/design/04-client.md §5.2."),
+                "The POCO source writes BOOL, the integer and floating kinds, DECIMAL, STRING, "
+                + "BINARY, DATE, TIME, TIMESTAMP, TIMESTAMP_TZ, INTERVAL_DAY and UUID columns."),
         };
     }
 

@@ -12,7 +12,7 @@ namespace Chalk.Integration.Tests;
 
 /// <summary>
 /// D256: a source's dialect the sidecar does not recognise is refused at <c>RegisterCatalog</c>
-/// (the existing <see cref="PlanErrorKind.InvalidCatalog"/> kind) — <c>ansi</c> or a
+/// (the existing <see cref="PlanErrorKinds.InvalidCatalog"/> kind) — <c>ansi</c> or a
 /// <c>DatabaseProduct</c> name (aliases included) still register; empty is untouched.
 /// <see cref="ChalkEngine.CreateAsync"/> checks first, against <see cref="PlannerInfo.Dialects"/>
 /// (D248), so a host's mistyped name is reported locally, naming the source, before the round trip
@@ -105,7 +105,7 @@ public sealed class DialectRegistrationTests(SharedSidecar sidecar)
         var error = await Assert.ThrowsAsync<PlanningException>(
             () => planner.RegisterCatalogAsync(catalog).AsTask());
 
-        Assert.Equal(PlanErrorKind.InvalidCatalog, error.Kind);
+        Assert.Equal(PlanErrorKinds.InvalidCatalog, error.Kind);
         Assert.Contains("not-a-real-dialect", error.Message, StringComparison.Ordinal);
     }
 

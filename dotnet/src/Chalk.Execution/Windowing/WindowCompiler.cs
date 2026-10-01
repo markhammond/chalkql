@@ -19,9 +19,9 @@ internal static class WindowCompiler
         if (window.Frame.Mode == FrameMode.Groups)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedSql,
                 "a GROUPS frame",
-                "Calcite 1.42's parser does not accept GROUPS, so no Chalk planner emits one "
-                + "(docs/design/13-window-functions.md §9, ADR 0017 V16).");
+                "Calcite 1.42's parser does not accept GROUPS, so no Chalk planner emits one.");
         }
 
         // D297: the partition and order keys are bound here, for the buffered and the streaming
@@ -415,8 +415,9 @@ internal static class WindowCompiler
 
             default:
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedFunction,
                     call.WindowFunction.ToString().ToUpperInvariant(),
-                    "It is outside the window functions of docs/design/13-window-functions.md §1.");
+                    "This executor does not implement this window function.");
         }
     }
 
@@ -495,11 +496,10 @@ internal static class WindowCompiler
 
             default:
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedFunction,
                     $"{call.Aggregate.ToString().ToUpperInvariant()} over a window",
                     "The window operator implements COUNT, SUM, SUM0, AVG, MIN, MAX, BOOL_AND, "
-                    + "BOOL_OR, ANY_VALUE, MODE, LISTAGG and ARRAY_AGG, with or without DISTINCT "
-                    + "(docs/design/13-window-functions.md §1, docs/design/14-windows-ii.md §2 "
-                    + "and §3).");
+                    + "BOOL_OR, ANY_VALUE, MODE, LISTAGG and ARRAY_AGG, with or without DISTINCT.");
         }
     }
 
@@ -519,8 +519,9 @@ internal static class WindowCompiler
             || argument.Literal.ValueCase != Literal.ValueOneofCase.StringValue)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.NonConstantArgument,
                 $"LISTAGG over a window with a {argument.KindCase} separator",
-                "The separator is a string literal (docs/design/14-windows-ii.md §3).");
+                "The separator is a string literal.");
         }
 
         return argument.Literal.StringValue;
@@ -543,6 +544,7 @@ internal static class WindowCompiler
         if (argument.KindCase != Expr.KindOneofCase.FieldRef)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"a window call whose value argument is a {argument.KindCase}",
                 "The operator reads its value from a buffered column; the planner pushes any "
                 + "expression into a Project below the window.");

@@ -171,8 +171,9 @@ internal sealed class WindowDistinctEvaluator : WindowValueEvaluator
             && !IrTypes.IsNumeric(resultType.Kind))
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"{function}(DISTINCT) over {resultType} in a window",
-                "SUM and AVG are defined for the numeric kinds (docs/design/02-ir.md §6).");
+                "SUM and AVG are defined for the numeric kinds.");
         }
     }
 

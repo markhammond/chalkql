@@ -6,12 +6,13 @@ using Rpc = Chalk.Client.Rpc;
 namespace Chalk.Entitlements;
 
 /// <summary>
-/// Why the entitlements refused a statement (D329). A twin of the wire's
-/// <c>PolicyRefusalReason</c>, value for value, as <c>StarPolicy</c> is of its own.
+/// Why the entitlements refused a statement (D329): the refusal's code, as an enum a host can
+/// switch over. Each reason is one code; <see cref="EntitlementRefusal.Code"/> carries the code
+/// itself.
 /// </summary>
 public enum RefusalReason
 {
-    /// <summary>A reason this client does not know: a planner newer than it said something else.</summary>
+    /// <summary>A code this client has no reason for: a planner newer than it refused for something else.</summary>
     Unspecified = 0,
 
     /// <summary>
@@ -77,14 +78,15 @@ public enum RefusalReason
 public sealed class EntitlementRefusal
 {
     internal EntitlementRefusal(
-        RefusalReason reason,
+        string code,
         string? table,
         string? column,
         string? use,
         IReadOnlyList<string> permitted,
         ArrowSchema? outputSchema)
     {
-        Reason = reason;
+        Code = code;
+        Reason = ReasonOf(code);
         Table = table;
         Column = column;
         Use = use;
@@ -92,7 +94,10 @@ public sealed class EntitlementRefusal
         OutputSchema = outputSchema;
     }
 
-    /// <summary>Why.</summary>
+    /// <summary>The rule refused, as the glossary names it: <see cref="ChalkErrorCodes.Star"/>, say.</summary>
+    public string Code { get; }
+
+    /// <summary>Why, as the reason <see cref="Code"/> is; <see cref="RefusalReason.Unspecified"/> for a code this client has no reason for.</summary>
     public RefusalReason Reason { get; }
 
     /// <summary>The table the refusal is about, as <c>schema.table</c>, or null where it is about none.</summary>
@@ -120,11 +125,12 @@ public sealed class EntitlementRefusal
     public ArrowSchema? OutputSchema { get; }
 
     /// <summary>
-    /// The public refusal the wire's describes. STRING columns declare the layout the engine
-    /// accepts; where it accepts any, which the compiler would settle from a plan a refused statement
-    /// does not have, they declare <see cref="StringLayouts.Utf8View"/>, the default.
+    /// The refusals a planner's error describes, one for each rule it breaks, in its order. They
+    /// share one table model, the error's. STRING columns declare the layout the engine accepts;
+    /// where it accepts any, which the compiler would settle from a plan a refused statement does not
+    /// have, they declare <see cref="StringLayouts.Utf8View"/>, the default.
     /// </summary>
-    internal static EntitlementRefusal From(Rpc.PolicyRefusal wire, StringLayouts strings)
+    internal static IReadOnlyList<EntitlementRefusal> From(Rpc.PlanError wire, StringLayouts strings)
     {
         ArrowSchema? schema = null;
         if (wire.Output is { Fields.Count: > 0 } output)
@@ -136,28 +142,34 @@ public sealed class EntitlementRefusal
                 ArrowTypeMapping.ToArrowSchema(output, layouts), wire.Disclosures);
         }
 
-        return new EntitlementRefusal(
-            ReasonOf(wire.Reason),
-            wire.Table.Length == 0 ? null : wire.Table,
-            wire.Column.Length == 0 ? null : wire.Column,
-            wire.Use.Length == 0 ? null : wire.Use,
-            [.. wire.Permitted],
-            schema);
+        return
+        [
+            .. wire.Violations
+                .Where(violation => violation.Code.Length > 0)
+                .Select(violation => new EntitlementRefusal(
+                    violation.Code,
+                    violation.Table.Length == 0 ? null : violation.Table,
+                    violation.Column.Length == 0 ? null : violation.Column,
+                    violation.Use.Length == 0 ? null : violation.Use,
+                    [.. violation.Permitted],
+                    schema)),
+        ];
     }
 
-    private static RefusalReason ReasonOf(Rpc.PolicyRefusalReason reason) => reason switch
+    /// <summary>The reason a refusal's code is, the one each refusal code has.</summary>
+    internal static RefusalReason ReasonOf(string code) => code switch
     {
-        Rpc.PolicyRefusalReason.PopulationOnly => RefusalReason.PopulationOnly,
-        Rpc.PolicyRefusalReason.Statistical => RefusalReason.Statistical,
-        Rpc.PolicyRefusalReason.Redacted => RefusalReason.Redacted,
-        Rpc.PolicyRefusalReason.Star => RefusalReason.Star,
-        Rpc.PolicyRefusalReason.NoVisibleRows => RefusalReason.NoVisibleRows,
-        Rpc.PolicyRefusalReason.PushdownRequired => RefusalReason.PushdownRequired,
-        Rpc.PolicyRefusalReason.NoContext => RefusalReason.NoContext,
-        Rpc.PolicyRefusalReason.Binding => RefusalReason.Binding,
-        Rpc.PolicyRefusalReason.InvalidEntitlement => RefusalReason.InvalidEntitlement,
-        Rpc.PolicyRefusalReason.NameCollision => RefusalReason.NameCollision,
-        Rpc.PolicyRefusalReason.Internal => RefusalReason.Internal,
+        ChalkErrorCodes.PopulationOnly => RefusalReason.PopulationOnly,
+        ChalkErrorCodes.Statistical => RefusalReason.Statistical,
+        ChalkErrorCodes.Redacted => RefusalReason.Redacted,
+        ChalkErrorCodes.Star => RefusalReason.Star,
+        ChalkErrorCodes.NoVisibleRows => RefusalReason.NoVisibleRows,
+        ChalkErrorCodes.PushdownRequired => RefusalReason.PushdownRequired,
+        ChalkErrorCodes.ContextRequired => RefusalReason.NoContext,
+        ChalkErrorCodes.EntitlementBinding => RefusalReason.Binding,
+        ChalkErrorCodes.InvalidEntitlement => RefusalReason.InvalidEntitlement,
+        ChalkErrorCodes.DisclosureNameCollision => RefusalReason.NameCollision,
+        ChalkErrorCodes.Internal => RefusalReason.Internal,
         _ => RefusalReason.Unspecified,
     };
 }

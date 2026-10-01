@@ -28,7 +28,15 @@ public sealed class GrpcQueryPlannerTests
             StatusCode.InvalidArgument,
             new PlanError
             {
-                Kind = PlanErrorKind.Parse,
+                Violations =
+                {
+                    new Violation
+                    {
+                        Code = ChalkErrorCodes.SqlSyntax,
+                        Kind = PlanErrorKinds.Parse,
+                        Message = "Encountered \"close\"",
+                    },
+                },
                 Message = "Encountered \"close\"",
                 Line = 1,
                 Column = 20,
@@ -39,7 +47,7 @@ public sealed class GrpcQueryPlannerTests
         var decoded = GrpcQueryPlanner.DecodeTrailer(error);
 
         Assert.NotNull(decoded);
-        Assert.Equal(PlanErrorKind.Parse, decoded!.Kind);
+        Assert.Equal(PlanErrorKinds.Parse, Assert.Single(decoded!.Violations).Kind);
         Assert.Equal(20, decoded.Column);
     }
 
@@ -76,17 +84,20 @@ public sealed class GrpcQueryPlannerTests
     }
 
     [Theory]
-    [InlineData(PlanErrorKind.Parse, "SQL parse error")]
-    [InlineData(PlanErrorKind.Validation, "SQL validation error")]
-    [InlineData(PlanErrorKind.Unsupported, "Unsupported query")]
-    [InlineData(PlanErrorKind.EpochMismatch, "Catalog epoch mismatch")]
-    [InlineData(PlanErrorKind.Internal, "Planner internal error")]
-    public void Each_error_kind_reads_as_something_a_host_can_act_on(PlanErrorKind kind, string expected)
+    [InlineData(ChalkErrorCodes.SqlSyntax, PlanErrorKinds.Parse, "SQL parse error")]
+    [InlineData(ChalkErrorCodes.SqlValidation, PlanErrorKinds.Validation, "SQL validation error")]
+    [InlineData(ChalkErrorCodes.UnsupportedSql, PlanErrorKinds.Unsupported, "Unsupported query")]
+    [InlineData(ChalkErrorCodes.StalePlan, PlanErrorKinds.EpochMismatch, "Catalog epoch mismatch")]
+    [InlineData(ChalkErrorCodes.Internal, PlanErrorKinds.Internal, "Planner internal error")]
+    [InlineData("SomethingNewer", "SomeNewerKind", "Planning failed")]
+    public void Each_error_kind_reads_as_something_a_host_can_act_on(string code, string kind, string expected)
     {
-        var exception = new PlanningException(kind, "detail", position: null);
+        var exception = new PlanningException(code, kind, "detail", position: null);
 
         Assert.StartsWith(expected, exception.Message, StringComparison.Ordinal);
+        Assert.EndsWith($" [{code}]", exception.Message, StringComparison.Ordinal);
         Assert.Equal(kind, exception.Kind);
+        Assert.Equal(code, exception.Code);
     }
 
     [Fact]
@@ -96,7 +107,8 @@ public sealed class GrpcQueryPlannerTests
         Assert.Equal("line 1, column 20 to line 1, column 24", new SqlPosition(1, 20, 1, 24).ToString());
         Assert.Contains(
             "line 3, column 7",
-            new PlanningException(PlanErrorKind.Validation, "nope", new SqlPosition(3, 7, 3, 11)).Message,
+            new PlanningException(
+                ChalkErrorCodes.SqlValidation, PlanErrorKinds.Validation, "nope", new SqlPosition(3, 7, 3, 11)).Message,
             StringComparison.Ordinal);
     }
 }

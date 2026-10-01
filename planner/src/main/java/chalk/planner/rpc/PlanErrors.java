@@ -1,10 +1,11 @@
 package chalk.planner.rpc;
 
+import chalk.planner.Coded;
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import chalk.planner.catalog.InvalidCatalogException;
 import chalk.planner.rpc.v1.PlanError;
-import chalk.planner.rpc.v1.PlanErrorKind;
-import chalk.planner.rpc.v1.PolicyRefusal;
+import chalk.planner.rpc.v1.Violation;
 import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
@@ -34,32 +35,27 @@ public final class PlanErrors {
   /** Maps a planning failure to the status and trailer the client expects. */
   public static StatusRuntimeException toStatus(Throwable error) {
     if (error instanceof SqlParseException parse) {
-      return build(Status.INVALID_ARGUMENT, PlanErrorKind.PLAN_ERROR_KIND_PARSE, message(parse), parse.getPos());
+      return build(
+          Status.INVALID_ARGUMENT,
+          PlanErrorKind.PARSE,
+          ErrorCode.SQL_SYNTAX,
+          message(parse),
+          parse.getPos());
     }
     if (error instanceof ValidationException validation) {
       Throwable cause = validation.getCause() == null ? validation : validation.getCause();
       if (cause instanceof CalciteContextException context) {
-        return build(
-            Status.INVALID_ARGUMENT,
-            PlanErrorKind.PLAN_ERROR_KIND_VALIDATION,
-            message(context),
-            context.getPosLine(),
-            context.getPosColumn(),
-            context.getEndPosLine(),
-            context.getEndPosColumn());
+        return validation(context);
       }
       return build(
-          Status.INVALID_ARGUMENT, PlanErrorKind.PLAN_ERROR_KIND_VALIDATION, message(cause), null);
+          Status.INVALID_ARGUMENT,
+          PlanErrorKind.VALIDATION,
+          ErrorCode.SQL_VALIDATION,
+          message(cause),
+          null);
     }
     if (error instanceof CalciteContextException context) {
-      return build(
-          Status.INVALID_ARGUMENT,
-          PlanErrorKind.PLAN_ERROR_KIND_VALIDATION,
-          message(context),
-          context.getPosLine(),
-          context.getPosColumn(),
-          context.getEndPosLine(),
-          context.getEndPosColumn());
+      return validation(context);
     }
     // Valid SQL the entitlements refuse (D143). PERMISSION_DENIED rather than INVALID_ARGUMENT: the
     // statement is well formed and the planner could express it perfectly well; it is declining to,
@@ -73,7 +69,8 @@ public final class PlanErrors {
     if (error instanceof chalk.planner.ReservedNames.ReservedNameException reserved) {
       return build(
           Status.INVALID_ARGUMENT,
-          PlanErrorKind.PLAN_ERROR_KIND_INVALID_REQUEST,
+          PlanErrorKind.INVALID_REQUEST,
+          ErrorCode.RESERVED_NAME,
           reserved.getMessage(),
           null);
     }
@@ -84,7 +81,8 @@ public final class PlanErrors {
     if (error instanceof chalk.planner.plan.ParameterHintCheck.InvalidHintException hint) {
       return build(
           Status.INVALID_ARGUMENT,
-          PlanErrorKind.PLAN_ERROR_KIND_INVALID_REQUEST,
+          PlanErrorKind.INVALID_REQUEST,
+          ErrorCode.PARAMETER_BINDING,
           hint.getMessage(),
           null);
     }
@@ -94,7 +92,8 @@ public final class PlanErrors {
     if (error instanceof chalk.planner.ext.PlanExtensionRegistry.UnknownExtensionException unknown) {
       return build(
           Status.INVALID_ARGUMENT,
-          PlanErrorKind.PLAN_ERROR_KIND_INVALID_REQUEST,
+          PlanErrorKind.INVALID_REQUEST,
+          ErrorCode.UNKNOWN_EXTENSION,
           unknown.getMessage(),
           null);
     }
@@ -104,24 +103,30 @@ public final class PlanErrors {
     if (error instanceof chalk.planner.plan.PlannerPipeline.PlanningAbortedException aborted) {
       return build(
           Status.RESOURCE_EXHAUSTED,
-          PlanErrorKind.PLAN_ERROR_KIND_PLANNING_ABORTED,
+          PlanErrorKind.PLANNING_ABORTED,
+          ErrorCode.PLANNING_ABORTED,
           aborted.getMessage(),
           0,
           0,
           0,
           0,
-          PlannerServiceImpl.planningState(aborted.state(), 0L, 0L),
-          null);
+          PlannerServiceImpl.planningState(aborted.state(), 0L, 0L));
     }
     if (error instanceof UnsupportedFeatureException unsupported) {
       return build(
-          Status.UNIMPLEMENTED, PlanErrorKind.PLAN_ERROR_KIND_UNSUPPORTED, unsupported.getMessage(), null);
+          Status.UNIMPLEMENTED,
+          PlanErrorKind.UNSUPPORTED,
+          unsupported.code(),
+          unsupported.getMessage(),
+          null);
     }
     if (error instanceof RelOptPlanner.CannotPlanException cannotPlan) {
       return build(
           Status.UNIMPLEMENTED,
-          PlanErrorKind.PLAN_ERROR_KIND_UNSUPPORTED,
-          "This query cannot be physically planned by this milestone's rule set. " + cannotPlan.getMessage(),
+          PlanErrorKind.UNSUPPORTED,
+          ErrorCode.UNSUPPORTED_SQL,
+          "This planner has no rule that plans this statement as written. "
+              + cannotPlan.getMessage(),
           null);
     }
     // A shape version this planner does not hold (D271 (b), (e)). FAILED_PRECONDITION, like the two
@@ -130,29 +135,52 @@ public final class PlanErrors {
     if (error instanceof UnknownCatalogVersionException version) {
       return build(
           Status.FAILED_PRECONDITION,
-          PlanErrorKind.PLAN_ERROR_KIND_UNKNOWN_CATALOG_VERSION,
+          PlanErrorKind.UNKNOWN_CATALOG_VERSION,
+          ErrorCode.STALE_PLAN,
           version.getMessage(),
           null);
     }
     if (error instanceof UnknownContextException unknown) {
       return build(
-          Status.FAILED_PRECONDITION, PlanErrorKind.PLAN_ERROR_KIND_UNKNOWN_CONTEXT, unknown.getMessage(), null);
+          Status.FAILED_PRECONDITION,
+          PlanErrorKind.UNKNOWN_CONTEXT,
+          ErrorCode.STALE_PLAN,
+          unknown.getMessage(),
+          null);
     }
     if (error instanceof EpochMismatchException mismatch) {
       return build(
-          Status.FAILED_PRECONDITION, PlanErrorKind.PLAN_ERROR_KIND_EPOCH_MISMATCH, mismatch.getMessage(), null);
+          Status.FAILED_PRECONDITION,
+          PlanErrorKind.EPOCH_MISMATCH,
+          ErrorCode.STALE_PLAN,
+          mismatch.getMessage(),
+          null);
     }
     if (error instanceof IrVersionException version) {
       return build(
-          Status.FAILED_PRECONDITION, PlanErrorKind.PLAN_ERROR_KIND_IR_VERSION, version.getMessage(), null);
+          Status.FAILED_PRECONDITION,
+          PlanErrorKind.IR_VERSION,
+          ErrorCode.IR_VERSION_MISMATCH,
+          version.getMessage(),
+          null);
     }
     if (error instanceof InvalidCatalogException invalid) {
       return build(
-          Status.INVALID_ARGUMENT, PlanErrorKind.PLAN_ERROR_KIND_INVALID_CATALOG, invalid.getMessage(), null);
+          Status.INVALID_ARGUMENT,
+          PlanErrorKind.INVALID_CATALOG,
+          invalid.code(),
+          invalid.getMessage(),
+          null);
     }
+    // An argument the planner refuses: its own, naming the rule it meets, or one Calcite raised
+    // over the statement's text.
     if (error instanceof IllegalArgumentException illegal) {
       return build(
-          Status.INVALID_ARGUMENT, PlanErrorKind.PLAN_ERROR_KIND_VALIDATION, illegal.getMessage(), null);
+          Status.INVALID_ARGUMENT,
+          PlanErrorKind.VALIDATION,
+          illegal instanceof Coded coded ? coded.code() : ErrorCode.SQL_VALIDATION,
+          illegal.getMessage(),
+          null);
     }
 
     // Anything else is ours to fix. The client gets a correlation id it can quote; the stack trace
@@ -161,89 +189,104 @@ public final class PlanErrors {
     LOG.error("Internal planner error [{}]", correlationId, error);
     return build(
         Status.INTERNAL,
-        PlanErrorKind.PLAN_ERROR_KIND_INTERNAL,
+        PlanErrorKind.INTERNAL,
+        ErrorCode.INTERNAL,
         error.getClass().getName() + ": " + error.getMessage() + " [correlation id " + correlationId + "]",
         null);
   }
 
+  /** A statement Calcite's validator refused, at the position it named. */
+  private static StatusRuntimeException validation(CalciteContextException context) {
+    return build(
+        Status.INVALID_ARGUMENT,
+        PlanErrorKind.VALIDATION,
+        ErrorCode.SQL_VALIDATION,
+        message(context),
+        context.getPosLine(),
+        context.getPosColumn(),
+        context.getEndPosLine(),
+        context.getEndPosColumn(),
+        null);
+  }
+
   private static StatusRuntimeException build(
-      Status status, PlanErrorKind kind, String message, SqlParserPos position) {
+      Status status, PlanErrorKind kind, ErrorCode code, String message, SqlParserPos position) {
     if (position == null) {
-      return build(status, kind, message, 0, 0, 0, 0);
+      return build(status, kind, code, message, 0, 0, 0, 0, null);
     }
     return build(
         status,
         kind,
+        code,
         message,
         position.getLineNum(),
         position.getColumnNum(),
         position.getEndLineNum(),
-        position.getEndColumnNum());
-  }
-
-  private static StatusRuntimeException build(
-      Status status, PlanErrorKind kind, String message, int line, int column, int endLine, int endColumn) {
-    return build(status, kind, message, line, column, endLine, endColumn, null, null);
+        position.getEndColumnNum(),
+        null);
   }
 
   /**
    * A refusal, carrying what was refused and the result the statement would have had (D329), so a
-   * host can answer in its own words and still return the table model.
+   * host can answer in its own words and still return the table model. What was refused travels in
+   * the violation, under the refusal's code; the result is the error's, whatever it refuses.
    */
   private static StatusRuntimeException policy(chalk.planner.entitlement.PolicyException policy) {
-    PolicyRefusal.Builder refusal =
-        PolicyRefusal.newBuilder()
-            .setReason(policy.reason())
-            .setTable(policy.table())
-            .setColumn(policy.column())
-            .setUse(policy.use())
-            .addAllPermitted(policy.permitted())
+    String text = message(policy);
+    PlanError.Builder error =
+        PlanError.newBuilder()
+            .setMessage(text)
+            .addViolations(
+                Violation.newBuilder()
+                    .setCode(policy.code().wireName())
+                    .setKind(PlanErrorKind.POLICY.wireName())
+                    .setMessage(text)
+                    .setTable(policy.table())
+                    .setColumn(policy.column())
+                    .setUse(policy.use())
+                    .addAllPermitted(policy.permitted()))
             .addAllDisclosures(policy.disclosures().stream().map(PlanErrors::word).toList());
     chalk.ir.v1.RowType output = policy.output();
     if (output != null) {
-      refusal.setOutput(output);
+      error.setOutput(output);
     }
-    return build(
-        Status.PERMISSION_DENIED,
-        PlanErrorKind.PLAN_ERROR_KIND_POLICY,
-        policy.getMessage(),
-        0,
-        0,
-        0,
-        0,
-        null,
-        refusal.build());
+    return send(Status.PERMISSION_DENIED, error.build());
   }
 
+  /** An error that breaks one rule, which is every error the planner raises today. */
   private static StatusRuntimeException build(
       Status status,
       PlanErrorKind kind,
+      ErrorCode code,
       String message,
       int line,
       int column,
       int endLine,
       int endColumn,
-      chalk.planner.rpc.v1.@org.checkerframework.checker.nullness.qual.Nullable PlanningState state,
-      @org.checkerframework.checker.nullness.qual.Nullable PolicyRefusal refusal) {
-    String text = message == null ? kind.name() : message;
+      chalk.planner.rpc.v1.@org.checkerframework.checker.nullness.qual.Nullable PlanningState state) {
+    String text = message == null ? kind.wireName() : message;
     PlanError.Builder builder =
         PlanError.newBuilder()
-            .setKind(kind)
             .setMessage(text)
             .setLine(line)
             .setColumn(column)
             .setEndLine(endLine)
-            .setEndColumn(endColumn);
+            .setEndColumn(endColumn)
+            .addViolations(
+                Violation.newBuilder()
+                    .setCode(code.wireName())
+                    .setKind(kind.wireName())
+                    .setMessage(text));
     if (state != null) {
       builder.setPlanningState(state);
     }
-    if (refusal != null) {
-      builder.setPolicyRefusal(refusal);
-    }
-    PlanError error = builder.build();
+    return send(status, builder.build());
+  }
+
+  private static StatusRuntimeException send(Status status, PlanError error) {
     Metadata trailers = new Metadata();
     trailers.put(TRAILER, error.toByteArray());
-    return status.withDescription(text).asRuntimeException(trailers);
+    return status.withDescription(error.getMessage()).asRuntimeException(trailers);
   }
 
   /**

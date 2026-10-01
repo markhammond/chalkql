@@ -2,9 +2,9 @@ package chalk.planner.entitlement;
 
 import chalk.ir.v1.Enforcement;
 import chalk.ir.v1.PredicateShape;
+import chalk.planner.ErrorCode;
 import chalk.planner.catalog.ChalkTable;
 import chalk.planner.plan.PushdownGate;
-import chalk.planner.rpc.v1.PolicyRefusalReason;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -178,7 +178,7 @@ public final class PushdownRequired {
     String sourceId = chalkTable.sourceId();
     if (readsContextRelation(predicate) && !exchanges.joinPolicy().allowsLookup("", sourceId)) {
       throw new PolicyException(
-          PolicyRefusalReason.POLICY_REFUSAL_REASON_PUSHDOWN_REQUIRED,
+          ErrorCode.PUSHDOWN_REQUIRED,
           map.qualifiedName(),
           "",
           "",
@@ -198,7 +198,7 @@ public final class PushdownRequired {
     }
 
     throw new PolicyException(
-        PolicyRefusalReason.POLICY_REFUSAL_REASON_PUSHDOWN_REQUIRED,
+        ErrorCode.PUSHDOWN_REQUIRED,
         map.qualifiedName(),
         "",
         "",
@@ -251,7 +251,7 @@ public final class PushdownRequired {
         && !parentSource.equals(childSource)
         && !exchanges.joinPolicy().allowsLookup(parentSource, childSource)) {
       throw new PolicyException(
-          PolicyRefusalReason.POLICY_REFUSAL_REASON_PUSHDOWN_REQUIRED,
+          ErrorCode.PUSHDOWN_REQUIRED,
           map.qualifiedName(),
           "",
           "",
@@ -273,7 +273,7 @@ public final class PushdownRequired {
     }
 
     throw new PolicyException(
-        PolicyRefusalReason.POLICY_REFUSAL_REASON_PUSHDOWN_REQUIRED,
+        ErrorCode.PUSHDOWN_REQUIRED,
         map.qualifiedName(),
         "",
         "",

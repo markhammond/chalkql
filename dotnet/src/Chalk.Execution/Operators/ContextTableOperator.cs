@@ -78,11 +78,13 @@ internal sealed class ContextTableOperator : OperatorBase
     {
         var supplied = Context.ContextRelation(_name)
             ?? throw new ExecutionException(
+                ChalkErrorCodes.InvalidContext,
                 Context.PlanDigest,
                 Path,
                 $"the plan reads the context relation '{_name}' and the execution bound none. "
                 + "A list too large to fold stays a relation the executor materialises, so it has "
-                + "to be bound at execution as well as at prepare.");
+                + "to be bound at execution as well as at prepare.",
+                innerException: null);
 
         var bound = new ScalarValue[supplied.Count][];
         for (var r = 0; r < supplied.Count; r++)
@@ -91,23 +93,27 @@ internal sealed class ContextTableOperator : OperatorBase
             if (row.Count != _columnTypes.Length)
             {
                 throw new ExecutionException(
+                    ChalkErrorCodes.InvalidContext,
                     Context.PlanDigest,
                     Path,
                     $"row {r} of the context relation '{_name}' has {row.Count} value(s) and the "
-                    + $"plan declares {_columnTypes.Length} column(s).");
+                    + $"plan declares {_columnTypes.Length} column(s).",
+                    innerException: null);
             }
 
             try
             {
                 bound[r] = ParameterBinder.Bind(row, _columnTypes);
             }
-            catch (ArgumentException failure)
+            catch (ParameterBindingException failure)
             {
                 throw new ExecutionException(
+                    ChalkErrorCodes.ParameterBinding,
                     Context.PlanDigest,
                     Path,
                     $"row {r} of the context relation '{_name}' does not match the column types "
-                    + $"the plan declares: {failure.Message}");
+                    + $"the plan declares: {failure.Message}",
+                    failure);
             }
         }
 

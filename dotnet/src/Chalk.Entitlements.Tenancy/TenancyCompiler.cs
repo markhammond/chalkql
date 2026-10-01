@@ -105,6 +105,7 @@ internal static class TenancyCompiler
         internal SchemaDescriptor Require(string name, string path) =>
             Schema(name)
             ?? throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidPolicy,
                 path,
                 $"the policy speaks about the source '{name}', which is not among the schemas it is "
                 + $"compiled against ({string.Join(", ", Schemas.Select(s => s.Name))}).");
@@ -132,6 +133,7 @@ internal static class TenancyCompiler
             var schema = sources.Require(declared.Schema, path);
             var table = Find(schema, declared.Name)
                 ?? throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidPolicy,
                     path,
                     $"the policy declares '{declared.Schema}.{declared.Name}', which that source "
                     + "does not hold");
@@ -739,6 +741,7 @@ internal static class TenancyCompiler
             && Column(table, declared.ResourceOwnerColumn) is null)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.UnknownName,
                 path,
                 $"ResourceOwner names '{declared.ResourceOwnerColumn}', which is not a column of "
                 + "the table");
@@ -748,7 +751,8 @@ internal static class TenancyCompiler
         {
             if (restriction.Kind == RestrictionKind.Predicate && restriction.Predicate.Length == 0)
             {
-                throw new CatalogValidationException(path, "a Predicate restriction is empty");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidPolicy, path, "a Predicate restriction is empty");
             }
         }
 
@@ -773,13 +777,14 @@ internal static class TenancyCompiler
                 }
 
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidTenancyPath,
                     $"{path}.related",
                     $"Related(\"{declaredPath.Kind}\") on '{declared.Name}' reaches the endpoint "
                     + $"'{declaredPath.EndpointTable}', which also holds '{dimension.Declared.Kind}' "
                     + $"— a kind this policy declares may confine '{declaredPath.Kind}'. A grant so "
                     + "confined would have to be borne by the path's existence marker, and "
                     + "confinement along a Related kind is refused in this decision "
-                    + "(docs/design/40-conjoined-confinement.md §3, §7, D266): reach the endpoint "
+                    + ": reach the endpoint "
                     + "with an Inherited path, or take the confining kind off the endpoint.");
             }
         }
@@ -828,14 +833,14 @@ internal static class TenancyCompiler
             }
 
             throw new CatalogValidationException(
+                ChalkErrorCodes.UnansweredCombination,
                 rules.Path,
                 $"the combination {combination} declared for role '{role}' resolves on '{table}' — "
                 + string.Join(", ", where)
                 + " — and no one route answers it: a conjoined test is decided on one row, or on one "
                 + "path's endpoint read beside the row, so a grant of it would reach nothing here. "
                 + $"Declare its kinds on one row of '{table}' or reach them along one path, or do "
-                + $"not admit '{role}' on '{table}' "
-                + "(docs/design/59-declared-combinations.md §2, D320).");
+                + $"not admit '{role}' on '{table}'.");
         }
     }
 
@@ -894,13 +899,13 @@ internal static class TenancyCompiler
         if (available.Count > MaxConfiningKinds)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidPolicy,
                 rules.Path,
                 $"the dimension '{dimension.Declared.Kind}' may be confined by {available.Count} tenancy "
                 + $"kinds that this table resolves, and the compiler writes a membership test for every "
                 + $"set of them — up to {1 << available.Count} per role for this kind alone. "
                 + $"{MaxConfiningKinds} is the most it will write. Declare the combinations grants hold, "
-                + "and only those are written "
-                + "(docs/design/59-declared-combinations.md §1, D320; design 40 §2, §4, D266).");
+                + "and only those are written.");
         }
 
         var groups = new List<ConfinementGroup>();
@@ -1246,6 +1251,7 @@ internal static class TenancyCompiler
     {
         var column = Column(table, restriction.Column)
             ?? throw new CatalogValidationException(
+                ChalkErrorCodes.UnknownName,
                 $"{path}.through",
                 $"Through names '{restriction.Column}', which is not a column of '{table.Name}'");
 
@@ -1264,6 +1270,7 @@ internal static class TenancyCompiler
             if (found is null)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidTenancyPath,
                     $"{path}.through",
                     $"Through('{restriction.Column}') has no declared foreign key over that column "
                     + $"on '{table.Name}', so there is nothing to read the parent off. Declare the "
@@ -1276,6 +1283,7 @@ internal static class TenancyCompiler
             parentSchema = schema;
             var parentTableForKey = Find(schema, parentName)
                 ?? throw new CatalogValidationException(
+                    ChalkErrorCodes.UnknownName,
                     $"{path}.through",
                     $"the foreign key over '{restriction.Column}' names parent '{parentName}', "
                     + "which the schema does not hold");
@@ -1288,28 +1296,32 @@ internal static class TenancyCompiler
 
         var parent = Find(parentSchema, parentName)
             ?? throw new CatalogValidationException(
+                ChalkErrorCodes.UnknownName,
                 $"{path}.through",
                 $"Through('{restriction.Column}') names parent '{parentName}', which the schema "
                 + "does not hold");
 
         var declaredParent = policy.TableOf(parentSchema.Name, parent.Name)
             ?? throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidTenancyPath,
                 $"{path}.through",
                 $"Through('{restriction.Column}') names parent '{parent.Name}', which this policy "
                 + "does not declare. A row's visibility can only derive from a table the policy "
-                + "speaks about (docs/design/16-entitlements.md §3.13, D227).");
+                + "speaks about.");
 
         if (!declaredParent.IsRestricted)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidTenancyPath,
                 $"{path}.through",
                 $"Through('{restriction.Column}') names parent '{parent.Name}', which this policy "
                 + "leaves unrestricted. Through an unrestricted parent restricts nothing; declare "
-                + "the child unrestricted, or restrict the parent (§3.13, D227).");
+                + "the child unrestricted, or restrict the parent.");
         }
 
         var keyColumn = Column(parent, parentKey)
             ?? throw new CatalogValidationException(
+                ChalkErrorCodes.UnknownName,
                 $"{path}.through",
                 $"Through('{restriction.Column}') names the parent key '{parent.Name}.{parentKey}', "
                 + "which is not a column of the parent");
@@ -1318,10 +1330,11 @@ internal static class TenancyCompiler
         if (!IsUniqueKey(parent, keyOrdinal))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.NotAUniqueKey,
                 $"{path}.through",
                 $"Through('{restriction.Column}') resolves to '{parent.Name}.{keyColumn.Name}', "
                 + "which is not a declared unique key of the parent. The join it compiles into must "
-                + "not multiply rows, and a unique key is what makes that so (§3.13, D226). Declare "
+                + "not multiply rows, and a unique key is what makes that so. Declare "
                 + "the key.");
         }
 
@@ -1371,10 +1384,10 @@ internal static class TenancyCompiler
         if (restriction.Steps.Count == 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidTenancyPath,
                 where,
                 $"{verb}(\"{restriction.TenancyKind}\") on '{table.Name}' declares no step. A path "
-                + "with no step is a Direct dimension written the long way round "
-                + "(docs/design/38-existential-visibility.md §1, §3, D265).");
+                + "with no step is a Direct dimension written the long way round.");
         }
 
         var steps = new List<ResolvedStep>(restriction.Steps.Count);
@@ -1388,6 +1401,7 @@ internal static class TenancyCompiler
                 step.Schema.Length == 0 ? schema.Name : step.Schema, where);
             var to = Find(toSchema, step.Table)
                 ?? throw new CatalogValidationException(
+                    ChalkErrorCodes.UnknownName,
                     where,
                     $"step {i} of {verb}(\"{restriction.TenancyKind}\") on '{table.Name}' names "
                     + $"'{toSchema.Name}.{step.Table}', which that source does not hold");
@@ -1396,10 +1410,11 @@ internal static class TenancyCompiler
                 && string.Equals(toSchema.Name, schema.Name, StringComparison.OrdinalIgnoreCase))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidTenancyPath,
                     where,
                     $"step {i} of {verb}(\"{restriction.TenancyKind}\") returns to '{table.Name}' "
                     + "itself. A row's visibility cannot derive from its own table's, so a bridge "
-                    + "and an endpoint are both other tables (§3, D265).");
+                    + "and an endpoint are both other tables.");
             }
 
             var up = restriction.Kind == RestrictionKind.Related && i == 0;
@@ -1421,10 +1436,11 @@ internal static class TenancyCompiler
         {
             var declaredEndpoint = policy.TableOf(atSchema.Name, at.Name)
                 ?? throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidTenancyPath,
                     where,
                     $"{verb}(\"{restriction.TenancyKind}\") on '{table.Name}' ends at "
                     + $"'{atSchema.Name}.{at.Name}', which this policy does not declare. A row's "
-                    + "visibility can only derive from a table the policy speaks about (§3, D265).");
+                    + "visibility can only derive from a table the policy speaks about.");
 
             if (DimensionOfKind(declaredEndpoint, restriction.TenancyKind) is { } held)
             {
@@ -1453,12 +1469,13 @@ internal static class TenancyCompiler
             if (onward is null || ++flattened > 16)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidTenancyPath,
                     where,
                     $"{verb}(\"{restriction.TenancyKind}\") on '{table.Name}' ends at '{at.Name}', "
                     + $"which does not hold the kind '{restriction.TenancyKind}'. A path ends where "
                     + "the key lives: declare it there with "
                     + $"Direct(\"{restriction.TenancyKind}\", \"<column>\"), or carry the path on "
-                    + "with another step (§1, §3, D265).");
+                    + "with another step.");
             }
 
             for (var i = 0; i < onward.Steps.Count; i++)
@@ -1468,6 +1485,7 @@ internal static class TenancyCompiler
                     step.Schema.Length == 0 ? atSchema.Name : step.Schema, where);
                 var to = Find(toSchema, step.Table)
                     ?? throw new CatalogValidationException(
+                        ChalkErrorCodes.UnknownName,
                         where,
                         $"the endpoint '{at.Name}' inherits '{restriction.TenancyKind}' through "
                         + $"'{toSchema.Name}.{step.Table}', which that source does not hold");
@@ -1526,6 +1544,7 @@ internal static class TenancyCompiler
         if (keys.Count == 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidTenancyPath,
                 where,
                 $"step {ordinal} of Related(\"{restriction.TenancyKind}\") goes up from "
                 + $"'{from.Name}' to '{bridge.Name}', and '{bridge.Name}' declares no foreign key "
@@ -1536,17 +1555,17 @@ internal static class TenancyCompiler
                     : $", and the catalog declares no association from '{bridgeSchema.Name}."
                       + $"{bridge.Name}' to '{fromSchema.Name}.{from.Name}' either")
                 + ". The first step of a Related path names the bridge — the "
-                + "table that references us — and the direction is checked, not inferred (§1, §3, "
-                + "D265; docs/design/45-typed-tenancy-surface.md §3, D270).");
+                + "table that references this one — and the direction is checked, not inferred.");
         }
 
         if (keys.Count > 1)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidTenancyPath,
                 where,
                 $"step {ordinal} of Related(\"{restriction.TenancyKind}\") is ambiguous: "
                 + $"'{bridge.Name}' declares {keys.Count} references naming '{from.Name}'. Name "
-                + $"the bridge's column: Through(table, on: column) (§1, D265).");
+                + $"the bridge's column: Through(table, on: column).");
         }
 
         var chosen = keys[0];
@@ -1556,11 +1575,12 @@ internal static class TenancyCompiler
         if (!IsUniqueKey(from, parentColumn))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.NotAUniqueKey,
                 where,
                 $"step {ordinal} of Related(\"{restriction.TenancyKind}\") joins "
                 + $"'{from.Name}.{from.Columns[parentColumn].Name}', which is not a declared unique "
                 + "key of the table. The key set the planner joins back to must not multiply rows, "
-                + "and a unique key is what makes that so (§3, D265). Declare the key.");
+                + "and a unique key is what makes that so. Declare the key.");
         }
 
         RefuseTypeDisagreement(
@@ -1620,6 +1640,7 @@ internal static class TenancyCompiler
         if (keys.Count == 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidTenancyPath,
                 where,
                 $"step {ordinal} of {verb}(\"{restriction.TenancyKind}\") goes down from "
                 + $"'{from.Name}' to '{parent.Name}', and '{from.Name}' declares no foreign key "
@@ -1631,27 +1652,29 @@ internal static class TenancyCompiler
                       + $"{from.Name}' to '{parentSchema.Name}.{parent.Name}' either")
                 + ". A down-step follows a declared foreign key of the "
                 + "current table, or a declared association from it, and the direction is checked, "
-                + "not inferred (§1, §3, D265; docs/design/45-typed-tenancy-surface.md §3, D270).");
+                + "not inferred.");
         }
 
         if (keys.Count > 1)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidTenancyPath,
                 where,
                 $"step {ordinal} of {verb}(\"{restriction.TenancyKind}\") is ambiguous: "
                 + $"'{from.Name}' declares {keys.Count} references naming '{parent.Name}'. Name "
-                + $"our column: Through(table, on: column) (§1, D265).");
+                + $"our column: Through(table, on: column).");
         }
 
         var chosen = keys[0];
         if (!IsUniqueKey(parent, chosen.Parent))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidTenancyPath,
                 where,
                 $"step {ordinal} of {verb}(\"{restriction.TenancyKind}\") joins "
                 + $"'{parent.Name}.{parent.Columns[chosen.Parent].Name}', which is not a "
                 + "declared unique key of that table. The joins a path compiles into must not "
-                + "multiply rows, and a unique key is what makes that so (§3, D265). Declare the "
+                + "multiply rows, and a unique key is what makes that so. Declare the "
                 + "key.");
         }
 
@@ -1733,12 +1756,12 @@ internal static class TenancyCompiler
         if (here.Type.Kind != there.Type.Kind)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.TypeMismatch,
                 where,
                 $"step {ordinal} joins '{childSchema.Name}.{child.Name}.{here.Name}' "
                 + $"({here.Type.Kind}) to '{parentSchema.Name}.{parent.Name}.{there.Name}' "
                 + $"({there.Type.Kind}), and the two types disagree. A step joins one key to "
-                + "another, so the two columns have to be the same kind of value "
-                + "(docs/design/45-typed-tenancy-surface.md §3, D270).");
+                + "another, so the two columns have to be the same kind of value.");
         }
     }
 
@@ -1762,12 +1785,12 @@ internal static class TenancyCompiler
                 if (string.Equals(member, column, StringComparison.OrdinalIgnoreCase))
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.ProtectedBridgeKey,
                         where,
                         $"the bridge key '{bridge.Name}.{column}' is in the realm '{realm.Key}'. The "
                         + "mechanism reads the bridge's two key columns raw and discloses neither, "
-                        + "exactly as a parent's key is left full under D227, so a realm over one is "
-                        + "a contradiction: take it out, or reach the endpoint another way "
-                        + "(§3, D265).");
+                        + "exactly as a parent's key is left full, so a realm over one is a "
+                        + "contradiction: take it out, or reach the endpoint another way.");
                 }
             }
         }
@@ -1777,11 +1800,12 @@ internal static class TenancyCompiler
             if (string.Equals(rule.ColumnName, column, StringComparison.OrdinalIgnoreCase))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.ProtectedBridgeKey,
                     where,
                     $"the bridge key '{bridge.Name}.{column}' is named by an access rule. The "
                     + "mechanism reads the bridge's two key columns raw and discloses neither, "
-                    + "exactly as a parent's key is left full under D227, so a rule over one is a "
-                    + "contradiction: take it out, or reach the endpoint another way (§3, D265).");
+                    + "exactly as a parent's key is left full, so a rule over one is a "
+                    + "contradiction: take it out, or reach the endpoint another way.");
             }
         }
     }
@@ -1834,12 +1858,12 @@ internal static class TenancyCompiler
         {
             visiting.Add(declared.Name);
             throw new CatalogValidationException(
+                ChalkErrorCodes.VisibilityCycle,
                 $"{path}.through",
                 $"the chain of derived visibility returns to '{declared.Name}': "
                 + string.Join(" -> ", visiting)
                 + ". A row's visibility cannot derive from itself, so a cycle is refused where a "
-                + "diamond is fine (docs/design/16-entitlements.md §3.13, D225; "
-                + "docs/design/38-existential-visibility.md §3, D265).");
+                + "diamond is fine.");
         }
 
         visiting.Add(declared.Name);
@@ -1936,6 +1960,7 @@ internal static class TenancyCompiler
         if (dimension.WithinKinds.Count == 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidTenancyPath,
                 $"{path}.{dimension.Kind}",
                 "a subject dimension must name the tenancy dimension it is confined within; a grant "
                 + "that reaches every tenancy says so with Tenancy.Anywhere at the grant");
@@ -1963,6 +1988,7 @@ internal static class TenancyCompiler
         if (within is null)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidTenancyPath,
                 $"{path}.{dimension.Kind}",
                 $"the subject dimension is confined within {Named(dimension.WithinKinds)}, "
                 + (dimension.WithinKinds.Count == 1 ? "which is not a " : "none of which is a ")
@@ -1993,6 +2019,7 @@ internal static class TenancyCompiler
         {
             return Column(table, columnOrPath)
                 ?? throw new CatalogValidationException(
+                    ChalkErrorCodes.UnknownName,
                     path, $"'{columnOrPath}' is not a column of '{table.Name}'");
         }
 
@@ -2004,6 +2031,7 @@ internal static class TenancyCompiler
             if (visited.Contains(at.Name, StringComparer.OrdinalIgnoreCase))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidTenancyPath,
                     path,
                     $"the path '{columnOrPath}' returns to '{at.Name}', which it already visited: a "
                     + "foreign-key path may not cycle");
@@ -2015,6 +2043,7 @@ internal static class TenancyCompiler
         var last = segments[^1];
         var target = policy.TableOf(schema.Name, at.Name)
             ?? throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidTenancyPath,
                 path,
                 $"the path '{columnOrPath}' arrives at '{at.Name}', which the policy does not "
                 + "declare, so it has no dimension to end at");
@@ -2031,6 +2060,7 @@ internal static class TenancyCompiler
         if (end is null)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidTenancyPath,
                 path,
                 $"the path '{columnOrPath}' ends at '{last}', which is not a tenancy dimension of "
                 + $"'{at.Name}'");
@@ -2044,11 +2074,12 @@ internal static class TenancyCompiler
         if (here is null || here.Type.Kind != there.Type.Kind)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidTenancyPath,
                 path,
                 $"the path '{columnOrPath}' resolves to '{at.Name}.{there.Name}' ({there.Type.Kind}), "
                 + $"and '{table.Name}' carries no column '{there.Name}' of that kind. A compiled "
                 + "predicate may read this table's own columns, a context scalar and a context list "
-                + "and nothing else (docs/design/16-entitlements.md §2), so the tenancy has to be on "
+                + "and nothing else, so the tenancy has to be on "
                 + "the row: carry the column, or declare the dimension on the column that does.");
         }
 
@@ -2086,6 +2117,7 @@ internal static class TenancyCompiler
         }
 
         throw new CatalogValidationException(
+            ChalkErrorCodes.InvalidTenancyPath,
             path,
             matches.Count == 0
                 ? $"'{segment}' names no declared foreign key of '{from.Name}'. A path resolves "
@@ -2325,6 +2357,7 @@ internal static class TenancyCompiler
                 if (Column(table, member) is null)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.UnknownName,
                         path, $"realm '{realm}' names '{member}', which is not a column of the table");
                 }
             }
@@ -2339,34 +2372,36 @@ internal static class TenancyCompiler
             if (rule.Roles.Contains(Roles.Visible) && rule.Roles.Count > 1)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidAccessRule,
                     $"{path}.access[{r}]",
                     $"the access rule for {About(rule)} on '{declared.Name}' names Roles.Visible "
                     + "beside other grantees. Roles.Visible is every way into the row — every "
                     + "declared role, the resource owner and the global grant — so a grantee beside "
                     + "it says nothing more and would only make the condition something other than "
-                    + "the row predicate (docs/design/43-verdicts-along-paths.md, D269 (c)).");
+                    + "the row predicate.");
             }
 
             if (rule.Roles.Contains(Roles.Visible)
                 && RowPredicate(declared, model).Length == 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidAccessRule,
                     $"{path}.access[{r}]",
                     $"the access rule for {About(rule)} on '{declared.Name}' names Roles.Visible, "
                     + "and this table restricts no row, so there is no predicate to write as the "
                     + "condition. Every row is visible here already; write the verdict for the "
-                    + "roles it is meant for (docs/design/43-verdicts-along-paths.md, D269 (c)).");
+                    + "roles it is meant for.");
             }
 
             if (rule.Roles.Contains(Roles.Owner)
                 && declared.ResourceOwnerColumn.Length == 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidAccessRule,
                     $"{path}.access[{r}]",
                     $"the access rule for {About(rule)} on '{declared.Name}' names Roles.Owner, and "
                     + "this table declares no ResourceOwner, so there is no column to compare the "
-                    + "caller with. Declare one with `ResourceOwner(column)`, or drop the grantee "
-                    + "(docs/design/43-verdicts-along-paths.md, D269 (c)).");
+                    + "caller with. Declare one with `ResourceOwner(column)`, or drop the grantee.");
             }
 
             // A rule speaks for roles, and a role the policy does not list is a role no grant can
@@ -2382,6 +2417,7 @@ internal static class TenancyCompiler
                 if (!roles.Contains(role.Name, StringComparer.Ordinal))
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidAccessRule,
                         $"{path}.access[{r}]",
                         $"the access rule for {About(rule)} on '{declared.Name}' speaks for role "
                         + $"'{role.Name}', which is not one of the roles this policy declares "
@@ -2403,11 +2439,12 @@ internal static class TenancyCompiler
             if (rule.PlaceholderText.Length > 0 && rule.Grants != Verdict.None)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidAccessRule,
                     path,
                     $"an access rule for {About(rule)} grants {rule.Grants} and states a "
                     + "placeholder. A placeholder is what stands in for a value the rule withholds, "
-                    + "so it is meaningful only with Verdict.None (docs/design/16-entitlements.md "
-                    + "§5, D224). A rule that means to show something derived from the value grants "
+                    + "so it is meaningful only with Verdict.None. A rule that means to show "
+                    + "something derived from the value grants "
                     + "Verdict.Mask and states a Mask.");
             }
 
@@ -2418,10 +2455,11 @@ internal static class TenancyCompiler
             if (rule.Grants == Verdict.Test && rule.Tests.Count == 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidAccessRule,
                     path,
                     $"an access rule for {About(rule)} grants Verdict.Test and names no comparison "
-                    + "shape, so it discloses neither the value nor any comparison of it "
-                    + "(docs/design/36-test-verdict.md §1). Name the shapes — Test.Equals, "
+                    + "shape, so it discloses neither the value nor any comparison of it. "
+                    + "Name the shapes — Test.Equals, "
                     + "Test.NotEquals, Test.In — or grant Verdict.None and mean it.");
             }
 
@@ -2429,11 +2467,12 @@ internal static class TenancyCompiler
                 && rule.Grants is not (Verdict.Test or Verdict.AggregateOnly))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidAccessRule,
                     path,
                     $"an access rule for {About(rule)} grants {rule.Grants} and names comparison "
                     + "shapes. A shape is what a principal may test without reading the value, so it "
                     + "is meaningful with Verdict.Test, and on a Verdict.AggregateOnly rule as the "
-                    + "FILTER of a permitted aggregate (D261) — under any other verdict the value is "
+                    + "FILTER of a permitted aggregate — under any other verdict the value is "
                     + "either disclosed outright or withheld entirely.");
             }
 
@@ -2443,6 +2482,7 @@ internal static class TenancyCompiler
                 if (Column(table, named.Name) is null)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.UnknownName,
                         path,
                         $"an access rule names column '{named.Name}', which the table does not hold");
                 }
@@ -2454,6 +2494,7 @@ internal static class TenancyCompiler
                 if (!declared.Realms.ContainsKey(about.Name))
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.UnknownName,
                         path,
                         $"an access rule names realm '{about.Name}', which the table does not declare");
                 }
@@ -2462,6 +2503,7 @@ internal static class TenancyCompiler
             if (rule.RealmName.Length > 0 && rule.ColumnName.Length > 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidAccessRule,
                     path,
                     $"an access rule names both realm '{rule.RealmName}' and column "
                     + $"'{rule.ColumnName}'; a rule speaks about one or the other");
@@ -2888,6 +2930,7 @@ internal static class TenancyCompiler
                 if (planned.Aggregates.Count == 0)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidAccessRule,
                         path,
                         $"column '{column}' is AggregateOnly for some role and the rule lists no "
                         + "population aggregate, so nothing could ever read it. List the aggregates "
@@ -3079,11 +3122,12 @@ internal static class TenancyCompiler
                 }
 
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.MaskReadsProtectedColumn,
                     path,
                     $"the mask of '{column}' reads '{other}', which is itself a protected column "
                     + "(it is in a realm, or a rule names it). A mask is evaluated over the raw "
                     + $"row, so this one would disclose '{other}' inside '{column}' to a principal "
-                    + $"who may see neither (docs/design/16-entitlements.md §5, D220). A mask may "
+                    + $"who may see neither. A mask may "
                     + "read its own column, an unprotected column and the context; a rule condition "
                     + "may read anything.");
             }
@@ -3171,12 +3215,13 @@ internal static class TenancyCompiler
         {
             if (value.Length == 0)
             {
-                throw new CatalogValidationException(path, $"a {what} is empty");
+                throw new CatalogValidationException(ChalkErrorCodes.EmptyName, path, $"a {what} is empty");
             }
 
             if (seen.Contains(value, StringComparer.Ordinal))
             {
-                throw new CatalogValidationException(path, $"{what} '{value}' is listed twice");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.DuplicateName, path, $"{what} '{value}' is listed twice");
             }
 
             seen.Add(value);
@@ -3191,6 +3236,7 @@ internal static class TenancyCompiler
         if (!declared.Contains(value, StringComparer.Ordinal))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.UnknownName,
                 path,
                 $"'{value}' is not one of the {what}s this policy declares ({string.Join(", ", declared)})");
         }

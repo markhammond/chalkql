@@ -40,6 +40,7 @@ internal static class PocoConvert
     /// </summary>
     public static void ThrowUnexpectedNull(string sourceId, string table, string column) =>
         throw new SourceContractException(
+            ChalkErrorCodes.SourceContract,
             sourceId,
             table,
             $"column '{column}' is declared NOT NULL but a row holds null. Declare the column nullable, "

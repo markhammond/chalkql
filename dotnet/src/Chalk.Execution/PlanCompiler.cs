@@ -225,9 +225,11 @@ internal static class PlanCompiler
             if (!Registry.TryGetValue(rel.KindCase, out var factory))
             {
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedOperator,
                     rel.KindCase.ToString(),
-                    $"The M1 executor runs {string.Join(", ", Registry.Keys.OrderBy(k => k.ToString(), StringComparer.Ordinal))}; "
-                    + "see docs/design/06-m1-workplan.md §4 for what is deliberately out.");
+                    "This executor runs "
+                    + string.Join(", ", Registry.Keys.OrderBy(k => k.ToString(), StringComparer.Ordinal))
+                    + ", and not this node.");
             }
 
             return factory(this, rel, path);
@@ -241,6 +243,7 @@ internal static class PlanCompiler
             if (!_sources.TryGetValue(table.SourceId, out var source))
             {
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnknownSource,
                     $"source '{table.SourceId}'",
                     $"The engine holds no source with that id. Known: {string.Join(", ", _sources.Keys)}.");
             }
@@ -298,6 +301,7 @@ internal static class PlanCompiler
             if (!_sources.TryGetValue(query.SourceId, out var source))
             {
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnknownSource,
                     $"source '{query.SourceId}'",
                     $"The engine holds no source with that id. Known: {string.Join(", ", _sources.Keys)}.");
             }
@@ -425,16 +429,18 @@ internal static class PlanCompiler
             if (join.PostJoinFilter is not null)
             {
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedOperator,
                     "a lookup join with a residual predicate",
-                    "A LookupJoin carries only its equality in this milestone; the planner does not "
+                    "A LookupJoin carries only its equality; the planner does not "
                     + "emit one with a post_join_filter, and a plan that has one was made by "
-                    + "something else (ADR 0022).");
+                    + "something else.");
             }
 
             var lookup = join.Lookup;
             if (lookup.KindCase != Rel.KindOneofCase.RemoteQuery)
             {
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedOperator,
                     $"a lookup join whose lookup side is a {lookup.KindCase}",
                     "A LookupJoin's lookup side is the query a source runs with the keys bound into "
                     + "it, so it is always a RemoteQuery.");
@@ -444,6 +450,7 @@ internal static class PlanCompiler
             if (!_sources.TryGetValue(query.SourceId, out var source))
             {
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnknownSource,
                     $"source '{query.SourceId}'",
                     $"The engine holds no source with that id. Known: {string.Join(", ", _sources.Keys)}.");
             }
@@ -639,6 +646,7 @@ internal static class PlanCompiler
             if (!_sources.TryGetValue(table.SourceId, out var source))
             {
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnknownSource,
                     $"source '{table.SourceId}'",
                     $"The engine holds no source with that id. Known: {string.Join(", ", _sources.Keys)}.");
             }
@@ -693,13 +701,13 @@ internal static class PlanCompiler
                     throw new InvalidPlanException(
                         "I-IR-6",
                         path,
-                        "an IndexRange carries an escape but is not a LIKE prefix range (D313)");
+                        "an IndexRange carries an escape but is not a LIKE prefix range");
                 }
 
                 if (LikePattern.EscapeDefect(range.Prefix && range.Escape.Length > 0 ? range.Escape : null)
                     is { } defect)
                 {
-                    throw new InvalidPlanException("I-IR-6", path, $"{defect} (D312)");
+                    throw new InvalidPlanException("I-IR-6", path, $"{defect}");
                 }
 
                 ranges.Add(new IndexLookupOperator.RangePlan
@@ -830,7 +838,7 @@ internal static class PlanCompiler
                 "I-IR-6",
                 path,
                 $"an IndexLookup range bound is a {bound.KindCase}; only a literal or a parameter "
-                + "can bound an index key (docs/design/11-m2-index-support.md §3)"),
+                + "can bound an index key"),
         };
 
         /// <summary>
@@ -1354,8 +1362,9 @@ internal static class PlanCompiler
 
                 default:
                     throw new UnsupportedFeatureException(
+                        ChalkErrorCodes.NonConstantArgument,
                         $"{what} at {path}",
-                        "A window's slide, size and gap are constants or parameters (I-IR-14).");
+                        "A window's slide, size and gap are constants or parameters.");
             }
         }
 
@@ -1378,17 +1387,17 @@ internal static class PlanCompiler
                 if (measure.Args.Count > maximum)
                 {
                     throw new UnsupportedFeatureException(
+                        ChalkErrorCodes.UnsupportedFunction,
                         $"{measure.Function} with {measure.Args.Count} arguments",
-                        $"It takes at most {maximum} (docs/design/02-ir.md §6, "
-                        + "docs/design/14-windows-ii.md §3).");
+                        $"It takes at most {maximum}.");
                 }
 
                 if (measure.OrderBy.Count > 1)
                 {
                     throw new UnsupportedFeatureException(
+                        ChalkErrorCodes.UnsupportedFunction,
                         $"{measure.Function} ordered by {measure.OrderBy.Count} keys",
-                        "The executor orders a holistic aggregate by one key "
-                        + "(docs/design/14-windows-ii.md §3).");
+                        "The executor orders a holistic aggregate by one key.");
                 }
             }
 
@@ -1520,6 +1529,7 @@ internal static class PlanCompiler
             if (_catalog is null)
             {
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UserFunctionUnavailable,
                     $"table function {scan.Function}",
                     "This plan was compiled without a catalog, so a declared function cannot be "
                     + "resolved.");

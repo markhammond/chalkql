@@ -304,6 +304,7 @@ public sealed class PocoSourceBuilder
                     if (parentColumns[i] < 0)
                     {
                         throw new CatalogValidationException(
+                            ChalkErrorCodes.UnknownName,
                             $"table '{table.Name}'",
                             $"ForeignKey(…) names '{key.ParentColumns[i]}' on parent table "
                             + $"'{parent.Name}', which has no such column or member.");
@@ -344,6 +345,7 @@ public sealed class PocoSourceBuilder
             return System.Array.Find(
                 tables, t => string.Equals(t.Name, named, StringComparison.OrdinalIgnoreCase))
                 ?? throw new CatalogValidationException(
+                    ChalkErrorCodes.UnknownName,
                     $"table '{child.Name}'",
                     $"ForeignKey(…) names the parent table '{named}', which is not registered on "
                     + "this source. Add it with AddTable before Build.");
@@ -354,11 +356,13 @@ public sealed class PocoSourceBuilder
         {
             1 => byType[0],
             0 => throw new CatalogValidationException(
+                ChalkErrorCodes.UnknownName,
                 $"table '{child.Name}'",
                 $"References<{key.ParentType?.Name}>(…) has no table to point at: no table on this "
                 + $"source is registered over {key.ParentType?.Name}. Add it with AddTable before "
                 + "Build, or name the table with References(table, …)."),
             _ => throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidForeignKey,
                 $"table '{child.Name}'",
                 $"References<{key.ParentType?.Name}>(…) is ambiguous: "
                 + string.Join(", ", byType.Select(t => $"'{t.Name}'"))

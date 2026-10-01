@@ -92,7 +92,9 @@ Chalk.Sources.ExecutionArena.Trim() -> void
 Chalk.Sources.ExecutionArena.TrimmedBytes.get -> long
 Chalk.Sources.ExecutionArena.UnpooledReturnBytes.get -> long
 Chalk.Sources.ExecutionException
-Chalk.Sources.ExecutionException.ExecutionException(ulong planDigest, string! operatorPath, string! detail, System.Exception? innerException = null) -> void
+Chalk.Sources.ExecutionException.ExecutionException(string! code, ulong planDigest, string! operatorPath, string! detail, System.Exception? innerException) -> void
+Chalk.Sources.ExecutionException.ExecutionException(ulong planDigest, string! operatorPath, string! detail) -> void
+Chalk.Sources.ExecutionException.ExecutionException(ulong planDigest, string! operatorPath, string! detail, System.Exception? innerException) -> void
 Chalk.Sources.ExecutionException.OperatorPath.get -> string!
 Chalk.Sources.ExecutionException.PlanDigest.get -> ulong
 Chalk.Sources.ExecutionStats
@@ -243,6 +245,7 @@ Chalk.Sources.SortPath.Comparer = 0 -> Chalk.Sources.SortPath
 Chalk.Sources.SortPath.Encoded128 = 2 -> Chalk.Sources.SortPath
 Chalk.Sources.SortPath.Encoded64 = 1 -> Chalk.Sources.SortPath
 Chalk.Sources.SourceContractException
+Chalk.Sources.SourceContractException.SourceContractException(string! code, string! sourceId, string! table, string! detail) -> void
 Chalk.Sources.SourceContractException.SourceContractException(string! sourceId, string! table, string! detail) -> void
 Chalk.Sources.SourceContractException.SourceId.get -> string!
 Chalk.Sources.SourceContractException.Table.get -> string!
@@ -320,6 +323,7 @@ Chalk.Sources.StringLayouts.Utf8 = 1 -> Chalk.Sources.StringLayouts
 Chalk.Sources.StringLayouts.Utf8View = 2 -> Chalk.Sources.StringLayouts
 Chalk.Sources.UnsupportedFeatureException
 Chalk.Sources.UnsupportedFeatureException.Feature.get -> string!
+Chalk.Sources.UnsupportedFeatureException.UnsupportedFeatureException(string! code, string! feature, string! detail) -> void
 Chalk.Sources.UnsupportedFeatureException.UnsupportedFeatureException(string! feature, string! detail) -> void
 Chalk.Sources.WindowPath
 Chalk.Sources.WindowPath.Buffered = 0 -> Chalk.Sources.WindowPath

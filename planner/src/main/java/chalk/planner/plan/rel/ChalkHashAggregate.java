@@ -43,7 +43,7 @@ public final class ChalkHashAggregate extends Aggregate implements ChalkRel {
     ChalkHashAggregate aggregate =
         new ChalkHashAggregate(cluster, traits, input, groupSet, groupSets, aggCalls);
     if (aggregate.getGroupSets().size() != 1) {
-      throw new InvalidRelException("grouping sets are not supported in this milestone");
+      throw new InvalidRelException("grouping sets are not supported");
     }
     return aggregate;
   }

@@ -155,6 +155,7 @@ internal sealed class HopOperator : OperatorBase
         ColumnKind.Int32 => column.Lanes<int>()[row],
         ColumnKind.Int64 => column.Lanes<long>()[row],
         _ => throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedFunction,
             $"HOP over a {_timeType} column",
             "A window's time column is DATE, TIMESTAMP or TIMESTAMP_TZ."),
     };

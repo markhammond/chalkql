@@ -205,9 +205,10 @@ public sealed class StringKernelTests
             IrBuilder.Param(0, IrBuilder.Str(true)),
             IrBuilder.Lit("!"));
 
-        var error = await Assert.ThrowsAsync<ArgumentException>(
+        var error = await Assert.ThrowsAsync<ParameterBindingException>(
             () => Runner.ProjectAsync(
                 escaped, Source, Table, 4096, reference, ["secret!"], [IrBuilder.Str(true)]));
+        Assert.Equal(ChalkErrorCodes.ParameterBinding, error.Code);
 
         Assert.Contains("ends with its escape character", error.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("secret", error.Message, StringComparison.Ordinal);

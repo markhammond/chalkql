@@ -2,6 +2,8 @@ package chalk.planner.entitlement;
 
 import chalk.ir.v1.Literal;
 import chalk.ir.v1.Type;
+import chalk.planner.ErrorCode;
+import chalk.planner.InvalidArgumentException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.concurrent.TimeUnit;
@@ -61,7 +63,8 @@ public final class ContextLiterals {
                   .toPlainString(),
               pos);
       default ->
-          throw new IllegalArgumentException(
+          throw new InvalidArgumentException(
+              ErrorCode.INVALID_CONTEXT,
               what + " has type " + literal.getValueCase()
                   + ", which has no SQL literal spelling. A context binds BOOL, the integer and "
                   + "floating kinds, DECIMAL, STRING, BINARY, DATE, TIME and the two TIMESTAMP "
@@ -76,7 +79,8 @@ public final class ContextLiterals {
 
   private static SqlNode approx(double value, SqlParserPos pos) {
     if (Double.isNaN(value) || Double.isInfinite(value)) {
-      throw new IllegalArgumentException(
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_CONTEXT,
           "a context scalar is " + value + ", which SQL has no literal for");
     }
     return SqlLiteral.createApproxNumeric(new BigDecimal(value).toString(), pos);

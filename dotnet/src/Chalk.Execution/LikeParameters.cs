@@ -91,10 +91,10 @@ internal sealed class LikeParameters
                 ?? LikePattern.PatternDefect(pattern, entry.Escape);
             if (defect is not null)
             {
-                throw new ArgumentException(
+                throw new ParameterBindingException(
+                    entry.Label,
                     $"The value bound to {entry.Label} is used as a LIKE pattern and is malformed: "
-                    + $"{defect} (D312).",
-                    "parameters");
+                    + $"{defect}.");
             }
         }
     }

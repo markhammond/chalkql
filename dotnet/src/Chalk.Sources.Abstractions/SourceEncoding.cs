@@ -46,6 +46,7 @@ public static class SourceEncoding
                 ? "Widen the scale, or round the value in the source."
                 : "Widen the precision.";
             throw new SourceContractException(
+                ChalkErrorCodes.SourceContract,
                 sourceId,
                 table,
                 $"column '{column}' is DECIMAL({precision},{scale}) but a row holds "

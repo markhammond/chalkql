@@ -335,6 +335,7 @@ internal static class ReferenceExpansions
         if (interpreter.Evaluate(expr, []) is not long micros || micros <= 0)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.NonConstantArgument,
                 what, "A window's slide, size and gap are positive interval constants.");
         }
 

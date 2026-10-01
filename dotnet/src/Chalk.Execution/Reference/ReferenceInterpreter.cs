@@ -101,7 +101,7 @@ internal sealed class ReferenceInterpreter
     }
 
     private static UnsupportedFeatureException NoCatalog(string name) =>
-        new($"function {name}",
+        new(ChalkErrorCodes.UserFunctionUnavailable, $"function {name}",
             "The reference executor was given no catalog, so a declared function cannot be resolved.");
 
     /// <summary>
@@ -178,6 +178,7 @@ internal sealed class ReferenceInterpreter
                 ? fields[(int)expr.FieldAccess.Index]
                 : null,
         _ => throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedOperator,
             $"expression kind {expr.KindCase}", "The reference executor cannot evaluate it."),
     };
 
@@ -481,7 +482,8 @@ internal sealed class ReferenceInterpreter
                 ((object?[])operands[0]!).Where(e => e is not null).Select(e => (string)e!)),
 
             _ => throw new UnsupportedFeatureException(
-                call.Function.ToString(), "The reference executor implements the M1 function set only."),
+                ChalkErrorCodes.UnsupportedFunction,
+                call.Function.ToString(), "The reference executor does not implement this function."),
         };
     }
 
@@ -879,7 +881,8 @@ internal sealed class ReferenceInterpreter
                 "MICROSECOND" => (secondOfDay % 60 * 1_000_000) + (subSecond * 1_000_000 / unitsPerSecond),
                 "EPOCH" => (days * 86_400L) + secondOfDay,
                 _ => throw new UnsupportedFeatureException(
-                    $"EXTRACT {unit}", "The reference executor implements the M1 unit set."),
+                    ChalkErrorCodes.UnsupportedFunction,
+                    $"EXTRACT {unit}", "The reference executor does not implement this unit."),
             };
         }
 
@@ -923,6 +926,7 @@ internal sealed class ReferenceInterpreter
             if (ChalkType.FromProto(call.Args[intervalIndex].Type).Kind != TypeKind.IntervalDay)
             {
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedFunction,
                     $"{function} over {type}",
                     "The reference executor moves a temporal by an INTERVAL_DAY only.");
             }
@@ -991,7 +995,8 @@ internal sealed class ReferenceInterpreter
 
                 default:
                     throw new UnsupportedFeatureException(
-                        $"FLOOR TO {unit}", "The reference executor implements the M1 unit set.");
+                        ChalkErrorCodes.UnsupportedFunction,
+                        $"FLOOR TO {unit}", "The reference executor does not implement this unit.");
             }
 
             return source.Kind == TypeKind.Date

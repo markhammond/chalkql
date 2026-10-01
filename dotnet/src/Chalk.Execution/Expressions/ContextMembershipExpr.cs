@@ -55,6 +55,7 @@ internal sealed class ContextMembershipExpr : VectorExprBase
             if (kind is ColumnKind.List or ColumnKind.Composite)
             {
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.InvalidContext,
                     $"a membership of the context list '{list}' over a {kind} column",
                     "A context list holds scalars; the planner never compares anything else with one.");
             }
@@ -327,12 +328,12 @@ internal sealed class ContextMembershipExpr : VectorExprBase
             {
                 bound = ParameterBinder.Bind(row, _types);
             }
-            catch (ArgumentException failure)
+            catch (ParameterBindingException failure)
             {
-                throw new InvalidOperationException(
+                throw new ParameterBindingException(
+                    $"Context list '{_list}'",
                     $"row {r} of the context list '{_list}' does not match the column types the plan "
-                    + $"compares it in: {failure.Message}",
-                    failure);
+                    + $"compares it in: {failure.Message}");
             }
 
             rows[r] = bound;

@@ -241,9 +241,10 @@ public final class UserOperators {
         return chalk.planner.ir.SqlBodyInliner.macroTable(declaration, sql.operands());
       }
       throw new chalk.planner.UnsupportedFeatureException(
+          chalk.planner.ErrorCode.UNSUPPORTED_SQL,
           "table function " + declaration.qualifiedName() + " called from " + callBinding.getClass(),
-          "A SQL-bodied table function is expanded from the syntax of its call "
-              + "(docs/design/17-user-defined-functions.md §2, V31).");
+          "A SQL-bodied table function is expanded from the syntax of its call, and this call "
+              + "reached the planner without it.");
     }
   }
 

@@ -236,10 +236,12 @@ internal static class DuckDbParameters
                     statement, index, v.ToString("D", CultureInfo.InvariantCulture));
             default:
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.ParameterBinding,
                     $"a DuckDB parameter of CLR type {value.GetType().Name}"
                     + (type is null ? string.Empty : $" for declared type {type}"),
-                    "The native DuckDB reader binds the CLR shapes docs/design/18-m4-capabilities-"
-                    + "and-pushdown.md §3 lists. Use the DbDataReader path for anything else.");
+                    "The native DuckDB reader binds bool, the integer kinds, float, double, string, "
+                    + "Utf8String, byte[], ReadOnlyMemory<byte>, DateOnly, TimeOnly, DateTime, "
+                    + "DateTimeOffset, decimal and Guid. Use the DbDataReader path for anything else.");
         }
     }
 }

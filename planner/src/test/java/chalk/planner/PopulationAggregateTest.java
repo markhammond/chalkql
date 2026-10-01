@@ -74,8 +74,12 @@ final class PopulationAggregateTest {
   void an_allow_list_naming_an_aggregate_not_declared_population_is_refused_saying_how() {
     assertThatThrownBy(() -> new CatalogRegistry().register(catalog("AMOUNT_SUMMARY")))
         .isInstanceOf(InvalidCatalogException.class)
+        .satisfies(
+            error ->
+                assertThat(((InvalidCatalogException) error).code())
+                    .isEqualTo(chalk.planner.ErrorCode.INVALID_ENTITLEMENT))
         .hasMessageContaining("(amount).aggregate_only_functions[4]")
-        .hasMessageContaining("'AMOUNT_SUMMARY' is not a population aggregate (D190)")
+        .hasMessageContaining("'AMOUNT_SUMMARY' is not a population aggregate.")
         .hasMessageContaining("any user-defined aggregate not declared Population()")
         .hasMessageContaining("once its host declares it Population()");
   }

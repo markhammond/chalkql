@@ -1,5 +1,6 @@
 package chalk.planner.plan.rules;
 
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import chalk.planner.plan.ChalkConvention;
 import chalk.planner.plan.rel.ChalkAsOfJoin;
@@ -52,6 +53,7 @@ public final class ChalkAsOfJoinRule extends ConverterRule {
   public static void check(LogicalAsofJoin join) {
     if (join.getJoinType() != JoinRelType.ASOF && join.getJoinType() != JoinRelType.LEFT_ASOF) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "ASOF JOIN type " + join.getJoinType(), "Only ASOF and LEFT ASOF exist.");
     }
 
@@ -61,6 +63,7 @@ public final class ChalkAsOfJoinRule extends ConverterRule {
     // slower plan.
     if (ChalkInputs.hasNullSafeEquality(join)) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "ASOF JOIN ON " + join.getCondition(),
           "A null-safe equality (IS NOT DISTINCT FROM) is not an ASOF join key; ASOF matches on "
               + "plain equalities, which never match NULL to NULL.");
@@ -69,6 +72,7 @@ public final class ChalkAsOfJoinRule extends ConverterRule {
     JoinInfo info = join.analyzeCondition();
     if (!info.isEqui()) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "ASOF JOIN ON " + join.getCondition(),
           "The ON clause of an ASOF JOIN must be equalities between the two inputs; this one has a "
               + "remainder.");
@@ -77,6 +81,7 @@ public final class ChalkAsOfJoinRule extends ConverterRule {
     RexNode match = join.getMatchCondition();
     if (!(match instanceof RexCall call) || !isComparison(call.getKind())) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "ASOF JOIN MATCH_CONDITION " + match, "It must be one comparison of two columns.");
     }
 
@@ -85,6 +90,7 @@ public final class ChalkAsOfJoinRule extends ConverterRule {
     RexNode second = call.getOperands().get(1);
     if (!(first instanceof RexInputRef left) || !(second instanceof RexInputRef right)) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "ASOF JOIN MATCH_CONDITION " + match, "It compares two columns, not expressions.");
     }
 
@@ -92,6 +98,7 @@ public final class ChalkAsOfJoinRule extends ConverterRule {
         (left.getIndex() < leftFields) != (right.getIndex() < leftFields);
     if (!oneEachSide) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "ASOF JOIN MATCH_CONDITION " + match, "It names one column of each input.");
     }
   }

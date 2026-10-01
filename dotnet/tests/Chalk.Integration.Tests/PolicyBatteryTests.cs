@@ -254,8 +254,8 @@ public sealed class PolicyBatteryTests(
         Chalk.Catalog.CatalogValidationException => "INVALID_CATALOG",
         // The sidecar's own refusals travel as a PlanningException carrying the planner's kind, so
         // a catalog it refused at registration is INVALID_CATALOG and not a validation error.
-        PlanningException { Kind: Chalk.Client.Rpc.PlanErrorKind.InvalidCatalog } => "INVALID_CATALOG",
-        PlanningException { Kind: Chalk.Client.Rpc.PlanErrorKind.Policy } => "POLICY",
+        PlanningException { Kind: PlanErrorKinds.InvalidCatalog } => "INVALID_CATALOG",
+        PlanningException { Kind: PlanErrorKinds.Policy } => "POLICY",
         PlanningException => "VALIDATION",
         _ => refusal.GetType().Name.Replace("Exception", "", StringComparison.Ordinal)
             .ToUpperInvariant(),

@@ -106,7 +106,7 @@ internal static class Decimals
         {
             throw new OverflowException(
                 "A DECIMAL value is wider than System.Decimal's 96-bit mantissa; "
-                + "this build computes DECIMAL arithmetic in System.Decimal (docs/design/04-client.md §6.4).");
+                + "this build computes DECIMAL arithmetic in System.Decimal.");
         }
 
         var low = (ulong)magnitude;

@@ -870,9 +870,9 @@ list gives no rows for `IN`, and all rows for `NOT IN`.
 
 A parameter's type comes from the statement: the column it is compared with, the
 function it is passed to, or `ParameterTypes`. A value binds only if that type holds it
-**exactly**. Anything else is refused by `ExecuteAsync` with an `ArgumentException`,
-before anything reaches a source. The error names the parameter (`@amount`, `$2`, or its
-position) and the CLR type you bound, but never the value:
+**exactly**. Anything else is refused by `ExecuteAsync` with a `ParameterBindingException`,
+code `ParameterBinding`, before anything reaches a source. The error names the parameter
+(`@amount`, `$2`, or its position) and the CLR type you bound, but never the value:
 
 | Parameter (as a refusal names it) | Binds from |
 |---|---|
@@ -956,7 +956,7 @@ the statement names one with `ESCAPE`. Any value is answered, on every source:
 - Elsewhere, the pattern is compiled once per execution.
 
 A value that is malformed under the statement's escape (see [`LIKE`](#like)) is refused
-by `ExecuteAsync` with an `ArgumentException` naming the parameter, before anything
+by `ExecuteAsync` with a `ParameterBindingException` naming the parameter, before anything
 reaches a source. To match user input literally, name an escape and escape the input:
 
 ```csharp
@@ -1175,9 +1175,9 @@ need none of this. They are in the core parser, and work at every level, `Defaul
 included.
 
 Babel's grammar also has `CREATE TABLE`, `BEGIN`, `COMMIT`, `SHOW` and similar
-statements. Chalk only plans queries, so under `Babel` it refuses these by name with
-`PlanErrorKind.Unsupported`, instead of parsing them and then failing somewhere
-surprising.
+statements. Chalk only plans queries, so under `Babel` it refuses these by name, as an
+`Unsupported` planning error with the code `UnsupportedStatement`, instead of parsing them
+and then failing somewhere surprising.
 
 ## Planning on a budget
 
@@ -2001,7 +2001,9 @@ source for.
 
 A refusal is an `EntitlementException`. Its message names the table, the column and the
 use. Its `Refusal` property says the same things in a form your code can act on, and adds
-the result the statement would have had:
+the result the statement would have had. `Refusals` holds one for each rule the statement
+breaks, in the order the planner found them, and `Refusal` is the first; the planner stops
+at the first today, so there is one:
 
 ```csharp
 try
@@ -2038,6 +2040,10 @@ catch (EntitlementException refused) when (refused.Refusal is { } refusal)
 - **The engine remembers each refusal.** The same request is refused again without asking
   the planner, and carries the same `Refusal` object. A different statement, context or
   catalog is a different request.
+- **`Code`** is the rule refused, as an error code: `Star` or `PopulationOnly`, say.
+  `Reason` is the same rule as an enum. The exception's `Code` is its first refusal's, and
+  its message ends with it in brackets, as every ChalkQL exception's does (see
+  [Errors and their codes](#errors-and-their-codes)).
 
 Whether a statement is refused can depend on when the principal's values are bound. Bound
 as the statement is prepared, the planner knows this principal's lists, so a `WHERE` clause
@@ -2322,6 +2328,44 @@ One remaining channel is documented rather than closed. Error text from a functi
 fails on some inputs, in a statement shape the developer wrote, may quote a non-entitled
 column of an excluded row.
 
+## Errors and their codes
+
+Every exception ChalkQL raises on purpose names the rules it breaks. `Violations` lists them,
+each with its `Code`, the `Kind` of problem when the planner reported it, and its `Message`.
+`Code` is the first violation's code, and the exception's message ends with it in brackets:
+
+```csharp
+catch (ChalkException failure) when (failure.Code == ChalkErrorCodes.DuplicateName)
+{
+    // Invalid catalog at schemas[0] (sales).tables[1] (orders): table name 'orders' is used
+    // twice in schema 'sales' [DuplicateName]
+    log.LogWarning("catalog refused: {Code}", failure.Code);
+}
+```
+
+A code names the rule an error meets and the remedy that goes with it; the message names the
+case. Logging the code alone records why something was refused without the table, column and
+principal names the message carries. A code is text, compared ordinally: `ChalkErrorCodes`
+has a constant for each, and they work as `case` labels in a `switch`.
+
+ChalkQL stops at the first rule it finds broken, so an error carries one violation today. A
+host that reads them as a list is ready for an error that reports more:
+
+```csharp
+foreach (var violation in failure.Violations)
+{
+    log.LogWarning("{Code} ({Kind}): {Message}", violation.Code, violation.Kind, violation.Message);
+}
+```
+
+A planner's errors travel with their codes and kinds, so a `PlanningException` or an
+`EntitlementException` has the code the planner raised it with, and its `Kind` is one of
+`PlanErrorKinds`: `Parse`, `Validation`, `Unsupported`, `Policy` and the rest. A code or kind
+from a planner newer than the client is kept as it was sent.
+
+[`docs/errors.md`](errors.md) explains every code: what it means, what usually causes it, and
+what to do.
+
 ## Testing
 
 The backbone of correctness is a second executor that is naive on purpose
@@ -2410,6 +2454,7 @@ NULL. On every path:
 ## Documentation
 
 - `docs/tutorial.md` — the tutorial: eighteen chapters over one marketplace.
+- `docs/errors.md` — every error code, what it means and what to do.
 - `CONTRIBUTING.md` — how to build, test and record plans.
 
 ## Licence

@@ -4,6 +4,8 @@ import chalk.ir.v1.Expr;
 import chalk.ir.v1.Literal;
 import chalk.ir.v1.RowType;
 import chalk.ir.v1.VirtualRow;
+import chalk.planner.ErrorCode;
+import chalk.planner.InvalidArgumentException;
 import chalk.planner.rpc.v1.ContextRelationKind;
 import chalk.planner.rpc.v1.ContextRelationValue;
 import chalk.planner.rpc.v1.ContextScalar;
@@ -112,42 +114,47 @@ public final class BoundContext {
         // A shape declares the type and nothing else (D209, D232): the planner has to type the
         // parameter it plans in the value's place, and a value would defeat the whole point of it.
         if (!scalar.getValue().hasType()) {
-          throw new IllegalArgumentException(
+          throw new InvalidArgumentException(
+              ErrorCode.INVALID_CONTEXT,
               "context scalar '" + name + "' declares no type. A shape binds a name, a kind and a "
-                  + "type and no value (docs/design/16-entitlements.md §2, §2.1, D209, D232).");
+                  + "type and no value.");
         }
         if (scalar.getValue().getKindCase() != Expr.KindCase.KIND_NOT_SET) {
-          throw new IllegalArgumentException(
+          throw new InvalidArgumentException(
+              ErrorCode.INVALID_CONTEXT,
               "context scalar '" + name + "' carries a value and says it is a shape. Bind the "
-                  + "value at execution, which is what a shape exists for "
-                  + "(docs/design/16-entitlements.md §2, §2.1, D209, D232).");
+                  + "value at execution, which is what a shape exists for.");
         }
         shapes.add(name);
       } else if (scalar.getValue().getKindCase() != Expr.KindCase.LITERAL) {
-        throw new IllegalArgumentException(
+        throw new InvalidArgumentException(
+            ErrorCode.INVALID_CONTEXT,
             "context scalar '" + name + "' is not a literal. A context binds values, not "
                 + "expressions: a predicate the planner cannot see cannot be pushed, costed or "
                 + "audited, so a host that needs code runs it before the statement and binds the "
-                + "result (docs/design/16-entitlements.md §2).");
+                + "result.");
       }
       if (scalars.put(name, scalar.getValue()) != null || relations.containsKey(name)) {
-        throw new IllegalArgumentException("context name '" + name + "' is bound twice");
+        throw new InvalidArgumentException(
+            ErrorCode.INVALID_CONTEXT, "context name '" + name + "' is bound twice");
       }
     }
 
     for (ContextRelationValue relation : proto.getRelationsList()) {
       String name = require(relation.getName(), "a context relation");
       if (relation.getRowType().getFieldsCount() == 0) {
-        throw new IllegalArgumentException(
+        throw new InvalidArgumentException(
+            ErrorCode.INVALID_CONTEXT,
             "context relation '" + name + "' declares no columns; a list or a relation has at "
                 + "least one");
       }
       boolean shape = shapeOnly || relation.getShape();
       if (shape) {
         if (relation.getRowsCount() != 0) {
-          throw new IllegalArgumentException(
+          throw new InvalidArgumentException(
+              ErrorCode.INVALID_CONTEXT,
               "context relation '" + name + "' carries rows and says it is a shape. Bind the rows "
-                  + "at execution (docs/design/16-entitlements.md §2, §2.1, D209, D232).");
+                  + "at execution.");
         }
         shapes.add(name);
       }
@@ -161,7 +168,8 @@ public final class BoundContext {
               relation.getRowType(),
               relation.getRowsList());
       if (relations.put(name, bound) != null || scalars.containsKey(name)) {
-        throw new IllegalArgumentException("context name '" + name + "' is bound twice");
+        throw new InvalidArgumentException(
+            ErrorCode.INVALID_CONTEXT, "context name '" + name + "' is bound twice");
       }
     }
 
@@ -189,18 +197,21 @@ public final class BoundContext {
     for (int r = 0; r < relation.getRowsCount(); r++) {
       VirtualRow row = relation.getRows(r);
       if (row.getValuesCount() != columns) {
-        throw new IllegalArgumentException(
+        throw new InvalidArgumentException(
+            ErrorCode.INVALID_CONTEXT,
             "context relation '" + name + "' row " + r + " has " + row.getValuesCount()
                 + " values and the row type declares " + columns);
       }
       for (int c = 0; c < row.getValuesCount(); c++) {
         Expr value = row.getValues(c);
         if (value.getKindCase() != Expr.KindCase.LITERAL) {
-          throw new IllegalArgumentException(
+          throw new InvalidArgumentException(
+              ErrorCode.INVALID_CONTEXT,
               "context relation '" + name + "' row " + r + " column " + c + " is not a literal");
         }
         if (isList && isNull(value.getLiteral())) {
-          throw new IllegalArgumentException(
+          throw new InvalidArgumentException(
+              ErrorCode.INVALID_CONTEXT,
               "context list '" + name + "' has a NULL in row " + r + " column " + c + ". A list is "
                   + "a membership set and is NOT NULL in every column: a NULL member makes every "
                   + "non-matching row UNKNOWN and NOT IN never true, which would silently empty a "
@@ -216,14 +227,16 @@ public final class BoundContext {
 
   private static String require(String name, String what) {
     if (name == null || name.isBlank()) {
-      throw new IllegalArgumentException(what + " has no name");
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_CONTEXT, what + " has no name");
     }
     return name;
   }
 
   private static int ceiling(int declared) {
     if (declared < 0) {
-      throw new IllegalArgumentException("fold_max_rows is negative");
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_CONTEXT, "fold_max_rows is negative");
     }
     return declared == 0 ? DEFAULT_FOLD_MAX_ROWS : declared;
   }

@@ -1,13 +1,13 @@
 package chalk.planner.entitlement;
 
 import chalk.ir.v1.RowType;
-import chalk.planner.rpc.v1.PolicyRefusalReason;
+import chalk.planner.ErrorCode;
 import chalk.planner.rpc.v1.ReportedDisclosure;
 import java.util.List;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
- * Valid SQL the entitlements refuse ({@code PlanErrorKind.POLICY}, D143).
+ * Valid SQL the entitlements refuse (the {@code Policy} kind, D143).
  *
  * <p>Distinct from a validation error because the SQL is well formed, and from
  * {@code UNSUPPORTED} because the planner could express it perfectly well and is declining to. Every
@@ -17,7 +17,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * <p>Both refusals of §3.5 are decided on the <em>folded</em> rules and never on the descriptor's
  * text: the same statement is legitimate for another principal.
  *
- * <p>A refusal is also structured, for a host that answers it in its own words (D329): the reason,
+ * <p>A refusal is also structured, for a host that answers it in its own words (D329): its code,
  * the table and column it is about, the use, and what the column does permit. Once the pass has
  * decided the statement's columns, the pipeline attaches the result the statement would have had,
  * so a host can still return the table model beside the error.
@@ -25,7 +25,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 public final class PolicyException extends RuntimeException {
   private static final long serialVersionUID = 1L;
 
-  private final PolicyRefusalReason reason;
+  private final ErrorCode code;
   private final String table;
   private final String column;
   private final String use;
@@ -35,9 +35,9 @@ public final class PolicyException extends RuntimeException {
   private transient org.apache.calcite.rel.@Nullable RelNode tree;
   private transient List<Disclosed> flow = List.of();
 
-  /** A refusal for {@code reason} that is about no one column. */
-  public PolicyException(PolicyRefusalReason reason, String message) {
-    this(reason, "", "", "", List.of(), message);
+  /** A refusal under {@code code} that is about no one column. */
+  public PolicyException(ErrorCode code, String message) {
+    this(code, "", "", "", List.of(), message);
   }
 
   /**
@@ -49,22 +49,23 @@ public final class PolicyException extends RuntimeException {
    * @param permitted what the column does permit this principal, or empty
    */
   public PolicyException(
-      PolicyRefusalReason reason,
+      ErrorCode code,
       String table,
       String column,
       String use,
       List<String> permitted,
       String message) {
     super(message);
-    this.reason = reason;
+    this.code = code;
     this.table = table;
     this.column = column;
     this.use = use;
     this.permitted = List.copyOf(permitted);
   }
 
-  public PolicyRefusalReason reason() {
-    return reason;
+  /** The rule refused, as a client reports it: {@code Star}, {@code PopulationOnly}. */
+  public ErrorCode code() {
+    return code;
   }
 
   public String table() {

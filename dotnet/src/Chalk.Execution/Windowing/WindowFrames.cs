@@ -254,8 +254,8 @@ internal static class WindowFrames
         ColumnKind.Float or ColumnKind.Double => ColumnKind.Double,
         ColumnKind.Decimal128 => ColumnKind.Decimal128,
         _ => throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedFunction,
             $"RANGE offset over an order key of type {key}",
-            "A RANGE frame with an offset needs a numeric or temporal order key "
-            + "(docs/design/13-window-functions.md §1)."),
+            "A RANGE frame with an offset needs a numeric or temporal order key."),
     };
 }

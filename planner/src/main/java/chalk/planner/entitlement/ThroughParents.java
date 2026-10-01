@@ -3,12 +3,13 @@ package chalk.planner.entitlement;
 import chalk.ir.v1.CatalogContext;
 import chalk.ir.v1.InheritedVisibility;
 import chalk.ir.v1.ParentVisibility;
-import chalk.ir.v1.StepDirection;
 import chalk.ir.v1.Schema;
+import chalk.ir.v1.StepDirection;
 import chalk.ir.v1.Table;
 import chalk.ir.v1.TableEntitlement;
 import chalk.ir.v1.UniqueKey;
 import chalk.ir.v1.VisibilityStep;
+import chalk.planner.ErrorCode;
 import chalk.planner.catalog.ChalkTable;
 import chalk.planner.catalog.InvalidCatalogException;
 import java.util.ArrayList;
@@ -112,6 +113,7 @@ public final class ThroughParents {
 
       if (through.getColumn() >= childRow.getFieldCount()) {
         throw new InvalidCatalogException(
+            ErrorCode.COLUMN_INDEX_OUT_OF_RANGE,
             field,
             "on " + where + ", the correlation column " + through.getColumn()
                 + " is out of range for a table of " + childRow.getFieldCount() + " columns.");
@@ -124,37 +126,40 @@ public final class ThroughParents {
           parentSchema == null ? null : tableNamed(parentSchema, through.getParentTable());
       if (parent == null) {
         throw new InvalidCatalogException(
+            ErrorCode.UNKNOWN_NAME,
             field,
             "on " + where + ", visibility derives through '" + parentSchemaName + "."
                 + through.getParentTable() + "', which this catalog does not hold. A `through`"
                 + " names a table of the same catalog, so the pass can compile it into one join"
-                + " against that table's own entitled scan"
-                + " (docs/design/16-entitlements.md §3.13, D225).");
+                + " against that table's own entitled scan.");
       }
 
       if (!parent.hasEntitlement()) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_TENANCY_PATH,
             field,
             "on " + where + ", visibility derives through '" + parentSchemaName + "."
                 + parent.getName() + "', which carries no entitlement. Through an unrestricted"
                 + " parent restricts nothing; declare the child unrestricted or restrict the"
-                + " parent (§3.13, D225).");
+                + " parent.");
       }
 
       TableEntitlement parentEntitlement = parent.getEntitlement();
       if (parentEntitlement.getRowPredicate().isBlank()
           && parentEntitlement.getThroughCount() == 0) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_TENANCY_PATH,
             field,
             "on " + where + ", visibility derives through '" + parentSchemaName + "."
                 + parent.getName() + "', whose entitlement restricts no row — it has neither a row"
                 + " predicate nor a `through` of its own. Through an unrestricted parent restricts"
-                + " nothing; declare the child unrestricted or restrict the parent (§3.13, D225).");
+                + " nothing; declare the child unrestricted or restrict the parent.");
       }
 
       RelDataType parentRow = new ChalkTable(parent, parentSchema).getRowType(typeFactory);
       if (through.getParentColumn() >= parentRow.getFieldCount()) {
         throw new InvalidCatalogException(
+            ErrorCode.COLUMN_INDEX_OUT_OF_RANGE,
             field,
             "on " + where + ", the parent key column " + through.getParentColumn()
                 + " is out of range for '" + parentSchemaName + "." + parent.getName()
@@ -164,10 +169,11 @@ public final class ThroughParents {
       String parentKey = parentRow.getFieldList().get(through.getParentColumn()).getName();
       if (!isDeclaredUniqueKey(parent, through.getParentColumn())) {
         throw new InvalidCatalogException(
+            ErrorCode.NOT_A_UNIQUE_KEY,
             field,
             "on " + where + ", '" + parentSchemaName + "." + parent.getName() + "." + parentKey
                 + "' is not a declared unique key of the parent. The join a `through` compiles into"
-                + " must not multiply rows, and a unique key is what makes that so (§3.13, D226)."
+                + " must not multiply rows, and a unique key is what makes that so."
                 + " Declare the key.");
         }
 
@@ -176,11 +182,12 @@ public final class ThroughParents {
       RelDataType parentType = parentRow.getFieldList().get(through.getParentColumn()).getType();
       if (childType.getSqlTypeName() != parentType.getSqlTypeName()) {
         throw new InvalidCatalogException(
+            ErrorCode.TYPE_MISMATCH,
             field,
             "on " + where + ", the correlation key '" + childKey + "' is "
                 + childType.getSqlTypeName() + " and the parent key '" + parentKey + "' is "
                 + parentType.getSqlTypeName() + "; they must have the same type kind, or the join"
-                + " could never match (§3.13, D225).");
+                + " could never match.");
       }
 
       // Two parents that arrive under the same unqualified name are two things a rule condition
@@ -190,18 +197,19 @@ public final class ThroughParents {
       String already = byAlias.putIfAbsent(alias, qualifiedName);
       if (already != null && !already.equals(qualifiedName)) {
         throw new InvalidCatalogException(
+            ErrorCode.DUPLICATE_NAME,
             field,
             "on " + where + ", two parents are both named '" + parent.getName() + "' ('" + already
                 + "' and '" + qualifiedName + "'). A rule condition names a parent's column as"
-                + " <parent_table>.<column>, so two parents of one name could not be told apart"
-                + " (§3.13, D225).");
+                + " <parent_table>.<column>, so two parents of one name could not be told apart.");
       }
       if (alias.equals(table.getName().toLowerCase(Locale.ROOT))) {
         throw new InvalidCatalogException(
+            ErrorCode.DUPLICATE_NAME,
             field,
             "on " + where + ", the parent is named '" + parent.getName() + "', which is this"
                 + " table's own name; a rule condition could not tell <parent_table>.<column> from"
-                + " this table's own column (§3.13, D225).");
+                + " this table's own column.");
       }
 
       blocks.putIfAbsent(qualifiedName, List.of(parentSchemaName, parent.getName()));
@@ -240,10 +248,10 @@ public final class ThroughParents {
 
       if (declared.getStepsCount() == 0) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_TENANCY_PATH,
             field,
             "on " + where + ", the path of kind '" + declared.getKind() + "' has no step. A path"
-                + " with no step is a direct dimension written the long way round"
-                + " (docs/design/38-existential-visibility.md §1, §3, D265).");
+                + " with no step is a direct dimension written the long way round.");
       }
 
       Schema fromSchema = schema;
@@ -256,29 +264,32 @@ public final class ThroughParents {
         Table to = stepSchema == null ? null : tableNamed(stepSchema, step.getTable());
         if (to == null) {
           throw new InvalidCatalogException(
+              ErrorCode.UNKNOWN_NAME,
               field,
               "on " + where + ", step " + s + " of the path of kind '" + declared.getKind()
                   + "' arrives at '" + stepSchemaName + "." + step.getTable() + "', which this"
                   + " catalog does not hold. A path names tables of the same catalog, so the pass"
-                  + " can compile it into one key set (§3, D265).");
+                  + " can compile it into one key set.");
         }
 
         if (to.getName().equalsIgnoreCase(table.getName())
             && stepSchemaName.equalsIgnoreCase(schema.getName())) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_TENANCY_PATH,
               field,
               "on " + where + ", step " + s + " of the path of kind '" + declared.getKind()
                   + "' returns to this table itself. A row's visibility cannot derive from its own"
-                  + " table's, so a bridge and an endpoint are both other tables (§3, D265).");
+                  + " table's, so a bridge and an endpoint are both other tables.");
         }
 
         if (step.getDirection() == StepDirection.STEP_DIRECTION_TO_CHILD && s > 0) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_TENANCY_PATH,
               field,
               "on " + where + ", step " + s + " of the path of kind '" + declared.getKind()
-                  + "' goes up. This run admits an inherited path of any length and a related path"
+                  + "' goes up. ChalkQL admits an inherited path of any length and a related path"
                   + " of one up-step followed by down-steps; a second up-step, and an up-step after"
-                  + " a down-step, are refused rather than built (§1, §9, D265).");
+                  + " a down-step, are refused rather than built.");
         }
 
         RelDataType toRow = new ChalkTable(to, stepSchema).getRowType(typeFactory);
@@ -306,20 +317,22 @@ public final class ThroughParents {
           declared.getEndpointSchema().isEmpty() ? schema.getName() : declared.getEndpointSchema();
       if (!fromTable.getName().equalsIgnoreCase(declared.getEndpointTable())) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_TENANCY_PATH,
             field,
             "on " + where + ", the path of kind '" + declared.getKind() + "' says its endpoint is '"
                 + declared.getEndpointTable() + "', and its last step arrives at '"
                 + fromTable.getName() + "'. The endpoint names where the kind is held, so it is the"
-                + " table the last step reaches (§2, D265).");
+                + " table the last step reaches.");
       }
 
       if (declared.getEndpointPredicate().isBlank()) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_TENANCY_PATH,
             field,
             "on " + where + ", the path of kind '" + declared.getKind() + "' carries no endpoint"
                 + " predicate. The endpoint '" + fromTable.getName() + "' is where the kind is held,"
                 + " and the predicate is what says which of its rows this principal holds it in; a"
-                + " path without one would grant every row (§2, §3, D265).");
+                + " path without one would grant every row.");
       }
 
       // A path predicate is decided above the join, over the target's own row and the endpoint's
@@ -330,13 +343,14 @@ public final class ThroughParents {
       if (!declared.getPathPredicate().isBlank()
           && declared.getSteps(0).getDirection() == StepDirection.STEP_DIRECTION_TO_CHILD) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_TENANCY_PATH,
             field,
             "on " + where + ", the path of kind '" + declared.getKind() + "' goes up to a bridge"
                 + " and carries a path predicate. A path predicate is decided above the join, over"
                 + " this table's own row and the endpoint's together, and that needs one endpoint"
                 + " row per key: an inherited path is one, a related path is many, so the verdict"
                 + " would have to be borne by the path's existence marker. Reach the endpoint with"
-                + " an inherited path, or drop the confinement (§1, §4, D279).");
+                + " an inherited path, or drop the confinement.");
       }
 
       String alias = fromTable.getName().toLowerCase(Locale.ROOT);
@@ -344,18 +358,20 @@ public final class ThroughParents {
       String already = byAlias.putIfAbsent(alias, qualifiedName);
       if (already != null && !already.equals(qualifiedName)) {
         throw new InvalidCatalogException(
+            ErrorCode.DUPLICATE_NAME,
             field,
             "on " + where + ", two tables this one derives visibility from are both named '"
                 + fromTable.getName() + "' ('" + already + "' and '" + qualifiedName + "'). A rule"
                 + " condition names a column as <table>.<column>, so two of one name could not be"
-                + " told apart (§3, D265).");
+                + " told apart.");
       }
       if (alias.equals(table.getName().toLowerCase(Locale.ROOT))) {
         throw new InvalidCatalogException(
+            ErrorCode.DUPLICATE_NAME,
             field,
             "on " + where + ", the endpoint is named '" + fromTable.getName() + "', which is this"
                 + " table's own name; a rule condition could not tell <table>.<column> from this"
-                + " table's own column (§3, D265).");
+                + " table's own column.");
       }
 
       blocks.putIfAbsent(qualifiedName, List.of(endpointSchemaName, fromTable.getName()));
@@ -378,6 +394,7 @@ public final class ThroughParents {
       String where) {
     if (step.getFromColumn() >= fromRow.getFieldCount()) {
       throw new InvalidCatalogException(
+          ErrorCode.COLUMN_INDEX_OUT_OF_RANGE,
           field,
           "on " + where + ", step " + ordinal + " of the path of kind '" + declared.getKind()
               + "' reads column " + step.getFromColumn() + " of '" + fromSchema.getName() + "."
@@ -385,6 +402,7 @@ public final class ThroughParents {
     }
     if (step.getToColumn() >= toRow.getFieldCount()) {
       throw new InvalidCatalogException(
+          ErrorCode.COLUMN_INDEX_OUT_OF_RANGE,
           field,
           "on " + where + ", step " + ordinal + " of the path of kind '" + declared.getKind()
               + "' reads column " + step.getToColumn() + " of '" + toSchema.getName() + "."
@@ -401,12 +419,13 @@ public final class ThroughParents {
 
     if (!isDeclaredUniqueKey(parent, parentColumn)) {
       throw new InvalidCatalogException(
+          ErrorCode.NOT_A_UNIQUE_KEY,
           field,
           "on " + where + ", step " + ordinal + " of the path of kind '" + declared.getKind()
               + "' joins '" + parent.getName() + "."
               + parentRow.getFieldList().get(parentColumn).getName() + "', which is not a declared"
               + " unique key of that table. The joins a path compiles into must not multiply rows,"
-              + " and a unique key is what makes that so (§3, D265). Declare the key.");
+              + " and a unique key is what makes that so. Declare the key.");
     }
 
     Schema childSchema = down ? fromSchema : toSchema;
@@ -421,6 +440,7 @@ public final class ThroughParents {
             parent,
             parentRow.getFieldList().get(parentColumn).getName())) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_TENANCY_PATH,
           field,
           "on " + where + ", step " + ordinal + " of the path of kind '" + declared.getKind()
               + "' goes " + (down ? "down" : "up") + " from '" + from.getName() + "' to '"
@@ -429,8 +449,7 @@ public final class ThroughParents {
               + " naming '" + parent.getName() + "."
               + parentRow.getFieldList().get(parentColumn).getName() + "', and this catalog declares"
               + " no association between them either. The direction is checked and never inferred,"
-              + " so the association has to be declared before a path can rely on it (§1, §3, D265;"
-              + " docs/design/45-typed-tenancy-surface.md §3, D270).");
+              + " so the association has to be declared before a path can rely on it.");
     }
   }
 
@@ -484,13 +503,13 @@ public final class ThroughParents {
             && entitlement.getDefaultDisclosure() != chalk.ir.v1.Disclosure.DISCLOSURE_UNSPECIFIED;
     if (named || deniedByDefault) {
       throw new InvalidCatalogException(
+          ErrorCode.PROTECTED_BRIDGE_KEY,
           field,
           "on " + where + ", the bridge key '" + viaSchemaName + "." + via.getName() + "."
               + viaRow.getFieldList().get(column).getName() + "' is protected by a rule or by its"
               + " table's default. The mechanism reads the bridge's two key columns raw and"
-              + " discloses neither, exactly as a parent's key is left FULL under D227, so a rule"
-              + " over one is a contradiction: leave it full, or reach the endpoint another way"
-              + " (§3, D265).");
+              + " discloses neither, exactly as a parent's key is left FULL, so a rule over one is"
+              + " a contradiction: leave it full, or reach the endpoint another way.");
     }
   }
 
@@ -516,12 +535,12 @@ public final class ThroughParents {
         List<String> chain = new ArrayList<>(visiting);
         chain.add(name);
         throw new InvalidCatalogException(
+            ErrorCode.VISIBILITY_CYCLE,
             path + ".through",
             "the chain of derived visibility returns to '" + name + "': "
                 + String.join(" -> ", chain)
                 + ". A row's visibility cannot derive from itself, so a cycle is refused where a"
-                + " diamond is fine (docs/design/16-entitlements.md §3.13, D225;"
-                + " docs/design/38-existential-visibility.md §3, D265).");
+                + " diamond is fine.");
       }
     }
     if (!table.hasEntitlement()

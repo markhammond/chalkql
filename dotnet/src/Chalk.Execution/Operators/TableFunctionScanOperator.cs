@@ -118,9 +118,9 @@ internal sealed class TableRows<TRow> : ITableRows
         if (produced is not IEnumerable<TRow> rows)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UserFunctionContract,
                 $"a table function returning {produced?.GetType().Name ?? "null"}",
-                $"A table function's producer returns IEnumerable<{typeof(TRow).Name}> "
-                + "(docs/design/17-user-defined-functions.md §3).");
+                $"A table function's producer returns IEnumerable<{typeof(TRow).Name}>.");
         }
 
         foreach (var row in rows)
@@ -171,9 +171,9 @@ internal abstract class RowColumn<TRow>
         if (LaneCodec.ClrTypeOf(column.Type) is null)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UserFunctionContract,
                 $"{what}: column '{column.Name}' of {LaneCodec.Describe(column.Type)}",
-                "A v1 table function returns the scalar kinds a Tier 1 delegate can carry "
-                + "(docs/design/17-user-defined-functions.md §3).");
+                "A table function returns the scalar kinds a Tier 1 delegate can carry.");
         }
 
         // A member is read as a Tier 1 delegate's value is: in any of the spellings the lane codec
@@ -185,6 +185,7 @@ internal abstract class RowColumn<TRow>
 
         var member = Member(column.Name)
             ?? throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"{what}: column '{column.Name}'",
                 $"{typeof(TRow).Name} has no public property or field with that name; a table "
                 + "function's row type names its columns the way a POCO table does.");
@@ -225,6 +226,7 @@ internal abstract class RowColumn<TRow>
         if (!LaneCodec.Accepts(actual, column.Type))
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UserFunctionContract,
                 $"{what}: column '{column.Name}'",
                 $"it is declared {LaneCodec.Describe(column.Type)} and the row's member is "
                 + $"{actual.Name}.");
@@ -340,9 +342,10 @@ internal sealed class ReflectedRowColumn<TRow> : RowColumn<TRow>
                 break;
             default:
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UserFunctionContract,
                     $"a table function column of CLR type {value.GetType().Name}",
-                    "docs/design/17-user-defined-functions.md §3 lists the types a v1 table function "
-                    + "returns.");
+                    "A table function's columns hold bool, sbyte, short, int, long, float or double, "
+                    + "or a nullable form of one.");
         }
     }
 }

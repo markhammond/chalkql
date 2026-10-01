@@ -4,27 +4,28 @@ import chalk.ir.v1.CatalogContext;
 import chalk.ir.v1.Column;
 import chalk.ir.v1.ColumnStatistics;
 import chalk.ir.v1.CostProfile;
+import chalk.ir.v1.DialectProfile;
 import chalk.ir.v1.ForeignKey;
 import chalk.ir.v1.FunctionDescriptor;
 import chalk.ir.v1.FunctionKind;
-import chalk.ir.v1.Parameter;
 import chalk.ir.v1.HistogramBucket;
+import chalk.ir.v1.IdentifierQuoting;
 import chalk.ir.v1.Index;
 import chalk.ir.v1.KeyOrder;
-import chalk.ir.v1.DialectProfile;
-import chalk.ir.v1.IdentifierQuoting;
+import chalk.ir.v1.Parameter;
 import chalk.ir.v1.PredicateShape;
 import chalk.ir.v1.QueryLanguage;
 import chalk.ir.v1.Schema;
-import chalk.ir.v1.SourceCapabilities;
-import chalk.ir.v1.StringCollation;
 import chalk.ir.v1.SortDirection;
+import chalk.ir.v1.SourceCapabilities;
 import chalk.ir.v1.SourceKind;
+import chalk.ir.v1.StringCollation;
 import chalk.ir.v1.Table;
 import chalk.ir.v1.TableCollation;
 import chalk.ir.v1.Type;
 import chalk.ir.v1.TypeKind;
 import chalk.ir.v1.UniqueKey;
+import chalk.planner.ErrorCode;
 import chalk.planner.plan.SourceDialects;
 import chalk.planner.plan.SqlConfigs;
 import chalk.planner.types.ChalkTypeSystem;
@@ -45,13 +46,18 @@ public final class CatalogValidator {
 
   public static void validate(CatalogContext catalog) {
     if (catalog.getContextId().isBlank()) {
-      throw new InvalidCatalogException("context_id", "the context id is empty");
+      throw new InvalidCatalogException(
+          ErrorCode.EMPTY_NAME, "context_id", "the context id is empty");
     }
     if (catalog.getEpoch() < 0) {
-      throw new InvalidCatalogException("epoch", "the epoch is " + catalog.getEpoch() + "; it must be >= 0");
+      throw new InvalidCatalogException(
+          ErrorCode.VALUE_OUT_OF_RANGE,
+          "epoch", "the epoch is " + catalog.getEpoch() + "; it must be >= 0");
     }
     if (catalog.getSchemasCount() == 0) {
-      throw new InvalidCatalogException("schemas", "a catalog needs at least one schema");
+      throw new InvalidCatalogException(
+          ErrorCode.INCOMPLETE_DECLARATION,
+          "schemas", "a catalog needs at least one schema");
     }
 
     Set<String> schemaNames = new HashSet<>();
@@ -59,21 +65,26 @@ public final class CatalogValidator {
       Schema schema = catalog.getSchemas(s);
       String path = "schemas[" + s + "]";
       if (schema.getName().isBlank()) {
-        throw new InvalidCatalogException(path, "the schema name is empty");
+        throw new InvalidCatalogException(
+            ErrorCode.EMPTY_NAME, path, "the schema name is empty");
       }
       path = path + " (" + schema.getName() + ")";
       if (schema.getSourceId().isBlank()) {
-        throw new InvalidCatalogException(path, "the source id is empty");
+        throw new InvalidCatalogException(
+            ErrorCode.EMPTY_NAME, path, "the source id is empty");
       }
       if (!schemaNames.add(lower(schema.getName()))) {
         throw new InvalidCatalogException(
+            ErrorCode.DUPLICATE_NAME,
             path, "schema name '" + schema.getName() + "' is used twice");
       }
       if (schema.getKind() == SourceKind.SOURCE_KIND_UNSPECIFIED) {
-        throw new InvalidCatalogException(path, "the source kind is unspecified");
+        throw new InvalidCatalogException(
+            ErrorCode.INCOMPLETE_DECLARATION, path, "the source kind is unspecified");
       }
       if (schema.getKind() == SourceKind.SOURCE_KIND_REMOTE && schema.getDialect().isEmpty()) {
         throw new InvalidCatalogException(
+            ErrorCode.INCOMPLETE_DECLARATION,
             path, "a remote schema must name the SQL dialect its source speaks");
       }
       validateCostProfile(schema.getCostProfile(), path);
@@ -99,11 +110,13 @@ public final class CatalogValidator {
       Table table = schema.getTables(t);
       String tablePath = path + ".tables[" + t + "]";
       if (table.getName().isBlank()) {
-        throw new InvalidCatalogException(tablePath, "the table name is empty");
+        throw new InvalidCatalogException(
+            ErrorCode.EMPTY_NAME, tablePath, "the table name is empty");
       }
       tablePath = tablePath + " (" + table.getName() + ")";
       if (!tableNames.add(lower(table.getName()))) {
         throw new InvalidCatalogException(
+            ErrorCode.DUPLICATE_NAME,
             tablePath, "table name '" + table.getName() + "' is used twice in this schema");
       }
       validateTable(table, tablePath, schema);
@@ -129,19 +142,24 @@ public final class CatalogValidator {
       FunctionDescriptor function = schema.getFunctions(f);
       String functionPath = path + ".functions[" + f + "]";
       if (function.getName().isBlank()) {
-        throw new InvalidCatalogException(functionPath, "the function name is empty");
+        throw new InvalidCatalogException(
+            ErrorCode.EMPTY_NAME, functionPath, "the function name is empty");
       }
       functionPath = functionPath + " (" + function.getName() + ")";
       if (!names.add(lower(function.getName()))) {
         throw new InvalidCatalogException(
+            ErrorCode.DUPLICATE_NAME,
             functionPath, "function name '" + function.getName() + "' is used twice in this schema");
       }
       if (function.getKind() == FunctionKind.FUNCTION_KIND_UNSPECIFIED) {
-        throw new InvalidCatalogException(functionPath, "the function kind is unspecified");
+        throw new InvalidCatalogException(
+            ErrorCode.INVALID_FUNCTION,
+            functionPath, "the function kind is unspecified");
       }
       if (function.getImplementationCase()
           == FunctionDescriptor.ImplementationCase.IMPLEMENTATION_NOT_SET) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_FUNCTION,
             functionPath, "the function declares no implementation: set sql, client or native");
       }
 
@@ -149,21 +167,26 @@ public final class CatalogValidator {
       if (table) {
         if (function.getReturnsTable().getFieldsCount() == 0) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_FUNCTION,
               functionPath, "a table function must declare the row type it returns");
         }
         if (function.hasReturnType()) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_FUNCTION,
               functionPath, "a table function returns a table, not a scalar type");
         }
         if (function.getImplementationCase() == FunctionDescriptor.ImplementationCase.NATIVE) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_FUNCTION,
               functionPath,
               "a native table function has nowhere to be evaluated: a pushed subtree is a query, not"
-                  + " a table-valued call (docs/design/17-user-defined-functions.md §8)");
+                  + " a table-valued call");
         }
       } else {
         if (!function.hasReturnType()) {
-          throw new InvalidCatalogException(functionPath, "the function declares no return type");
+          throw new InvalidCatalogException(
+              ErrorCode.INVALID_FUNCTION,
+              functionPath, "the function declares no return type");
         }
         validateType(function.getReturnType(), functionPath + ".return_type");
         // D291: a composite comes from a function the host implements. A SQL body is inlined into
@@ -172,6 +195,7 @@ public final class CatalogValidator {
         if (function.getReturnType().getKind() == TypeKind.TYPE_KIND_COMPOSITE
             && function.getImplementationCase() != FunctionDescriptor.ImplementationCase.CLIENT) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_FUNCTION,
               functionPath + ".return_type",
               "'"
                   + function.getName()
@@ -183,10 +207,12 @@ public final class CatalogValidator {
         }
         if (function.hasReturnsTable()) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_FUNCTION,
               functionPath, "only a table function declares a returned row type");
         }
         if (function.getRows() != 0) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_FUNCTION,
               functionPath, "`rows` is a table function's output estimate; this one is not one");
         }
       }
@@ -198,23 +224,27 @@ public final class CatalogValidator {
               || function.getNullTreatment()
               || function.getPopulation())) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_FUNCTION,
             functionPath,
             "`window`, `ordered`, `null_treatment` and `population` describe an aggregate");
       }
       if (function.getRows() < 0) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_FUNCTION,
             functionPath, "`rows` is " + function.getRows() + "; it must be >= 0");
       }
       if (function.getCost() < 0
           || Double.isNaN(function.getCost())
           || Double.isInfinite(function.getCost())) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_FUNCTION,
             functionPath,
             "`cost` is " + function.getCost() + "; it must be finite and >= 0 (zero means default)");
       }
       if (function.getMonotonicityCount() != 0
           && function.getMonotonicityCount() != function.getParametersCount()) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_FUNCTION,
             functionPath,
             "monotonicity has "
                 + function.getMonotonicityCount()
@@ -224,12 +254,14 @@ public final class CatalogValidator {
       }
       if (function.getImplementationCase() == FunctionDescriptor.ImplementationCase.SQL
           && function.getSql().getText().isBlank()) {
-        throw new InvalidCatalogException(functionPath, "the SQL body is empty");
+        throw new InvalidCatalogException(
+            ErrorCode.INVALID_FUNCTION, functionPath, "the SQL body is empty");
       }
       if (function.getImplementationCase() == FunctionDescriptor.ImplementationCase.NATIVE
           && schema.getCapabilities().getQueryLanguage() != QueryLanguage.QUERY_LANGUAGE_SQL
           && schema.getCapabilities().getQueryLanguage() != QueryLanguage.QUERY_LANGUAGE_IR) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_FUNCTION,
             functionPath,
             "a native function is evaluated by its own source, so the schema must take queries;"
                 + " this one declares " + schema.getCapabilities().getQueryLanguage());
@@ -240,35 +272,43 @@ public final class CatalogValidator {
         Parameter parameter = function.getParameters(p);
         String parameterPath = functionPath + ".parameters[" + p + "]";
         if (parameter.getName().isBlank()) {
-          throw new InvalidCatalogException(parameterPath, "the parameter name is empty");
+          throw new InvalidCatalogException(
+              ErrorCode.EMPTY_NAME, parameterPath, "the parameter name is empty");
         }
         parameterPath = parameterPath + " (" + parameter.getName() + ")";
         if (!parameterNames.add(lower(parameter.getName()))) {
           throw new InvalidCatalogException(
+              ErrorCode.DUPLICATE_NAME,
               parameterPath, "parameter name '" + parameter.getName() + "' is used twice");
         }
         validateType(parameter.getType(), parameterPath);
         if (parameter.getType().getKind() == TypeKind.TYPE_KIND_LIST) {
           throw new InvalidCatalogException(
-              parameterPath, "a v1 parameter is a scalar; LIST parameters are not supported");
+              ErrorCode.INVALID_FUNCTION,
+              parameterPath, "a parameter is a scalar; LIST parameters are not supported");
         }
         if (parameter.getType().getKind() == TypeKind.TYPE_KIND_COMPOSITE) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_FUNCTION,
               parameterPath,
               "a parameter is a scalar; a COMPOSITE is a function's result or an in-process table's"
                   + " column and never a parameter, so pass its fields as parameters of their own");
         }
         if (parameter.getOptional() && !parameter.hasDefaultValue()) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_FUNCTION,
               parameterPath, "an optional parameter must carry the default it stands for");
         }
         if (!parameter.getOptional() && parameter.hasDefaultValue()) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_FUNCTION,
               parameterPath, "a default is only meaningful on an optional parameter");
         }
         if (parameter.hasDefaultValue()
             && parameter.getDefaultValue().getKindCase() != chalk.ir.v1.Expr.KindCase.LITERAL) {
-          throw new InvalidCatalogException(parameterPath, "a parameter default must be a literal");
+          throw new InvalidCatalogException(
+              ErrorCode.INVALID_FUNCTION,
+              parameterPath, "a parameter default must be a literal");
         }
       }
 
@@ -276,7 +316,8 @@ public final class CatalogValidator {
         chalk.ir.v1.Field field = function.getReturnsTable().getFields(c);
         String fieldPath = functionPath + ".returns_table[" + c + "]";
         if (field.getName().isBlank()) {
-          throw new InvalidCatalogException(fieldPath, "the column name is empty");
+          throw new InvalidCatalogException(
+              ErrorCode.EMPTY_NAME, fieldPath, "the column name is empty");
         }
         validateType(field.getType(), fieldPath);
         refuseCompositeColumn(field.getType(), fieldPath, "a table function's column");
@@ -299,6 +340,7 @@ public final class CatalogValidator {
     // reads it as ANSI, and this decision does not change that.
     if (!profile.getDialect().isEmpty() && !SourceDialects.isAccepted(profile.getDialect())) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_CAPABILITIES,
           path,
           "dialect_profile.dialect '"
               + profile.getDialect()
@@ -317,28 +359,33 @@ public final class CatalogValidator {
         SqlConfigs.named(SqlLibrary.class, library, "library");
       }
     } catch (IllegalArgumentException e) {
-      throw new InvalidCatalogException(path, "dialect_profile: " + e.getMessage());
+      throw new InvalidCatalogException(
+          ErrorCode.INVALID_CAPABILITIES, path, "dialect_profile: " + e.getMessage());
     }
 
     if (capabilities.getQueryLanguage() == QueryLanguage.QUERY_LANGUAGE_NONE && pushes(capabilities)) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_CAPABILITIES,
           path,
           "the source declares pushable work but QUERY_LANGUAGE_NONE, so it can only be scanned and "
               + "nothing would ever be pushed");
     }
     if (capabilities.getSupportsOffset() && !capabilities.getSupportsLimit()) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_CAPABILITIES,
           path,
           "supports_offset without supports_limit: an OFFSET is pushed as part of a fetch, so a "
               + "source that takes one must take a LIMIT too");
     }
     if (capabilities.getSupportsHaving() && !capabilities.getSupportsGroupBy()) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_CAPABILITIES,
           path, "supports_having without supports_group_by: a HAVING has nothing to filter");
     }
     if (capabilities.getMaxInList() > 0
         && !capabilities.getPushablePredicatesList().contains(PredicateShape.PREDICATE_SHAPE_IN)) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_CAPABILITIES,
           path,
           "max_in_list is "
               + capabilities.getMaxInList()
@@ -346,6 +393,7 @@ public final class CatalogValidator {
     }
     if (capabilities.getMaxPushdownRows() < 0) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_CAPABILITIES,
           path,
           "max_pushdown_rows is "
               + capabilities.getMaxPushdownRows()
@@ -356,9 +404,10 @@ public final class CatalogValidator {
     if (profile.getLikeMatchesCodePoints()
         && profile.getStringCollation() == StringCollation.STRING_COLLATION_CASE_INSENSITIVE) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_CAPABILITIES,
           path,
           "the dialect profile says like_matches_code_points and STRING_COLLATION_CASE_INSENSITIVE;"
-              + " a case-insensitive collation folds case in LIKE, so the two contradict (D315)");
+              + " a case-insensitive collation folds case in LIKE, so the two contradict");
     }
     if (profile.getStringCollation() == StringCollation.STRING_COLLATION_CASE_INSENSITIVE
         || (profile.getStringCollation() == StringCollation.STRING_COLLATION_LOCALE
@@ -367,18 +416,20 @@ public final class CatalogValidator {
         if (shape == PredicateShape.PREDICATE_SHAPE_LIKE
             || shape == PredicateShape.PREDICATE_SHAPE_LIKE_PREFIX) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_CAPABILITIES,
               path,
               shape
                   + " is declared pushable but the dialect profile says "
                   + profile.getStringCollation()
-                  + "; a LIKE evaluated under another collation can match different rows (D89)"
-                  + ", unless the profile says like_matches_code_points (D315)");
+                  + "; a LIKE evaluated under another collation can match different rows"
+                  + ", unless the profile says like_matches_code_points");
         }
       }
     }
     if (capabilities.getQueryLanguage() == QueryLanguage.QUERY_LANGUAGE_SQL
         && profile.getQuoting() == IdentifierQuoting.IDENTIFIER_QUOTING_UNSPECIFIED) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_CAPABILITIES,
           path, "a SQL source must say how it quotes identifiers (dialect_profile.quoting)");
     }
 
@@ -386,6 +437,7 @@ public final class CatalogValidator {
     // list of literals certainly cannot take a VALUES relation of them.
     if (capabilities.getSupportsValuesJoin() && capabilities.getMaxInList() <= 0) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_CAPABILITIES,
           path,
           "supports_values_join with max_in_list 0: a broadcast join ships the small side's rows "
               + "into the source's query, so a source that accepts no list of values cannot do one");
@@ -395,6 +447,7 @@ public final class CatalogValidator {
     // rather than in values.
     if (capabilities.getSupportsRowValueInList() && capabilities.getMaxInList() <= 0) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_CAPABILITIES,
           path,
           "supports_row_value_in_list with max_in_list 0: a row-constructor IN list is still an IN "
               + "list, and max_in_list is what sizes a call of them");
@@ -413,10 +466,13 @@ public final class CatalogValidator {
 
     chalk.ir.v1.Partitioning partitioning = table.getPartitioning();
     if (partitioning.getPartitionsCount() == 0) {
-      throw new InvalidCatalogException(path, "a partitioned table declares no partitions");
+      throw new InvalidCatalogException(
+          ErrorCode.INVALID_PARTITIONING,
+          path, "a partitioned table declares no partitions");
     }
     if (partitioning.getPartitionColumn() >= table.getColumnsCount()) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_PARTITIONING,
           path,
           "partition_column is "
               + partitioning.getPartitionColumn()
@@ -428,10 +484,12 @@ public final class CatalogValidator {
     for (chalk.ir.v1.Partition partition : partitioning.getPartitionsList()) {
       if (partition.getSourceId().isEmpty() || partition.getTable().isEmpty()) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_PARTITIONING,
             path, "every partition must name a source and a table");
       }
       if (partition.getMatchCase() == chalk.ir.v1.Partition.MatchCase.MATCH_NOT_SET) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_PARTITIONING,
             path,
             "partition '"
                 + partition.getSourceId()
@@ -442,6 +500,7 @@ public final class CatalogValidator {
       if (partition.hasValue()
           && partition.getValue().getKindCase() != chalk.ir.v1.Expr.KindCase.LITERAL) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_PARTITIONING,
             path,
             "partition '"
                 + partition.getSourceId()
@@ -459,6 +518,7 @@ public final class CatalogValidator {
       }
       if (owner == null) {
         throw new InvalidCatalogException(
+            ErrorCode.UNKNOWN_NAME,
             path, "partition schema '" + partition.getSourceId() + "' is not in this catalog");
       }
       boolean found = false;
@@ -467,6 +527,7 @@ public final class CatalogValidator {
           found = true;
           if (candidate.getColumnsCount() != table.getColumnsCount()) {
             throw new InvalidCatalogException(
+                ErrorCode.INVALID_PARTITIONING,
                 path,
                 "partition '"
                     + partition.getSourceId()
@@ -483,6 +544,7 @@ public final class CatalogValidator {
       }
       if (!found) {
         throw new InvalidCatalogException(
+            ErrorCode.UNKNOWN_NAME,
             path,
             "partition '"
                 + partition.getSourceId()
@@ -502,6 +564,7 @@ public final class CatalogValidator {
         || policy.getLocalJoinMaxRows() < 0
         || policy.getUnknownRowCountAssumption() < 0) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_JOIN_POLICY,
           path,
           "every join-policy limit must be zero (the planner's default) or positive; "
               + "broadcast_max_rows="
@@ -518,6 +581,7 @@ public final class CatalogValidator {
           && rule.getPreferred() != chalk.ir.v1.JoinStrategy.JOIN_STRATEGY_UNSPECIFIED
           && !rule.getAllowedList().contains(rule.getPreferred())) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_JOIN_POLICY,
             path,
             "pair rule '"
                 + rule.getLeftSource()
@@ -558,13 +622,16 @@ public final class CatalogValidator {
       String keyPath = path + ".foreign_keys[" + k + "]";
       if (!key.getName().isBlank() && !names.add(lower(key.getName()))) {
         throw new InvalidCatalogException(
+            ErrorCode.DUPLICATE_NAME,
             keyPath, "foreign key name '" + key.getName() + "' is used twice on this table");
       }
       if (key.getColumnsCount() == 0) {
-        throw new InvalidCatalogException(keyPath, "a foreign key has no columns");
+        throw new InvalidCatalogException(
+            ErrorCode.INVALID_FOREIGN_KEY, keyPath, "a foreign key has no columns");
       }
       if (key.getColumnsCount() != key.getParentColumnsCount()) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_FOREIGN_KEY,
             keyPath,
             "the key has "
                 + key.getColumnsCount()
@@ -582,6 +649,7 @@ public final class CatalogValidator {
       }
       if (parent == null) {
         throw new InvalidCatalogException(
+            ErrorCode.UNKNOWN_NAME,
             keyPath,
             "the parent table '" + key.getParentTable() + "' is not in schema '"
                 + schema.getName() + "'");
@@ -595,6 +663,7 @@ public final class CatalogValidator {
         refuseCompositeKey(table, child, keyPath, "a foreign key");
         if (!seen.add(child)) {
           throw new InvalidCatalogException(
+              ErrorCode.DUPLICATE_NAME,
               keyPath, "column " + child + " appears twice in the same foreign key");
         }
         requireColumn(target, parent.getColumnsCount(), keyPath + " (parent '" + parent.getName() + "')");
@@ -604,6 +673,7 @@ public final class CatalogValidator {
         TypeKind parentKind = parent.getColumns(target).getType().getKind();
         if (childKind != parentKind) {
           throw new InvalidCatalogException(
+              ErrorCode.TYPE_MISMATCH,
               keyPath,
               "column '"
                   + table.getColumns(child).getName()
@@ -623,10 +693,12 @@ public final class CatalogValidator {
 
   private static void validateTable(Table table, String path, Schema schema) {
     if (table.getColumnsCount() == 0) {
-      throw new InvalidCatalogException(path, "a table needs at least one column");
+      throw new InvalidCatalogException(
+          ErrorCode.INCOMPLETE_DECLARATION, path, "a table needs at least one column");
     }
     if (table.getRowCount() < -1) {
       throw new InvalidCatalogException(
+          ErrorCode.VALUE_OUT_OF_RANGE,
           path, "row_count is " + table.getRowCount() + "; it must be >= -1 (-1 means unknown)");
     }
 
@@ -635,10 +707,12 @@ public final class CatalogValidator {
       Column column = table.getColumns(c);
       String columnPath = path + ".columns[" + c + "]";
       if (column.getName().isBlank()) {
-        throw new InvalidCatalogException(columnPath, "the column name is empty");
+        throw new InvalidCatalogException(
+            ErrorCode.EMPTY_NAME, columnPath, "the column name is empty");
       }
       if (!columnNames.add(lower(column.getName()))) {
         throw new InvalidCatalogException(
+            ErrorCode.DUPLICATE_NAME,
             columnPath, "column name '" + column.getName() + "' is used twice in this table");
       }
       validateType(column.getType(), columnPath + " (" + column.getName() + ")");
@@ -647,6 +721,7 @@ public final class CatalogValidator {
       if (column.getType().getKind() == TypeKind.TYPE_KIND_COMPOSITE
           && schema.getKind() != chalk.ir.v1.SourceKind.SOURCE_KIND_LOCAL) {
         throw new InvalidCatalogException(
+            ErrorCode.UNSUPPORTED_TYPE,
             columnPath + " (" + column.getName() + ")",
             "column '" + column.getName() + "' of table '" + table.getName() + "' is a COMPOSITE,"
                 + " and schema '" + schema.getName() + "' is not an in-process source; a composite"
@@ -660,7 +735,8 @@ public final class CatalogValidator {
       UniqueKey key = table.getUniqueKeys(k);
       String keyPath = path + ".unique_keys[" + k + "]";
       if (key.getColumnsCount() == 0) {
-        throw new InvalidCatalogException(keyPath, "a unique key has no columns");
+        throw new InvalidCatalogException(
+            ErrorCode.INCOMPLETE_DECLARATION, keyPath, "a unique key has no columns");
       }
       Set<Integer> seen = new HashSet<>();
       for (int column : key.getColumnsList()) {
@@ -668,6 +744,7 @@ public final class CatalogValidator {
         refuseCompositeKey(table, column, keyPath, "a unique key");
         if (!seen.add(column)) {
           throw new InvalidCatalogException(
+              ErrorCode.DUPLICATE_NAME,
               keyPath, "column " + column + " appears twice in the same key");
         }
       }
@@ -677,7 +754,8 @@ public final class CatalogValidator {
       TableCollation collation = table.getCollations(i);
       String collationPath = path + ".collations[" + i + "]";
       if (collation.getKeysCount() == 0) {
-        throw new InvalidCatalogException(collationPath, "a collation has no keys");
+        throw new InvalidCatalogException(
+            ErrorCode.INCOMPLETE_DECLARATION, collationPath, "a collation has no keys");
       }
       Set<Integer> seen = new HashSet<>();
       for (int j = 0; j < collation.getKeysCount(); j++) {
@@ -687,12 +765,14 @@ public final class CatalogValidator {
         refuseCompositeKey(table, key.getColumn(), keyPath, "a collation");
         if (key.getDirection() == SortDirection.SORT_DIRECTION_UNSPECIFIED) {
           throw new InvalidCatalogException(
+              ErrorCode.INCOMPLETE_DECLARATION,
               keyPath,
               "the sort direction is unspecified; Calcite compares collations including null "
                   + "direction, so an unspecified one never satisfies an ORDER BY");
         }
         if (!seen.add(key.getColumn())) {
           throw new InvalidCatalogException(
+              ErrorCode.DUPLICATE_NAME,
               keyPath, "column " + key.getColumn() + " appears twice in the same collation");
         }
       }
@@ -703,17 +783,22 @@ public final class CatalogValidator {
       Index index = table.getIndexes(i);
       String indexPath = path + ".indexes[" + i + "]";
       if (index.getName().isBlank()) {
-        throw new InvalidCatalogException(indexPath, "the index name is empty");
+        throw new InvalidCatalogException(
+            ErrorCode.EMPTY_NAME, indexPath, "the index name is empty");
       }
       if (!indexNames.add(lower(index.getName()))) {
         throw new InvalidCatalogException(
+            ErrorCode.DUPLICATE_NAME,
             indexPath, "index name '" + index.getName() + "' is used twice on this table");
       }
       if (index.getKind() == chalk.ir.v1.IndexKind.INDEX_KIND_UNSPECIFIED) {
-        throw new InvalidCatalogException(indexPath, "the index kind is unspecified");
+        throw new InvalidCatalogException(
+            ErrorCode.INCOMPLETE_DECLARATION,
+            indexPath, "the index kind is unspecified");
       }
       if (index.getColumnsCount() == 0) {
-        throw new InvalidCatalogException(indexPath, "an index has no columns");
+        throw new InvalidCatalogException(
+            ErrorCode.INCOMPLETE_DECLARATION, indexPath, "an index has no columns");
       }
       Set<Integer> indexColumns = new HashSet<>();
       for (int column : index.getColumnsList()) {
@@ -721,12 +806,14 @@ public final class CatalogValidator {
         refuseCompositeKey(table, column, indexPath, "an index key");
         if (!indexColumns.add(column)) {
           throw new InvalidCatalogException(
+              ErrorCode.DUPLICATE_NAME,
               indexPath, "column " + column + " appears twice in the same index key");
         }
       }
       if (index.getDirectionsCount() != 0
           && index.getDirectionsCount() != index.getColumnsCount()) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_INDEX,
             indexPath,
             "the index declares "
                 + index.getDirectionsCount()
@@ -737,6 +824,7 @@ public final class CatalogValidator {
       for (int d = 0; d < index.getDirectionsCount(); d++) {
         if (index.getDirections(d) == SortDirection.SORT_DIRECTION_UNSPECIFIED) {
           throw new InvalidCatalogException(
+              ErrorCode.INCOMPLETE_DECLARATION,
               indexPath + ".directions[" + d + "]",
               "the sort direction is unspecified; leave the directions empty for the "
                   + "ascending-nulls-last default rather than declaring an unspecified one");
@@ -767,6 +855,7 @@ public final class CatalogValidator {
 
     if (index.getColumnsCount() != 1) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_INDEX,
           indexPath,
           "index '"
               + index.getName()
@@ -779,6 +868,7 @@ public final class CatalogValidator {
     Column column = table.getColumns(index.getColumns(0));
     if (column.getType().getKind() != chalk.ir.v1.TypeKind.TYPE_KIND_STRING) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_INDEX,
           indexPath,
           "index '"
               + index.getName()
@@ -797,22 +887,26 @@ public final class CatalogValidator {
   private static void validateStatistics(ColumnStatistics statistics, String path) {
     if (statistics.getDistinctCount() < -1) {
       throw new InvalidCatalogException(
+          ErrorCode.VALUE_OUT_OF_RANGE,
           path,
           "distinct_count is " + statistics.getDistinctCount() + "; it must be >= -1 (-1 means unknown)");
     }
     if (statistics.getNullCount() < -1) {
       throw new InvalidCatalogException(
+          ErrorCode.VALUE_OUT_OF_RANGE,
           path, "null_count is " + statistics.getNullCount() + "; it must be >= -1 (-1 means unknown)");
     }
     for (int b = 0; b < statistics.getHistogram().getBucketsCount(); b++) {
       HistogramBucket bucket = statistics.getHistogram().getBuckets(b);
       if (bucket.getCount() < 0) {
         throw new InvalidCatalogException(
+            ErrorCode.VALUE_OUT_OF_RANGE,
             path + ".histogram[" + b + "]",
             "the bucket count is " + bucket.getCount() + "; it must be >= 0");
       }
       if (bucket.getDistinctCount() < -1) {
         throw new InvalidCatalogException(
+            ErrorCode.VALUE_OUT_OF_RANGE,
             path + ".histogram[" + b + "]",
             "distinct_count is " + bucket.getDistinctCount() + "; it must be >= -1");
       }
@@ -820,6 +914,7 @@ public final class CatalogValidator {
     for (int v = 0; v < statistics.getFrequentValuesCount(); v++) {
       if (statistics.getFrequentValues(v).getCount() < 0) {
         throw new InvalidCatalogException(
+            ErrorCode.VALUE_OUT_OF_RANGE,
             path + ".frequent_values[" + v + "]",
             "the value count is " + statistics.getFrequentValues(v).getCount() + "; it must be >= 0");
       }
@@ -841,6 +936,7 @@ public final class CatalogValidator {
   private static void requireCost(double cost, String name, String path) {
     if (cost < 0 || Double.isNaN(cost) || Double.isInfinite(cost)) {
       throw new InvalidCatalogException(
+          ErrorCode.VALUE_OUT_OF_RANGE,
           path + ".cost_profile",
           name + " is " + cost + "; a cost must be finite and >= 0 (zero means 'inherit')");
     }
@@ -861,6 +957,7 @@ public final class CatalogValidator {
       for (Column column : table.getColumnsList()) {
         if (column.getType().getKind() == TypeKind.TYPE_KIND_COMPOSITE) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_INDEX,
               indexPath,
               "index '" + index.getName() + "' is CLUSTERED with no covering set, which covers every"
                   + " column and so the composite column '" + column.getName() + "'; a clustered"
@@ -874,6 +971,7 @@ public final class CatalogValidator {
 
     if (index.getKind() != chalk.ir.v1.IndexKind.INDEX_KIND_CLUSTERED) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_INDEX,
           indexPath,
           "index '"
               + index.getName()
@@ -890,6 +988,7 @@ public final class CatalogValidator {
       requireColumn(column, columns, indexPath + ".covering[" + c + "]");
       if (table.getColumns(column).getType().getKind() == TypeKind.TYPE_KIND_COMPOSITE) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_INDEX,
             indexPath + ".covering[" + c + "]",
             "the covering set of index '" + index.getName() + "' names the composite column '"
                 + table.getColumns(column).getName() + "'; a clustered copy never carries a composite"
@@ -897,12 +996,14 @@ public final class CatalogValidator {
       }
       if (!seen.add(column)) {
         throw new InvalidCatalogException(
+            ErrorCode.DUPLICATE_NAME,
             indexPath + ".covering[" + c + "]",
             "column " + column + " appears twice in the covering set of index '"
                 + index.getName() + "'");
       }
       if (column <= previous) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_INDEX,
             indexPath + ".covering[" + c + "]",
             "the covering set of index '"
                 + index.getName()
@@ -917,6 +1018,7 @@ public final class CatalogValidator {
     for (int key : keyColumns) {
       if (!seen.contains(key)) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_INDEX,
             indexPath,
             "the covering set of index '"
                 + index.getName()
@@ -937,6 +1039,7 @@ public final class CatalogValidator {
   private static void refuseCompositeKey(Table table, int column, String path, String what) {
     if (table.getColumns(column).getType().getKind() == TypeKind.TYPE_KIND_COMPOSITE) {
       throw new InvalidCatalogException(
+          ErrorCode.INCOMPARABLE_TYPE,
           path,
           "column '" + table.getColumns(column).getName() + "' is a COMPOSITE and cannot be part of "
               + what + "; a composite value has no ordering or equality. Declare the field to key on"
@@ -947,6 +1050,7 @@ public final class CatalogValidator {
   private static void requireColumn(int column, int columnCount, String path) {
     if (column < 0 || column >= columnCount) {
       throw new InvalidCatalogException(
+          ErrorCode.COLUMN_INDEX_OUT_OF_RANGE,
           path,
           "column index " + column + " is out of range for a table of " + columnCount + " columns");
     }
@@ -959,6 +1063,7 @@ public final class CatalogValidator {
   private static void refuseCompositeColumn(Type type, String path, String what) {
     if (type.getKind() == TypeKind.TYPE_KIND_COMPOSITE) {
       throw new InvalidCatalogException(
+          ErrorCode.UNSUPPORTED_TYPE,
           path,
           "a COMPOSITE cannot be "
               + what
@@ -973,18 +1078,22 @@ public final class CatalogValidator {
    */
   private static void validateCompositeFields(Type type, String path) {
     if (type.getFieldsCount() == 0) {
-      throw new InvalidCatalogException(path, "a COMPOSITE declares no fields; it has at least one");
+      throw new InvalidCatalogException(
+          ErrorCode.INCOMPLETE_DECLARATION,
+          path, "a COMPOSITE declares no fields; it has at least one");
     }
     Set<String> names = new HashSet<>();
     for (int f = 0; f < type.getFieldsCount(); f++) {
       chalk.ir.v1.Field field = type.getFields(f);
       String fieldPath = path + ".fields[" + f + "]";
       if (field.getName().isBlank()) {
-        throw new InvalidCatalogException(fieldPath, "the field name is empty");
+        throw new InvalidCatalogException(
+            ErrorCode.EMPTY_NAME, fieldPath, "the field name is empty");
       }
       fieldPath = fieldPath + " (" + field.getName() + ")";
       if (!names.add(lower(field.getName()))) {
         throw new InvalidCatalogException(
+            ErrorCode.DUPLICATE_NAME,
             fieldPath,
             "field name '"
                 + field.getName()
@@ -994,6 +1103,7 @@ public final class CatalogValidator {
       TypeKind kind = field.getType().getKind();
       if (kind == TypeKind.TYPE_KIND_LIST || kind == TypeKind.TYPE_KIND_COMPOSITE) {
         throw new InvalidCatalogException(
+            ErrorCode.UNSUPPORTED_TYPE,
             fieldPath,
             "the field is a "
                 + (kind == TypeKind.TYPE_KIND_LIST ? "LIST" : "COMPOSITE")
@@ -1005,12 +1115,14 @@ public final class CatalogValidator {
 
   private static void validateType(Type type, String path) {
     if (type.getKind() == TypeKind.TYPE_KIND_UNSPECIFIED) {
-      throw new InvalidCatalogException(path, "the column type is unspecified");
+      throw new InvalidCatalogException(
+          ErrorCode.INCOMPLETE_DECLARATION, path, "the column type is unspecified");
     }
     if (type.getKind() == TypeKind.TYPE_KIND_COMPOSITE) {
       validateCompositeFields(type, path);
     } else if (type.getFieldsCount() > 0) {
       throw new InvalidCatalogException(
+          ErrorCode.UNSUPPORTED_TYPE,
           path,
           type.getKind() + " declares " + type.getFieldsCount() + " field(s); only a COMPOSITE has fields");
     }
@@ -1018,6 +1130,7 @@ public final class CatalogValidator {
         && type.hasElement()
         && type.getElement().getKind() == TypeKind.TYPE_KIND_COMPOSITE) {
       throw new InvalidCatalogException(
+          ErrorCode.UNSUPPORTED_TYPE,
           path, "a LIST's element is a COMPOSITE; a list holds scalars and a composite is never nested");
     }
     switch (type.getKind()) {
@@ -1025,6 +1138,7 @@ public final class CatalogValidator {
         if (type.getPrecision() < 1
             || type.getPrecision() > ChalkTypeSystem.MAX_DECIMAL_PRECISION) {
           throw new InvalidCatalogException(
+              ErrorCode.VALUE_OUT_OF_RANGE,
               path,
               "DECIMAL precision is "
                   + type.getPrecision()
@@ -1033,6 +1147,7 @@ public final class CatalogValidator {
         }
         if (type.getScale() > type.getPrecision()) {
           throw new InvalidCatalogException(
+              ErrorCode.VALUE_OUT_OF_RANGE,
               path, "DECIMAL scale " + type.getScale() + " exceeds precision " + type.getPrecision());
         }
       }
@@ -1043,15 +1158,19 @@ public final class CatalogValidator {
                 : ChalkTypeSystem.MAX_TIMESTAMP_PRECISION;
         if (type.getPrecision() > max) {
           throw new InvalidCatalogException(
+              ErrorCode.VALUE_OUT_OF_RANGE,
               path, type.getKind() + " precision is " + type.getPrecision() + "; the maximum is " + max);
         }
         if (type.getScale() != 0) {
-          throw new InvalidCatalogException(path, type.getKind() + " carries a scale; scale is DECIMAL-only");
+          throw new InvalidCatalogException(
+              ErrorCode.UNSUPPORTED_TYPE,
+              path, type.getKind() + " carries a scale; scale is DECIMAL-only");
         }
       }
       default -> {
         if (type.getPrecision() != 0 || type.getScale() != 0) {
           throw new InvalidCatalogException(
+              ErrorCode.VALUE_OUT_OF_RANGE,
               path,
               type.getKind()
                   + " carries precision "

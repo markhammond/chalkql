@@ -1,5 +1,7 @@
 package chalk.planner.plan;
 
+import chalk.planner.ErrorCode;
+import chalk.planner.InvalidArgumentException;
 import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
@@ -94,7 +96,7 @@ public final class LikePatterns {
     }
 
     if (defect != null) {
-      throw new IllegalArgumentException(defect);
+      throw new InvalidArgumentException(ErrorCode.SQL_VALIDATION, defect);
     }
   }
 
@@ -166,7 +168,7 @@ public final class LikePatterns {
     }
 
     if (defect != null) {
-      throw new IllegalArgumentException(defect);
+      throw new InvalidArgumentException(ErrorCode.SQL_VALIDATION, defect);
     }
   }
 

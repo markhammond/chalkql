@@ -56,6 +56,14 @@ between planner and executor (invariant I2).
   interfaces. No positional records: they cannot grow additively.
 - **No licence headers** in source files; `LICENSE` and `NOTICE` cover it.
 - **Java**: `chalk.planner.*` packages, no wildcard imports.
+- **Errors** carry a code and a message that stands on its own. Raise a ChalkQL
+  exception with the `ChalkErrorCodes` constant of the rule it meets (in the
+  planner, an exception that carries an `ErrorCode`). Write the message for the
+  host: what happened, where, the rule and what to do, citing no design
+  document, decision or milestone. A code travels by name, so a new one needs
+  no protocol change: add its entry to `docs/errors.md`, a constant to
+  `ChalkErrorCodes` and one to the planner's `ErrorCode`. `MessageTests` fails
+  the build on a citation, or when the three disagree.
 
 ## Testing rules that are not negotiable
 

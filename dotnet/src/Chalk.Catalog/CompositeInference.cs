@@ -64,7 +64,7 @@ internal static class CompositeInference
     public static ChalkType Infer(Type type, bool nullable, string path) =>
         TryInfer(type, nullable, out var inferred, out var refusal)
             ? inferred
-            : throw new CatalogValidationException(path, refusal!);
+            : throw new CatalogValidationException(ChalkErrorCodes.UnsupportedType, path, refusal!);
 
     /// <summary>
     /// The same, answering the refusal rather than throwing it — which is how the engine's binding

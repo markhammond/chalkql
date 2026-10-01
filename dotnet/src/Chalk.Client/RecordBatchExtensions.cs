@@ -310,7 +310,7 @@ public static class RecordBatchExtensions
             BinaryArray a => a.GetBytes(index).ToArray(),
             StructArray a => Fields(a, index),
             _ => throw new NotSupportedException(
-                $"no CLR mapping for Arrow array {array.GetType().Name}; see 04-client.md §7.2"),
+                $"no CLR mapping for Arrow array {array.GetType().Name}."),
         };
     }
 

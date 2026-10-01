@@ -117,7 +117,9 @@ public sealed class ConformanceReport
 public sealed class ConformanceException : ChalkException
 {
     public ConformanceException(ConformanceReport report)
-        : base($"Source '{report.SourceId}' does not conform to its own descriptor:\n{report}") =>
+        : base(
+            ChalkErrorCodes.ConformanceFailed,
+            $"Source '{report.SourceId}' does not conform to its own descriptor:\n{report}") =>
         Report = report;
 
     public ConformanceReport Report { get; }

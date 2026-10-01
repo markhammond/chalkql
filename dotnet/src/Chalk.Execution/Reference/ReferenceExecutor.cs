@@ -189,6 +189,7 @@ internal sealed class ReferenceExecutor
                 // source's own scan path and every predicate is evaluated here. A RemoteQuery in an
                 // oracle plan means the level was wrong, not that a node is missing.
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedOperator,
                     "RemoteQuery in the reference executor",
                     "The reference executor is the I4 oracle and runs plans made at "
                     + "PushdownLevel.None, where nothing is pushed into a source. Plan with "
@@ -214,10 +215,12 @@ internal sealed class ReferenceExecutor
                 if (!_relations.TryGetValue(name, out var supplied))
                 {
                     throw new ExecutionException(
+                        ChalkErrorCodes.InvalidContext,
                         _plan.Plan.PlanDigest,
                         path,
                         $"the plan reads the context relation '{name}' and the execution bound "
-                        + "none.");
+                        + "none.",
+                        innerException: null);
                 }
 
                 var types = rel.RowType.Fields.Select(f => ChalkType.FromProto(f.Type)).ToList();
@@ -464,6 +467,7 @@ internal sealed class ReferenceExecutor
                 // PushdownLevel.None has no strategy in it at all — the joins are ordinary ones over
                 // ordinary Reads — so one of these here means the level was wrong.
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedOperator,
                     rel.KindCase + " in the reference executor",
                     "The reference executor is the federation oracle and runs plans made at "
                     + "PushdownLevel.None, where no cross-source strategy is chosen at all. Plan "
@@ -471,8 +475,9 @@ internal sealed class ReferenceExecutor
 
             default:
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedOperator,
                     rel.KindCase.ToString(),
-                    "The reference executor implements the M1 node set (docs/design/06-m1-workplan.md §4).");
+                    "The reference executor does not run this node.");
         }
     }
 
@@ -723,6 +728,7 @@ internal sealed class ReferenceExecutor
         if (!_sources.TryGetValue(table.SourceId, out var source))
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnknownSource,
                 $"source '{table.SourceId}'", "The engine holds no source with that id.");
         }
 
@@ -934,6 +940,7 @@ internal sealed class ReferenceExecutor
         if (!_sources.TryGetValue(table.SourceId, out var source))
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnknownSource,
                 $"source '{table.SourceId}'", "The engine holds no source with that id.");
         }
 

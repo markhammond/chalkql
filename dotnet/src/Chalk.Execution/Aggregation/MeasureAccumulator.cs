@@ -119,13 +119,15 @@ internal abstract class MeasureAccumulator : ArenaScratch
                 return new MinMaxAccumulator(resultType, measure.Function == AggregateFunctionId.Max);
             case AggregateFunctionId.Avg:
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedFunction,
                     "AVG",
-                    "The reference planner reduces AVG to SUM0/COUNT and M1 executors reject it (A12).");
+                    "The planner writes AVG as SUM0 over COUNT, so a plan with an AVG measure was made "
+                    + "by something else.");
             default:
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedFunction,
                     measure.Function.ToString().ToUpperInvariant(),
-                    "The engine implements COUNT, SUM, SUM0, MIN, MAX and the holistic family "
-                    + "(docs/design/02-ir.md §6, docs/design/14-windows-ii.md §3).");
+                    "The engine implements COUNT, SUM, SUM0, MIN, MAX and the holistic family.");
         }
     }
 
@@ -136,8 +138,9 @@ internal abstract class MeasureAccumulator : ArenaScratch
         if (literal is not { KindCase: Expr.KindOneofCase.Literal })
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.NonConstantArgument,
                 measure.Function.ToString().ToUpperInvariant() + " with a non-constant fraction",
-                "The fraction is a literal between 0 and 1 (docs/design/14-windows-ii.md §3).");
+                "The fraction is a literal between 0 and 1.");
         }
 
         var value = Expressions.Literals.ToScalar(literal);
@@ -152,8 +155,9 @@ internal abstract class MeasureAccumulator : ArenaScratch
         if (fraction is < 0 or > 1)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.ValueOutOfRange,
                 measure.Function.ToString().ToUpperInvariant() + $" of {fraction}",
-                "The fraction must be between 0 and 1 (docs/design/14-windows-ii.md §3).");
+                "The fraction must be between 0 and 1.");
         }
 
         return fraction;
@@ -171,8 +175,9 @@ internal abstract class MeasureAccumulator : ArenaScratch
         if (literal is not { KindCase: Expr.KindOneofCase.Literal })
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.NonConstantArgument,
                 "LISTAGG with a non-constant separator",
-                "The separator is a literal (docs/design/14-windows-ii.md §3).");
+                "The separator is a literal.");
         }
 
         return Expressions.Literals.ToScalar(literal).Text ?? string.Empty;
@@ -254,8 +259,9 @@ internal sealed class SumAccumulator : MeasureAccumulator
         if (!IrTypes.IsNumeric(resultType.Kind))
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"SUM over {resultType}",
-                "SUM is defined for the numeric kinds (docs/design/02-ir.md §6).");
+                "SUM is defined for the numeric kinds.");
         }
     }
 

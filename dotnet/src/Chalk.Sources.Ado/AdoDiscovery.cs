@@ -317,6 +317,7 @@ internal static class AdoDiscovery
     {
         var type = AdoTypeMapping.FromSqlType(declared, nullable, precision, scale)
             ?? throw new CatalogValidationException(
+                ChalkErrorCodes.UnsupportedType,
                 $"table '{table}'",
                 $"column '{name}' is declared '{declared}', which Chalk has no type for. Register "
                 + "the table explicitly with AddTable and give the column a type, or cast it in a "

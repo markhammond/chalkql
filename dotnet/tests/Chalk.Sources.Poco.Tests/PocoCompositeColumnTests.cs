@@ -261,7 +261,7 @@ public sealed class PocoCompositeColumnTests
         Assert.Equal(
             "Invalid catalog at table 'accounts' index 'ix_contact': 'Contact' is a composite column and cannot be an index key: a "
             + "composite value has no ordering or equality, so nothing is keyed, indexed or ordered on one. "
-            + "Declare the field to key on as a member of its own.",
+            + "Declare the field to key on as a member of its own. [IncomparableType]",
             Refused(t => t.Index("ix_contact", Chalk.Ir.IndexKind.Ordered, unique: false, a => a.Contact)).Message);
         // An index the host did not name is refused by the name it would have had.
         Assert.StartsWith(
@@ -275,7 +275,7 @@ public sealed class PocoCompositeColumnTests
         Assert.Equal(
             "Invalid catalog at table 'accounts': Index(keys) names 'Tier' of 'Contact', which is a composite column; a field of "
             + "a composite column is not a column of its own, and nothing is keyed, indexed or ordered on "
-            + "one. Declare the field as a member of its own.",
+            + "one. Declare the field as a member of its own. [IncomparableType]",
             Refused(t => t.Index(a => a.Contact!.Tier)).Message);
         Assert.Contains(
             "'Where' is a composite column and cannot be a unique key",

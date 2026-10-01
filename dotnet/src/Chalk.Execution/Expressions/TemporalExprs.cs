@@ -44,8 +44,9 @@ internal static class TemporalUnits
         "MICROSECOND" => TemporalUnit.Microsecond,
         "EPOCH" => TemporalUnit.Epoch,
         _ => throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedFunction,
             $"{function} unit {value}",
-            "M1 supports YEAR MONTH DAY HOUR MINUTE SECOND DOW DOY EPOCH (docs/design/02-ir.md §6)."),
+            "This executor supports YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, DOW, DOY and EPOCH."),
     };
 }
 

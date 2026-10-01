@@ -38,6 +38,7 @@ internal static class ScalarLanes
                 break;
             default:
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedType,
                     $"constant of layout {kind}",
                     "It has no fixed-width lane; variable-length constants are appended, not written.");
         }

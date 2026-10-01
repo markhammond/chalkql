@@ -260,11 +260,12 @@ internal static class ParameterBinder
 
         if (IsList(value))
         {
-            throw new ArgumentException(
+            throw new ParameterBindingException(
+                $"Parameter {parameter}",
                 $"a list was given as the value hint for parameter {parameter}. A list parameter is "
                 + "expanded into one placeholder per element, so the plan's shape depends on the "
                 + "list's length rather than on a representative value, and a hint cannot say "
-                + "anything useful about it (docs/design/04-client.md §7.4).");
+                + "anything useful about it.");
         }
 
         return value;
@@ -316,10 +317,11 @@ internal static class ParameterBinder
 
             if (!parameters[i].AcceptsList)
             {
-                throw new ArgumentException(
+                throw new ParameterBindingException(
+                    $"Parameter {parameters[i]}",
                     $"a list was bound to parameter {parameters[i]}, but it is not in an IN position. "
                     + "Only a parameter whose every occurrence directly follows IN or NOT IN can be "
-                    + "expanded into a list (docs/design/04-client.md §7.4).");
+                    + "expanded into a list.");
             }
 
             shape[i] = ((IEnumerable)values[i]!).Cast<object?>().Count();

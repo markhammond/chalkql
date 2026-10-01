@@ -66,12 +66,14 @@ internal static class CatalogLiterals
                     IntervalYearValue = Convert.ToInt32(value, CultureInfo.InvariantCulture),
                 },
                 _ => throw new CatalogValidationException(
+                    ChalkErrorCodes.UnsupportedType,
                     what, $"a statistic of type {type} cannot be expressed as a literal"),
             };
         }
         catch (Exception e) when (e is InvalidCastException or FormatException or OverflowException)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.TypeMismatch,
                 what,
                 $"the statistic value ({value.GetType().Name}) does not fit the column's type {type}: {e.Message}");
         }

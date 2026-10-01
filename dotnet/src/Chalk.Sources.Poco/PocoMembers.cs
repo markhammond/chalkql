@@ -94,6 +94,7 @@ internal static class PocoMembers
             && CompositeInference.IsCandidate(outer.Type))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.IncomparableType,
                 $"table '{table}'",
                 $"{what} names '{field.Member.Name}' of '{outer.Member.Name}', which is a composite "
                 + "column; a field of a composite column is not a column of its own, and nothing is "
@@ -101,6 +102,7 @@ internal static class PocoMembers
         }
 
         throw new CatalogValidationException(
+            ChalkErrorCodes.UnknownName,
             $"table '{table}'",
             $"{what} must name a property or field of {lambda.Parameters[0].Type.Name} directly, "
             + "for example row => row.Symbol. Use Column(name, projection) for a computed column.");

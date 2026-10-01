@@ -216,6 +216,8 @@ public sealed class TenancyExecuteTimeTests(SharedSidecar sidecar)
         var missing = await Assert.ThrowsAsync<ContextRequiredException>(
             async () => await engine.ExecuteAsync(prepared.Query, (IReadOnlyList<object?>?)null));
         Assert.Contains("manager_orgs", missing.Names);
+        Assert.Equal(ChalkErrorCodes.ContextRequired, missing.Code);
+        Assert.EndsWith(" [ContextRequired]", missing.Message, StringComparison.Ordinal);
     }
 
     [Fact]

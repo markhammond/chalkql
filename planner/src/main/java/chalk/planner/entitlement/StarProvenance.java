@@ -1,6 +1,6 @@
 package chalk.planner.entitlement;
 
-import chalk.planner.rpc.v1.PolicyRefusalReason;
+import chalk.planner.ErrorCode;
 import chalk.planner.rpc.v1.StarPolicy;
 import java.util.ArrayList;
 import java.util.List;
@@ -332,17 +332,16 @@ public final class StarProvenance {
       if (policy == StarPolicy.STAR_POLICY_REFUSE_WHEN_ENTITLED) {
         if (entitled.any()) {
           throw new PolicyException(
-              PolicyRefusalReason.POLICY_REFUSAL_REASON_STAR,
+              ErrorCode.STAR,
               "this statement uses SELECT *, and StarPolicy.RefuseWhenEntitled refuses any star "
-                  + "while the catalog carries entitlements. Name the columns "
-                  + "(docs/design/16-entitlements.md §3.11).");
+                  + "while the catalog carries entitlements. Name the columns.");
         }
         return;
       }
       String table = entitledIn(select.getFrom());
       if (table != null) {
         throw new PolicyException(
-            PolicyRefusalReason.POLICY_REFUSAL_REASON_STAR,
+            ErrorCode.STAR,
             table,
             "",
             "",
@@ -350,7 +349,7 @@ public final class StarProvenance {
             "this statement uses SELECT * over "
                 + table
                 + ", which carries an entitlement, and StarPolicy.RefuseOverEntitled refuses that. "
-                + "Name the columns (docs/design/16-entitlements.md §3.11).");
+                + "Name the columns.");
       }
     }
 
@@ -358,15 +357,14 @@ public final class StarProvenance {
       String table = entitledIn(select.getFrom());
       if (table != null) {
         throw new PolicyException(
-            PolicyRefusalReason.POLICY_REFUSAL_REASON_STAR,
+            ErrorCode.STAR,
             table,
             "",
             "",
             List.of(),
             "this statement builds a ROW(…) over "
                 + table
-                + ", which carries an entitlement, and the star policy refuses that "
-                + "(docs/design/16-entitlements.md §3.11).");
+                + ", which carries an entitlement, and the star policy refuses that.");
       }
     }
 

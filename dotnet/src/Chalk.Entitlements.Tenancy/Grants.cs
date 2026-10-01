@@ -165,8 +165,7 @@ public sealed class Grant
     private static KindDeclaration Declaration(KindDeclaration? declaration, string parameter) =>
         declaration ?? throw new ArgumentException(
             "a default kind handle names no kind. Obtain one from TenancyPolicy.Tenancy(name) or "
-            + "TenancyPolicy.Subject(name, within: …) "
-            + "(docs/design/45-typed-tenancy-surface.md §1, D270).",
+            + "TenancyPolicy.Subject(name, within: …).",
             parameter);
 
     /// <summary>
@@ -188,19 +187,20 @@ public sealed class Grant
         if (IsGlobal)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidGrant,
                 "tenancy.grants",
                 $"a global grant is confined along '{confining}'. A global grant reaches every tenancy "
                 + "whatever a row's own, so confining one is a contradiction: hold an ordinary grant "
-                + "on the tenancy instead (docs/design/40-conjoined-confinement.md §1, D266).");
+                + "on the tenancy instead.");
         }
 
         if (string.Equals(confining, Kind, StringComparison.Ordinal))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidGrant,
                 "tenancy.grants",
                 $"the grant on '{Kind}' is confined along '{confining}', which is its own kind. A grant "
-                + "names one tenancy of its kind already; two tenancies of one kind are two grants "
-                + "(docs/design/40-conjoined-confinement.md §1, D266).");
+                + "names one tenancy of its kind already; two tenancies of one kind are two grants.");
         }
 
         foreach (var confinement in Confinements)
@@ -208,11 +208,11 @@ public sealed class Grant
             if (string.Equals(confinement.KindName, confining, StringComparison.Ordinal))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidGrant,
                     "tenancy.grants",
                     $"the grant on '{Kind}' names the confining kind '{confining}' twice. Within may be "
                     + "called once per tenancy kind: all the confinements of one grant must hold at "
-                    + "once, so two of one kind would reach no row at all "
-                    + "(docs/design/40-conjoined-confinement.md §1, D266).");
+                    + "once, so two of one kind would reach no row at all.");
             }
         }
 

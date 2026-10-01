@@ -138,7 +138,9 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
             when (e.Message.Contains("nesting", StringComparison.OrdinalIgnoreCase))
         {
             var tooDeep = new Chalk.Ir.PlanTooDeepException(nestingLimit, e);
-            throw new PlanningException(PlanErrorKind.Internal, tooDeep.Message, position: null, tooDeep);
+            throw new PlanningException(
+                ChalkErrorCodes.PlanTooDeep,
+                PlanErrorKinds.Internal, tooDeep.Message, position: null, planningState: null, tooDeep);
         }
 
         return response;
@@ -627,11 +629,13 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
             || error.Status.Detail.Contains("levels of nesting", StringComparison.OrdinalIgnoreCase))
         {
             return new PlanningException(
-                PlanErrorKind.Internal,
+                ChalkErrorCodes.PlanTooDeep,
+                PlanErrorKinds.Internal,
                 "the plan the planner returned could not be read by this client: "
                 + (error.Status.DebugException?.Message ?? error.Status.Detail)
                 + " (GrpcPlannerOptions.PlanNestingLimit bounds how deep a plan may nest)",
                 position: null,
+                planningState: null,
                 error);
         }
 
@@ -651,36 +655,37 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
             // No trailer: the failure came from the transport or from something in front of the
             // service, so there is nothing more specific to say than what gRPC reported.
             return new PlanningException(
-                PlanErrorKind.Internal,
+                ChalkErrorCodes.PlannerUnavailable,
+                PlanErrorKinds.Internal,
                 $"{error.StatusCode}: {error.Status.Detail}",
                 position: null,
+                planningState: null,
                 error);
         }
 
         SqlPosition? position = planError.Line > 0
             ? new SqlPosition(planError.Line, planError.Column, planError.EndLine, planError.EndColumn)
             : null;
-        if (planError.Kind == PlanErrorKind.Policy)
+        var violations = ErrorCodes.Violations(planError);
+        if (violations.Count > 0 && violations[0].Kind == PlanErrorKinds.Policy)
         {
             // What was refused and the table model travel as the wire said them (D329); the engine
-            // makes the public refusal of them, in the layouts it declares its schemas in.
-            return new EntitlementException(planError.Message, position, error)
+            // makes the public refusals of them, in the layouts it declares its schemas in.
+            return new EntitlementException(violations, planError.Message, position, refusals: [], error)
             {
-                WireRefusal = planError.PolicyRefusal,
+                WireError = planError,
             };
         }
 
         // A search this request's own options ended before there was a plan (D235). The state is
         // the whole of what the caller can act on, so it travels on the exception rather than only
         // in the message.
-        return planError.Kind == PlanErrorKind.PlanningAborted
-            ? new PlanningException(
-                planError.Kind,
-                planError.Message,
-                position,
-                PlanningStates.FromProto(planError.PlanningState),
-                error)
-            : new PlanningException(planError.Kind, planError.Message, position, error);
+        return new PlanningException(
+            violations,
+            planError.Message,
+            position,
+            planError.PlanningState is { } state ? PlanningStates.FromProto(state) : null,
+            error);
     }
 
     /// <summary>Reads the <c>chalk-plan-error-bin</c> trailer, if the server sent one.</summary>

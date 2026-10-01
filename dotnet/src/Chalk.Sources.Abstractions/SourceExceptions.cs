@@ -2,13 +2,22 @@ namespace Chalk.Sources;
 
 /// <summary>
 /// Valid IR that this executor cannot run yet — a node kind, function or type combination outside
-/// the milestone's scope. Distinct from <c>InvalidPlanException</c>, which means the plan is
+/// what this build implements. Distinct from <c>InvalidPlanException</c>, which means the plan is
 /// malformed. Raised at plan compilation, never mid-stream.
 /// </summary>
 public sealed class UnsupportedFeatureException : ChalkException
 {
+    /// <summary>
+    /// An operation this executor or source does not run: <see cref="ChalkErrorCodes.UnsupportedOperator"/>.
+    /// </summary>
     public UnsupportedFeatureException(string feature, string detail)
-        : base($"Unsupported in this build: {feature}. {detail}")
+        : this(ChalkErrorCodes.UnsupportedOperator, feature, detail)
+    {
+    }
+
+    /// <summary>The same, with the code of the rule it meets: an unsupported function, type or cast, say.</summary>
+    public UnsupportedFeatureException(string code, string feature, string detail)
+        : base(code, $"Unsupported in this build: {feature}. {detail}")
     {
         Feature = feature;
     }
@@ -36,6 +45,7 @@ public sealed class StalePlanException : ChalkException
     public StalePlanException(
         string planContextId, long planEpoch, string liveContextId, long liveEpoch, string? table)
         : base(
+            ChalkErrorCodes.StalePlan,
             table is null
                 ? $"The plan was made against catalog ({planContextId}, epoch {planEpoch}) but the engine now holds "
                     + $"({liveContextId}, epoch {liveEpoch}). Re-prepare the query against the current catalog."
@@ -68,8 +78,22 @@ public sealed class StalePlanException : ChalkException
 /// <summary>Something went wrong while running a plan. Carries the plan digest and the failing operator's path.</summary>
 public sealed class ExecutionException : ChalkException
 {
-    public ExecutionException(ulong planDigest, string operatorPath, string detail, Exception? innerException = null)
-        : base($"Execution failed at {operatorPath} (plan {planDigest:x16}): {detail}", innerException)
+    /// <summary>An operator that failed while the query ran: <see cref="ChalkErrorCodes.ExecutionFailed"/>.</summary>
+    public ExecutionException(ulong planDigest, string operatorPath, string detail)
+        : this(ChalkErrorCodes.ExecutionFailed, planDigest, operatorPath, detail, innerException: null)
+    {
+    }
+
+    /// <summary>The same, wrapping the failure: <see cref="ChalkErrorCodes.ExecutionFailed"/>.</summary>
+    public ExecutionException(ulong planDigest, string operatorPath, string detail, Exception? innerException)
+        : this(ChalkErrorCodes.ExecutionFailed, planDigest, operatorPath, detail, innerException)
+    {
+    }
+
+    /// <summary>The same, with the code of the rule it meets: a context the execution did not bind, say.</summary>
+    public ExecutionException(
+        string code, ulong planDigest, string operatorPath, string detail, Exception? innerException)
+        : base(code, $"Execution failed at {operatorPath} (plan {planDigest:x16}): {detail}", innerException)
     {
         PlanDigest = planDigest;
         OperatorPath = operatorPath;
@@ -87,8 +111,15 @@ public sealed class ExecutionException : ChalkException
 /// </summary>
 public sealed class SourceContractException : ChalkException
 {
+    /// <summary>A source that answered outside its contract: <see cref="ChalkErrorCodes.SourceContract"/>.</summary>
     public SourceContractException(string sourceId, string table, string detail)
-        : base($"Source '{sourceId}' broke the scan contract for table '{table}': {detail}")
+        : this(ChalkErrorCodes.SourceContract, sourceId, table, detail)
+    {
+    }
+
+    /// <summary>The same, with the code of the rule it meets: a refresh that does not fit its source, say.</summary>
+    public SourceContractException(string code, string sourceId, string table, string detail)
+        : base(code, $"Source '{sourceId}' broke the scan contract for table '{table}': {detail}")
     {
         SourceId = sourceId;
         Table = table;
@@ -113,6 +144,7 @@ public sealed class SourceExecutionException : ChalkException
 {
     public SourceExecutionException(string sourceId, string subject, Exception? innerException = null)
         : base(
+            ChalkErrorCodes.SourceFailed,
             innerException is null
                 ? $"Source '{sourceId}' failed running {subject}."
                 : $"Source '{sourceId}' failed running {subject}: {innerException.GetType().Name}: {innerException.Message}",
@@ -137,6 +169,7 @@ public sealed class SourceTimeoutException : ChalkException
 {
     public SourceTimeoutException(string sourceId, string subject, TimeSpan timeout, Exception? innerException = null)
         : base(
+            ChalkErrorCodes.SourceTimeout,
             $"Source '{sourceId}' did not answer within {timeout.TotalSeconds:0.###}s while running {subject}. "
             + "Raise SourceOptions.QueryTimeout, or Timeout.InfiniteTimeSpan to wait indefinitely.",
             innerException)
@@ -172,7 +205,9 @@ public sealed class SourceTimeoutException : ChalkException
 public sealed class InvalidUtf8Exception : ChalkException
 {
     public InvalidUtf8Exception(string subject, long row)
-        : base($"{subject} is not valid UTF-8 at row {row}. A Utf8String holds UTF-8 bytes with "
+        : base(
+            ChalkErrorCodes.InvalidUtf8,
+            $"{subject} is not valid UTF-8 at row {row}. A Utf8String holds UTF-8 bytes with "
             + "ordinal semantics; bytes that are not UTF-8 are refused where they enter a column, so "
             + "that no reader downstream has to check. Encode the value, or declare the member "
             + "BINARY (byte[] or ReadOnlyMemory<byte>) if it is not text.")

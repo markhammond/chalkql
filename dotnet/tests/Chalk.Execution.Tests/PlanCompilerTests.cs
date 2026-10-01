@@ -142,10 +142,11 @@ public sealed class PlanCompilerTests
         var compiled = Runner.Compile(
             IrBuilder.Plan(filter, parameterTypes: [IrBuilder.Str(true)]), Source);
 
-        var failure = Assert.Throws<ArgumentException>(
+        var failure = Assert.Throws<ParameterBindingException>(
             () => compiled.ExecuteAsync([42], new ExecutionStats(), arena: null, CancellationToken.None));
 
         Assert.Contains("Parameter 0", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(ChalkErrorCodes.ParameterBinding, failure.Code);
         await Task.CompletedTask;
     }
 
@@ -163,8 +164,9 @@ public sealed class PlanCompilerTests
         var compiled = Runner.Compile(
             IrBuilder.Plan(filter, parameterTypes: [IrBuilder.I32(true)]), Source);
 
-        Assert.Throws<ArgumentException>(
+        var failure = Assert.Throws<ParameterBindingException>(
             () => compiled.ExecuteAsync([], new ExecutionStats(), arena: null, CancellationToken.None));
+        Assert.Equal(ChalkErrorCodes.ParameterBinding, failure.Code);
     }
 
     [Fact]
@@ -180,8 +182,9 @@ public sealed class PlanCompilerTests
                 IrBuilder.Param(0, IrBuilder.I32())));
         var compiled = Runner.Compile(IrBuilder.Plan(filter, parameterTypes: [IrBuilder.I32()]), Source);
 
-        Assert.Throws<ArgumentException>(
+        var failure = Assert.Throws<ParameterBindingException>(
             () => compiled.ExecuteAsync([null], new ExecutionStats(), arena: null, CancellationToken.None));
+        Assert.Equal(ChalkErrorCodes.ParameterBinding, failure.Code);
     }
 
     [Fact]

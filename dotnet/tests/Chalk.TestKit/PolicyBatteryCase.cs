@@ -150,7 +150,7 @@ public enum PolicyCompare
 /// <summary>The kind a refusal must carry.</summary>
 public enum PolicyErrorKind
 {
-    /// <summary>Refused by the entitlements: <c>PlanErrorKind.POLICY</c>.</summary>
+    /// <summary>Refused by the entitlements: <see cref="Chalk.Client.PlanErrorKinds.Policy"/>.</summary>
     Policy,
 
     /// <summary>Refused by the planner's own validation.</summary>

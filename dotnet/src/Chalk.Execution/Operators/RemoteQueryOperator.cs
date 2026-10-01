@@ -175,6 +175,7 @@ internal sealed class RemoteQueryOperator : OperatorBase
                     if (!ArrowTypeMapping.AreEquivalent(Schema, batch.Schema))
                     {
                         throw new SourceContractException(
+                            ChalkErrorCodes.SourceContract,
                             _source.SourceId,
                             Subject,
                             $"the first batch has schema {ArrowTypeMapping.DescribeArrow(batch.Schema)}, "

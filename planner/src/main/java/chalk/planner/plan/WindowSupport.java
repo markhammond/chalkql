@@ -1,5 +1,6 @@
 package chalk.planner.plan;
 
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import chalk.planner.ir.FunctionMapping;
 import chalk.planner.plan.rules.ChalkTumbleRule;
@@ -16,7 +17,7 @@ import org.apache.calcite.sql.SqlAggFunction;
  *
  * <p>It runs here rather than in a converter rule because a rule that declines to convert leaves the
  * optimiser with nothing to do and produces "cannot plan", which tells a caller nothing. Refusing on
- * the logical tree gives a {@code PLAN_ERROR_KIND_UNSUPPORTED} that names the feature and says where
+ * the logical tree gives an {@code Unsupported} error that names the feature and says where
  * it is written down.
  */
 public final class WindowSupport {
@@ -53,9 +54,10 @@ public final class WindowSupport {
     }
     if (ChalkTumbleRule.isTumble(scan)) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "TUMBLE with an alignment offset",
           "Chalk rewrites TUMBLE(TABLE t, DESCRIPTOR(c), INTERVAL) into TIME_BUCKET; the optional "
-              + "third operand is not implemented (docs/design/13-window-functions.md §9).");
+              + "third operand is not implemented.");
     }
 
     if (ChalkWindowTableFunctionRule.isWindowFunction(scan)) {
@@ -64,16 +66,16 @@ public final class WindowSupport {
       }
 
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           name + " in this form",
-          "Chalk implements HOP(TABLE t, DESCRIPTOR(c), slide, size) and "
-              + "SESSION(TABLE t, DESCRIPTOR(c), [DESCRIPTOR(key),] gap) over a column of the input "
-              + "(docs/design/14-windows-ii.md §1).");
+          "Chalk implements HOP(TABLE t, DESCRIPTOR(c), slide, size) and SESSION(TABLE t,"
+              + " DESCRIPTOR(c), [DESCRIPTOR(key),] gap) over a column of the input.");
     }
 
     throw new UnsupportedFeatureException(
+        ErrorCode.UNSUPPORTED_SQL,
         "table function " + name,
-        "Chalk implements the window table functions TUMBLE, HOP and SESSION "
-            + "(docs/design/14-windows-ii.md §1).");
+        "Chalk implements the window table functions TUMBLE, HOP and SESSION.");
   }
 
   private static void checkWindow(Window window) {

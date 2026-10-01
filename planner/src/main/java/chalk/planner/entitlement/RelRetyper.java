@@ -1,5 +1,6 @@
 package chalk.planner.entitlement;
 
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import java.util.ArrayList;
 import java.util.List;
@@ -121,10 +122,11 @@ final class RelRetyper {
     }
 
     throw new UnsupportedFeatureException(
+        ErrorCode.UNSUPPORTED_SQL,
         "an entitled column that is NOT NULL in the catalog is redacted under "
             + rel.getRelTypeName()
             + ", which the entitlement pass cannot re-type",
-        "A redacted column is a typed NULL, so its output type widens to nullable (D161) and every "
+        "A redacted column is a typed NULL, so its output type widens to nullable and every "
             + "node above the leaf has to be rebuilt. This node class is not one the pass knows how "
             + "to rebuild. Declare the column nullable in the catalog, or use "
             + "PlaceholderPolicy.PlaceholdersAsEmpty, which keeps the declared nullability.");

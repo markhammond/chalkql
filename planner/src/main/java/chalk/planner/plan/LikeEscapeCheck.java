@@ -1,5 +1,7 @@
 package chalk.planner.plan;
 
+import chalk.planner.ErrorCode;
+import chalk.planner.InvalidArgumentException;
 import org.apache.calcite.runtime.CalciteContextException;
 import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlCharStringLiteral;
@@ -66,7 +68,7 @@ public final class LikeEscapeCheck {
   private static CalciteContextException refusal(SqlParserPos pos, String message) {
     return new CalciteContextException(
         message,
-        new IllegalArgumentException(message),
+        new InvalidArgumentException(ErrorCode.SQL_VALIDATION, message),
         pos.getLineNum(),
         pos.getColumnNum(),
         pos.getEndLineNum(),

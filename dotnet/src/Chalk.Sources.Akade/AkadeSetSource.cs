@@ -169,6 +169,7 @@ public abstract class AkadeSetSource<T, TSet> :
         if (entries.Count != 1)
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
                 SourceId,
                 Options.TableName,
                 entries.Count == 0
@@ -182,6 +183,7 @@ public abstract class AkadeSetSource<T, TSet> :
         if (entry.RowType != typeof(T))
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
                 SourceId,
                 entry.Table,
                 $"the rows are {entry.RowType.Name}, but this table was built over {typeof(T).Name}. "
@@ -191,6 +193,7 @@ public abstract class AkadeSetSource<T, TSet> :
         if (entry.Rows is not IReadOnlyList<T>)
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
                 SourceId,
                 entry.Table,
                 $"the refresh rows are {entry.Rows.GetType().Name}, not IReadOnlyList<{typeof(T).Name}>.");
@@ -199,6 +202,7 @@ public abstract class AkadeSetSource<T, TSet> :
         if (entry.Kind is not (SourceRefreshKind.Replace or SourceRefreshKind.Append))
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
                 SourceId,
                 entry.Table,
                 $"{entry.Kind} is not supported by an Akade source.");
@@ -207,6 +211,7 @@ public abstract class AkadeSetSource<T, TSet> :
         if (!CanPrepareRowRefresh)
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
                 SourceId,
                 entry.Table,
                 "this Akade source has no transactional row-refresh editor. Direct host mutation and "
@@ -246,6 +251,7 @@ public abstract class AkadeSetSource<T, TSet> :
             if (nextSet is null)
             {
                 throw new SourceContractException(
+                    ChalkErrorCodes.SourceRefresh,
                     SourceId,
                     entry.Table,
                     "the Akade editor returned null.");
@@ -254,6 +260,7 @@ public abstract class AkadeSetSource<T, TSet> :
             if (ReferenceEquals(nextSet, current.Set))
             {
                 throw new SourceContractException(
+                    ChalkErrorCodes.SourceRefresh,
                     SourceId,
                     entry.Table,
                     "the Akade editor returned the currently published set. Replace/Append require a "
@@ -315,6 +322,7 @@ public abstract class AkadeSetSource<T, TSet> :
 
     private SourceContractException ChangedDuringPreparation(int expected, int actual) =>
         new(
+            ChalkErrorCodes.SourceRefresh,
             SourceId,
             Options.TableName,
             $"the Akade set reported {expected} row(s) but enumerated {actual} while Append was being "
@@ -349,6 +357,7 @@ public abstract class AkadeSetSource<T, TSet> :
     private TSet ReadExternalRegistration() =>
         _externalRegistration()
         ?? throw new SourceContractException(
+            ChalkErrorCodes.SourceRefresh,
             SourceId,
             Options.TableName,
             "the Akade registration returned null.");
@@ -365,6 +374,7 @@ public abstract class AkadeSetSource<T, TSet> :
         catch (AkadeIndexTopologyException ex)
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
                 SourceId,
                 table,
                 ex.Message + " Use Refresh(source) if the physical Akade index topology intentionally changed.");
@@ -400,6 +410,7 @@ public abstract class AkadeSetSource<T, TSet> :
         if (oldTable.Columns.Count != newTable.Columns.Count)
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
                 fresh.SourceId,
                 newTable.Name,
                 "the row shape changed across an Akade row refresh.");
@@ -415,6 +426,7 @@ public abstract class AkadeSetSource<T, TSet> :
                 || !Equals(oldColumn.Type, newColumn.Type))
             {
                 throw new SourceContractException(
+                    ChalkErrorCodes.SourceRefresh,
                     fresh.SourceId,
                     newTable.Name,
                     $"column {i} changed from '{oldColumn.Name}'/{oldColumn.Type} to "
@@ -477,6 +489,7 @@ public abstract class AkadeSetSource<T, TSet> :
         if (!string.Equals(table, Options.TableName, StringComparison.OrdinalIgnoreCase))
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceContract,
                 SourceId,
                 table,
                 $"there is no such table in schema '{Options.SchemaName}'. "

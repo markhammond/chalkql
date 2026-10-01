@@ -3,6 +3,7 @@ package chalk.planner.ir;
 import chalk.ir.v1.AggregateFunctionId;
 import chalk.ir.v1.FunctionId;
 import chalk.ir.v1.WindowFunctionId;
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -141,8 +142,9 @@ public final class FunctionMapping {
       return byName;
     }
     throw new UnsupportedFeatureException(
+        ErrorCode.UNSUPPORTED_FUNCTION,
         "function " + operator.getName() + " (" + operator.getKind() + ")",
-        "docs/design/02-ir.md §6 lists the functions the IR carries; this is not one of them.");
+        "ChalkQL does not implement this function.");
   }
 
   /**
@@ -157,9 +159,10 @@ public final class FunctionMapping {
       case "ILIKE" -> FunctionId.FUNCTION_ID_ILIKE;
       default ->
           throw new UnsupportedFeatureException(
+              ErrorCode.UNSUPPORTED_FUNCTION,
               "the LIKE-kind operator " + operator.getName(),
               "Only LIKE and ILIKE are implemented; another member of the family would be "
-                  + "evaluated as one of them, and answer differently (docs/design/02-ir.md §6).");
+                  + "evaluated as one of them, and answer differently.");
     };
   }
 
@@ -249,7 +252,8 @@ public final class FunctionMapping {
 
   private static UnsupportedFeatureException unsupportedAggregate(SqlAggFunction function) {
     return new UnsupportedFeatureException(
+        ErrorCode.UNSUPPORTED_FUNCTION,
         "aggregate " + function.getName(),
-        "docs/design/02-ir.md §6 lists the aggregates the IR carries; this is not one of them.");
+        "ChalkQL does not implement this aggregate.");
   }
 }

@@ -87,10 +87,10 @@ internal sealed class ValueBinding
         }
         catch (Exception failure) when (failure is not OperationCanceledException)
         {
-            throw new ArgumentException(
+            throw new ParameterBindingException(
+                what,
                 $"{what} is {type}, and {converter} threw converting the {value.GetType().Name} bound to "
-                + $"it: {failure.GetType().Name} (D323).",
-                "parameters",
+                + $"it: {failure.GetType().Name}.",
                 failure);
         }
 
@@ -103,10 +103,10 @@ internal sealed class ValueBinding
         {
             return type.Nullable
                 ? null
-                : throw new ArgumentException(
+                : throw new ParameterBindingException(
+                    what,
                     $"{what} is {type}, which is not nullable, and {converter} returned NULL for the "
-                    + $"{value.GetType().Name} bound to it (D323).",
-                    "parameters");
+                    + $"{value.GetType().Name} bound to it.");
         }
 
         return ParameterValues.Exact(converted, type, what, converter.ToString());

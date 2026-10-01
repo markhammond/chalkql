@@ -50,7 +50,7 @@ internal static class BoundSlots
                 "I-IR-3",
                 "param",
                 $"a DynamicParam names the bound value '{param.BoundKey}' and the plan lists none, "
-                + "so there is no value for it to read (docs/design/16-entitlements.md §2)");
+                + "so there is no value for it to read");
         }
 
         return slot;

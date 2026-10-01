@@ -46,7 +46,7 @@ public sealed class FederationFailureTests(SharedSidecar sidecar)
         var failure = await Assert.ThrowsAsync<PlanningException>(
             () => engine.PrepareAsync(query.Sql, query.PrepareOptions()).AsTask());
 
-        Assert.Equal(PlanErrorKind.Unsupported, failure.Kind);
+        Assert.Equal(PlanErrorKinds.Unsupported, failure.Kind);
         Assert.Contains("local_join_max_rows", failure.Message, StringComparison.Ordinal);
         Assert.Contains("fetched rows", failure.Message, StringComparison.Ordinal);
     }

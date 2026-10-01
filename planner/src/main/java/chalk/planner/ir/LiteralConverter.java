@@ -3,6 +3,7 @@ package chalk.planner.ir;
 import chalk.ir.v1.DecimalValue;
 import chalk.ir.v1.Literal;
 import chalk.ir.v1.Type;
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import com.google.protobuf.ByteString;
 import java.math.BigDecimal;
@@ -77,6 +78,7 @@ public final class LiteralConverter {
           builder.setIntervalYearValue(value(literal, BigDecimal.class).intValueExact());
       default ->
           throw new UnsupportedFeatureException(
+              ErrorCode.UNSUPPORTED_TYPE,
               "literal of type " + type.getKind(), "There is no IR literal encoding for it.");
     }
     return builder.build();
@@ -90,6 +92,7 @@ public final class LiteralConverter {
     TimestampString timestamp = literal.getValueAs(TimestampString.class);
     if (timestamp == null) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_TYPE,
           "timestamp literal " + literal, "Calcite did not expose it as a TimestampString.");
     }
     LocalDateTime local = LocalDateTime.parse(timestamp.toString(), TIMESTAMP_FORMAT);
@@ -121,6 +124,7 @@ public final class LiteralConverter {
     byte[] bigEndian = value.toByteArray();
     if (bigEndian.length > 16) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_TYPE,
           "decimal literal " + value,
           "It needs " + bigEndian.length + " bytes; the IR carries 128-bit unscaled values.");
     }
@@ -156,8 +160,9 @@ public final class LiteralConverter {
         org.apache.calcite.sql.parser.SqlParserPos.ZERO;
     if (expr.getKindCase() != chalk.ir.v1.Expr.KindCase.LITERAL) {
       throw new UnsupportedFeatureException(
+          ErrorCode.INVALID_FUNCTION,
           "a parameter default that is not a literal",
-          "docs/design/17-user-defined-functions.md §1: a default is a constant.");
+          "A parameter's default is a constant.");
     }
 
     Literal literal = expr.getLiteral();
@@ -180,9 +185,9 @@ public final class LiteralConverter {
               pos);
       default ->
           throw new UnsupportedFeatureException(
+              ErrorCode.UNSUPPORTED_TYPE,
               "a parameter default of kind " + literal.getValueCase(),
-              "v1 defaults are boolean, numeric, string or NULL "
-                  + "(docs/design/17-user-defined-functions.md §1).");
+              "A parameter's default is a boolean, a number, a string or NULL.");
     };
   }
 
@@ -210,6 +215,7 @@ public final class LiteralConverter {
     T value = literal.getValueAs(clazz);
     if (value == null) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_TYPE,
           "literal " + literal,
           "Calcite could not express it as a " + clazz.getSimpleName() + ".");
     }

@@ -310,6 +310,8 @@ public sealed class PlanningOptionsTests(SharedSidecar sidecar)
         var cancelled = Assert.IsType<PlanningCancelledException>(thrown);
         Assert.Equal(
             PlanningTerminationReason.CancelledByHost, cancelled.PlanningState.TerminationReason);
+        Assert.Equal(ChalkErrorCodes.PlanningCancelled, cancelled.Code);
+        Assert.EndsWith(" [PlanningCancelled]", cancelled.Message, StringComparison.Ordinal);
 
         // The diagnostic: the sidecar unwinds the cancelled planning and takes it out of flight.
         // Polled rather than timed — the deadline is a backstop that fails the test, not an

@@ -205,6 +205,7 @@ internal static class CatalogProtoMapping
                 break;
             default:
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidFunction,
                     $"functions ({function.Name})",
                     $"{function.Body.GetType().Name} is not one of the three implementation kinds.");
         }

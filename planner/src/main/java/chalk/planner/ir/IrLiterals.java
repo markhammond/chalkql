@@ -2,6 +2,7 @@ package chalk.planner.ir;
 
 import chalk.ir.v1.Expr;
 import chalk.ir.v1.Literal;
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -31,9 +32,9 @@ public final class IrLiterals {
   public static RexNode literal(RexBuilder rex, Expr expr, RelDataType type) {
     if (expr.getKindCase() != Expr.KindCase.LITERAL) {
       throw new UnsupportedFeatureException(
+          ErrorCode.NON_CONSTANT_ARGUMENT,
           "a partition value that is not a literal",
-          "A partition's value must be a constant of the partition column's type "
-              + "(docs/design/20-m5-federation.md §3).");
+          "A partition's value must be a constant of the partition column's type.");
     }
 
     Literal value = expr.getLiteral();
@@ -64,6 +65,7 @@ public final class IrLiterals {
       case DECIMAL_VALUE -> rex.makeExactLiteral(decimal(value, type), type);
       default ->
           throw new UnsupportedFeatureException(
+              ErrorCode.UNSUPPORTED_TYPE,
               "a partition value of kind " + value.getValueCase(),
               "The partition column's type has no literal form the planner can compare against.");
     };

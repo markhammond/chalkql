@@ -1,5 +1,7 @@
 package chalk.planner.plan;
 
+import chalk.planner.ErrorCode;
+import chalk.planner.InvalidArgumentException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -116,7 +118,8 @@ public final class SqlConfigs {
       }
     }
 
-    throw new IllegalArgumentException(
+    throw new InvalidArgumentException(
+        ErrorCode.INVALID_CONFIGURATION,
         "'"
             + name
             + "' is not a "

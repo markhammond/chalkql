@@ -31,18 +31,18 @@ import chalk.planner.entitlement.PolicyException;
 import chalk.planner.entitlement.PolicyOptions;
 import chalk.planner.plan.PlannerPipeline;
 import chalk.planner.plan.PushdownPolicy;
+import chalk.planner.rpc.PlanErrorKind;
 import chalk.planner.rpc.PlanErrors;
 import chalk.planner.rpc.v1.ContextRelationKind;
 import chalk.planner.rpc.v1.ContextRelationValue;
 import chalk.planner.rpc.v1.EntitlementsOptions;
 import chalk.planner.rpc.v1.NamedColumns;
 import chalk.planner.rpc.v1.PlanError;
-import chalk.planner.rpc.v1.PlanErrorKind;
-import chalk.planner.rpc.v1.PolicyRefusalReason;
 import chalk.planner.rpc.v1.Redaction;
 import chalk.planner.rpc.v1.ReportedDisclosure;
 import chalk.planner.rpc.v1.RequestContext;
 import chalk.planner.rpc.v1.StarPolicy;
+import chalk.planner.rpc.v1.Violation;
 import io.grpc.StatusRuntimeException;
 import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
@@ -213,7 +213,7 @@ class PolicyRefusalTest {
     PolicyException refused =
         refusal("SELECT * FROM members", counter(), PolicyOptions.DEFAULTS);
 
-    assertThat(refused.reason()).isEqualTo(PolicyRefusalReason.POLICY_REFUSAL_REASON_POPULATION_ONLY);
+    assertThat(refused.code()).isEqualTo(ErrorCode.POPULATION_ONLY);
     assertThat(refused.table()).isEqualTo("main.members");
     assertThat(refused.column()).isEqualTo("national_id");
     assertThat(refused.use()).isEqualTo("a projection to the result");
@@ -236,7 +236,7 @@ class PolicyRefusalTest {
   void bound_at_execution_the_refusal_carries_the_result_too() {
     PolicyException refused = refusal("SELECT * FROM members", shape(), PolicyOptions.DEFAULTS);
 
-    assertThat(refused.reason()).isEqualTo(PolicyRefusalReason.POLICY_REFUSAL_REASON_POPULATION_ONLY);
+    assertThat(refused.code()).isEqualTo(ErrorCode.POPULATION_ONLY);
     assertThat(refused.column()).isEqualTo("national_id");
     assertThat(names(refused.output())).containsExactly("id", "org_id", "national_id");
     assertThat(refused.disclosures()).hasSize(3);
@@ -254,7 +254,7 @@ class PolicyRefusalTest {
                 .build());
     PolicyException refused = refusal("SELECT id, national_id FROM members", reader(), refuseNamed);
 
-    assertThat(refused.reason()).isEqualTo(PolicyRefusalReason.POLICY_REFUSAL_REASON_REDACTED);
+    assertThat(refused.code()).isEqualTo(ErrorCode.REDACTED);
     assertThat(refused.column()).isEqualTo("national_id");
     RowType output = refused.output();
     assertThat(names(output)).containsExactly("id", "national_id");
@@ -310,7 +310,7 @@ class PolicyRefusalTest {
                 .build());
     PolicyException refused = refusal("SELECT * FROM members", counter(), refuseStars);
 
-    assertThat(refused.reason()).isEqualTo(PolicyRefusalReason.POLICY_REFUSAL_REASON_STAR);
+    assertThat(refused.code()).isEqualTo(ErrorCode.STAR);
     assertThat(refused.output()).isNull();
     assertThat(refused.disclosures()).isEmpty();
   }
@@ -321,16 +321,21 @@ class PolicyRefusalTest {
         PlanErrors.toStatus(refusal("SELECT * FROM members", counter(), PolicyOptions.DEFAULTS));
     PlanError error = PlanError.parseFrom(status.getTrailers().get(PlanErrors.TRAILER));
 
-    assertThat(error.getKind()).isEqualTo(PlanErrorKind.PLAN_ERROR_KIND_POLICY);
+    // One rule broken, carrying what was refused under the refusal's code.
+    assertThat(error.getViolationsList()).hasSize(1);
+    Violation refused = error.getViolations(0);
+    assertThat(refused.getKind()).isEqualTo(PlanErrorKind.POLICY.wireName());
+    assertThat(refused.getCode()).isEqualTo("PopulationOnly");
+    assertThat(refused.getMessage()).isEqualTo(error.getMessage());
     assertThat(error.getMessage()).contains("national_id is population-only");
-    assertThat(error.getPolicyRefusal().getReason())
-        .isEqualTo(PolicyRefusalReason.POLICY_REFUSAL_REASON_POPULATION_ONLY);
-    assertThat(error.getPolicyRefusal().getTable()).isEqualTo("main.members");
-    assertThat(error.getPolicyRefusal().getColumn()).isEqualTo("national_id");
-    assertThat(error.getPolicyRefusal().getPermittedList()).containsExactly("COUNT");
-    assertThat(names(error.getPolicyRefusal().getOutput()))
-        .containsExactly("id", "org_id", "national_id");
-    assertThat(error.getPolicyRefusal().getDisclosuresList())
+    // The client ends the message with the code; the planner sends it bare.
+    assertThat(error.getMessage()).doesNotContain("[PopulationOnly]");
+    assertThat(refused.getTable()).isEqualTo("main.members");
+    assertThat(refused.getColumn()).isEqualTo("national_id");
+    assertThat(refused.getPermittedList()).containsExactly("COUNT");
+    // The result the statement would have had is the error's, whatever it refuses.
+    assertThat(names(error.getOutput())).containsExactly("id", "org_id", "national_id");
+    assertThat(error.getDisclosuresList())
         .containsExactly("FULL", "FULL", "AGGREGATE");
   }
 }

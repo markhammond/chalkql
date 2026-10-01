@@ -108,8 +108,9 @@ internal sealed class ColumnCopier : IArenaScratch
             ? new ColumnCopier(
                 type.Element
                 ?? throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedType,
                     "a LIST column with no element type",
-                    "docs/design/02-ir.md §3 requires Type.element on a LIST."),
+                    "A LIST type names the type of its elements, and this one names none."),
                 strings)
             : null;
         if (_kind == ColumnKind.Composite)
@@ -477,8 +478,9 @@ internal sealed class ColumnCopier : IArenaScratch
             if (!value.IsNull)
             {
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedType,
                     "a COMPOSITE constant",
-                    "A composite comes from a function and has no literal (docs/design/51-structured-function-results.md §1).");
+                    "A composite comes from a function and has no literal.");
             }
 
             AppendNulls(count);
@@ -1772,7 +1774,7 @@ internal sealed class ColumnCopier : IArenaScratch
                 {
                     throw new InvalidOperationException(
                         "A STRING column declared as utf8view cannot be built directly from a "
-                        + "classic view; append it through this copier instead (D244).");
+                        + "classic view; append it through this copier instead.");
                 }
 
                 buffers[1] = Owned(view.Offsets.Span[..((view.Length + 1) * sizeof(int))], arena);
@@ -1898,7 +1900,7 @@ internal sealed class ColumnCopier : IArenaScratch
                 {
                     throw new InvalidOperationException(
                         "A STRING column declared as utf8view cannot be built directly from a "
-                        + "classic view; append it through this copier instead (D244).");
+                        + "classic view; append it through this copier instead.");
                 }
 
                 buffers[1] = rentals.CopyFrom(view.Offsets.Span[..checked((view.Length + 1) * sizeof(int))]);

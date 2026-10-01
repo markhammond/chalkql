@@ -2,6 +2,8 @@ package chalk.planner.rpc;
 
 import chalk.ir.IrVersion;
 import chalk.ir.v1.Plan;
+import chalk.planner.ErrorCode;
+import chalk.planner.InvalidArgumentException;
 import chalk.planner.PlannerConfig;
 import chalk.planner.catalog.CatalogRegistry;
 import chalk.planner.catalog.RegisteredCatalog;
@@ -220,9 +222,9 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
       chalk.planner.redact.RedactionPolicy policy =
           chalk.planner.redact.RedactionPolicy.of(request.getRedaction(), request.hasRedaction());
       if (policy == null) {
-        throw new IllegalArgumentException(
-            "RedactSqlRequest carries no redaction options; a redaction needs at least a salt"
-                + " (docs/design/37-redacted-sql.md §2).");
+        throw new InvalidArgumentException(
+            ErrorCode.INVALID_REQUEST,
+            "RedactSqlRequest carries no redaction options; a redaction needs at least a salt.");
       }
       // The context the statement was planned with, when the caller passed it on: a literal that
       // is one of its bound values is labelled with the name it was bound under (D286). A request

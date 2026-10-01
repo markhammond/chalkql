@@ -77,6 +77,7 @@ internal static class PocoColumnFactory
             PocoStorageKind.List => CreateList<T>(name, plan, binding, sourceId, table),
             PocoStorageKind.Composite => CreateComposite<T>(name, plan, binding, sourceId, table),
             _ => throw new UnsupportedFeatureException(
+                ChalkErrorCodes.Internal,
                 $"POCO storage {plan.Storage}", "There is no encoder for it."),
         };
     }
@@ -92,10 +93,12 @@ internal static class PocoColumnFactory
         var elementClrType =
             plan.ElementClrType
             ?? throw new UnsupportedFeatureException(
+                ChalkErrorCodes.Internal,
                 $"POCO list column '{name}'", "The plan carries no element CLR type.");
         var elementPlan =
             plan.Element
             ?? throw new UnsupportedFeatureException(
+                ChalkErrorCodes.Internal,
                 $"POCO list column '{name}'", "The plan carries no element plan.");
 
         return (PocoColumn<T>)
@@ -135,6 +138,7 @@ internal static class PocoColumnFactory
     {
         var record = plan.RecordClrType
             ?? throw new UnsupportedFeatureException(
+                ChalkErrorCodes.Internal,
                 $"POCO composite column '{name}'", "The plan carries no record CLR type.");
 
         return (PocoColumn<T>)

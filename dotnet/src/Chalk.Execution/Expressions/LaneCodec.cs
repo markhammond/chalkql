@@ -404,6 +404,7 @@ internal static class LaneCodec
         }
 
         throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UserFunctionContract,
             $"a Tier 1 argument of CLR type {typeof(T).Name}",
             "Tier 1 delegates take " + Spellings + " and their nullable forms; anything else needs a "
             + "Tier 2 kernel");
@@ -770,9 +771,9 @@ internal static class LaneCodec
         }
 
         throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UserFunctionContract,
             $"a Tier 1 result of CLR type {typeof(T).Name}",
-            "Tier 1 delegates return " + Spellings + " and their nullable forms "
-            + "(docs/design/17-user-defined-functions.md §3).");
+            "Tier 1 delegates return " + Spellings + " and their nullable forms.");
     }
 
     /// <summary>
@@ -802,6 +803,7 @@ internal static class LaneCodec
                 return;
             default:
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.Internal,
                     $"a zero lane of {type}", "Only fixed-width lanes are zeroed.");
         }
     }
@@ -910,10 +912,10 @@ internal static class LaneCodec
         }
 
         throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UserFunctionContract,
             $"a Tier 1 aggregate over CLR type {typeof(T).Name}",
             "A Tier 1 aggregate takes bool, sbyte, short, int, long, float, double, decimal, "
-            + "DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan or Guid "
-            + "(docs/design/17-user-defined-functions.md §3).");
+            + "DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan or Guid.");
     }
 
     /// <summary>
@@ -1021,10 +1023,11 @@ internal static class LaneCodec
         }
 
         throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UserFunctionContract,
             $"a Tier 1 aggregate returning CLR type {typeof(T).Name}",
             "A Tier 1 aggregate returns bool, sbyte, short, int, long, float, double, decimal, "
             + "DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan or Guid, or a nullable "
-            + "form of one (docs/design/17-user-defined-functions.md §3).");
+            + "form of one.");
     }
 
     private static bool WriteNullableRaw<TValue>(Span<byte> lane, TValue? value)
@@ -1232,9 +1235,9 @@ internal static class LaneCodec
         }
 
         throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UserFunctionContract,
             $"a composite field of CLR type {typeof(T).Name}",
-            "A composite value's fields are " + Spellings + ", or a nullable form of one "
-            + "(docs/design/51-structured-function-results.md §1).");
+            "A composite value's fields are " + Spellings + ", or a nullable form of one.");
     }
 
     /// <summary>The nullable forms: no value clears the lane.</summary>

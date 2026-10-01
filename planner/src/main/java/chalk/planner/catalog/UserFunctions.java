@@ -3,6 +3,7 @@ package chalk.planner.catalog;
 import chalk.ir.v1.CatalogContext;
 import chalk.ir.v1.FunctionDescriptor;
 import chalk.ir.v1.Schema;
+import chalk.planner.ErrorCode;
 import chalk.planner.plan.UserOperators;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
@@ -138,6 +139,7 @@ public final class UserFunctions {
   private static void refuseBuiltInClash(String name, String what, boolean clashes) {
     if (clashes) {
       throw new InvalidCatalogException(
+          ErrorCode.RESERVED_NAME,
           "functions (" + name + ")",
           "'" + name + "' is already " + what + "; a user function may not shadow one, so rename it");
     }

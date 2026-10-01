@@ -310,6 +310,7 @@ public sealed class FunctionBuilder
         if (_body is null)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidFunction,
                 $"functions ({_name})",
                 "declare where the function is implemented: Sql, Client or Native");
         }
@@ -353,6 +354,7 @@ public sealed class FunctionBuilder
         if (index < 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.UnknownName,
                 $"functions ({_name})",
                 $"'{parameter}' is not one of the parameters declared so far; declare the parameter "
                 + "before saying how the result moves with it");
@@ -399,6 +401,7 @@ public sealed class FunctionBuilder
                 var what = role == Role.Parameter ? "parameter" : "column";
                 var never = role == Role.Parameter ? "a parameter" : "a table function's column";
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidFunction,
                     $"functions ({_name})",
                     $"{what} '{name}' is typed {CompositeInference.Describe(clr)}, which would be a COMPOSITE; "
                     + $"a composite value is never {never}. Declare its fields as {what}s of their own.");
@@ -408,6 +411,7 @@ public sealed class FunctionBuilder
         }
 
         throw new CatalogValidationException(
+            ChalkErrorCodes.InvalidFunction,
             "functions",
             $"{type.Name} has no inferred declared type; write the type out with Parameter(name, "
             + "type) or Returns(type). A function's declared types are the catalog's, and only the "

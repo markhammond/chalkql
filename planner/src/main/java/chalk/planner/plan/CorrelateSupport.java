@@ -1,5 +1,6 @@
 package chalk.planner.plan;
 
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import chalk.planner.plan.rules.ChalkUnnestRule;
 import java.util.ArrayList;
@@ -37,9 +38,10 @@ public final class CorrelateSupport {
   public static void check(RelNode rel) {
     if (rel instanceof Correlate correlate && ChalkUnnestRule.matchLogical(correlate) == null) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "correlated subquery could not be decorrelated: " + describe(correlate),
           "Chalk decorrelates LATERAL and correlated sub-queries into ordinary joins and never "
-              + "re-runs the right side per left row (docs/design/14-windows-ii.md §8). Rewrite the "
+              + "re-runs the right side per left row. Rewrite the "
               + "sub-query as a join, or as an aggregate joined on the correlation key.");
     }
 

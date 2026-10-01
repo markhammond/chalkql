@@ -574,7 +574,8 @@ public sealed class EntitlementDescriptorTests
         var ex = Assert.Throws<CatalogValidationException>(() => CatalogValidator.Validate(AllowListing("name_digest")));
 
         Assert.Contains(".aggregate_only_functions[0]", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("'name_digest' is not a population aggregate (D190)", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'name_digest' is not a population aggregate.", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(ChalkErrorCodes.InvalidEntitlement, ex.Code);
         Assert.Contains("any user-defined aggregate not declared Population()", ex.Message, StringComparison.Ordinal);
         Assert.Contains("Declare it so if it keeps that promise; the engine cannot check it.", ex.Message,
             StringComparison.Ordinal);

@@ -211,7 +211,7 @@ class BabelParserTest {
    * does not do this.
    *
    * <p>Now each is {@link UnsupportedFeatureException}, the error a library function without an IR
-   * mapping gets, carrying {@code PLAN_ERROR_KIND_UNSUPPORTED} and naming the construct.
+   * mapping gets, of the kind {@code Unsupported}, naming the construct.
    */
   @ParameterizedTest
   @ValueSource(

@@ -184,6 +184,7 @@ internal static class EntitlementsInvariant
                     if (read.Disclosures.Count > 0)
                     {
                         throw new InvalidPlanException(
+                            ChalkErrorCodes.PlanBreaksEntitlements,
                             Invariant,
                             here,
                             $"the read of {Name(read.Table)} carries per-column disclosures and this "
@@ -202,6 +203,7 @@ internal static class EntitlementsInvariant
                     if (!rel.PolicyInjected)
                     {
                         throw new InvalidPlanException(
+                            ChalkErrorCodes.PlanBreaksEntitlements,
                             Invariant,
                             here,
                             $"the read of {Name(read.Table)} says it is the entitlement mechanism's "
@@ -212,6 +214,7 @@ internal static class EntitlementsInvariant
                     if (read.Disclosures.Count > 0 || read.DescriptorHash.Length > 0)
                     {
                         throw new InvalidPlanException(
+                            ChalkErrorCodes.PlanBreaksEntitlements,
                             Invariant,
                             here,
                             $"the read of {Name(read.Table)} says it is the entitlement mechanism's "
@@ -226,6 +229,7 @@ internal static class EntitlementsInvariant
                 if (!rel.PolicyInjected)
                 {
                     throw new InvalidPlanException(
+                        ChalkErrorCodes.PlanBreaksEntitlements,
                         Invariant,
                         here,
                         $"{Name(read.Table)} carries an entitlement in this client's catalog and the "
@@ -235,6 +239,7 @@ internal static class EntitlementsInvariant
                 if (read.Disclosures.Count != columns)
                 {
                     throw new InvalidPlanException(
+                        ChalkErrorCodes.PlanBreaksEntitlements,
                         Invariant,
                         here,
                         $"the read of {Name(read.Table)} states {read.Disclosures.Count} column "
@@ -247,6 +252,7 @@ internal static class EntitlementsInvariant
                     if (read.Disclosures[i].Column != i)
                     {
                         throw new InvalidPlanException(
+                            ChalkErrorCodes.PlanBreaksEntitlements,
                             Invariant,
                             here,
                             $"the read of {Name(read.Table)} states column "
@@ -264,6 +270,7 @@ internal static class EntitlementsInvariant
                     && !string.Equals(reported, read.DescriptorHash, StringComparison.Ordinal))
                 {
                     throw new InvalidPlanException(
+                        ChalkErrorCodes.PlanBreaksEntitlements,
                         Invariant,
                         here,
                         $"the read of {Name(read.Table)} was compiled under descriptor "
@@ -304,6 +311,7 @@ internal static class EntitlementsInvariant
                         or DisclosureOutcome.Tested)
                     {
                         throw new InvalidPlanException(
+                            ChalkErrorCodes.PlanBreaksEntitlements,
                             Invariant,
                             $"plan.output_type[{i}]",
                             $"output column '{Field(plan, i)}' is column {origin.TableColumn} of "
@@ -312,7 +320,7 @@ internal static class EntitlementsInvariant
                             + (origin.Correlation
                                 ? "the entitlement mechanism's own correlation along a declared "
                                   + "path, which discloses nothing and must be unreachable from the "
-                                  + "statement (D265 §7)"
+                                  + "statement"
                                 : "redacted and unsanitised"));
                     }
                 }
@@ -334,6 +342,7 @@ internal static class EntitlementsInvariant
             if (reported.Count != atRoot.Count)
             {
                 throw new InvalidPlanException(
+                    ChalkErrorCodes.PlanBreaksEntitlements,
                     Invariant,
                     "plan.output_type",
                     $"the report states {reported.Count} column disclosures and the plan's root row "
@@ -365,6 +374,7 @@ internal static class EntitlementsInvariant
                 }
 
                 throw new InvalidPlanException(
+                    ChalkErrorCodes.PlanBreaksEntitlements,
                     Invariant,
                     $"plan.output_type[{i}]",
                     $"output column '{Field(plan, i)}' is reported {reported[i]} and the reads this "
@@ -427,6 +437,7 @@ internal static class EntitlementsInvariant
             if (!Traced.Contains(rel.KindCase))
             {
                 throw new InvalidPlanException(
+                    ChalkErrorCodes.PlanBreaksEntitlements,
                     Invariant,
                     path,
                     $"the relation kind {rel.KindCase} is one this client's entitlement invariant "
@@ -1396,6 +1407,7 @@ internal static class EntitlementsInvariant
                 }
 
                 throw new InvalidPlanException(
+                    ChalkErrorCodes.PlanBreaksEntitlements,
                     Invariant,
                     path,
                     $"column {origin.TableColumn} of {Name(origin.Read.Table)} is population-only for "

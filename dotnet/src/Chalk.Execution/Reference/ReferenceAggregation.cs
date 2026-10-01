@@ -239,8 +239,9 @@ internal static class ReferenceAggregation
 
                 default:
                     throw new UnsupportedFeatureException(
+                        ChalkErrorCodes.UnsupportedFunction,
                         measure.Function.ToString(),
-                        "The reference executor implements COUNT, SUM, SUM0, MIN and MAX (A12).");
+                        "The reference executor implements COUNT, SUM, SUM0, MIN and MAX.");
             }
         }
 

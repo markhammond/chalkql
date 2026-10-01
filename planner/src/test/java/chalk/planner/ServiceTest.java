@@ -6,12 +6,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import chalk.ir.IrVersion;
 import chalk.planner.catalog.CatalogRegistry;
+import chalk.planner.rpc.PlanErrorKind;
 import chalk.planner.rpc.PlanErrors;
 import chalk.planner.rpc.PlannerServiceImpl;
 import chalk.planner.rpc.v1.GetInfoRequest;
 import chalk.planner.rpc.v1.GetInfoResponse;
 import chalk.planner.rpc.v1.PlanError;
-import chalk.planner.rpc.v1.PlanErrorKind;
 import chalk.planner.rpc.v1.PlanRequest;
 import chalk.planner.rpc.v1.PlanResponse;
 import chalk.planner.rpc.v1.PlannerOptions;
@@ -189,12 +189,12 @@ class ServiceTest {
 
   @ParameterizedTest(name = "{0} -> {1}")
   @CsvSource({
-    "'SELEC * FROM bars', PLAN_ERROR_KIND_PARSE, true",
-    "'SELECT nope FROM bars', PLAN_ERROR_KIND_VALIDATION, true",
-    "'SELECT * FROM nope', PLAN_ERROR_KIND_VALIDATION, true",
-    "'SELECT * FROM bars b RIGHT ASOF JOIN bars q MATCH_CONDITION b.ts >= q.ts ON b.symbol = q.symbol', PLAN_ERROR_KIND_PARSE, true",
-    "'SELECT b.symbol FROM bars b ASOF JOIN bars q MATCH_CONDITION b.ts <> q.ts ON b.symbol = q.symbol', PLAN_ERROR_KIND_VALIDATION, true",
-    "'SELECT b.symbol FROM bars b JOIN symbols s ON b.ts = s.tick_size', PLAN_ERROR_KIND_VALIDATION, true",
+    "'SELEC * FROM bars', PARSE, true",
+    "'SELECT nope FROM bars', VALIDATION, true",
+    "'SELECT * FROM nope', VALIDATION, true",
+    "'SELECT * FROM bars b RIGHT ASOF JOIN bars q MATCH_CONDITION b.ts >= q.ts ON b.symbol = q.symbol', PARSE, true",
+    "'SELECT b.symbol FROM bars b ASOF JOIN bars q MATCH_CONDITION b.ts <> q.ts ON b.symbol = q.symbol', VALIDATION, true",
+    "'SELECT b.symbol FROM bars b JOIN symbols s ON b.ts = s.tick_size', VALIDATION, true",
   })
   void the_negative_corpus_maps_to_the_right_error_kind(
       String sql, PlanErrorKind expected, boolean hasPosition) {
@@ -205,7 +205,7 @@ class ServiceTest {
             .actual();
 
     PlanError planError = decode(error);
-    assertThat(planError.getKind()).isEqualTo(expected);
+    assertThat(kind(planError)).isEqualTo(expected);
     assertThat(planError.getMessage()).isNotBlank();
     if (hasPosition) {
       assertThat(planError.getLine()).as("%s should carry a SQL position", sql).isGreaterThan(0);
@@ -225,8 +225,8 @@ class ServiceTest {
             .actual();
 
     assertThat(error.getStatus().getCode()).isEqualTo(io.grpc.Status.Code.FAILED_PRECONDITION);
-    assertThat(decode(error).getKind())
-        .isEqualTo(PlanErrorKind.PLAN_ERROR_KIND_UNKNOWN_CATALOG_VERSION);
+    assertThat(kind(decode(error)))
+        .isEqualTo(PlanErrorKind.UNKNOWN_CATALOG_VERSION);
     assertThat(decode(error).getMessage()).contains("nope");
   }
 
@@ -260,8 +260,8 @@ class ServiceTest {
             .actual();
 
     assertThat(error.getStatus().getCode()).isEqualTo(io.grpc.Status.Code.FAILED_PRECONDITION);
-    assertThat(decode(error).getKind())
-        .isEqualTo(PlanErrorKind.PLAN_ERROR_KIND_UNKNOWN_CATALOG_VERSION);
+    assertThat(kind(decode(error)))
+        .isEqualTo(PlanErrorKind.UNKNOWN_CATALOG_VERSION);
     assertThat(decode(error).getMessage()).contains("01JCATALOGVERSIONXXXXXXXXXX");
   }
 
@@ -278,7 +278,7 @@ class ServiceTest {
             .extracting(e -> (StatusRuntimeException) e)
             .actual();
 
-    assertThat(decode(error).getKind()).isEqualTo(PlanErrorKind.PLAN_ERROR_KIND_IR_VERSION);
+    assertThat(kind(decode(error))).isEqualTo(PlanErrorKind.IR_VERSION);
   }
 
   @Test
@@ -295,7 +295,7 @@ class ServiceTest {
             .extracting(e -> (StatusRuntimeException) e)
             .actual();
 
-    assertThat(decode(error).getKind()).isEqualTo(PlanErrorKind.PLAN_ERROR_KIND_INVALID_CATALOG);
+    assertThat(kind(decode(error))).isEqualTo(PlanErrorKind.INVALID_CATALOG);
   }
 
   // -------------------------------------------------------- D256: an unrecognised dialect name
@@ -331,7 +331,7 @@ class ServiceTest {
             .actual();
 
     PlanError decoded = decode(error);
-    assertThat(decoded.getKind()).isEqualTo(PlanErrorKind.PLAN_ERROR_KIND_INVALID_CATALOG);
+    assertThat(kind(decoded)).isEqualTo(PlanErrorKind.INVALID_CATALOG);
     assertThat(decoded.getMessage())
         .contains("db256") // the source
         .contains("not-a-real-dialect") // the name
@@ -352,7 +352,7 @@ class ServiceTest {
             .extracting(e -> (StatusRuntimeException) e)
             .actual();
 
-    assertThat(decode(error).getKind()).isEqualTo(PlanErrorKind.PLAN_ERROR_KIND_INVALID_CATALOG);
+    assertThat(kind(decode(error))).isEqualTo(PlanErrorKind.INVALID_CATALOG);
   }
 
   /**
@@ -397,6 +397,16 @@ class ServiceTest {
   @Test
   void a_product_name_still_registers() {
     assertThatCode(() -> register(profileNamed("oracle"), "d256-product")).doesNotThrowAnyException();
+  }
+
+  /** The kind of the one rule an error breaks, as the planner names it on the wire. */
+  private static PlanErrorKind kind(PlanError error) {
+    assertThat(error.getViolationsList()).as("an error breaks one rule today").hasSize(1);
+    String name = error.getViolations(0).getKind();
+    return java.util.Arrays.stream(PlanErrorKind.values())
+        .filter(kind -> kind.wireName().equals(name))
+        .findFirst()
+        .orElseThrow(() -> new AssertionError("no kind is named '" + name + "'"));
   }
 
   private static PlanError decode(StatusRuntimeException error) {

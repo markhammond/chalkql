@@ -1,6 +1,5 @@
 using Chalk.Client;
 using Chalk.TestKit;
-using PlanErrorKind = Chalk.Client.Rpc.PlanErrorKind;
 using PlanRequest = Chalk.Client.PlanRequest;
 using SqlConformance = Chalk.Catalog.SqlConformance;
 
@@ -23,26 +22,26 @@ public sealed class ConformanceTests(SharedSidecar sidecar)
     private static readonly CorpusFixture Fixture = CorpusFixture.Shared;
 
     /// <summary>The constructs D34 names, with the error the default dialect answers with.</summary>
-    public static TheoryData<string, string, PlanErrorKind> LenientOnly() => new()
+    public static TheoryData<string, string, string> LenientOnly() => new()
     {
-        { "!=", "SELECT symbol FROM bars WHERE symbol != 'BTCUSDT'", PlanErrorKind.Parse },
-        { "%", "SELECT symbol FROM bars WHERE volume % 2 = 0", PlanErrorKind.Parse },
+        { "!=", "SELECT symbol FROM bars WHERE symbol != 'BTCUSDT'", PlanErrorKinds.Parse },
+        { "%", "SELECT symbol FROM bars WHERE volume % 2 = 0", PlanErrorKinds.Parse },
         {
             "OFFSET before LIMIT",
             "SELECT symbol, ts FROM bars ORDER BY ts, symbol OFFSET 3 LIMIT 5",
-            PlanErrorKind.Parse
+            PlanErrorKinds.Parse
         },
         {
             "GROUP BY on a SELECT alias",
             "SELECT symbol AS s, COUNT(*) AS n FROM bars GROUP BY s",
-            PlanErrorKind.Validation
+            PlanErrorKinds.Validation
         },
     };
 
     [Theory]
     [MemberData(nameof(LenientOnly))]
     public async Task The_default_dialect_rejects_what_only_lenient_allows(
-        string construct, string sql, PlanErrorKind expected)
+        string construct, string sql, string expected)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
 
@@ -57,7 +56,7 @@ public sealed class ConformanceTests(SharedSidecar sidecar)
 
     [Theory]
     [MemberData(nameof(LenientOnly))]
-    public async Task Lenient_accepts_all_of_them(string construct, string sql, PlanErrorKind expected)
+    public async Task Lenient_accepts_all_of_them(string construct, string sql, string expected)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         _ = expected;
@@ -70,7 +69,7 @@ public sealed class ConformanceTests(SharedSidecar sidecar)
 
     [Theory]
     [MemberData(nameof(LenientOnly))]
-    public async Task Babel_accepts_all_of_them(string construct, string sql, PlanErrorKind expected)
+    public async Task Babel_accepts_all_of_them(string construct, string sql, string expected)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         _ = expected;
@@ -97,7 +96,7 @@ public sealed class ConformanceTests(SharedSidecar sidecar)
         var error = await Assert.ThrowsAsync<PlanningException>(
             () => PlanAsync("SELECT 1 AS n", SqlConformance.Strict2003).AsTask());
 
-        Assert.Equal(PlanErrorKind.Validation, error.Kind);
+        Assert.Equal(PlanErrorKinds.Validation, error.Kind);
     }
 
     /// <summary>An unset conformance is the default one, not whatever the planner was built with.</summary>
@@ -118,7 +117,7 @@ public sealed class ConformanceTests(SharedSidecar sidecar)
                 // No Options at all: the wire enum's zero value means DEFAULT.
             }).AsTask());
 
-        Assert.Equal(PlanErrorKind.Parse, error.Kind);
+        Assert.Equal(PlanErrorKinds.Parse, error.Kind);
     }
 
     /// <summary>The dialect is a per-statement option, not part of the planner's identity (D34).</summary>

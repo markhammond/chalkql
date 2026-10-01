@@ -27,6 +27,7 @@ public sealed class PlanTooDeepException : ChalkException
 {
     public PlanTooDeepException(int limit, Exception? innerException = null)
         : base(
+            ChalkErrorCodes.PlanTooDeep,
             $"the plan nests deeper than this client's limit of {limit} levels, and the client refuses "
             + "to read it rather than risk exhausting the stack. A plan that deep is a statement that "
             + "deep — sub-queries or joins nested by the hundred. Simplify the statement, or raise the "

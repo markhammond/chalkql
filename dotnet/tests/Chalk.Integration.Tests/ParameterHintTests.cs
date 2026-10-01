@@ -110,7 +110,7 @@ public sealed class ParameterHintTests(SharedSidecar sidecar)
     [Fact]
     public void A_list_valued_hint_is_refused_by_name()
     {
-        var failure = Assert.Throws<ArgumentException>(
+        var failure = Assert.Throws<ParameterBindingException>(
             () => Resolve(
                 "SELECT symbol FROM bars WHERE symbol IN @symbols",
                 new Dictionary<string, object?> { ["symbols"] = new[] { "BTCUSDT", "ETHUSDT" } }));

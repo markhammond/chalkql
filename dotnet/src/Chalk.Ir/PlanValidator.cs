@@ -677,8 +677,8 @@ public static class PlanValidator
                 throw Invalid(
                     "I-IR-6",
                     path,
-                    "Read.filter is set, but the source did not declare a matching pushdown capability "
-                    + "(an M1-M3 planner never sets it)");
+                    "Read.filter is set, but the source did not declare a matching pushdown "
+                    + "capability");
             }
         }
 
@@ -888,8 +888,8 @@ public static class PlanValidator
                 throw Invalid(
                     "I-IR-7",
                     path,
-                    $"the aggregate has {aggregate.Groupings.Count} groupings; v1 requires exactly one "
-                    + "(grouping sets are reserved)");
+                    $"the aggregate has {aggregate.Groupings.Count} groupings; a plan carries exactly "
+                    + "one (grouping sets are reserved)");
             }
 
             var keys = aggregate.Groupings[0].Keys;
@@ -2369,7 +2369,7 @@ public static class PlanValidator
                     throw Invalid(
                         "I-IR-12",
                         path,
-                        "a LIST's element is itself a LIST; v1 lists are exactly one level deep");
+                        "a LIST's element is itself a LIST; a list is exactly one level deep");
                 }
 
                 if (type.Element.Kind == TypeKind.Composite)
@@ -2514,7 +2514,7 @@ public static class PlanValidator
                 throw Invalid(
                     "I-IR-12",
                     path,
-                    $"a LIST cannot be {what}; v1 lists are produced, projected and indexed into only");
+                    $"a LIST cannot be {what}; a list is produced, projected and indexed into only");
             }
 
             RefuseComposite(type, path, what);

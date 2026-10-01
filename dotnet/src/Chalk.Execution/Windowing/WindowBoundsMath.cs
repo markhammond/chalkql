@@ -32,6 +32,7 @@ internal static class WindowBoundsMath
         if (micros <= 0)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.ValueOutOfRange,
                 $"{what} of {micros} microseconds", "A window's slide, size and gap must be positive.");
         }
 
@@ -40,6 +41,7 @@ internal static class WindowBoundsMath
             if (micros % MicrosPerDay != 0)
             {
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedFunction,
                     $"{what} of {micros} microseconds over a DATE column",
                     "A window over a DATE column measures whole days.");
             }
@@ -57,6 +59,7 @@ internal static class WindowBoundsMath
         if (micros % perMicro != 0)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"{what} of {micros} microseconds over a {time} column",
                 $"The column counts {perSecond} units per second, so the interval must be a whole "
                 + "number of them.");

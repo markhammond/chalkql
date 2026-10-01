@@ -280,6 +280,7 @@ public sealed class CombinationTests
     {
         var refused = Assert.Throws<CatalogValidationException>(() => new Shape(withArea: true).Compile());
         Assert.Contains("4 is the most it will write", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(ChalkErrorCodes.InvalidPolicy, refused.Code);
 
         var shape = new Shape(
             s => s.Policy.Combination([s.Analyst], [.. s.FiveKinds, s.Area]),
@@ -347,6 +348,8 @@ public sealed class CombinationTests
             error.Message,
             StringComparison.Ordinal);
         Assert.Contains("no one route answers it", error.Message, StringComparison.Ordinal);
+        Assert.Equal(ChalkErrorCodes.UnansweredCombination, error.Code);
+        Assert.EndsWith(" [UnansweredCombination]", error.Message, StringComparison.Ordinal);
     }
 
     /// <summary>A combination with a kind the table does not declare is not that table's.</summary>
@@ -423,6 +426,8 @@ public sealed class CombinationTests
             + "{classification, mission, compartment, releasability, environment}",
             error.Message,
             StringComparison.Ordinal);
+        Assert.Equal(ChalkErrorCodes.UndeclaredCombination, error.Code);
+        Assert.EndsWith(" [UndeclaredCombination]", error.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

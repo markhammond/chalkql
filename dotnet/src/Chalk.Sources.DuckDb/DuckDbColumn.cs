@@ -409,6 +409,7 @@ internal sealed unsafe class DuckDbColumn
             if (nulls > 0 && !_type.Nullable)
             {
                 throw new SourceContractException(
+                    ChalkErrorCodes.SourceContract,
                     _sourceId,
                     _subject,
                     $"column '{_name}' is declared NOT NULL in the catalog, but the query produced "

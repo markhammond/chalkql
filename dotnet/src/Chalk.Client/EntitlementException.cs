@@ -31,14 +31,22 @@ namespace Chalk.Entitlements;
 public sealed class EntitlementException : ChalkException
 {
     public EntitlementException(string message, SqlPosition? position, Exception? innerException = null)
-        : this(message, position, refusal: null, innerException)
+        : this([], message, position, refusals: [], innerException)
     {
     }
 
-    /// <summary>The same, carrying what was refused and the result the statement would have had.</summary>
+    /// <summary>
+    /// The same, carrying every rule the planner said the statement breaks, what was refused and the
+    /// result the statement would have had.
+    /// </summary>
     internal EntitlementException(
-        string message, SqlPosition? position, EntitlementRefusal? refusal, Exception? innerException)
+        IReadOnlyList<ChalkViolation> violations,
+        string message,
+        SqlPosition? position,
+        IReadOnlyList<EntitlementRefusal> refusals,
+        Exception? innerException)
         : base(
+            violations,
             position is { Line: > 0 }
                 ? $"Refused by the entitlements at {position}: {message}"
                 : $"Refused by the entitlements: {message}",
@@ -46,25 +54,32 @@ public sealed class EntitlementException : ChalkException
     {
         Position = position;
         PlannerMessage = message;
-        Refusal = refusal;
+        Refusals = refusals;
     }
 
-    /// <summary>Always <see cref="PlanErrorKind.Policy"/>, so the two exceptions read alike.</summary>
-    public PlanErrorKind Kind => PlanErrorKind.Policy;
+    /// <summary>Always <see cref="PlanErrorKinds.Policy"/>, so the two exceptions read alike.</summary>
+    public string Kind => PlanErrorKinds.Policy;
 
     /// <summary>Where in the SQL, when the planner reported it.</summary>
     public SqlPosition? Position { get; }
 
     /// <summary>
-    /// What was refused and the result the statement would have had (D329): the reason, the table,
-    /// column and use, and the table model in the same form as a prepared statement's schema. Null
-    /// where the planner said nothing more than the message, as one older than this client does.
+    /// What was refused and the result the statement would have had (D329): the first of
+    /// <see cref="Refusals"/>, or null where the planner said nothing more than the message.
     /// </summary>
-    public EntitlementRefusal? Refusal { get; internal set; }
+    public EntitlementRefusal? Refusal => Refusals.Count > 0 ? Refusals[0] : null;
+
+    /// <summary>
+    /// What was refused, one for each rule the statement breaks, in the order the planner met them:
+    /// the code and reason, the table, column and use, and the table model in the same form as a
+    /// prepared statement's schema. The planner stops at the first rule today, so there is one; none
+    /// where the planner said nothing more than the message.
+    /// </summary>
+    public IReadOnlyList<EntitlementRefusal> Refusals { get; internal set; }
 
     /// <summary>The planner's own message, before this exception's prefix, for a refusal answered again.</summary>
     internal string PlannerMessage { get; }
 
-    /// <summary>The refusal as the wire carried it, which the engine turns into <see cref="Refusal"/>.</summary>
-    internal PolicyRefusal? WireRefusal { get; init; }
+    /// <summary>The error as the wire carried it, which the engine turns into <see cref="Refusals"/>.</summary>
+    internal PlanError? WireError { get; init; }
 }

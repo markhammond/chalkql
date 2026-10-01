@@ -8,6 +8,7 @@ public sealed class IrVersionMismatchException : ChalkException
 {
     public IrVersionMismatchException(uint planVersion, uint clientVersion, string detail)
         : base(
+            ChalkErrorCodes.IrVersionMismatch,
             $"Plan IR version {planVersion} cannot be read by this client, which speaks version {clientVersion}. "
             + $"{detail} Upgrade the Chalk client packages, or pin the planner sidecar to a version that serves IR {clientVersion}.")
     {
@@ -27,8 +28,18 @@ public sealed class IrVersionMismatchException : ChalkException
 /// </summary>
 public sealed class InvalidPlanException : ChalkException
 {
+    /// <summary>A plan that breaks an invariant of the IR: <see cref="ChalkErrorCodes.Internal"/>.</summary>
     public InvalidPlanException(string invariant, string path, string detail)
-        : base($"Invalid plan at {path}: {detail} (violates {invariant}, docs/design/02-ir.md §8)")
+        : this(ChalkErrorCodes.Internal, invariant, path, detail)
+    {
+    }
+
+    /// <summary>The same, with the code of the rule it meets: a plan that breaks the entitlements, say.</summary>
+    public InvalidPlanException(string code, string invariant, string path, string detail)
+        : base(
+            code,
+            $"Invalid plan at {path}: {detail} (invariant {invariant}). The fault is in the planner that "
+            + "produced the plan, not in the statement: report it with the statement.")
     {
         Invariant = invariant;
         Path = path;

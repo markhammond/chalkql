@@ -96,7 +96,9 @@ public sealed class RecordedPlanner : IQueryPlanner
             when (e.Message.Contains("nesting", StringComparison.OrdinalIgnoreCase))
         {
             var tooDeep = new PlanTooDeepException(PlanNestingLimit, e);
-            throw new PlanningException(Chalk.Client.Rpc.PlanErrorKind.Internal, tooDeep.Message, position: null, tooDeep);
+            throw new PlanningException(
+                ChalkErrorCodes.PlanTooDeep,
+                PlanErrorKinds.Internal, tooDeep.Message, position: null, planningState: null, tooDeep);
         }
 
         // A recorded plan is only valid against a catalog whose *shape* it still fits; serving it

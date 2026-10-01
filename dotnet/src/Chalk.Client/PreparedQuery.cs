@@ -560,7 +560,7 @@ public sealed class PreparedQuery
                     "this query was prepared with its context values and carries them, so there is "
                     + "nothing to bind at execution. Prepare with context.Shape() — or with "
                     + "context.Shape(names) for the names that stay open — to bind the values here "
-                    + "instead (docs/design/16-entitlements.md §2, §2.1, D209, D232).",
+                    + "instead.",
                     nameof(supplied));
             }
 
@@ -580,8 +580,7 @@ public sealed class PreparedQuery
             throw new ArgumentException(
                 "this query needs the context's values at execution and was handed "
                 + string.Join(", ", supplied.ShapeNames)
-                + " as shapes again. Bind the values "
-                + "(docs/design/16-entitlements.md §2, §2.1, D209, D232).",
+                + " as shapes again. Bind the values.",
                 nameof(supplied));
         }
 
@@ -590,8 +589,7 @@ public sealed class PreparedQuery
             throw new ArgumentException(
                 "this query was planned for a different context shape: the names, kinds and types "
                 + "bound at execution must be the ones it was prepared with, since the plan was "
-                + "built for them. Prepare again for this shape "
-                + "(docs/design/16-entitlements.md §2, D209).",
+                + "built for them. Prepare again for this shape.",
                 nameof(supplied));
         }
 

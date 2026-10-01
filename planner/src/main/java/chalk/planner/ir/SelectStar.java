@@ -165,7 +165,8 @@ final class SelectStar {
           "generated SQL would say SELECT * over a FROM this rewrite cannot name ("
               + select.getFrom()
               + "). A star sends the source's physical columns in the source's own order, which is"
-              + " what F35 exists to prevent; teach chalk.planner.ir.SelectStar this shape.");
+              + " what a statement's own column order must never depend on. This is a planner"
+              + " fault: report it with the statement.");
     }
     select.setSelectList(new SqlNodeList(named, SqlParserPos.ZERO));
   }

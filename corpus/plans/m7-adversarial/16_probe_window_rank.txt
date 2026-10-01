@@ -12,10 +12,10 @@ report id:Full, r:Full, members:Some
 2|1
 
 -- u3
-F60 PlanningException: SQL validation error: Expected identity mapping after processing RelNode rel#N:LogicalProject.NONE.[](input=LogicalFilter#N); but got [size=0, sourceCount=0, targetCount=1, elements=[]]
+F60 PlanningException: SQL validation error: Expected identity mapping after processing RelNode rel#N:LogicalProject.NONE.[](input=LogicalFilter#N); but got [size=0, sourceCount=0, targetCount=1, elements=[]] [SqlValidation]
 
 -- u3-in-o1
-F60 PlanningException: SQL validation error: Expected identity mapping after processing RelNode rel#N:LogicalProject.NONE.[](input=LogicalFilter#N); but got [size=0, sourceCount=0, targetCount=1, elements=[]]
+F60 PlanningException: SQL validation error: Expected identity mapping after processing RelNode rel#N:LogicalProject.NONE.[](input=LogicalFilter#N); but got [size=0, sourceCount=0, targetCount=1, elements=[]] [SqlValidation]
 
 -- u4
 report id:Full, r:Full, members:All

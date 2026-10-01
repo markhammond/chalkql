@@ -127,6 +127,7 @@ internal static class Holistic
 
             default:
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedFunction,
                     measure.Function.ToString(), "It is not a holistic aggregate.");
         }
     }
@@ -179,6 +180,7 @@ internal static class Holistic
             Literal.ValueOneofCase.I32Value => literal.I32Value,
             Literal.ValueOneofCase.I64Value => literal.I64Value,
             _ => throw new UnsupportedFeatureException(
+                ChalkErrorCodes.ValueOutOfRange,
                 "a percentile fraction of " + literal.ValueCase,
                 "The fraction is a numeric literal between 0 and 1."),
         };
@@ -194,6 +196,7 @@ internal static class Holistic
         float single => single,
         decimal number => (double)number,
         _ => throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedFunction,
             "PERCENTILE_CONT over " + (value?.GetType().Name ?? "NULL"),
             "It interpolates between two numbers."),
     };

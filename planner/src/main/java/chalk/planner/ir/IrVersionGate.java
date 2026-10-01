@@ -9,7 +9,7 @@ import java.util.Map;
  * When each IR node kind was introduced (docs/design/02-ir.md §2, rule 1). A planner at IR version N
  * serves a client at N−k by declining to use nodes the client cannot read: a rule that would produce
  * one is not registered for that request, and if the query cannot be planned without it the planner
- * fails with {@code PLAN_ERROR_KIND_IR_VERSION} rather than emitting a node the client will reject.
+ * fails with an {@code IrVersion} error rather than emitting a node the client will reject.
  *
  * <p>Every M1 kind is version 1, so nothing is gated yet. The table exists now so that adding a node
  * in M2 is a one-line change here rather than a design conversation.

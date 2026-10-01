@@ -2,7 +2,6 @@ using Apache.Arrow;
 using Chalk.Catalog;
 using Chalk.Client;
 using Chalk.TestKit;
-using PlanErrorKind = Chalk.Client.Rpc.PlanErrorKind;
 
 namespace Chalk.Integration.Tests;
 
@@ -96,7 +95,7 @@ public sealed class BabelSyntaxTests(SharedSidecar sidecar)
                 },
                 TestContext.Current.CancellationToken).AsTask());
 
-        Assert.Equal(PlanErrorKind.Parse, error.Kind);
+        Assert.Equal(PlanErrorKinds.Parse, error.Kind);
     }
 
     /// <summary>
@@ -117,7 +116,7 @@ public sealed class BabelSyntaxTests(SharedSidecar sidecar)
                 new PrepareOptions { Conformance = SqlConformance.Babel },
                 TestContext.Current.CancellationToken).AsTask());
 
-        Assert.Equal(PlanErrorKind.Unsupported, error.Kind);
+        Assert.Equal(PlanErrorKinds.Unsupported, error.Kind);
         Assert.Contains("CREATE TABLE", error.Message, StringComparison.Ordinal);
         Assert.Contains("Chalk plans queries", error.Message, StringComparison.Ordinal);
     }
