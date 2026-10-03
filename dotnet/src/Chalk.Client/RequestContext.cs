@@ -282,7 +282,7 @@ public sealed class RequestContext
             throw new ArgumentException(
                 "this plan folded " + string.Join(", ", Ordered(closed)) + " at prepare, so they are "
                 + "in its leaves and in its digest and cannot be given another value. Narrow from "
-                + "the plan that left them open (docs/design/16-entitlements.md §2.1, D233).",
+                + "the plan that left them open.",
                 nameof(more));
         }
 
@@ -344,8 +344,7 @@ public sealed class RequestContext
         {
             throw new InvalidOperationException(
                 $"this context is shape-only, so binding '{name}' would leave the rest of it "
-                + "without values. Build the values and leave the open names to Shape(names) "
-                + "(docs/design/16-entitlements.md §2.1, D232).");
+                + "without values. Build the values and leave the open names to Shape(names).");
         }
     }
 
@@ -1008,10 +1007,13 @@ public sealed class ContextRequiredException : InvalidOperationException
 
     /// <summary>Creates the exception for the named bindings.</summary>
     public ContextRequiredException(IReadOnlyList<string> names)
-        : base(Describe(names))
+        : base(ErrorCodes.WithCode(ChalkErrorCodes.ContextRequired, Describe(names)))
     {
         Names = names;
     }
+
+    /// <summary>Always <see cref="ChalkErrorCodes.ContextRequired"/>, as a ChalkQL exception would carry it.</summary>
+    public string Code => ChalkErrorCodes.ContextRequired;
 
     private static string Describe(IReadOnlyList<string> names) =>
         "this plan was prepared for execute-time context binding and needs "

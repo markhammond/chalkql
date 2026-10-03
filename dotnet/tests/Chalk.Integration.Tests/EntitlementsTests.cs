@@ -141,7 +141,7 @@ public sealed class EntitlementsTests(SharedSidecar sidecar)
                 .PrepareAsync("SELECT id FROM \"$chalk$ctx\".\"members\"", TenancyFixture.U1)
                 .AsTask());
 
-        Assert.Equal(Chalk.Client.Rpc.PlanErrorKind.InvalidRequest, refusal.Kind);
+        Assert.Equal(PlanErrorKinds.InvalidRequest, refusal.Kind);
         Assert.Contains(
             "the identifier \"$chalk$ctx\" in this statement begins with $chalk$",
             refusal.Message,
@@ -610,7 +610,7 @@ public sealed class EntitlementsTests(SharedSidecar sidecar)
                     new ColumnEntitlementDescriptor { Column = 2, Otherwise = Disclosure.Full },
                 ],
             })));
-        Assert.Contains("D208", refusal.Message, StringComparison.Ordinal);
+        Assert.Equal(ChalkErrorCodes.InvalidEntitlement, refusal.Code);
     }
 
     [Fact]

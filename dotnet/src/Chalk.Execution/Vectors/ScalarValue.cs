@@ -73,6 +73,7 @@ internal sealed class ScalarValue
             TypeKind.Binary or TypeKind.Uuid or TypeKind.Decimal =>
                 new ScalarValue { Type = type, Bytes = BytesOf(column, row, type) },
             _ => throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedType,
                 $"a lookup key of type {IrTypes.Describe(type.ToProto())}",
                 "A lookup join binds its keys into a source's query, and this type has no value the "
                 + "boundary can carry. Plan the join as LOCAL, or narrow the key column."),
@@ -161,6 +162,7 @@ internal sealed class ScalarValue
         TypeKind.IntervalYear => (int)Integer,
         TypeKind.List => Elements.Select(e => e.ToClr()).ToArray(),
         _ => throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedType,
             $"index key bound of type {Type}",
             "There is no CLR shape for it; the index would compare the wrong values."),
     };

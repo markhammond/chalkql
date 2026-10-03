@@ -180,6 +180,7 @@ internal sealed class AdoBatchReader : IDisposable
         if (reader.FieldCount != _types.Length)
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceContract,
                 _sourceId,
                 _subject,
                 $"the result set has {reader.FieldCount} columns and the plan expects "
@@ -198,6 +199,7 @@ internal sealed class AdoBatchReader : IDisposable
             if (!string.Equals(reported, expected, StringComparison.OrdinalIgnoreCase))
             {
                 throw new SourceContractException(
+                    ChalkErrorCodes.SourceContract,
                     _sourceId,
                     _subject,
                     $"the result set names column {c} '{reported}' and the plan expects "
@@ -1221,9 +1223,10 @@ internal static class AdoArrays
             TypeKind.String => String(arena, values, rows, validity, nullCount),
             TypeKind.Binary => Binary(arena, values, rows, validity, nullCount),
             _ => throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedType,
                 $"reading a {type.Kind} column from an ADO.NET provider",
-                "docs/design/18-m4-capabilities-and-pushdown.md §3 lists the types the in-box "
-                + "ADO.NET source reads; a LIST or a struct column is not one of them."),
+                "The in-box ADO.NET source reads scalar columns; a LIST or a struct column is not "
+                + "one of them."),
         };
     }
 

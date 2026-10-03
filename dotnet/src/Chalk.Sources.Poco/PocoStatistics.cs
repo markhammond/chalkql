@@ -368,6 +368,7 @@ internal static class PocoStatistics
         {
             var supplied = supplier()
                 ?? throw new CatalogValidationException(
+                    ChalkErrorCodes.IncompleteDeclaration,
                     "statistics", "the Statistics(Func<TableStatistics>) delegate returned null");
             for (var c = 0; c < columns.Length; c++)
             {

@@ -128,7 +128,7 @@ public sealed class LikePortabilityTests(SharedSidecar sidecar, SharedPostgres p
             await using (engine)
             {
                 var error = await Assert.ThrowsAsync<PlanningException>(async () => await engine.PrepareAsync(sql));
-                Assert.True(error.Kind == PlanErrorKind.Validation, $"{name}: {error.Kind}");
+                Assert.True(error.Kind == PlanErrorKinds.Validation, $"{name}: {error.Kind}");
                 Assert.NotNull(error.Position);
             }
         }
@@ -144,9 +144,9 @@ public sealed class LikePortabilityTests(SharedSidecar sidecar, SharedPostgres p
             await using (engine)
             {
                 var query = await engine.PrepareAsync("SELECT id FROM items WHERE sku LIKE ? ESCAPE '!'");
-                var error = await Assert.ThrowsAsync<ArgumentException>(
+                var error = await Assert.ThrowsAsync<ParameterBindingException>(
                     async () => await engine.ExecuteAsync(query, [pattern]));
-                Assert.True(error.Message.Contains("D312", StringComparison.Ordinal), $"{name}: {error.Message}");
+                Assert.True(error.Code == ChalkErrorCodes.ParameterBinding, $"{name}: {error.Message}");
             }
         }
     }

@@ -1,7 +1,7 @@
 package chalk.planner.entitlement;
 
+import chalk.planner.ErrorCode;
 import chalk.planner.plan.ChalkContextMembership;
-import chalk.planner.rpc.v1.PolicyRefusalReason;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -145,14 +145,13 @@ final class MembershipMarkers {
         for (RexNode expression : expressions) {
           if (!MembershipSplit.monotone(expression, membership.toString())) {
             throw new PolicyException(
-                PolicyRefusalReason.POLICY_REFUSAL_REASON_BINDING,
+                ErrorCode.ENTITLEMENT_BINDING,
                 "the entitlement on "
                     + where
                     + " tests membership of a bound relation under a negation, and this request "
                     + "binds the context at execution, where the relation's rows are not here to be "
                     + "compared. Bind the values at prepare, test a whole list (IN (@ctx.name)), or "
-                    + "write the condition so the membership stands under AND and OR alone "
-                    + "(docs/design/16-entitlements.md §2, D209).");
+                    + "write the condition so the membership stands under AND and OR alone.");
           }
         }
       }

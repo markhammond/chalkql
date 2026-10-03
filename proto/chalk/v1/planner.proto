@@ -609,103 +609,56 @@ message PlanningStats {
 
 // Carried in the gRPC trailer `chalk-plan-error-bin` on every failed Plan/RegisterCatalog call.
 message PlanError {
-  PlanErrorKind kind = 1;
+  // The kind, the refusal and the code each error once carried are each violation's now, as names.
+  reserved 1, 8, 9;
+  reserved "kind", "policy_refusal", "code";
+  // The first violation's message, as a client reports the error.
   string message = 2;
-  // 1-based SQL position when known; zero otherwise.
+  // The first violation's 1-based SQL position when known; zero otherwise.
   int32 line = 3;
   int32 column = 4;
   int32 end_line = 5;
   int32 end_column = 6;
-  // Set on a PLANNING_ABORTED failure: what the governor had measured when it ended a search
+  // Set on a PlanningAborted failure: what the governor had measured when it ended a search
   // that had no complete plan to return. Absent on every other kind.
   PlanningState planning_state = 7;
-  // Set on a POLICY failure: what the entitlements refused, and the result the statement would have
-  // had. Absent on every other kind.
-  PolicyRefusal policy_refusal = 8;
+  // Every rule the request breaks, in the order the planner met them. The planner stops at the
+  // first today, so there is one; a client reads as many as there are.
+  repeated Violation violations = 10;
+  // Set on a refusal by the entitlements: the statement's output columns as the policy would shape
+  // them (a withheld column is nullable), and each one's disclosure as the word a batch's
+  // `chalk.disclosure` metadata carries — FULL, MASKED, REDACTED, PER_ROW, AGGREGATE or TESTED — in
+  // the same order. Both are empty where the refusal came before the entitlement pass had decided
+  // them, and on every other failure.
+  RowType output = 11;
+  repeated string disclosures = 12;
 }
 
-// What the entitlements refused, and the statement's result as the policy would shape it: the table
-// model a host can still return beside the error.
-message PolicyRefusal {
-  PolicyRefusalReason reason = 1;
-  // The table the refusal is about, as schema.table, and the column. Empty where it is about neither.
-  string table = 2;
-  string column = 3;
-  // What the statement did that was refused, in the message's own words: "a projection to the
-  // result", "SUM", "a window aggregate".
-  string use = 4;
-  // What the column does permit this principal: the population aggregates a population-only column
-  // allows. Empty for every other reason.
-  repeated string permitted = 5;
-  // The statement's output columns as the policy would shape them (a withheld column is nullable),
-  // and each one's disclosure as the word a batch's `chalk.disclosure` metadata carries — FULL,
-  // MASKED, REDACTED, PER_ROW, AGGREGATE or TESTED — in the same order. Both are empty where the
-  // refusal came before the entitlement pass had decided them.
-  RowType output = 6;
-  repeated string disclosures = 7;
-}
-
-enum PolicyRefusalReason {
-  POLICY_REFUSAL_REASON_UNSPECIFIED = 0;
-  // A column the principal may only aggregate, used some other way.
-  POLICY_REFUSAL_REASON_POPULATION_ONLY = 1;
-  // A statistical column read under a window, or a declared unique key of its table compared or
-  // grouped by.
-  POLICY_REFUSAL_REASON_STATISTICAL = 2;
-  // A column that discloses nothing, under a redaction policy that refuses it rather than returning
-  // a placeholder.
-  POLICY_REFUSAL_REASON_REDACTED = 3;
-  // A star, or a ROW over a table's columns, under a star policy that refuses it.
-  POLICY_REFUSAL_REASON_STAR = 4;
-  // A statement that can return no row, under RefuseWhenNoVisibleRows.
-  POLICY_REFUSAL_REASON_NO_VISIBLE_ROWS = 5;
-  // A row predicate declared PUSHDOWN_REQUIRED that this plan would evaluate locally.
-  POLICY_REFUSAL_REASON_PUSHDOWN_REQUIRED = 6;
-  // A request that binds no execution context against a catalog that carries an entitlement.
-  POLICY_REFUSAL_REASON_NO_CONTEXT = 7;
-  // An entitlement this request's binding time cannot apply.
-  POLICY_REFUSAL_REASON_BINDING = 8;
-  // An entitlement that does not parse, does not type-check, or does not fit its table.
-  POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT = 9;
-  // A disclosure column whose name the statement already produces.
-  POLICY_REFUSAL_REASON_NAME_COLLISION = 10;
-  // A guard the planner holds itself to. Reaching one is a bug, to be reported with the statement.
-  POLICY_REFUSAL_REASON_INTERNAL = 11;
-}
-
-enum PlanErrorKind {
-  PLAN_ERROR_KIND_UNSPECIFIED = 0;
-  PLAN_ERROR_KIND_PARSE = 1;
-  PLAN_ERROR_KIND_VALIDATION = 2;
-  // Valid SQL the planner cannot express in the IR, or cannot physically plan.
-  PLAN_ERROR_KIND_UNSUPPORTED = 3;
-  // Retired from the request path and **reserved**: the number is never reused and the
-  // name stays readable, so a client of either vintage reads an older sidecar's answer. What
-  // replaces both is UNKNOWN_CATALOG_VERSION, which a client recovers from rather than reports.
-  PLAN_ERROR_KIND_UNKNOWN_CONTEXT = 4;
-  PLAN_ERROR_KIND_EPOCH_MISMATCH = 5;
-  PLAN_ERROR_KIND_IR_VERSION = 6;
-  PLAN_ERROR_KIND_INVALID_CATALOG = 7;
-  PLAN_ERROR_KIND_INTERNAL = 8;
-  // Valid SQL the entitlements refuse: a use of a column no disclosure could ever permit, a star
-  // under a refusing StarPolicy, or a redacted column under REDACTED_COLUMNS_REFUSE.
-  // Distinct from VALIDATION because the SQL is well formed and from UNSUPPORTED because the
-  // planner could express it perfectly well and is declining to.
-  PLAN_ERROR_KIND_POLICY = 9;
-  // A request the planner will not act on as written: today, a `PlanRequest.extensions` entry whose
-  // type URL no handler is registered for. Never ignored — ignoring an extension a
-  // host attached is the one unsafe direction, since a policy silently dropped is a policy not
-  // enforced. The message names the type URL.
-  PLAN_ERROR_KIND_INVALID_REQUEST = 10;
-  // A search this request's own options ended before the optimiser had a complete plan.
-  // Nothing is wrong with the statement and nothing is unsupported: the host asked for a budget and
-  // the budget was spent. `PlanError.planning_state` says what had been measured.
-  PLAN_ERROR_KIND_PLANNING_ABORTED = 11;
-  // The (instance_id, shape_version) a request names is not one this planner holds, or a delta's
-  // base is not. **Memory policy, never correctness**: the planner evicts on its own
-  // schedule and may have restarted, and every eviction is recoverable — the client registers the
-  // version the message names and retries once, with no host involvement. The message names the
-  // version, so a client can tell "register the shape I was planning against" from "register the
-  // base my delta was built on".
-  PLAN_ERROR_KIND_UNKNOWN_CATALOG_VERSION = 12;
+// One rule a request breaks. Its code and kind travel as names rather than numbers, so a rule is
+// added in the glossary and in the code that raises it, with no change here, and a client keeps a
+// name it does not know as it was sent.
+message Violation {
+  // The rule, as the glossary (docs/errors.md) names it: "DuplicateName", "Star".
+  string code = 1;
+  // What kind of problem it is:
+  // - "Parse", "Validation": the statement does not parse, or names what does not exist;
+  // - "Unsupported": valid SQL the planner cannot express in the IR, or cannot physically plan;
+  // - "Policy": valid SQL the entitlements refuse, which the planner could plan and declines to;
+  // - "InvalidRequest": a request the planner will not act on as written, such as an extension no
+  //   handler is registered for, which is never ignored;
+  // - "PlanningAborted": a search the request's own options ended before there was a plan;
+  // - "UnknownCatalogVersion": a catalog version this planner does not hold, which a client
+  //   recovers from by registering it and retrying once;
+  // - "InvalidCatalog", "IrVersion", "UnknownContext", "EpochMismatch" and "Internal".
+  string kind = 2;
+  // What happened, where, and what to do, naming nothing a host cannot see.
+  string message = 3;
+  // For a refusal by the entitlements: the table (schema.table) and column it is about, what the
+  // statement did that was refused, in the message's own words ("a projection to the result",
+  // "SUM"), and the population aggregates a population-only column permits. Empty where it is
+  // about none of them, and for every other kind.
+  string table = 4;
+  string column = 5;
+  string use = 6;
+  repeated string permitted = 7;
 }

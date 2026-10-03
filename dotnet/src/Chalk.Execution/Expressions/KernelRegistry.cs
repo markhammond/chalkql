@@ -113,8 +113,9 @@ internal static class KernelRegistry
         if (IrTypes.IsInterval(operand.Kind))
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"{function}({operand}, {operand})",
-                "02-ir.md §6 excludes the INTERVAL kinds from comparison in M1.");
+                "This executor does not compare INTERVAL values.");
         }
 
         return ColumnKinds.Of(operand) switch
@@ -193,9 +194,9 @@ internal static class KernelRegistry
         if (!IrTypes.IsNumeric(result.Kind))
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"{call.Function}({left.Type}, {right.Type})",
-                "M1 implements arithmetic on the numeric kinds only; interval arithmetic is optional "
-                + "(docs/design/02-ir.md §6).");
+                "This executor implements arithmetic on the numeric kinds only.");
         }
 
         if (result.Kind == TypeKind.Decimal)
@@ -213,8 +214,9 @@ internal static class KernelRegistry
             ColumnKind.Float when !isModulus => Make<float>(call.Function, result, left, right),
             ColumnKind.Double when !isModulus => Make<double>(call.Function, result, left, right),
             _ => throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"{call.Function}({left.Type}, {right.Type})",
-                "MODULUS is defined for the exact kinds only (docs/design/02-ir.md §6)."),
+                "MODULUS is defined for the exact kinds only."),
         };
 
         static IVectorExpr Make<T>(FunctionId function, ChalkType result, IVectorExpr left, IVectorExpr right)
@@ -243,9 +245,10 @@ internal static class KernelRegistry
         if (!IrTypes.IsTemporal(temporal.Type.Kind) || interval.Type.Kind != TypeKind.IntervalDay)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"{call.Function}({left.Type}, {right.Type})",
-                "M1 moves a DATE, TIMESTAMP or TIMESTAMP_TZ by an INTERVAL_DAY; month arithmetic is "
-                + "not implemented (docs/design/02-ir.md §6).");
+                "This executor moves a DATE, TIMESTAMP or TIMESTAMP_TZ by an INTERVAL_DAY; month "
+                + "arithmetic is not implemented.");
         }
 
         return new TemporalIntervalExpr(result, temporal, interval, subtract);
@@ -261,6 +264,7 @@ internal static class KernelRegistry
         if (call.Args.Count is < 2 or > 3)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"TIME_BUCKET with {call.Args.Count} arguments",
                 "It takes an interval, a value and an optional origin.");
         }
@@ -272,14 +276,16 @@ internal static class KernelRegistry
         if (size.Type.Kind != TypeKind.IntervalDay)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"TIME_BUCKET with a {size.Type} width",
-                "The bucket width is an INTERVAL_DAY (docs/design/13-window-functions.md §2).");
+                "The bucket width is an INTERVAL_DAY.");
         }
 
         RequireTemporal(value.Type, "TIME_BUCKET");
         if (origin is not null && origin.Type.Kind != value.Type.Kind)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"TIME_BUCKET with a {origin.Type} origin over a {value.Type} value",
                 "The origin has the value's own type.");
         }
@@ -296,8 +302,9 @@ internal static class KernelRegistry
         if (digits is not null && call.Function != FunctionId.Round)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"{call.Function}({operand.Type}, {digits.Type})",
-                "Only ROUND takes a digit count in M1.");
+                "Only ROUND takes a digit count.");
         }
 
         if (result.Kind == TypeKind.Decimal)
@@ -308,15 +315,17 @@ internal static class KernelRegistry
         if (rounding && !ColumnKinds.IsFloatingPoint(result.Kind))
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"{call.Function}({operand.Type})",
-                "FLOOR, CEIL and ROUND are defined for FP and DECIMAL (docs/design/02-ir.md §6).");
+                "FLOOR, CEIL and ROUND are defined for FP and DECIMAL.");
         }
 
         if (!IrTypes.IsNumeric(result.Kind))
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"{call.Function}({operand.Type})",
-                "M1 implements this function on the numeric kinds only.");
+                "This executor implements this function on the numeric kinds only.");
         }
 
         return ColumnKinds.Of(result) switch
@@ -388,10 +397,10 @@ internal static class KernelRegistry
         }
 
         throw new UnsupportedFeatureException(
+            ChalkErrorCodes.NonConstantArgument,
             "LIKE with a pattern that is neither a literal nor a parameter",
             "A pattern is compiled once per plan when it is a literal and once per execution when it "
-            + "is a parameter; one that could differ from row to row is not implemented "
-            + "(docs/design/02-ir.md §6).");
+            + "is a parameter; one that could differ from row to row is not implemented.");
     }
 
     /// <summary>The text of a string literal, which is what a LIKE escape has to be.</summary>
@@ -401,8 +410,9 @@ internal static class KernelRegistry
             || expr.Literal.ValueCase != Literal.ValueOneofCase.StringValue)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.NonConstantArgument,
                 $"LIKE with a non-constant {what}",
-                "The escape decides what the pattern means, so it has to be a literal (D312).");
+                "The escape decides what the pattern means, so it has to be a literal.");
         }
 
         return expr.Literal.StringValue;
@@ -415,9 +425,9 @@ internal static class KernelRegistry
             or TemporalUnit.Millisecond or TemporalUnit.Microsecond)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"EXTRACT({unit})",
-                "M1 implements YEAR MONTH DAY HOUR MINUTE SECOND DOW DOY EPOCH "
-                + "(docs/design/02-ir.md §6); the rest are optional.");
+                "This executor implements YEAR, MONTH, DAY, HOUR, MINUTE, SECOND, DOW, DOY and EPOCH.");
         }
 
         var operand = compile(call.Args[1]);
@@ -433,8 +443,9 @@ internal static class KernelRegistry
             or TemporalUnit.Day or TemporalUnit.Hour or TemporalUnit.Minute or TemporalUnit.Second))
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"FLOOR(… TO {unit})",
-                "M1 implements YEAR QUARTER MONTH DAY HOUR MINUTE SECOND (docs/design/02-ir.md §6).");
+                "This executor implements YEAR, QUARTER, MONTH, DAY, HOUR, MINUTE and SECOND.");
         }
 
         RequireTemporal(operand.Type, "FLOOR");
@@ -446,8 +457,9 @@ internal static class KernelRegistry
         if (type.Kind is not (TypeKind.Date or TypeKind.Timestamp or TypeKind.TimestampTz))
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"{function} over {type}",
-                "The temporal functions take DATE, TIMESTAMP or TIMESTAMP_TZ (docs/design/02-ir.md §6).");
+                "The temporal functions take DATE, TIMESTAMP or TIMESTAMP_TZ.");
         }
     }
 
@@ -464,7 +476,8 @@ internal static class KernelRegistry
     {
         var operands = string.Join(", ", args.Select(a => IrTypes.Describe(a.Type)));
         return new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedFunction,
             $"{function}({operands})",
-            "It is outside the M1 kernel set (the ✔ column of docs/design/02-ir.md §6).");
+            "This executor does not implement it for these argument types.");
     }
 }

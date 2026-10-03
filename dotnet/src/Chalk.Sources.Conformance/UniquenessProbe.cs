@@ -107,7 +107,7 @@ internal static class UniquenessProbe
                     Outcome = ConformanceOutcome.Fail,
                     Advice = "Remove the declaration. Calcite's join-removal rules delete a join "
                         + "outright on the strength of a unique key, so a false one returns too "
-                        + "few rows rather than too many (F16).",
+                        + "few rows rather than too many.",
                 };
             }
 

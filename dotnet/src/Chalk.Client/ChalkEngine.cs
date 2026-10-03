@@ -81,7 +81,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// <summary>
     /// What this engine has actually registered on its planner connection (D271 (b)). A registration
     /// is sent only when a version is new here, and a plan answered with
-    /// <see cref="PlanErrorKind.UnknownCatalogVersion"/> registers again and retries once. Guarded by
+    /// <see cref="PlanErrorKinds.UnknownCatalogVersion"/> registers again and retries once. Guarded by
     /// <see cref="_registering"/> rather than by the refresh lock, because the recovery path runs
     /// from a prepare and must not wait behind a refresh it does not need.
     /// </summary>
@@ -310,6 +310,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                     if (!string.IsNullOrEmpty(dialect) && !DialectIsAccepted(dialect, info.Dialects))
                     {
                         throw new CatalogValidationException(
+                            ChalkErrorCodes.InvalidCapabilities,
                             $"schemas ({schema.SourceId})",
                             $"dialect '{dialect}' is not one of the presets this planner accepts: "
                             + string.Join(", ", info.Dialects.Select(d => d.Name))
@@ -326,6 +327,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 if (profile.Conformance is { } conformance && Unknown(conformance.Name, info.Conformances.Select(c => c.Name)))
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidCapabilities,
                         $"schemas ({schema.SourceId})",
                         $"conformance '{conformance}' is not a level this planner accepts: "
                         + string.Join(", ", info.Conformances) + ".");
@@ -336,6 +338,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                     if (Unknown(library.Name, info.Libraries.Select(l => l.Name)))
                     {
                         throw new CatalogValidationException(
+                            ChalkErrorCodes.InvalidCapabilities,
                             $"schemas ({schema.SourceId})",
                             $"library '{library}' is not one this planner has: " + string.Join(", ", info.Libraries) + ".");
                     }
@@ -1378,7 +1381,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         throw new ArgumentException(
             $"the refresh names the table '{target.Table}' on source '{source.SourceId}', which does "
             + "not declare it. A table is named by its schema and its own name together, and never by "
-            + "its name alone (D271 (h)).",
+            + "its name alone.",
             parameterName);
     }
 
@@ -1548,7 +1551,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         {
             await _options.Planner.RegisterCatalogAsync(delta, ct).ConfigureAwait(false);
         }
-        catch (PlanningException failure) when (failure.Kind == Chalk.Client.Rpc.PlanErrorKind.UnknownCatalogVersion)
+        catch (PlanningException failure) when (failure.Kind == PlanErrorKinds.UnknownCatalogVersion)
         {
             // The planner no longer holds the base — it evicted it, or it restarted. Memory policy,
             // recovered here: the whole catalog, and the numbers with it, because a planner that lost
@@ -1802,7 +1805,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             {
                 result = await _options.Planner.PlanAsync(request, ct).ConfigureAwait(false);
             }
-            catch (PlanningException failure) when (failure.Kind == Chalk.Client.Rpc.PlanErrorKind.UnknownCatalogVersion)
+            catch (PlanningException failure) when (failure.Kind == PlanErrorKinds.UnknownCatalogVersion)
             {
                 // The planner evicted this version, or it restarted (D271 (b), (e)). Memory policy
                 // and never correctness: register the version again and retry exactly once. A host
@@ -1819,14 +1822,17 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         {
             // What was refused as a host reads it, and the table model in the layouts this engine
             // declares its schemas in (D329); remembered for the next identical request (D330).
-            refused.Refusal ??= refused.WireRefusal is { } wire
-                ? Chalk.Entitlements.EntitlementRefusal.From(wire, _settings.OutputStrings)
-                : null;
+            if (refused.Refusals.Count == 0 && refused.WireError is { } wire)
+            {
+                refused.Refusals = Chalk.Entitlements.EntitlementRefusal.From(wire, _settings.OutputStrings);
+            }
+
             _refusals.Remember(new RefusalMemo.Remembered(
                 refusalKey ?? RefusalMemo.Key(request),
+                refused.Violations,
                 refused.PlannerMessage,
                 refused.Position,
-                refused.Refusal));
+                refused.Refusals));
             throw;
         }
 
@@ -1850,7 +1856,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         {
             // The one limit, held here for a planner that hands over a plan without parsing one
             // (F102, F161): refused by name, never as the stack overflow reading it could be.
-            throw new PlanningException(PlanErrorKind.Internal, tooDeep.Message, position: null, tooDeep);
+            throw new PlanningException(
+                ChalkErrorCodes.PlanTooDeep,
+                PlanErrorKinds.Internal, tooDeep.Message, position: null, planningState: null, tooDeep);
         }
 
         return result;

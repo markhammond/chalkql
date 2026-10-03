@@ -1,5 +1,6 @@
 package chalk.planner.plan;
 
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -108,6 +109,7 @@ public final class LateralCorrelationSupport {
   private static UnsupportedFeatureException refusal(String column, Set<String> tables) {
     List<String> named = new ArrayList<>(tables);
     return new UnsupportedFeatureException(
+        ErrorCode.UNSUPPORTED_SQL,
         "a LATERAL sub-query that constrains "
             + named.get(0)
             + " and "
@@ -117,7 +119,7 @@ public final class LateralCorrelationSupport {
         "Calcite's general decorrelator rewrites that into a join which keeps only one of the two "
             + "equalities, so one side would range over every row of its table and the sub-query "
             + "would answer about rows belonging to another outer row. Chalk refuses it rather "
-            + "than answering wrongly (docs/design/14-windows-ii.md §8). Write the second "
+            + "than answering wrongly. Write the second "
             + "constraint through the first — "
             + named.get(1)
             + " against "

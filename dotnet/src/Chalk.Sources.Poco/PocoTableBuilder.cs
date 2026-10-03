@@ -681,7 +681,7 @@ public sealed class PocoTableBuilder<T>
         {
             throw new ArgumentException(
                 "A collation key needs an explicit direction: Calcite compares collations including the "
-                + "null direction, so an unspecified one never satisfies an ORDER BY (V3).",
+                + "null direction, so an unspecified one never satisfies an ORDER BY.",
                 nameof(direction));
         }
 
@@ -726,6 +726,7 @@ public sealed class PocoTableBuilder<T>
             if (!byMember.ContainsKey(name) && !_ignored.Contains(name))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.UnknownName,
                     $"table '{_table}'",
                     $"Column(…) names '{name}', which is not a public instance property or field of {typeof(T).Name} "
                     + "(or is excluded by [ChalkIgnore]).");
@@ -754,6 +755,7 @@ public sealed class PocoTableBuilder<T>
         if (columns.Count == 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.IncompleteDeclaration,
                 $"table '{_table}'",
                 $"{typeof(T).Name} contributes no columns. A table needs at least one public instance "
                 + "property or field, or a Column(name, projection).");
@@ -773,9 +775,10 @@ public sealed class PocoTableBuilder<T>
         if (!rows.RandomAccess && collations.Length > 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidIndex,
                 $"table '{_table}'",
                 "the collection was registered as an IReadOnlyCollection<T>, which only enumerates, so "
-                + "its position order is not addressable and it cannot declare a collation (§1). "
+                + "its position order is not addressable and it cannot declare a collation. "
                 + "Register an IReadOnlyList<T>, or drop the OrderedBy declaration.");
         }
 
@@ -866,6 +869,7 @@ public sealed class PocoTableBuilder<T>
             if (!randomAccess)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidIndex,
                     $"table '{_table}'",
                     "a built-in index is a permutation of row positions, so it needs an "
                     + "IReadOnlyList<T>. Register the collection as a list, or supply your own "
@@ -936,6 +940,7 @@ public sealed class PocoTableBuilder<T>
             if (!names.Add(descriptor.Name))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.DuplicateName,
                     $"table '{_table}'",
                     $"index name '{descriptor.Name}' is declared twice");
             }
@@ -945,6 +950,7 @@ public sealed class PocoTableBuilder<T>
                 if (column < 0 || column >= columns.Length)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.ColumnIndexOutOfRange,
                         $"table '{_table}' index '{descriptor.Name}'",
                         $"key column {column} is out of range for a table of {columns.Length} columns. "
                         + "An index's key columns are indexes into the table's columns, in key order.");
@@ -975,6 +981,7 @@ public sealed class PocoTableBuilder<T>
                 && Array.FindIndex(columns, c => c.Type.Kind == Chalk.Ir.TypeKind.Composite) is var composite and >= 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidIndex,
                     $"table '{_table}' index '{name}'",
                     $"a clustered index with no covering set copies every column, and '{columns[composite].Name}' "
                     + "is a composite column, which a clustered copy never carries. Name the covering set "
@@ -1045,6 +1052,7 @@ public sealed class PocoTableBuilder<T>
             if (columns[column].Type.Kind == Chalk.Ir.TypeKind.Composite)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.UnsupportedType,
                     $"table '{_table}' Statistics(…)",
                     $"'{columns[column].Name}' is a composite column, which carries no statistics: none of "
                     + "its values compares with another.");
@@ -1057,6 +1065,7 @@ public sealed class PocoTableBuilder<T>
         if (column >= 0 && column < columns.Length && columns[column].Type.Kind == Chalk.Ir.TypeKind.Composite)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.IncomparableType,
                 $"table '{_table}' {declaration}",
                 $"'{columns[column].Name}' is a composite column and cannot be {what}: a composite value "
                 + "has no ordering or equality, so nothing is keyed, indexed or ordered on one. Declare the "
@@ -1098,6 +1107,7 @@ public sealed class PocoTableBuilder<T>
         byMember.TryGetValue(member, out var index)
             ? index
             : throw new CatalogValidationException(
+                ChalkErrorCodes.UnknownName,
                 $"table '{_table}'",
                 $"'{member}' is named by a collation, a unique key or an index but is not one of the "
                 + "table's columns. "

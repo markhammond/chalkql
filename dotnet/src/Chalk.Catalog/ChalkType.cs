@@ -89,8 +89,8 @@ public readonly record struct ChalkType(TypeKind Kind, bool Nullable, int Precis
         if (element.Kind == TypeKind.List)
         {
             throw new ArgumentException(
-                "a LIST's element may not itself be a LIST: v1 lists are one level deep "
-                + "(docs/design/14-windows-ii.md §5).",
+                "a LIST's element may not itself be a LIST: a list is one level deep, and its elements "
+                + "are scalars.",
                 nameof(element));
         }
 

@@ -276,6 +276,7 @@ internal static class Rounding
         }
 
         throw new Chalk.Sources.UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedFunction,
             $"ROUND over CLR type {typeof(T).Name}",
             "ROUND with a digit count is computed for double and float lanes.");
     }

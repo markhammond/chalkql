@@ -161,12 +161,12 @@ public sealed class TenancyEntitlements
         if (_shared.TryGetValue(table, out var shared))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidGrant,
                 "tenancy.reconcile",
                 $"the reference names the table '{table}' and no schema, and this policy speaks "
                 + $"about {string.Join(" and ", shared.Select(name => "'" + name + "'"))}. Which of "
                 + "them a row of this plan came from decides what it must disclose, so answering "
-                + "for one of them would be a guess: reconcile a plan whose reads name their schema "
-                + "(docs/design/45-typed-tenancy-surface.md §1, ADR 0056 §7.7).");
+                + "for one of them would be a guess: reconcile a plan whose reads name their schema.");
         }
 
         return null;
@@ -252,13 +252,14 @@ public sealed class TenancyEntitlements
             if (!_lists.Any(list => string.Equals(list.Kind, kind, StringComparison.Ordinal)))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidGrant,
                     "tenancy.grants",
                     $"'{kind}' is not a dimension this policy declares, so there is nothing of it to "
                     + "fold. Name one of "
                     + string.Join(
                         ", ",
                         _lists.Select(l => l.Kind).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
-                    + " (docs/design/16-entitlements.md §2.1, D232).");
+                    + ".");
             }
         }
 
@@ -538,6 +539,7 @@ public sealed class TenancyEntitlements
         if (!_policy.Roles.Contains(grant.Role, StringComparer.Ordinal))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidGrant,
                 "tenancy.grants",
                 $"the grant names role '{grant.Role}', which this policy does not declare "
                 + $"({string.Join(", ", _policy.Roles)})");
@@ -546,6 +548,7 @@ public sealed class TenancyEntitlements
         if (grant.ScopeName.Length > 0 && !_policy.Scopes.Contains(grant.ScopeName, StringComparer.Ordinal))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidGrant,
                 "tenancy.grants",
                 $"the grant names scope '{grant.ScopeName}', which this policy does not declare");
         }
@@ -555,11 +558,11 @@ public sealed class TenancyEntitlements
             if (!_policy.AllowsGlobalGrants)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidGrant,
                     "tenancy.grants",
                     "this principal holds a global grant and the policy does not permit them "
                     + "(AllowGlobalGrants is off, which is the default): a tier that may see every "
-                    + "tenancy is a decision a deployment makes once, not one a request makes "
-                    + "(docs/design/16-entitlements.md §5, D205).");
+                    + "tenancy is a decision a deployment makes once, not one a request makes.");
             }
 
             return;
@@ -573,6 +576,7 @@ public sealed class TenancyEntitlements
                 && list.IsSubject == grant.IsSubject))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidGrant,
                 "tenancy.grants",
                 $"the grant names {(grant.IsSubject ? "subject" : "tenancy")} dimension "
                 + $"'{grant.Kind}', which no table of this policy declares");
@@ -586,14 +590,14 @@ public sealed class TenancyEntitlements
         if (grant.IsSubject && grant.Confinements.Count == 0 && !grant.Unconfined)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidGrant,
                 "tenancy.grants",
                 $"a subject grant must name the tenancy it is confined to, or Tenancy.Anywhere: the "
                 + $"grant on '{grant.Kind}' names neither. Write "
                 + $"Grant.ForSubject({grant.Kind}, …, within: <tenancy>) or .Within(kind, id) "
                 + "for the confined grant, and "
                 + $"Grant.ForSubject({grant.Kind}, …, within: Tenancy.Anywhere) for one that "
-                + "reaches every tenancy (docs/design/16-entitlements.md §5, "
-                + "docs/design/40-conjoined-confinement.md §1, D266).");
+                + "reaches every tenancy.");
         }
 
         // Which kinds may confine which is the policy's own declaration (D266 §2): a subject kind
@@ -608,33 +612,33 @@ public sealed class TenancyEntitlements
             if (kind.Length == 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidGrant,
                     "tenancy.grants",
                     $"the grant on '{grant.Kind}' is confined to a tenancy and this policy declares "
                     + $"no kind that may confine '{grant.Kind}'. Declare one — "
                     + $"Subject(\"{grant.Kind}\", within: [<kind>]) for a subject, a second tenancy "
-                    + "kind for a container — or hold the grant unconfined "
-                    + "(docs/design/40-conjoined-confinement.md §2, D266).");
+                    + "kind for a container — or hold the grant unconfined.");
             }
 
             if (!permitted.Contains(kind, StringComparer.Ordinal))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidGrant,
                     "tenancy.grants",
                     $"the grant on '{grant.Kind}' is confined along '{kind}', which this policy does "
                     + $"not declare as a kind that may confine '{grant.Kind}'. It declares "
-                    + $"{TenancyCompiler.Named(permitted)} (docs/design/40-conjoined-confinement.md "
-                    + "§2, D266).");
+                    + $"{TenancyCompiler.Named(permitted)}.");
             }
 
             if (named.Contains(kind, StringComparer.Ordinal))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidGrant,
                     "tenancy.grants",
                     $"the grant on '{grant.Kind}' names the confining kind '{kind}' twice — once "
                     + "through Within and once through the within: sugar, which means the first "
                     + $"kind the declaration names. All the confinements of one grant must hold at "
-                    + "once, so two of one kind would reach no row at all "
-                    + "(docs/design/40-conjoined-confinement.md §1, D266).");
+                    + "once, so two of one kind would reach no row at all.");
             }
 
             named.Add(kind);
@@ -655,14 +659,14 @@ public sealed class TenancyEntitlements
         if (!_lists.Any(list => Carries(grant, list)))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidGrant,
                 "tenancy.grants",
                 $"the grant on {(grant.IsSubject ? "subject" : "tenancy")} dimension "
                 + $"'{grant.Kind}' names role '{grant.Role}', and no table that resolves "
                 + $"'{grant.Kind}' admits that role — so there is no membership the grant could fill "
                 + "and it would reach nothing. The roles this policy holds a membership of "
                 + $"'{grant.Kind}' for are {AnswerableRoles(grant)}. Name one of those, or admit "
-                + $"'{grant.Role}' on a table that resolves '{grant.Kind}' "
-                + "(docs/design/40-conjoined-confinement.md §3, D266, F99).");
+                + $"'{grant.Role}' on a table that resolves '{grant.Kind}'.");
         }
 
         // And the group the grant would fill has to exist. The clause above asks what the *policy*
@@ -675,6 +679,7 @@ public sealed class TenancyEntitlements
         {
             var kinds = TenancyCompiler.Named(named);
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidGrant,
                 "tenancy.grants",
                 $"the grant on '{grant.Kind}' is confined along {kinds}, and no table of this policy "
                 + $"resolves '{grant.Kind}' and {kinds} on one row — so there is no membership the "
@@ -684,7 +689,7 @@ public sealed class TenancyEntitlements
                 + AlongAPath(grant, named)
                 + "A confined grant applies to a table where its own kind and every confining kind "
                 + "resolve on that table: hold the grant unconfined, or declare the dimension on a "
-                + "table that has both (docs/design/40-conjoined-confinement.md §3, D266).");
+                + "table that has both.");
         }
 
         _ = principal;
@@ -712,6 +717,7 @@ public sealed class TenancyEntitlements
             if (!declared.Any(c => c.Is(kinds)))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.UndeclaredCombination,
                     "tenancy.grants",
                     $"the grant holds {{{string.Join(", ", kinds)}}} in role '{grant.Role}', which is "
                     + $"no combination this policy declares for '{grant.Role}' — "
@@ -720,20 +726,19 @@ public sealed class TenancyEntitlements
                         : $"it declares {string.Join(", ", declared)}")
                     + ". A policy that declares combinations compiles those and nothing else, so a "
                     + "grant of any other shape, one kind alone included, is refused rather than "
-                    + "left to reach less, or more, than was meant "
-                    + "(docs/design/59-declared-combinations.md §3, D320).");
+                    + "left to reach less, or more, than was meant.");
             }
 
             if (!_lists.Any(list => Answers(list, grant.Role, kinds)))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.UndeclaredCombination,
                     "tenancy.grants",
                     $"the grant holds {{{string.Join(", ", kinds)}}} in role '{grant.Role}', a "
                     + "combination this policy declares, and no table of the policy admits "
                     + $"'{grant.Role}' where that combination has a route — so it would reach nothing. "
                     + $"Admit '{grant.Role}' on a table that holds those kinds on one row, or on one "
-                    + "path's endpoint read beside the row "
-                    + "(docs/design/59-declared-combinations.md §2, D320).");
+                    + "path's endpoint read beside the row.");
             }
 
             return;
@@ -745,13 +750,14 @@ public sealed class TenancyEntitlements
             if (!_lists.Any(list => Answers(list, grant.Role, kinds)))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidGrant,
                     "tenancy.grants",
                     $"the grant on tenancy dimension '{grant.Kind}' names role '{grant.Role}', and no "
                     + $"table that resolves '{grant.Kind}' admits that role — so there is no "
                     + "membership the grant could fill and it would reach nothing. The roles this "
                     + $"policy holds a membership of '{grant.Kind}' for are {AnswerableRoles(grant)}. "
                     + $"Name one of those, or admit '{grant.Role}' on a table that resolves "
-                    + $"'{grant.Kind}' (docs/design/40-conjoined-confinement.md §3, D266, F99).");
+                    + $"'{grant.Kind}'.");
             }
 
             return;
@@ -762,6 +768,7 @@ public sealed class TenancyEntitlements
         if (!_lists.Any(list => Answers(list, grant.Role, kinds)))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidGrant,
                 "tenancy.grants",
                 $"the grant holds {{{string.Join(", ", kinds)}}} in role '{grant.Role}', and no "
                 + "table of this policy answers those kinds together — on one row, or on one path's "
@@ -769,8 +776,7 @@ public sealed class TenancyEntitlements
                 + $"answers for '{grant.Role}' with '{grant.Kind}' among them is: "
                 + $"{AnswerableSets(grant.Role, grant.Kind)}. "
                 + AlongAPath(grant, named)
-                + "Declare the kinds together on one row, or hold the grant confined along fewer "
-                + "(docs/design/40-conjoined-confinement.md §3, D266; F158).");
+                + "Declare the kinds together on one row, or hold the grant confined along fewer.");
         }
     }
 
@@ -901,7 +907,7 @@ public sealed class TenancyEntitlements
                     + "conjoined confinement across a path is decided over the target's own row and "
                     + "one endpoint's together, and two endpoints are two rows neither of which "
                     + $"holds the other's kind. Either '{other.Kind}' is declared directly on "
-                    + $"'{model.Declared.Name}', or the grant is held unconfined (F101). ";
+                    + $"'{model.Declared.Name}', or the grant is held unconfined. ";
             }
 
             foreach (var parent in model.Through)
@@ -923,7 +929,7 @@ public sealed class TenancyEntitlements
                     + "conjoined confinement across a path is decided over the target's own row and "
                     + "the endpoint's, so a kind one join further out is on neither. Either "
                     + $"{TenancyCompiler.Named(onParent)} is declared directly on "
-                    + $"'{model.Declared.Name}', or the grant is held unconfined (F101). ";
+                    + $"'{model.Declared.Name}', or the grant is held unconfined. ";
             }
 
             // The third near miss, and the one F101 was reported for: the confining kind is on the
@@ -941,10 +947,9 @@ public sealed class TenancyEntitlements
                     + $"{TenancyCompiler.Named(onTarget)} on its own row and reaches '{path.Kind}' "
                     + $"along a Related path whose endpoint is '{path.EndpointTable}' — a path whose "
                     + "first step goes up, to a bridge. A conjoined confinement along a Related kind "
-                    + "would have to be borne by the path's existence marker, and that is refused in "
-                    + "this decision (docs/design/40-conjoined-confinement.md §3, §7, D266). Either "
-                    + $"'{path.Kind}' resolves on '{model.Declared.Name}' directly, or the grant is "
-                    + "held unconfined (F101). ";
+                    + "would have to be borne by the path's existence marker, which ChalkQL does not "
+                    + $"build. Either '{path.Kind}' resolves on '{model.Declared.Name}' directly, or "
+                    + "the grant is held unconfined. ";
             }
         }
 

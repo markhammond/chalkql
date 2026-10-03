@@ -2,16 +2,17 @@ package chalk.planner.entitlement;
 
 import chalk.ir.v1.CatalogContext;
 import chalk.ir.v1.ColumnEntitlement;
+import chalk.ir.v1.Disclosure;
 import chalk.ir.v1.DisclosureRule;
 import chalk.ir.v1.Schema;
 import chalk.ir.v1.Table;
 import chalk.ir.v1.TableEntitlement;
+import chalk.planner.ErrorCode;
 import chalk.planner.catalog.ChalkTable;
 import chalk.planner.catalog.InvalidCatalogException;
 import chalk.planner.catalog.UserFunctions;
 import chalk.planner.plan.ChalkOperatorTable;
 import chalk.planner.plan.SqlConfigs;
-import chalk.ir.v1.Disclosure;
 import chalk.planner.types.ChalkTypeSystem;
 import java.util.BitSet;
 import java.util.List;
@@ -216,13 +217,14 @@ public final class EntitlementRegistration {
         String function = column.getAggregateOnlyFunctions(f);
         if (!PopulationAggregates.isPermitted(function, functions)) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_ENTITLEMENT,
               columnPath + ".aggregate_only_functions[" + f + "]",
-              "'" + function + "' is not a population aggregate (D190). MIN, MAX, ANY_VALUE, the"
+              "'" + function + "' is not a population aggregate. MIN, MAX, ANY_VALUE, the"
                   + " positional and holistic aggregates, every string aggregate and any"
                   + " user-defined aggregate not declared Population() each report an individual"
                   + " row's value. A user-defined aggregate may be named here once its host declares"
                   + " it Population(), promising that its result reports the group and never one"
-                  + " row's value (D295).");
+                  + " row's value.");
         }
       }
 
@@ -251,11 +253,12 @@ public final class EntitlementRegistration {
         if (!rules.get(r).getPlaceholder().isBlank()
             && normalise(rules.get(r).getThen()) != Disclosure.DISCLOSURE_NONE) {
           throw new InvalidCatalogException(
+              ErrorCode.INVALID_ENTITLEMENT,
               rulePlaceholderPath,
               "on " + where + ", the rule for '" + name(rowType, column.getColumn())
                   + "' discloses " + spelling(rules.get(r).getThen()) + " and states a placeholder."
                   + " A placeholder is what stands in for a value the rule withholds, so it is"
-                  + " meaningful only with NONE (docs/design/16-entitlements.md §3.11, D224). The"
+                  + " meaningful only with NONE. The"
                   + " text is: " + rules.get(r).getPlaceholder());
         }
         RexNode rulePlaceholder =
@@ -488,9 +491,10 @@ public final class EntitlementRegistration {
         throw refusal;
       }
       throw new InvalidCatalogException(
+          ErrorCode.MASK_READS_PROTECTED_COLUMN,
           field,
           "on " + where + ", " + what + " reads '" + parent + "', a parent this table is entitled"
-              + " through. " + why + " (docs/design/16-entitlements.md §3.13, D225, D228). The"
+              + " through. " + why + ". The"
               + " text is: " + sql);
     }
   }
@@ -590,10 +594,11 @@ public final class EntitlementRegistration {
     Disclosure then = normalise(rule.getThen());
     if (then == Disclosure.DISCLOSURE_TEST && rule.getTestsCount() == 0) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_ENTITLEMENT,
           path,
           "on " + where + ", the rule for '" + column + "' discloses TEST and names no comparison"
               + " shape, so it discloses neither the value nor any comparison of it"
-              + " (docs/design/36-test-verdict.md §1). Name the shapes — EQUALS, NOT_EQUALS, IN —"
+              + ". Name the shapes — EQUALS, NOT_EQUALS, IN —"
               + " or say NONE and mean it.");
     }
 
@@ -601,17 +606,19 @@ public final class EntitlementRegistration {
         && then != Disclosure.DISCLOSURE_TEST
         && then != Disclosure.DISCLOSURE_AGGREGATE_ONLY) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_ENTITLEMENT,
           path,
           "on " + where + ", the rule for '" + column + "' discloses " + spelling(rule.getThen())
               + " and names comparison shapes, which could never be reached. A shape is what a"
               + " principal may test without reading the value, so it belongs on a TEST rule, or on"
-              + " an AGGREGATE_ONLY rule as the FILTER of a permitted aggregate (D261).");
+              + " an AGGREGATE_ONLY rule as the FILTER of a permitted aggregate.");
     }
 
     for (int t = 0; t < rule.getTestsCount(); t++) {
       if (rule.getTests(t) == chalk.ir.v1.TestShape.TEST_SHAPE_UNSPECIFIED
           || rule.getTests(t) == chalk.ir.v1.TestShape.UNRECOGNIZED) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_ENTITLEMENT,
             path + "[" + t + "]",
             "on " + where + ", the rule for '" + column + "' names a comparison shape that is not"
                 + " one of the three. Say EQUALS, NOT_EQUALS or IN.");
@@ -620,10 +627,11 @@ public final class EntitlementRegistration {
 
     if (rule.getTestsCount() > 0 && declared != null && !hasEquality(declared)) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_ENTITLEMENT,
           path,
           "on " + where + ", the rule permits a comparison of '" + column + "', which is "
               + declared.getSqlTypeName()
-              + " — a type Chalk states no equality for (D58), so no comparison of it could be"
+              + " — a type Chalk states no equality for, so no comparison of it could be"
               + " computed at the leaf. A test verdict needs a column whose values compare.");
     }
   }
@@ -644,10 +652,12 @@ public final class EntitlementRegistration {
           || then == Disclosure.DISCLOSURE_AGGREGATE_ONLY
           || then == Disclosure.DISCLOSURE_TEST) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_ENTITLEMENT,
             columnPath + ".rules[" + r + "]", wholeOrNothing(name, where, then));
       }
       if (!column.getRules(r).getPlaceholder().isBlank() || !column.getRules(r).getMask().isBlank()) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_ENTITLEMENT,
             columnPath + ".rules[" + r + "]",
             "on " + where + ", '" + name + "' is a COMPOSITE column and the rule states a "
                 + (column.getRules(r).getMask().isBlank() ? "placeholder" : "mask")
@@ -660,10 +670,12 @@ public final class EntitlementRegistration {
         || otherwise == Disclosure.DISCLOSURE_AGGREGATE_ONLY
         || otherwise == Disclosure.DISCLOSURE_TEST) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_ENTITLEMENT,
           columnPath + ".otherwise", wholeOrNothing(name, where, otherwise));
     }
     if (!column.getMask().isBlank() || !column.getPlaceholder().isBlank()) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_ENTITLEMENT,
           columnPath,
           "on " + where + ", '" + name + "' is a COMPOSITE column and states a "
               + (column.getMask().isBlank() ? "placeholder" : "mask")
@@ -672,6 +684,7 @@ public final class EntitlementRegistration {
     }
     if (column.getAggregateOnlyFunctionsCount() > 0 || column.getStatistical()) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_ENTITLEMENT,
           columnPath,
           "on " + where + ", '" + name + "' is a COMPOSITE column and states "
               + (column.getStatistical() ? "the statistical opt-in" : "an aggregate allow-list")
@@ -724,12 +737,13 @@ public final class EntitlementRegistration {
         continue;
       }
       throw new InvalidCatalogException(
+          ErrorCode.MASK_READS_PROTECTED_COLUMN,
           field,
           "on " + where + ", " + what + " for '" + name(rowType, own) + "' reads '"
               + name(rowType, column) + "', which is itself a protected column. A mask is evaluated"
               + " over the raw row, so this one would disclose '" + name(rowType, column)
               + "' inside '" + name(rowType, own) + "' to a principal entitled to neither"
-              + " (docs/design/16-entitlements.md §1, D220). A mask may read its own column, an"
+              + ". A mask may read its own column, an"
               + " unprotected column and the context; a rule condition may read anything. The text"
               + " is: " + sql);
     }
@@ -754,12 +768,13 @@ public final class EntitlementRegistration {
       return;
     }
     throw new InvalidCatalogException(
+        ErrorCode.MASK_READS_PROTECTED_COLUMN,
         field,
         "on " + where + ", the placeholder for '" + name(rowType, own) + "' reads '"
             + name(rowType, own) + "' itself. A placeholder stands in for a value that is withheld,"
             + " and the disclosure stays REDACTED, so one holding the column's own value would"
             + " disclose exactly what it claims to have withheld"
-            + " (docs/design/16-entitlements.md §3.11, D224). A rule that means to show something"
+            + ". A rule that means to show something"
             + " derived from the value discloses MASKED and states a mask. The text is: " + sql);
   }
 
@@ -791,7 +806,9 @@ public final class EntitlementRegistration {
     try {
       chalk.planner.ReservedNames.check(sql, what);
     } catch (chalk.planner.ReservedNames.ReservedNameException reserved) {
-      throw new InvalidCatalogException(field, "on " + where + ", " + reserved.getMessage());
+      throw new InvalidCatalogException(
+          ErrorCode.INVALID_ENTITLEMENT,
+          field, "on " + where + ", " + reserved.getMessage());
     }
 
     if (sql.isBlank() || RegistrationFold.isBareContextReference(sql)) {
@@ -805,6 +822,7 @@ public final class EntitlementRegistration {
       converted = converter.convert(List.of("(" + sql + ")"), qualified, parents, where).get(0);
     } catch (PolicyException refusal) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_ENTITLEMENT,
           field, refusal.getMessage() + " The text is: " + sql);
     }
 
@@ -812,20 +830,22 @@ public final class EntitlementRegistration {
     if (expected == null) {
       if (!SqlTypeUtil.inBooleanFamily(actual)) {
         throw new InvalidCatalogException(
+            ErrorCode.INVALID_ENTITLEMENT,
             field,
             "on " + where + ", " + what + " is not boolean but " + name(typeFactory, actual)
-                + " (docs/design/16-entitlements.md §1). The text is: " + sql);
+                + ". The text is: " + sql);
       }
       return converted;
     }
 
     if (!assignable(expected, actual)) {
       throw new InvalidCatalogException(
+          ErrorCode.TYPE_MISMATCH,
           field,
           "on " + where + ", " + what + " type " + name(typeFactory, actual)
               + " does not match column type " + name(typeFactory, expected)
-              + " (docs/design/16-entitlements.md §1: a mask and a placeholder have the column's"
-              + " type, so every principal gets the same row shape). The text is: " + sql);
+              + ": a mask and a placeholder have the column's type, so every principal gets the"
+              + " same row shape. The text is: " + sql);
     }
 
     return converted;

@@ -418,7 +418,7 @@ internal sealed class ParameterRewriter
             {
                 throw new ArgumentException(
                     $"the statement mixes parameter styles: '{_firstStyleToken}' is {Style} but '{token}' is "
-                    + $"{style}. Use one style per statement (docs/design/04-client.md §7.3).");
+                    + $"{style}. Use one style per statement.");
             }
         }
 

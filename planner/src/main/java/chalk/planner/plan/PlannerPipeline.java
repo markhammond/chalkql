@@ -853,11 +853,11 @@ public final class PlannerPipeline implements AutoCloseable {
       // Refusing it by name is the fail-closed answer, and it now names both ways out (§2, D209).
       if (context.isEmpty() && !context.shapeOnly()) {
         throw new chalk.planner.entitlement.PolicyException(
-            chalk.planner.rpc.v1.PolicyRefusalReason.POLICY_REFUSAL_REASON_NO_CONTEXT,
+            chalk.planner.ErrorCode.CONTEXT_REQUIRED,
             "this catalog carries an entitlement and the request binds no execution context, so"
                 + " there is nothing for the policy's @ctx names to resolve against. Prepare with a"
                 + " context — the primary mode — or with a shape-only one and bind the values at"
-                + " execution (docs/design/16-entitlements.md §2, D152, D209).");
+                + " execution.");
       }
       stages.add(STAGE_ENTITLEMENTS);
       chalk.planner.entitlement.EntitlementPass.Result rewritten =
@@ -1128,8 +1128,7 @@ public final class PlannerPipeline implements AutoCloseable {
                   .replace('_', ' ')
               + " after "
               + governor.evaluations()
-              + " rule evaluations). Raise the time budget, or prepare without one"
-              + " (docs/design/30-planning-options.md, D235).",
+              + " rule evaluations). Raise the time budget, or prepare without one.",
           cause);
       this.state =
           new PlanningState(
@@ -1186,12 +1185,13 @@ public final class PlannerPipeline implements AutoCloseable {
     String detail = String.valueOf(failure.getMessage());
     int newline = detail.indexOf('\n');
     return new chalk.planner.UnsupportedFeatureException(
+        chalk.planner.ErrorCode.UNSUPPORTED_SQL,
         "correlated subquery could not be decorrelated: a LATERAL or correlated sub-query whose "
             + "decorrelated form Calcite cannot re-type ("
             + (newline < 0 ? detail : detail.substring(0, newline))
             + ")",
         "Chalk decorrelates LATERAL and correlated sub-queries into ordinary joins and never "
-            + "re-runs the right side per left row (docs/design/14-windows-ii.md §8). An aggregate "
+            + "re-runs the right side per left row. An aggregate "
             + "on the inner side of a CROSS JOIN LATERAL is the shape Calcite 1.42 cannot rewrite; "
             + "LEFT JOIN LATERAL (…) ON TRUE decorrelates cleanly and means the same thing when "
             + "every left row has a match.");

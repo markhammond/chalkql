@@ -205,6 +205,7 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
             if (!named.Add(table.Name))
             {
                 throw new SourceContractException(
+                    ChalkErrorCodes.SourceRefresh,
                     SourceId,
                     entry.Table,
                     "a refresh names this table twice. One transaction says what a table becomes "
@@ -214,6 +215,7 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
             if (entry.RowType != table.RowType)
             {
                 throw new SourceContractException(
+                    ChalkErrorCodes.SourceRefresh,
                     SourceId,
                     entry.Table,
                     $"the rows are {entry.RowType.Name}, but this table was built over "
@@ -322,6 +324,7 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
             // §4: a source that never declared a pushable predicate must refuse one rather than
             // quietly ignore it, which would return too many rows.
             throw new SourceContractException(
+                ChalkErrorCodes.SourceContract,
                 SourceId,
                 request.Table,
                 "a filter was pushed down, but this source declares SourceCapabilities.None.");
@@ -355,6 +358,7 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
         if (request.PushedFilter is not null)
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceContract,
                 SourceId,
                 request.Table,
                 "a filter was pushed down, but this source declares SourceCapabilities.None.");
@@ -375,6 +379,7 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
     private PocoTableRuntime Require(string name) =>
         _tables.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))
         ?? throw new SourceContractException(
+            ChalkErrorCodes.SourceContract,
             SourceId,
             name,
             $"there is no such table in schema '{SchemaName}'. Known tables: "
@@ -586,6 +591,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         if (entry.Rows is not IReadOnlyList<T>)
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
                 sourceId,
                 entry.Table,
                 $"the rows are {entry.Rows.GetType().Name}, which is not an "
@@ -595,16 +601,18 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         if (entry.Kind is SourceRefreshKind.Append && !_factory.RandomAccess)
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
                 sourceId,
                 entry.Table,
                 "the collection was registered as an IReadOnlyCollection<T>, which only enumerates, "
-                + "so there are no positions to append after (§1). Register an IReadOnlyList<T>, or "
+                + "so there are no positions to append after. Register an IReadOnlyList<T>, or "
                 + "replace the table's rows instead of appending to them.");
         }
 
         if (entry.Kind is not (SourceRefreshKind.Replace or SourceRefreshKind.Append))
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
                 sourceId,
                 entry.Table,
                 $"{entry.Kind} is not something this table can do.");
@@ -922,6 +930,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         if (ordinal < 0)
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceContract,
                 sourceId,
                 Name,
                 $"there is no index named '{request.Index}' on this table. Declared: "
@@ -936,6 +945,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             if (range.BoundedColumns > index.Descriptor.Columns.Count)
             {
                 throw new SourceContractException(
+                    ChalkErrorCodes.SourceContract,
                     sourceId,
                     Name,
                     $"a range bounds {range.BoundedColumns} key column(s) but index "
@@ -945,6 +955,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             if (index.Descriptor.Kind == Chalk.Ir.IndexKind.Hash && !IsEquality(range))
             {
                 throw new SourceContractException(
+                    ChalkErrorCodes.SourceContract,
                     sourceId,
                     Name,
                     $"index '{index.Descriptor.Name}' is a hash index and answers equality only, but "
@@ -957,6 +968,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             if (index.Descriptor.Kind == Chalk.Ir.IndexKind.Prefix && range.Prefix is null)
             {
                 throw new SourceContractException(
+                    ChalkErrorCodes.SourceContract,
                     sourceId,
                     Name,
                     $"index '{index.Descriptor.Name}' is a prefix index and answers prefix lookups "
@@ -966,6 +978,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             if (index.Descriptor.Kind != Chalk.Ir.IndexKind.Prefix && range.Prefix is not null)
             {
                 throw new SourceContractException(
+                    ChalkErrorCodes.SourceContract,
                     sourceId,
                     Name,
                     $"index '{index.Descriptor.Name}' is {index.Descriptor.Kind} and was asked for "
@@ -983,6 +996,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
                     || index is not IReversiblePocoIndex<T>)
                 {
                     throw new SourceContractException(
+                        ChalkErrorCodes.SourceContract,
                         sourceId,
                         Name,
                         $"the plan asks index '{index.Descriptor.Name}' for the range {range} read "
@@ -1030,6 +1044,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             if (projection[i] < 0 || projection[i] >= _columns.Length)
             {
                 throw new SourceContractException(
+                    ChalkErrorCodes.SourceContract,
                     sourceId,
                     Name,
                     $"projection[{i}] is column {projection[i]}, but the table has {_columns.Length} columns.");
@@ -1051,6 +1066,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         {
             var expected = new ArrowSchema(projection.Select(i => _columns[i].Field), metadata: null);
             throw new SourceContractException(
+                ChalkErrorCodes.SourceContract,
                 sourceId,
                 Name,
                 $"the requested output schema {ArrowTypeMapping.DescribeArrow(outputSchema)} is not the one "

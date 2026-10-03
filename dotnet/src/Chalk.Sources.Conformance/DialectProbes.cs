@@ -99,7 +99,7 @@ internal static class DialectProbes
                 Observed = $"'alpha' = 'ALPHA' matched {matched} rows, so the comparison ignores case",
                 Outcome = ConformanceOutcome.Fail,
                 Advice = "Declare StringCollation.CaseInsensitive. Chalk then keeps every string "
-                    + "predicate, sort and DISTINCT local (D89), because a case-insensitive source "
+                    + "predicate, sort and DISTINCT local, because a case-insensitive source "
                     + "would return different rows.",
             }
             : new ConformanceFinding
@@ -140,7 +140,7 @@ internal static class DialectProbes
                 Observed = $"ids {order}",
                 Outcome = ConformanceOutcome.Fail,
                 Advice = "The source orders strings by a locale, not by code point. Declare "
-                    + "StringCollation.Locale so no ORDER BY on a string is pushed (D89).",
+                    + "StringCollation.Locale so no ORDER BY on a string is pushed.",
             }
             : new ConformanceFinding
             {
@@ -224,7 +224,7 @@ internal static class DialectProbes
                 Observed = nullsFirst ? "NULLs first ascending" : "NULLs last ascending",
                 Outcome = ConformanceOutcome.Fail,
                 Advice = $"Declare NullCollation.{observed}. Chalk pushes a sort only when the "
-                    + "source will put NULLs where the plan asks (D89), and it reads this field to "
+                    + "source will put NULLs where the plan asks, and it reads this field to "
                     + "decide.",
             };
     }
@@ -385,7 +385,7 @@ internal static class DialectProbes
                 Advice = "This source's division is real division, so it neither truncates nor "
                     + "floors. Remove FunctionId.Divide from PushableFunctions, or give the "
                     + "planner's dialect an integer-division operator to write instead, the way "
-                    + "Chalk's DuckDB dialect writes `//` (ADR 0027). A pushed division reaches "
+                    + "Chalk's DuckDB dialect writes `//`. A pushed division reaches "
                     + "the client as the wrong type, and inside a pushed predicate it matches the "
                     + "wrong rows.",
             };
@@ -488,7 +488,7 @@ internal static class DialectProbes
                     ? "The profile already says this source's decimals are approximate, and the "
                         + "planner refuses to push a comparison it would truncate."
                     : "Lower DialectProfile.MaxNumericPrecision to what this source really keeps; "
-                        + "Chalk then stops pushing comparisons that would truncate (D89).",
+                        + "Chalk then stops pushing comparisons that would truncate.",
             };
     }
 
@@ -529,7 +529,7 @@ internal static class DialectProbes
                 Observed = $"100 ns past midnight came back as {observed}",
                 Outcome = ConformanceOutcome.Fail,
                 Advice = "Lower DialectProfile.MaxTimestampPrecision to what this source really "
-                    + "keeps; Chalk then stops pushing a comparison it would truncate (D89).",
+                    + "keeps; Chalk then stops pushing a comparison it would truncate.",
             };
     }
 
@@ -635,7 +635,7 @@ internal static class DialectProbes
                 Outcome = ConformanceOutcome.Fail,
                 Advice = "Chalk's LIKE has no escape character unless ESCAPE names one, so a pattern "
                     + "holding a backslash would match different rows here. Remove the LIKE shapes "
-                    + "from PushablePredicates (D315).",
+                    + "from PushablePredicates.",
             };
     }
 

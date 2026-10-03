@@ -7,7 +7,7 @@ namespace Chalk.Integration.Tests;
 
 /// <summary>
 /// Error attribution (work plan §2): the negative corpus must map to the right
-/// <see cref="PlanErrorKind"/>, with a SQL position where the planner knew one. A host that cannot
+/// <see cref="PlanErrorKinds"/>, with a SQL position where the planner knew one. A host that cannot
 /// tell "your SQL is wrong" from "this milestone cannot do that" from "the planner is down" cannot
 /// build anything sensible on top.
 /// </summary>
@@ -55,7 +55,7 @@ public sealed class PlannerErrorTests(SharedSidecar sidecar)
         var error = await Assert.ThrowsAsync<PlanningException>(
             () => PlanAsync("SELEC * FROM bars").AsTask());
 
-        Assert.Equal(PlanErrorKind.Parse, error.Kind);
+        Assert.Equal(PlanErrorKinds.Parse, error.Kind);
         Assert.Equal(1, error.Position!.Value.Line);
         Assert.Equal(1, error.Position!.Value.Column);
     }
@@ -68,7 +68,7 @@ public sealed class PlannerErrorTests(SharedSidecar sidecar)
         var error = await Assert.ThrowsAsync<PlanningException>(
             () => PlanAsync("SELECT nope FROM bars").AsTask());
 
-        Assert.Equal(PlanErrorKind.Validation, error.Kind);
+        Assert.Equal(PlanErrorKinds.Validation, error.Kind);
         Assert.Contains("nope", error.Message, StringComparison.Ordinal);
     }
 
@@ -90,7 +90,7 @@ public sealed class PlannerErrorTests(SharedSidecar sidecar)
         // D271 (b): UNKNOWN_CONTEXT and EPOCH_MISMATCH retire from the request path — a catalog
         // version the planner does not hold is one error kind now, and it names the version so a
         // client can register it and retry. The message names the instance nothing is held for.
-        Assert.Equal(PlanErrorKind.UnknownCatalogVersion, error.Kind);
+        Assert.Equal(PlanErrorKinds.UnknownCatalogVersion, error.Kind);
         Assert.Contains("never-registered", error.Message, StringComparison.Ordinal);
         Assert.Null(error.Position);
     }
@@ -117,7 +117,7 @@ public sealed class PlannerErrorTests(SharedSidecar sidecar)
                 CatalogEpoch = 99,
             }).AsTask());
 
-        Assert.Equal(PlanErrorKind.UnknownCatalogVersion, error.Kind);
+        Assert.Equal(PlanErrorKinds.UnknownCatalogVersion, error.Kind);
         Assert.Contains("99", error.Message, StringComparison.Ordinal);
     }
 
@@ -138,16 +138,16 @@ public sealed class PlannerErrorTests(SharedSidecar sidecar)
         Assert.Contains("127.0.0.1:1", error.Address, StringComparison.Ordinal);
     }
 
-    private static PlanErrorKind Expected(CorpusQuery query)
+    private static string Expected(CorpusQuery query)
     {
         var line = query.Expectations.FirstOrDefault(e => e.StartsWith("error=", StringComparison.Ordinal))
             ?? throw new InvalidOperationException($"{query.Name} has no '-- expect: error=' line");
         var name = line["error=".Length..].Trim();
         return name switch
         {
-            "PARSE" => PlanErrorKind.Parse,
-            "VALIDATION" => PlanErrorKind.Validation,
-            "UNSUPPORTED" => PlanErrorKind.Unsupported,
+            "PARSE" => PlanErrorKinds.Parse,
+            "VALIDATION" => PlanErrorKinds.Validation,
+            "UNSUPPORTED" => PlanErrorKinds.Unsupported,
             _ => throw new FormatException($"unknown expected error kind '{name}'"),
         };
     }

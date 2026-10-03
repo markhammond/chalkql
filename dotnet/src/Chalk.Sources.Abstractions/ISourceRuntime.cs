@@ -139,6 +139,7 @@ public interface ISourceRuntime
         ArgumentNullException.ThrowIfNull(request);
 
         throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedOperator,
             $"IndexLookupAsync on source '{SourceId}'",
             $"The plan asks for a lookup on index '{request.Index}' of table '{request.Table}', but "
             + "this source does not implement IndexLookupAsync. A source that declares an index in "
@@ -172,6 +173,7 @@ public interface ISourceRuntime
         ArgumentNullException.ThrowIfNull(request);
 
         throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedOperator,
             $"ExecuteQueryAsync on source '{SourceId}'",
             "The plan pushed a query into this source, but it does not implement "
             + "ExecuteQueryAsync. A source whose SourceCapabilities.QueryLanguage is Sql or Ir must "

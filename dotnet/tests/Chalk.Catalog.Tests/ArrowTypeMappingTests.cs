@@ -155,7 +155,8 @@ public sealed class ArrowTypeMappingTests
         var ex = Assert.Throws<UnsupportedFeatureException>(
             () => ArrowTypeMapping.FromArrow(new MapType(Int32Type.Default, Int32Type.Default), nullable: false));
 
-        Assert.Contains("docs/design/02-ir.md §3", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(ChalkErrorCodes.UnsupportedType, ex.Code);
+        Assert.Contains("It has no Chalk logical type.", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

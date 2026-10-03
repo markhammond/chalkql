@@ -437,6 +437,7 @@ internal static class ReferenceWindow
             default:
                 _ = row;
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedOperator,
                     call.Aggregate.ToString(),
                     "The reference executor implements COUNT, SUM, SUM0, AVG, MIN, MAX, BOOL_AND, "
                     + "BOOL_OR and ANY_VALUE over a window.");
@@ -626,9 +627,9 @@ internal static class ReferenceWindow
                     WindowFunctionId.LastValue => candidates.Count == 0 ? null : candidates[^1],
                     WindowFunctionId.NthValue => Nth(call, candidates, row, interpreter),
                     _ => throw new UnsupportedFeatureException(
+                        ChalkErrorCodes.UnsupportedFunction,
                         call.WindowFunction.ToString(),
-                        "The reference executor implements the window functions of "
-                        + "docs/design/13-window-functions.md §1."),
+                        "The reference executor does not implement this window function."),
                 };
             }
         }

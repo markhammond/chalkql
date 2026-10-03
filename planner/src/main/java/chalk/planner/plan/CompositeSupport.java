@@ -1,6 +1,7 @@
 package chalk.planner.plan;
 
 import chalk.ir.v1.TypeKind;
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import chalk.planner.catalog.UserFunction;
 import java.util.List;
@@ -659,7 +660,7 @@ public final class CompositeSupport {
 
   private static UnsupportedFeatureException refusal(String construct, String alternative) {
     return new UnsupportedFeatureException(
-        construct, alternative + " (docs/design/51-structured-function-results.md §1)");
+        ErrorCode.UNSUPPORTED_SQL, construct, alternative + "");
   }
 
   /** Every node of the statement, parents before children. */

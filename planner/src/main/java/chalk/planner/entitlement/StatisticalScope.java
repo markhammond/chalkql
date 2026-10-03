@@ -1,7 +1,7 @@
 package chalk.planner.entitlement;
 
+import chalk.planner.ErrorCode;
 import chalk.planner.catalog.ChalkTable;
-import chalk.planner.rpc.v1.PolicyRefusalReason;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -226,7 +226,7 @@ final class StatisticalScope {
 
   private static PolicyException windowRefusal(String table, String column) {
     return new PolicyException(
-        PolicyRefusalReason.POLICY_REFUSAL_REASON_STATISTICAL,
+        ErrorCode.STATISTICAL,
         table,
         column,
         "a window function",
@@ -237,7 +237,7 @@ final class StatisticalScope {
             + " is a statistical column and this statement reads it under a window function."
             + " Statistical access is query-set-size control, and a window's partition can be one"
             + " row, so no suppression can be enforced on it: a window is one of the three things"
-            + " the opt-in forbids (docs/design/16-entitlements.md §3.4, D203).");
+            + " the opt-in forbids.");
   }
 
   // ------------------------------------------------------------------ no pinning
@@ -318,7 +318,7 @@ final class StatisticalScope {
 
   private static PolicyException refusal(Key key) {
     return new PolicyException(
-        PolicyRefusalReason.POLICY_REFUSAL_REASON_STATISTICAL,
+        ErrorCode.STATISTICAL,
         key.table(),
         key.column(),
         "a comparison or a grouping",
@@ -330,8 +330,7 @@ final class StatisticalScope {
             + " compares or groups by it. Statistical access is query-set-size control: an aggregate over one"
             + " person, or over everyone but them, is that person, and the difference of two such"
             + " statements is their value. Pinning or excluding an individual is refused in a"
-            + " statement that reads a statistical column raw"
-            + " (docs/design/16-entitlements.md §3.4, D203).");
+            + " statement that reads a statistical column raw.");
   }
 
   /**

@@ -141,7 +141,8 @@ public final class PlannerConfig {
     boolean envTcp =
         isSet(environment, "CHALK_PLANNER_HOST") || isSet(environment, "CHALK_PLANNER_PORT");
     if (envSocket != null && envTcp) {
-      throw new IllegalArgumentException(
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_CONFIGURATION,
           "CHALK_PLANNER_SOCKET and CHALK_PLANNER_HOST/CHALK_PLANNER_PORT are different transports; "
               + "set one or the other, or override both with an option. "
               + USAGE);
@@ -200,7 +201,8 @@ public final class PlannerConfig {
       throw new IllegalArgumentException("--threads must be at least 1");
     }
     if (planningWorkersArg != null && planningWorkersArg < 1) {
-      throw new IllegalArgumentException("--planning-workers must be at least 1");
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_CONFIGURATION, "--planning-workers must be at least 1");
     }
     if (planningLoadFactorArg != null && (planningLoadFactorArg <= 0 || planningLoadFactorArg > 1)) {
       throw new IllegalArgumentException("--planning-load-factor must be greater than 0 and at most 1");
@@ -215,7 +217,8 @@ public final class PlannerConfig {
       throw new IllegalArgumentException("--catalog-idle-minutes must be at least 1");
     }
     if (sliceMillis < 1) {
-      throw new IllegalArgumentException("CHALK_PLANNER_SLICE_MS must be at least 1");
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_CONFIGURATION, "CHALK_PLANNER_SLICE_MS must be at least 1");
     }
     int planningWorkers = planningWorkers(planningWorkersArg, planningLoadFactorArg);
     int planningSessionLimit =
@@ -420,7 +423,8 @@ public final class PlannerConfig {
 
   private static String requireValue(String[] args, int index, String option) {
     if (index >= args.length) {
-      throw new IllegalArgumentException(option + " needs a value");
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_CONFIGURATION, option + " needs a value");
     }
     return args[index];
   }

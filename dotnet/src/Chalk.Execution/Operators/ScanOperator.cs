@@ -85,6 +85,7 @@ internal sealed class ScanOperator : OperatorBase
                     if (!ArrowTypeMapping.AreEquivalent(Schema, batch.Schema))
                     {
                         throw new SourceContractException(
+                            ChalkErrorCodes.SourceContract,
                             _source.SourceId,
                             _request.Table,
                             $"the first batch has schema {ArrowTypeMapping.DescribeArrow(batch.Schema)}, "

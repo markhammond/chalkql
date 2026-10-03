@@ -16,38 +16,47 @@ public readonly record struct SqlPosition(int Line, int Column, int EndLine, int
 }
 
 /// <summary>
-/// The planner refused the statement: a parse error, a validation error, or valid SQL this milestone
-/// cannot plan. The message is the planner's own, with the SQL position when it knew one.
+/// The planner refused the statement: a parse error, a validation error, or valid SQL this build
+/// cannot plan. The message is the planner's own, with the SQL position when it knew one, and each
+/// violation carries the code and kind the planner raised it with.
 /// </summary>
 public sealed class PlanningException : ChalkException
 {
-    public PlanningException(PlanErrorKind kind, string message, SqlPosition? position, Exception? innerException = null)
-        : this(kind, message, position, planningState: null, innerException)
+    /// <summary>A planner's error that breaks the rule <paramref name="code"/>, of the kind <paramref name="kind"/>.</summary>
+    public PlanningException(
+        string code,
+        string kind,
+        string message,
+        SqlPosition? position,
+        PlanningState? planningState = null,
+        Exception? innerException = null)
+        : this([new ChalkViolation(code, message, kind)], message, position, planningState, innerException)
     {
     }
 
     /// <summary>
-    /// The same, carrying what the optimiser had measured when it gave up (D235). Set on a
-    /// <see cref="PlanErrorKind.PlanningAborted"/>, where the state is the whole of the answer.
+    /// A planner's error that breaks every rule in <paramref name="violations"/>, in the order the
+    /// planner met them, worded by <paramref name="message"/>, the first one's. The state is what the
+    /// optimiser had measured when it gave up (D235), set where the kind is
+    /// <see cref="PlanErrorKinds.PlanningAborted"/> and the state is the whole of the answer.
     /// </summary>
     public PlanningException(
-        PlanErrorKind kind,
+        IReadOnlyList<ChalkViolation> violations,
         string message,
         SqlPosition? position,
         PlanningState? planningState,
-        Exception? innerException = null)
-        : base(
-            position is { Line: > 0 }
-                ? $"{Describe(kind)} at {position}: {message}"
-                : $"{Describe(kind)}: {message}",
-            innerException)
+        Exception? innerException)
+        : base(violations, Compose(violations.Count > 0 ? violations[0].Kind : null, message, position), innerException)
     {
-        Kind = kind;
         Position = position;
         PlanningState = planningState;
     }
 
-    public PlanErrorKind Kind { get; }
+    /// <summary>
+    /// What kind of problem this is: the first violation's, one of <see cref="PlanErrorKinds"/>, or
+    /// null when the planner named none.
+    /// </summary>
+    public string? Kind => Violations.Count > 0 ? Violations[0].Kind : null;
 
     /// <summary>Where in the SQL, when the planner reported it.</summary>
     public SqlPosition? Position { get; }
@@ -58,21 +67,26 @@ public sealed class PlanningException : ChalkException
     /// </summary>
     public PlanningState? PlanningState { get; }
 
-    private static string Describe(PlanErrorKind kind) => kind switch
+    private static string Compose(string? kind, string message, SqlPosition? position) =>
+        position is { Line: > 0 }
+            ? $"{Describe(kind)} at {position}: {message}"
+            : $"{Describe(kind)}: {message}";
+
+    private static string Describe(string? kind) => kind switch
     {
-        PlanErrorKind.Parse => "SQL parse error",
-        PlanErrorKind.Validation => "SQL validation error",
-        PlanErrorKind.Unsupported => "Unsupported query",
-        PlanErrorKind.UnknownContext => "Unknown catalog context",
-        PlanErrorKind.EpochMismatch => "Catalog epoch mismatch",
-        PlanErrorKind.IrVersion => "IR version mismatch",
-        PlanErrorKind.InvalidCatalog => "Invalid catalog",
-        PlanErrorKind.Internal => "Planner internal error",
-        PlanErrorKind.Policy => "Refused by the entitlements",
-        PlanErrorKind.PlanningAborted => "Planning ended before there was a plan",
+        PlanErrorKinds.Parse => "SQL parse error",
+        PlanErrorKinds.Validation => "SQL validation error",
+        PlanErrorKinds.Unsupported => "Unsupported query",
+        PlanErrorKinds.UnknownContext => "Unknown catalog context",
+        PlanErrorKinds.EpochMismatch => "Catalog epoch mismatch",
+        PlanErrorKinds.IrVersion => "IR version mismatch",
+        PlanErrorKinds.InvalidCatalog => "Invalid catalog",
+        PlanErrorKinds.Internal => "Planner internal error",
+        PlanErrorKinds.Policy => "Refused by the entitlements",
+        PlanErrorKinds.PlanningAborted => "Planning ended before there was a plan",
         // D271 (b): the client recovers from this by registering the version and retrying, so a host
         // only ever sees it when the recovery itself failed.
-        PlanErrorKind.UnknownCatalogVersion => "The planner does not hold this catalog version",
+        PlanErrorKinds.UnknownCatalogVersion => "The planner does not hold this catalog version",
         _ => "Planning failed",
     };
 }
@@ -103,8 +117,10 @@ public sealed class PlanningCancelledException : OperationCanceledException
     public PlanningCancelledException(
         PlanningState planningState, CancellationToken token, Exception? innerException = null)
         : base(
-            $"Planning was cancelled by the host after {planningState?.Elapsed.TotalMilliseconds ?? 0:0} ms. "
-            + "No plan was produced; PlanningOptions.StopToken asks for the best plan so far instead.",
+            ErrorCodes.WithCode(
+                ChalkErrorCodes.PlanningCancelled,
+                $"Planning was cancelled by the host after {planningState?.Elapsed.TotalMilliseconds ?? 0:0} ms. "
+                + "No plan was produced; PlanningOptions.StopToken asks for the best plan so far instead."),
             innerException!,
             token)
     {
@@ -113,6 +129,9 @@ public sealed class PlanningCancelledException : OperationCanceledException
 
     /// <summary>What the client knows about the planning it cancelled.</summary>
     public PlanningState PlanningState { get; }
+
+    /// <summary>Always <see cref="ChalkErrorCodes.PlanningCancelled"/>, as a ChalkQL exception would carry it.</summary>
+    public string Code => ChalkErrorCodes.PlanningCancelled;
 }
 
 /// <summary>
@@ -123,7 +142,10 @@ public sealed class PlanningCancelledException : OperationCanceledException
 public sealed class PlannerUnavailableException : ChalkException
 {
     public PlannerUnavailableException(string address, string detail, Exception? innerException = null)
-        : base($"The Chalk planner at {address} is unavailable: {detail}", innerException)
+        : base(
+            ChalkErrorCodes.PlannerUnavailable,
+            $"The Chalk planner at {address} is unavailable: {detail}",
+            innerException)
     {
         Address = address;
     }
@@ -139,6 +161,7 @@ public sealed class RecordedPlanMissingException : ChalkException
 {
     public RecordedPlanMissingException(string sql, PushdownLevel pushdown, string key, string directory)
         : base(
+            ChalkErrorCodes.RecordedPlanMissing,
             $"No recorded plan for this query at pushdown level {pushdown} (key {key}) in {directory}.{Environment.NewLine}"
             + $"SQL: {sql}{Environment.NewLine}"
             + "Record it with: scripts/record-plans.sh")

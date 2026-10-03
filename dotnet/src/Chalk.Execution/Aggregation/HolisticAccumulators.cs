@@ -129,9 +129,9 @@ internal sealed class PercentileAccumulator : HolisticAccumulator
         if (continuous && !IrTypes.IsNumeric(valueType.Kind))
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"PERCENTILE_CONT over {valueType}",
-                "It interpolates between two values, so it is defined for the numeric kinds "
-                + "(docs/design/14-windows-ii.md §3).");
+                "It interpolates between two values, so it is defined for the numeric kinds.");
         }
     }
 
@@ -202,9 +202,8 @@ internal sealed class ListAggAccumulator : HolisticAccumulator
         _separator = Encoding.UTF8.GetBytes(separator);
         if (ValueKind != ColumnKind.Utf8)
         {
-            throw new UnsupportedFeatureException(
-                $"LISTAGG over {valueType}",
-                "It concatenates strings (docs/design/14-windows-ii.md §3).");
+            throw new UnsupportedFeatureException(ChalkErrorCodes.UnsupportedFunction, $"LISTAGG over {valueType}",
+                "It concatenates strings.");
         }
     }
 

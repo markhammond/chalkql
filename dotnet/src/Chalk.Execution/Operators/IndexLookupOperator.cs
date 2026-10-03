@@ -90,9 +90,10 @@ internal sealed class IndexLookupOperator : OperatorBase
             // brings its residual — so this is a plan from somewhere else, refused rather than
             // answered with the extra rows.
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedOperator,
                 $"a LIKE lookup on index '{_index}' that its ranges do not decide",
                 $"The lookup on '{_table}' binds a pattern that is not a bare prefix, and the plan "
-                + "gives it no residual to check the rest of the pattern with (D314).");
+                + "gives it no residual to check the rest of the pattern with.");
         }
 
         _gate?.Bound(decided);
@@ -158,6 +159,7 @@ internal sealed class IndexLookupOperator : OperatorBase
                     if (!ArrowTypeMapping.AreEquivalent(Schema, batch.Schema))
                     {
                         throw new SourceContractException(
+                            ChalkErrorCodes.SourceContract,
                             _source.SourceId,
                             _table,
                             $"the first batch has schema {ArrowTypeMapping.DescribeArrow(batch.Schema)}, "

@@ -47,8 +47,7 @@ public readonly record struct PocoTable<T> : ITableTarget<T>
     internal PocoTableBinding Required() =>
         Binding ?? throw new InvalidOperationException(
             "a default PocoTable<T> handle names no table. Obtain one from PocoSourceBuilder's "
-            + "AddTable(…, out var table, …) or from PocoSource.Table<T>(name) "
-            + "(docs/design/44-catalog-registration.md §6 (h), D271).");
+            + "AddTable(…, out var table, …) or from PocoSource.Table<T>(name).");
 
     public override string ToString() => $"{Schema}.{Name}";
 }

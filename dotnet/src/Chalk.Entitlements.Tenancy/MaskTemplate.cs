@@ -73,11 +73,12 @@ internal static class MaskTemplate
         if (mask.Contains("{column}", StringComparison.Ordinal))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement,
                 path,
                 $"the mask '{mask}' uses the retired '{{column}}' token. A mask that covers more "
                 + "than one column is a template in lambda notation — "
                 + "\"lambda v: SUBSTRING(v, 1, 1)\" — which substitutes an identifier token and "
-                + "never text inside a string literal (docs/design/16-entitlements.md §5, D219).");
+                + "never text inside a string literal.");
         }
 
         if (!IsTemplate(mask))
@@ -89,12 +90,14 @@ internal static class MaskTemplate
         if (body.Length == 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement,
                 path, $"the mask template '{mask}' has no body after its ':'.");
         }
 
         if (TenancyCompiler.Column(table, parameter) is { } shadowed)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement,
                 path,
                 $"the mask template '{mask}' names its parameter '{parameter}', which is also a "
                 + $"column of '{table.Name}' ('{shadowed.Name}'). Every identifier token equal to "
@@ -112,9 +115,10 @@ internal static class MaskTemplate
         if (colon < 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement,
                 path,
                 $"the mask template '{mask}' has no ':' between its parameter and its body. The "
-                + "form is \"lambda v: SUBSTRING(v, 1, 1)\" (D219).");
+                + "form is \"lambda v: SUBSTRING(v, 1, 1)\".");
         }
 
         var parameters = after[..colon].Trim();
@@ -128,10 +132,11 @@ internal static class MaskTemplate
         if (names.Length != 1 || !IsIdentifier(names[0]))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement,
                 path,
                 $"the mask template '{mask}' takes {names.Length} parameters and a mask template "
                 + "takes exactly one: it stands for the column being masked and there is nothing "
-                + "else for a second to stand for (D219).");
+                + "else for a second to stand for.");
         }
 
         return (names[0], after[(colon + 1)..].Trim());

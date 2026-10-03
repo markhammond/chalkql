@@ -253,6 +253,30 @@ public sealed class PocoAppendTests
         IReadOnlyList<Tick> rows, Action<PocoTableBuilder<Tick>>? configure = null) =>
         new PocoSourceBuilder("mem").AddTable("ticks", rows, configure).Build();
 
+    /// <summary>
+    /// A refresh is one transaction that says once what each table becomes, so one that names a
+    /// table twice is refused before anything is applied, as <see cref="ChalkErrorCodes.SourceRefresh"/>.
+    /// </summary>
+    [Fact]
+    public async Task A_refresh_that_names_a_table_twice_is_refused_as_SourceRefresh()
+    {
+        var source = Source(Ordered(1, 6), t => t.Index(x => x.Seq));
+        var entry = new SourceRefreshEntry
+        {
+            Table = "ticks",
+            Kind = SourceRefreshKind.Append,
+            RowType = typeof(Tick),
+            Rows = Ordered(7, 2),
+        };
+
+        var refused = await Assert.ThrowsAsync<SourceContractException>(
+            async () => await source.PrepareRefreshAsync([entry, entry], TestContext.Current.CancellationToken));
+
+        Assert.Equal(ChalkErrorCodes.SourceRefresh, refused.Code);
+        Assert.Contains("names this table twice", refused.Message, StringComparison.Ordinal);
+        Assert.EndsWith(" [SourceRefresh]", refused.Message, StringComparison.Ordinal);
+    }
+
     private static Task AppendAsync(PocoSource source, IReadOnlyList<Tick> rows) =>
         RefreshAsync(source, SourceRefreshKind.Append, rows);
 

@@ -1,5 +1,7 @@
 package chalk.planner.entitlement;
 
+import chalk.planner.ErrorCode;
+import chalk.planner.InvalidArgumentException;
 import chalk.planner.ReservedNames;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -110,7 +112,8 @@ public final class ContextSql {
       i++;
     }
     if (i == nameStart) {
-      throw new IllegalArgumentException(
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_CONTEXT,
           "'@ctx.' at offset " + start + " names nothing. Write @ctx.<name> for a value the "
               + "execution context binds.");
     }
@@ -127,7 +130,8 @@ public final class ContextSql {
     } else if (context.relations().containsKey(name)) {
       out.append(marker()).append(".\"").append(name).append('"');
     } else {
-      throw new IllegalArgumentException(
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_CONTEXT,
           "'@ctx." + name + "' is not bound by this execution context. Bound: " + bound(context)
               + ".");
     }

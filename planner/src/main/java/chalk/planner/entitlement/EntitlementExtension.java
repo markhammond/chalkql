@@ -1,5 +1,6 @@
 package chalk.planner.entitlement;
 
+import chalk.planner.ErrorCode;
 import chalk.planner.ext.PlanExtensionContext;
 import chalk.planner.ext.PlanExtensionHandler;
 import chalk.planner.ext.PlanExtensionRegistry;
@@ -10,7 +11,6 @@ import chalk.planner.rpc.v1.EntitlementsOptions;
 import chalk.planner.rpc.v1.EntitlementsReport;
 import chalk.planner.rpc.v1.ExplainedColumn;
 import chalk.planner.rpc.v1.ExplainedTable;
-import chalk.planner.rpc.v1.PolicyRefusalReason;
 import chalk.planner.rpc.v1.Visibility;
 import com.google.protobuf.Any;
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -114,7 +114,7 @@ public final class EntitlementExtension implements PlanExtensionHandler {
         // acknowledgement, and a host may ask for an exception rather than an empty result.
         throw planned(
             new PolicyException(
-                PolicyRefusalReason.POLICY_REFUSAL_REASON_NO_VISIBLE_ROWS,
+                ErrorCode.NO_VISIBLE_ROWS,
                 table.qualifiedName(),
                 "",
                 "",
@@ -123,13 +123,13 @@ public final class EntitlementExtension implements PlanExtensionHandler {
                     + table.qualifiedName()
                     + ", so the statement can return no row, and "
                     + "PrepareOptions.RefuseWhenNoVisibleRows asks for an error rather than an empty "
-                    + "result (docs/design/16-entitlements.md §3.12)."),
+                    + "result."),
             result);
       }
       if (!table.contradiction().isEmpty() && policyOptions.refuseWhenNoVisibleRows()) {
         throw planned(
             new PolicyException(
-                PolicyRefusalReason.POLICY_REFUSAL_REASON_NO_VISIBLE_ROWS,
+                ErrorCode.NO_VISIBLE_ROWS,
                 table.qualifiedName(),
                 "",
                 "",
@@ -140,7 +140,7 @@ public final class EntitlementExtension implements PlanExtensionHandler {
                     + table.contradiction()
                     + "' outside this principal's scope, so it can return no row, and "
                     + "PrepareOptions.RefuseWhenNoVisibleRows asks for an error rather than an "
-                    + "empty result (docs/design/16-entitlements.md §3.12)."),
+                    + "empty result."),
             result);
       }
       EntitledTable.Builder entitled =

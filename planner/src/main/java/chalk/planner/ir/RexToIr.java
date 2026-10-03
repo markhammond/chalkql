@@ -15,6 +15,7 @@ import chalk.ir.v1.Literal;
 import chalk.ir.v1.ScalarCall;
 import chalk.ir.v1.Type;
 import chalk.ir.v1.TypeKind;
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import chalk.planner.types.TypeMapper;
 import java.util.ArrayList;
@@ -76,6 +77,7 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
     Expr expr = node.accept(this);
     if (expr == null) {
       throw new UnsupportedFeatureException(
+          ErrorCode.INTERNAL,
           "expression " + node, "The visitor produced nothing, which is a planner bug.");
     }
     return expr;
@@ -161,14 +163,16 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
       // constructor to lower one from; a MAP is not a type the IR has at all.
       case ROW ->
           throw new UnsupportedFeatureException(
+              ErrorCode.UNSUPPORTED_SQL,
               "the ROW constructor",
               "A composite comes from a function: a client-bodied user function returns one, and SQL "
                   + "takes it apart with .field or carries it whole. Select the values as columns "
-                  + "of their own (docs/design/51-structured-function-results.md §1).");
+                  + "of their own.");
       case MAP_VALUE_CONSTRUCTOR ->
           throw new UnsupportedFeatureException(
+              ErrorCode.UNSUPPORTED_SQL,
               "constructor " + call.getKind(),
-              "The IR's non-scalar types are LIST and COMPOSITE (docs/design/14-windows-ii.md §5).");
+              "The IR's non-scalar types are LIST and COMPOSITE.");
       default -> {
         if (chalk.planner.plan.ChalkKeySet.is(call)) {
           return keySet(call, type);
@@ -238,16 +242,18 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
   private Expr arrayLiteral(RexCall call, Type type) {
     if (type.getKind() != TypeKind.TYPE_KIND_LIST) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "ARRAY constructor of " + call.getType(),
-          "docs/design/14-windows-ii.md §5: v1 lists are one level deep and hold scalars.");
+          "A list is one level deep and holds scalars.");
     }
 
     ListValue.Builder elements = ListValue.newBuilder();
     for (RexNode operand : call.getOperands()) {
       if (!(operand instanceof RexLiteral literal)) {
         throw new UnsupportedFeatureException(
+            ErrorCode.UNSUPPORTED_SQL,
             "ARRAY constructor over " + operand,
-            "v1 builds a list only from constants (docs/design/14-windows-ii.md §5).");
+            "An ARRAY constructor builds a list only from constants.");
       }
 
       elements.addElements(LiteralConverter.convert(literal, type.getElement()));
@@ -305,6 +311,7 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
   private Expr userCall(RexCall call, Type type, chalk.planner.catalog.UserFunction declared) {
     if (declared.isNative() && pushedDepth == 0) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "native function "
               + declared.schemaName()
               + "."
@@ -313,11 +320,11 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
               + declared.schemaName(),
           "A native function is implemented by its own source, so a plan that would evaluate it "
               + "anywhere else has nothing to call. This happens when an argument comes from another "
-              + "source, or when the request turned pushdown off "
-              + "(docs/design/17-user-defined-functions.md §2).");
+              + "source, or when the request turned pushdown off.");
     }
     if (declared.isSqlBodied()) {
       throw new UnsupportedFeatureException(
+          ErrorCode.INTERNAL,
           "SQL-bodied function " + declared.qualifiedName() + " survived inlining",
           "A SQL body is substituted into the statement before validation; reaching the IR means "
               + "the inliner missed it, which is a planner bug.");
@@ -367,6 +374,7 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
       if (option.getKindCase() != Expr.KindCase.LITERAL
           && option.getKindCase() != Expr.KindCase.PARAM) {
         throw new UnsupportedFeatureException(
+            ErrorCode.UNSUPPORTED_SQL,
             "IN with a computed option",
             "The IR carries only constant IN lists; the planner rewrites the rest to OR.");
       }
@@ -431,12 +439,16 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
 
   @Override
   public Expr visitOver(RexOver over) {
-    throw unsupported("window function " + over.getAggOperator().getName(), "Window functions are M2+.");
+    throw unsupported(
+        "window function " + over.getAggOperator().getName(),
+        "A window function is planned as a window operator, and this one reached an expression.");
   }
 
   @Override
   public Expr visitCorrelVariable(RexCorrelVariable variable) {
-    throw unsupported("correlation variable", "Correlated subqueries are not supported in M1.");
+    throw unsupported(
+        "correlation variable",
+        "A correlated sub-query is planned as a join, and this one was not.");
   }
 
   @Override
@@ -507,7 +519,7 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
       throw unsupported(
           "field access of a correlation variable",
           "A correlated reference survived decorrelation; Chalk plans a correlated sub-query only "
-              + "as a join (docs/design/14-windows-ii.md §8).");
+              + "as a join.");
     }
 
     Expr input = convert(sameCallEitherSpelling(reference));
@@ -516,7 +528,7 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
       throw unsupported(
           "field access over " + reference.getType(),
           "A field is read from a COMPOSITE: a client-bodied user function's result or an"
-              + " in-process table's column (docs/design/51-structured-function-results.md §1).");
+              + " in-process table's column.");
     }
 
     int index = access.getField().getIndex();
@@ -537,7 +549,7 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
 
   @Override
   public Expr visitSubQuery(RexSubQuery subQuery) {
-    throw unsupported("subquery", "Subqueries are not supported in M1.");
+    throw unsupported("subquery", "A sub-query is planned as a join, and this one was not.");
   }
 
   @Override
@@ -551,7 +563,7 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
   }
 
   private static UnsupportedFeatureException unsupported(String feature, String detail) {
-    return new UnsupportedFeatureException(feature, detail);
+    return new UnsupportedFeatureException(ErrorCode.UNSUPPORTED_SQL, feature, detail);
   }
 
   /** The IR type kind of an expression, for the coercion pass. */

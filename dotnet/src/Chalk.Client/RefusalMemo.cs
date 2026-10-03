@@ -41,10 +41,14 @@ internal sealed class RefusalMemo
 
     /// <summary>One refusal, as the next identical request is answered with it.</summary>
     internal sealed record Remembered(
-        string Key, string Message, SqlPosition? Position, EntitlementRefusal? Refusal)
+        string Key,
+        IReadOnlyList<ChalkViolation> Violations,
+        string Message,
+        SqlPosition? Position,
+        IReadOnlyList<EntitlementRefusal> Refusals)
     {
-        /// <summary>A fresh exception each time, carrying the same refusal.</summary>
-        internal EntitlementException Refuse() => new(Message, Position, Refusal, innerException: null);
+        /// <summary>A fresh exception each time, carrying the same violations and refusals.</summary>
+        internal EntitlementException Refuse() => new(Violations, Message, Position, Refusals, innerException: null);
     }
 
     /// <summary>Whether anything is remembered, so a prepare computes no key until something is.</summary>

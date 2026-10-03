@@ -7,6 +7,7 @@ import chalk.ir.v1.Field;
 import chalk.ir.v1.RowType;
 import chalk.ir.v1.Type;
 import chalk.ir.v1.TypeKind;
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import java.util.List;
 import org.apache.calcite.avatica.util.TimeUnit;
@@ -67,7 +68,9 @@ public final class TypeMapper {
           case TYPE_KIND_LIST -> {
             if (!type.hasElement()) {
               throw new UnsupportedFeatureException(
-                  "LIST with no element type", "docs/design/02-ir.md §3 requires Type.element on a LIST.");
+                  ErrorCode.UNSUPPORTED_TYPE,
+                  "LIST with no element type",
+                  "A LIST type names the type of its elements, and this one names none.");
             }
             yield typeFactory.createArrayType(toCalcite(type.getElement()), -1);
           }
@@ -76,6 +79,7 @@ public final class TypeMapper {
           case TYPE_KIND_COMPOSITE -> composite(type);
           case TYPE_KIND_UNSPECIFIED, UNRECOGNIZED ->
               throw new UnsupportedFeatureException(
+                  ErrorCode.UNSUPPORTED_TYPE,
                   "type kind " + type.getKind(),
                   "The catalog declares a type this planner does not know.");
         };
@@ -104,7 +108,9 @@ public final class TypeMapper {
   private RelDataType composite(Type type) {
     if (type.getFieldsCount() == 0) {
       throw new UnsupportedFeatureException(
-          "COMPOSITE with no fields", "docs/design/02-ir.md §3 requires at least one field on a COMPOSITE.");
+          ErrorCode.INCOMPLETE_DECLARATION,
+          "COMPOSITE with no fields",
+          "A COMPOSITE type has at least one field.");
     }
     List<RelDataType> fieldTypes = new java.util.ArrayList<>(type.getFieldsCount());
     List<String> fieldNames = new java.util.ArrayList<>(type.getFieldsCount());
@@ -124,9 +130,9 @@ public final class TypeMapper {
   /** A non-scalar inside a non-scalar: refused, because a COMPOSITE and a LIST are one level deep. */
   private static UnsupportedFeatureException nested(String what) {
     return new UnsupportedFeatureException(
+        ErrorCode.UNSUPPORTED_TYPE,
         "a nested composite type (" + what + ")",
-        "A COMPOSITE's fields and a LIST's element are scalars: both are exactly one level deep "
-            + "(docs/design/51-structured-function-results.md §1).");
+        "A COMPOSITE's fields and a LIST's element are scalars: both are exactly one level deep.");
   }
 
   /** The IR type for a Calcite type. */
@@ -135,6 +141,7 @@ public final class TypeMapper {
     SqlTypeName name = type.getSqlTypeName();
     if (name == null) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_TYPE,
           "Calcite type " + type, "It has no SQL type name, so the IR has no vocabulary for it.");
     }
     switch (name) {
@@ -183,9 +190,9 @@ public final class TypeMapper {
             || element.getSqlTypeName() == SqlTypeName.MAP
             || element.getSqlTypeName() == SqlTypeName.ROW) {
           throw new UnsupportedFeatureException(
+              ErrorCode.UNSUPPORTED_TYPE,
               "a nested collection type (" + type + ")",
-              "v1 lists are exactly one level deep and hold scalars "
-                  + "(docs/design/14-windows-ii.md §5).");
+              "A list is exactly one level deep and holds scalars.");
         }
         builder.setKind(TypeKind.TYPE_KIND_LIST).setElement(toIr(element));
       }
@@ -207,8 +214,9 @@ public final class TypeMapper {
       }
       default ->
           throw new UnsupportedFeatureException(
+              ErrorCode.UNSUPPORTED_TYPE,
               "SQL type " + name,
-              "docs/design/02-ir.md §3 lists the types the IR carries; this is not one of them.");
+              "ChalkQL has no type for it.");
     }
     return builder.build();
   }

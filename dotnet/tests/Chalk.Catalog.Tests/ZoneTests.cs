@@ -37,6 +37,7 @@ public sealed class ZoneTests
             () => CatalogValidator.Validate(Catalog(("mem", "main", "eu"), ("pg", "warehouse", "us"))));
 
         Assert.Contains("one catalog is one zone", error.Message, StringComparison.Ordinal);
+        Assert.Equal(ChalkErrorCodes.InvalidZone, error.Code);
         Assert.Contains("'eu' (main)", error.Message, StringComparison.Ordinal);
         Assert.Contains("'us' (warehouse)", error.Message, StringComparison.Ordinal);
         Assert.Contains("one engine per zone", error.Message, StringComparison.Ordinal);

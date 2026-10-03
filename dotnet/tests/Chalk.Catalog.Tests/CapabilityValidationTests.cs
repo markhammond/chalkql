@@ -152,7 +152,7 @@ public sealed class CapabilityValidationTests
             DialectProfiles.PostgreSql.With(likeMatchesCodePoints: false)));
 
         Assert.Contains("StringCollation.Locale", error.Message, StringComparison.Ordinal);
-        Assert.Contains("D89", error.Message, StringComparison.Ordinal);
+        Assert.Equal(ChalkErrorCodes.InvalidCapabilities, error.Code);
         Assert.Contains("LikeMatchesCodePoints", error.Message, StringComparison.Ordinal);
     }
 
@@ -208,7 +208,7 @@ public sealed class CapabilityValidationTests
                 .With(likeMatchesCodePoints: true)));
 
         Assert.Contains("contradict", error.Message, StringComparison.Ordinal);
-        Assert.Contains("D315", error.Message, StringComparison.Ordinal);
+        Assert.Equal(ChalkErrorCodes.InvalidCapabilities, error.Code);
     }
 
     [Fact]

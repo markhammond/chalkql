@@ -111,9 +111,10 @@ public sealed class AkadeLikePatternTests(AkadeLikePatternTests.Engines engines)
         {
             var query = await engine.PrepareAsync("SELECT id FROM items WHERE sku LIKE ? ESCAPE '!'");
 
-            var error = await Assert.ThrowsAsync<ArgumentException>(
+            var error = await Assert.ThrowsAsync<ParameterBindingException>(
                 async () => await engine.ExecuteAsync(query, [pattern]));
 
+            Assert.Equal(ChalkErrorCodes.ParameterBinding, error.Code);
             Assert.Contains("parameter ?0", error.Message, StringComparison.Ordinal);
             Assert.DoesNotContain(pattern, error.Message, StringComparison.Ordinal);
         }
@@ -131,7 +132,7 @@ public sealed class AkadeLikePatternTests(AkadeLikePatternTests.Engines engines)
         var error = await Assert.ThrowsAsync<PlanningException>(
             async () => await engines.Large.PrepareAsync(sql));
 
-        Assert.Equal(PlanErrorKind.Validation, error.Kind);
+        Assert.Equal(PlanErrorKinds.Validation, error.Kind);
         Assert.NotNull(error.Position);
     }
 

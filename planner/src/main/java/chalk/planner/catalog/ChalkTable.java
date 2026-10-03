@@ -11,22 +11,23 @@ import chalk.ir.v1.Schema;
 import chalk.ir.v1.SourceKind;
 import chalk.ir.v1.Table;
 import chalk.ir.v1.TableCollation;
+import chalk.planner.ErrorCode;
 import chalk.planner.types.TypeMapper;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.DataContext;
 import org.apache.calcite.linq4j.Enumerable;
+import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelFieldCollation;
+import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelReferentialConstraint;
 import org.apache.calcite.rel.RelReferentialConstraintImpl;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
-import org.apache.calcite.plan.RelOptTable;
-import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.schema.ScannableTable;
 import org.apache.calcite.schema.Statistic;
 import org.apache.calcite.schema.Statistics;
@@ -252,6 +253,7 @@ public final class ChalkTable extends AbstractTable implements ScannableTable, T
     org.apache.calcite.plan.RelOptSchema schema = logical.getRelOptSchema();
     if (schema == null) {
       throw new InvalidCatalogException(
+          ErrorCode.INVALID_PARTITIONING,
           "tables." + tableName(),
           "a partitioned table can only be expanded through a catalog, and this one has none.");
     }
@@ -259,6 +261,7 @@ public final class ChalkTable extends AbstractTable implements ScannableTable, T
     RelOptTable found = schema.getTableForMember(ImmutableList.of(schemaName, partition.getTable()));
     if (found == null) {
       throw new InvalidCatalogException(
+          ErrorCode.UNKNOWN_NAME,
           "tables." + tableName(),
           "partition '"
               + schemaName
@@ -421,6 +424,7 @@ public final class ChalkTable extends AbstractTable implements ScannableTable, T
               RelFieldCollation.NullDirection.LAST);
       case SORT_DIRECTION_UNSPECIFIED, UNRECOGNIZED ->
           throw new InvalidCatalogException(
+              ErrorCode.INCOMPLETE_DECLARATION,
               "collation", "a sort direction is unspecified; both direction and null direction "
                   + "must be explicit or the collation can never satisfy an ORDER BY");
     };

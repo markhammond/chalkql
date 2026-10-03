@@ -223,6 +223,7 @@ internal sealed class SessionOperator : OperatorBase
         ColumnKind.Int32 => column.Lanes<int>()[row],
         ColumnKind.Int64 => column.Lanes<long>()[row],
         _ => throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedFunction,
             $"SESSION over a {_timeType} column",
             "A window's time column is DATE, TIMESTAMP or TIMESTAMP_TZ."),
     };

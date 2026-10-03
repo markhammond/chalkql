@@ -1,6 +1,18 @@
 #nullable enable
 abstract Chalk.Client.BindingConverter.ValueType.get -> System.Type!
 abstract Chalk.Client.BindingConverter<T>.TryConvert(T value, Chalk.Catalog.ChalkType target, out object? converted) -> bool
+const Chalk.Client.PlanErrorKinds.EpochMismatch = "EpochMismatch" -> string!
+const Chalk.Client.PlanErrorKinds.Internal = "Internal" -> string!
+const Chalk.Client.PlanErrorKinds.InvalidCatalog = "InvalidCatalog" -> string!
+const Chalk.Client.PlanErrorKinds.InvalidRequest = "InvalidRequest" -> string!
+const Chalk.Client.PlanErrorKinds.IrVersion = "IrVersion" -> string!
+const Chalk.Client.PlanErrorKinds.Parse = "Parse" -> string!
+const Chalk.Client.PlanErrorKinds.PlanningAborted = "PlanningAborted" -> string!
+const Chalk.Client.PlanErrorKinds.Policy = "Policy" -> string!
+const Chalk.Client.PlanErrorKinds.UnknownCatalogVersion = "UnknownCatalogVersion" -> string!
+const Chalk.Client.PlanErrorKinds.UnknownContext = "UnknownContext" -> string!
+const Chalk.Client.PlanErrorKinds.Unsupported = "Unsupported" -> string!
+const Chalk.Client.PlanErrorKinds.Validation = "Validation" -> string!
 Chalk.Arrow.RecordBatchExtensions
 Chalk.Client.ArenaPool
 Chalk.Client.ArenaPool.ArenaPool(Chalk.Sources.ArenaOptions! options, int capacity, string? name = null) -> void
@@ -101,6 +113,7 @@ Chalk.Client.ContextRelation.IsShape.init -> void
 Chalk.Client.ContextRelation.Rows.get -> System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<object?>!>!
 Chalk.Client.ContextRelation.Rows.init -> void
 Chalk.Client.ContextRequiredException
+Chalk.Client.ContextRequiredException.Code.get -> string!
 Chalk.Client.ContextRequiredException.ContextRequiredException(System.Collections.Generic.IReadOnlyList<string!>! names) -> void
 Chalk.Client.ContextRequiredException.Names.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Chalk.Client.DialectInfo
@@ -240,6 +253,7 @@ Chalk.Client.ParameterValueHint.Ordinal.init -> void
 Chalk.Client.ParameterValueHint.ParameterValueHint() -> void
 Chalk.Client.ParameterValueHint.Value.get -> Chalk.Ir.Expr?
 Chalk.Client.ParameterValueHint.Value.init -> void
+Chalk.Client.PlanErrorKinds
 Chalk.Client.PlannerInfo.Conformances.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.SqlConformance>!
 Chalk.Client.PlannerInfo.Libraries.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.SqlLibrary>!
 Chalk.Client.PlannerOptions.Conformance.get -> Chalk.Catalog.SqlConformance
@@ -390,6 +404,7 @@ Chalk.Client.PlannerUnavailableException
 Chalk.Client.PlannerUnavailableException.Address.get -> string!
 Chalk.Client.PlannerUnavailableException.PlannerUnavailableException(string! address, string! detail, System.Exception? innerException = null) -> void
 Chalk.Client.PlanningCancelledException
+Chalk.Client.PlanningCancelledException.Code.get -> string!
 Chalk.Client.PlanningCancelledException.PlanningCancelledException(Chalk.Client.PlanningState! planningState, System.Threading.CancellationToken token, System.Exception? innerException = null) -> void
 Chalk.Client.PlanningCancelledException.PlanningState.get -> Chalk.Client.PlanningState!
 Chalk.Client.PlanningCost
@@ -401,9 +416,9 @@ Chalk.Client.PlanningCost.PlanningCost() -> void
 Chalk.Client.PlanningCost.Rows.get -> double
 Chalk.Client.PlanningCost.Rows.init -> void
 Chalk.Client.PlanningException
-Chalk.Client.PlanningException.Kind.get -> Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.PlanningException.PlanningException(Chalk.Client.Rpc.PlanErrorKind kind, string! message, Chalk.Client.SqlPosition? position, Chalk.Client.PlanningState? planningState, System.Exception? innerException = null) -> void
-Chalk.Client.PlanningException.PlanningException(Chalk.Client.Rpc.PlanErrorKind kind, string! message, Chalk.Client.SqlPosition? position, System.Exception? innerException = null) -> void
+Chalk.Client.PlanningException.Kind.get -> string?
+Chalk.Client.PlanningException.PlanningException(System.Collections.Generic.IReadOnlyList<Chalk.ChalkViolation!>! violations, string! message, Chalk.Client.SqlPosition? position, Chalk.Client.PlanningState? planningState, System.Exception? innerException) -> void
+Chalk.Client.PlanningException.PlanningException(string! code, string! kind, string! message, Chalk.Client.SqlPosition? position, Chalk.Client.PlanningState? planningState = null, System.Exception? innerException = null) -> void
 Chalk.Client.PlanningException.PlanningState.get -> Chalk.Client.PlanningState?
 Chalk.Client.PlanningException.Position.get -> Chalk.Client.SqlPosition?
 Chalk.Client.PlanningOptions
@@ -685,28 +700,9 @@ Chalk.Client.Rpc.PlanError.EndColumn.get -> int
 Chalk.Client.Rpc.PlanError.EndColumn.set -> void
 Chalk.Client.Rpc.PlanError.EndLine.get -> int
 Chalk.Client.Rpc.PlanError.EndLine.set -> void
-Chalk.Client.Rpc.PlanError.Kind.get -> Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.Rpc.PlanError.Kind.set -> void
 Chalk.Client.Rpc.PlanError.Line.get -> int
 Chalk.Client.Rpc.PlanError.Line.set -> void
 Chalk.Client.Rpc.PlanError.PlanError() -> void
-~Chalk.Client.Rpc.PlanError.PolicyRefusal.get -> Chalk.Client.Rpc.PolicyRefusal
-~Chalk.Client.Rpc.PlanError.PolicyRefusal.set -> void
-const Chalk.Client.Rpc.PlanError.PolicyRefusalFieldNumber = 8 -> int
-Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.Rpc.PlanErrorKind.EpochMismatch = 5 -> Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.Rpc.PlanErrorKind.Internal = 8 -> Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.Rpc.PlanErrorKind.InvalidCatalog = 7 -> Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.Rpc.PlanErrorKind.InvalidRequest = 10 -> Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.Rpc.PlanErrorKind.IrVersion = 6 -> Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.Rpc.PlanErrorKind.Parse = 1 -> Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.Rpc.PlanErrorKind.PlanningAborted = 11 -> Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.Rpc.PlanErrorKind.Policy = 9 -> Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.Rpc.PlanErrorKind.UnknownCatalogVersion = 12 -> Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.Rpc.PlanErrorKind.UnknownContext = 4 -> Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.Rpc.PlanErrorKind.Unspecified = 0 -> Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.Rpc.PlanErrorKind.Unsupported = 3 -> Chalk.Client.Rpc.PlanErrorKind
-Chalk.Client.Rpc.PlanErrorKind.Validation = 2 -> Chalk.Client.Rpc.PlanErrorKind
 Chalk.Client.Rpc.PlanRequest
 Chalk.Client.Rpc.PlanRequest.CalculateSize() -> int
 Chalk.Client.Rpc.PlanRequest.CatalogEpoch.get -> long
@@ -808,52 +804,6 @@ Chalk.Client.Rpc.PlanningTerminationReason.CancelledByHost = 4 -> Chalk.Client.R
 Chalk.Client.Rpc.PlanningTerminationReason.Converged = 1 -> Chalk.Client.Rpc.PlanningTerminationReason
 Chalk.Client.Rpc.PlanningTerminationReason.StoppedByHost = 3 -> Chalk.Client.Rpc.PlanningTerminationReason
 Chalk.Client.Rpc.PlanningTerminationReason.Unspecified = 0 -> Chalk.Client.Rpc.PlanningTerminationReason
-Chalk.Client.Rpc.PolicyRefusal
-Chalk.Client.Rpc.PolicyRefusal.CalculateSize() -> int
-~Chalk.Client.Rpc.PolicyRefusal.Clone() -> Chalk.Client.Rpc.PolicyRefusal
-~Chalk.Client.Rpc.PolicyRefusal.Column.get -> string
-~Chalk.Client.Rpc.PolicyRefusal.Column.set -> void
-const Chalk.Client.Rpc.PolicyRefusal.ColumnFieldNumber = 3 -> int
-~static Chalk.Client.Rpc.PolicyRefusal.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
-~Chalk.Client.Rpc.PolicyRefusal.Disclosures.get -> Google.Protobuf.Collections.RepeatedField<string>
-const Chalk.Client.Rpc.PolicyRefusal.DisclosuresFieldNumber = 7 -> int
-~Chalk.Client.Rpc.PolicyRefusal.Equals(Chalk.Client.Rpc.PolicyRefusal other) -> bool
-~override Chalk.Client.Rpc.PolicyRefusal.Equals(object other) -> bool
-override Chalk.Client.Rpc.PolicyRefusal.GetHashCode() -> int
-~Chalk.Client.Rpc.PolicyRefusal.MergeFrom(Chalk.Client.Rpc.PolicyRefusal other) -> void
-~Chalk.Client.Rpc.PolicyRefusal.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
-~Chalk.Client.Rpc.PolicyRefusal.Output.get -> Chalk.Ir.RowType
-~Chalk.Client.Rpc.PolicyRefusal.Output.set -> void
-const Chalk.Client.Rpc.PolicyRefusal.OutputFieldNumber = 6 -> int
-~static Chalk.Client.Rpc.PolicyRefusal.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.PolicyRefusal>
-~Chalk.Client.Rpc.PolicyRefusal.Permitted.get -> Google.Protobuf.Collections.RepeatedField<string>
-const Chalk.Client.Rpc.PolicyRefusal.PermittedFieldNumber = 5 -> int
-Chalk.Client.Rpc.PolicyRefusal.PolicyRefusal() -> void
-~Chalk.Client.Rpc.PolicyRefusal.PolicyRefusal(Chalk.Client.Rpc.PolicyRefusal other) -> void
-Chalk.Client.Rpc.PolicyRefusal.Reason.get -> Chalk.Client.Rpc.PolicyRefusalReason
-Chalk.Client.Rpc.PolicyRefusal.Reason.set -> void
-const Chalk.Client.Rpc.PolicyRefusal.ReasonFieldNumber = 1 -> int
-~Chalk.Client.Rpc.PolicyRefusal.Table.get -> string
-~Chalk.Client.Rpc.PolicyRefusal.Table.set -> void
-const Chalk.Client.Rpc.PolicyRefusal.TableFieldNumber = 2 -> int
-~override Chalk.Client.Rpc.PolicyRefusal.ToString() -> string
-~Chalk.Client.Rpc.PolicyRefusal.Use.get -> string
-~Chalk.Client.Rpc.PolicyRefusal.Use.set -> void
-const Chalk.Client.Rpc.PolicyRefusal.UseFieldNumber = 4 -> int
-~Chalk.Client.Rpc.PolicyRefusal.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
-Chalk.Client.Rpc.PolicyRefusalReason
-Chalk.Client.Rpc.PolicyRefusalReason.Binding = 8 -> Chalk.Client.Rpc.PolicyRefusalReason
-Chalk.Client.Rpc.PolicyRefusalReason.Internal = 11 -> Chalk.Client.Rpc.PolicyRefusalReason
-Chalk.Client.Rpc.PolicyRefusalReason.InvalidEntitlement = 9 -> Chalk.Client.Rpc.PolicyRefusalReason
-Chalk.Client.Rpc.PolicyRefusalReason.NameCollision = 10 -> Chalk.Client.Rpc.PolicyRefusalReason
-Chalk.Client.Rpc.PolicyRefusalReason.NoContext = 7 -> Chalk.Client.Rpc.PolicyRefusalReason
-Chalk.Client.Rpc.PolicyRefusalReason.NoVisibleRows = 5 -> Chalk.Client.Rpc.PolicyRefusalReason
-Chalk.Client.Rpc.PolicyRefusalReason.PopulationOnly = 1 -> Chalk.Client.Rpc.PolicyRefusalReason
-Chalk.Client.Rpc.PolicyRefusalReason.PushdownRequired = 6 -> Chalk.Client.Rpc.PolicyRefusalReason
-Chalk.Client.Rpc.PolicyRefusalReason.Redacted = 3 -> Chalk.Client.Rpc.PolicyRefusalReason
-Chalk.Client.Rpc.PolicyRefusalReason.Star = 4 -> Chalk.Client.Rpc.PolicyRefusalReason
-Chalk.Client.Rpc.PolicyRefusalReason.Statistical = 2 -> Chalk.Client.Rpc.PolicyRefusalReason
-Chalk.Client.Rpc.PolicyRefusalReason.Unspecified = 0 -> Chalk.Client.Rpc.PolicyRefusalReason
 Chalk.Client.Rpc.PushdownLevel
 Chalk.Client.Rpc.PushdownLevel.FiltersOnly = 2 -> Chalk.Client.Rpc.PushdownLevel
 Chalk.Client.Rpc.PushdownLevel.Full = 1 -> Chalk.Client.Rpc.PushdownLevel
@@ -915,6 +865,9 @@ Chalk.Client.Rpc.TableStatistics.RowCount.set -> void
 Chalk.Client.Rpc.TableStatistics.RowCountKind.get -> Chalk.Ir.RowCountKind
 Chalk.Client.Rpc.TableStatistics.RowCountKind.set -> void
 Chalk.Client.Rpc.TableStatistics.TableStatistics() -> void
+Chalk.Client.Rpc.Violation
+Chalk.Client.Rpc.Violation.CalculateSize() -> int
+Chalk.Client.Rpc.Violation.Violation() -> void
 Chalk.Client.SchemaTableExtensions
 const Chalk.Client.SchemaTableExtensions.CompositeFieldsProperty = "chalk.fields" -> string!
 const Chalk.Client.SchemaTableExtensions.DisclosureProperty = "chalk.disclosure" -> string!
@@ -957,7 +910,7 @@ Chalk.Client.WindowExecution.Automatic = 0 -> Chalk.Client.WindowExecution
 Chalk.Client.WindowExecution.Buffered = 1 -> Chalk.Client.WindowExecution
 Chalk.Entitlements.EntitlementException
 Chalk.Entitlements.EntitlementException.EntitlementException(string! message, Chalk.Client.SqlPosition? position, System.Exception? innerException = null) -> void
-Chalk.Entitlements.EntitlementException.Kind.get -> Chalk.Client.Rpc.PlanErrorKind
+Chalk.Entitlements.EntitlementException.Kind.get -> string!
 Chalk.Entitlements.EntitlementException.Position.get -> Chalk.Client.SqlPosition?
 const Chalk.Client.Rpc.GetInfoResponse.ConformancesFieldNumber = 10 -> int
 const Chalk.Client.Rpc.GetInfoResponse.LibrariesFieldNumber = 11 -> int
@@ -971,7 +924,9 @@ const Chalk.Client.Rpc.RedactSqlRequest.ConformanceFieldNumber = 5 -> int
 override Chalk.Client.BindingConverter.ToString() -> string!
 override Chalk.Client.Rpc.ParameterHint.GetHashCode() -> int
 Chalk.Entitlements.EntitlementException.Refusal.get -> Chalk.Entitlements.EntitlementRefusal?
+Chalk.Entitlements.EntitlementException.Refusals.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.EntitlementRefusal!>!
 Chalk.Entitlements.EntitlementRefusal
+Chalk.Entitlements.EntitlementRefusal.Code.get -> string!
 Chalk.Entitlements.EntitlementRefusal.Column.get -> string?
 Chalk.Entitlements.EntitlementRefusal.OutputSchema.get -> Apache.Arrow.Schema?
 Chalk.Entitlements.EntitlementRefusal.Permitted.get -> System.Collections.Generic.IReadOnlyList<string!>!
@@ -1023,12 +978,14 @@ const Chalk.Client.Rpc.GetInfoResponse.PlannerConfigHashFieldNumber = 5 -> int
 const Chalk.Client.Rpc.GetInfoResponse.PlannerVersionFieldNumber = 3 -> int
 const Chalk.Client.Rpc.GetInfoResponse.PlanningWorkersFieldNumber = 9 -> int
 const Chalk.Client.Rpc.PlanError.ColumnFieldNumber = 4 -> int
+const Chalk.Client.Rpc.PlanError.DisclosuresFieldNumber = 12 -> int
 const Chalk.Client.Rpc.PlanError.EndColumnFieldNumber = 6 -> int
 const Chalk.Client.Rpc.PlanError.EndLineFieldNumber = 5 -> int
-const Chalk.Client.Rpc.PlanError.KindFieldNumber = 1 -> int
 const Chalk.Client.Rpc.PlanError.LineFieldNumber = 3 -> int
 const Chalk.Client.Rpc.PlanError.MessageFieldNumber = 2 -> int
+const Chalk.Client.Rpc.PlanError.OutputFieldNumber = 11 -> int
 const Chalk.Client.Rpc.PlanError.PlanningStateFieldNumber = 7 -> int
+const Chalk.Client.Rpc.PlanError.ViolationsFieldNumber = 10 -> int
 const Chalk.Client.Rpc.PlanRequest.CatalogEpochFieldNumber = 3 -> int
 const Chalk.Client.Rpc.PlanRequest.ClientIrVersionFieldNumber = 5 -> int
 const Chalk.Client.Rpc.PlanRequest.ContextFieldNumber = 8 -> int
@@ -1116,6 +1073,13 @@ const Chalk.Client.Rpc.TableStatistics.RowCountFieldNumber = 3 -> int
 const Chalk.Client.Rpc.TableStatistics.RowCountKindFieldNumber = 4 -> int
 const Chalk.Client.Rpc.TableStatistics.SchemaFieldNumber = 1 -> int
 const Chalk.Client.Rpc.TableStatistics.TableFieldNumber = 2 -> int
+const Chalk.Client.Rpc.Violation.CodeFieldNumber = 1 -> int
+const Chalk.Client.Rpc.Violation.ColumnFieldNumber = 5 -> int
+const Chalk.Client.Rpc.Violation.KindFieldNumber = 2 -> int
+const Chalk.Client.Rpc.Violation.MessageFieldNumber = 3 -> int
+const Chalk.Client.Rpc.Violation.PermittedFieldNumber = 7 -> int
+const Chalk.Client.Rpc.Violation.TableFieldNumber = 4 -> int
+const Chalk.Client.Rpc.Violation.UseFieldNumber = 6 -> int
 override Chalk.Client.ParameterDescriptor.ToString() -> string!
 override Chalk.Client.PlanningCost.ToString() -> string!
 override Chalk.Client.PlanningState.ToString() -> string!
@@ -1144,6 +1108,7 @@ override Chalk.Client.Rpc.RequestContext.GetHashCode() -> int
 override Chalk.Client.Rpc.StopPlanningRequest.GetHashCode() -> int
 override Chalk.Client.Rpc.StopPlanningResponse.GetHashCode() -> int
 override Chalk.Client.Rpc.TableStatistics.GetHashCode() -> int
+override Chalk.Client.Rpc.Violation.GetHashCode() -> int
 override Chalk.Client.SqlPosition.GetHashCode() -> int
 override Chalk.Client.SqlPosition.ToString() -> string!
 static Chalk.Arrow.RecordBatchExtensions.GetComposite<T>(this Apache.Arrow.IArrowArray! array, int index) -> T
@@ -1237,14 +1202,18 @@ static readonly Chalk.Client.PlanningOptions.None -> Chalk.Client.PlanningOption
 ~Chalk.Client.Rpc.ParameterHint.ParameterHint(Chalk.Client.Rpc.ParameterHint other) -> void
 ~Chalk.Client.Rpc.ParameterHint.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
 ~Chalk.Client.Rpc.PlanError.Clone() -> Chalk.Client.Rpc.PlanError
+~Chalk.Client.Rpc.PlanError.Disclosures.get -> Google.Protobuf.Collections.RepeatedField<string>
 ~Chalk.Client.Rpc.PlanError.Equals(Chalk.Client.Rpc.PlanError other) -> bool
 ~Chalk.Client.Rpc.PlanError.MergeFrom(Chalk.Client.Rpc.PlanError other) -> void
 ~Chalk.Client.Rpc.PlanError.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
 ~Chalk.Client.Rpc.PlanError.Message.get -> string
 ~Chalk.Client.Rpc.PlanError.Message.set -> void
+~Chalk.Client.Rpc.PlanError.Output.get -> Chalk.Ir.RowType
+~Chalk.Client.Rpc.PlanError.Output.set -> void
 ~Chalk.Client.Rpc.PlanError.PlanError(Chalk.Client.Rpc.PlanError other) -> void
 ~Chalk.Client.Rpc.PlanError.PlanningState.get -> Chalk.Client.Rpc.PlanningState
 ~Chalk.Client.Rpc.PlanError.PlanningState.set -> void
+~Chalk.Client.Rpc.PlanError.Violations.get -> Google.Protobuf.Collections.RepeatedField<Chalk.Client.Rpc.Violation>
 ~Chalk.Client.Rpc.PlanError.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
 ~Chalk.Client.Rpc.PlannerOptions.Conformance.get -> string
 ~Chalk.Client.Rpc.PlannerOptions.Conformance.set -> void
@@ -1444,6 +1413,25 @@ static readonly Chalk.Client.PlanningOptions.None -> Chalk.Client.PlanningOption
 ~Chalk.Client.Rpc.TableStatistics.Table.set -> void
 ~Chalk.Client.Rpc.TableStatistics.TableStatistics(Chalk.Client.Rpc.TableStatistics other) -> void
 ~Chalk.Client.Rpc.TableStatistics.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
+~Chalk.Client.Rpc.Violation.Clone() -> Chalk.Client.Rpc.Violation
+~Chalk.Client.Rpc.Violation.Code.get -> string
+~Chalk.Client.Rpc.Violation.Code.set -> void
+~Chalk.Client.Rpc.Violation.Column.get -> string
+~Chalk.Client.Rpc.Violation.Column.set -> void
+~Chalk.Client.Rpc.Violation.Equals(Chalk.Client.Rpc.Violation other) -> bool
+~Chalk.Client.Rpc.Violation.Kind.get -> string
+~Chalk.Client.Rpc.Violation.Kind.set -> void
+~Chalk.Client.Rpc.Violation.MergeFrom(Chalk.Client.Rpc.Violation other) -> void
+~Chalk.Client.Rpc.Violation.MergeFrom(Google.Protobuf.CodedInputStream input) -> void
+~Chalk.Client.Rpc.Violation.Message.get -> string
+~Chalk.Client.Rpc.Violation.Message.set -> void
+~Chalk.Client.Rpc.Violation.Permitted.get -> Google.Protobuf.Collections.RepeatedField<string>
+~Chalk.Client.Rpc.Violation.Table.get -> string
+~Chalk.Client.Rpc.Violation.Table.set -> void
+~Chalk.Client.Rpc.Violation.Use.get -> string
+~Chalk.Client.Rpc.Violation.Use.set -> void
+~Chalk.Client.Rpc.Violation.Violation(Chalk.Client.Rpc.Violation other) -> void
+~Chalk.Client.Rpc.Violation.WriteTo(Google.Protobuf.CodedOutputStream output) -> void
 ~override Chalk.Client.Rpc.ColumnStatisticsEntry.Equals(object other) -> bool
 ~override Chalk.Client.Rpc.ColumnStatisticsEntry.ToString() -> string
 ~override Chalk.Client.Rpc.ContextRelationValue.Equals(object other) -> bool
@@ -1497,6 +1485,8 @@ static readonly Chalk.Client.PlanningOptions.None -> Chalk.Client.PlanningOption
 ~override Chalk.Client.Rpc.StopPlanningResponse.ToString() -> string
 ~override Chalk.Client.Rpc.TableStatistics.Equals(object other) -> bool
 ~override Chalk.Client.Rpc.TableStatistics.ToString() -> string
+~override Chalk.Client.Rpc.Violation.Equals(object other) -> bool
+~override Chalk.Client.Rpc.Violation.ToString() -> string
 ~override Chalk.Client.SqlPosition.Equals(object obj) -> bool
 ~static Chalk.Client.Rpc.ColumnStatisticsEntry.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
 ~static Chalk.Client.Rpc.ColumnStatisticsEntry.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.ColumnStatisticsEntry>
@@ -1552,6 +1542,8 @@ static readonly Chalk.Client.PlanningOptions.None -> Chalk.Client.PlanningOption
 ~static Chalk.Client.Rpc.StopPlanningResponse.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.StopPlanningResponse>
 ~static Chalk.Client.Rpc.TableStatistics.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
 ~static Chalk.Client.Rpc.TableStatistics.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.TableStatistics>
+~static Chalk.Client.Rpc.Violation.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
+~static Chalk.Client.Rpc.Violation.Parser.get -> Google.Protobuf.MessageParser<Chalk.Client.Rpc.Violation>
 ~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.GetInfo(Chalk.Client.Rpc.GetInfoRequest request, Grpc.Core.CallOptions options) -> Chalk.Client.Rpc.GetInfoResponse
 ~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.GetInfo(Chalk.Client.Rpc.GetInfoRequest request, Grpc.Core.Metadata headers = null, System.DateTime? deadline = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Chalk.Client.Rpc.GetInfoResponse
 ~virtual Chalk.Client.Rpc.PlannerService.PlannerServiceClient.GetInfoAsync(Chalk.Client.Rpc.GetInfoRequest request, Grpc.Core.CallOptions options) -> Grpc.Core.AsyncUnaryCall<Chalk.Client.Rpc.GetInfoResponse>

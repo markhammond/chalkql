@@ -227,6 +227,7 @@ public sealed class AdoSource : ISourceRuntime
         var declared = Array.Find(
             current.Tables, t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))
             ?? throw new SourceContractException(
+                ChalkErrorCodes.SourceContract,
                 SourceId,
                 name,
                 $"there is no such table in schema '{SchemaName}'. Known tables: "
@@ -268,6 +269,7 @@ public sealed class AdoSource : ISourceRuntime
             // would return too many rows. This source's predicates travel in a RemoteQuery, so a
             // filter on the *scan* path is always a planner error.
             throw new SourceContractException(
+                ChalkErrorCodes.SourceContract,
                 SourceId,
                 request.Table,
                 "a filter was pushed into a scan. This source evaluates predicates through "
@@ -300,6 +302,7 @@ public sealed class AdoSource : ISourceRuntime
         if (request.QueryText.Length == 0)
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceContract,
                 SourceId,
                 "a pushed query",
                 "this source speaks SQL, but the request carries no query text. A source whose "
@@ -485,6 +488,7 @@ public sealed class AdoSource : ISourceRuntime
         var tables = Volatile.Read(ref _current).Tables;
         return Array.Find(tables, t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))
             ?? throw new SourceContractException(
+                ChalkErrorCodes.SourceContract,
                 SourceId,
                 name,
                 $"there is no such table in schema '{SchemaName}'. Known tables: "

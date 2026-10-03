@@ -67,7 +67,7 @@ public sealed class BindingConverterTests(SharedSidecar sidecar)
         Assert.Equal(7L, binding.Bind(new OrgId(7), ChalkType.Int32(), "Parameter @org"));
         Assert.Equal(7m, binding.Bind(new OrgId(7), ChalkType.Decimal(10, 2), "Parameter @org"));
 
-        var refused = Assert.Throws<ArgumentException>(
+        var refused = Assert.Throws<ParameterBindingException>(
             () => binding.Bind(new OrgId(7), ChalkType.String(), "Parameter @org"));
         Assert.StartsWith(
             "Parameter @org is STRING, and a Int32 returned by BindingConverter.From<OrgId> was bound to it:",
@@ -83,7 +83,7 @@ public sealed class BindingConverterTests(SharedSidecar sidecar)
 
         Assert.Equal(Guid.Parse(Text), binding.Bind(Text, ChalkType.Uuid(), "Parameter @id"));
         Assert.Equal(Text, binding.Bind(Text, ChalkType.String(), "Parameter @name"));
-        Assert.Throws<ArgumentException>(() => binding.Bind("not-a-guid", ChalkType.Uuid(), "Parameter @id"));
+        Assert.Throws<ParameterBindingException>(() => binding.Bind("not-a-guid", ChalkType.Uuid(), "Parameter @id"));
     }
 
     [Fact]
@@ -91,8 +91,9 @@ public sealed class BindingConverterTests(SharedSidecar sidecar)
     {
         var binding = new ValueBinding([new Throws()]);
 
-        var refused = Assert.Throws<ArgumentException>(
+        var refused = Assert.Throws<ParameterBindingException>(
             () => binding.Bind(new OrgId(4711), ChalkType.Int32(), "Context scalar 'org'"));
+        Assert.Equal("Context scalar 'org'", refused.Subject);
 
         Assert.StartsWith("Context scalar 'org' is I32, and Throws threw", refused.Message, StringComparison.Ordinal);
         Assert.IsType<InvalidOperationException>(refused.InnerException);
@@ -105,7 +106,7 @@ public sealed class BindingConverterTests(SharedSidecar sidecar)
         var binding = new ValueBinding([new Nothing()]);
 
         Assert.Null(binding.Bind(new OrgId(1), ChalkType.Int32(nullable: true), "Parameter @org"));
-        var refused = Assert.Throws<ArgumentException>(
+        var refused = Assert.Throws<ParameterBindingException>(
             () => binding.Bind(new OrgId(1), ChalkType.Int32(), "Parameter @org"));
         Assert.Contains("which is not nullable, and Nothing returned NULL", refused.Message, StringComparison.Ordinal);
     }
@@ -140,7 +141,7 @@ public sealed class BindingConverterTests(SharedSidecar sidecar)
         await using var engine = await EngineAsync(TenancyFixture.Shared);
 
         var context = TenancyFixture.U1.WithRows("manager_orgs", Orgs(1.5));
-        var refused = await Assert.ThrowsAsync<ArgumentException>(
+        var refused = await Assert.ThrowsAsync<ParameterBindingException>(
             () => engine.WithEntitlements().PrepareAsync(Members, context).AsTask());
 
         Assert.StartsWith(
@@ -155,7 +156,7 @@ public sealed class BindingConverterTests(SharedSidecar sidecar)
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         await using var engine = await EngineAsync(TenancyFixture.Shared);
 
-        var refused = await Assert.ThrowsAsync<ArgumentException>(
+        var refused = await Assert.ThrowsAsync<ParameterBindingException>(
             () => engine.WithEntitlements().PrepareAsync(Members, Typed(TenancyFixture.U1, "1")).AsTask());
 
         Assert.StartsWith(
@@ -181,7 +182,7 @@ public sealed class BindingConverterTests(SharedSidecar sidecar)
 
         await using (var engine = await EngineAsync(TenancyFixture.Shared))
         {
-            var refused = await Assert.ThrowsAsync<ArgumentException>(
+            var refused = await Assert.ThrowsAsync<ParameterBindingException>(
                 () => engine.WithEntitlements().PrepareAsync(Members, converted).AsTask());
 
             Assert.StartsWith(
@@ -205,7 +206,7 @@ public sealed class BindingConverterTests(SharedSidecar sidecar)
         Assert.NotEmpty(expected);
         Assert.Equal(expected, await RowsAsync(engine, prepared, [new OrgId(1)]));
         Assert.Equal(expected, await RowsAsync(engine, prepared, [1L]));
-        var refused = await Assert.ThrowsAsync<ArgumentException>(
+        var refused = await Assert.ThrowsAsync<ParameterBindingException>(
             async () => await RowsAsync(engine, prepared, [1.0]));
         Assert.StartsWith("Parameter ", refused.Message, StringComparison.Ordinal);
     }
@@ -235,7 +236,7 @@ public sealed class BindingConverterTests(SharedSidecar sidecar)
         Assert.NotEmpty(expected);
         Assert.Equal(expected, await RowsAsync(engine, prepared.Query, converted));
 
-        var refused = await Assert.ThrowsAsync<ArgumentException>(
+        var refused = await Assert.ThrowsAsync<ParameterBindingException>(
             async () => await RowsAsync(engine, prepared.Query, Typed(TenancyFixture.U3, 3.5).WithRows("subject_pairs", Pairs(3, 2))));
         Assert.StartsWith(
             "Context scalar 'user' is I32, and a Double was bound to it:", refused.Message, StringComparison.Ordinal);

@@ -565,21 +565,21 @@ public sealed class EntitlementSubversionTests(SharedSidecar sidecar)
     [InlineData(
         "SELECT id FROM members WHERE id = @ctx.user ORDER BY id",
         "Encountered \". user\"",
-        Chalk.Client.Rpc.PlanErrorKind.Parse)]
+        PlanErrorKinds.Parse)]
     [InlineData(
         "SELECT @ctx.user AS u FROM members",
         "Encountered \". user\"",
-        Chalk.Client.Rpc.PlanErrorKind.Parse)]
+        PlanErrorKinds.Parse)]
     [InlineData(
         "SELECT id FROM members WHERE org_id IN (@ctx.manager_orgs) ORDER BY id",
         "Illegal use of dynamic parameter",
-        Chalk.Client.Rpc.PlanErrorKind.Validation)]
+        PlanErrorKinds.Validation)]
     [InlineData(
         "SELECT id FROM members WHERE org_id IN (\"$chalk$ctx\".\"manager_orgs\") ORDER BY id",
         "begins with $chalk$",
-        Chalk.Client.Rpc.PlanErrorKind.InvalidRequest)]
+        PlanErrorKinds.InvalidRequest)]
     public async Task A_statement_that_spells_the_context_itself_is_refused(
-        string sql, string says, Chalk.Client.Rpc.PlanErrorKind kind)
+        string sql, string says, string kind)
     {
         await using var engine = await EngineAsync();
         var refusal = await Assert.ThrowsAsync<PlanningException>(

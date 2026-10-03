@@ -8,13 +8,13 @@ import chalk.ir.v1.AsOfMatch;
 import chalk.ir.v1.Collation;
 import chalk.ir.v1.DynamicParam;
 import chalk.ir.v1.Expr;
-import chalk.ir.v1.FieldRef;
 import chalk.ir.v1.Fetch;
+import chalk.ir.v1.FieldRef;
+import chalk.ir.v1.Filter;
 import chalk.ir.v1.FrameBound;
 import chalk.ir.v1.FrameBoundKind;
 import chalk.ir.v1.FrameExclusion;
 import chalk.ir.v1.FrameMode;
-import chalk.ir.v1.Filter;
 import chalk.ir.v1.FunctionId;
 import chalk.ir.v1.Grouping;
 import chalk.ir.v1.HashAggregate;
@@ -28,8 +28,8 @@ import chalk.ir.v1.NestedLoopJoin;
 import chalk.ir.v1.Plan;
 import chalk.ir.v1.Project;
 import chalk.ir.v1.Read;
-import chalk.ir.v1.RemoteQuery;
 import chalk.ir.v1.Rel;
+import chalk.ir.v1.RemoteQuery;
 import chalk.ir.v1.RowType;
 import chalk.ir.v1.ScalarCall;
 import chalk.ir.v1.SetOpKind;
@@ -44,29 +44,30 @@ import chalk.ir.v1.VirtualTable;
 import chalk.ir.v1.WindowCall;
 import chalk.ir.v1.WindowFrame;
 import chalk.ir.v1.WindowFunctionId;
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import chalk.planner.catalog.ChalkTable;
+import chalk.planner.plan.SourceConvention;
 import chalk.planner.plan.rel.ChalkAsOfJoin;
 import chalk.planner.plan.rel.ChalkFilter;
 import chalk.planner.plan.rel.ChalkHashAggregate;
-import chalk.planner.plan.rel.ChalkHop;
 import chalk.planner.plan.rel.ChalkHashJoin;
+import chalk.planner.plan.rel.ChalkHop;
 import chalk.planner.plan.rel.ChalkIndexLookup;
+import chalk.planner.plan.rel.ChalkIntersect;
 import chalk.planner.plan.rel.ChalkLimit;
 import chalk.planner.plan.rel.ChalkMergeJoin;
+import chalk.planner.plan.rel.ChalkMinus;
 import chalk.planner.plan.rel.ChalkNestedLoopJoin;
 import chalk.planner.plan.rel.ChalkProject;
+import chalk.planner.plan.rel.ChalkSession;
 import chalk.planner.plan.rel.ChalkSort;
 import chalk.planner.plan.rel.ChalkTableScan;
-import chalk.planner.plan.rel.ChalkSession;
 import chalk.planner.plan.rel.ChalkTopN;
-import chalk.planner.plan.rel.ChalkUnnest;
-import chalk.planner.plan.rel.ChalkIntersect;
-import chalk.planner.plan.rel.ChalkMinus;
 import chalk.planner.plan.rel.ChalkUnion;
+import chalk.planner.plan.rel.ChalkUnnest;
 import chalk.planner.plan.rel.ChalkValues;
 import chalk.planner.plan.rel.ChalkWindow;
-import chalk.planner.plan.SourceConvention;
 import chalk.planner.plan.rel.SourceRels;
 import chalk.planner.plan.rel.SourceScan;
 import chalk.planner.plan.rel.SourceToLocalConverter;
@@ -355,13 +356,15 @@ public final class RelToIr {
       builder.setJoin(ir);
     } else {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "relational operator " + node.getClass().getSimpleName(),
-          "The optimiser produced a rel this milestone cannot express in the IR.");
+          "The optimiser produced a relational operator ChalkQL cannot express in a plan.");
     }
 
     Rel.KindCase kind = builder.getKindCase();
     if (!gate.allows(kind)) {
       throw new UnsupportedFeatureException(
+          ErrorCode.IR_VERSION_MISMATCH,
           "IR node " + kind,
           "It was introduced in IR version "
               + IrVersionGate.sinceVersion(kind)
@@ -498,9 +501,10 @@ public final class RelToIr {
       RelDataTypeField right = join.getRight().getRowType().getFieldList().get(rightKeys.get(i));
       if (left.getType().isStruct() || right.getType().isStruct()) {
         throw new UnsupportedFeatureException(
+            ErrorCode.INCOMPARABLE_TYPE,
             "a join on the composite column '" + left.getName() + "'",
             "A composite value has no equality, so it cannot be a join key. Join on one of its fields "
-                + "instead (docs/design/51-structured-function-results.md §1).");
+                + "instead.");
       }
     }
   }
@@ -550,6 +554,7 @@ public final class RelToIr {
       case GREATER_THAN_OR_EQUAL -> AsOfMatch.AS_OF_MATCH_GE;
       default ->
           throw new UnsupportedFeatureException(
+              ErrorCode.UNSUPPORTED_SQL,
               "ASOF MATCH_CONDITION operator " + kind, "Only <, <=, > and >= compare two times.");
     };
   }
@@ -564,6 +569,7 @@ public final class RelToIr {
       case ANTI -> JoinType.JOIN_TYPE_ANTI;
       default ->
           throw new UnsupportedFeatureException(
+              ErrorCode.UNSUPPORTED_SQL,
               "join type " + type, "The IR has INNER, LEFT, RIGHT, FULL, SEMI and ANTI.");
     };
   }
@@ -1112,6 +1118,7 @@ public final class RelToIr {
     RexNode offset = bound.getOffset();
     if (offset == null) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "window frame bound " + bound, "A PRECEDING or FOLLOWING bound must carry an offset.");
     }
 
@@ -1232,7 +1239,8 @@ public final class RelToIr {
   private Aggregate aggregate(org.apache.calcite.rel.core.Aggregate node) {
     if (node.getGroupSets().size() != 1) {
       throw new UnsupportedFeatureException(
-          "grouping sets", "The IR accepts exactly one grouping in v1 (docs/design/02-ir.md §4).");
+          ErrorCode.UNSUPPORTED_SQL,
+          "grouping sets", "A plan carries exactly one grouping.");
     }
     Aggregate.Builder aggregate = Aggregate.newBuilder().setInput(toRel(node.getInput()));
     Grouping.Builder grouping = Grouping.newBuilder();
@@ -1303,9 +1311,10 @@ public final class RelToIr {
     chalk.planner.catalog.UserFunction declared = scan.declaration();
     if (!declared.isClientBodied()) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "table function " + declared.qualifiedName(),
           "Only a client-bodied table function reaches the IR; a SQL-bodied one is a macro and has "
-              + "already expanded (docs/design/17-user-defined-functions.md §2).");
+              + "already expanded.");
     }
 
     chalk.ir.v1.TableFunctionScan.Builder ir =
@@ -1323,16 +1332,17 @@ public final class RelToIr {
   private static String userAggregateName(chalk.planner.catalog.UserFunction declared) {
     if (declared.isNative()) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "native function "
               + declared.qualifiedName()
               + " cannot be evaluated outside source "
               + declared.schemaName(),
           "A native aggregate is computed by its own source inside a pushed Aggregate; evaluating "
-              + "it here would mean running somebody else's function "
-              + "(docs/design/17-user-defined-functions.md §2).");
+              + "it here would mean running somebody else's function.");
     }
     if (declared.isSqlBodied()) {
       throw new UnsupportedFeatureException(
+          ErrorCode.UNSUPPORTED_SQL,
           "SQL-bodied aggregate " + declared.qualifiedName() + " survived inlining",
           "A SQL-bodied aggregate is expanded into the built-in aggregates it is written over "
               + "before validation; reaching the IR means the inliner missed it.");
@@ -1383,18 +1393,19 @@ public final class RelToIr {
       for (org.apache.calcite.rel.type.RelDataTypeField field : rel.getRowType().getFieldList()) {
         if (types.toIr(field.getType()).getKind() == TypeKind.TYPE_KIND_LIST) {
           throw new UnsupportedFeatureException(
+              ErrorCode.INCOMPARABLE_TYPE,
               rel.kind + " on the LIST column '" + field.getName() + "'",
-              "v1 lists have no ordering or equality, so a set operation that compares rows cannot "
-                  + "have one in its row (docs/design/14-windows-ii.md §5). UNION ALL, which "
+              "A list has no ordering or equality, so a set operation that compares rows cannot "
+                  + "have one in its row. UNION ALL, which "
                   + "compares nothing, is allowed.");
         }
         // D291: the same of a composite value, which the statement's validation refuses first.
         if (field.getType().isStruct()) {
           throw new UnsupportedFeatureException(
+              ErrorCode.INCOMPARABLE_TYPE,
               rel.kind + " on the composite column '" + field.getName() + "'",
               "A composite value has no equality, so a set operation that compares rows cannot have one in "
-                  + "its row. UNION ALL, which compares nothing, carries one "
-                  + "(docs/design/51-structured-function-results.md §1).");
+                  + "its row. UNION ALL, which compares nothing, carries one.");
         }
       }
     }
@@ -1434,15 +1445,15 @@ public final class RelToIr {
     TypeKind kind = types.toIr(field.getType()).getKind();
     if (kind == TypeKind.TYPE_KIND_LIST) {
       throw new UnsupportedFeatureException(
+          ErrorCode.INCOMPARABLE_TYPE,
           clause + " on the LIST column '" + field.getName() + "'",
-          "v1 lists have no ordering or equality; they can be produced, projected and indexed "
-              + "into (docs/design/14-windows-ii.md §5).");
+          "A list has no ordering or equality; it can be produced, projected and indexed into.");
     }
     if (kind == TypeKind.TYPE_KIND_COMPOSITE) {
       throw new UnsupportedFeatureException(
+          ErrorCode.INCOMPARABLE_TYPE,
           clause + " on the composite column '" + field.getName() + "'",
-          "A composite value has no equality: group by one of its fields instead "
-              + "(docs/design/51-structured-function-results.md §1).");
+          "A composite value has no equality: group by one of its fields instead.");
     }
   }
 
@@ -1462,22 +1473,22 @@ public final class RelToIr {
       // client's validator — the planner is where a caller can be told which column it was.
       if (key.getType().getKind() == TypeKind.TYPE_KIND_LIST) {
         throw new UnsupportedFeatureException(
+            ErrorCode.INCOMPARABLE_TYPE,
             "ORDER BY on the LIST column '"
                 + inputRow.getFieldList().get(field.getFieldIndex()).getName()
                 + "'",
-            "v1 lists have no ordering or equality; they can be produced, projected and indexed "
-                + "into (docs/design/14-windows-ii.md §5).");
+            "A list has no ordering or equality; it can be produced, projected and indexed into.");
       }
 
       // D291: the same of a composite value. The statement's validation refuses ORDER BY one by name first;
       // this is the refusal for an ordering a rule derived rather than the statement wrote.
       if (key.getType().getKind() == TypeKind.TYPE_KIND_COMPOSITE) {
         throw new UnsupportedFeatureException(
+            ErrorCode.INCOMPARABLE_TYPE,
             "ordering on the composite column '"
                 + inputRow.getFieldList().get(field.getFieldIndex()).getName()
                 + "'",
-            "A composite value has no ordering: sort by one of its fields instead "
-                + "(docs/design/51-structured-function-results.md §1).");
+            "A composite value has no ordering: sort by one of its fields instead.");
       }
 
       fields.add(

@@ -84,7 +84,7 @@ internal abstract class OperatorBase : IBatchOperator, IAsyncEnumerable<Columnar
         }
         catch (Exception exception) when (Wraps(exception))
         {
-            throw new ExecutionException(Context.PlanDigest, Path, exception.Message, exception);
+            throw new ExecutionException(CodeOf(exception), Context.PlanDigest, Path, exception.Message, exception);
         }
 
         if (!move.IsCompleted)
@@ -101,7 +101,7 @@ internal abstract class OperatorBase : IBatchOperator, IAsyncEnumerable<Columnar
         }
         catch (Exception exception) when (Wraps(exception))
         {
-            throw new ExecutionException(Context.PlanDigest, Path, exception.Message, exception);
+            throw new ExecutionException(CodeOf(exception), Context.PlanDigest, Path, exception.Message, exception);
         }
 
         if (!moved)
@@ -148,7 +148,7 @@ internal abstract class OperatorBase : IBatchOperator, IAsyncEnumerable<Columnar
         }
         catch (Exception exception) when (Wraps(exception))
         {
-            throw new ExecutionException(Context.PlanDigest, Path, exception.Message, exception);
+            throw new ExecutionException(CodeOf(exception), Context.PlanDigest, Path, exception.Message, exception);
         }
 
         if (!moved)
@@ -245,4 +245,11 @@ internal abstract class OperatorBase : IBatchOperator, IAsyncEnumerable<Columnar
     /// </summary>
     private static bool Wraps(Exception exception) =>
         exception is not (OperationCanceledException or ExecutionException);
+
+    /// <summary>
+    /// A wrapped ChalkQL exception keeps its code, which says more than that an operator failed; any
+    /// other failure is <see cref="ChalkErrorCodes.ExecutionFailed"/>.
+    /// </summary>
+    private static string CodeOf(Exception exception) =>
+        exception is ChalkException { Code: { } code } ? code : ChalkErrorCodes.ExecutionFailed;
 }

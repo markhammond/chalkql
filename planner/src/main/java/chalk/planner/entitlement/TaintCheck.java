@@ -1,8 +1,8 @@
 package chalk.planner.entitlement;
 
+import chalk.planner.ErrorCode;
 import chalk.planner.catalog.ChalkTable;
 import chalk.planner.plan.rel.ProjectedRelOptTable;
-import chalk.planner.rpc.v1.PolicyRefusalReason;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
@@ -62,7 +62,7 @@ public final class TaintCheck {
   private static final String BUG =
       " This is a POLICY refusal and also a bug in the entitlement rewrite: a statement that trips"
           + " the taint check has found a hole in the rewrite, not in itself. Please report the"
-          + " statement and the catalog (docs/design/16-entitlements.md §3.10).";
+          + " statement and the catalog.";
 
   // ------------------------------------------------------------------ clause 1
 
@@ -86,7 +86,7 @@ public final class TaintCheck {
           // as that table's policy says, quite separately.
           && !CorrelationRelOptTable.isCorrelation(scan.getTable())) {
         throw new PolicyException(
-            PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
+            ErrorCode.INTERNAL,
             "a scan of "
                 + table.schemaName()
                 + "."
@@ -126,7 +126,7 @@ public final class TaintCheck {
           String function = call.getAggregation().getName().toUpperCase(Locale.ROOT);
           if (!tainted.allowList().contains(function)) {
             throw new PolicyException(
-                PolicyRefusalReason.POLICY_REFUSAL_REASON_POPULATION_ONLY,
+                ErrorCode.POPULATION_ONLY,
                 tainted.table(),
                 tainted.column(),
                 function,
@@ -415,7 +415,7 @@ public final class TaintCheck {
       if (!findThroughJoin(physical, join, mq, new IdentityHashMap<>())
           && !markerCannotDecide(physical, join, mq, rexBuilder, executor)) {
         throw new PolicyException(
-            PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
+            ErrorCode.INTERNAL,
             "the visibility of "
                 + join.childTable()
                 + (join.rawParent() ? " derives along a path through " : " derives through ")
@@ -774,16 +774,17 @@ public final class TaintCheck {
           if (isRawPopulationOnly(aggregate.getInput(), argument, mq)
               && !PopulationAggregates.isPermitted(call.getAggregation())) {
             throw new PolicyException(
-                PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
+                ErrorCode.INTERNAL,
                 "a population-only column reaches "
                     + function
-                    + ", which is not one of the population aggregates D190 permits."
+                    + ", which is not a population aggregate: one that reports the group and never"
+                    + " one row's value."
                     + BUG);
           }
         }
         if (call.filterArg >= 0 && isRawPopulationOnly(aggregate.getInput(), call.filterArg, mq)) {
           throw new PolicyException(
-              PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
+              ErrorCode.INTERNAL,
               "a population-only column reaches an aggregate's FILTER clause, which is a predicate"
                   + " on a raw value and therefore an oracle."
                   + BUG);
@@ -797,7 +798,7 @@ public final class TaintCheck {
           sort.getCollation().getFieldCollations()) {
         if (isRawPopulationOnly(sort.getInput(), field.getFieldIndex(), mq)) {
           throw new PolicyException(
-              PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
+              ErrorCode.INTERNAL,
               "a population-only column is a sort key, which orders by the raw value." + BUG);
         }
       }
@@ -1115,7 +1116,7 @@ public final class TaintCheck {
       if (index < offset + width) {
         if (isRawPopulationOnly(input, index - offset, mq)) {
           throw new PolicyException(
-              PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
+              ErrorCode.INTERNAL,
               "a population-only column reaches "
                   + rel.getRelTypeName()
                   + " as a value rather than as a population aggregate's argument."
@@ -1413,7 +1414,7 @@ public final class TaintCheck {
           continue;
         }
         throw new PolicyException(
-            PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
+            ErrorCode.INTERNAL,
             "the row predicate of "
                 + map.qualifiedName()
                 + " does not survive to its consumer: the conjunct reads the context relation(s) "
@@ -1422,7 +1423,7 @@ public final class TaintCheck {
                 + BUG);
       }
       throw new PolicyException(
-          PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
+          ErrorCode.INTERNAL,
           "the row predicate of "
               + map.qualifiedName()
               + " does not survive to its consumer: the conjunct "
@@ -1555,7 +1556,7 @@ public final class TaintCheck {
         if (disclosureOf(origin) == Disclosed.REDACTED
             || disclosureOf(origin) == Disclosed.TESTED) {
           throw new PolicyException(
-              PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
+              ErrorCode.INTERNAL,
               "the output column '"
                   + physical.getRowType().getFieldNames().get(i)
                   + "' is a "

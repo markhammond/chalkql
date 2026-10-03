@@ -1,7 +1,6 @@
 using Chalk.Client;
 using Chalk.Ir;
 using Chalk.TestKit;
-using PlanErrorKind = Chalk.Client.Rpc.PlanErrorKind;
 
 namespace Chalk.Integration.Tests;
 
@@ -121,7 +120,7 @@ public sealed class UserFunctionRemoteTests(SharedSidecar sidecar)
         var error = await Assert.ThrowsAsync<PlanningException>(
             () => engine.PrepareAsync("SELECT duck.md5(symbol) FROM bars_small").AsTask());
 
-        Assert.Equal(PlanErrorKind.Unsupported, error.Kind);
+        Assert.Equal(PlanErrorKinds.Unsupported, error.Kind);
         Assert.Contains("cannot be evaluated outside source duck", error.Message, StringComparison.Ordinal);
     }
 

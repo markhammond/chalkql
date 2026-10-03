@@ -195,6 +195,7 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>, IReversiblePoco
         if (Descriptor.Kind != IndexKind.Ordered || range.Upper.Count != 0)
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceContract,
                 _sourceId,
                 _table,
                 $"Akade index '{_akadeIndexName}', behind the index '{Descriptor.Name}', was asked "
@@ -256,6 +257,7 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>, IReversiblePoco
             if (hasPrevious && _comparer.Compare(previous, key) < 0)
             {
                 throw new SourceContractException(
+                    ChalkErrorCodes.SourceContract,
                     _sourceId,
                     _table,
                     $"Akade index '{_akadeIndexName}', behind the ORDERED index "
@@ -301,6 +303,7 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>, IReversiblePoco
             if (hasPrevious && _comparer.Compare(previous, key) > 0)
             {
                 throw new SourceContractException(
+                    ChalkErrorCodes.SourceContract,
                     _sourceId,
                     _table,
                     $"Akade index '{_akadeIndexName}', behind the ORDERED index "

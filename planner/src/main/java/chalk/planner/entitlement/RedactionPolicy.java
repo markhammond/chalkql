@@ -1,6 +1,6 @@
 package chalk.planner.entitlement;
 
-import chalk.planner.rpc.v1.PolicyRefusalReason;
+import chalk.planner.ErrorCode;
 import java.util.List;
 import org.apache.calcite.runtime.ImmutablePairList;
 
@@ -61,7 +61,7 @@ public final class RedactionPolicy {
       // named is the policy's `named_columns` member's business (D217).
       if (at(flow, fields.leftList().get(i)) == Disclosed.REDACTED && !stars.isNamed(i)) {
         throw new PolicyException(
-            PolicyRefusalReason.POLICY_REFUSAL_REASON_REDACTED,
+            ErrorCode.REDACTED,
             "",
             fields.rightList().get(i),
             "",
@@ -71,7 +71,7 @@ public final class RedactionPolicy {
                 + "' is one this statement's star surfaced, it discloses nothing for this "
                 + "principal, and Redaction.StarExpansion.Refuse asks to be told rather than "
                 + "handed a "
-                + "placeholder (docs/design/16-entitlements.md §3.11).");
+                + "placeholder.");
       }
     }
     return new Result(fields, false);
@@ -87,7 +87,7 @@ public final class RedactionPolicy {
     for (int i = 0; i < fields.size(); i++) {
       if (at(flow, fields.leftList().get(i)) == Disclosed.REDACTED && stars.isNamed(i)) {
         throw new PolicyException(
-            PolicyRefusalReason.POLICY_REFUSAL_REASON_REDACTED,
+            ErrorCode.REDACTED,
             "",
             fields.rightList().get(i),
             "",
@@ -95,8 +95,8 @@ public final class RedactionPolicy {
             "the output column '"
                 + fields.rightList().get(i)
                 + "' is named by this statement, it discloses nothing for this principal, and "
-                + "Redaction.NamedColumns.Refuse asks to be told rather than handed a placeholder "
-                + "(docs/design/16-entitlements.md §3.11).");
+                + "Redaction.NamedColumns.Refuse asks to be told rather than handed a"
+                + " placeholder.");
       }
     }
   }

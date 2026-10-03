@@ -21,13 +21,13 @@ public sealed class EntitlementRegistrationTests(SharedSidecar sidecar)
     {
         var refusal = await RefusalAsync(PolicyEntitlements.BadWhenNotBoolean);
 
-        Assert.Equal(Chalk.Client.Rpc.PlanErrorKind.InvalidCatalog, refusal.Kind);
+        Assert.Equal(PlanErrorKinds.InvalidCatalog, refusal.Kind);
         Assert.Equal(
             "Invalid catalog: Invalid catalog at schemas[0] (main).tables[1] (members)"
             + ".entitlement.columns[0] (first_name).rules[0].when: on main.members, the rule "
-            + "condition is not boolean but STRING (docs/design/16-entitlements.md §1). "
-            + "The text is: first_name",
+            + "condition is not boolean but STRING. The text is: first_name [InvalidEntitlement]",
             refusal.Message);
+        Assert.Equal(ChalkErrorCodes.InvalidEntitlement, refusal.Code);
     }
 
     [Fact]
@@ -35,14 +35,14 @@ public sealed class EntitlementRegistrationTests(SharedSidecar sidecar)
     {
         var refusal = await RefusalAsync(PolicyEntitlements.BadRuleMaskType);
 
-        Assert.Equal(Chalk.Client.Rpc.PlanErrorKind.InvalidCatalog, refusal.Kind);
+        Assert.Equal(PlanErrorKinds.InvalidCatalog, refusal.Kind);
         Assert.Equal(
             "Invalid catalog: Invalid catalog at schemas[0] (main).tables[1] (members)"
             + ".entitlement.columns[0] (dob).rules[0].mask: on main.members, mask type STRING does "
-            + "not match column type DATE (docs/design/16-entitlements.md §1: a mask and a "
-            + "placeholder have the column's type, so every principal gets the same row shape). "
-            + "The text is: '****'",
+            + "not match column type DATE: a mask and a placeholder have the column's type, so every "
+            + "principal gets the same row shape. The text is: '****' [TypeMismatch]",
             refusal.Message);
+        Assert.Equal(ChalkErrorCodes.TypeMismatch, refusal.Code);
     }
 
     /// <summary>
@@ -55,17 +55,17 @@ public sealed class EntitlementRegistrationTests(SharedSidecar sidecar)
     {
         var refusal = await RefusalAsync(PolicyEntitlements.BadMaskReadsProtected);
 
-        Assert.Equal(Chalk.Client.Rpc.PlanErrorKind.InvalidCatalog, refusal.Kind);
+        Assert.Equal(PlanErrorKinds.InvalidCatalog, refusal.Kind);
         Assert.Equal(
             "Invalid catalog: Invalid catalog at schemas[0] (main).tables[1] (members)"
             + ".entitlement.columns[0] (first_name).rules[0].mask: on main.members, mask for "
             + "'first_name' reads 'last_name', which is itself a protected column. A mask is "
             + "evaluated over the raw row, so this one would disclose 'last_name' inside "
-            + "'first_name' to a principal entitled to neither "
-            + "(docs/design/16-entitlements.md §1, D220). A mask may read its own column, an "
+            + "'first_name' to a principal entitled to neither. A mask may read its own column, an "
             + "unprotected column and the context; a rule condition may read anything. The text "
-            + "is: SUBSTRING(last_name FROM 1 FOR 1)",
+            + "is: SUBSTRING(last_name FROM 1 FOR 1) [MaskReadsProtectedColumn]",
             refusal.Message);
+        Assert.Equal(ChalkErrorCodes.MaskReadsProtectedColumn, refusal.Code);
     }
 
     /// <summary>

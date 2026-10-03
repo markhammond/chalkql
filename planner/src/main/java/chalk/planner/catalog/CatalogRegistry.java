@@ -4,6 +4,8 @@ import chalk.ir.v1.CatalogContext;
 import chalk.ir.v1.Column;
 import chalk.ir.v1.Schema;
 import chalk.ir.v1.Table;
+import chalk.planner.ErrorCode;
+import chalk.planner.InvalidArgumentException;
 import chalk.planner.rpc.v1.ColumnStatisticsEntry;
 import chalk.planner.rpc.v1.RegisterCatalogRequest;
 import chalk.planner.rpc.v1.RegisterStatisticsRequest;
@@ -70,10 +72,13 @@ public final class CatalogRegistry {
   /** The same, with the clock a test drives idle eviction by: nanoseconds, monotonic. */
   public CatalogRegistry(int versionLimit, Duration idle, LongSupplier clock) {
     if (versionLimit < 1) {
-      throw new IllegalArgumentException("versionLimit must be at least 1, got " + versionLimit);
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_CONFIGURATION,
+          "versionLimit must be at least 1, got " + versionLimit);
     }
     if (idle.isNegative() || idle.isZero()) {
-      throw new IllegalArgumentException("idle must be positive, got " + idle);
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_CONFIGURATION, "idle must be positive, got " + idle);
     }
     this.versionLimit = versionLimit;
     this.idleNanos = idle.toNanos();
@@ -114,9 +119,9 @@ public final class CatalogRegistry {
     evictIdle();
     String instanceId = request.getInstanceId();
     if (instanceId.isEmpty()) {
-      throw new IllegalArgumentException(
-          "RegisterStatistics names no instance_id; statistics belong to one engine instance"
-              + " (docs/design/44-catalog-registration.md §3).");
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_REQUEST,
+          "RegisterStatistics names no instance_id; statistics belong to one engine instance.");
     }
     Instance instance = byInstance.computeIfAbsent(instanceId, ignored -> new Instance(versionLimit));
     instance.installStatistics(request, clock.getAsLong());

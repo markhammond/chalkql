@@ -3,7 +3,7 @@ package chalk.planner.entitlement;
 import chalk.ir.v1.Disclosure;
 import chalk.ir.v1.Type;
 import chalk.ir.v1.TypeKind;
-import chalk.planner.rpc.v1.PolicyRefusalReason;
+import chalk.planner.ErrorCode;
 import chalk.planner.types.TypeMapper;
 import com.google.common.collect.ImmutableList;
 import java.math.BigDecimal;
@@ -367,7 +367,7 @@ public final class DisclosureColumns {
       String sibling = name + suffix;
       if (taken.contains(sibling)) {
         throw new PolicyException(
-            PolicyRefusalReason.POLICY_REFUSAL_REASON_NAME_COLLISION,
+            ErrorCode.DISCLOSURE_NAME_COLLISION,
             "",
             sibling,
             "",
@@ -377,8 +377,7 @@ public final class DisclosureColumns {
                 + "', and PrepareOptions.IncludeDisclosureColumns would name the sibling of '"
                 + name
                 + "' the same. A consumer looks a sibling up by name, so it is refused rather than"
-                + " renamed: choose another DisclosureColumnSuffix, or rename the column"
-                + " (docs/design/16-entitlements.md §3.12).");
+                + " renamed: choose another DisclosureColumnSuffix, or rename the column.");
       }
       extended.add(at + column, sibling);
     }

@@ -34,6 +34,7 @@ internal static class UserFunctionBinding
         if (function is null)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UserFunctionUnavailable,
                 $"function {qualified}",
                 "The plan names a function the live catalog does not declare. A plan is only valid "
                 + "for the catalog epoch it was made against.");
@@ -499,6 +500,7 @@ internal static class UserFunctionBinding
         if (catalog is null)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UserFunctionUnavailable,
                 $"aggregate {qualified}",
                 "This plan was compiled without a catalog, so a declared aggregate cannot be resolved.");
         }
@@ -517,6 +519,7 @@ internal static class UserFunctionBinding
         if (catalog is null)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UserFunctionUnavailable,
                 $"aggregate {qualified}",
                 "This plan was compiled without a catalog, so a declared aggregate cannot be resolved.");
         }
@@ -527,9 +530,9 @@ internal static class UserFunctionBinding
         if (!descriptor.Window)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"aggregate {qualified} over a window",
-                "It is not declared WINDOW, so it may only be used with GROUP BY "
-                + "(docs/design/17-user-defined-functions.md §1).");
+                "It is not declared WINDOW, so it may only be used with GROUP BY.");
         }
 
         return ((HostAggregate)host!, descriptor);

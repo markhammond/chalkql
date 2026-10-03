@@ -81,7 +81,7 @@ public sealed class LateralCorrelationTests(SharedSidecar sidecar)
         var failure = await Assert.ThrowsAsync<PlanningException>(
             () => engine.PrepareAsync(SharedOuterColumn).AsTask());
 
-        Assert.Equal(PlanErrorKind.Unsupported, failure.Kind);
+        Assert.Equal(PlanErrorKinds.Unsupported, failure.Kind);
         Assert.Contains("LATERAL sub-query that constrains o1 and o2", failure.Message, StringComparison.Ordinal);
         Assert.Contains("same outer column c.id", failure.Message, StringComparison.Ordinal);
         Assert.Contains("o2 against o1", failure.Message, StringComparison.Ordinal);

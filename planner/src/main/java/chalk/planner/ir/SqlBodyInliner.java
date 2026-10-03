@@ -1,6 +1,7 @@
 package chalk.planner.ir;
 
 import chalk.ir.v1.Parameter;
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import chalk.planner.catalog.UserFunction;
 import chalk.planner.catalog.UserFunctions;
@@ -114,10 +115,10 @@ public final class SqlBodyInliner extends SqlShuttle {
     }
 
     throw new UnsupportedFeatureException(
+        ErrorCode.INVALID_FUNCTION,
         "a SQL function body that expands without end",
         "A SQL-bodied function called itself, directly or through another one; Chalk inlines a body "
-            + "into its call site and so cannot express recursion "
-            + "(docs/design/17-user-defined-functions.md §2).");
+            + "into its call site and so cannot express recursion.");
   }
 
   @Override
@@ -227,6 +228,7 @@ public final class SqlBodyInliner extends SqlShuttle {
         int index = indexOf(declaration, name);
         if (index < 0) {
           throw new UnsupportedFeatureException(
+              ErrorCode.INVALID_FUNCTION,
               "argument " + name + " of " + declaration.qualifiedName(),
               declaration.qualifiedName() + " has no parameter called '" + name + "'.");
         }
@@ -236,6 +238,7 @@ public final class SqlBodyInliner extends SqlShuttle {
 
       if (next >= parameters.size()) {
         throw new UnsupportedFeatureException(
+            ErrorCode.INVALID_FUNCTION,
             declaration.qualifiedName() + " called with " + call.getOperandList().size() + " arguments",
             "It declares " + parameters.size() + ".");
       }
@@ -252,6 +255,7 @@ public final class SqlBodyInliner extends SqlShuttle {
       }
       if (!parameter.getOptional()) {
         throw new UnsupportedFeatureException(
+            ErrorCode.INVALID_FUNCTION,
             declaration.qualifiedName() + " called without '" + parameter.getName() + "'",
             "That parameter has no default, so every call must supply it.");
       }
@@ -459,6 +463,7 @@ public final class SqlBodyInliner extends SqlShuttle {
       return SqlParser.create(declaration.sqlText(), parserConfig()).parseExpression();
     } catch (SqlParseException e) {
       throw new UnsupportedFeatureException(
+          ErrorCode.INVALID_FUNCTION,
           "the body of " + declaration.qualifiedName(),
           "It does not parse as a SQL expression: " + e.getMessage());
     }
@@ -482,7 +487,9 @@ public final class SqlBodyInliner extends SqlShuttle {
       chalk.planner.ReservedNames.check(declaration.sqlText(), "the body");
     } catch (chalk.planner.ReservedNames.ReservedNameException reserved) {
       throw new chalk.planner.catalog.InvalidCatalogException(
-          "functions (" + declaration.qualifiedName() + ")", reserved.getMessage());
+          chalk.planner.ErrorCode.RESERVED_NAME,
+          "functions (" + declaration.qualifiedName() + ")",
+          reserved.getMessage());
     }
     switch (declaration.kind()) {
       case FUNCTION_KIND_TABLE -> parseQuery(declaration);
@@ -506,6 +513,7 @@ public final class SqlBodyInliner extends SqlShuttle {
             });
         if (!unknown.isEmpty()) {
           throw new chalk.planner.catalog.InvalidCatalogException(
+              chalk.planner.ErrorCode.UNKNOWN_NAME,
               "functions (" + declaration.qualifiedName() + ")",
               "the body names " + unknown + ", which "
                   + (declaration.parameters().isEmpty()
@@ -521,6 +529,7 @@ public final class SqlBodyInliner extends SqlShuttle {
       return SqlParser.create(declaration.sqlText(), parserConfig()).parseQuery();
     } catch (SqlParseException e) {
       throw new chalk.planner.catalog.InvalidCatalogException(
+          chalk.planner.ErrorCode.INVALID_FUNCTION,
           "functions (" + declaration.qualifiedName() + ")",
           "the body does not parse as a SELECT: " + e.getMessage());
     }
@@ -559,6 +568,7 @@ public final class SqlBodyInliner extends SqlShuttle {
 
     String what = operand instanceof SqlDynamicParam ? "a dynamic parameter" : "'" + unwrap(operand) + "'";
     throw new UnsupportedFeatureException(
+        ErrorCode.INVALID_FUNCTION,
         "table function "
             + declaration.qualifiedName()
             + " called with "
@@ -567,8 +577,7 @@ public final class SqlBodyInliner extends SqlShuttle {
             + parameter.getName()
             + "'",
         "A SQL-bodied table function is a Calcite table macro: its arguments are bound while the "
-            + "statement is validated, so they must be constants in v1 "
-            + "(docs/design/17-user-defined-functions.md §2, V31). Write the value as a literal, or "
+            + "statement is validated, so they must be constants. Write the value as a literal, or "
             + "declare the function with a client body, which takes any expression.");
   }
 

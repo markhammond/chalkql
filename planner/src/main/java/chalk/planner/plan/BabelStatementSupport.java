@@ -1,5 +1,6 @@
 package chalk.planner.plan;
 
+import chalk.planner.ErrorCode;
 import chalk.planner.UnsupportedFeatureException;
 import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlKind;
@@ -22,7 +23,7 @@ import org.apache.calcite.sql.validate.SqlConformanceEnum;
  * (a INTEGER)} threw a raw {@code AssertionError} — <i>"Was not expecting value 'CREATE_TABLE' for
  * enumeration 'org.apache.calcite.sql.SqlKind' in this context"</i> — and {@code BEGIN} an
  * {@code UnsupportedOperationException} naming {@code SqlNodeList} and nothing else. Both become
- * {@code PLAN_ERROR_KIND_INTERNAL} with a correlation id: the sidecar telling a host that Chalk is
+ * {@code Internal} errors with a correlation id: the sidecar telling a host that Chalk is
  * broken, when what happened is that the host asked for something Chalk does not do. Neither is a
  * wrong answer, and neither says what was unsupported.
  *
@@ -48,6 +49,7 @@ public final class BabelStatementSupport {
       return;
     }
     throw new UnsupportedFeatureException(
+        ErrorCode.UNSUPPORTED_STATEMENT,
         "The " + name(parsed) + " statement",
         "Chalk plans queries: a statement that changes a schema, a transaction or a session has"
             + " nowhere to run, because the sidecar owns no data and holds no session on a source."

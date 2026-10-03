@@ -34,17 +34,19 @@ public static class CatalogValidator
 
         if (string.IsNullOrWhiteSpace(catalog.ContextId))
         {
-            throw new CatalogValidationException("context_id", "the context id is empty");
+            throw new CatalogValidationException(ChalkErrorCodes.EmptyName, "context_id", "the context id is empty");
         }
 
         if (catalog.Epoch < 0)
         {
-            throw new CatalogValidationException("epoch", $"the epoch is {catalog.Epoch}; it must be >= 0");
+            throw new CatalogValidationException(
+                ChalkErrorCodes.ValueOutOfRange, "epoch", $"the epoch is {catalog.Epoch}; it must be >= 0");
         }
 
         if (catalog.Schemas.Count == 0)
         {
-            throw new CatalogValidationException("schemas", "a catalog needs at least one schema");
+            throw new CatalogValidationException(
+                ChalkErrorCodes.IncompleteDeclaration, "schemas", "a catalog needs at least one schema");
         }
 
         var schemaNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -55,28 +57,32 @@ public static class CatalogValidator
 
             if (string.IsNullOrWhiteSpace(schema.Name))
             {
-                throw new CatalogValidationException(path, "the schema name is empty");
+                throw new CatalogValidationException(ChalkErrorCodes.EmptyName, path, "the schema name is empty");
             }
 
             if (string.IsNullOrWhiteSpace(schema.SourceId))
             {
-                throw new CatalogValidationException($"{path} ({schema.Name})", "the source id is empty");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.EmptyName, $"{path} ({schema.Name})", "the source id is empty");
             }
 
             if (!schemaNames.Add(schema.Name))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.DuplicateName,
                     path, $"schema name '{schema.Name}' is used twice (names match case-insensitively)");
             }
 
             if (schema.Kind == SourceKind.Unspecified)
             {
-                throw new CatalogValidationException($"{path} ({schema.Name})", "the source kind is unspecified");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.IncompleteDeclaration, $"{path} ({schema.Name})", "the source kind is unspecified");
             }
 
             if (schema.Kind == SourceKind.Remote && string.IsNullOrEmpty(schema.Dialect))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.IncompleteDeclaration,
                     $"{path} ({schema.Name})", "a remote schema must name the SQL dialect its source speaks");
             }
 
@@ -136,12 +142,14 @@ public static class CatalogValidator
 
         if (partitioning.Partitions.Count == 0)
         {
-            throw new CatalogValidationException(path, "a partitioned table declares no partitions");
+            throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidPartitioning, path, "a partitioned table declares no partitions");
         }
 
         if (partitioning.PartitionColumn < 0 || partitioning.PartitionColumn >= table.Columns.Count)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidPartitioning,
                 path,
                 $"PartitionColumn is {partitioning.PartitionColumn} but the table has "
                 + $"{table.Columns.Count} columns");
@@ -151,12 +159,14 @@ public static class CatalogValidator
         {
             if (string.IsNullOrWhiteSpace(partition.Schema) || string.IsNullOrWhiteSpace(partition.Table))
             {
-                throw new CatalogValidationException(path, "every partition must name a schema and a table");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidPartitioning, path, "every partition must name a schema and a table");
             }
 
             if (!partition.HasValue && partition.LowerBound is null && partition.UpperBound is null)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidPartitioning,
                     path,
                     $"partition '{partition.Schema}.{partition.Table}' says neither which value nor "
                     + "which range it holds");
@@ -164,9 +174,11 @@ public static class CatalogValidator
 
             var owner = catalog.FindSchema(partition.Schema)
                 ?? throw new CatalogValidationException(
+                    ChalkErrorCodes.UnknownName,
                     path, $"partition schema '{partition.Schema}' is not in this catalog");
             var physical = owner.FindTable(partition.Table)
                 ?? throw new CatalogValidationException(
+                    ChalkErrorCodes.UnknownName,
                     path,
                     $"partition '{partition.Schema}.{partition.Table}' names a table schema "
                     + $"'{partition.Schema}' does not have");
@@ -174,6 +186,7 @@ public static class CatalogValidator
             if (physical.Columns.Count != table.Columns.Count)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidPartitioning,
                     path,
                     $"partition '{partition.Schema}.{partition.Table}' has {physical.Columns.Count} "
                     + $"columns and the partitioned table has {table.Columns.Count}; every partition "
@@ -185,6 +198,7 @@ public static class CatalogValidator
                 if (physical.Columns[c].Type.Kind != table.Columns[c].Type.Kind)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidPartitioning,
                         path,
                         $"partition '{partition.Schema}.{partition.Table}' column "
                         + $"'{physical.Columns[c].Name}' is {physical.Columns[c].Type.Kind} and the "
@@ -203,6 +217,7 @@ public static class CatalogValidator
             || policy.UnknownRowCountAssumption < 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidJoinPolicy,
                 path,
                 "every join-policy limit must be zero (the planner's default) or positive; "
                 + $"BroadcastMaxRows={policy.BroadcastMaxRows}, LookupMaxCalls={policy.LookupMaxCalls}, "
@@ -217,6 +232,7 @@ public static class CatalogValidator
                 && !pair.Allowed.Contains(pair.Preferred))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidJoinPolicy,
                     path,
                     $"pair rule '{pair.LeftSource}' -> '{pair.RightSource}' prefers {pair.Preferred}, "
                     + "which is not in its allowed list");
@@ -237,7 +253,7 @@ public static class CatalogValidator
 
             if (string.IsNullOrWhiteSpace(table.Name))
             {
-                throw new CatalogValidationException(tablePath, "the table name is empty");
+                throw new CatalogValidationException(ChalkErrorCodes.EmptyName, tablePath, "the table name is empty");
             }
 
             tablePath = $"{path}.tables[{t}] ({table.Name})";
@@ -245,6 +261,7 @@ public static class CatalogValidator
             if (!tableNames.Add(table.Name))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.DuplicateName,
                     tablePath, $"table name '{table.Name}' is used twice in schema '{schema.Name}'");
             }
 
@@ -288,6 +305,7 @@ public static class CatalogValidator
         }
 
         throw new CatalogValidationException(
+            ChalkErrorCodes.InvalidCapabilities,
             $"{path}.entitlement",
             $"Enforcement.PushdownRequired on '{table.Name}', whose schema declares "
             + $"{schema.Kind} with {schema.Capabilities.QueryLanguage}: the client scans this "
@@ -324,6 +342,7 @@ public static class CatalogValidator
             if (parent.Column < 0 || parent.Column >= table.Columns.Count)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.ColumnIndexOutOfRange,
                     parentPath,
                     $"column index {parent.Column} is out of range for a table of "
                     + $"{table.Columns.Count} columns");
@@ -344,38 +363,41 @@ public static class CatalogValidator
             if (parentTable is null)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.UnknownName,
                     parentPath,
                     $"'{table.Name}' derives its visibility through "
                     + $"'{Qualified(parent, schema)}', which this catalog does not hold. A Through "
                     + "names a table of the same catalog, so the planner can compile it into a join "
-                    + "against that table's own entitled scan (docs/design/16-entitlements.md "
-                    + "§3.13, D225).");
+                    + "against that table's own entitled scan.");
             }
 
             if (parentTable.Entitlement is not { } parentEntitlement)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidTenancyPath,
                     parentPath,
                     $"'{table.Name}' derives its visibility through "
                     + $"'{parentSchema!.Name}.{parentTable.Name}', which carries no entitlement. "
                     + "Through an unrestricted parent restricts nothing; declare the child "
-                    + "unrestricted or restrict the parent (§3.13, D225).");
+                    + "unrestricted or restrict the parent.");
             }
 
             if (parentEntitlement.RowPredicate.Length == 0 && parentEntitlement.Through.Count == 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidTenancyPath,
                     parentPath,
                     $"'{table.Name}' derives its visibility through "
                     + $"'{parentSchema!.Name}.{parentTable.Name}', whose entitlement restricts no "
                     + "row — it has neither a row predicate nor a Through of its own. Through an "
                     + "unrestricted parent restricts nothing; declare the child unrestricted or "
-                    + "restrict the parent (§3.13, D225).");
+                    + "restrict the parent.");
             }
 
             if (parent.ParentColumn < 0 || parent.ParentColumn >= parentTable.Columns.Count)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.ColumnIndexOutOfRange,
                     parentPath,
                     $"parent column index {parent.ParentColumn} is out of range for "
                     + $"'{parentSchema!.Name}.{parentTable.Name}', which has "
@@ -385,11 +407,12 @@ public static class CatalogValidator
             if (!IsDeclaredUniqueKey(parentTable, parent.ParentColumn))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.NotAUniqueKey,
                     parentPath,
                     $"'{parentSchema!.Name}.{parentTable.Name}.{parentTable.Columns[parent.ParentColumn].Name}' "
                     + "is not a declared unique key of the parent. The join the planner compiles a "
-                    + "Through into must not multiply rows, and a unique key is what makes that so "
-                    + "(§3.13, D226). Declare the key.");
+                    + "Through into must not multiply rows, and a unique key is what makes that so. "
+                    + "Declare the key.");
             }
 
             var childType = table.Columns[parent.Column].Type;
@@ -397,11 +420,12 @@ public static class CatalogValidator
             if (childType.Kind != parentType.Kind)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.TypeMismatch,
                     parentPath,
                     $"'{table.Name}.{table.Columns[parent.Column].Name}' is {childType.Kind} and "
                     + $"'{parentSchema!.Name}.{parentTable.Name}.{parentTable.Columns[parent.ParentColumn].Name}' "
                     + $"is {parentType.Kind}; the correlation key and the parent's key must have the "
-                    + "same type kind, or the join could never match (§3.13, D225).");
+                    + "same type kind, or the join could never match.");
             }
         }
 
@@ -439,10 +463,10 @@ public static class CatalogValidator
             if (declared.Steps.Count == 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidTenancyPath,
                     where,
                     $"the path of kind '{declared.Kind}' on '{table.Name}' has no step. A path with "
-                    + "no step is a direct dimension written the long way round "
-                    + "(docs/design/38-existential-visibility.md §1, §3, D265).");
+                    + "no step is a direct dimension written the long way round.");
             }
 
             var fromSchema = schema;
@@ -466,11 +490,12 @@ public static class CatalogValidator
                 if (toTable is null)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.UnknownName,
                         where,
                         $"step {s} of the path of kind '{declared.Kind}' on '{table.Name}' arrives "
                         + $"at '{Qualified(step.Schema, step.Table, schema)}', which this catalog "
                         + "does not hold. A path names tables of the same catalog, so the pass can "
-                        + "compile it into one key set (§3, D265).");
+                        + "compile it into one key set.");
                 }
 
                 if (step.Direction == Chalk.Entitlements.StepDirection.ToChild)
@@ -479,12 +504,12 @@ public static class CatalogValidator
                     if (s > 0)
                     {
                         throw new CatalogValidationException(
+                            ChalkErrorCodes.InvalidTenancyPath,
                             where,
                             $"step {s} of the path of kind '{declared.Kind}' on '{table.Name}' goes "
-                            + "up. This run admits an inherited path of any length and a related "
+                            + "up. ChalkQL admits an inherited path of any length and a related "
                             + "path of one up-step followed by down-steps; a second up-step, and an "
-                            + "up-step after a down-step, are refused rather than built (§1, §9, "
-                            + "D265).");
+                            + "up-step after a down-step, are refused rather than built.");
                     }
                 }
 
@@ -508,10 +533,11 @@ public static class CatalogValidator
                     && string.Equals(toSchema!.Name, schema.Name, StringComparison.OrdinalIgnoreCase))
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidTenancyPath,
                         where,
                         $"step {s} of the path of kind '{declared.Kind}' returns to '{table.Name}' "
                         + "itself. A row's visibility cannot derive from its own table's, so a "
-                        + "bridge and an endpoint are both other tables (§3, D265).");
+                        + "bridge and an endpoint are both other tables.");
                 }
 
                 fromSchema = toSchema!;
@@ -526,21 +552,23 @@ public static class CatalogValidator
             if (!string.Equals(fromTable.Name, declared.EndpointTable, StringComparison.OrdinalIgnoreCase))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidTenancyPath,
                     where,
                     $"the path of kind '{declared.Kind}' on '{table.Name}' says its endpoint is "
                     + $"'{declared.EndpointTable}', and its last step arrives at "
                     + $"'{fromTable.Name}'. The endpoint names where the kind is held, so it is the "
-                    + "table the last step reaches (§2, D265).");
+                    + "table the last step reaches.");
             }
 
             if (declared.EndpointPredicate.Length == 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidTenancyPath,
                     where,
                     $"the path of kind '{declared.Kind}' on '{table.Name}' carries no endpoint "
                     + $"predicate. The endpoint '{fromTable.Name}' is where the kind is held, and "
                     + "the predicate is what says which of its rows this principal holds it in; a "
-                    + "path without one would grant every row (§2, §3, D265).");
+                    + "path without one would grant every row.");
             }
 
             // A path predicate is decided above the join, over the target's row and the endpoint's
@@ -553,13 +581,14 @@ public static class CatalogValidator
                 && declared.Steps[0].Direction == Chalk.Entitlements.StepDirection.ToChild)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidTenancyPath,
                     where,
                     $"the path of kind '{declared.Kind}' on '{table.Name}' goes up to a bridge and "
                     + "carries a path predicate. A path predicate is decided above the join, over "
                     + "this table's own row and the endpoint's together, and that needs one endpoint "
                     + "row per key: an inherited path is one, a related path is many, so the verdict "
                     + "would have to be borne by the path's existence marker. Reach the endpoint "
-                    + "with an inherited path, or drop the confinement (§1, §4, D279).");
+                    + "with an inherited path, or drop the confinement.");
             }
         }
 
@@ -593,6 +622,7 @@ public static class CatalogValidator
             }
 
             throw new CatalogValidationException(
+                ChalkErrorCodes.UnknownName,
                 path,
                 $"the association starts at '{association.FromSchema}.{association.FromTable}', "
                 + "which this catalog does not hold.");
@@ -608,6 +638,7 @@ public static class CatalogValidator
             }
 
             throw new CatalogValidationException(
+                ChalkErrorCodes.UnknownName,
                 path,
                 $"the association arrives at '{association.ToSchema}.{association.ToTable}', which "
                 + "this catalog does not hold.");
@@ -617,6 +648,7 @@ public static class CatalogValidator
         if (fromColumn < 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.UnknownName,
                 path,
                 $"'{association.FromColumn}' is not a column of '{fromSchema!.Name}.{fromTable.Name}'.");
         }
@@ -625,6 +657,7 @@ public static class CatalogValidator
         if (toColumn < 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.UnknownName,
                 path,
                 $"'{association.ToColumn}' is not a column of '{toSchema!.Name}.{toTable.Name}'.");
         }
@@ -632,16 +665,18 @@ public static class CatalogValidator
         if (!IsDeclaredUniqueKey(toTable, toColumn))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.NotAUniqueKey,
                 path,
                 $"the association names '{toSchema!.Name}.{toTable.Name}.{association.ToColumn}', "
                 + "which is not a declared unique key of that table. An association is read exactly "
-                + "as a foreign key is, and the joins it compiles into must not multiply rows "
-                + "(docs/design/45-typed-tenancy-surface.md §3, D270). Declare the key.");
+                + "as a foreign key is, and the joins it compiles into must not multiply rows. "
+                + "Declare the key.");
         }
 
         if (fromTable.Columns[fromColumn].Type.Kind != toTable.Columns[toColumn].Type.Kind)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.TypeMismatch,
                 path,
                 $"the association joins "
                 + $"'{fromSchema!.Name}.{fromTable.Name}.{association.FromColumn}' "
@@ -692,6 +727,7 @@ public static class CatalogValidator
         if (step.FromColumn < 0 || step.FromColumn >= from.Columns.Count)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.ColumnIndexOutOfRange,
                 where,
                 $"step {ordinal} of the path of kind '{declared.Kind}' reads column "
                 + $"{step.FromColumn} of '{fromSchema.Name}.{from.Name}', which has "
@@ -701,6 +737,7 @@ public static class CatalogValidator
         if (step.ToColumn < 0 || step.ToColumn >= to.Columns.Count)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.ColumnIndexOutOfRange,
                 where,
                 $"step {ordinal} of the path of kind '{declared.Kind}' reads column {step.ToColumn} "
                 + $"of '{toSchema.Name}.{to.Name}', which has {to.Columns.Count} columns");
@@ -715,11 +752,12 @@ public static class CatalogValidator
         if (!IsDeclaredUniqueKey(parent, parentColumn))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.NotAUniqueKey,
                 where,
                 $"step {ordinal} of the path of kind '{declared.Kind}' joins "
                 + $"'{parent.Name}.{parent.Columns[parentColumn].Name}', which is not a declared "
                 + "unique key of that table. The joins a path compiles into must not multiply rows, "
-                + "and a unique key is what makes that so (§3, D265). Declare the key.");
+                + "and a unique key is what makes that so. Declare the key.");
         }
 
         var childSchema = down ? fromSchema : toSchema;
@@ -729,6 +767,7 @@ public static class CatalogValidator
                 catalog, childSchema, child, childColumn, parentSchema, parent, parentColumn))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidTenancyPath,
                 where,
                 $"step {ordinal} of the path of kind '{declared.Kind}' goes "
                 + (down ? "down" : "up")
@@ -736,13 +775,13 @@ public static class CatalogValidator
                 + $"'{child.Name}.{child.Columns[childColumn].Name}' declares no foreign key naming "
                 + $"'{parent.Name}.{parent.Columns[parentColumn].Name}', and this catalog declares "
                 + "no association between them either. The direction is checked and never inferred, "
-                + "so the association has to be declared before a path can rely on it (§1, §3, "
-                + "D265; docs/design/45-typed-tenancy-surface.md §3, D270).");
+                + "so the association has to be declared before a path can rely on it.");
         }
 
         if (child.Columns[childColumn].Type.Kind != parent.Columns[parentColumn].Type.Kind)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.TypeMismatch,
                 where,
                 $"step {ordinal} of the path of kind '{declared.Kind}' joins "
                 + $"'{childSchema.Name}.{child.Name}.{child.Columns[childColumn].Name}' "
@@ -766,12 +805,13 @@ public static class CatalogValidator
         if (denied)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.ProtectedBridgeKey,
                 where,
                 $"the bridge key '{viaSchema.Name}.{via.Name}.{via.Columns[column].Name}' is "
                 + "protected by a rule or by its table's default. The mechanism reads the bridge's "
-                + "two key columns raw and discloses neither, exactly as a parent's key is left full "
-                + "under D227, so a rule over one is a contradiction: leave it full, or reach the "
-                + "target another way (§3, D265).");
+                + "two key columns raw and discloses neither, exactly as a parent's key is left full, "
+                + "so a rule over one is a contradiction: leave it full, or reach the "
+                + "target another way.");
         }
     }
 
@@ -793,11 +833,11 @@ public static class CatalogValidator
         {
             visiting.Add(name);
             throw new CatalogValidationException(
+                ChalkErrorCodes.VisibilityCycle,
                 $"{path}.entitlement",
                 $"the chain of derived visibility returns to '{name}': "
                 + $"{string.Join(" -> ", visiting)}. A row's visibility cannot derive from itself, "
-                + "so a cycle is refused where a diamond is fine (docs/design/16-entitlements.md "
-                + "§3.13, D225; docs/design/38-existential-visibility.md §3, D265).");
+                + "so a cycle is refused where a diamond is fine.");
         }
 
         if (table.Entitlement is not { } entitlement
@@ -940,20 +980,23 @@ public static class CatalogValidator
             var functionPath = $"{path}.functions[{f}]";
             if (string.IsNullOrWhiteSpace(function.Name))
             {
-                throw new CatalogValidationException(functionPath, "the function name is empty");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.EmptyName, functionPath, "the function name is empty");
             }
 
             functionPath = $"{functionPath} ({function.Name})";
             if (!names.Add(function.Name))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.DuplicateName,
                     functionPath,
                     $"function name '{function.Name}' is used twice in schema '{schema.Name}'");
             }
 
             if (function.Kind == FunctionKind.Unspecified)
             {
-                throw new CatalogValidationException(functionPath, "the function kind is unspecified");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidFunction, functionPath, "the function kind is unspecified");
             }
 
             var isTable = function.Kind == FunctionKind.Table;
@@ -962,29 +1005,33 @@ public static class CatalogValidator
                 if (function.ReturnsTable.Count == 0)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidFunction,
                         functionPath, "a table function must declare the row type it returns");
                 }
 
                 if (function.ReturnType is not null)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidFunction,
                         functionPath, "a table function returns a table, not a scalar type");
                 }
 
                 if (function.Body is NativeFunctionBody)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidFunction,
                         functionPath,
                         "a native table function has nowhere to be evaluated: a pushed subtree is a "
                         + "query, not a table-valued call "
-                        + "(docs/design/17-user-defined-functions.md §8)");
+                        + "");
                 }
             }
             else
             {
                 if (function.ReturnType is not { } returnType)
                 {
-                    throw new CatalogValidationException(functionPath, "the function declares no return type");
+                    throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidFunction, functionPath, "the function declares no return type");
                 }
                 else
                 {
@@ -996,6 +1043,7 @@ public static class CatalogValidator
                     if (returnType.Kind == TypeKind.Composite && function.Body is not ClientFunctionBody)
                     {
                         throw new CatalogValidationException(
+                            ChalkErrorCodes.InvalidFunction,
                             $"{functionPath}.return_type",
                             $"'{function.Name}' returns a COMPOSITE and is "
                             + (function.Body is SqlFunctionBody ? "SQL-bodied" : "native")
@@ -1007,12 +1055,14 @@ public static class CatalogValidator
                 if (function.ReturnsTable.Count > 0)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidFunction,
                         functionPath, "only a table function declares a returned row type");
                 }
 
                 if (function.Rows != 0)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidFunction,
                         functionPath, "`Rows` is a table function's output estimate; this one is not one");
                 }
             }
@@ -1021,6 +1071,7 @@ public static class CatalogValidator
                 && (function.Window || function.Ordered || function.NullTreatment))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidFunction,
                     functionPath, "`Window`, `Ordered` and `NullTreatment` describe an aggregate");
             }
 
@@ -1028,6 +1079,7 @@ public static class CatalogValidator
             if (function.Kind != FunctionKind.Aggregate && function.Population)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidFunction,
                     functionPath,
                     "`Population` promises that an aggregate's result reports the group and never one "
                     + "row's value, and this function is not an aggregate");
@@ -1036,12 +1088,14 @@ public static class CatalogValidator
             if (function.Rows < 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidFunction,
                     functionPath, $"`Rows` is {function.Rows}; it must be >= 0");
             }
 
             if (function.Cost < 0 || double.IsNaN(function.Cost) || double.IsInfinity(function.Cost))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidFunction,
                     functionPath,
                     $"`Cost` is {function.Cost.ToString(CultureInfo.InvariantCulture)}; it must be "
                     + "finite and >= 0 (zero means the planner's default)");
@@ -1051,6 +1105,7 @@ public static class CatalogValidator
                 && function.Monotonicity.Count != function.Parameters.Count)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidFunction,
                     functionPath,
                     $"monotonicity has {function.Monotonicity.Count} entries for "
                     + $"{function.Parameters.Count} parameters; declare one per parameter or none");
@@ -1058,13 +1113,15 @@ public static class CatalogValidator
 
             if (function.Body is SqlFunctionBody { Text: var text } && string.IsNullOrWhiteSpace(text))
             {
-                throw new CatalogValidationException(functionPath, "the SQL body is empty");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidFunction, functionPath, "the SQL body is empty");
             }
 
             if (function.Body is NativeFunctionBody
                 && schema.Capabilities.QueryLanguage is not (QueryLanguage.Sql or QueryLanguage.Ir))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidFunction,
                     functionPath,
                     "a native function is evaluated by its own source, so the schema must take "
                     + $"queries; this one declares {schema.Capabilities.QueryLanguage}");
@@ -1077,13 +1134,15 @@ public static class CatalogValidator
                 var parameterPath = $"{functionPath}.parameters[{p}]";
                 if (string.IsNullOrWhiteSpace(parameter.Name))
                 {
-                    throw new CatalogValidationException(parameterPath, "the parameter name is empty");
+                    throw new CatalogValidationException(
+                        ChalkErrorCodes.EmptyName, parameterPath, "the parameter name is empty");
                 }
 
                 parameterPath = $"{parameterPath} ({parameter.Name})";
                 if (!parameterNames.Add(parameter.Name))
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.DuplicateName,
                         parameterPath, $"parameter name '{parameter.Name}' is used twice");
                 }
 
@@ -1091,12 +1150,14 @@ public static class CatalogValidator
                 if (parameter.Type.Kind == TypeKind.List)
                 {
                     throw new CatalogValidationException(
-                        parameterPath, "a v1 parameter is a scalar; LIST parameters are not supported");
+                        ChalkErrorCodes.InvalidFunction,
+                        parameterPath, "a parameter is a scalar; LIST parameters are not supported");
                 }
 
                 if (parameter.Type.Kind == TypeKind.Composite)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidFunction,
                         parameterPath,
                         "a parameter is a scalar; a COMPOSITE is a function's result or an in-process "
                         + "table's column and never a parameter, so pass its fields as parameters of their own");
@@ -1105,12 +1166,14 @@ public static class CatalogValidator
                 if (parameter.Optional && parameter.Default is null)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidFunction,
                         parameterPath, "an optional parameter must carry the default it stands for");
                 }
 
                 if (!parameter.Optional && parameter.Default is not null)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidFunction,
                         parameterPath, "a default is only meaningful on an optional parameter");
                 }
             }
@@ -1121,7 +1184,8 @@ public static class CatalogValidator
                 var columnPath = $"{functionPath}.returns_table[{c}]";
                 if (string.IsNullOrWhiteSpace(column.Name))
                 {
-                    throw new CatalogValidationException(columnPath, "the column name is empty");
+                    throw new CatalogValidationException(
+                        ChalkErrorCodes.EmptyName, columnPath, "the column name is empty");
                 }
 
                 ValidateType(column.Type, $"{columnPath} ({column.Name})");
@@ -1139,6 +1203,7 @@ public static class CatalogValidator
         if (type.Kind == TypeKind.Composite)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.UnsupportedType,
                 path,
                 $"a COMPOSITE cannot be {what}; a composite value is a client-bodied function's result or a "
                 + "column of an in-process source's table. Declare its fields as columns of their own");
@@ -1158,6 +1223,7 @@ public static class CatalogValidator
         if (capabilities.QueryLanguage == QueryLanguage.None && Pushes(capabilities))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidCapabilities,
                 path,
                 "the source declares pushable work but QueryLanguage.None, so it can only be "
                 + "scanned and nothing would ever be pushed. Set QueryLanguage.Sql or "
@@ -1167,6 +1233,7 @@ public static class CatalogValidator
         if (capabilities.SupportsOffset && !capabilities.SupportsLimit)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidCapabilities,
                 path,
                 "SupportsOffset without SupportsLimit: an OFFSET is pushed as part of a fetch, so a "
                 + "source that takes one must take a LIMIT too.");
@@ -1175,6 +1242,7 @@ public static class CatalogValidator
         if (capabilities.SupportsHaving && !capabilities.SupportsGroupBy)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidCapabilities,
                 path, "SupportsHaving without SupportsGroupBy: a HAVING has nothing to filter.");
         }
 
@@ -1182,6 +1250,7 @@ public static class CatalogValidator
             && !capabilities.PushablePredicates.Contains(PredicateShape.In))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidCapabilities,
                 path,
                 $"MaxInList is {capabilities.MaxInList} but PredicateShape.In is not pushable, so no "
                 + "IN list is ever pushed. Declare the shape or leave MaxInList at zero.");
@@ -1192,6 +1261,7 @@ public static class CatalogValidator
         if (capabilities.SupportsValuesJoin && capabilities.MaxInList <= 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidCapabilities,
                 path,
                 "SupportsValuesJoin with MaxInList 0: a broadcast join ships the small side's rows "
                 + "into the source's query, so a source that accepts no list of values cannot do one.");
@@ -1202,6 +1272,7 @@ public static class CatalogValidator
         if (capabilities.SupportsRowValueInList && capabilities.MaxInList <= 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidCapabilities,
                 path,
                 "SupportsRowValueInList with MaxInList 0: a row-constructor IN list is still an IN "
                 + "list, and MaxInList is what sizes a call of them.");
@@ -1212,6 +1283,7 @@ public static class CatalogValidator
         if (capabilities.SupportsMaskPushdown && capabilities.QueryLanguage == QueryLanguage.None)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidCapabilities,
                 path,
                 "SupportsMaskPushdown with QueryLanguage.None: the source is only scanned, so it "
                 + "never sees an expression to evaluate. Declare a query language, or leave mask "
@@ -1221,6 +1293,7 @@ public static class CatalogValidator
         if (capabilities.MaxPushdownRows < 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidCapabilities,
                 path,
                 $"MaxPushdownRows is {capabilities.MaxPushdownRows}; it must be zero (unlimited) or "
                 + "positive.");
@@ -1231,9 +1304,10 @@ public static class CatalogValidator
         if (profile.LikeMatchesCodePoints && profile.StringCollation == StringCollation.CaseInsensitive)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidCapabilities,
                 path,
                 "The dialect profile says LikeMatchesCodePoints and StringCollation.CaseInsensitive. "
-                + "A case-insensitive collation folds case in LIKE, so the two contradict (D315).");
+                + "A case-insensitive collation folds case in LIKE, so the two contradict.");
         }
 
         // D89's string rules are applied by the planner regardless of the descriptor, but a
@@ -1248,13 +1322,14 @@ public static class CatalogValidator
                 if (shape is PredicateShape.Like or PredicateShape.LikePrefix)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidCapabilities,
                         path,
                         $"PredicateShape.{shape} is declared pushable but the dialect profile says "
                         + $"StringCollation.{profile.StringCollation}. A LIKE the source evaluates "
                         + "under a different collation than Chalk's can match different rows, so it "
-                        + "is never pushed (D89). Drop the shape, declare StringCollation.Binary if "
+                        + "is never pushed. Drop the shape, declare StringCollation.Binary if "
                         + "the source really compares by code point, or LikeMatchesCodePoints if its "
-                        + "LIKE does whatever its collation (D315).");
+                        + "LIKE does whatever its collation.");
                 }
             }
         }
@@ -1263,6 +1338,7 @@ public static class CatalogValidator
             && profile.Quoting == IdentifierQuoting.Unspecified)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidCapabilities,
                 path,
                 "a SQL source must say how it quotes identifiers: set DialectProfile.Quoting, or "
                 + "start from a DialectProfiles preset.");
@@ -1302,17 +1378,20 @@ public static class CatalogValidator
             if (key.Name.Length > 0 && !names.Add(key.Name))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.DuplicateName,
                     keyPath, $"foreign key name '{key.Name}' is used twice on table '{table.Name}'");
             }
 
             if (key.Columns.Count == 0)
             {
-                throw new CatalogValidationException(keyPath, "a foreign key has no columns");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidForeignKey, keyPath, "a foreign key has no columns");
             }
 
             if (key.Columns.Count != key.ParentColumns.Count)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidForeignKey,
                     keyPath,
                     $"the key has {key.Columns.Count} column(s) and the parent key has "
                     + $"{key.ParentColumns.Count}; a foreign key pairs them one for one");
@@ -1322,6 +1401,7 @@ public static class CatalogValidator
             if (parent is null)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.UnknownName,
                     keyPath,
                     $"the parent table '{key.ParentTable}' is not in schema '{schema.Name}'");
             }
@@ -1334,6 +1414,7 @@ public static class CatalogValidator
                 if (!seen.Add(key.Columns[c]))
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.DuplicateName,
                         keyPath, $"column {key.Columns[c]} appears twice in the same foreign key");
                 }
 
@@ -1346,6 +1427,7 @@ public static class CatalogValidator
                 if (childType.Kind != parentType.Kind)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.TypeMismatch,
                         keyPath,
                         $"column '{table.Columns[key.Columns[c]].Name}' is {childType.Kind} but "
                         + $"'{parent.Name}.{parent.Columns[key.ParentColumns[c]].Name}' is "
@@ -1359,12 +1441,14 @@ public static class CatalogValidator
     {
         if (table.Columns.Count == 0)
         {
-            throw new CatalogValidationException(path, "a table needs at least one column");
+            throw new CatalogValidationException(
+                ChalkErrorCodes.IncompleteDeclaration, path, "a table needs at least one column");
         }
 
         if (table.RowCount < -1)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.ValueOutOfRange,
                 path, $"row_count is {table.RowCount}; it must be >= -1 (-1 means unknown)");
         }
 
@@ -1376,12 +1460,14 @@ public static class CatalogValidator
             var column = table.Columns[c];
             if (string.IsNullOrWhiteSpace(column.Name))
             {
-                throw new CatalogValidationException($"{path}.columns[{c}]", "the column name is empty");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.EmptyName, $"{path}.columns[{c}]", "the column name is empty");
             }
 
             if (!columnNames.Add(column.Name))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.DuplicateName,
                     $"{path}.columns[{c}]",
                     $"column name '{column.Name}' is used twice in table '{table.Name}'");
             }
@@ -1393,6 +1479,7 @@ public static class CatalogValidator
             if (column.Type.Kind == TypeKind.Composite && schema.Kind != SourceKind.Local)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.UnsupportedType,
                     $"{path}.columns[{c}] ({column.Name})",
                     $"column '{column.Name}' of table '{table.Name}' is a COMPOSITE, and schema "
                     + $"'{schema.Name}' is a {schema.Kind.ToString().ToUpperInvariant()} source; a composite "
@@ -1406,7 +1493,8 @@ public static class CatalogValidator
             var key = table.UniqueKeys[k];
             if (key.Columns.Count == 0)
             {
-                throw new CatalogValidationException($"{path}.unique_keys[{k}]", "a unique key has no columns");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.IncompleteDeclaration, $"{path}.unique_keys[{k}]", "a unique key has no columns");
             }
 
             var seen = new HashSet<int>();
@@ -1417,6 +1505,7 @@ public static class CatalogValidator
                 if (!seen.Add(column))
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.DuplicateName,
                         $"{path}.unique_keys[{k}]", $"column {column} appears twice in the same key");
                 }
             }
@@ -1427,7 +1516,8 @@ public static class CatalogValidator
             var collation = table.Collations[i];
             if (collation.Keys.Count == 0)
             {
-                throw new CatalogValidationException($"{path}.collations[{i}]", "a collation has no keys");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.IncompleteDeclaration, $"{path}.collations[{i}]", "a collation has no keys");
             }
 
             var seen = new HashSet<int>();
@@ -1440,6 +1530,7 @@ public static class CatalogValidator
                 if (key.Direction == SortDirection.Unspecified)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.IncompleteDeclaration,
                         $"{path}.collations[{i}].keys[{j}]",
                         "the sort direction is unspecified; Calcite compares collations including null "
                         + "direction, so an unspecified one never satisfies an ORDER BY");
@@ -1448,6 +1539,7 @@ public static class CatalogValidator
                 if (!seen.Add(key.Column))
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.DuplicateName,
                         $"{path}.collations[{i}].keys[{j}]",
                         $"column {key.Column} appears twice in the same collation");
                 }
@@ -1461,23 +1553,26 @@ public static class CatalogValidator
             var indexPath = $"{path}.indexes[{i}]";
             if (string.IsNullOrWhiteSpace(index.Name))
             {
-                throw new CatalogValidationException(indexPath, "the index name is empty");
+                throw new CatalogValidationException(ChalkErrorCodes.EmptyName, indexPath, "the index name is empty");
             }
 
             if (!indexNames.Add(index.Name))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.DuplicateName,
                     indexPath, $"index name '{index.Name}' is used twice on table '{table.Name}'");
             }
 
             if (index.Kind == IndexKind.Unspecified)
             {
-                throw new CatalogValidationException(indexPath, "the index kind is unspecified");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.IncompleteDeclaration, indexPath, "the index kind is unspecified");
             }
 
             if (index.Columns.Count == 0)
             {
-                throw new CatalogValidationException(indexPath, "an index has no columns");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.IncompleteDeclaration, indexPath, "an index has no columns");
             }
 
             var indexColumns = new HashSet<int>();
@@ -1488,6 +1583,7 @@ public static class CatalogValidator
                 if (!indexColumns.Add(column))
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.DuplicateName,
                         indexPath, $"column {column} appears twice in the same index key");
                 }
             }
@@ -1495,6 +1591,7 @@ public static class CatalogValidator
             if (index.Directions.Count != 0 && index.Directions.Count != index.Columns.Count)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidIndex,
                     indexPath,
                     $"the index declares {index.Directions.Count} key direction(s) for "
                     + $"{index.Columns.Count} key column(s); declare one per column or none at all");
@@ -1505,6 +1602,7 @@ public static class CatalogValidator
                 if (index.Directions[d] == SortDirection.Unspecified)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.IncompleteDeclaration,
                         $"{indexPath}.directions[{d}]",
                         "the sort direction is unspecified; leave the directions empty for the "
                         + "ascending-nulls-last default rather than declaring an unspecified one");
@@ -1524,6 +1622,7 @@ public static class CatalogValidator
                     || statistics.Histogram.Count > 0 || statistics.FrequentValues.Count > 0))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.UnsupportedType,
                     $"{path}.columns[{c}] ({table.Columns[c].Name})",
                     $"column '{table.Columns[c].Name}' is a COMPOSITE and declares statistics; a composite "
                     + "column carries none, because none of its values compares with another");
@@ -1553,6 +1652,7 @@ public static class CatalogValidator
             }
 
             throw new CatalogValidationException(
+                ChalkErrorCodes.MissingEntitlement,
                 $"{path}.tables[{t}] ({table.Name})",
                 $"CatalogOptions.RequireEntitlements is on and table '{table.Name}' neither carries "
                 + "an entitlement nor is marked Public(). Declare one, or say Public() and mean it.");
@@ -1575,6 +1675,7 @@ public static class CatalogValidator
         if (entitlement.DefaultDisclosure is Disclosure.Masked or Disclosure.AggregateOnly)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement,
                 $"{path}.entitlement",
                 $"default_disclosure is {entitlement.DefaultDisclosure}, which needs a mask or an "
                 + "aggregate list this table cannot state for a column it does not name. The default "
@@ -1590,6 +1691,7 @@ public static class CatalogValidator
             if (column.Column < 0 || column.Column >= table.Columns.Count)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.ColumnIndexOutOfRange,
                     columnPath,
                     $"column index {column.Column} is out of range for a table of "
                     + $"{table.Columns.Count} columns");
@@ -1600,6 +1702,7 @@ public static class CatalogValidator
             if (!seen.Add(column.Column))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.DuplicateName,
                     columnPath,
                     $"column '{table.Columns[column.Column].Name}' is entitled twice; one rule per "
                     + "column, and a rule that resolves several ways is one CASE expression");
@@ -1608,6 +1711,7 @@ public static class CatalogValidator
             if (column.MinGroupSize < 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.ValueOutOfRange,
                     $"{columnPath}.min_group_size",
                     $"min_group_size is {column.MinGroupSize}; it must be >= 0 (0 inherits the "
                     + "default the host gives at planning, 1 disables the guard for this column)");
@@ -1641,9 +1745,10 @@ public static class CatalogValidator
         if (entitlement.RowPredicate.Length > 0 && column.Otherwise != Disclosure.None)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement,
                 $"{columnPath}.otherwise",
                 $"otherwise is {column.Otherwise} on a table that has a row predicate. Every column "
-                + "of a table whose rows are filtered must default to None (D208): a row outside "
+                + "of a table whose rows are filtered must default to None: a row outside "
                 + "the predicate is evaluated too, by whatever the optimiser moves below the "
                 + "filter. Write the permissive case as a rule whose condition is the scope.");
         }
@@ -1663,6 +1768,7 @@ public static class CatalogValidator
             if (string.IsNullOrWhiteSpace(rule.When))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidEntitlement,
                     rulePath,
                     "the rule condition is empty. A rule that always holds is written 'TRUE'; a "
                     + "column with no condition at all is an otherwise and no rules.");
@@ -1671,6 +1777,7 @@ public static class CatalogValidator
             if (rule.Then is Disclosure.Unspecified)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidEntitlement,
                     rulePath,
                     "the rule discloses Unspecified, which is not one of the names. Say Full, "
                     + "Masked, AggregateOnly, Test or None.");
@@ -1683,6 +1790,7 @@ public static class CatalogValidator
             if (rule.Mask.Length > 0 && rule.Then != Disclosure.Masked)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidEntitlement,
                     rulePath,
                     $"the rule declares a mask but discloses {rule.Then}, so the mask could never be "
                     + "reached. A per-rule mask belongs on a Masked rule.");
@@ -1691,6 +1799,7 @@ public static class CatalogValidator
             if (rule.Then == Disclosure.Masked && rule.Mask.Length == 0 && column.Mask.Length == 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidEntitlement,
                     rulePath,
                     "the rule discloses Masked and neither it nor the column declares a mask, so "
                     + "there would be nothing to put in the value's place");
@@ -1704,6 +1813,7 @@ public static class CatalogValidator
         if (reachable.Contains(Disclosure.AggregateOnly) && column.AggregateOnlyFunctions.Count == 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement,
                 columnPath,
                 "AggregateOnly is reachable and no aggregate is permitted, so every use of the "
                 + "column would be refused. List the aggregates, or say None and mean it.");
@@ -1715,13 +1825,14 @@ public static class CatalogValidator
             if (!PopulationAggregates.IsPermitted(function, catalog))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidEntitlement,
                     $"{columnPath}.aggregate_only_functions[{f}]",
-                    $"'{column.AggregateOnlyFunctions[f]}' is not a population aggregate (D190). "
+                    $"'{column.AggregateOnlyFunctions[f]}' is not a population aggregate. "
                     + "MIN, MAX, ANY_VALUE, the positional and holistic aggregates, every string "
                     + "aggregate and any user-defined aggregate not declared Population() each report "
                     + $"an individual row's value. The permitted set is {PopulationAggregates.Listing}, "
                     + "and a user-defined aggregate the catalog declares with Population(), which "
-                    + "promises that its result reports the group and never one row's value (D295). "
+                    + "promises that its result reports the group and never one row's value. "
                     + "Declare it so if it keeps that promise; the engine cannot check it.");
             }
         }
@@ -1737,6 +1848,7 @@ public static class CatalogValidator
             if (!hasRuleMask)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidEntitlement,
                     columnPath,
                     "a mask is declared but no rule and no default discloses Masked, so the mask "
                     + "could never be reached");
@@ -1750,6 +1862,7 @@ public static class CatalogValidator
             && !reachable.Contains(Disclosure.AggregateOnly))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement,
                 $"{columnPath}.statistical",
                 "statistical is set but neither Masked nor AggregateOnly is reachable, so there is "
                 + "no withheld value for it to relax. It is an opt-in under one of those two.");
@@ -1784,12 +1897,14 @@ public static class CatalogValidator
             var then = column.Rules[r].Then;
             if (then is Disclosure.Masked or Disclosure.AggregateOnly or Disclosure.Test)
             {
-                throw new CatalogValidationException($"{columnPath}.rules[{r}]", Refusal(then));
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidEntitlement, $"{columnPath}.rules[{r}]", Refusal(then));
             }
 
             if (column.Rules[r].Placeholder.Length > 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidEntitlement,
                     $"{columnPath}.rules[{r}]",
                     $"column '{declared.Name}' is a COMPOSITE and the rule declares a placeholder; a "
                     + "composite column's placeholder is the NULL composite, and no expression builds another");
@@ -1798,12 +1913,14 @@ public static class CatalogValidator
 
         if (column.Otherwise is Disclosure.Masked or Disclosure.AggregateOnly or Disclosure.Test)
         {
-            throw new CatalogValidationException($"{columnPath}.otherwise", Refusal(column.Otherwise));
+            throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement, $"{columnPath}.otherwise", Refusal(column.Otherwise));
         }
 
         if (column.Mask.Length > 0 || column.Placeholder.Length > 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement,
                 columnPath,
                 $"column '{declared.Name}' is a COMPOSITE and declares a "
                 + (column.Mask.Length > 0 ? "mask" : "placeholder")
@@ -1813,6 +1930,7 @@ public static class CatalogValidator
         if (column.AggregateOnlyFunctions.Count > 0 || column.Statistical)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement,
                 columnPath,
                 $"column '{declared.Name}' is a COMPOSITE and declares "
                 + (column.Statistical ? "the statistical opt-in" : "an aggregate allow-list")
@@ -1837,6 +1955,7 @@ public static class CatalogValidator
         if (rule.Then == Disclosure.Test && rule.Tests.Count == 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement,
                 $"{rulePath}.tests",
                 "the rule discloses Test and names no comparison shape, so it discloses neither the "
                 + "value nor any comparison of it. Name the shapes — Equals, NotEquals, In — or say "
@@ -1846,6 +1965,7 @@ public static class CatalogValidator
         if (rule.Tests.Count > 0 && rule.Then is not (Disclosure.Test or Disclosure.AggregateOnly))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement,
                 $"{rulePath}.tests",
                 $"the rule permits comparison shapes but discloses {rule.Then}, which either "
                 + "discloses the value outright or withholds it entirely, so the shapes could never "
@@ -1858,6 +1978,7 @@ public static class CatalogValidator
             if (rule.Tests[t] == Chalk.Entitlements.TestShape.Unspecified)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidEntitlement,
                     $"{rulePath}.tests[{t}]",
                     "the shape is Unspecified, which is not one of the three. Say Equals, NotEquals "
                     + "or In.");
@@ -1867,9 +1988,10 @@ public static class CatalogValidator
         if (rule.Tests.Count > 0 && !HasEquality(declared.Type))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidEntitlement,
                 $"{rulePath}.tests",
                 $"column '{declared.Name}' is {declared.Type.Kind}, a type Chalk states no equality "
-                + "for (D58), so no comparison of it could be computed at the leaf. A test verdict "
+                + "for, so no comparison of it could be computed at the leaf. A test verdict "
                 + "needs a column whose values compare.");
         }
     }
@@ -1887,12 +2009,14 @@ public static class CatalogValidator
         if (statistics.DistinctCount < -1)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.ValueOutOfRange,
                 path, $"distinct_count is {statistics.DistinctCount}; it must be >= -1 (-1 means unknown)");
         }
 
         if (statistics.NullCount < -1)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.ValueOutOfRange,
                 path, $"null_count is {statistics.NullCount}; it must be >= -1 (-1 means unknown)");
         }
 
@@ -1901,12 +2025,14 @@ public static class CatalogValidator
             if (statistics.Histogram[b].Count < 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.ValueOutOfRange,
                     $"{path}.histogram[{b}]", $"the bucket count is {statistics.Histogram[b].Count}; it must be >= 0");
             }
 
             if (statistics.Histogram[b].DistinctCount < -1)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.ValueOutOfRange,
                     $"{path}.histogram[{b}]",
                     $"distinct_count is {statistics.Histogram[b].DistinctCount}; it must be >= -1");
             }
@@ -1917,6 +2043,7 @@ public static class CatalogValidator
             if (statistics.FrequentValues[v].Count < 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.ValueOutOfRange,
                     $"{path}.frequent_values[{v}]",
                     $"the value count is {statistics.FrequentValues[v].Count}; it must be >= 0");
             }
@@ -1940,6 +2067,7 @@ public static class CatalogValidator
             if (cost < 0 || double.IsNaN(cost) || double.IsInfinity(cost))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.ValueOutOfRange,
                     $"{path}.cost_profile",
                     $"{name} is {cost.ToString(System.Globalization.CultureInfo.InvariantCulture)}; "
                     + "a cost must be finite and >= 0 (zero means 'inherit')");
@@ -1969,6 +2097,7 @@ public static class CatalogValidator
         if (index.Columns.Count != 1)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidIndex,
                 indexPath,
                 $"index '{index.Name}' is PREFIX and declares {index.Columns.Count} key columns. A "
                 + "prefix index answers prefix lookups on one STRING column and claims no ordering, "
@@ -1978,6 +2107,7 @@ public static class CatalogValidator
         if (table.Columns[index.Columns[0]].Type.Kind != TypeKind.String)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidIndex,
                 indexPath,
                 $"index '{index.Name}' is PREFIX over column '{table.Columns[index.Columns[0]].Name}', "
                 + $"which is {table.Columns[index.Columns[0]].Type.Kind}. A prefix is a question about "
@@ -1997,6 +2127,7 @@ public static class CatalogValidator
                 if (table.Columns[c].Type.Kind == TypeKind.Composite)
                 {
                     throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidIndex,
                         indexPath,
                         $"index '{index.Name}' is CLUSTERED with no covering set, which covers every "
                         + $"column and so the composite column '{table.Columns[c].Name}'; a clustered "
@@ -2013,6 +2144,7 @@ public static class CatalogValidator
         if (index.Kind != IndexKind.Clustered)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidIndex,
                 indexPath,
                 $"index '{index.Name}' is {index.Kind} and declares a covering set, but only a "
                 + "CLUSTERED index holds a copy of its columns. Declare the index clustered, or drop "
@@ -2028,6 +2160,7 @@ public static class CatalogValidator
             if (table.Columns[column].Type.Kind == TypeKind.Composite)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidIndex,
                     $"{indexPath}.covering[{c}]",
                     $"the covering set of index '{index.Name}' names the composite column "
                     + $"'{table.Columns[column].Name}'; a clustered copy never carries a composite column");
@@ -2036,6 +2169,7 @@ public static class CatalogValidator
             if (!seen.Add(column))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.DuplicateName,
                     $"{indexPath}.covering[{c}]",
                     $"column {column} appears twice in the covering set of index '{index.Name}'");
             }
@@ -2043,6 +2177,7 @@ public static class CatalogValidator
             if (column <= previous)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidIndex,
                     $"{indexPath}.covering[{c}]",
                     $"the covering set of index '{index.Name}' is not ascending: column {column} "
                     + $"follows column {previous}");
@@ -2056,6 +2191,7 @@ public static class CatalogValidator
             if (!seen.Contains(key))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidIndex,
                     indexPath,
                     $"the covering set of index '{index.Name}' leaves out key column {key} "
                     + $"('{table.Columns[key].Name}'). A range seek binary-searches the key in the "
@@ -2069,6 +2205,7 @@ public static class CatalogValidator
         if (column < 0 || column >= table.Columns.Count)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.ColumnIndexOutOfRange,
                 path, $"column index {column} is out of range for a table of {table.Columns.Count} columns");
         }
     }
@@ -2084,6 +2221,7 @@ public static class CatalogValidator
         if (table.Columns[column].Type.Kind == TypeKind.Composite)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.IncomparableType,
                 path,
                 $"column '{table.Columns[column].Name}' is a COMPOSITE and cannot be part of {what}; a "
                 + "composite value has no ordering or equality. Declare the field to key on as a column "
@@ -2093,9 +2231,10 @@ public static class CatalogValidator
         if (table.Columns[column].Type.Kind == TypeKind.List)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.IncomparableType,
                 path,
                 $"column '{table.Columns[column].Name}' is a LIST and cannot be part of {what}; "
-                + "v1 lists have no ordering or equality (docs/design/14-windows-ii.md §5)");
+                + "a list has no ordering or equality");
         }
     }
 
@@ -2107,7 +2246,8 @@ public static class CatalogValidator
     {
         if (type.Fields.Count == 0)
         {
-            throw new CatalogValidationException(path, "a COMPOSITE declares no fields; it has at least one");
+            throw new CatalogValidationException(
+                ChalkErrorCodes.IncompleteDeclaration, path, "a COMPOSITE declares no fields; it has at least one");
         }
 
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -2117,13 +2257,14 @@ public static class CatalogValidator
             var fieldPath = $"{path}.fields[{f}]";
             if (string.IsNullOrWhiteSpace(field.Name))
             {
-                throw new CatalogValidationException(fieldPath, "the field name is empty");
+                throw new CatalogValidationException(ChalkErrorCodes.EmptyName, fieldPath, "the field name is empty");
             }
 
             fieldPath = $"{fieldPath} ({field.Name})";
             if (!names.Add(field.Name))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.DuplicateName,
                     fieldPath,
                     $"field name '{field.Name}' is used twice ignoring case; SQL resolves a field by "
                     + "name ignoring case, so the two would be one field");
@@ -2132,6 +2273,7 @@ public static class CatalogValidator
             if (field.Type.Kind is TypeKind.List or TypeKind.Composite)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.UnsupportedType,
                     fieldPath,
                     $"the field is a {field.Type.Kind.ToString().ToUpperInvariant()}; a COMPOSITE is one "
                     + "level deep and its fields are scalars");
@@ -2145,7 +2287,8 @@ public static class CatalogValidator
     {
         if (type.Kind == TypeKind.Unspecified)
         {
-            throw new CatalogValidationException(path, "the column type is unspecified");
+            throw new CatalogValidationException(
+                ChalkErrorCodes.IncompleteDeclaration, path, "the column type is unspecified");
         }
 
         // D58: a LIST carries an element, exactly one level deep, and nothing else carries one.
@@ -2153,20 +2296,23 @@ public static class CatalogValidator
         {
             if (type.Element is not { } element)
             {
-                throw new CatalogValidationException(path, "a LIST column declares no element type");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.IncompleteDeclaration, path, "a LIST column declares no element type");
             }
 
             if (element.Kind == TypeKind.List)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.UnsupportedType,
                     path,
-                    "a LIST's element is itself a LIST; v1 lists are exactly one level deep "
-                    + "(docs/design/14-windows-ii.md §5)");
+                    "a LIST's element is itself a LIST; a list is exactly one level deep, and its "
+                    + "elements are scalars");
             }
 
             if (element.Kind == TypeKind.Composite)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.UnsupportedType,
                     path,
                     "a LIST's element is a COMPOSITE; a list holds scalars and a composite is never "
                     + "nested in another");
@@ -2177,6 +2323,7 @@ public static class CatalogValidator
         else if (type.Element is not null)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.UnsupportedType,
                 path, $"{type.Kind} declares an element type; only a LIST has one");
         }
 
@@ -2188,12 +2335,14 @@ public static class CatalogValidator
         else if (type.Fields.Count > 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.UnsupportedType,
                 path, $"{type.Kind} declares {type.Fields.Count} field(s); only a COMPOSITE has fields");
         }
 
         if (type.Precision < 0 || type.Scale < 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.ValueOutOfRange,
                 path, $"precision {type.Precision} / scale {type.Scale} must not be negative");
         }
 
@@ -2201,12 +2350,14 @@ public static class CatalogValidator
         {
             if (type.Precision is < 1 or > 38)
             {
-                throw new CatalogValidationException(path, $"DECIMAL precision is {type.Precision}; it must be 1..38");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.ValueOutOfRange, path, $"DECIMAL precision is {type.Precision}; it must be 1..38");
             }
 
             if (type.Scale > type.Precision)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.ValueOutOfRange,
                     path, $"DECIMAL scale {type.Scale} exceeds precision {type.Precision}");
             }
         }
@@ -2216,17 +2367,20 @@ public static class CatalogValidator
             if (type.Precision > max)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.ValueOutOfRange,
                     path, $"{type.Kind} precision is {type.Precision}; the maximum is {max}");
             }
 
             if (type.Scale != 0)
             {
-                throw new CatalogValidationException(path, $"{type.Kind} carries a scale; scale is DECIMAL-only");
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.UnsupportedType, path, $"{type.Kind} carries a scale; scale is DECIMAL-only");
             }
         }
         else if (type.Precision != 0 || type.Scale != 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.ValueOutOfRange,
                 path,
                 $"{type.Kind} carries precision {type.Precision} / scale {type.Scale}; both must be zero");
         }
@@ -2256,6 +2410,7 @@ public static class CatalogValidator
             if (zone.Trim().Length != zone.Length || zone.Trim().Length == 0)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidZone,
                     $"schemas[{s}] ({schema.Name}).zone",
                     $"the zone '{zone}' begins or ends with white space. Zones match exactly, so it would "
                     + "be a zone of its own rather than the one it looks like.");
@@ -2277,6 +2432,7 @@ public static class CatalogValidator
         if (declared.Count > 1)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidZone,
                 "schemas",
                 "one catalog is one zone, and this one's sources declare "
                 + string.Join(" and ", declared.Select(z => $"'{z.Key}' ({string.Join(", ", z.Value)})"))
@@ -2287,6 +2443,7 @@ public static class CatalogValidator
         {
             var (zone, sources) = (declared.First().Key, declared.First().Value);
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidZone,
                 "schemas",
                 $"one catalog is one zone: {string.Join(", ", sources)} declare the zone '{zone}' and "
                 + $"{string.Join(", ", undeclared)} declare none. Declare it on every source of the catalog, or on none.");

@@ -150,6 +150,8 @@ public sealed class StructuredRefusalTests(SharedSidecar sidecar) : IDisposable
 
         var refusal = Assert.IsType<EntitlementRefusal>(refused.Refusal);
         Assert.Equal(RefusalReason.PopulationOnly, refusal.Reason);
+        Assert.Equal(ChalkErrorCodes.PopulationOnly, refused.Code);
+        Assert.EndsWith(" [PopulationOnly]", refused.Message, StringComparison.Ordinal);
         Assert.Equal(run == Run.FromDatabase ? "duck.members" : "main.members", refusal.Table);
         Assert.Equal("national_id", refusal.Column);
         Assert.Equal("a projection to the result", refusal.Use);
@@ -222,6 +224,7 @@ public sealed class StructuredRefusalTests(SharedSidecar sidecar) : IDisposable
         Assert.NotSame(first, second);
         Assert.Same(first.Refusal, second.Refusal);
         Assert.Equal(first.Message, second.Message);
+        Assert.Equal(ChalkErrorCodes.PopulationOnly, second.Code);
 
         // Another statement, or another principal's values, is another request.
         await Assert.ThrowsAsync<EntitlementException>(
@@ -335,7 +338,8 @@ public sealed class StructuredRefusalTests(SharedSidecar sidecar) : IDisposable
         Assert.False(memo.Any);
         for (var i = 0; i <= RefusalMemo.Capacity; i++)
         {
-            memo.Remember(new RefusalMemo.Remembered($"k{i}", "refused", null, null));
+            memo.Remember(new RefusalMemo.Remembered(
+                $"k{i}", [new ChalkViolation(ChalkErrorCodes.Star, "refused", PlanErrorKinds.Policy)], "refused", null, []));
         }
 
         Assert.True(memo.Any);

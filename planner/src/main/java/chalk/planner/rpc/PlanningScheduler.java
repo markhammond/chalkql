@@ -1,5 +1,7 @@
 package chalk.planner.rpc;
 
+import chalk.planner.ErrorCode;
+import chalk.planner.InvalidArgumentException;
 import chalk.planner.diag.PlanningGovernor;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -118,7 +120,8 @@ public final class PlanningScheduler implements AutoCloseable {
    * {@link #DEFAULT_SESSION_LIMIT}. */
   public PlanningScheduler(int workers, int sessionLimit) {
     if (workers < 1) {
-      throw new IllegalArgumentException("workers must be at least 1, got " + workers);
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_CONFIGURATION, "workers must be at least 1, got " + workers);
     }
     if (sessionLimit < 1) {
       throw new IllegalArgumentException("sessionLimit must be at least 1, got " + sessionLimit);

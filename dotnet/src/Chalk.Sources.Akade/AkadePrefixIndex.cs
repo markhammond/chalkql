@@ -74,6 +74,7 @@ internal sealed class AkadePrefixIndex<T> : IPocoIndex<T>
         if (range.Prefix is null)
         {
             throw new SourceContractException(
+                ChalkErrorCodes.SourceContract,
                 _sourceId,
                 _table,
                 $"Akade prefix index '{Descriptor.Name}' answers prefix lookups only, and was asked "

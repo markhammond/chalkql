@@ -143,8 +143,7 @@ public readonly record struct Source : Chalk.Sources.IRefreshTarget
 
     internal SourceDeclaration Required() =>
         Declaration ?? throw new InvalidOperationException(
-            "a default Source handle names no source. Obtain one from TenancyPolicy.Source(id) "
-            + "(docs/design/45-typed-tenancy-surface.md §1, D270).");
+            "a default Source handle names no source. Obtain one from TenancyPolicy.Source(id).");
 
     public override string ToString() => Name;
 }
@@ -273,7 +272,7 @@ public readonly record struct Table : Chalk.Sources.IRefreshTarget
     internal TableDeclaration Required() =>
         Declaration ?? throw new InvalidOperationException(
             "a default Table handle names no table. Obtain one from TenancyPolicy.Table(name) or "
-            + "Source.Table(name) (docs/design/45-typed-tenancy-surface.md §1, D270).");
+            + "Source.Table(name).");
 
     public override string ToString() => Name;
 }
@@ -324,8 +323,7 @@ public readonly record struct Column
 
     internal ColumnDeclaration Required() =>
         Declaration ?? throw new InvalidOperationException(
-            "a default Column handle names no column. Obtain one from Table.Column(name) "
-            + "(docs/design/45-typed-tenancy-surface.md §1, D270).");
+            "a default Column handle names no column. Obtain one from Table.Column(name).");
 
     public override string ToString() => Name;
 }

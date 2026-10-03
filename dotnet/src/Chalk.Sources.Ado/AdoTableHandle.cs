@@ -38,8 +38,7 @@ public readonly record struct AdoTable : ITableTarget
     internal AdoTableBinding Required() =>
         Binding ?? throw new InvalidOperationException(
             "a default AdoTable handle names no table. Obtain one from AdoSourceBuilder's "
-            + "AddTable(…, out var table, …) or from AdoSource.Table(name) "
-            + "(docs/design/44-catalog-registration.md §6 (h), D271).");
+            + "AddTable(…, out var table, …) or from AdoSource.Table(name).");
 
     public override string ToString() => $"{Schema}.{Name}";
 }

@@ -1,5 +1,7 @@
 package chalk.planner.redact;
 
+import chalk.planner.ErrorCode;
+import chalk.planner.InvalidArgumentException;
 import chalk.planner.rpc.v1.RedactionOptions;
 import chalk.planner.rpc.v1.RedactionScope;
 import java.util.Arrays;
@@ -43,11 +45,11 @@ public final class RedactionPolicy {
       return null;
     }
     if (options.getSalt().isEmpty()) {
-      throw new IllegalArgumentException(
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_REQUEST,
           "PlanRequest.redaction carries no salt. A salt absent or empty means a random per-engine"
               + " one, and that decision is the client's: a sidecar that invented a key here would"
-              + " give two engines different pseudonyms for the same host secret"
-              + " (docs/design/37-redacted-sql.md §2).");
+              + " give two engines different pseudonyms for the same host secret.");
     }
     return new RedactionPolicy(
         options.getSalt().toByteArray(), scopeOf(options.getScope()), options.getKeepStructural());
@@ -56,7 +58,8 @@ public final class RedactionPolicy {
   /** A policy built directly, for the planner's own tests and for callers inside this package. */
   public static RedactionPolicy of(byte[] salt, Scope scope, boolean keepStructural) {
     if (salt.length == 0) {
-      throw new IllegalArgumentException("a redaction needs a salt");
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_REQUEST, "a redaction needs a salt");
     }
     return new RedactionPolicy(Arrays.copyOf(salt, salt.length), scope, keepStructural);
   }
@@ -68,7 +71,8 @@ public final class RedactionPolicy {
       // that this build has never heard of is refused rather than quietly read as something else.
       case REDACTION_SCOPE_ALL, REDACTION_SCOPE_UNSPECIFIED -> Scope.ALL;
       case UNRECOGNIZED ->
-          throw new IllegalArgumentException(
+          throw new InvalidArgumentException(
+              ErrorCode.INVALID_REQUEST,
               "RedactionOptions.scope is not a RedactionScope this planner knows");
     };
   }

@@ -44,7 +44,7 @@ internal static class ParameterValues
     /// <see cref="string"/> or <see cref="Utf8String"/>, <see cref="byte"/>[], <see cref="DateOnly"/>,
     /// <see cref="TimeOnly"/>, <see cref="DateTime"/> (a wall clock), <see cref="DateTimeOffset"/>
     /// (UTC), <see cref="Guid"/>, <see cref="TimeSpan"/>, <see cref="int"/> (months) or
-    /// <see cref="bool"/>. Throws an <see cref="ArgumentException"/> naming <paramref name="what"/> —
+    /// <see cref="bool"/>. Throws a <see cref="ParameterBindingException"/> naming <paramref name="what"/> —
     /// <c>Parameter @amount</c>, <c>Context scalar 'tenant'</c> — for anything the type does not hold
     /// exactly; <paramref name="via"/> names the converter the value came from, when it did.
     /// </summary>
@@ -312,12 +312,13 @@ internal static class ParameterValues
         return result;
     }
 
-    private static ArgumentException Refused(Subject subject, ChalkType type, object value, string reason) =>
+    private static ParameterBindingException Refused(Subject subject, ChalkType type, object value, string reason) =>
         new(
+            subject.What,
             $"{subject.What} is {type}, and a {Describe(value)}"
             + (subject.Via is { } via ? $" returned by {via}" : string.Empty)
-            + $" was bound to it: {reason} (D317).",
-            "parameters");
+            + $" was bound to it: {reason}. A bound value is never converted at a loss; bind one the "
+            + "type holds exactly.");
 
     /// <summary>What is being bound, and the converter its value came from.</summary>
     private readonly record struct Subject(string What, string? Via);

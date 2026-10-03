@@ -27,9 +27,10 @@ internal static class ParameterBinder
         ArgumentNullException.ThrowIfNull(types);
         if (values.Count != types.Count)
         {
-            throw new ArgumentException(
-                $"The plan declares {types.Count} parameter(s) but {values.Count} were supplied.",
-                nameof(values));
+            throw new ParameterBindingException(
+                "Parameters",
+                $"The plan declares {types.Count} parameter(s) but {values.Count} were supplied. Bind one "
+                + "value per parameter, in order.");
         }
 
         var bound = new ScalarValue[types.Count];
@@ -47,9 +48,9 @@ internal static class ParameterBinder
         {
             return type.Nullable
                 ? ScalarValue.Null(type)
-                : throw new ArgumentException(
-                    $"Parameter {index} is declared {type} but NULL was bound: the parameter is declared NOT NULL.",
-                    $"parameters[{index}]");
+                : throw new ParameterBindingException(
+                    $"Parameter {index.ToString(CultureInfo.InvariantCulture)}",
+                    $"Parameter {index} is declared {type} but NULL was bound: the parameter is declared NOT NULL.");
         }
 
         return Scalar(ParameterValues.Exact(value, type, $"Parameter {index.ToString(CultureInfo.InvariantCulture)}"), type);

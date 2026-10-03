@@ -41,8 +41,9 @@ public static class ArrowTypeMapping
             TypeKind.List => new ListType(ToArrowField(
                 ListElementName,
                 type.Element ?? throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnsupportedType,
                     "LIST with no element type",
-                    "docs/design/02-ir.md §3 requires Type.element on a LIST."),
+                    "A LIST type names the type of its elements, and this one names none."),
                 strings)),
             TypeKind.Composite => new StructType(
                 [.. type.Fields.Select(f => ToArrowField(f.Name, f.Type, strings))]),
@@ -75,13 +76,15 @@ public static class ArrowTypeMapping
         TypeKind.List => new ListType(ToArrowField(
             ListElementName,
             type.Element ?? throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedType,
                 "LIST with no element type",
-                "docs/design/02-ir.md §3 requires Type.element on a LIST."))),
+                "A LIST type names the type of its elements, and this one names none."))),
 
         // D291: one child field per composite field, named as declared and carrying the field's own
         // nullability; the composite's own is on the column's field.
         TypeKind.Composite => new StructType([.. type.Fields.Select(f => ToArrowField(f.Name, f.Type))]),
         _ => throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedType,
             $"type kind {type.Kind}",
             "There is no Arrow mapping for it; the planner should never have produced it."),
     };
@@ -184,8 +187,9 @@ public static class ArrowTypeMapping
                 record.Fields.Select(f => new CompositeField(f.Name, FromArrow(f.DataType, f.IsNullable))),
                 nullable),
             _ => throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedType,
                 $"Arrow type {type.Name}",
-                "It has no Chalk logical type; see docs/design/02-ir.md §3 for the supported set."),
+                "It has no Chalk logical type."),
         };
     }
 
@@ -217,7 +221,8 @@ public static class ArrowTypeMapping
         TimeUnit.Millisecond => 1_000L,
         TimeUnit.Microsecond => 1_000_000L,
         TimeUnit.Nanosecond => 1_000_000_000L,
-        _ => throw new UnsupportedFeatureException($"Arrow time unit {unit}", "Chalk maps ms, us and ns only."),
+        _ => throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedType, $"Arrow time unit {unit}", "Chalk maps ms, us and ns only."),
     };
 
     /// <summary>Two schemas are the same when names, types, nullability and order all agree.</summary>

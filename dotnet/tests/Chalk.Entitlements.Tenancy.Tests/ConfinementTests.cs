@@ -423,7 +423,7 @@ public sealed class ConfinementTests
             error.Message,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Either 'org' is declared directly on 'orders', or the grant is held unconfined (F101)",
+            "Either 'org' is declared directly on 'orders', or the grant is held unconfined.",
             error.Message,
             StringComparison.Ordinal);
     }
@@ -739,7 +739,7 @@ public sealed class ConfinementTests
         Assert.Contains("along a Related path whose endpoint is 'items'", error.Message, StringComparison.Ordinal);
         Assert.Contains("holds 'region' on its own row", error.Message, StringComparison.Ordinal);
         Assert.Contains("existence marker", error.Message, StringComparison.Ordinal);
-        Assert.Contains("held unconfined (F101)", error.Message, StringComparison.Ordinal);
+        Assert.Contains("held unconfined.", error.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

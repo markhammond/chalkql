@@ -31,6 +31,7 @@ Chalk.Catalog.CatalogContext.Schemas.get -> System.Collections.Generic.IReadOnly
 Chalk.Catalog.CatalogContext.Schemas.init -> void
 Chalk.Catalog.CatalogSerialization
 Chalk.Catalog.CatalogValidationException
+Chalk.Catalog.CatalogValidationException.CatalogValidationException(string! code, string! path, string! detail) -> void
 Chalk.Catalog.CatalogValidationException.CatalogValidationException(string! path, string! detail) -> void
 Chalk.Catalog.CatalogValidationException.Path.get -> string!
 Chalk.Catalog.CatalogValidator

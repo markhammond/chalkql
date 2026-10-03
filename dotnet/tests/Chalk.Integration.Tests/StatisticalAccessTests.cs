@@ -163,9 +163,9 @@ public sealed class StatisticalAccessTests(SharedSidecar sidecar)
             "Refused by the entitlements: main.members.first_name is a statistical column and this "
             + "statement reads it under a window function. Statistical access is query-set-size "
             + "control, and a window's partition can be one row, so no suppression can be enforced "
-            + "on it: a window is one of the three things the opt-in forbids "
-            + "(docs/design/16-entitlements.md §3.4, D203).",
+            + "on it: a window is one of the three things the opt-in forbids. [Statistical]",
             refusal.Message);
+        Assert.Equal(ChalkErrorCodes.Statistical, refusal.Code);
     }
 
     /// <summary>

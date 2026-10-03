@@ -85,8 +85,7 @@ public interface IQueryPlanner : IAsyncDisposable
     /// </remarks>
     ValueTask<RedactedSql> RedactSqlAsync(RedactSqlRequest request, CancellationToken ct = default) =>
         throw new NotSupportedException(
-            $"{GetType().Name} cannot redact a statement: redaction needs the planner's own parser "
-            + "(D262, docs/design/37-redacted-sql.md §1).");
+            $"{GetType().Name} cannot redact a statement: redaction needs the planner's own parser.");
 }
 
 /// <summary>

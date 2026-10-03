@@ -263,8 +263,10 @@ public sealed class CompositeTypeTests
             "Invalid catalog at schemas[0] (people).tables[0] (profiles).columns[1] (contact): column "
             + "'contact' of table "
             + "'profiles' is a COMPOSITE, and schema 'people' is a REMOTE source; a composite column is "
-            + "read only from an in-process (LOCAL) source. Declare its fields as columns of their own",
+            + "read only from an in-process (LOCAL) source. Declare its fields as columns of their own "
+            + "[UnsupportedType]",
             ex.Message);
+        Assert.Equal(ChalkErrorCodes.UnsupportedType, ex.Code);
     }
 
     [Fact]
@@ -337,7 +339,7 @@ public sealed class CompositeTypeTests
             + "(contact).rules[0]: column 'contact' "
             + "is a COMPOSITE and is disclosed Masked, but no expression builds a composite value to "
             + "mask it with. A composite column is disclosed Full or None, None's placeholder being the "
-            + "NULL composite; a rule's condition may read a field of it",
+            + "NULL composite; a rule's condition may read a field of it [InvalidEntitlement]",
             masked.Message);
 
         Assert.Contains(

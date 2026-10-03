@@ -134,8 +134,9 @@ internal sealed class ReferenceKernel
                 break;
             default:
                 throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UserFunctionContract,
                     $"a Tier 2 argument of CLR type {value.GetType().Name}",
-                    "docs/design/17-user-defined-functions.md §3 lists what a v1 kernel takes.");
+                    "A Tier 2 kernel reads bool, the integer kinds, float and double.");
         }
 
         BitUtility.SetBit(bits, 0);

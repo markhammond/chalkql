@@ -44,7 +44,7 @@ internal static class CapabilityProbes
                     Declared = "the source interprets an IfThen in a pushed plan",
                     Observed = "unverified: this kit probes with SQL text and this source takes IR",
                     Outcome = ConformanceOutcome.Skipped,
-                    Advice = "SupportsCase is true unless a descriptor says otherwise (D273). An "
+                    Advice = "SupportsCase is true unless a descriptor says otherwise. An "
                         + "adapter that does not implement Expr.IfThen must set SupportsCase = "
                         + "false, or it will be sent one.",
                 });

@@ -346,7 +346,9 @@ internal interface IManagedColumnPublisher
 public sealed class BatchLifetimeException : ChalkException
 {
     internal BatchLifetimeException(int current, int captured)
-        : base($"a column view from batch generation {captured} was read after its producer had moved "
+        : base(
+            ChalkErrorCodes.BatchLifetime,
+            $"a column view from batch generation {captured} was read after its producer had moved "
             + $"on to generation {current}. A batch is valid until the next MoveNext; copy anything "
             + "that has to outlive it.")
     {

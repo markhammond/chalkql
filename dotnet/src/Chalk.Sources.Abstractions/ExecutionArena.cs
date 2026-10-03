@@ -726,7 +726,9 @@ public sealed class ExecutionArena : IDisposable
 public sealed class ArenaBudgetExceededException : ChalkException
 {
     public ArenaBudgetExceededException(long maxBytes, long requestedBytes, long outstandingBytes)
-        : base($"execution exceeded its arena budget of {maxBytes} bytes: {outstandingBytes} bytes were "
+        : base(
+            ChalkErrorCodes.MemoryBudgetExceeded,
+            $"execution exceeded its arena budget of {maxBytes} bytes: {outstandingBytes} bytes were "
             + $"already outstanding and {requestedBytes} more were asked for")
     {
         MaxBytes = maxBytes;

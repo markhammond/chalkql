@@ -764,6 +764,7 @@ public sealed class AdoSourceBuilder
                         key.ParentTable,
                         StringComparison.OrdinalIgnoreCase))
                     ?? throw new CatalogValidationException(
+                        ChalkErrorCodes.UnknownName,
                         $"table '{registration.Descriptor.Name}'",
                         $"ForeignKey(…) names the parent table '{key.ParentTable}', which is not "
                         + $"registered on source '{_sourceId}'.");
@@ -779,6 +780,7 @@ public sealed class AdoSourceBuilder
                     if (parentColumns[i] < 0)
                     {
                         throw new CatalogValidationException(
+                            ChalkErrorCodes.UnknownName,
                             $"table '{registration.Descriptor.Name}'",
                             $"ForeignKey(…) names '{key.ParentColumns[i]}' on parent table "
                             + $"'{parent.Descriptor.Name}', which has no such column.");
@@ -1075,6 +1077,7 @@ public sealed class AdoTableBuilder
             indexes[i] = found >= 0
                 ? found
                 : throw new CatalogValidationException(
+                    ChalkErrorCodes.UnknownName,
                     $"table '{_name}'",
                     $"there is no column named '{columns[i]}'. Columns: "
                     + string.Join(", ", _columns.Select(c => c.Name))

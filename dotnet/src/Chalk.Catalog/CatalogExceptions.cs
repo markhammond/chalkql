@@ -7,8 +7,16 @@ namespace Chalk.Catalog;
 /// </summary>
 public sealed class CatalogValidationException : ChalkException
 {
+    /// <summary>A catalog that breaks a rule, with no code.</summary>
     public CatalogValidationException(string path, string detail)
         : base($"Invalid catalog at {path}: {detail}")
+    {
+        Path = path;
+    }
+
+    /// <summary>The same, with the code of the rule it breaks.</summary>
+    public CatalogValidationException(string code, string path, string detail)
+        : base(code, $"Invalid catalog at {path}: {detail}")
     {
         Path = path;
     }
@@ -26,6 +34,7 @@ public sealed class CatalogVerificationException : ChalkException
 {
     public CatalogVerificationException(string table, string declaration, long rowIndex, string detail)
         : base(
+            ChalkErrorCodes.DeclarationNotHeld,
             $"Table '{table}' does not satisfy its declared {declaration}: {detail} (first seen at row {rowIndex}). "
             + "Sort the collection to match, correct the declaration, or call Verify(false) if the host "
             + "guarantees the invariant another way.")

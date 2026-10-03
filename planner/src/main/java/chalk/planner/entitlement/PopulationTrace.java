@@ -1,6 +1,6 @@
 package chalk.planner.entitlement;
 
-import chalk.planner.rpc.v1.PolicyRefusalReason;
+import chalk.planner.ErrorCode;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
@@ -544,9 +544,9 @@ final class PopulationTrace {
         .append(", each taking the column as a bare reference, optionally under a CAST to a numeric")
         .append(" type. A predicate, a grouping key, a sort key, a FILTER clause, a window aggregate")
         .append(" or a value use of the raw value is refused for every principal, because a")
-        .append(" comparison on a raw value is an oracle (docs/design/16-entitlements.md §3.4).");
+        .append(" comparison on a raw value is an oracle.");
     return new PolicyException(
-        PolicyRefusalReason.POLICY_REFUSAL_REASON_POPULATION_ONLY,
+        ErrorCode.POPULATION_ONLY,
         taint.table(),
         taint.column(),
         function == null ? use : use + ": " + function,

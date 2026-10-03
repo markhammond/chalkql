@@ -3,6 +3,8 @@ package chalk.planner.entitlement;
 import chalk.ir.v1.Expr;
 import chalk.ir.v1.Field;
 import chalk.ir.v1.VirtualRow;
+import chalk.planner.ErrorCode;
+import chalk.planner.InvalidArgumentException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -128,13 +130,15 @@ public final class ContextFold {
       }
       if (fromPositions.contains(id)) {
         if (relation.isList()) {
-          throw new IllegalArgumentException(
+          throw new InvalidArgumentException(
+              ErrorCode.INVALID_CONTEXT,
               "context list '" + relation.name() + "' is used as a table. A list is a membership "
                   + "set and belongs inside an IN list; bind it as a relation to put it in a FROM.");
         }
         return id;
       }
-      throw new IllegalArgumentException(
+      throw new InvalidArgumentException(
+          ErrorCode.INVALID_CONTEXT,
           "context "
               + (relation.isList() ? "list" : "relation")
               + " '"
@@ -150,7 +154,8 @@ public final class ContextFold {
       if (value == null) {
         // ContextSql only emits CTX(…) for a bound scalar, so this is a descriptor that wrote the
         // call itself.
-        throw new IllegalArgumentException(
+        throw new InvalidArgumentException(
+            ErrorCode.INVALID_CONTEXT,
             "'@ctx." + name + "' names no context scalar. Write @ctx." + name + " and bind it,"
                 + " or remove it from the descriptor.");
       }
@@ -202,7 +207,8 @@ public final class ContextFold {
         return null;
       }
       if (!relation.isList()) {
-        throw new IllegalArgumentException(
+        throw new InvalidArgumentException(
+            ErrorCode.INVALID_CONTEXT,
             "context relation '" + relation.name() + "' is used in an IN list. A relation is a "
                 + "table: write EXISTS (SELECT 1 FROM @ctx." + relation.name() + " …), or bind it "
                 + "as a list.");
@@ -220,7 +226,8 @@ public final class ContextFold {
       SqlNode left = call.operand(0).accept(this);
       int arity = arityOf(left);
       if (arity != relation.columnCount()) {
-        throw new IllegalArgumentException(
+        throw new InvalidArgumentException(
+            ErrorCode.INVALID_CONTEXT,
             "context list '" + relation.name() + "' has " + relation.columnCount()
                 + " column(s) and the membership test compares " + arity);
       }
@@ -280,7 +287,8 @@ public final class ContextFold {
       try {
         return SqlParser.create(sql.toString(), parserConfig).parseQuery();
       } catch (SqlParseException failure) {
-        throw new IllegalArgumentException(
+        throw new InvalidArgumentException(
+            ErrorCode.INVALID_CONTEXT,
             "context list '" + relation.name() + "' could not be planned as a context table: "
                 + failure.getMessage(),
             failure);

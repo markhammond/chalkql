@@ -779,7 +779,8 @@ public sealed class PlanValidatorTests
 
         Assert.Equal("root/Filter.condition.args[0]", ex.Path);
         Assert.Contains("root/Filter.condition.args[0]", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("I-IR-3", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("docs/design/02-ir.md §8", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("(invariant I-IR-3)", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(ChalkErrorCodes.Internal, ex.Code);
+        Assert.EndsWith("report it with the statement. [Internal]", ex.Message, StringComparison.Ordinal);
     }
 }

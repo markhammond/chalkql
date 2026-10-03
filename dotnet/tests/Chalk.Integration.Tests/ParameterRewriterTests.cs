@@ -259,8 +259,9 @@ public sealed class ParameterRewriterTests
     {
         var rewriter = ParameterRewriter.Parse("SELECT * FROM bars WHERE symbol = @symbols");
 
-        var error = Assert.Throws<ArgumentException>(
+        var error = Assert.Throws<ParameterBindingException>(
             () => ParameterBinder.ShapeOf(rewriter.Parameters, [new[] { "a", "b" }]));
+        Assert.Equal(ChalkErrorCodes.ParameterBinding, error.Code);
 
         Assert.Contains("@symbols", error.Message, StringComparison.Ordinal);
         Assert.Contains("not in an IN position", error.Message, StringComparison.Ordinal);

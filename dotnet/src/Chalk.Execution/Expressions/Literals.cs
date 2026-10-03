@@ -46,6 +46,7 @@ internal static class Literals
                 new ScalarValue { Type = type, Integer = literal.IntervalYearValue },
             Literal.ValueOneofCase.ListValue => List(type, literal),
             _ => throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedType,
                 $"literal of kind {literal.ValueCase}",
                 "The execution engine has no representation for it."),
         };
@@ -59,8 +60,9 @@ internal static class Literals
     {
         var element = type.Element
             ?? throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedType,
                 "a LIST literal with no element type",
-                "docs/design/02-ir.md §3 requires Type.element on a LIST.");
+                "A LIST type names the type of its elements, and this one names none.");
         var elementProto = element.ToProto();
         var elements = new ScalarValue[literal.ListValue.Elements.Count];
         for (var i = 0; i < elements.Length; i++)

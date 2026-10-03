@@ -169,12 +169,12 @@ public sealed class TenancyPolicy
         }
 
         throw new CatalogValidationException(
+            ChalkErrorCodes.UnknownName,
             "tenancy.sources",
             $"'{name}' names no source of this catalog, which holds "
             + $"{string.Join(", ", _sources.Select(s => s.Schema.Name))}. A source is named by its "
             + "schema name — what a statement qualifies a table with — rather than by the "
-            + "identifier of the runtime that serves it "
-            + "(docs/design/45-typed-tenancy-surface.md §1, D270).");
+            + "identifier of the runtime that serves it.");
     }
 
     // A table handle is obtained from a Source and from nothing else: two sources may hold a table
@@ -229,11 +229,11 @@ public sealed class TenancyPolicy
         if (roles.Count == 0 || kinds.Length == 0)
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidPolicy,
                 where,
                 $"a combination names {(roles.Count == 0 ? "no role" : "no kind")}. It is the roles "
                 + "whose grants hold it and the tenancy kinds they hold together: "
-                + "Combination([analyst], classification, mission) "
-                + "(docs/design/59-declared-combinations.md §1, D320).");
+                + "Combination([analyst], classification, mission).");
         }
 
         var roleNames = new List<string>(roles.Count);
@@ -243,18 +243,18 @@ public sealed class TenancyPolicy
             if (declaration.Marker != RoleMarker.None)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidPolicy,
                     where,
                     $"a combination names '{role.Name}', which stands for a relation to a row rather "
-                    + "than a role a grant is held in. Name the roles grants are held in "
-                    + "(docs/design/59-declared-combinations.md §1, D320).");
+                    + "than a role a grant is held in. Name the roles grants are held in.");
             }
 
             if (roleNames.Contains(role.Name, StringComparer.Ordinal))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.DuplicateName,
                     where,
-                    $"a combination names role '{role.Name}' twice "
-                    + "(docs/design/59-declared-combinations.md §1, D320).");
+                    $"a combination names role '{role.Name}' twice: a role holds a combination once.");
             }
 
             roleNames.Add(role.Name);
@@ -267,10 +267,10 @@ public sealed class TenancyPolicy
             if (kindNames.Contains(name, StringComparer.Ordinal))
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.DuplicateName,
                     where,
                     $"a combination names kind '{name}' twice. A combination is a set of kinds held "
-                    + "at once, and one kind cannot take two values in one grant "
-                    + "(docs/design/59-declared-combinations.md §1, D320).");
+                    + "at once, and one kind cannot take two values in one grant.");
             }
 
             kindNames.Add(name);
@@ -488,10 +488,11 @@ public sealed class TenancyPolicy
             if (known.IsSubject != isSubject)
             {
                 throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidPolicy,
                     "tenancy.kinds",
                     $"'{name}' is declared both as a tenancy kind and as a subject kind. A kind is "
                     + "one or the other: a container a row belongs to, or the individual a row is "
-                    + "about (docs/design/38-existential-visibility.md §1, D265).");
+                    + "about.");
             }
 
             return known;
@@ -582,12 +583,12 @@ public sealed class TenancyPolicy
         if (!ReferenceEquals(declaration.Table, table))
         {
             throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidPolicy,
                 where,
                 $"the column handle '{declaration.Table.Name}.{declaration.Name}' is used on "
                 + $"'{table.Name}'. A column handle carries the table it was obtained from, so a "
                 + "declaration reads a column of its own table and no other: write "
-                + $"{table.Name}.Column(\"{declaration.Name}\") "
-                + "(docs/design/45-typed-tenancy-surface.md §1, D270).");
+                + $"{table.Name}.Column(\"{declaration.Name}\").");
         }
 
         return declaration.Name;
@@ -599,10 +600,12 @@ public sealed class TenancyPolicy
             : throw Foreign("table", table.Name, where);
 
     private static CatalogValidationException Foreign(string what, string name, string where) =>
-        new(where,
+        new(
+            ChalkErrorCodes.InvalidPolicy,
+            where,
             $"the {what} handle '{name}' was not obtained from this policy. Every name enters once, "
             + "at its declaration on the policy this table belongs to, and every later mention is "
-            + "the handle it got back (docs/design/45-typed-tenancy-surface.md §1, D270).");
+            + "the handle it got back.");
 }
 
 /// <summary>One table's declarations (§5), frozen at compile.</summary>

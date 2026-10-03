@@ -65,8 +65,9 @@ internal static class ColumnKinds
         TypeKind.List => ColumnKind.List,
         TypeKind.Composite => ColumnKind.Composite,
         _ => throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedType,
             $"type kind {kind}",
-            "The execution engine has no memory layout for it; see docs/design/02-ir.md §3."),
+            "The execution engine has no memory layout for it."),
     };
 
     /// <summary>The layout a logical type uses.</summary>
@@ -110,17 +111,19 @@ internal static class ColumnKinds
         if (type.Kind == TypeKind.List)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.IncomparableType,
                 $"{what} on a LIST",
-                "v1 lists have no ordering or equality; they can be produced, projected and indexed "
-                + "into (docs/design/14-windows-ii.md §5).");
+                "A list has no ordering or equality; it can be produced, projected and indexed "
+                + "into.");
         }
 
         if (type.Kind == TypeKind.Composite)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.IncomparableType,
                 $"{what} on a COMPOSITE",
                 "a composite value has no ordering or equality; it is produced by a user function, carried, "
-                + "and taken apart by field access (docs/design/51-structured-function-results.md §1).");
+                + "and taken apart by field access.");
         }
     }
 }

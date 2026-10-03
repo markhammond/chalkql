@@ -88,7 +88,7 @@ public final class ReservedNames {
                 "the identifier \"" + name + "\" in " + what + " begins with " + PREFIX + ", which"
                     + " the planner keeps for its own markers — the context marker, the per-request"
                     + " context schema and the strict-function guard"
-                    + " (docs/design/16-entitlements.md §2, D223). No unquoted identifier can spell"
+                    + ". No unquoted identifier can spell"
                     + " it, so a quoted one is refused rather than silently shadowing a rewrite."
                     + " Rename it.");
           }

@@ -401,8 +401,9 @@ internal sealed class WindowCollectingEvaluator : WindowCallEvaluator
         if (column.Kind != ColumnKind.Utf8)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
                 $"LISTAGG over a {column.Type} column in a window",
-                "LISTAGG concatenates strings (docs/design/02-ir.md §6).");
+                "LISTAGG concatenates strings.");
         }
 
         return Encoding.UTF8.GetString(column.Lane(row, scratch));

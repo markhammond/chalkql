@@ -1,7 +1,7 @@
 package chalk.planner.entitlement;
 
+import chalk.planner.ErrorCode;
 import chalk.planner.catalog.ChalkTable;
-import chalk.planner.rpc.v1.PolicyRefusalReason;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
 import org.apache.calcite.config.CalciteConnectionConfig;
@@ -198,14 +198,13 @@ public final class DescriptorConverter {
       parsed = SqlParser.create(text, parserConfig).parseQuery();
     } catch (org.apache.calcite.sql.parser.SqlParseException e) {
       throw new PolicyException(
-          PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
+          ErrorCode.INVALID_ENTITLEMENT,
           "the entitlement on "
               + where
               + " does not parse: "
               + e.getMessage()
               + ". Its row predicate, rule conditions, masks and placeholders are SQL in Chalk's own"
-              + " dialect over the table's columns and @ctx names"
-              + " (docs/design/16-entitlements.md §1).");
+              + " dialect over the table's columns and @ctx names.");
     }
 
     ContextFold.Folded folded =
@@ -223,12 +222,12 @@ public final class DescriptorConverter {
               parents.isEmpty() ? folded.node() : qualifyTarget(folded.node(), qualified));
     } catch (RuntimeException e) {
       throw new PolicyException(
-          PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
+          ErrorCode.INVALID_ENTITLEMENT,
           "the entitlement on "
               + where
               + " does not type-check against the table: "
               + rootMessage(e)
-              + " (docs/design/16-entitlements.md §1).");
+              + ".");
     }
 
     SqlToRelConverter converter =
@@ -240,12 +239,12 @@ public final class DescriptorConverter {
     Project project = projectOf(root.rel);
     if (project == null) {
       throw new PolicyException(
-          PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
+          ErrorCode.INVALID_ENTITLEMENT,
           "the entitlement on "
               + where
               + " converts to a shape the pass cannot place on a leaf. Its expressions must be"
               + " scalar over the table's own row; a condition over another catalog table is not"
-              + " supported (docs/design/16-entitlements.md §10).");
+              + " supported.");
     }
     List<RexNode> converted = bind(project.getProjects(), folded.boundScalars());
     for (RexNode expression : converted) {
@@ -338,7 +337,7 @@ public final class DescriptorConverter {
             String table = catalogTableIn(subQuery.rel);
             if (table != null) {
               throw new PolicyException(
-                  PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
+                  ErrorCode.INVALID_ENTITLEMENT,
                   "the entitlement on "
                       + where
                       + " reads the catalog table "
@@ -348,7 +347,7 @@ public final class DescriptorConverter {
                       + " @ctx scalars, @ctx lists and @ctx relations — and never another catalog"
                       + " table. Visibility that derives from another table is declared as a"
                       + " `through` parent, which the pass compiles into one join against that"
-                      + " table's own entitled scan (docs/design/16-entitlements.md §3.13, D225).");
+                      + " table's own entitled scan.");
             }
             return super.visitSubQuery(subQuery);
           }
@@ -412,7 +411,7 @@ public final class DescriptorConverter {
       return context == null ? ContextSql.rewriteForRegistration(sql) : ContextSql.rewrite(sql, context);
     } catch (IllegalArgumentException e) {
       throw new PolicyException(
-              PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
+              ErrorCode.INVALID_ENTITLEMENT,
               "the entitlement on " + where + ": " + e.getMessage());
     }
   }

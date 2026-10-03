@@ -228,6 +228,7 @@ internal sealed class ExpressionCompiler
             Expr.KindOneofCase.FieldAccess => new FieldAccessExpr(
                 type, Compile(expr.FieldAccess.Input), (int)expr.FieldAccess.Index),
             _ => throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedOperator,
                 $"expression kind {expr.KindCase}",
                 "The execution engine does not know how to evaluate it."),
         };
@@ -243,6 +244,7 @@ internal sealed class ExpressionCompiler
         if (_catalog is null)
         {
             throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UserFunctionUnavailable,
                 $"function {name}",
                 "This expression was compiled without a catalog, so a declared function cannot be "
                 + "resolved.");
@@ -330,7 +332,8 @@ internal sealed class ExpressionCompiler
         }
 
         throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedCast,
             $"CAST({source} AS {target})",
-            "It is outside the M1 cast matrix (docs/design/02-ir.md §6).");
+            "This executor does not convert between those two types.");
     }
 }

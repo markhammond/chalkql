@@ -3,9 +3,9 @@ package chalk.planner.entitlement;
 import chalk.ir.v1.Disclosure;
 import chalk.ir.v1.DisclosureRule;
 import chalk.ir.v1.TableEntitlement;
+import chalk.planner.ErrorCode;
 import chalk.planner.catalog.ChalkTable;
 import chalk.planner.rpc.v1.PlaceholderPolicy;
-import chalk.planner.rpc.v1.PolicyRefusalReason;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -14,8 +14,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.apache.calcite.plan.RelOptPredicateList;
-import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.RelOptTable;
+import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.logical.LogicalFilter;
@@ -799,15 +799,14 @@ public final class EntitlementPass {
         // Registration proved the parent is in the catalog (D225), so this is a catalog the
         // planner did not register — a bug rather than a policy, and refused as one.
         throw new PolicyException(
-            PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
+            ErrorCode.INTERNAL,
             "the entitlement on "
                 + table.schemaName()
                 + "."
                 + table.tableName()
                 + " derives visibility through '"
                 + String.join(".", qualified)
-                + "', which this query's schema does not resolve"
-                + " (docs/design/16-entitlements.md §3.13, D225).");
+                + "', which this query's schema does not resolve.");
       }
       int[] block = blocks.get(String.join(".", qualified));
       if (block == null) {
@@ -969,7 +968,7 @@ public final class EntitlementPass {
       }
       if (bit < block[0] || bit >= block[0] + block[1]) {
         throw new PolicyException(
-            PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
+            ErrorCode.INVALID_ENTITLEMENT,
             table.schemaName() + "." + table.tableName(),
             "",
             "",
@@ -983,8 +982,7 @@ public final class EntitlementPass {
                 + "' that reads a table other than its own row and the endpoint '"
                 + path.endpoint().getQualifiedName()
                 + "'. A path predicate is decided above the join, where this table's row and that"
-                + " endpoint's are, and nothing else is there"
-                + " (docs/design/47-conjoined-across-a-path.md §2, §4, D279).");
+                + " endpoint's are, and nothing else is there.");
       }
       columns.add(bit - block[0]);
     }
@@ -1031,7 +1029,7 @@ public final class EntitlementPass {
     }
 
     throw new PolicyException(
-        PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
+        ErrorCode.INVALID_ENTITLEMENT,
         target.schemaName() + "." + target.tableName(),
         "",
         "",
@@ -1058,9 +1056,7 @@ public final class EntitlementPass {
             + there.sourceId()
             + "' — and this catalog declares no association between them. A foreign key is one"
             + " source's claim about a table of its own schema, so a step across two sources is"
-            + " built only where the host states it (F84,"
-            + " docs/design/38-existential-visibility.md §5;"
-            + " docs/design/45-typed-tenancy-surface.md §3, D270).");
+            + " built only where the host states it: declare the association.");
   }
 
   /** Whether this catalog declares the association the step relies on, by name, as D270 writes it. */
@@ -1101,15 +1097,14 @@ public final class EntitlementPass {
       // Registration proved every step is in the catalog (D265 §3), so this is a catalog the
       // planner did not register — a bug rather than a policy, and refused as one.
       throw new PolicyException(
-          PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
+          ErrorCode.INTERNAL,
           "the entitlement on "
               + table.schemaName()
               + "."
               + table.tableName()
               + " derives visibility along a path through '"
               + String.join(".", qualified)
-              + "', which this query's schema does not resolve"
-              + " (docs/design/38-existential-visibility.md §3, D265).");
+              + "', which this query's schema does not resolve.");
     }
     return found;
   }
@@ -3241,7 +3236,7 @@ public final class EntitlementPass {
       return simplified;
     }
     throw new PolicyException(
-        PolicyRefusalReason.POLICY_REFUSAL_REASON_INTERNAL,
+        ErrorCode.INTERNAL,
         "a composite column's disclosure folded to " + simplified + ", which is neither the column,"
             + " its NULL composite nor a choice between the two. This is a bug in the entitlement"
             + " rewrite: please report the statement and the catalog.");
@@ -3262,7 +3257,7 @@ public final class EntitlementPass {
         RexNode mask = entitled == null ? null : rule < 0 ? entitled.mask() : entitled.maskOf(rule);
         if (mask == null) {
           throw new PolicyException(
-              PolicyRefusalReason.POLICY_REFUSAL_REASON_INVALID_ENTITLEMENT,
+              ErrorCode.INVALID_ENTITLEMENT,
               table.schemaName() + "." + table.tableName(),
               columnName,
               "",
@@ -3273,7 +3268,7 @@ public final class EntitlementPass {
                   + "."
                   + columnName
                   + " discloses MASKED and states no mask, so there is nothing to put in the "
-                  + "value's place (docs/design/16-entitlements.md §1).");
+                  + "value's place.");
         }
         yield mask;
       }
