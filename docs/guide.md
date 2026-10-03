@@ -304,8 +304,8 @@ for every level of the tree. A plan deep enough to use up the stack would crash 
 whole process, and nothing can catch that.
 
 So when you prepare a statement, the client refuses a plan that nests more deeply than a
-limit, before it reads any further. The refusal is a `PlanningException`, and its inner
-exception is a `PlanTooDeepException` that names the limit.
+limit, before it reads any further. The refusal is a `PlanningException` with the code
+`PlanTooDeep`, and its inner exception is a `PlanTooDeepException` that names the limit.
 
 The limit is 256 levels by default. (A level here is one protobuf message; each step or
 expression in a plan takes about two.) That is less than half the depth measured to run
@@ -1970,20 +1970,20 @@ source for.
 - **Fail closed, twice.** Chalk proves the model for every plan, rather than assuming
   it.
   1. In the planner, a four-clause *taint check* proves that:
-     - every entitled scan is one the pass wrapped;
-     - a raw population-only value reaches only a permitted aggregate;
-     - the row predicate survives to each leaf's consumer;
-     - no output column is a redacted column itself.
+    - every entitled scan is one the pass wrapped;
+    - a raw population-only value reaches only a permitted aggregate;
+    - the row predicate survives to each leaf's consumer;
+    - no output column is a redacted column itself.
 
      A failure is a refusal *and* a bug report, and the message says so.
   2. Then the client checks the same things over the plan it received, from its **own**
      catalog rather than from the planner's claims (`I-IR-E`):
-     - every read of a table it entitled went through the rewrite, and carries one
-       verdict per column;
-     - a population-only value reaches only an aggregate;
-     - no root column is a masked or redacted column itself;
-     - every output column's label, worked out again from the reads, matches the
-       report's.
+    - every read of a table it entitled went through the rewrite, and carries one
+      verdict per column;
+    - a population-only value reaches only an aggregate;
+    - no root column is a masked or redacted column itself;
+    - every output column's label, worked out again from the reads, matches the
+      report's.
 
   These checks catch *escapes*. Catching misclassification is the job of the corpus and
   of the package's `Reconcile`.

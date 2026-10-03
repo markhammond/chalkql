@@ -190,9 +190,12 @@ Raised when a tenancy policy is compiled against a catalog.
 
 The tenancy policy's own declarations disagree with each other or with the catalog: it speaks
 about a source the catalog does not hold, a combination names a role twice or no role, a handle
-comes from another policy, a kind is declared both as a tenancy and a subject kind.
+comes from another policy, a kind is declared both as a tenancy and a subject kind. Or a policy
+that declares no combinations reaches more scopes on one table than ChalkQL will compile: five,
+a grant's own and four that confine it.
 
-**What to do:** Correct the policy.
+**What to do:** Correct the policy. For more scopes on a table, declare the combinations its
+grants hold.
 
 ### InvalidTenancyPath
 

@@ -67,7 +67,7 @@ await using var execution = await engine.ExecuteAsync(query, ["EUR"]);
 
 On macOS and Linux the local sidecar uses a Unix domain socket by default, so there is no port to assign or configure.
 
-Results arrive as Apache Arrow record batches.
+Results arrive as Apache Arrow record batches. A prepared statement's `OutputSchema` describes their columns before anything runs, and `ToDataTable()` turns it into an empty `DataTable` for code that works with `System.Data`.
 
 ## Federation for (almost) everyone
 
@@ -185,6 +185,8 @@ WHERE holder_email = /*REDACTED-c94b5d85:CHAR*/
 
 Parameterised values remain parameters and require no redaction. The same pseudonyms are used in redacted plan text, while the guide covers the full redaction contract.
 
+Errors carry a code. Every exception ChalkQL raises names the rule it breaks, such as `DuplicateName` or `ParameterBinding`, and its message ends with that code in brackets. A host can branch on `ChalkException.Code` with the `ChalkErrorCodes` constants, or log the code without the names the message carries. The [error glossary](https://github.com/markhammond/chalkql/blob/main/docs/errors.md) explains each code and what to do about it.
+
 ## Access control you can reason about
 
 ChalkQL's entitlement layer is entirely optional. When used, policy is explicit and inspectable rather than reconstructed from views, predicates, ORMs or application code.
@@ -241,6 +243,10 @@ The JVM process boundary is intentional. It preserves Apache Calcite's planner e
 **The embedded planner writes to a cache when first used.** ChalkQL does not extract anything merely because the assembly was loaded. `PlannerProcess.StartAsync()` performs lazy materialisation. `PlannerProcessOptions.ArtifactCacheDirectory` or `CHALK_PLANNER_CACHE` can redirect the cache for containers and locked-down hosts.
 
 **Source capabilities are promises.** Pushdown depends on what a source declares it can evaluate. The source conformance package exists to test those declarations against the database rather than discovering disagreement in production.
+
+**Values bind exactly.** A parameter, or a context value of a known type, binds only when its type holds the value exactly. `3.5` for an `INTEGER`, or the text `"2026-01-03"` for a `DATE`, is refused with a `ParameterBindingException` before anything reaches a source. Register a `BindingConverter` on the engine to bind your own types.
+
+**`LIKE` follows the SQL standard.** There is no escape character unless `ESCAPE` names one, so a backslash is an ordinary character, and a malformed pattern is refused rather than guessed at. The answer is the same wherever the `LIKE` runs. `ILIKE` matches regardless of case.
 
 **An in-process collection must not change under a running query.** POCO and Akade sources permit no mutation that overlaps an execution or refresh. Mutate between requests, swap the collection behind a delegate, or use transactional refresh so each execution retains its own snapshot.
 

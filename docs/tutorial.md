@@ -204,12 +204,12 @@ planner:
               LogicalProject(customer_id=[$0], company_name=[$1], country=[$3])
                 ChalkTableScan(table=[[main, customers]], projection=[[0, 1, 2, 3]])
     -- physical
-    ChalkProject(customer=[$5], order_id=[$0], order_date=[$2], freight=[$3]): rowcount = 60.0, cumulative cost = {231.88571428571427 rows, 413.0857142857143 cpu, 0.0 io}, id = 398
-      ChalkHashJoin(condition=[=($4, $1)], joinType=[inner]): rowcount = 60.0, cumulative cost = {171.88571428571427 rows, 173.0857142857143 cpu, 0.0 io}, id = 397
-        ChalkTableScan(table=[[main, orders]], projection=[[0, 1, 4, 5]]): rowcount = 60.0, cumulative cost = {34.285714285714285 rows, 34.285714285714285 cpu, 0.0 io}, id = 331
-        ChalkProject(customer_id=[$0], company_name=[$1]): rowcount = 1.2, cumulative cost = {15.2 rows, 16.4 cpu, 0.0 io}, id = 396
-          ChalkFilter(condition=[=($2, 'GB')], sel=[guess(0.1500)]): rowcount = 1.2, cumulative cost = {14.0 rows, 14.0 cpu, 0.0 io}, id = 395
-            ChalkTableScan(table=[[main, customers]], projection=[[0, 1, 3]]): rowcount = 8.0, cumulative cost = {6.0 rows, 6.0 cpu, 0.0 io}, id = 340
+    ChalkProject(customer=[$5], order_id=[$0], order_date=[$2], freight=[$3]): rowcount = 60.0, cumulative cost = {231.88571428571427 rows, 413.0857142857143 cpu, 0.0 io}, id = 416
+      ChalkHashJoin(condition=[=($4, $1)], joinType=[inner]): rowcount = 60.0, cumulative cost = {171.88571428571427 rows, 173.0857142857143 cpu, 0.0 io}, id = 415
+        ChalkTableScan(table=[[main, orders]], projection=[[0, 1, 4, 5]]): rowcount = 60.0, cumulative cost = {34.285714285714285 rows, 34.285714285714285 cpu, 0.0 io}, id = 349
+        ChalkProject(customer_id=[$0], company_name=[$1]): rowcount = 1.2, cumulative cost = {15.2 rows, 16.4 cpu, 0.0 io}, id = 414
+          ChalkFilter(condition=[=($2, 'GB')], sel=[guess(0.1500)]): rowcount = 1.2, cumulative cost = {14.0 rows, 14.0 cpu, 0.0 io}, id = 413
+            ChalkTableScan(table=[[main, customers]], projection=[[0, 1, 3]]): rowcount = 8.0, cumulative cost = {6.0 rows, 6.0 cpu, 0.0 io}, id = 358
 the IR Chalk executes:
     Plan ir_version=1 digest=b0c82e2d81e20454 context_id=tutorial-02a catalog_epoch=1
       Project [$5, $0, $2, $3] rows=60 out=[customer:STRING, order_id:I32, order_date:TIMESTAMP(9), freight:DECIMAL(28,2)] collations=[($1 ASC NULLS LAST)]
@@ -468,8 +468,8 @@ is a per-batch cost in disguise.
 
 ```
 -- what a row costs on the managed heap
-    17000 rows in one batch: 2672 bytes allocated
-    34000 rows in one batch: 2672 bytes allocated
+    17000 rows in one batch: 2712 bytes allocated
+    34000 rows in one batch: 2712 bytes allocated
     slope: 0.0000 bytes per row
     The allocation gates hold a POCO Utf8String column at 0.0000 bytes per row.
     Two sizes read in one batch each, because a slope taken with the batch count
@@ -506,7 +506,7 @@ along that customer's orders in date order.
     ORDER BY c.company_name, o.order_date
 
 plan:
-    Plan ir_version=1 digest=cc514f2eda6e52ad context_id=tutorial-05 catalog_epoch=1
+    Plan ir_version=1 digest=4d81655ba370e199 context_id=tutorial-05 catalog_epoch=1
       Sort [$0 ASC NULLS LAST, $1 ASC NULLS LAST] rows=3.75 out=[customer:STRING, order_date:TIMESTAMP(9), order_value:DECIMAL(38,2), running_revenue:DECIMAL(38,2)] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
         Project [$2, $1, $3, $4] rows=3.75 out=[customer:STRING, order_date:TIMESTAMP(9), order_value:DECIMAL(38,2), running_revenue:DECIMAL(38,2)]
           Window partition=[$0] order=[$1 ASC NULLS LAST] frame=RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW calls=[SUM($3)->DECIMAL(38,2)] rows=3.75 out=[customer_id:I32, order_date:TIMESTAMP(9), company_name:STRING, order_value:DECIMAL(38,2), running_revenue:DECIMAL(38,2)] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
@@ -514,8 +514,8 @@ plan:
               HashAggregate keys=[1,2,3] measures=[SUM0($5)->DECIMAL(38,2)] rows=3.75 out=[customer_id:I32, order_date:TIMESTAMP(9), company_name:STRING, order_value:DECIMAL(38,2)]
                 Project [$2, $3, $4, $5, $0, $1] rows=37.5 out=[order_id:I32, customer_id:I32, order_date:TIMESTAMP(9), company_name:STRING, order_id0:I32, $f3:DECIMAL(38,2)]
                   HashJoin Inner left_keys=[0] right_keys=[0] rows=37.5 out=[order_id:I32, $f3:DECIMAL(38,2), order_id0:I32, customer_id:I32, order_date:TIMESTAMP(9), company_name:STRING]
-                    Project [$0, MULTIPLY($2, CAST($3 AS DECIMAL(28,2)))] rows=150 out=[order_id:I32, $f3:DECIMAL(38,2)]
-                      Read shop.main.order_details projection=[0,1,2,3,4] rows=150 out=[order_id:I32, product_id:I32, unit_price:DECIMAL(28,2), quantity:I32, discount:DECIMAL(28,2)] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
+                    Project [$0, MULTIPLY($1, CAST($2 AS DECIMAL(28,2)))] rows=150 out=[order_id:I32, $f3:DECIMAL(38,2)] collations=[($0 ASC NULLS LAST)]
+                      Read shop.main.order_details projection=[0,2,3] rows=150 out=[order_id:I32, unit_price:DECIMAL(28,2), quantity:I32] collations=[($0 ASC NULLS LAST)]
                     Project [$0, $1, $2, $4] rows=15 out=[order_id:I32, customer_id:I32, order_date:TIMESTAMP(9), company_name:STRING]
                       HashJoin Inner left_keys=[1] right_keys=[0] rows=15 out=[order_id:I32, customer_id:I32, order_date:TIMESTAMP(9), customer_id0:I32, company_name:STRING]
                         Filter $1 IN (3, 7) rows=15 out=[order_id:I32, customer_id:I32, order_date:TIMESTAMP(9)] collations=[($0 ASC NULLS LAST)]
@@ -853,25 +853,25 @@ Three bindings, one plan digest. The values never reach the SQL.
     GROUP BY c.company_name
     ORDER BY c.company_name
 
-    style Positional, 2 parameters (String, I32), plan 0102734e1e65a77a
+    style Positional, 2 parameters (String, I32), plan b54a3975d1ddd11d
 
     country = 'GB', region_id = 3
     customer          orders  freight
     ----------------  ------  -------
     Harbour Partners  1       88.5
-    plan 0102734e1e65a77a — the same plan every time
+    plan b54a3975d1ddd11d — the same plan every time
 
     country = 'SE', region_id = 1
     customer           orders  freight
     -----------------  ------  -------
     Northwind Trading  1       12
-    plan 0102734e1e65a77a — the same plan every time
+    plan b54a3975d1ddd11d — the same plan every time
 
     country = 'JP', region_id = 8
     customer      orders  freight
     ------------  ------  -------
     Kanto Supply  1       59.25
-    plan 0102734e1e65a77a — the same plan every time
+    plan b54a3975d1ddd11d — the same plan every time
 ```
 
 The other two styles: Dapper-style named parameters, and a list expanded into the `IN`
@@ -887,13 +887,13 @@ clause.
     ORDER BY s.supplier_id
 
 
-    countries = [SE, FR], plan 3199ae41effe2219
+    countries = [SE, FR], plan 49a8058b9c990c05
     supplier_id  products
     -----------  --------
     A            3
     B            3
 
-    countries = [DE, TW, IT], plan 7f6f65e2b9f7f30e
+    countries = [DE, TW, IT], plan 983882ac6e7bb1e3
     supplier_id  products
     -----------  --------
     C            3
@@ -1738,13 +1738,13 @@ aggregates before the IR ever sees it.
     ORDER BY supplier_id
 
 plan as Finance:
-    Plan ir_version=1 digest=b764a327c9b9e0df context_id=tutorial-15 catalog_epoch=1
+    Plan ir_version=1 digest=decfa215e00c458a context_id=tutorial-15 catalog_epoch=1
       Sort [$0 ASC NULLS LAST] rows=5.992 out=[supplier_id:STRING, ams_qty:I32?, sfo_qty:I32?, sin_qty:I32?] collations=[($0 ASC NULLS LAST)]
         Project [$0, CASE WHEN EQ($2, CAST(0 AS I64)) THEN NULL:I32? ELSE $1 END, CASE WHEN EQ($4, CAST(0 AS I64)) THEN NULL:I32? ELSE $3 END, CASE WHEN EQ($6, CAST(0 AS I64)) THEN NULL:I32? ELSE $5 END] rows=5.992 out=[supplier_id:STRING, ams_qty:I32?, sfo_qty:I32?, sin_qty:I32?]
           HashAggregate keys=[6] measures=[SUM0($1) FILTER ISTRUE($2)->I32, COUNT() FILTER ISTRUE($2)->I64, SUM0($1) FILTER ISTRUE($3)->I32, COUNT() FILTER ISTRUE($3)->I64, SUM0($1) FILTER ISTRUE($4)->I32, COUNT() FILTER ISTRUE($4)->I64] rows=5.992 out=[supplier_id:STRING, ams_qty:I32, $f2:I64, sfo_qty:I32, $f4:I64, sin_qty:I32, $f6:I64]
             HashJoin Inner left_keys=[0] right_keys=[0] rows=36 out=[product_id:I32, quantity:I32, $f3:BOOL, $f4:BOOL, $f5:BOOL, product_id0:I32, supplier_id:STRING]
-              Project [$1, $3, EQ($0, 'AMS'), EQ($0, 'SFO'), EQ($0, 'SIN')] rows=36 out=[product_id:I32, quantity:I32, $f3:BOOL, $f4:BOOL, $f5:BOOL]
-                Read shop.main.inventory_positions projection=[0,1,2,3] descriptor=cd043ab066bf843c86ccfca2e40950e7 entitled rows=36 out=[warehouse_id:STRING, product_id:I32, supplier_id:STRING, quantity:I32] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
+              Project [$1, $2, EQ($0, 'AMS'), EQ($0, 'SFO'), EQ($0, 'SIN')] rows=36 out=[product_id:I32, quantity:I32, $f3:BOOL, $f4:BOOL, $f5:BOOL]
+                Read shop.main.inventory_positions projection=[0,1,3] descriptor=4e9764dcaed50b7231bc4dd055426317 entitled rows=36 out=[warehouse_id:STRING, product_id:I32, quantity:I32] collations=[($0 ASC NULLS LAST, $1 ASC NULLS LAST)]
               Read shop.main.products projection=[0,1] descriptor=a87b3b38d0608c63b89c102be0be5745 entitled rows=20 out=[product_id:I32, supplier_id:STRING] collations=[($0 ASC NULLS LAST)]
 
     The PIVOT is gone by the time the IR sees it: it is one aggregate whose
@@ -2169,17 +2169,17 @@ The pivot clause is chapter 15's, character for character. What changed is under
     down two ordered streams rather than a range join and a window over
     its output.
 plan as Finance:
-    Plan ir_version=1 digest=894623342d5af176 context_id=tutorial-17 catalog_epoch=1
+    Plan ir_version=1 digest=6f12b4fac53c82af context_id=tutorial-17 catalog_epoch=1
       Sort [$0 ASC NULLS LAST] rows=1.833 out=[supplier_id:STRING, ams_qty:DECIMAL(38,2)?, sfo_qty:DECIMAL(38,2)?, sin_qty:DECIMAL(38,2)?] collations=[($0 ASC NULLS LAST)]
         Project [$0, CASE WHEN EQ($2, CAST(0 AS I64)) THEN NULL:DECIMAL(38,2)? ELSE $1 END, CASE WHEN EQ($4, CAST(0 AS I64)) THEN NULL:DECIMAL(38,2)? ELSE $3 END, CASE WHEN EQ($6, CAST(0 AS I64)) THEN NULL:DECIMAL(38,2)? ELSE $5 END] rows=1.833 out=[supplier_id:STRING, ams_qty:DECIMAL(38,2)?, sfo_qty:DECIMAL(38,2)?, sin_qty:DECIMAL(38,2)?]
           HashAggregate keys=[6] measures=[SUM0($1) FILTER ISTRUE($2)->DECIMAL(38,2), COUNT() FILTER ISTRUE($2)->I64, SUM0($1) FILTER ISTRUE($3)->DECIMAL(38,2), COUNT() FILTER ISTRUE($3)->I64, SUM0($1) FILTER ISTRUE($4)->DECIMAL(38,2), COUNT() FILTER ISTRUE($4)->I64] rows=1.833 out=[supplier_id:STRING, ams_qty:DECIMAL(38,2), $f2:I64, sfo_qty:DECIMAL(38,2), $f4:I64, sin_qty:DECIMAL(38,2), $f6:I64]
             Project [$2, $3, $4, $5, $6, $0, $1] rows=2 out=[product_id:I32, amount:DECIMAL(38,2), $f3:BOOL, $f4:BOOL, $f5:BOOL, product_id0:I32, supplier_id:STRING]
               HashJoin Inner left_keys=[0] right_keys=[0] rows=2 out=[product_id:I32, supplier_id:STRING, product_id0:I32, amount:DECIMAL(38,2), $f3:BOOL, $f4:BOOL, $f5:BOOL]
                 Read shop.main.products projection=[0,1] descriptor=a87b3b38d0608c63b89c102be0be5745 entitled rows=20 out=[product_id:I32, supplier_id:STRING] collations=[($0 ASC NULLS LAST)]
-                Project [$3, MULTIPLY(CAST($4 AS DECIMAL(28,2)), $8), EQ($2, 'AMS'), EQ($2, 'SFO'), EQ($2, 'SIN')] rows=2 out=[product_id:I32, amount:DECIMAL(38,2), $f3:BOOL, $f4:BOOL, $f5:BOOL]
-                  AsOfJoin Inner left_keys=[3] right_keys=[2] match=$1 >= $1 rows=2 out=[movement_id:I32, ts:TIMESTAMP(9), warehouse_id:STRING, product_id:I32, delta:I32, price_id:I32, ts0:TIMESTAMP(9), product_id0:I32, price:DECIMAL(28,2)]
-                    Read shop.main.inventory_movements projection=[0,1,2,3,5] descriptor=cd043ab066bf843c86ccfca2e40950e7 entitled rows=24 out=[movement_id:I32, ts:TIMESTAMP(9), warehouse_id:STRING, product_id:I32, delta:I32] collations=[($0 ASC NULLS LAST)]
-                    Read shop.main.market_prices projection=[0,1,2,3] rows=96 out=[price_id:I32, ts:TIMESTAMP(9), product_id:I32, price:DECIMAL(28,2)] collations=[($0 ASC NULLS LAST)]
+                Project [$2, MULTIPLY(CAST($3 AS DECIMAL(28,2)), $6), EQ($1, 'AMS'), EQ($1, 'SFO'), EQ($1, 'SIN')] rows=2 out=[product_id:I32, amount:DECIMAL(38,2), $f3:BOOL, $f4:BOOL, $f5:BOOL]
+                  AsOfJoin Inner left_keys=[2] right_keys=[1] match=$0 >= $0 rows=2 out=[ts:TIMESTAMP(9), warehouse_id:STRING, product_id:I32, delta:I32, ts0:TIMESTAMP(9), product_id0:I32, price:DECIMAL(28,2)]
+                    Read shop.main.inventory_movements projection=[1,2,3,5] descriptor=4e9764dcaed50b7231bc4dd055426317 entitled rows=24 out=[ts:TIMESTAMP(9), warehouse_id:STRING, product_id:I32, delta:I32]
+                    Read shop.main.market_prices projection=[1,2,3] rows=96 out=[ts:TIMESTAMP(9), product_id:I32, price:DECIMAL(28,2)]
 ```
 
 ```
@@ -2382,4 +2382,3 @@ What it keeps is everything else: a kind where a kind belongs, a column that mus
 the table it is on, and a source a table is obtained from rather than guessed at.
 
 ---
-

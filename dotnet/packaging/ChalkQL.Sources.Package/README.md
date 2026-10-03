@@ -83,8 +83,8 @@ assert ChalkQL's range and ordering contract.
 An `IndexedSet<T>` is exposed as one table, and the indexes it was built with become the planner's
 access paths without an adapter written by the host: unique and non-unique indexes as hash
 lookups, range indexes as ordered lookups that also serve `ORDER BY` and stop early under a
-`LIMIT`, compound keys of two to four members, prefix tries for `LIKE 'p%'`, and an ordered index
-read backwards for `ORDER BY … DESC LIMIT 1`.
+`LIMIT`, compound keys of two to four members, prefix tries for `LIKE 'p%'` or a pattern bound as
+a parameter, and an ordered index read backwards for `ORDER BY … DESC LIMIT 1`.
 
 ```csharp
 var purchases = rows.ToIndexedSet(x => x.Id)
@@ -131,13 +131,18 @@ would rather not have sort or truncate on its behalf.
 A `LIMIT` travels with a pushed query whether it is a literal or a parameter: a parameterised bound
 is written into the query text with the value bound at execution, in the spelling the dialect uses.
 
+`LIKE` gives the same answer on every source. A pattern pushed to PostgreSQL is written with its
+escape stated, since PostgreSQL's default escape is a backslash and ChalkQL has none. `ILIKE` is
+evaluated by ChalkQL itself, because databases fold case differently.
+
 Queries may span several sources at once, including joins between remote databases and
 application-owned tables.
 
 ## Conformance
 
 `Chalk.Sources.Conformance` probes a source's declared capabilities against the source itself —
-which functions, operators and collations it evaluates the way ChalkQL does — so that pushdown
+which functions, operators and collations it evaluates the way ChalkQL does, `LIKE`'s case and
+escapes included — so that pushdown
 rests on what was verified rather than on what was hoped. Run it once against each database and
 dialect profile a deployment uses.
 

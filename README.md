@@ -158,6 +158,8 @@ WHERE holder_email = /*REDACTED-c94b5d85:CHAR*/
 
 Parameterised values remain parameters and require no redaction. The same pseudonyms are used in redacted plan text.
 
+Errors are just as careful. Each carries a short code, such as `DuplicateName`, so a host can log why something failed without the names in its message. The [error glossary](docs/errors.md) explains every code.
+
 ## Choose your own topology
 
 ChalkQL is predominantly an embedded **.NET library**.
