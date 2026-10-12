@@ -94,6 +94,34 @@ class AsOfRuleTest {
         .hasMessageContaining("'rate > 0' names a column without its input's alias");
   }
 
+  /**
+   * D338, design 63 §3: a match column the left side computes. Calcite casts a {@code VALUES}
+   * timestamp to the right side's precision inside the match condition, which was a planner
+   * internal error; the cast is now a column of the left input.
+   */
+  @Test
+  void a_computed_match_column_plans() throws Exception {
+    String plan =
+        plan(
+            "WITH days (d, closes) AS (VALUES ('a', TIMESTAMP '2026-01-02 00:00:00'),"
+                + " ('b', TIMESTAMP '2026-01-03 00:00:00'))"
+                + " SELECT d.d, f.rate FROM days d CROSS JOIN bars b"
+                + " ASOF JOIN funding f MATCH_CONDITION f.ts <= d.closes ON f.symbol = b.symbol");
+
+    assertThat(plan).contains("ChalkAsOfJoin").contains("joinType=[asof]");
+  }
+
+  /** And a row-value key, which Calcite's ASOF check refused as a single equality. */
+  @Test
+  void a_row_value_key_plans() throws Exception {
+    String plan =
+        plan(
+            "SELECT b.symbol FROM bars b ASOF JOIN funding f MATCH_CONDITION f.ts <= b.ts"
+                + " ON (f.symbol, f.symbol) = (b.symbol, b.symbol)");
+
+    assertThat(plan).contains("ChalkAsOfJoin");
+  }
+
   @ParameterizedTest(name = "{1}")
   @CsvSource(
       delimiter = '|',

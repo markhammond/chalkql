@@ -1179,6 +1179,23 @@ input of an `ASOF JOIN`. In a `LEFT ASOF JOIN` it is refused, because a left row
 fails it must still appear, with NULLs; put it in `WHERE` instead. Qualify each column
 in `ON` with its input's alias, so ChalkQL can tell which input a condition is on.
 
+A key may be a row of columns, `ON (c.book, c.asset) = (k.book, k.asset)`. The match may
+be on a column the left side computes, such as each day's close in a `WITH` block:
+
+```sql
+WITH days (trading_day, closes) AS (
+  VALUES ('2026-10-11', TIMESTAMP '2026-10-12 00:00:00'),
+         ('2026-10-12', LEAST(TIMESTAMP '2026-10-13 00:00:00', CAST(@now AS TIMESTAMP(9))))
+)
+SELECT d.trading_day, k.asset, c.qty
+FROM days d
+CROSS JOIN positions k
+ASOF JOIN position_changes c MATCH_CONDITION c.ts <= d.closes ON c.asset = k.asset
+```
+
+`MATCH_CONDITION` itself compares a column of each input, so compute the value in the
+input, as here, rather than writing the expression in it.
+
 ### The current time
 
 `CURRENT_TIMESTAMP`, `LOCALTIMESTAMP` and `CURRENT_DATE` read one instant for each
