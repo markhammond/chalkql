@@ -83,6 +83,7 @@
     <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Client/bin/$(Configuration)/$(PackageTfm)/Chalk.Client.dll" />
     <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Entitlements/bin/$(Configuration)/$(PackageTfm)/Chalk.Entitlements.dll" />
     <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Entitlements.Tenancy/bin/$(Configuration)/$(PackageTfm)/Chalk.Entitlements.Tenancy.dll" />
+    <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Incremental/bin/$(Configuration)/$(PackageTfm)/Chalk.Incremental.dll" />
     <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Execution/bin/$(Configuration)/$(PackageTfm)/Chalk.Execution.dll" />
     <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Ir/bin/$(Configuration)/$(PackageTfm)/Chalk.Ir.dll" />
     <_ManagedAssembly Include="$(RepoRoot)dotnet/src/Chalk.Sources.Abstractions/bin/$(Configuration)/$(PackageTfm)/Chalk.Sources.Abstractions.dll" />
@@ -118,6 +119,11 @@
           Pack="true"
           PackagePath="lib/$(PackageTfm)/"
           Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Entitlements.Tenancy/bin/$(Configuration)/$(PackageTfm)/Chalk.Entitlements.Tenancy.xml')" />
+
+    <None Include="$(RepoRoot)dotnet/src/Chalk.Incremental/bin/$(Configuration)/$(PackageTfm)/Chalk.Incremental.xml"
+          Pack="true"
+          PackagePath="lib/$(PackageTfm)/"
+          Condition="Exists('$(RepoRoot)dotnet/src/Chalk.Incremental/bin/$(Configuration)/$(PackageTfm)/Chalk.Incremental.xml')" />
 
     <None Include="$(RepoRoot)dotnet/src/Chalk.Execution/bin/$(Configuration)/$(PackageTfm)/Chalk.Execution.xml"
           Pack="true"

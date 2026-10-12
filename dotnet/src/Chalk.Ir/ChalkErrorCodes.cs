@@ -252,6 +252,11 @@ public static class ChalkErrorCodes
     /// <summary>A source failed its conformance check.</summary>
     public const string ConformanceFailed = nameof(ConformanceFailed);
 
+    // Standing views.
+
+    /// <summary>A view reads the current time, and the engine has no clock, or has not set it.</summary>
+    public const string ClockRequired = nameof(ClockRequired);
+
     // Engine and planner.
 
     /// <summary>The planner process could not be reached, or did not answer in time.</summary>

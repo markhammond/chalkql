@@ -6,6 +6,7 @@ using CatalogContext = Chalk.Catalog.CatalogContext;
 using Chalk.Client;
 using Chalk.Entitlements;
 using Chalk.Entitlements.Tenancy;
+using Chalk.Incremental;
 using Chalk.Ir;
 using Chalk.Sources;
 using Chalk.Sources.Ado;
@@ -30,6 +31,7 @@ public sealed class ArchitectureTests
         typeof(ChalkEngine).Assembly,          // Chalk.Client
         typeof(EntitledEngine).Assembly,       // Chalk.Entitlements
         typeof(TenancyPolicy).Assembly,        // Chalk.Entitlements.Tenancy
+        typeof(ViewCursor).Assembly,           // Chalk.Incremental
     ];
 
     private static Assembly ExecutionAssembly =>
@@ -114,6 +116,13 @@ public sealed class ArchitectureTests
     [InlineData("Chalk.Execution", "Chalk.Entitlements")]
     [InlineData("Chalk.Client", "Chalk.Entitlements")]
     [InlineData("Chalk.Entitlements", "Chalk.Entitlements.Tenancy")]
+    // D339: standing views sit above the client, beside the entitlement wrapper and apart from it.
+    [InlineData("Chalk.Ir", "Chalk.Incremental")]
+    [InlineData("Chalk.Catalog", "Chalk.Incremental")]
+    [InlineData("Chalk.Execution", "Chalk.Incremental")]
+    [InlineData("Chalk.Client", "Chalk.Incremental")]
+    [InlineData("Chalk.Incremental", "Chalk.Entitlements")]
+    [InlineData("Chalk.Entitlements", "Chalk.Incremental")]
     public void The_package_graph_has_no_reverse_edge(string lower, string higher)
     {
         var lowerAssembly = ClientAssemblies.Single(a => a.GetName().Name == lower);
@@ -292,6 +301,19 @@ public sealed class ArchitectureTests
             Ours(typeof(EntitledEngine).Assembly));
     }
 
+    /// <summary>
+    /// Standing views' allowed references (D339): the client they are made through, and below it the
+    /// catalog, the IR their plans are in and the sources' contract. Nothing else of ours — not the
+    /// executor, whose one hook a view needs the client opens to it.
+    /// </summary>
+    [Fact]
+    public void Standing_views_reference_only_the_client_and_what_is_below_it()
+    {
+        Assert.Subset(
+            new HashSet<string>(["Chalk.Catalog", "Chalk.Client", "Chalk.Ir", "Chalk.Sources.Abstractions"]),
+            new HashSet<string>(Ours(typeof(ViewCursor).Assembly)));
+    }
+
     /// <summary>The tenancy package is layer B: those three, and the wrapper it declares for.</summary>
     /// <remarks>
     /// <para>
@@ -343,6 +365,7 @@ public sealed class ArchitectureTests
     [InlineData("Chalk.Sources.Abstractions")]
     [InlineData("Chalk.Client")]
     [InlineData("Chalk.Entitlements")]
+    [InlineData("Chalk.Incremental")]
     public void Public_types_are_sealed_or_abstract(string assemblyName)
     {
         var assembly = ClientAssemblies.Single(a => a.GetName().Name == assemblyName);

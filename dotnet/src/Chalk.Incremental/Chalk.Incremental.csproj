@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Incremental</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Description>Chalk incremental views: a statement kept current as one row per key, read from a cursor as the latest row of each key changed since.</Description>
+  </PropertyGroup>
+
+  <!--
+    Standing views (docs/design/64-incremental-views.md, D339). Everything about a view lives here,
+    over the client's public surface and the few hooks it opens to this assembly: the engine's epoch
+    stamp, its change count, and an execution that reads a given time as the current one. A host that
+    does not reference this assembly sees none of it.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../Chalk.Client/Chalk.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Apache.Arrow" />
+    <PackageReference Include="Google.Protobuf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Chalk.Integration.Tests" />
+    <InternalsVisibleTo Include="Chalk.TestKit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+</Project>

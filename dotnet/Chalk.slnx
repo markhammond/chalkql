@@ -23,6 +23,7 @@
     <Project Path="src/Chalk.Client/Chalk.Client.csproj" />
     <Project Path="src/Chalk.Entitlements/Chalk.Entitlements.csproj" />
     <Project Path="src/Chalk.Entitlements.Tenancy/Chalk.Entitlements.Tenancy.csproj" />
+    <Project Path="src/Chalk.Incremental/Chalk.Incremental.csproj" />
     <Project Path="src\Chalk.Planner\Chalk.Planner.csproj" />
     <Project Path="src\Chalk\Chalk.csproj" />
   </Folder>

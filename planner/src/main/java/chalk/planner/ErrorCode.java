@@ -183,6 +183,11 @@ public enum ErrorCode {
   /** A source failed its conformance check. */
   CONFORMANCE_FAILED("ConformanceFailed"),
 
+  // Standing views.
+
+  /** A view reads the current time, and the engine has no clock, or has not set it. */
+  CLOCK_REQUIRED("ClockRequired"),
+
   // Engine and planner.
 
   /** The planner process could not be reached, or did not answer in time. */

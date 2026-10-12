@@ -547,6 +547,20 @@ A source failed its conformance check against its own descriptor.
 
 **What to do:** Correct the source; the report says which probe failed and why.
 
+## Standing views
+
+A standing view keeps a statement's result current as one row per key. These refusals keep a view
+equal to what its statement returns at each epoch.
+
+### ClockRequired
+
+A view reads the current time — through `CURRENT_TIMESTAMP`, `LOCALTIMESTAMP`, `CURRENT_DATE`, or the
+parameter named as the engine's clock — and the engine has no clock, or no refresh has set it yet. In
+a view, the current time is the clock's time at the view's epoch.
+
+**What to do:** Name the engine's clock with `ChalkEngineOptions.Clock`, and move it with
+`AdvanceClock` in a refresh before the view is updated.
+
 ## Engine and planner
 
 Raised about the engine, the planner process or the request itself.
