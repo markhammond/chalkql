@@ -400,6 +400,10 @@ public final class SqlBodyInliner extends SqlShuttle {
       call ->
           call.getOperator() == STRICT_GUARD
               ? GUARD
+              // D337: LEAST and GREATEST as the comparisons they stand for.
+              : call.getOperator() == chalk.planner.plan.ChalkOperatorTable.LEAST
+                      || call.getOperator() == chalk.planner.plan.ChalkOperatorTable.GREATEST
+                  ? ExtremumConvertlet.INSTANCE
               // D337: TIMESTAMPDIFF stays the call the IR has a function for.
               : call.getKind() == org.apache.calcite.sql.SqlKind.TIMESTAMP_DIFF
                       && TimestampDiffConvertlet.unitOf(call) != null

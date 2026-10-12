@@ -729,3 +729,95 @@ internal sealed class TimestampDiffExpr : VectorExprBase
         return Scratch.Finish(length, nulls);
     }
 }
+
+/// <summary>
+/// An interval scaled by a number (D337, design 63 §6): its count of microseconds, or of months,
+/// times or divided by the number, rounded half-even to a whole count. Shared by both engines.
+/// </summary>
+internal static class IntervalMath
+{
+    public static long Scale(long count, decimal factor, bool divide)
+    {
+        if (divide && factor == 0m)
+        {
+            throw new DivideByZeroException("An interval was divided by zero.");
+        }
+
+        var exact = divide ? count / factor : count * factor;
+        return checked((long)Math.Round(exact, MidpointRounding.ToEven));
+    }
+
+    /// <summary>A number's lane as a <see cref="decimal"/>, whatever numeric kind it is.</summary>
+    public static decimal FactorAt(Vector vector, ChalkType type, int row) => ColumnKinds.Of(type) switch
+    {
+        ColumnKind.Int8 => Lanes<sbyte>.From(vector)[row],
+        ColumnKind.Int16 => Lanes<short>.From(vector)[row],
+        ColumnKind.Int32 => Lanes<int>.From(vector)[row],
+        ColumnKind.Int64 => Lanes<long>.From(vector)[row],
+        ColumnKind.Float => (decimal)Lanes<float>.From(vector)[row],
+        ColumnKind.Double => (decimal)Lanes<double>.From(vector)[row],
+        _ when type.Kind == TypeKind.Decimal => Decimals.Read(RawLanes.From(vector, 16)[row], type.Scale),
+        _ => throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedFunction,
+            $"an interval scaled by {type}",
+            "An interval is multiplied or divided by a number."),
+    };
+}
+
+/// <summary><c>n * INTERVAL '1' MINUTE</c>, <c>interval * n</c> and <c>interval / n</c> (D337).</summary>
+internal sealed class IntervalScaleExpr : VectorExprBase
+{
+    private readonly IVectorExpr _interval;
+    private readonly IVectorExpr _factor;
+    private readonly bool _divide;
+
+    public IntervalScaleExpr(ChalkType type, IVectorExpr interval, IVectorExpr factor, bool divide)
+        : base(type)
+    {
+        _interval = interval;
+        _factor = factor;
+        _divide = divide;
+    }
+
+    public override Vector Evaluate(EvalContext context)
+    {
+        var interval = _interval.Evaluate(context);
+        var factor = _factor.Evaluate(context);
+        var length = context.Length;
+        var nulls = IntersectValidity(length, interval, factor, context.SelectionMask);
+        var valid = Scratch.CurrentValidity(length);
+        var months = Type.Kind == TypeKind.IntervalYear;
+        var monthResult = months ? Scratch.Values<int>(length) : default;
+        var microResult = months ? default : Scratch.Values<long>(length);
+
+        for (var i = 0; i < length; i++)
+        {
+            if (!valid.IsEmpty && !BitUtility.GetBit(valid, i))
+            {
+                if (months)
+                {
+                    monthResult[i] = 0;
+                }
+                else
+                {
+                    microResult[i] = 0;
+                }
+
+                continue;
+            }
+
+            var count = TemporalDifference.At(interval, _interval.Type, i);
+            var scaled = IntervalMath.Scale(count, IntervalMath.FactorAt(factor, _factor.Type, i), _divide);
+            if (months)
+            {
+                monthResult[i] = checked((int)scaled);
+            }
+            else
+            {
+                microResult[i] = scaled;
+            }
+        }
+
+        return Scratch.Finish(length, nulls);
+    }
+}

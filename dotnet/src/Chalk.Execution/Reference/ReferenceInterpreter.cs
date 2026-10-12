@@ -467,6 +467,25 @@ internal sealed class ReferenceInterpreter
             FunctionId.Add or FunctionId.Subtract when IrTypes.IsTemporal(type.Kind) =>
                 Temporal.Shift(call.Function, call, operands, type),
 
+            // D337: interval arithmetic, through the same scaling as the vectorised kernel.
+            FunctionId.Add or FunctionId.Subtract when IrTypes.IsInterval(type.Kind)
+                && IrTypes.IsInterval(ChalkType.FromProto(call.Args[0].Type).Kind)
+                && IrTypes.IsInterval(ChalkType.FromProto(call.Args[1].Type).Kind) =>
+                call.Function == FunctionId.Add
+                    ? checked((long)operands[0]! + (long)operands[1]!)
+                    : checked((long)operands[0]! - (long)operands[1]!),
+            FunctionId.Multiply or FunctionId.Divide when IrTypes.IsInterval(type.Kind) =>
+                IrTypes.IsInterval(ChalkType.FromProto(call.Args[0].Type).Kind)
+                    ? Chalk.Execution.Expressions.IntervalMath.Scale(
+                        (long)operands[0]!,
+                        Convert.ToDecimal(operands[1], System.Globalization.CultureInfo.InvariantCulture),
+                        call.Function == FunctionId.Divide)
+                    : Chalk.Execution.Expressions.IntervalMath.Scale(
+                        (long)operands[1]!,
+                        Convert.ToDecimal(operands[0], System.Globalization.CultureInfo.InvariantCulture),
+                        divide: false),
+            FunctionId.Negate when IrTypes.IsInterval(type.Kind) => checked(-(long)operands[0]!),
+
             // D337: a temporal less a temporal, in microseconds or whole months.
             FunctionId.Subtract when IrTypes.IsInterval(type.Kind) => type.Kind == TypeKind.IntervalYear
                 ? (long)checked((int)Chalk.Execution.Expressions.TemporalDifference.Months(

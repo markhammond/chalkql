@@ -84,8 +84,45 @@ public final class ChalkOperatorTable {
    * not PostgreSQL's to lend, and asking for that library would bring every other PostgreSQL function
    * with it (and refuse a catalog whose user functions share a name with one).
    */
+  /**
+   * {@code LEAST(a, …)} and {@code GREATEST(a, …)} over any comparable kind (D337, design 63 §6).
+   * NULL arguments are skipped, as PostgreSQL and DuckDB skip them: the result is NULL only when every
+   * argument is, so it is nullable only when every argument is. The planner writes each as the
+   * comparisons it stands for ({@code chalk.planner.ir.ExtremumConvertlet}), so the executors need
+   * nothing of their own and a source that runs a {@code CASE} runs it.
+   */
+  public static final SqlFunction LEAST = extremum("LEAST", SqlKind.LEAST);
+
+  /** See {@link #LEAST}. */
+  public static final SqlFunction GREATEST = extremum("GREATEST", SqlKind.GREATEST);
+
+  private static SqlFunction extremum(String name, SqlKind kind) {
+    return new SqlFunction(
+        name,
+        kind,
+        binding -> {
+          java.util.List<org.apache.calcite.rel.type.RelDataType> types =
+              binding.collectOperandTypes();
+          org.apache.calcite.rel.type.RelDataType common =
+              binding.getTypeFactory().leastRestrictive(types);
+          if (common == null) {
+            throw binding.newError(
+                org.apache.calcite.util.Static.RESOURCE.typeNotComparableNear(
+                    String.valueOf(types.get(0)), String.valueOf(types.get(types.size() - 1))));
+          }
+          boolean everyNullable =
+              types.stream().allMatch(org.apache.calcite.rel.type.RelDataType::isNullable);
+          return binding.getTypeFactory().createTypeWithNullability(common, everyNullable);
+        },
+        org.apache.calcite.sql.type.InferTypes.FIRST_KNOWN,
+        OperandTypes.SAME_VARIADIC,
+        SqlFunctionCategory.SYSTEM);
+  }
+
   private static final ImmutableList<org.apache.calcite.sql.SqlOperator> OWN =
       ImmutableList.of(
+          LEAST,
+          GREATEST,
           TIME_BUCKET,
           FINGERPRINT,
           PRESENT,

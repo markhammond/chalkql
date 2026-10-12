@@ -1196,6 +1196,13 @@ the date in UTC. A timestamp has precision 6, microseconds, unless you write one
 9: `CURRENT_TIMESTAMP(9)`. A remote source is never sent the current time, so it cannot
 use a "now" of its own. A comparison with it is made in the host.
 
+### `LEAST` and `GREATEST`
+
+`LEAST(a, b, …)` and `GREATEST(a, b, …)` take values of any one comparable type: numbers,
+text, dates or timestamps. A NULL argument is skipped, as PostgreSQL and DuckDB skip it, so
+`LEAST(5, NULL)` is 5, and the result is NULL only when every argument is. Text compares by
+code point, as `ORDER BY` does.
+
 ### Differences between timestamps
 
 `TIMESTAMPDIFF(unit, from, to)` counts the whole units from one `DATE`, `TIMESTAMP` or
@@ -1210,7 +1217,10 @@ SELECT id, TIMESTAMPDIFF(MINUTE, placed_at, shipped_at) AS minutes_to_ship FROM 
 ```
 
 The standard form, `(to - from) DAY TO SECOND`, is an interval, which reaches you as a
-`TimeSpan`. An interval compares with an interval, and cast to an integer it is the same
+`TimeSpan`. An interval adds to or subtracts from one of its kind, is negated, and is
+multiplied or divided by a number, rounded to the microsecond: `utc_offset_minutes * INTERVAL
+'1' MINUTE` moves a timestamp by a zone's offset. A month interval is only multiplied, by a
+whole number. An interval compares with an interval, and cast to an integer it is the same
 count `TIMESTAMPDIFF` gives in its last unit: `CAST((to - from) MINUTE AS BIGINT)`. A bare
 `to - from`, with no unit, is refused, as the SQL standard has it. To keep the recent rows,
 compare the column with a bound, `ts >= CURRENT_TIMESTAMP - INTERVAL '5' MINUTE`, rather
