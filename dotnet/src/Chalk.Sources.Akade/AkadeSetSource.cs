@@ -23,7 +23,8 @@ namespace Chalk.Sources.Akade;
 public abstract class AkadeSetSource<T, TSet> :
     ISourceRuntime,
     IColumnarBatchSource,
-    IRefreshableSource
+    IRefreshableSource,
+    IPinnableSource
     where TSet : class
 {
     private readonly Lock _refreshing = new();
@@ -63,6 +64,23 @@ public abstract class AkadeSetSource<T, TSet> :
     }
 
     private AkadeSourceSnapshot<T, TSet> Current => Volatile.Read(ref _snapshot);
+
+    /// <summary>
+    /// The state a scan of one execution reads (F188): the one the execution pinned when it began, so
+    /// every table it reads is from one refresh; or, outside an execution, the one published now.
+    /// </summary>
+    private AkadeSourceSnapshot<T, TSet> Serving(ScanContext context) =>
+        context.Arena.ReadSet?.Pinned(SourceId, Options.TableName) as AkadeSourceSnapshot<T, TSet> ?? Current;
+
+    /// <inheritdoc />
+    /// <remarks>A published state is never changed, so holding it is holding the reference.</remarks>
+    object? IPinnableSource.Pin(string table) =>
+        string.Equals(table, Options.TableName, StringComparison.OrdinalIgnoreCase) ? Current : null;
+
+    /// <inheritdoc />
+    void IPinnableSource.Unpin(string table, object pinned)
+    {
+    }
 
     internal AkadeSourceOptions<T> Options { get; }
 
@@ -508,9 +526,10 @@ public abstract class AkadeSetSource<T, TSet> :
         ArgumentNullException.ThrowIfNull(context);
         RequireTable(request.Table);
 
-        // Capture one backend. A transactional publish cannot redirect this scan to its successor.
-        // Direct host mutation of the set is intentionally outside that guarantee.
-        var backend = Current.Backend;
+        // Capture one backend: the execution's pinned state, so a transactional publish cannot
+        // redirect this scan to its successor. Direct host mutation of the set is intentionally
+        // outside that guarantee.
+        var backend = Serving(context).Backend;
         return backend.ScanAsync(request, context, ct);
     }
 
@@ -523,7 +542,7 @@ public abstract class AkadeSetSource<T, TSet> :
         ArgumentNullException.ThrowIfNull(context);
         RequireTable(request.Table);
 
-        var backend = Current.Backend;
+        var backend = Serving(context).Backend;
         return backend.IndexLookupAsync(request, context, ct);
     }
 
@@ -535,7 +554,7 @@ public abstract class AkadeSetSource<T, TSet> :
         ArgumentNullException.ThrowIfNull(context);
         RequireTable(request.Table);
 
-        var backend = (IColumnarBatchSource)Current.Backend;
+        var backend = (IColumnarBatchSource)Serving(context).Backend;
         return backend.ColumnarScan(request, context);
     }
 
@@ -547,7 +566,7 @@ public abstract class AkadeSetSource<T, TSet> :
         ArgumentNullException.ThrowIfNull(context);
         RequireTable(request.Table);
 
-        var backend = (IColumnarBatchSource)Current.Backend;
+        var backend = (IColumnarBatchSource)Serving(context).Backend;
         return backend.ColumnarLookup(request, context);
     }
 }

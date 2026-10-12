@@ -16,7 +16,7 @@ namespace Chalk.Sources.Poco;
 /// first-class SQL table with a real row count, real unique keys, real collations and — from M2 —
 /// real indexes and statistics, which is the whole point of Chalk (rev 3 §6).
 /// </summary>
-public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefreshableSource
+public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefreshableSource, IPinnableSource
 {
     private readonly PocoTableRuntime[] _tables;
     private readonly string _zone;
@@ -191,6 +191,34 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
 
     private void Report(string table, object collection) =>
         SnapshotReleased?.Invoke(new PocoSnapshotRelease { Table = table, Collection = collection });
+
+    /// <inheritdoc />
+    /// <remarks>Looked up by a loop rather than <see cref="Require"/>, whose lambda would allocate on every execution.</remarks>
+    object? IPinnableSource.Pin(string table)
+    {
+        foreach (var runtime in _tables)
+        {
+            if (string.Equals(runtime.Name, table, StringComparison.OrdinalIgnoreCase))
+            {
+                return runtime.Pin();
+            }
+        }
+
+        return null;
+    }
+
+    /// <inheritdoc />
+    void IPinnableSource.Unpin(string table, object pinned)
+    {
+        foreach (var runtime in _tables)
+        {
+            if (string.Equals(runtime.Name, table, StringComparison.OrdinalIgnoreCase))
+            {
+                runtime.Unpin(pinned);
+                return;
+            }
+        }
+    }
 
     /// <inheritdoc />
     /// <remarks>
@@ -479,6 +507,14 @@ internal abstract class PocoTableRuntime
     public abstract void ValidateRefresh(string sourceId, SourceRefreshEntry entry);
 
     /// <summary>
+    /// The snapshot this table serves now, with a reader's reference taken for one execution (F188).
+    /// </summary>
+    public abstract object Pin();
+
+    /// <summary>Lets go of the reference <see cref="Pin"/> took.</summary>
+    public abstract void Unpin(object pinned);
+
+    /// <summary>
     /// Builds what this table's entries ask for, without publishing it: one that says what the rows
     /// are, or upserts and deletes by key, and an advance of the frontier beside either (D339).
     /// </summary>
@@ -643,6 +679,20 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
 
     /// <summary>The change kind this table declares (D339), or null for none.</summary>
     private PocoChanges<T>? _changes;
+
+    /// <inheritdoc />
+    public override object Pin() => Acquire();
+
+    /// <inheritdoc />
+    public override void Unpin(object pinned) => ((PocoTableSnapshot<T>)pinned).Release();
+
+    /// <summary>
+    /// The snapshot a scan of one execution reads (F188): the one the execution pinned when it began,
+    /// so every table it reads is from one refresh; or, for a scan outside an execution, the one this
+    /// table serves now.
+    /// </summary>
+    private PocoTableSnapshot<T> Serving(string sourceId, ScanContext context) =>
+        context.Arena.ReadSet?.Pinned(sourceId, Name) as PocoTableSnapshot<T> ?? Current;
 
     /// <summary>
     /// Takes the change kind the builder declared, and the frontier the registered rows already
@@ -1221,7 +1271,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     {
         CheckProjection(sourceId, request.Projection, request.OutputSchema);
         return new PocoScan<T>(
-            this, Current, request.Projection, request.OutputSchema, request.BatchSize,
+            this, Serving(sourceId, context), request.Projection, request.OutputSchema, request.BatchSize,
             request.RowGoal, context, ct);
     }
 
@@ -1229,7 +1279,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     {
         CheckProjection(sourceId, request.Projection, request.OutputSchema);
         return new PocoScan<T>(
-            this, Current, request.Projection, request.OutputSchema, request.BatchSize,
+            this, Serving(sourceId, context), request.Projection, request.OutputSchema, request.BatchSize,
             request.RowGoal, context, CancellationToken.None).Columnar();
     }
 
@@ -1251,10 +1301,11 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     {
         CheckProjection(sourceId, request.Projection, request.OutputSchema);
 
-        // One capture, used for all of it (§1). The index is then named by its ordinal rather than
-        // by its object, because the declaration order is shape: index i of any snapshot of this
-        // table is the same declared index, built over that snapshot's rows.
-        var snapshot = Current;
+        // One capture, used for all of it (§1): the execution's pinned snapshot (F188), or the current
+        // one. The index is then named by its ordinal rather than by its object, because the
+        // declaration order is shape: index i of any snapshot of this table is the same declared
+        // index, built over that snapshot's rows.
+        var snapshot = Serving(sourceId, context);
         var indexes = snapshot.Indexes;
         var ordinal = -1;
         for (var i = 0; i < indexes.Length; i++)

@@ -1202,9 +1202,11 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// The engine refresh lock is held for all of it; when this engine contains shared sources, their
     /// process-wide refresh gates are held too. A scheduled or second-engine refresh therefore waits
     /// rather than publishing between two of the swaps: an execution sees this transaction whole or not at all.
-    /// Executions already running keep the state they captured, and a
-    /// <see cref="PreparedQuery"/> survives — a replacement changes rows, and rows are not shape
-    /// (<see cref="PreparedQuery.IsStale"/>).
+    /// Executions already running read every table as it was when they began, since an execution pins
+    /// what it reads under the process-wide gate the commits take (F188), in this engine or any other
+    /// sharing a source. A re-introspection the transaction names publishes as it reads, before the
+    /// commits, so it is not part of what an execution sees whole. A <see cref="PreparedQuery"/>
+    /// survives — a replacement changes rows, and rows are not shape (<see cref="PreparedQuery.IsStale"/>).
     /// </para>
     /// </remarks>
     public async ValueTask<long> RefreshAsync(Action<RefreshBuilder> plan, CancellationToken ct = default)
@@ -1284,7 +1286,6 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             // The version and the clock are checked against the epoch this refresh follows, which
             // only the lock fixes, and before anything is applied.
             CheckStamp(builder.VersionGiven, builder.ClockGiven);
-            BeginChanges();
         }
         catch
         {
@@ -1292,6 +1293,10 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             throw;
         }
 
+        // Odd only from the first change a reader could see to the epoch that names it: the scopes,
+        // which publish as they read, or else the commits. Building the new state changes nothing
+        // anyone can read, so a view does not wait for it.
+        var changing = false;
         try
         {
             SharedSourceLease? sharedLease = null;
@@ -1305,6 +1310,12 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 // The scopes first: a re-introspection is the source going to look again, and a
                 // replacement in the same transaction is the host saying what the rows are. The host's
                 // word is the one that survives, so it is applied last.
+                if (scopes.Count > 0)
+                {
+                    BeginChanges();
+                    changing = true;
+                }
+
                 foreach (var (source, table) in scopes)
                 {
                     if (table.Length == 0)
@@ -1332,18 +1343,39 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                         await source.PrepareRefreshAsync(entries, ct).ConfigureAwait(false)));
                 }
 
-                // The one moment the transaction is not atomic is this loop, and it is a handful of
-                // reference writes with nothing between them that can fail: everything that could was
-                // done above. Replace/Append cannot change table shape, so cross-engine shape invalidation
-                // is not needed for this publication.
-                foreach (var (runtime, commit) in commits)
+                // The commits are a handful of reference writes with nothing between them that can
+                // fail: everything that could was done above. Replace/Append cannot change table shape,
+                // so cross-engine shape invalidation is not needed for this publication.
+                if (!changing)
                 {
-                    commit.Commit();
-                    if (_sharedSourceRegistrationsById is { } sharedById
-                        && sharedById.TryGetValue(runtime.SourceId, out var sharedRegistration))
+                    BeginChanges();
+                    changing = true;
+                }
+
+                // The states the commits replace are held across them, so one that no execution reads
+                // is let go after the gate: the host hears of its release while nothing waits on it.
+                var replaced = Replaced(bySource);
+                replaced?.Pin();
+                try
+                {
+                    // Under the gate every execution in the process takes to pin the tables it reads
+                    // (F188): it pins before the first commit here or after the last, never between two.
+                    lock (ExecutionReadSet.Gate)
                     {
-                        sharedRegistration.Shared!.Changed(shapeMayHaveChanged: false);
+                        foreach (var (runtime, commit) in commits)
+                        {
+                            commit.Commit();
+                            if (_sharedSourceRegistrationsById is { } sharedById
+                                && sharedById.TryGetValue(runtime.SourceId, out var sharedRegistration))
+                            {
+                                sharedRegistration.Shared!.Changed(shapeMayHaveChanged: false);
+                            }
+                        }
                     }
+                }
+                finally
+                {
+                    replaced?.Unpin();
                 }
 
                 var epoch = await PublishAsync(builder.VersionGiven, builder.ClockGiven, ct).ConfigureAwait(false);
@@ -1353,9 +1385,37 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         }
         finally
         {
-            EndChanges();
+            if (changing)
+            {
+                EndChanges();
+            }
+
             _refreshing.Release();
         }
+    }
+
+    /// <summary>
+    /// The tables a transaction's commits replace, in sources that pin, for the engine to hold across
+    /// the commits (F188); null when there are none.
+    /// </summary>
+    private static ExecutionReadSet? Replaced(
+        List<(ISourceRuntime Runtime, IRefreshableSource Refreshable, List<SourceRefreshEntry> Entries)> bySource)
+    {
+        var tables = new List<(string SourceId, string Table, IPinnableSource Source)>();
+        foreach (var (runtime, refreshable, entries) in bySource)
+        {
+            if (refreshable is not IPinnableSource pinnable)
+            {
+                continue;
+            }
+
+            foreach (var entry in entries)
+            {
+                tables.Add((runtime.SourceId, entry.Table, pinnable));
+            }
+        }
+
+        return tables.Count == 0 ? null : new ExecutionReadSet([.. tables]);
     }
 
     /// <summary>

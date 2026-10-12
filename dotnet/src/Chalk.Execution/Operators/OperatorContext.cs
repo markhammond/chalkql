@@ -19,6 +19,12 @@ namespace Chalk.Execution.Operators;
 /// </remarks>
 internal sealed class OperatorContext
 {
+    /// <summary>
+    /// The table states this tree's executions pin (F188), made the first time the tree runs and
+    /// reused by every execution after, so pinning allocates nothing once the tree is warm.
+    /// </summary>
+    public Chalk.Sources.ExecutionReadSet? ReadSet { get; set; }
+
     public required ExecutionSettings Settings { get; init; }
 
     public required CatalogContext Catalog { get; init; }

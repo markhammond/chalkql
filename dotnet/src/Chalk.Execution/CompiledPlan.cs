@@ -175,6 +175,8 @@ internal sealed class CompiledPlan
         arena.BeginExecution(stats);
         var tree = Rent();
         tree.Context.Begin(stats, arena, bound, _settings.TimeProvider.GetUtcNow());
+        tree.Context.ReadSet ??= NewReadSet();
+        Pin(tree.Context.ReadSet, arena);
 
         // As in Vectorised: the token has to reach the tree before the first pull creates the
         // operators' enumerators.
@@ -208,6 +210,7 @@ internal sealed class CompiledPlan
         finally
         {
             await tree.Root.DisposeAsync().ConfigureAwait(false);
+            Unpin(tree.Context.ReadSet, arena);
             tree.Context.End();
             arena.EndExecution();
             if (completed)
@@ -305,6 +308,91 @@ internal sealed class CompiledPlan
 
     private CompiledPlan? _clocked;
 
+    /// <summary>The tables this plan reads from sources that pin (F188), found the first time it runs.</summary>
+    private (string SourceId, string Table, IPinnableSource Source)[]? _pinnable;
+
+    /// <summary>A read set for one execution of this plan, or null when it reads no table a source pins.</summary>
+    internal ExecutionReadSet? NewReadSet()
+    {
+        _pinnable ??= Pinnable();
+        return _pinnable.Length == 0 ? null : new ExecutionReadSet(_pinnable);
+    }
+
+    /// <summary>
+    /// Pins every table the execution reads, while no refresh commit is swapping one, and hands them
+    /// to its scans through the arena (F188). The whole of a refresh transaction is then seen, or none
+    /// of it, whichever of the execution's scans starts first.
+    /// </summary>
+    internal static void Pin(ExecutionReadSet? readSet, ExecutionArena arena)
+    {
+        if (readSet is null)
+        {
+            return;
+        }
+
+        readSet.Pin();
+        arena.ReadSet = readSet;
+    }
+
+    /// <summary>Lets the execution's pinned tables go, once its scans are done with them.</summary>
+    internal static void Unpin(ExecutionReadSet? readSet, ExecutionArena arena)
+    {
+        if (readSet is null)
+        {
+            return;
+        }
+
+        arena.ReadSet = null;
+        readSet.Unpin();
+    }
+
+    /// <summary>Every table the plan reads, by its source, from a source that pins: once each.</summary>
+    private (string SourceId, string Table, IPinnableSource Source)[] Pinnable()
+    {
+        var found = new List<(string SourceId, string Table, IPinnableSource Source)>();
+        var pending = new Stack<Google.Protobuf.IMessage>();
+        pending.Push(Plan);
+        while (pending.Count > 0)
+        {
+            var message = pending.Pop();
+            if (message is Ir.TableRef table
+                && _sources.TryGetValue(table.SourceId, out var source)
+                && source is IPinnableSource pinnable
+                && !found.Exists(f => f.SourceId == table.SourceId
+                    && string.Equals(f.Table, table.Table, StringComparison.OrdinalIgnoreCase)))
+            {
+                found.Add((table.SourceId, table.Table, pinnable));
+            }
+
+            foreach (var field in message.Descriptor.Fields.InDeclarationOrder())
+            {
+                if (field.FieldType != Google.Protobuf.Reflection.FieldType.Message)
+                {
+                    continue;
+                }
+
+                switch (field.Accessor.GetValue(message))
+                {
+                    case Google.Protobuf.IMessage child:
+                        pending.Push(child);
+                        break;
+                    case System.Collections.IList list:
+                        foreach (var item in list)
+                        {
+                            if (item is Google.Protobuf.IMessage element)
+                            {
+                                pending.Push(element);
+                            }
+                        }
+
+                        break;
+                }
+            }
+        }
+
+        return [.. found];
+    }
+
     /// <summary>Builds the immutable half of an execution context.</summary>
     internal OperatorContext NewContext() => new()
     {
@@ -330,6 +418,8 @@ internal sealed class CompiledPlan
         var tree = Rent();
         tree.Context.Begin(
             stats, arena, parameters, _settings.TimeProvider.GetUtcNow(), relations);
+        tree.Context.ReadSet ??= NewReadSet();
+        Pin(tree.Context.ReadSet, arena);
 
         // Points the tree at this execution's token *before* the first pull. `TryNext` comes first
         // by design and creates the body's enumerator, so an operator that genuinely blocks on
@@ -372,6 +462,7 @@ internal sealed class CompiledPlan
         {
             stats.Elapsed = _settings.TimeProvider.GetElapsedTime(started);
             await tree.Root.DisposeAsync().ConfigureAwait(false);
+            Unpin(tree.Context.ReadSet, arena);
             tree.Context.End();
 
             // Only a tree that ran to the end is known to be in a state the next execution can use.
