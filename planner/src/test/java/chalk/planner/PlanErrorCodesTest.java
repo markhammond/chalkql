@@ -116,6 +116,88 @@ class PlanErrorCodesTest {
   }
 
   /**
+   * A message is cut to the bound before it is sent, saying how much was left out, so an error can
+   * never outgrow the response headers a client accepts and take the connection down with it. The
+   * error, its violation and the status description all carry the cut text.
+   */
+  @Test
+  void a_message_over_the_bound_is_cut_and_says_how_much_was_left_out() throws Exception {
+    String message = "No match found for function signature F(" + "<NUMERIC>, ".repeat(8000) + ")";
+    StatusRuntimeException status =
+        PlanErrors.toStatus(new CalciteContextException(message, new RuntimeException()));
+    PlanError error = PlanError.parseFrom(status.getTrailers().get(PlanErrors.TRAILER));
+
+    java.util.regex.Matcher cut =
+        Pattern.compile("(?s)(.*)… \\((\\d+) more characters\\)").matcher(error.getMessage());
+    assertThat(cut.matches()).isTrue();
+    assertThat(cut.group(1))
+        .hasSize(PlanErrors.MESSAGE_LIMIT)
+        .contains("No match found for function signature F(<NUMERIC>, ");
+    assertThat(Integer.parseInt(cut.group(2))).isGreaterThan(80_000);
+    assertThat(only(error).getMessage()).isEqualTo(error.getMessage());
+    assertThat(only(error).getCode()).isEqualTo("SqlValidation");
+    assertThat(status.getStatus().getDescription()).isEqualTo(error.getMessage());
+  }
+
+  /** The cut never leaves half a surrogate pair at the end. */
+  @Test
+  void a_cut_message_keeps_its_last_character_whole() {
+    String message = "x".repeat(PlanErrors.MESSAGE_LIMIT - 1) + "\uD83D\uDE00" + "y".repeat(10);
+
+    String cut = PlanErrors.bounded(message);
+
+    assertThat(cut).startsWith("x".repeat(PlanErrors.MESSAGE_LIMIT - 1) + "… (12 more characters)");
+  }
+
+  /**
+   * A refusal's table model is the one part of an error that can still outgrow the budget once
+   * messages are bounded: past it the model is left out, and the message says so. Under it, the
+   * model travels whole.
+   */
+  @Test
+  void a_refusal_whose_table_model_is_over_the_budget_is_sent_without_it() throws Exception {
+    PlanError wide = sent(refusal(20_000));
+    PlanError narrow = sent(refusal(3));
+
+    assertThat(wide.hasOutput()).isFalse();
+    assertThat(wide.getDisclosuresList()).isEmpty();
+    assertThat(wide.getMessage())
+        .isEqualTo(
+            "refused The statement's table model is left out: it is too large to send with an"
+                + " error.");
+    assertThat(only(wide).getCode()).isEqualTo("PopulationOnly");
+    assertThat(PlanErrors.wireSize(wide)).isLessThanOrEqualTo(PlanErrors.TRAILER_BUDGET);
+
+    assertThat(narrow.getOutput().getFieldsCount()).isEqualTo(3);
+    assertThat(narrow.getDisclosuresList()).hasSize(3);
+    assertThat(narrow.getMessage()).isEqualTo("refused");
+  }
+
+  private static PolicyException refusal(int columns) {
+    chalk.ir.v1.RowType.Builder output = chalk.ir.v1.RowType.newBuilder();
+    for (int i = 0; i < columns; i++) {
+      output.addFields(
+          chalk.ir.v1.Field.newBuilder()
+              .setName("a_rather_long_column_name_" + i)
+              .setType(
+                  chalk.ir.v1.Type.newBuilder()
+                      .setKind(chalk.ir.v1.TypeKind.TYPE_KIND_STRING)
+                      .setNullable(true)));
+    }
+    return new PolicyException(
+            ErrorCode.POPULATION_ONLY,
+            "main.members",
+            "national_id",
+            "a projection to the result",
+            List.of("COUNT"),
+            "refused")
+        .withOutput(
+            output.build(),
+            java.util.Collections.nCopies(
+                columns, chalk.planner.rpc.v1.ReportedDisclosure.REPORTED_DISCLOSURE_FULL));
+  }
+
+  /**
    * A code is a name the glossary explains, so the planner names no code the glossary does not,
    * and leaves out none it does. A kind is named the way its constant is spelt.
    */
