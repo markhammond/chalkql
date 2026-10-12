@@ -1404,11 +1404,12 @@ internal static class PlanCompiler
             var schema = ArrowTypeMapping.ToArrowSchema(rel.RowType);
             var types = Types(rel.RowType);
             var inputRow = aggregate.Input.RowType;
-            var keys = aggregate.Groupings[0].Keys.Select(i => (int)i).ToArray();
+            var keys = GroupingKeys.Of(aggregate);
 
             foreach (var measure in aggregate.Measures)
             {
-                if (measure.UserFunction.Length > 0)
+                // GROUPING takes a key for each bit it has, and the validator holds it to 63.
+                if (measure.UserFunction.Length > 0 || measure.Function == AggregateFunctionId.Grouping)
                 {
                     continue;
                 }
@@ -1431,83 +1432,202 @@ internal static class PlanCompiler
                 }
             }
 
-            // A13: one grouping only, and mixed DISTINCT/non-DISTINCT would need grouping sets.
             var measures = aggregate.Measures.ToArray();
-            var declaredDistinct = DeclaredDistinct(aggregate, keys);
+            if (aggregate.Groupings.Count == 1 && !measures.Any(IsGrouping))
+            {
+                var declaredDistinct = DeclaredDistinct(aggregate, keys);
+                return context =>
+                {
+                    var compiler = Expressions(path);
+
+                    // An aggregate's own estimate is a count of groups, which is what every piece of
+                    // its per-group state scales with (D258.3).
+                    return new HashAggregateOperator(
+                        context,
+                        path,
+                        schema,
+                        types,
+                        input(context),
+                        KeyExpressions(compiler, keys, inputRow),
+                        MeasurePlans(compiler, measures, path),
+                        rel.EstRowCount,
+                        declaredDistinct);
+                };
+            }
+
+            // Grouping sets, or a GROUPING measure under one grouping (D338): a table for each set,
+            // fed from one pass over the input. Each set's table has its own keys and every measure
+            // but GROUPING, which is the set's constant.
+            var tableMeasures = measures.Where(m => !IsGrouping(m)).ToArray();
+            var sets = aggregate.Groupings
+                .Select(g => GroupingSetShape(g, keys, measures, rel.RowType))
+                .ToArray();
+            var declared = sets.Select(s => DeclaredDistinct(aggregate, s.Keys)).ToArray();
+            var emptySets = aggregate.Groupings.Count(g => g.Keys.Count == 0);
+            var keyedEstimate = rel.EstRowCount / Math.Max(1, aggregate.Groupings.Count - emptySets);
             return context =>
             {
-                var compiler = Expressions(path);
-                var keyExprs = keys
-                    .Select(k => compiler.Compile(IrBuilders.FieldRef(k, inputRow.Fields[k].Type)))
-                    .ToArray();
-
-                var plans = new MeasurePlan[measures.Length];
-                for (var m = 0; m < measures.Length; m++)
+                var tables = new GroupingSet[sets.Length];
+                for (var s = 0; s < sets.Length; s++)
                 {
-                    var measure = measures[m];
-                    var ordered = measure.OrderBy.Count > 0 ? measure.OrderBy[0] : null;
-                    var descending = ordered is not null && Aggregates.IsDescending(ordered.Direction);
-
-                    // A percentile's value is its WITHIN GROUP expression, not its argument: Calcite
-                    // puts the fraction in the argument list (D57).
-                    var valueExpr = measure.UserFunction.Length == 0
-                        && Aggregates.IsPercentile(measure.Function)
-                        ? ordered?.Expr
-                            ?? throw new InvalidPlanException(
-                                "I-IR-13",
-                                path,
-                                $"{measure.Function} has no WITHIN GROUP ordering to take a percentile of")
-                        : measure.Args.Count > 0 ? measure.Args[0] : null;
-
-                    var argument = valueExpr is null ? null : compiler.Compile(valueExpr);
-                    var argumentType = argument?.Type;
-
-                    // The key is only read when it is a different column from the value; a percentile
-                    // orders by the value itself, and so does an aggregate with no ORDER BY.
-                    var keyExpr = measure.UserFunction.Length == 0
-                        && Aggregates.IsPercentile(measure.Function) ? null : ordered?.Expr;
-                    var key = keyExpr is null ? null : compiler.Compile(keyExpr);
-
-                    // D297: a DISTINCT measure hashes its operand and an ordered one sorts by its
-                    // WITHIN GROUP key — a percentile's own value — so both are keys, bound here
-                    // before the accumulator that reads them.
-                    if (measure.Distinct && argumentType is { } distinctType)
+                    var shape = sets[s];
+                    var compiler = Expressions(path);
+                    var table = new HashAggregateOperator(
+                        context,
+                        path,
+                        shape.Schema,
+                        shape.Types,
+                        input: null,
+                        KeyExpressions(compiler, shape.Keys, inputRow),
+                        MeasurePlans(compiler, tableMeasures, path),
+                        // The plan estimates the sets' groups together; a grand total is one.
+                        shape.Keys.Length == 0 ? 1 : keyedEstimate,
+                        declared[s]);
+                    tables[s] = new GroupingSet
                     {
-                        ColumnKinds.RequireComparable(distinctType, "a DISTINCT aggregate's argument");
-                    }
-
-                    if (ordered is not null && (key ?? argument) is { } orderedBy)
-                    {
-                        ColumnKinds.RequireComparable(orderedBy.Type, "an aggregate's ORDER BY key");
-                    }
-
-                    plans[m] = new MeasurePlan
-                    {
-                        Accumulator = measure.UserFunction.Length > 0
-                            ? UserFunctionBinding.AggregateAccumulator(
-                                _catalog, _functions, measure.UserFunction, ChalkType.FromProto(measure.Type))
-                            : MeasureAccumulator.Create(
-                                measure,
-                                ChalkType.FromProto(measure.Type),
-                                argumentType,
-                                key?.Type,
-                                descending),
-                        Argument = argument,
-                        Filter = measure.Filter is null ? null : compiler.Compile(measure.Filter),
-                        Distinct = measure.Distinct,
-                        ArgumentKind = argumentType is { } t ? ColumnKinds.Of(t) : ColumnKind.Int64,
-                        ArgumentWidth = argumentType is { } w ? ColumnKinds.Width(ColumnKinds.Of(w)) : 8,
-                        OrderKey = key,
-                        OrderKeyKind = key is { } k ? ColumnKinds.Of(k.Type) : ColumnKind.Int64,
-                        OrderKeyWidth = key is { } kw ? ColumnKinds.Width(ColumnKinds.Of(kw.Type)) : 8,
+                        Table = table,
+                        Columns = shape.Columns,
+                        Groupings = shape.Groupings,
                     };
                 }
 
-                // An aggregate's own estimate is a count of groups, which is what every piece of
-                // its per-group state scales with (D258.3).
-                return new HashAggregateOperator(
-                    context, path, schema, types, input(context), keyExprs, plans, rel.EstRowCount, declaredDistinct);
+                return new GroupingSetsOperator(context, path, schema, types, input(context), tables);
             };
+        }
+
+        private static bool IsGrouping(Measure measure) =>
+            measure.UserFunction.Length == 0 && measure.Function == AggregateFunctionId.Grouping;
+
+        /// <summary>
+        /// One grouping set's table and where the aggregate's output columns come from in its rows:
+        /// the set's keys, in the output's order, then every measure but <c>GROUPING</c>.
+        /// </summary>
+        private static GroupingSetPlan GroupingSetShape(
+            Grouping grouping, int[] keys, Measure[] measures, RowType output)
+        {
+            var named = grouping.Keys.Select(k => (int)k).ToHashSet();
+            var setKeys = keys.Where(named.Contains).ToArray();
+            var columns = new int[keys.Length + measures.Length];
+            var values = new long[columns.Length];
+            var tableColumns = new List<int>();
+            for (var i = 0; i < keys.Length; i++)
+            {
+                if (named.Contains(keys[i]))
+                {
+                    columns[i] = tableColumns.Count;
+                    tableColumns.Add(i);
+                }
+                else
+                {
+                    columns[i] = GroupingSet.NullKey;
+                }
+            }
+
+            for (var m = 0; m < measures.Length; m++)
+            {
+                var at = keys.Length + m;
+                if (!IsGrouping(measures[m]))
+                {
+                    columns[at] = tableColumns.Count;
+                    tableColumns.Add(at);
+                    continue;
+                }
+
+                // A bit for each argument, the first the most significant, set where the set does
+                // not name that key.
+                columns[at] = GroupingSet.Grouping;
+                var bits = 0L;
+                foreach (var argument in measures[m].Args)
+                {
+                    bits = (bits << 1) | (named.Contains((int)argument.FieldRef.Index) ? 0L : 1L);
+                }
+
+                values[at] = bits;
+            }
+
+            var row = new RowType();
+            row.Fields.AddRange(tableColumns.Select(c => output.Fields[c]));
+            return new GroupingSetPlan(
+                setKeys, ArrowTypeMapping.ToArrowSchema(row), Types(row), columns, values);
+        }
+
+        /// <summary>A grouping set's table, as the plan describes it, before an execution builds it.</summary>
+        private sealed record GroupingSetPlan(
+            int[] Keys,
+            Apache.Arrow.Schema Schema,
+            IReadOnlyList<ChalkType> Types,
+            int[] Columns,
+            long[] Groupings);
+
+        private static IVectorExpr[] KeyExpressions(ExpressionCompiler compiler, int[] keys, RowType inputRow) =>
+            [.. keys.Select(k => compiler.Compile(IrBuilders.FieldRef(k, inputRow.Fields[k].Type)))];
+
+        /// <summary>What each measure needs at run time, compiled for one execution's table.</summary>
+        private MeasurePlan[] MeasurePlans(ExpressionCompiler compiler, Measure[] measures, string path)
+        {
+            var plans = new MeasurePlan[measures.Length];
+            for (var m = 0; m < measures.Length; m++)
+            {
+                var measure = measures[m];
+                var ordered = measure.OrderBy.Count > 0 ? measure.OrderBy[0] : null;
+                var descending = ordered is not null && Aggregates.IsDescending(ordered.Direction);
+
+                // A percentile's value is its WITHIN GROUP expression, not its argument: Calcite
+                // puts the fraction in the argument list (D57).
+                var valueExpr = measure.UserFunction.Length == 0
+                    && Aggregates.IsPercentile(measure.Function)
+                    ? ordered?.Expr
+                        ?? throw new InvalidPlanException(
+                            "I-IR-13",
+                            path,
+                            $"{measure.Function} has no WITHIN GROUP ordering to take a percentile of")
+                    : measure.Args.Count > 0 ? measure.Args[0] : null;
+
+                var argument = valueExpr is null ? null : compiler.Compile(valueExpr);
+                var argumentType = argument?.Type;
+
+                // The key is only read when it is a different column from the value; a percentile
+                // orders by the value itself, and so does an aggregate with no ORDER BY.
+                var keyExpr = measure.UserFunction.Length == 0
+                    && Aggregates.IsPercentile(measure.Function) ? null : ordered?.Expr;
+                var key = keyExpr is null ? null : compiler.Compile(keyExpr);
+
+                // D297: a DISTINCT measure hashes its operand and an ordered one sorts by its
+                // WITHIN GROUP key — a percentile's own value — so both are keys, bound here
+                // before the accumulator that reads them.
+                if (measure.Distinct && argumentType is { } distinctType)
+                {
+                    ColumnKinds.RequireComparable(distinctType, "a DISTINCT aggregate's argument");
+                }
+
+                if (ordered is not null && (key ?? argument) is { } orderedBy)
+                {
+                    ColumnKinds.RequireComparable(orderedBy.Type, "an aggregate's ORDER BY key");
+                }
+
+                plans[m] = new MeasurePlan
+                {
+                    Accumulator = measure.UserFunction.Length > 0
+                        ? UserFunctionBinding.AggregateAccumulator(
+                            _catalog, _functions, measure.UserFunction, ChalkType.FromProto(measure.Type))
+                        : MeasureAccumulator.Create(
+                            measure,
+                            ChalkType.FromProto(measure.Type),
+                            argumentType,
+                            key?.Type,
+                            descending),
+                    Argument = argument,
+                    Filter = measure.Filter is null ? null : compiler.Compile(measure.Filter),
+                    Distinct = measure.Distinct,
+                    ArgumentKind = argumentType is { } t ? ColumnKinds.Of(t) : ColumnKind.Int64,
+                    ArgumentWidth = argumentType is { } w ? ColumnKinds.Width(ColumnKinds.Of(w)) : 8,
+                    OrderKey = key,
+                    OrderKeyKind = key is { } k ? ColumnKinds.Of(k.Type) : ColumnKind.Int64,
+                    OrderKeyWidth = key is { } kw ? ColumnKinds.Width(ColumnKinds.Of(kw.Type)) : 8,
+                };
+            }
+
+            return plans;
         }
 
         /// <summary>

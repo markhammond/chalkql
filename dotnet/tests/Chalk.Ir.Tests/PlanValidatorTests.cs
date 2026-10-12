@@ -445,23 +445,100 @@ public sealed class PlanValidatorTests
         Assert.Equal("I-IR-7", AssertInvalid(Restamp(IrBuilder.Plan(rel))).Invariant);
     }
 
+    /// <summary>
+    /// Grouping sets (D338): the output's keys are every set's, once each, in ascending field order,
+    /// whatever order a set lists them in, and a key some set leaves out is nullable. GROUPING names
+    /// keys.
+    /// </summary>
     [Fact]
-    public void Grouping_sets_are_reserved_in_v1()
+    public void Grouping_sets_carry_the_union_of_their_keys()
     {
-        var read = BarsRead();
-        var aggregate = new Aggregate { Input = read };
+        var aggregate = new Aggregate { Input = BarsRead() };
+        aggregate.Groupings.Add(new Grouping { Keys = { 1u, 0u } });
         aggregate.Groupings.Add(new Grouping { Keys = { 0u } });
-        aggregate.Groupings.Add(new Grouping { Keys = { 1u } });
+        aggregate.Groupings.Add(new Grouping());
+        aggregate.Measures.Add(Agg(AggregateFunctionId.Count, I64()));
+        aggregate.Measures.Add(
+            Agg(AggregateFunctionId.Grouping, I64(), Ref(Bars, 0), extraArgs: [Ref(Bars, 1)]));
+        var rel = new Rel
+        {
+            RowType = Row(
+                F("symbol", Str(nullable: true)),
+                F("ts", Timestamp(nullable: true)),
+                F("n", I64()),
+                F("g", I64())),
+            HashAggregate = new HashAggregate { Aggregate = aggregate },
+        };
+
+        PlanValidator.Validate(Restamp(IrBuilder.Plan(rel)));
+    }
+
+    /// <summary>The grand total's symbol is NULL, so a NOT NULL key type is wrong.</summary>
+    [Fact]
+    public void A_key_a_set_leaves_out_is_nullable()
+    {
+        var aggregate = new Aggregate { Input = BarsRead() };
+        aggregate.Groupings.Add(new Grouping { Keys = { 0u } });
+        aggregate.Groupings.Add(new Grouping());
         var rel = new Rel
         {
             RowType = Row(F("symbol", Str())),
             HashAggregate = new HashAggregate { Aggregate = aggregate },
         };
 
+        Assert.Equal("I-IR-4", AssertInvalid(Restamp(IrBuilder.Plan(rel))).Invariant);
+    }
+
+    [Fact]
+    public void A_grouping_measure_names_only_keys()
+    {
+        var aggregate = new Aggregate { Input = BarsRead() };
+        aggregate.Groupings.Add(new Grouping { Keys = { 0u } });
+        aggregate.Groupings.Add(new Grouping());
+        aggregate.Measures.Add(Agg(AggregateFunctionId.Grouping, I64(), Ref(Bars, 2)));
+        var rel = new Rel
+        {
+            RowType = Row(F("symbol", Str(nullable: true)), F("g", I64())),
+            HashAggregate = new HashAggregate { Aggregate = aggregate },
+        };
+
         var ex = AssertInvalid(Restamp(IrBuilder.Plan(rel)));
 
         Assert.Equal("I-IR-7", ex.Invariant);
-        Assert.Contains("grouping sets are reserved", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("one of the aggregate's keys", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>A sorted aggregate's input is in one grouping's order, so it has one grouping.</summary>
+    [Fact]
+    public void A_stream_aggregate_carries_one_grouping()
+    {
+        var aggregate = new Aggregate { Input = BarsRead() };
+        aggregate.Groupings.Add(new Grouping { Keys = { 0u } });
+        aggregate.Groupings.Add(new Grouping());
+        var rel = new Rel
+        {
+            RowType = Row(F("symbol", Str(nullable: true))),
+            StreamAggregate = new StreamAggregate { Aggregate = aggregate },
+        };
+
+        var ex = AssertInvalid(Restamp(IrBuilder.Plan(rel)));
+
+        Assert.Equal("I-IR-7", ex.Invariant);
+        Assert.Contains("one grouping", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void An_aggregate_has_at_least_one_grouping()
+    {
+        var aggregate = new Aggregate { Input = BarsRead() };
+        aggregate.Measures.Add(Agg(AggregateFunctionId.Count, I64()));
+        var rel = new Rel
+        {
+            RowType = Row(F("n", I64())),
+            HashAggregate = new HashAggregate { Aggregate = aggregate },
+        };
+
+        Assert.Equal("I-IR-7", AssertInvalid(Restamp(IrBuilder.Plan(rel))).Invariant);
     }
 
     [Fact]

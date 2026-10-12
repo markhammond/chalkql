@@ -1196,6 +1196,32 @@ ASOF JOIN position_changes c MATCH_CONDITION c.ts <= d.closes ON c.asset = k.ass
 `MATCH_CONDITION` itself compares a column of each input, so compute the value in the
 input, as here, rather than writing the expression in it.
 
+### `GROUPING SETS`, `ROLLUP` and `CUBE`
+
+A statement can total by several groupings at once. `GROUP BY ROLLUP(asset, book)` gives a
+row for each asset and book, a subtotal for each asset, and a grand total. `CUBE(asset, book)`
+gives every combination, and `GROUPING SETS ((asset), (book), ())` gives exactly the ones you
+list. Several in one `GROUP BY` multiply: `ROLLUP(asset, book), ROLLUP(venue)` is six
+groupings. The input is read once, however many groupings there are.
+
+In a subtotal, a key the row is not grouped by is NULL. `GROUPING(key, …)` tells that NULL
+from a NULL in the data. It has a bit for each key, the first the most significant, set where
+the row's grouping leaves that key out. So it labels subtotals, and in `HAVING` it picks
+groupings:
+
+```sql
+SELECT CASE WHEN GROUPING(asset) = 1 THEN 'all' ELSE asset END AS asset,
+       venue, SUM(qty) AS qty
+FROM positions
+GROUP BY GROUPING SETS ((asset, venue), (venue))
+```
+
+`GROUPING_ID` is the same function, and `GROUP_ID()` numbers a grouping you list twice. A
+`DISTINCT` aggregate, such as `COUNT(DISTINCT venue)`, is refused with grouping sets: write
+each grouping as its own `GROUP BY`, and join them with `UNION ALL`. Grouping sets are
+computed in the host, never by a source. Under an access policy, every group of every grouping
+has the policy's minimum size.
+
 ### The current time
 
 `CURRENT_TIMESTAMP`, `LOCALTIMESTAMP` and `CURRENT_DATE` read one instant for each

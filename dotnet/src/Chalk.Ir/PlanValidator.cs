@@ -318,6 +318,15 @@ public static class PlanValidator
                     break;
 
                 case Chalk.Ir.Rel.KindOneofCase.StreamAggregate:
+                    // Its input is sorted on the grouping's keys, which only one grouping has (D338).
+                    if (rel.StreamAggregate.Aggregate.Groupings.Count > 1)
+                    {
+                        throw Invalid(
+                            "I-IR-7",
+                            kindPath,
+                            "a StreamAggregate carries one grouping; grouping sets are a HashAggregate's");
+                    }
+
                     AggregateNode(rel.StreamAggregate.Aggregate, output, kindPath);
                     break;
 
@@ -883,39 +892,52 @@ public static class PlanValidator
         {
             var input = Rel(aggregate.Input, path);
 
-            if (aggregate.Groupings.Count != 1)
+            // One grouping is a GROUP BY; several are grouping sets (D338). GROUP BY () is one
+            // grouping with no keys, so none at all is a plan that says nothing.
+            if (aggregate.Groupings.Count == 0)
             {
                 throw Invalid(
                     "I-IR-7",
                     path,
-                    $"the aggregate has {aggregate.Groupings.Count} groupings; a plan carries exactly "
-                    + "one (grouping sets are reserved)");
+                    "the aggregate has no grouping; one with no keys is the whole input's");
             }
 
-            var keys = aggregate.Groupings[0].Keys;
-            for (var i = 0; i < keys.Count; i++)
+            for (var g = 0; g < aggregate.Groupings.Count; g++)
             {
-                RequireIndex(keys[i], input, "I-IR-3", $"{path}.groupings[0].keys[{i}]");
-                RefuseNonScalar(
-                    input.Fields[(int)keys[i]].Type,
-                    $"{path}.groupings[0].keys[{i}]",
-                    "grouped by");
+                var grouping = aggregate.Groupings[g].Keys;
+                for (var i = 0; i < grouping.Count; i++)
+                {
+                    RequireIndex(grouping[i], input, "I-IR-3", $"{path}.groupings[{g}].keys[{i}]");
+                    RefuseNonScalar(
+                        input.Fields[(int)grouping[i]].Type,
+                        $"{path}.groupings[{g}].keys[{i}]",
+                        "grouped by");
+                }
             }
 
-            if (output.Fields.Count != keys.Count + aggregate.Measures.Count)
+            var keys = GroupingKeys.Of(aggregate);
+            if (output.Fields.Count != keys.Length + aggregate.Measures.Count)
             {
                 throw Invalid(
                     "I-IR-7",
                     path,
-                    $"the aggregate's row type has {output.Fields.Count} fields but {keys.Count} keys "
+                    $"the aggregate's row type has {output.Fields.Count} fields but {keys.Length} keys "
                     + $"and {aggregate.Measures.Count} measures");
             }
 
-            for (var i = 0; i < keys.Count; i++)
+            for (var i = 0; i < keys.Length; i++)
             {
+                // A key some grouping leaves out is NULL in that grouping's rows.
+                var keyType = input.Fields[keys[i]].Type;
+                if (keyType is { Nullable: false } && !GroupingKeys.InEvery(aggregate, keys[i]))
+                {
+                    keyType = keyType.Clone();
+                    keyType.Nullable = true;
+                }
+
                 RequireSameType(
                     output.Fields[i].Type,
-                    input.Fields[(int)keys[i]].Type,
+                    keyType,
                     $"{path}.row_type[{i}]",
                     $"the type of grouping key ${keys[i]}");
             }
@@ -964,11 +986,56 @@ public static class PlanValidator
                     throw Invalid("I-IR-7", measurePath, "COUNT(DISTINCT) needs an argument");
                 }
 
+                if (measure.UserFunction.Length == 0 && measure.Function == AggregateFunctionId.Grouping)
+                {
+                    GroupingMeasure(measure, keys, measurePath);
+                }
+
                 RequireSameType(
-                    output.Fields[keys.Count + m].Type,
+                    output.Fields[keys.Length + m].Type,
                     measure.Type,
-                    $"{path}.row_type[{keys.Count + m}]",
+                    $"{path}.row_type[{keys.Length + m}]",
                     "the measure's result type");
+            }
+        }
+
+        /// <summary>
+        /// <c>GROUPING</c> (D338): a bit for each argument, so one to 63 of them, each a key of the
+        /// aggregate. Its value is the row's grouping's, so it reads no row: it takes no DISTINCT or
+        /// FILTER, and it is never NULL.
+        /// </summary>
+        private static void GroupingMeasure(Measure measure, int[] keys, string path)
+        {
+            if (measure.Args.Count is 0 or > 63)
+            {
+                throw Invalid(
+                    "I-IR-7", path, $"GROUPING takes one to 63 keys, not {measure.Args.Count}");
+            }
+
+            for (var a = 0; a < measure.Args.Count; a++)
+            {
+                var argument = measure.Args[a];
+                if (argument.KindCase != Expr.KindOneofCase.FieldRef
+                    || !keys.Contains((int)argument.FieldRef.Index))
+                {
+                    throw Invalid(
+                        "I-IR-7",
+                        $"{path}.args[{a}]",
+                        "a GROUPING argument is a FieldRef to one of the aggregate's keys");
+                }
+            }
+
+            if (measure.Distinct || measure.Filter is not null)
+            {
+                throw Invalid("I-IR-7", path, "GROUPING takes no DISTINCT and no FILTER");
+            }
+
+            if (measure.Type is not { Kind: TypeKind.I64, Nullable: false })
+            {
+                throw Invalid(
+                    "I-IR-7",
+                    path,
+                    $"GROUPING is a non-null I64, not {IrTypes.Describe(measure.Type)}");
             }
         }
 

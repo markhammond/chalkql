@@ -655,23 +655,20 @@ internal static class EntitlementsInvariant
             // Keys then measures (I-IR-7). A key is the input column itself — which is why the
             // planner ships its own column-origin handler for Aggregate rather than Calcite's, whose
             // index is off by the group set (CALCITE-4250) — and a measure is derived from its
-            // arguments.
-            foreach (var grouping in aggregate.Groupings)
+            // arguments. Under grouping sets the keys are every set's, once each (D338).
+            foreach (var key in GroupingKeys.Of(aggregate))
             {
-                foreach (var key in grouping.Keys)
+                if (at >= width)
                 {
-                    if (at >= width)
-                    {
-                        break;
-                    }
-
-                    if (key < input.Count)
-                    {
-                        origins[at].UnionWith(input[(int)key]);
-                    }
-
-                    at++;
+                    break;
                 }
+
+                if (key < input.Count)
+                {
+                    origins[at].UnionWith(input[key]);
+                }
+
+                at++;
             }
 
             foreach (var measure in aggregate.Measures)
@@ -684,10 +681,14 @@ internal static class EntitlementsInvariant
                 // A measure is a value of its *arguments*. Its FILTER decides which rows are
                 // counted rather than what the count is made of, and the report judges an aggregate
                 // the same way — which is why COUNT(*) FILTER (WHERE …) is a count and not a
-                // disclosure of what it filtered on.
-                foreach (var argument in measure.Args)
+                // disclosure of what it filtered on. GROUPING is a value of the row's grouping and
+                // of no column (D338).
+                if (!IsGrouping(measure))
                 {
-                    Derive(origins[at], input, argument);
+                    foreach (var argument in measure.Args)
+                    {
+                        Derive(origins[at], input, argument);
+                    }
                 }
 
                 at++;
@@ -1307,6 +1308,13 @@ internal static class EntitlementsInvariant
 
             foreach (var measure in aggregate.Measures)
             {
+                // GROUPING's arguments are keys, held to a key's rule above, and it reads none of
+                // their values (D338).
+                if (IsGrouping(measure))
+                {
+                    continue;
+                }
+
                 // A user aggregate is a population aggregate when the client's own catalog says its
                 // host declared it one (D295), which is the question I-IR-E asks of reads too.
                 var population = measure.UserFunction.Length == 0
@@ -1328,6 +1336,9 @@ internal static class EntitlementsInvariant
                 }
             }
         }
+
+        private static bool IsGrouping(Measure measure) =>
+            measure.UserFunction.Length == 0 && measure.Function == AggregateFunctionId.Grouping;
 
         private void Refuse(
             IReadOnlyList<HashSet<Origin>> input, Expr expr, string path, string use) =>

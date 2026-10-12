@@ -234,9 +234,15 @@ message Project {
 }
 
 // Output row = grouping keys (in order) followed by measures (in order).
+//
+// One grouping is a GROUP BY: the keys are its keys, in its order. More than one is GROUPING SETS,
+// ROLLUP or CUBE: each grouping makes its own groups over the whole input, and the output's keys
+// are every key any grouping names, once each, in ascending field order. A key a grouping does not
+// name is NULL in that grouping's rows, so it is nullable in the output unless every grouping
+// names it. A grouping named twice makes its groups twice, as SQL says.
 message Aggregate {
   Rel input = 1;
-  // v1 executors accept exactly one grouping. Multiple groupings (grouping sets) are reserved.
+  // At least one.
   repeated Grouping groupings = 2;
   repeated Measure measures = 3;
 }

@@ -45,6 +45,12 @@ internal sealed class MeasurePlan
 /// The hash aggregate of §6.6, which also serves a logical <c>Aggregate</c> because
 /// <c>02-ir.md</c> §4 says logical nodes are always executable. Groups come out in first-seen order.
 /// </summary>
+/// <remarks>
+/// One grouping set's table is the same class without an input (D338): a
+/// <see cref="GroupingSetsOperator"/> starts it with <see cref="Restart"/>, feeds it each batch with
+/// <see cref="Consume"/>, drains it with <see cref="Emit"/> and ends it with
+/// <see cref="ReleaseScratch"/>, so every set's table reads the one pass over the input.
+/// </remarks>
 internal sealed class HashAggregateOperator : OperatorBase
 {
     private const int InitialSlots = 64;
@@ -52,7 +58,8 @@ internal sealed class HashAggregateOperator : OperatorBase
     /// <summary>The largest probe table there is: one more doubling would not fit in an <c>int</c>.</summary>
     private const int MaximumSlots = 1 << 30;
 
-    private readonly IBatchOperator _input;
+    /// <summary>Null for one grouping set's table, which its coordinator feeds.</summary>
+    private readonly IBatchOperator? _input;
     private readonly IVectorExpr[] _keys;
     private readonly GroupKeyStore[] _keyStores;
     private readonly ColumnKind[] _keyKinds;
@@ -154,7 +161,7 @@ internal sealed class HashAggregateOperator : OperatorBase
         string path,
         ArrowSchema schema,
         IReadOnlyList<ChalkType> outputTypes,
-        IBatchOperator input,
+        IBatchOperator? input,
         IVectorExpr[] keys,
         MeasurePlan[] measures,
         double estimatedGroups = 0,
@@ -202,44 +209,24 @@ internal sealed class HashAggregateOperator : OperatorBase
             : -1;
     }
 
-    protected override ValueTask DisposeCoreAsync() => _input.DisposeAsync();
+    protected override ValueTask DisposeCoreAsync() => _input?.DisposeAsync() ?? ValueTask.CompletedTask;
 
     protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
+        var input = _input
+            ?? throw new InvalidOperationException("A grouping set's table is fed by its coordinator.");
         try
         {
             Restart();
-            await foreach (var batch in _input.ExecuteAsync(ct))
+            await foreach (var batch in input.ExecuteAsync(ct))
             {
                 Consume(batch);
             }
 
-            var batchSize = Context.Settings.BatchSize;
-            for (var start = 0; start < _groupCount; start += batchSize)
+            foreach (var groups in Emit(ct))
             {
-                ct.ThrowIfCancellationRequested();
-                var count = Math.Min(batchSize, _groupCount - start);
-                _slot.Begin(count);
-                for (var c = 0; c < _output.Length; c++)
-                {
-                    _output[c].Begin();
-                    for (var g = start; g < start + count; g++)
-                    {
-                        if (c < _keyStores.Length)
-                        {
-                            _keyStores[c].Emit(_output[c], g);
-                        }
-                        else
-                        {
-                            _measures[c - _keyStores.Length].Accumulator.Emit(_output[c], g);
-                        }
-                    }
-
-                    _slot.Set(c, _output[c].FinishView());
-                }
-
-                yield return _slot;
+                yield return groups;
             }
         }
         finally
@@ -249,11 +236,45 @@ internal sealed class HashAggregateOperator : OperatorBase
     }
 
     /// <summary>
+    /// This execution's groups, a batch at a time: the keys, then the measures. Each batch is valid
+    /// until the next is asked for.
+    /// </summary>
+    internal IEnumerable<ColumnarBatch> Emit(CancellationToken ct)
+    {
+        var batchSize = Context.Settings.BatchSize;
+        for (var start = 0; start < _groupCount; start += batchSize)
+        {
+            ct.ThrowIfCancellationRequested();
+            var count = Math.Min(batchSize, _groupCount - start);
+            _slot.Begin(count);
+            for (var c = 0; c < _output.Length; c++)
+            {
+                _output[c].Begin();
+                for (var g = start; g < start + count; g++)
+                {
+                    if (c < _keyStores.Length)
+                    {
+                        _keyStores[c].Emit(_output[c], g);
+                    }
+                    else
+                    {
+                        _measures[c - _keyStores.Length].Accumulator.Emit(_output[c], g);
+                    }
+                }
+
+                _slot.Set(c, _output[c].FinishView());
+            }
+
+            yield return _slot;
+        }
+    }
+
+    /// <summary>
     /// Starts this execution's hash table. The probe table, the per-group hashes and the per-row
     /// working arrays are rented from the arena here and returned by <see cref="ReleaseScratch"/>, so
     /// nothing that scales with the data outlives the run (ADR 0012).
     /// </summary>
-    private void Restart()
+    internal void Restart()
     {
         var arena = Context.Arena;
         foreach (var measure in _measures)
@@ -328,7 +349,7 @@ internal sealed class HashAggregateOperator : OperatorBase
     }
 
     /// <summary>Hands every rented array back, in the run's <c>finally</c>.</summary>
-    private void ReleaseScratch()
+    internal void ReleaseScratch()
     {
         var arena = Context.Arena;
         arena.Return(_slots);
@@ -375,7 +396,8 @@ internal sealed class HashAggregateOperator : OperatorBase
         }
     }
 
-    private void Consume(ColumnarBatch batch)
+    /// <summary>Folds one batch of input rows into this execution's groups.</summary>
+    internal void Consume(ColumnarBatch batch)
     {
         var length = batch.RowCount;
         if (batch.Count == 0)

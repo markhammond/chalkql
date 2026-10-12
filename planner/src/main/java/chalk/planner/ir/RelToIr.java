@@ -1251,15 +1251,31 @@ public final class RelToIr {
   }
 
   private Aggregate aggregate(org.apache.calcite.rel.core.Aggregate node) {
-    if (node.getGroupSets().size() != 1) {
+    // One grouping per set (D338): GROUPING SETS, ROLLUP and CUBE, and two ROLLUPs side by side,
+    // all arrive as one aggregate with a list of sets. The output's keys are the sets' union in
+    // ascending field order, which is Calcite's group set, so the two must agree: a group set that
+    // named a key no set does would make a key that is always NULL, which no SQL Calcite converts
+    // produces.
+    if (node.getGroupSets().size() > 1
+        && !org.apache.calcite.util.ImmutableBitSet.union(node.getGroupSets())
+            .equals(node.getGroupSet())) {
       throw new UnsupportedFeatureException(
           ErrorCode.UNSUPPORTED_SQL,
-          "grouping sets", "A plan carries exactly one grouping.");
+          "an aggregate whose keys are not its grouping sets' keys",
+          "It groups by " + node.getGroupSet() + " over the sets " + node.getGroupSets() + ".");
     }
     Aggregate.Builder aggregate = Aggregate.newBuilder().setInput(toRel(node.getInput()));
-    Grouping.Builder grouping = Grouping.newBuilder();
-    node.getGroupSet().forEach(grouping::addKeys);
-    aggregate.addGroupings(grouping);
+    if (node.getGroupSets().size() == 1) {
+      Grouping.Builder grouping = Grouping.newBuilder();
+      node.getGroupSet().forEach(grouping::addKeys);
+      aggregate.addGroupings(grouping);
+    } else {
+      for (org.apache.calcite.util.ImmutableBitSet set : node.getGroupSets()) {
+        Grouping.Builder grouping = Grouping.newBuilder();
+        set.forEach(grouping::addKeys);
+        aggregate.addGroupings(grouping);
+      }
+    }
 
     RelDataType inputRow = node.getInput().getRowType();
     // D58: a LIST has no equality, so nothing groups by one, and nothing de-duplicates one for a

@@ -70,7 +70,10 @@ class DistinctStrategyTest {
     assertThat(countAggregates(text)).isGreaterThan(1);
   }
 
-  /** Whichever branch it takes, the answer is one grouping: the IR has no grouping sets. */
+  /**
+   * Whichever branch it takes, the answer is one grouping per aggregate: the expansion joins, and
+   * writes no grouping sets.
+   */
   @Test
   void neither_branch_produces_grouping_sets() {
     for (String sql :
