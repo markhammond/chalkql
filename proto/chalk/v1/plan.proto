@@ -522,10 +522,12 @@ message IndexLookup {
   bool reverse = 7;
 }
 
-// Bounds over a prefix of the index's key columns. `lower` and `upper` are Literals or
-// DynamicParams, already cast to the key column's type (I-IR-2). All but the last bound column are
+// Bounds over a prefix of the index's key columns. `lower` and `upper` are Literals, DynamicParams,
+// or expressions that read no column and are the same for a whole execution — literals, parameters
+// and the current time under deterministic functions — which the client computes once as the lookup
+// binds. Each is already cast to the key column's type (I-IR-2). All but the last bound column are
 // equalities (the same expression on both sides, both inclusive); only the last may be open, and an
-// empty list on a side means unbounded there. A DynamicParam bound to NULL yields an empty range.
+// empty list on a side means unbounded there. A bound that is NULL yields an empty range.
 message IndexRange {
   repeated Expr lower = 1;
   bool lower_inclusive = 2;

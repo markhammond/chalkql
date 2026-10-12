@@ -38,6 +38,10 @@ internal sealed class IndexLookupOperator : OperatorBase
     private readonly ColumnarBatch _output;
     private readonly ColumnView[]?[] _children;
 
+    /// <summary>Each computed bound's expression, compiled for this tree (D337); empty when there is none.</summary>
+    private readonly IReadOnlyDictionary<Chalk.Ir.Expr, Expressions.IVectorExpr> _computed;
+    private readonly Expressions.EvalContext? _eval;
+
     public IndexLookupOperator(
         OperatorContext context,
         string path,
@@ -50,9 +54,12 @@ internal sealed class IndexLookupOperator : OperatorBase
         IReadOnlyList<ChalkType> columnTypes,
         long? rowGoal = null,
         bool reverse = false,
-        ResidualGate? gate = null)
+        ResidualGate? gate = null,
+        IReadOnlyDictionary<Chalk.Ir.Expr, Expressions.IVectorExpr>? computed = null)
         : base(context, schema, columnTypes, path)
     {
+        _computed = computed ?? new Dictionary<Chalk.Ir.Expr, Expressions.IVectorExpr>();
+        _eval = _computed.Count > 0 ? context.NewEvalContext() : null;
         _source = source;
         _table = table;
         _index = index;
@@ -68,6 +75,14 @@ internal sealed class IndexLookupOperator : OperatorBase
 
     protected override ValueTask DisposeCoreAsync() => default;
 
+    /// <summary>A computed bound's value for this execution, computed once as the lookup binds (D337).</summary>
+    private ScalarValue Compute(Chalk.Ir.Expr bound)
+    {
+        var expr = _computed[bound];
+        var answer = _eval!.EvaluateOnce(expr);
+        return answer.IsScalar ? answer.Scalar : ScalarValue.FromLane(answer.View, 0, expr.Type);
+    }
+
     protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
@@ -75,7 +90,7 @@ internal sealed class IndexLookupOperator : OperatorBase
         var decided = true;
         foreach (var range in _ranges)
         {
-            var value = range.Bind(Context.Parameters, out var whole);
+            var value = range.Bind(Context.Parameters, Compute, out var whole);
             if (value is not null)
             {
                 bound.Add(value);
@@ -234,20 +249,29 @@ internal sealed class IndexLookupOperator : OperatorBase
         public string SourceId { get; init; } = string.Empty;
 
         /// <summary>The bound range, or null when a NULL parameter emptied it.</summary>
-        public IndexKeyRange? Bind(IReadOnlyList<ScalarValue> parameters) => Bind(parameters, out _);
+        public IndexKeyRange? Bind(IReadOnlyList<ScalarValue> parameters) => Bind(parameters, null, out _);
+
+        /// <summary>The same, saying whether the range is decided; for a range with no computed bound.</summary>
+        public IndexKeyRange? Bind(IReadOnlyList<ScalarValue> parameters, out bool decided) =>
+            Bind(parameters, null, out decided);
+
+        /// <summary>Every computed bound in the range, for the operator to compile (D337).</summary>
+        public IEnumerable<Chalk.Ir.Expr> Computed =>
+            Lower.Concat(Upper).Select(b => b.Expression).OfType<Chalk.Ir.Expr>();
 
         /// <summary>
         /// The bound range, or null when a NULL parameter emptied it; <paramref name="decided"/> says
         /// whether the range is exactly the rows its predicate selects, which every range but a prefix
         /// one bound to a pattern that is not a bare prefix is (D314).
         /// </summary>
-        public IndexKeyRange? Bind(IReadOnlyList<ScalarValue> parameters, out bool decided)
+        public IndexKeyRange? Bind(
+            IReadOnlyList<ScalarValue> parameters, Func<Chalk.Ir.Expr, ScalarValue>? compute, out bool decided)
         {
             decided = true;
             var lower = new object?[Lower.Count];
             for (var i = 0; i < lower.Length; i++)
             {
-                if (!Lower[i].TryBind(parameters, out lower[i]))
+                if (!Lower[i].TryBind(parameters, compute, out lower[i]))
                 {
                     return null;
                 }
@@ -256,7 +280,7 @@ internal sealed class IndexLookupOperator : OperatorBase
             var upper = new object?[Upper.Count];
             for (var i = 0; i < upper.Length; i++)
             {
-                if (!Upper[i].TryBind(parameters, out upper[i]))
+                if (!Upper[i].TryBind(parameters, compute, out upper[i]))
                 {
                     return null;
                 }
@@ -359,25 +383,46 @@ internal sealed class IndexLookupOperator : OperatorBase
         }
     }
 
-    /// <summary>One bound: a constant the planner wrote down, or a parameter to read at execution.</summary>
+    /// <summary>
+    /// One bound: a constant the planner wrote down, a parameter to read at execution, or an
+    /// expression of constants to compute once at execution (D337).
+    /// </summary>
     internal sealed class BoundPlan
     {
         private readonly object? _constant;
         private readonly int _parameter;
 
-        private BoundPlan(object? constant, int parameter)
+        private BoundPlan(object? constant, int parameter, Chalk.Ir.Expr? expression = null)
         {
             _constant = constant;
             _parameter = parameter;
+            Expression = expression;
         }
+
+        /// <summary>The computed bound's expression, or null for a constant or a parameter.</summary>
+        public Chalk.Ir.Expr? Expression { get; }
 
         public static BoundPlan Constant(object? value) => new(value, -1);
 
         public static BoundPlan Parameter(int index) => new(null, index);
 
+        public static BoundPlan Computed(Chalk.Ir.Expr expression) => new(null, -1, expression);
+
         /// <summary>False when the bound is NULL, which makes the whole range empty.</summary>
-        public bool TryBind(IReadOnlyList<ScalarValue> parameters, out object? value)
+        public bool TryBind(IReadOnlyList<ScalarValue> parameters, out object? value) =>
+            TryBind(parameters, null, out value);
+
+        /// <summary>The same, with how a computed bound is computed.</summary>
+        public bool TryBind(
+            IReadOnlyList<ScalarValue> parameters, Func<Chalk.Ir.Expr, ScalarValue>? compute, out object? value)
         {
+            if (Expression is { } expression)
+            {
+                value = (compute ?? throw new InvalidOperationException(
+                    "A computed index bound was bound with no way to compute it."))(expression).ToClr();
+                return value is not null;
+            }
+
             if (_parameter < 0)
             {
                 value = _constant;

@@ -395,6 +395,14 @@ on the declared key but reads nothing from the parent, and the key is unique in 
 parent. Then the key promises that the join changes nothing, so the planner *deletes*
 it. If the key is wrong, the answer is wrong.
 
+An index serves a comparison on its leading columns. The value compared with may be a
+literal, a parameter, or an expression of them that is the same for the whole execution,
+such as `CURRENT_TIMESTAMP - INTERVAL '5' MINUTE`. Such an expression is computed once,
+as the lookup starts. Whether the planner reads the index or scans is a cost decision.
+An equality, a range closed on both sides, or a `LIMIT` over the index's order usually
+reads the index. A range open on one side, whose bound the planner cannot know until the
+query runs, is estimated to keep half the rows, so it usually scans.
+
 You can extend POCO indexing too. Implement `IPocoIndex<T>` to adapt an existing index
 structure. Then run the test kit's `PocoIndexConformance.Verify` against it. It compares
 the index with a full scan over a battery of ranges, to check that the index keeps
