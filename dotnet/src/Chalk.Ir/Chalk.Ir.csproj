@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Chalk.Ir.Tests" />
+    <!-- An operator records where a ChalkQL error was raised, on the error itself (D337). -->
+    <InternalsVisibleTo Include="Chalk.Execution" />
   </ItemGroup>
 
 </Project>

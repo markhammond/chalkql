@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Chalk;
 
 /// <summary>
@@ -58,6 +60,23 @@ public abstract class ChalkException : Exception
     /// carries.
     /// </summary>
     public string? Code => Violations.Count > 0 ? Violations[0].Code : null;
+
+    /// <summary>
+    /// The message, led, for an error raised while a query ran, by the operator it was raised in, as
+    /// an execution failure names it: <c>Execution failed at root/Sort (plan …): …</c>.
+    /// </summary>
+    public override string Message => _raisedAt is null ? base.Message : _raisedAt + base.Message;
+
+    private string? _raisedAt;
+
+    /// <summary>
+    /// Records the operator this error was raised in (D337). The error reaches the host as itself,
+    /// so the place is kept here rather than on a wrapper. The first operator to see it is the one
+    /// it broke in, so a later one changes nothing.
+    /// </summary>
+    internal void RaisedAt(ulong planDigest, string operatorPath) =>
+        _raisedAt ??= string.Create(
+            CultureInfo.InvariantCulture, $"Execution failed at {operatorPath} (plan {planDigest:x16}): ");
 
     /// <summary>
     /// A message ending with its code in brackets, or as it is when there is none, or when it already

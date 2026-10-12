@@ -136,14 +136,14 @@ public sealed class Tier1Utf8Tests
     [Fact]
     public async Task Invalid_UTF_8_from_a_span_is_refused_naming_the_row()
     {
-        // The operator wraps what a plan throws, naming the failing node; the cause is the refusal.
-        var wrapped = await Assert.ThrowsAsync<ExecutionException>(() => ProjectAsync(
+        // The refusal reaches the caller as itself, its message led by the failing node.
+        var failure = await Assert.ThrowsAsync<InvalidUtf8Exception>(() => ProjectAsync(
             StringToString("bad"),
             new HostScalar1<ReadOnlySpan<byte>, ReadOnlySpan<byte>>(
                 "bad",
                 static v => v.Length == 0 ? v : new byte[] { 0xC3, 0x28 })));
 
-        var failure = Assert.IsType<InvalidUtf8Exception>(wrapped.InnerException);
+        Assert.StartsWith("Execution failed at root", failure.Message, StringComparison.Ordinal);
         Assert.Equal(0, failure.Row);
         Assert.Contains("Tier 1 function", failure.Message, StringComparison.Ordinal);
         Assert.Contains("not valid UTF-8", failure.Message, StringComparison.Ordinal);

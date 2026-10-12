@@ -271,11 +271,11 @@ public sealed class WindowsIiOperatorTests
             Interval(5)));
 
         using var arena = new ExecutionArena(new ArenaOptions { MaxBytes = 200_000 });
-        var failure = await Assert.ThrowsAsync<ExecutionException>(
+        var failure = await Assert.ThrowsAsync<ArenaBudgetExceededException>(
             () => DrainAsync(Runner.Compile(plan, source, batchSize: 512), arena));
 
-        Assert.Contains("Session", failure.OperatorPath, StringComparison.Ordinal);
-        Assert.IsType<ArenaBudgetExceededException>(failure.InnerException);
+        Assert.Matches(@"^Execution failed at root\S*Session\S* \(plan [0-9a-f]{16}\): ", failure.Message);
+        Assert.Equal(ChalkErrorCodes.MemoryBudgetExceeded, failure.Code);
         Assert.Equal(0, arena.OutstandingBytes);
     }
 
@@ -430,11 +430,11 @@ public sealed class WindowsIiOperatorTests
         var plan = IrBuilder.Plan(IrBuilder.Unnest(Lists(), listColumn: 1));
 
         using var arena = new ExecutionArena(new ArenaOptions { MaxBytes = 4_096 });
-        var failure = await Assert.ThrowsAsync<ExecutionException>(
+        var failure = await Assert.ThrowsAsync<ArenaBudgetExceededException>(
             () => DrainAsync(Runner.Compile(plan, Source, batchSize: 4096), arena));
 
-        Assert.Contains("Unnest", failure.OperatorPath, StringComparison.Ordinal);
-        Assert.IsType<ArenaBudgetExceededException>(failure.InnerException);
+        Assert.Matches(@"^Execution failed at root\S*Unnest\S* \(plan [0-9a-f]{16}\): ", failure.Message);
+        Assert.Equal(ChalkErrorCodes.MemoryBudgetExceeded, failure.Code);
         Assert.Equal(0, arena.OutstandingBytes);
     }
 

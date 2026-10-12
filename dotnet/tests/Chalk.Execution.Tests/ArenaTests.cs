@@ -414,7 +414,7 @@ public sealed class ArenaTests
         var compiled = Pipeline(out _);
         using var arena = new ExecutionArena(new ArenaOptions { MaxBytes = 4096 });
 
-        var error = await Assert.ThrowsAsync<ExecutionException>(async () =>
+        var error = await Assert.ThrowsAsync<ArenaBudgetExceededException>(async () =>
         {
             await foreach (var batch in compiled.ExecuteAsync(
                 [], new ExecutionStats(), arena, TestContext.Current.CancellationToken))
@@ -425,9 +425,8 @@ public sealed class ArenaTests
 
         _output.WriteLine(error.Message);
         Assert.Contains("arena budget of 4096 bytes", error.Message, StringComparison.Ordinal);
-        Assert.Contains(error.OperatorPath, error.Message, StringComparison.Ordinal);
-        Assert.StartsWith("root", error.OperatorPath, StringComparison.Ordinal);
-        Assert.IsType<ArenaBudgetExceededException>(error.InnerException);
+        Assert.Matches(@"^Execution failed at root\S* \(plan [0-9a-f]{16}\): ", error.Message);
+        Assert.Equal(ChalkErrorCodes.MemoryBudgetExceeded, error.Code);
 
         // A refused rental is not a charged one: the arena is intact for whatever comes next.
         Assert.Equal(0, arena.OutstandingBytes);

@@ -84,7 +84,12 @@ internal abstract class OperatorBase : IBatchOperator, IAsyncEnumerable<Columnar
         }
         catch (Exception exception) when (Wraps(exception))
         {
-            throw new ExecutionException(CodeOf(exception), Context.PlanDigest, Path, exception.Message, exception);
+            throw new ExecutionException(Context.PlanDigest, Path, exception.Message, exception);
+        }
+        catch (ChalkException exception) when (exception is not ExecutionException)
+        {
+            exception.RaisedAt(Context.PlanDigest, Path);
+            throw;
         }
 
         if (!move.IsCompleted)
@@ -101,7 +106,12 @@ internal abstract class OperatorBase : IBatchOperator, IAsyncEnumerable<Columnar
         }
         catch (Exception exception) when (Wraps(exception))
         {
-            throw new ExecutionException(CodeOf(exception), Context.PlanDigest, Path, exception.Message, exception);
+            throw new ExecutionException(Context.PlanDigest, Path, exception.Message, exception);
+        }
+        catch (ChalkException exception) when (exception is not ExecutionException)
+        {
+            exception.RaisedAt(Context.PlanDigest, Path);
+            throw;
         }
 
         if (!moved)
@@ -148,7 +158,12 @@ internal abstract class OperatorBase : IBatchOperator, IAsyncEnumerable<Columnar
         }
         catch (Exception exception) when (Wraps(exception))
         {
-            throw new ExecutionException(CodeOf(exception), Context.PlanDigest, Path, exception.Message, exception);
+            throw new ExecutionException(Context.PlanDigest, Path, exception.Message, exception);
+        }
+        catch (ChalkException exception) when (exception is not ExecutionException)
+        {
+            exception.RaisedAt(Context.PlanDigest, Path);
+            throw;
         }
 
         if (!moved)
@@ -240,16 +255,12 @@ internal abstract class OperatorBase : IBatchOperator, IAsyncEnumerable<Columnar
     }
 
     /// <summary>
-    /// Cancellation is not a failure, and an <see cref="ExecutionException"/> from a child already
-    /// names the operator that actually broke — re-wrapping it would bury the useful path.
+    /// Cancellation is not a failure, and a ChalkQL exception reaches the host as itself (D337): its
+    /// type is what a host catches, and the operator it broke in leads its message, as it did when it
+    /// was wrapped. An <see cref="ExecutionException"/> from a child is one already. Only an
+    /// exception that is not ChalkQL's — a host's source or function, or the runtime — is wrapped,
+    /// with the plan digest and the operator's path.
     /// </summary>
     private static bool Wraps(Exception exception) =>
-        exception is not (OperationCanceledException or ExecutionException);
-
-    /// <summary>
-    /// A wrapped ChalkQL exception keeps its code, which says more than that an operator failed; any
-    /// other failure is <see cref="ChalkErrorCodes.ExecutionFailed"/>.
-    /// </summary>
-    private static string CodeOf(Exception exception) =>
-        exception is ChalkException { Code: { } code } ? code : ChalkErrorCodes.ExecutionFailed;
+        exception is not (OperationCanceledException or ChalkException);
 }

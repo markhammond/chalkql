@@ -339,7 +339,7 @@ public sealed class JoinOperatorTests
         var compiled = Runner.Compile(plan, Source);
         using var arena = new ExecutionArena(new ArenaOptions { MaxBytes = 512 });
 
-        var failure = await Assert.ThrowsAsync<ExecutionException>(async () =>
+        var failure = await Assert.ThrowsAsync<ArenaBudgetExceededException>(async () =>
         {
             await foreach (var batch in compiled.ExecuteAsync(
                 [], new ExecutionStats(), arena, CancellationToken.None))
@@ -348,8 +348,8 @@ public sealed class JoinOperatorTests
             }
         });
 
-        Assert.Contains("HashJoin", failure.OperatorPath, StringComparison.Ordinal);
-        Assert.IsType<ArenaBudgetExceededException>(failure.InnerException);
+        Assert.Matches(@"^Execution failed at root\S*HashJoin\S* \(plan [0-9a-f]{16}\): ", failure.Message);
+        Assert.Equal(ChalkErrorCodes.MemoryBudgetExceeded, failure.Code);
 
         // Not asserting OutstandingBytes here: an execution that is torn down mid-allocation leaves
         // the partially built column behind, which is true of every blocking operator since M1 and is

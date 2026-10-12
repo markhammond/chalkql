@@ -472,7 +472,7 @@ public sealed class WindowOperatorTests
                     IrBuilder.Ref(Value, IrBuilder.I64(nullable: true))))),
             Source);
 
-        var failure = await Assert.ThrowsAsync<ExecutionException>(async () =>
+        var failure = await Assert.ThrowsAsync<ArenaBudgetExceededException>(async () =>
         {
             await foreach (var batch in compiled.ExecuteAsync(
                 [], new ExecutionStats(), arena, CancellationToken.None))
@@ -481,8 +481,8 @@ public sealed class WindowOperatorTests
             }
         });
 
-        Assert.Contains("Window", failure.OperatorPath, StringComparison.Ordinal);
-        Assert.IsType<ArenaBudgetExceededException>(failure.InnerException);
+        Assert.Matches(@"^Execution failed at root\S*Window\S* \(plan [0-9a-f]{16}\): ", failure.Message);
+        Assert.Equal(ChalkErrorCodes.MemoryBudgetExceeded, failure.Code);
 
         // A refused rental is not a charged one, and the run's finally hands back everything it did
         // get: an aborted window leaves the arena as empty as a finished one (§2).

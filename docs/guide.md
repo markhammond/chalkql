@@ -2358,6 +2358,23 @@ foreach (var violation in failure.Violations)
 }
 ```
 
+An error raised while a query runs reaches you as itself, so you can catch the type you
+expect. Its message begins with the operator it broke in:
+
+```csharp
+catch (ArenaBudgetExceededException exceeded)
+{
+    // Execution failed at root/Sort/Read (plan 41b8eca5ff4a30c5): execution exceeded its arena
+    // budget of 4096 bytes: 1280 bytes were already outstanding and 4096 more were asked for
+    // [MemoryBudgetExceeded]
+    log.LogWarning("needed more than {Bytes} bytes", exceeded.MaxBytes);
+}
+```
+
+Only an exception that is not ChalkQL's arrives wrapped: one from your own source or function, or
+from the runtime. It comes as an `ExecutionException` with the code `ExecutionFailed`, which
+names the operator and the plan, and its `InnerException` is the one that was thrown.
+
 A planner's errors travel with their codes and kinds, so a `PlanningException` or an
 `EntitlementException` has the code the planner raised it with, and its `Kind` is one of
 `PlanErrorKinds`: `Parse`, `Validation`, `Unsupported`, `Policy` and the rest. A code or kind

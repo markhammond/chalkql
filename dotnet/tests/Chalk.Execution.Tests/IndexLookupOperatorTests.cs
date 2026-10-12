@@ -189,8 +189,7 @@ public sealed class IndexLookupOperatorTests
             [IrBuilder.Range([IrBuilder.Param(0, IrBuilder.Str(nullable: true))], [], prefix: true)],
             IrBuilder.Str(nullable: true));
 
-        var error = await Assert.ThrowsAsync<ExecutionException>(() => RunAsync(plan, ["a%b%"]));
-        var refusal = Assert.IsType<UnsupportedFeatureException>(error.InnerException);
+        var refusal = await Assert.ThrowsAsync<UnsupportedFeatureException>(() => RunAsync(plan, ["a%b%"]));
 
         Assert.Contains("ix_points_Group", refusal.Message, StringComparison.Ordinal);
         Assert.Contains("ranges do not decide", refusal.Message, StringComparison.Ordinal);
@@ -233,9 +232,9 @@ public sealed class IndexLookupOperatorTests
         var bareRange = Plan(
             [IrBuilder.Range([IrBuilder.Param(0, IrBuilder.Str(nullable: true))], [], prefix: true)],
             IrBuilder.Str(nullable: true));
-        var error = await Assert.ThrowsAsync<ExecutionException>(
+        var error = await Assert.ThrowsAsync<UnsupportedFeatureException>(
             () => RunAsync(bareRange, ["\U0010FFFF%"]));
-        Assert.IsType<UnsupportedFeatureException>(error.InnerException);
+        Assert.StartsWith("Execution failed at root", error.Message, StringComparison.Ordinal);
 
         var (rows, _) = await RunAsync(RechecksItsLike(escape: null), ["\U0010FFFF%"]);
         Assert.Empty(rows);
