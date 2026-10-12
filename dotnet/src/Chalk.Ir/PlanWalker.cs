@@ -146,6 +146,10 @@ public static class PlanWalker
                 yield return rel.AsOfJoin.Left;
                 yield return rel.AsOfJoin.Right;
                 break;
+            case Rel.KindOneofCase.AsOfLookupJoin:
+                // The table is read through its index, as an IndexLookup's is: a leaf on that side.
+                yield return rel.AsOfLookupJoin.Left;
+                break;
             case Rel.KindOneofCase.HashAggregate:
                 yield return rel.HashAggregate.Aggregate.Input;
                 break;
@@ -299,6 +303,14 @@ public static class PlanWalker
                 break;
             case Rel.KindOneofCase.AsOfJoin:
                 // Keys and time columns are field indexes, not expressions.
+                break;
+            case Rel.KindOneofCase.AsOfLookupJoin:
+                // The values the seek holds columns to, as an IndexLookup's bounds are.
+                foreach (var value in rel.AsOfLookupJoin.FixedValues)
+                {
+                    yield return value;
+                }
+
                 break;
             case Rel.KindOneofCase.Window:
                 foreach (var field in rel.Window.Order)

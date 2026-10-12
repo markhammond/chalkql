@@ -117,6 +117,10 @@ public final class PlanDigest {
         builder.getAsOfJoinBuilder().setLeft(stripEstimates(rel.getAsOfJoin().getLeft()));
         builder.getAsOfJoinBuilder().setRight(stripEstimates(rel.getAsOfJoin().getRight()));
       }
+      case AS_OF_LOOKUP_JOIN ->
+          builder
+              .getAsOfLookupJoinBuilder()
+              .setLeft(stripEstimates(rel.getAsOfLookupJoin().getLeft()));
       case SET_OP -> {
         SetOp.Builder setOp = builder.getSetOpBuilder();
         for (int i = 0; i < setOp.getInputsCount(); i++) {

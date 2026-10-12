@@ -326,6 +326,8 @@ public final class RuleSets {
     rules.add(ChalkMergeJoinRule.INSTANCE);
     rules.add(ChalkNestedLoopJoinRule.INSTANCE);
     rules.add(ChalkAsOfJoinRule.INSTANCE);
+    // D338: an ASOF join over an in-process table, answered by seeking an index on it.
+    rules.addAll(chalk.planner.plan.rules.ChalkAsOfLookupRule.rules(policy));
 
     // Join order, for the queries small enough to enumerate (D44).
     if (enumerateJoinOrders) {

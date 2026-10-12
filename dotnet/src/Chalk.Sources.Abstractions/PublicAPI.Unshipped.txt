@@ -190,6 +190,8 @@ Chalk.Sources.IndexLookupRequest.Reverse.get -> bool
 Chalk.Sources.IndexLookupRequest.Reverse.init -> void
 Chalk.Sources.IndexLookupRequest.RowGoal.get -> long?
 Chalk.Sources.IndexLookupRequest.RowGoal.init -> void
+Chalk.Sources.IndexLookupRequest.RowsPerRange.get -> int?
+Chalk.Sources.IndexLookupRequest.RowsPerRange.init -> void
 Chalk.Sources.IndexLookupRequest.Table.get -> string!
 Chalk.Sources.IndexLookupRequest.Table.init -> void
 Chalk.Sources.IndexPrefix

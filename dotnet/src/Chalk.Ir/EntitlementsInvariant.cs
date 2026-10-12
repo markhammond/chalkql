@@ -75,6 +75,7 @@ internal static class EntitlementsInvariant
         Rel.KindOneofCase.MergeJoin,
         Rel.KindOneofCase.NestedLoopJoin,
         Rel.KindOneofCase.AsOfJoin,
+        Rel.KindOneofCase.AsOfLookupJoin,
         Rel.KindOneofCase.LookupJoin,
         Rel.KindOneofCase.AdaptiveJoin,
         Rel.KindOneofCase.SetOp,
@@ -513,6 +514,12 @@ internal static class EntitlementsInvariant
                 case Rel.KindOneofCase.AsOfJoin:
                     return Joined(
                         rel.AsOfJoin.Left, rel.AsOfJoin.Right, rel.AsOfJoin.Type, path, width);
+
+                case Rel.KindOneofCase.AsOfLookupJoin:
+                    // The left's columns, then the table's read through its index, as an
+                    // IndexLookup reads it: the planner seeks no entitled table, and the compiler
+                    // refuses a plan that does (D338).
+                    return Widen(Of(rel.AsOfLookupJoin.Left, path), width);
 
                 case Rel.KindOneofCase.LookupJoin:
                     return Joined(
@@ -1266,6 +1273,7 @@ internal static class EntitlementsInvariant
                         break;
                     case Rel.KindOneofCase.Read:
                     case Rel.KindOneofCase.IndexLookup:
+                    case Rel.KindOneofCase.AsOfLookupJoin:
                     case Rel.KindOneofCase.RemoteQuery:
                     case Rel.KindOneofCase.VirtualTable:
                     case Rel.KindOneofCase.PartitionedScan:

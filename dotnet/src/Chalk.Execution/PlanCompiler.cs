@@ -43,6 +43,7 @@ internal static class PlanCompiler
             [Rel.KindOneofCase.MergeJoin] = static (c, rel, path) => c.MergeJoin(rel, path),
             [Rel.KindOneofCase.NestedLoopJoin] = static (c, rel, path) => c.NestedLoopJoin(rel, path),
             [Rel.KindOneofCase.AsOfJoin] = static (c, rel, path) => c.AsOfJoin(rel, path),
+            [Rel.KindOneofCase.AsOfLookupJoin] = static (c, rel, path) => c.AsOfLookupJoin(rel, path),
             [Rel.KindOneofCase.Window] = static (c, rel, path) => c.Window(rel, path),
             [Rel.KindOneofCase.Hop] = static (c, rel, path) => c.Hop(rel, path),
             [Rel.KindOneofCase.Session] = static (c, rel, path) => c.Session(rel, path),
@@ -1144,6 +1145,152 @@ internal static class PlanCompiler
                 join.Match,
                 preSorted,
                 shape.RightRows);
+        }
+
+        /// <summary>
+        /// An ASOF join that seeks an index (D338): the plain join, over the left input read once and
+        /// replayed, and over the rows a seek for each distinct key and time of it finds. The index
+        /// must begin with the seek's key columns, in any order, and go on with the time column
+        /// ascending, readable backwards where the seek reads that way; the planner chooses only such
+        /// an index, and a plan that names another is refused here rather than answered wrongly.
+        /// </summary>
+        public OperatorFactory AsOfLookupJoin(Rel rel, string path)
+        {
+            var seek = rel.AsOfLookupJoin;
+            var table = seek.Table;
+            if (!_sources.TryGetValue(table.SourceId, out var source))
+            {
+                throw new UnsupportedFeatureException(
+                    ChalkErrorCodes.UnknownSource,
+                    $"source '{table.SourceId}'",
+                    $"The engine holds no source with that id. Known: {string.Join(", ", _sources.Keys)}.");
+            }
+
+            var descriptor = _catalog.FindTable(table.Schema, table.Table)
+                ?? throw new InvalidPlanException(
+                    "I-IR-6", path, $"the catalog has no table {table.Schema}.{table.Table}");
+
+            // An access policy's filters and masks are a Read's, which a seek is not: the planner
+            // never seeks a table that has one.
+            if (descriptor.Table.Entitlement is not null)
+            {
+                throw new InvalidPlanException(
+                    "I-IR-6",
+                    path,
+                    $"the plan seeks {table.Schema}.{table.Table}, which carries an access policy; only a "
+                    + "read under the policy reaches it");
+            }
+
+            var index = descriptor.Table.Indexes.FirstOrDefault(
+                i => string.Equals(i.Name, seek.Index, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidPlanException(
+                    "I-IR-6",
+                    path,
+                    $"table {table.Schema}.{table.Table} declares no index named '{seek.Index}'");
+
+            var projection = seek.Projection.Select(i => (int)i).ToArray();
+            if (projection.Any(c => c < 0 || c >= descriptor.Table.Columns.Count))
+            {
+                throw new InvalidPlanException(
+                    "I-IR-6",
+                    path,
+                    $"a projection column is out of range for a table of {descriptor.Table.Columns.Count} columns");
+            }
+
+            var leftKeys = seek.LeftKeys.Select(k => (int)k).ToArray();
+            var rightKeys = seek.RightKeys.Select(k => (int)k).ToArray();
+            var keyColumns = rightKeys.Select(k => projection[k]).ToArray();
+            var fixedColumns = seek.FixedColumns.Select(c => (int)c).ToArray();
+            int[] held = [.. keyColumns, .. fixedColumns];
+            var timeColumn = projection[(int)seek.RightTime];
+            var backwards = seek.Match is AsOfMatch.Ge or AsOfMatch.Gt;
+            if (index.Kind is not (IndexKind.Ordered or IndexKind.Clustered)
+                || index.Columns.Count <= held.Length
+                || held.Distinct().Count() != held.Length
+                || !index.Columns.Take(held.Length).ToHashSet().SetEquals(held)
+                || index.Columns[held.Length] != timeColumn
+                || index.DirectionAt(held.Length) is not (SortDirection.AscNullsLast or SortDirection.AscNullsFirst)
+                || (backwards && index.Reversal != IndexReversal.Any))
+            {
+                throw new InvalidPlanException(
+                    "I-IR-6",
+                    path,
+                    $"index '{index.Name}' does not begin with the seek's key columns and then its time "
+                    + "column ascending, readable in the seek's direction");
+            }
+
+            // The index's leading key columns, in its order: each a left key, or a fixed value.
+            var keys = new AsOfSeekOperator.SeekKey[held.Length];
+            for (var p = 0; p < held.Length; p++)
+            {
+                var column = index.Columns[p];
+                var k = Array.IndexOf(keyColumns, column);
+                keys[p] = k >= 0
+                    ? new AsOfSeekOperator.SeekKey(leftKeys[k], null)
+                    : new AsOfSeekOperator.SeekKey(
+                        -1, Bound(seek.FixedValues[Array.IndexOf(fixedColumns, column)], path));
+            }
+
+            // The right side's fields are the table's columns, named and typed as the source returns
+            // them; the output renames them where the left has the same names, and pads them with NULLs
+            // for a LEFT join, as the plain join's does.
+            var leftRow = seek.Left.RowType;
+            var rightRow = new RowType();
+            for (var i = 0; i < projection.Length; i++)
+            {
+                var column = descriptor.Table.Columns[projection[i]];
+                var field = rel.RowType.Fields[leftRow.Fields.Count + i].Clone();
+                field.Name = column.Name;
+                field.Type.Nullable = column.Type.Nullable;
+                rightRow.Fields.Add(field);
+            }
+
+            var left = Node(seek.Left, path);
+            var leftSchema = ArrowTypeMapping.ToArrowSchema(leftRow);
+            var leftTypes = Types(leftRow);
+            var rightSchema = ArrowTypeMapping.ToArrowSchema(rightRow);
+            var rightTypes = Types(rightRow);
+            var schema = ArrowTypeMapping.ToArrowSchema(rel.RowType);
+            var outputTypes = Types(rel.RowType);
+            var computed = keys.Select(k => k.Fixed?.Expression).OfType<Expr>().Distinct().ToArray();
+            return context =>
+            {
+                var compiler = Expressions(path);
+                var materialisation = new Materialisation(leftTypes);
+                var found = new AsOfSeekOperator(
+                    context,
+                    path,
+                    rightSchema,
+                    rightTypes,
+                    source,
+                    descriptor.Table.Name,
+                    index.Name,
+                    projection,
+                    materialisation,
+                    leftTypes,
+                    keys,
+                    (int)seek.LeftTime,
+                    seek.Match,
+                    computed.Length == 0 ? null : computed.ToDictionary(e => e, compiler.Compile));
+                var join = new AsOfJoinOperator(
+                    context,
+                    path,
+                    schema,
+                    outputTypes,
+                    leftTypes,
+                    rightTypes,
+                    new MaterialisedInputOperator(context, path, leftSchema, leftTypes, materialisation),
+                    found,
+                    seek.Type,
+                    leftKeys,
+                    rightKeys,
+                    (int)seek.LeftTime,
+                    (int)seek.RightTime,
+                    seek.Match,
+                    rightPreSorted: false);
+                return new AsOfLookupJoinOperator(
+                    context, path, schema, outputTypes, left(context), materialisation, join);
+            };
         }
 
         /// <summary>

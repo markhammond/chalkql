@@ -445,6 +445,79 @@ public sealed class PlanValidatorTests
         Assert.Equal("I-IR-7", AssertInvalid(Restamp(IrBuilder.Plan(rel))).Invariant);
     }
 
+    // ---- AsOfLookupJoin (D338) ----
+
+    /// <summary>
+    /// An ASOF join that seeks <c>bars</c>' (symbol, ts) index, with the left's fields and then the
+    /// projection's (symbol, ts, close) as its row.
+    /// </summary>
+    private static Rel Seek(Action<AsOfLookupJoin>? change = null)
+    {
+        var seek = new AsOfLookupJoin
+        {
+            Left = BarsRead(),
+            Table = new TableRef { SourceId = "mem", Schema = "main", Table = "bars" },
+            Index = "ix_bars_symbol_ts",
+            LeftTime = 1,
+            RightTime = 1,
+            Match = AsOfMatch.Ge,
+            Type = JoinType.Inner,
+        };
+        seek.Projection.AddRange([0u, 1u, 2u]);
+        seek.LeftKeys.Add(0u);
+        seek.RightKeys.Add(0u);
+        change?.Invoke(seek);
+        var row = Row([.. Bars.Fields, F("symbol0", Str()), F("ts0", Timestamp()), F("close0", Fp64())]);
+        return new Rel { RowType = row, AsOfLookupJoin = seek };
+    }
+
+    [Fact]
+    public void A_seek_validates()
+    {
+        PlanValidator.Validate(Restamp(IrBuilder.Plan(Seek())));
+    }
+
+    [Fact]
+    public void A_seek_with_a_fixed_value_validates()
+    {
+        PlanValidator.Validate(Restamp(IrBuilder.Plan(Seek(s =>
+        {
+            s.LeftKeys.Clear();
+            s.RightKeys.Clear();
+            s.FixedColumns.Add(0u);
+            s.FixedValues.Add(Lit("EUR"));
+        }))));
+    }
+
+    [Fact]
+    public void A_fixed_column_needs_a_value()
+    {
+        var ex = AssertInvalid(Restamp(IrBuilder.Plan(Seek(s => s.FixedColumns.Add(0u)))));
+
+        Assert.Equal("I-IR-6", ex.Invariant);
+    }
+
+    /// <summary>A fixed value is the same for every row, so it reads no column.</summary>
+    [Fact]
+    public void A_fixed_value_reads_no_column()
+    {
+        var ex = AssertInvalid(Restamp(IrBuilder.Plan(Seek(s =>
+        {
+            s.FixedColumns.Add(0u);
+            s.FixedValues.Add(Ref(Bars, 0));
+        }))));
+
+        Assert.Equal("I-IR-3", ex.Invariant);
+    }
+
+    [Fact]
+    public void A_seeks_row_is_the_left_and_the_projection()
+    {
+        var ex = AssertInvalid(Restamp(IrBuilder.Plan(Seek(s => s.Projection.Add(3u)))));
+
+        Assert.Equal("I-IR-6", ex.Invariant);
+    }
+
     /// <summary>
     /// Grouping sets (D338): the output's keys are every set's, once each, in ascending field order,
     /// whatever order a set lists them in, and a key some set leaves out is nullable. GROUPING names

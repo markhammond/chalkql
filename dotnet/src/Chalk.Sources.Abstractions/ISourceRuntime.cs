@@ -227,6 +227,15 @@ public sealed class IndexLookupRequest
     /// no sort above it — and it is set only where the index declared it could serve one.
     /// </summary>
     public bool Reverse { get; init; }
+
+    /// <summary>
+    /// At most this many rows from each range, the first the read reaches in its direction, or null
+    /// for all of them (D338). An ASOF join that seeks an index asks for one row per range: the
+    /// closest time at or before, or after, a left row's. A hint a source may ignore — the rows it
+    /// returns past the first of a range are still rows of that range, and the join's answer is the
+    /// same — and one every POCO and Akade index honours.
+    /// </summary>
+    public int? RowsPerRange { get; init; }
 }
 
 /// <summary>

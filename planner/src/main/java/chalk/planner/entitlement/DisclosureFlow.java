@@ -144,16 +144,22 @@ final class DisclosureFlow {
               Rel.KindCase.HASH_AGGREGATE,
               Rel.KindCase.STREAM_AGGREGATE),
           // Concatenation by position, left then right — and left alone for a semi or anti join,
-          // which projects no right column. A correlate is the same shape.
+          // which projects no right column. A correlate is the same shape. An ASOF join that seeks
+          // its table has the left as its one input, and the table's columns past it are FULL: the
+          // seek is never chosen over an entitled table (D338).
           of(
               "join",
-              rel -> rel instanceof Join || rel instanceof Correlate,
+              rel ->
+                  rel instanceof Join
+                      || rel instanceof Correlate
+                      || rel instanceof chalk.planner.plan.rel.ChalkAsOfLookupJoin,
               DisclosureFlow::join,
               Rel.KindCase.JOIN,
               Rel.KindCase.HASH_JOIN,
               Rel.KindCase.MERGE_JOIN,
               Rel.KindCase.NESTED_LOOP_JOIN,
               Rel.KindCase.AS_OF_JOIN,
+              Rel.KindCase.AS_OF_LOOKUP_JOIN,
               Rel.KindCase.LOOKUP_JOIN,
               // An adaptive join is a join whose branches the executor chooses between; a
               // MaterialisedInput is the slot standing for its shared input, and neither branch can

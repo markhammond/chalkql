@@ -497,6 +497,10 @@ public static class PlanValidator
                     break;
                 }
 
+                case Chalk.Ir.Rel.KindOneofCase.AsOfLookupJoin:
+                    AsOfLookupJoin(rel, output, kindPath);
+                    break;
+
                 case Chalk.Ir.Rel.KindOneofCase.SetOp:
                 {
                     if (rel.SetOp.Inputs.Count < 2)
@@ -744,6 +748,81 @@ public static class PlanValidator
         /// equality, and the projection matching the row type. A range whose bounds disagree
         /// anywhere but in their last element would name a set of rows no index can produce.
         /// </summary>
+        /// <summary>
+        /// An ASOF join that seeks an index (D338): the plain join's rules over the left input and
+        /// the projection's fields, which are the output's past the left's, and values for the fixed
+        /// columns that read no row, as a range bound's do. That the index's key fits is the
+        /// executor's to check against the catalog, as an IndexLookup's index is.
+        /// </summary>
+        private void AsOfLookupJoin(Rel rel, RowType output, string path)
+        {
+            var seek = rel.AsOfLookupJoin;
+            var left = Rel(seek.Left, $"{path}.left");
+            if (seek.Table is null || seek.Table.Table.Length == 0)
+            {
+                throw Invalid("I-IR-6", path, "AsOfLookupJoin has no table reference");
+            }
+
+            if (seek.Index.Length == 0)
+            {
+                throw Invalid("I-IR-6", path, "AsOfLookupJoin.index names no index");
+            }
+
+            if (seek.Projection.Count == 0 || output.Fields.Count != left.Fields.Count + seek.Projection.Count)
+            {
+                throw Invalid(
+                    "I-IR-6",
+                    path,
+                    $"the row type has {output.Fields.Count} fields, not the left input's "
+                    + $"{left.Fields.Count} and the projection's {seek.Projection.Count}");
+            }
+
+            var right = new RowType();
+            right.Fields.AddRange(output.Fields.Skip(left.Fields.Count));
+            EquiJoin(left, right, seek.LeftKeys, seek.RightKeys, residual: null, path);
+            for (var i = 0; i < seek.LeftKeys.Count; i++)
+            {
+                RequireSameKind(
+                    left.Fields[(int)seek.LeftKeys[i]].Type,
+                    right.Fields[(int)seek.RightKeys[i]].Type,
+                    $"{path}.left_keys[{i}]",
+                    "the right key it is compared with");
+            }
+
+            if (seek.FixedColumns.Count != seek.FixedValues.Count)
+            {
+                throw Invalid(
+                    "I-IR-6",
+                    path,
+                    $"{seek.FixedColumns.Count} fixed columns against {seek.FixedValues.Count} values");
+            }
+
+            for (var i = 0; i < seek.FixedValues.Count; i++)
+            {
+                Expression(seek.FixedValues[i], EmptyRow, $"{path}.fixed_values[{i}]");
+            }
+
+            RequireIndex(seek.LeftTime, left, "I-IR-3", $"{path}.left_time");
+            RequireIndex(seek.RightTime, right, "I-IR-3", $"{path}.right_time");
+            RefuseNonScalar(left.Fields[(int)seek.LeftTime].Type, $"{path}.left_time", "an as-of join's time column");
+            RefuseNonScalar(right.Fields[(int)seek.RightTime].Type, $"{path}.right_time", "an as-of join's time column");
+            RequireSameKind(
+                left.Fields[(int)seek.LeftTime].Type,
+                right.Fields[(int)seek.RightTime].Type,
+                $"{path}.left_time",
+                "the right time column it is compared with");
+
+            if (seek.Match == AsOfMatch.Unspecified)
+            {
+                throw Invalid("I-IR-5", path, "AsOfLookupJoin.match is unspecified");
+            }
+
+            if (seek.Type is not (JoinType.Inner or JoinType.Left))
+            {
+                throw Invalid("I-IR-5", path, $"AsOfLookupJoin.type is {seek.Type}; only INNER and LEFT exist");
+            }
+        }
+
         private void IndexLookup(Rel rel, string path)
         {
             var lookup = rel.IndexLookup;
