@@ -659,9 +659,6 @@ public final class PlannerPipeline implements AutoCloseable {
           parsed, policyOptions.star(), entitledNames());
       stars = chalk.planner.entitlement.StarProvenance.of(parsed);
     }
-    // SQL bodies are inlined before validation, so a call to one disappears into ordinary algebra
-    // and everything downstream — the validator, the optimiser, pushdown — sees only what the body
-    // is made of (D78, docs/design/17-user-defined-functions.md §2).
     // A declared parameter type holds at validation, rather than one Calcite infers from what is
     // around the parameter (D337). Read from the statement as written, before a body is inlined.
     planner.declareParameterTypes(
@@ -669,10 +666,16 @@ public final class PlannerPipeline implements AutoCloseable {
             parsed,
             declaredParameterTypes,
             new chalk.planner.types.TypeMapper(planner.getTypeFactory())));
-    SqlNode inlined = chalk.planner.ir.SqlBodyInliner.inline(parsed, catalog.functions());
     // The statement's own words, for a refusal that names an expression (D296). Nothing is read
     // from it unless a refusal asks.
     StatementText text = StatementText.of(sql, parserConfig(), catalog.functions());
+    // An ASOF join's condition on one input becomes a filter on that input (D337). After the star
+    // policy has read the statement as written, since the filter is written as a star select.
+    AsofConditions.rewrite(parsed, text);
+    // SQL bodies are inlined before validation, so a call to one disappears into ordinary algebra
+    // and everything downstream — the validator, the optimiser, pushdown — sees only what the body
+    // is made of (D78, docs/design/17-user-defined-functions.md §2).
+    SqlNode inlined = chalk.planner.ir.SqlBodyInliner.inline(parsed, catalog.functions());
     SqlNode validated;
     try {
       validated = planner.validate(inlined);

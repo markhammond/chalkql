@@ -1159,6 +1159,23 @@ only under `C`). DuckDB folds a Turkish capital that `LOWER` leaves alone. Calci
 runtime folds ASCII only. So Chalk always evaluates an `ILIKE` itself, over the rows a
 source returns, and no index answers it, because an index is case-sensitive.
 
+### `ASOF JOIN`
+
+An `ASOF JOIN` pairs each left row with the last right row its `MATCH_CONDITION` allows,
+such as the rate in force when a trade was made. Its `ON` takes equalities between the
+two inputs. It also takes a condition on one input, which filters that input:
+
+```sql
+SELECT t.id, r.rate
+FROM trades t
+ASOF JOIN fx_rates r MATCH_CONDITION t.ts >= r.ts ON r.currency = 'EUR'
+```
+
+Here only euro rates can be the match. A condition on the left input filters the left
+input of an `ASOF JOIN`. In a `LEFT ASOF JOIN` it is refused, because a left row that
+fails it must still appear, with NULLs; put it in `WHERE` instead. Qualify each column
+in `ON` with its input's alias, so ChalkQL can tell which input a condition is on.
+
 ### The current time
 
 `CURRENT_TIMESTAMP`, `LOCALTIMESTAMP` and `CURRENT_DATE` read one instant for each

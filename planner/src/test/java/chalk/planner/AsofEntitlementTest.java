@@ -29,6 +29,17 @@ class AsofEntitlementTest {
     assertThat(plan).contains("ChalkAsOfJoin").contains("joinType=[asof]");
   }
 
+  /** And with a condition on one input, which filters that input under the join. */
+  @Test
+  void an_asof_join_over_entitled_tables_with_a_condition_on_one_input_plans() throws Exception {
+    String plan =
+        plan(
+            "SELECT m.id, x.org_id FROM members m LEFT ASOF JOIN members x"
+                + " MATCH_CONDITION m.id >= x.id ON x.org_id = 1");
+
+    assertThat(plan).contains("ChalkAsOfJoin").contains("left_asof");
+  }
+
   private static String plan(String sql) throws Exception {
     RegisteredCatalog registered = new CatalogRegistry().register(TenancyCatalogs.catalog());
     try (PlannerPipeline pipeline =
