@@ -234,6 +234,22 @@ class ServiceTest {
     assertThat(response.getPlan().getParameterTypesList()).containsExactly(timestamp);
   }
 
+  /**
+   * The same inside a function's arguments, whose types Calcite derives before it infers any, to
+   * choose the function's overload. A host function's call, refused without the declaration, is
+   * covered from the host.
+   */
+  @Test
+  void a_declared_parameter_type_holds_inside_a_functions_arguments() {
+    String sql = "SELECT symbol FROM bars WHERE volume >= ABS(? + 1)";
+    chalk.ir.v1.Type integer =
+        chalk.ir.v1.Type.newBuilder().setKind(chalk.ir.v1.TypeKind.TYPE_KIND_I16).build();
+
+    PlanResponse response = client.plan(request(sql).addParameterTypes(integer).build());
+
+    assertThat(response.getPlan().getParameterTypesList()).containsExactly(integer);
+  }
+
   /** A declaration has one type for each parameter, in order, or none. */
   @Test
   void a_declaration_that_does_not_have_one_type_per_parameter_is_refused() {

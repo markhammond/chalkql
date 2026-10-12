@@ -413,13 +413,36 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
           RelDataType inferredType,
           org.apache.calcite.sql.validate.SqlValidatorScope scope,
           org.apache.calcite.sql.SqlNode node) {
-        if (node instanceof org.apache.calcite.sql.SqlDynamicParam param
-            && param.getIndex() < declared.size()
-            && declared.get(param.getIndex()) instanceof RelDataType type) {
+        RelDataType type = declaredType(node);
+        if (type != null) {
           setValidatedNodeType(node, type);
           return;
         }
         super.inferUnknownTypes(inferredType, scope, node);
+      }
+
+      /**
+       * The same, where a type is derived before any is inferred: an argument of a function call,
+       * whose types choose the function's overload, is derived first, and a parameter in one would
+       * otherwise be of no type yet.
+       */
+      @Override
+      public RelDataType deriveType(
+          org.apache.calcite.sql.validate.SqlValidatorScope scope,
+          org.apache.calcite.sql.SqlNode expr) {
+        RelDataType type = declaredType(expr);
+        if (type != null) {
+          setValidatedNodeType(expr, type);
+          return type;
+        }
+        return super.deriveType(scope, expr);
+      }
+
+      private @Nullable RelDataType declaredType(org.apache.calcite.sql.SqlNode node) {
+        return node instanceof org.apache.calcite.sql.SqlDynamicParam param
+                && param.getIndex() < declared.size()
+            ? declared.get(param.getIndex())
+            : null;
       }
     };
   }
