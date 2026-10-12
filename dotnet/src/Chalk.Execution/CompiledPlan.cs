@@ -174,9 +174,8 @@ internal sealed class CompiledPlan
         var bound = ParameterBinder.Bind(parameters, ParameterTypes);
         arena.BeginExecution(stats);
         var tree = Rent();
-        tree.Context.Begin(stats, arena, bound, _settings.TimeProvider.GetUtcNow());
         tree.Context.ReadSet ??= NewReadSet();
-        Pin(tree.Context.ReadSet, arena);
+        tree.Context.Begin(stats, arena, bound, PinNow(tree.Context.ReadSet, arena));
 
         // As in Vectorised: the token has to reach the tree before the first pull creates the
         // operators' enumerators.
@@ -297,7 +296,7 @@ internal sealed class CompiledPlan
 
         var copy = new CompiledPlan(
             Plan, OutputSchema, ParameterTypes, BoundScalars, _outputTypes, _root, _catalog, _sources,
-            _settings with { TimeProvider = clock })
+            _settings with { TimeProvider = clock, EngineClock = null })
         {
             Sharing = Sharing,
             LikeParameters = LikeParameters,
@@ -333,6 +332,31 @@ internal sealed class CompiledPlan
 
     private CompiledPlan? _keeping;
 
+    /// <summary>
+    /// The same plan writing the engine's clock into <paramref name="slots"/> (D341): the parameter
+    /// named as the clock, which the host left for the engine to bind. Kept once per set of slots, so a
+    /// statement run alike keeps one copy and its warm tree, and an execution carries nothing more.
+    /// </summary>
+    internal CompiledPlan WithClockSlots(int[] slots)
+    {
+        if (_slotted is { } kept && kept._settings.ClockSlots is { } held && held.SequenceEqual(slots))
+        {
+            return kept;
+        }
+
+        var copy = new CompiledPlan(
+            Plan, OutputSchema, ParameterTypes, BoundScalars, _outputTypes, _root, _catalog, _sources,
+            _settings with { ClockSlots = slots })
+        {
+            Sharing = Sharing,
+            LikeParameters = LikeParameters,
+        };
+        _slotted = copy;
+        return copy;
+    }
+
+    private CompiledPlan? _slotted;
+
     /// <summary>The tables this plan reads from sources that pin (F188), found the first time it runs.</summary>
     private (string SourceId, string Table, IPinnableSource Source)[]? _pinnable;
 
@@ -342,6 +366,71 @@ internal sealed class CompiledPlan
         _pinnable ??= Pinnable();
         return _pinnable.Length == 0 ? null : new ExecutionReadSet(_pinnable);
     }
+
+    /// <summary>
+    /// Pins the execution's tables (F188) and reads its time, in one hold of the gate: on an engine
+    /// that names a clock, the clock as the last refresh committed it, so the tables and the time are
+    /// of one refresh (D341); otherwise the settings' clock, the wall clock unless a test says not.
+    /// </summary>
+    internal DateTimeOffset PinNow(ExecutionReadSet? readSet, ExecutionArena arena)
+    {
+        if (_settings.EngineClock is not { } clock)
+        {
+            Pin(readSet, arena);
+            return _settings.TimeProvider.GetUtcNow();
+        }
+
+        DateTimeOffset? committed;
+        lock (ExecutionReadSet.Gate)
+        {
+            readSet?.PinHeld();
+            committed = clock.Committed;
+        }
+
+        if (readSet is not null)
+        {
+            arena.ReadSet = readSet;
+        }
+
+        // Unset only for a plan that reads no time: the client refuses the others first.
+        return committed ?? _settings.TimeProvider.GetUtcNow();
+    }
+
+    /// <summary>
+    /// Writes the engine's clock into each slot the host left to it (D341): the parameter named as the
+    /// clock, bound for the host, of each slot's own type. One small array per slot, on an engine with a
+    /// clock and a statement that names it only.
+    /// </summary>
+    internal void ClockInto(ScalarValue[] parameters, DateTimeOffset now)
+    {
+        if (_settings.ClockSlots is not { } slots)
+        {
+            return;
+        }
+
+        foreach (var slot in slots)
+        {
+            var type = ParameterTypes[slot];
+
+            // Boxed apart, as F189 taught: in one conditional the DateTime would widen to an offset.
+            object value;
+            if (type.Kind == Ir.TypeKind.TimestampTz)
+            {
+                value = now.ToUniversalTime();
+            }
+            else
+            {
+                value = DateTime.SpecifyKind(now.UtcDateTime, DateTimeKind.Unspecified);
+            }
+
+            parameters[slot] = ParameterBinder.Bind([value], [type])[0];
+        }
+    }
+
+    /// <summary>Whether the plan reads the current time (D341), found once.</summary>
+    internal bool ReadsCurrentTime => _readsTime ??= PlanTables.ReadsCurrentTime(Plan);
+
+    private bool? _readsTime;
 
     /// <summary>
     /// Pins every table the execution reads, while no refresh commit is swapping one, and hands them
@@ -409,10 +498,10 @@ internal sealed class CompiledPlan
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         var tree = Rent();
-        tree.Context.Begin(
-            stats, arena, parameters, _settings.TimeProvider.GetUtcNow(), relations);
         tree.Context.ReadSet ??= NewReadSet();
-        Pin(tree.Context.ReadSet, arena);
+        var now = PinNow(tree.Context.ReadSet, arena);
+        ClockInto(parameters, now);
+        tree.Context.Begin(stats, arena, parameters, now, relations);
 
         // Points the tree at this execution's token *before* the first pull. `TryNext` comes first
         // by design and creates the body's enumerator, so an operator that genuinely blocks on

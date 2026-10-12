@@ -44,6 +44,19 @@ internal sealed record ExecutionSettings
     /// </summary>
     public Chalk.Sources.IReadKeeper? Reads { get; init; }
 
+    /// <summary>
+    /// The engine's clock, when the engine names one (D341): every execution reads it in place of
+    /// <see cref="TimeProvider"/>, as of the refresh its pins read. Null on an engine without a clock,
+    /// and in a standing view's own copy of a plan, whose time is the view's.
+    /// </summary>
+    public IEngineClock? EngineClock { get; init; }
+
+    /// <summary>
+    /// The parameter slots an execution writes the engine's clock into (D341): those of the parameter
+    /// named as the clock, which the host left unbound. Null for every other plan.
+    /// </summary>
+    public IReadOnlyList<int>? ClockSlots { get; init; }
+
     /// <summary>The clock <c>CURRENT_TIMESTAMP</c> would read. Injectable so tests are deterministic.</summary>
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
 

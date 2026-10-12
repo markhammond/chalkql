@@ -178,3 +178,22 @@ public sealed class RecordedPlanMissingException : ChalkException
     /// <summary>The content hash the recorder files plans under.</summary>
     public string Key { get; }
 }
+
+/// <summary>
+/// A statement reads the current time on an engine that names a clock, and no refresh has set the
+/// clock yet (D341): on such an engine every query reads the clock, as a standing view does.
+/// </summary>
+public sealed class ClockRequiredException : ChalkException
+{
+    public ClockRequiredException(string clock)
+        : base(
+            ChalkErrorCodes.ClockRequired,
+            $"The statement reads the current time, and on this engine that is its clock, '{clock}', which no "
+            + "refresh has set yet. Advance it in a refresh with AdvanceClock before a query reads it.")
+    {
+        Clock = clock;
+    }
+
+    /// <summary>The engine's clock, by the name <c>ChalkEngineOptions.Clock</c> gave it.</summary>
+    public string Clock { get; }
+}

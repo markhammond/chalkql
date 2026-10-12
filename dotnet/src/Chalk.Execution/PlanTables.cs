@@ -50,6 +50,56 @@ internal static class PlanTables
         }
     }
 
+    /// <summary>
+    /// Whether a plan reads the current time: <c>CURRENT_TIMESTAMP</c>, <c>LOCALTIMESTAMP</c> or
+    /// <c>CURRENT_DATE</c> (D341: on an engine that names a clock, a query that does needs it set).
+    /// </summary>
+    public static bool ReadsCurrentTime(Google.Protobuf.IMessage? root)
+    {
+        if (root is null)
+        {
+            return false;
+        }
+
+        var pending = new Stack<Google.Protobuf.IMessage>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var message = pending.Pop();
+            if (message is Ir.ScalarCall { Function: Ir.FunctionId.CurrentTimestamp or Ir.FunctionId.CurrentDate })
+            {
+                return true;
+            }
+
+            foreach (var field in message.Descriptor.Fields.InDeclarationOrder())
+            {
+                if (field.FieldType != Google.Protobuf.Reflection.FieldType.Message)
+                {
+                    continue;
+                }
+
+                switch (field.Accessor.GetValue(message))
+                {
+                    case Google.Protobuf.IMessage child:
+                        pending.Push(child);
+                        break;
+                    case System.Collections.IList list:
+                        foreach (var item in list)
+                        {
+                            if (item is Google.Protobuf.IMessage element)
+                            {
+                                pending.Push(element);
+                            }
+                        }
+
+                        break;
+                }
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>The tables under <paramref name="root"/>, once each, by source and name.</summary>
     public static (string SourceId, string Table)[] Of(Google.Protobuf.IMessage? root)
     {

@@ -26,6 +26,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     private readonly Dictionary<string, ISourceRuntime> _sources;
     private readonly ExecutionSettings _settings;
 
+    /// <summary>The clock every execution reads, on an engine that names one (D341); null otherwise.</summary>
+    private readonly EngineClock? _engineClock;
+
     /// <summary>The refusals this engine has answered, by request (D330).</summary>
     private readonly RefusalMemo _refusals = new();
     private readonly ArenaPool _arenas;
@@ -128,8 +131,10 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         _registeredStatisticsVersion = versions.StatisticsVersion;
         PlannerInfo = plannerInfo;
         _log = (options.LoggerFactory ?? NullLoggerFactory.Instance).CreateLogger<ChalkEngine>();
+        _engineClock = options.Clock is null ? null : new EngineClock();
         _settings = new ExecutionSettings
         {
+            EngineClock = _engineClock,
             BatchSize = options.Execution.BatchSize,
             PlanNestingLimit = options.Planner.PlanNestingLimit,
             UseReferenceEngine = options.Execution.Engine == ExecutionEngine.Reference,
@@ -936,7 +941,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(query);
         RequireNamed(query);
-        return query.ExecuteAsync(ParameterBinder.ResolveNamed(query.Parameters, parameters), arena, ct);
+        var (values, clock) = Named(query, parameters);
+        return query.ExecuteAsync(values, context: null, arena, ct, clockParameter: clock);
     }
 
     /// <summary>Binds <c>@name</c> parameters from an anonymous object or POCO, Dapper-style.</summary>
@@ -950,7 +956,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(query);
         RequireNamed(query);
-        return query.ExecuteAsync(ParameterBinder.ResolveNamed(query.Parameters, parameters), arena, ct);
+        var (values, clock) = Named(query, parameters);
+        return query.ExecuteAsync(values, context: null, arena, ct, clockParameter: clock);
     }
 
     /// <summary>Prepare and execute in one call, for a statement run once.</summary>
@@ -1052,8 +1059,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(pool);
         RequireNamed(query);
-        return query.ExecuteAsync(
-            ParameterBinder.ResolveNamed(query.Parameters, parameters), context: null, pool, ct);
+        var (values, clock) = Named(query, parameters);
+        return query.ExecuteAsync(values, context: null, arena: null, ct, pool, clock);
     }
 
     /// <inheritdoc cref="ExecuteAsync(PreparedQuery, IReadOnlyList{object?}, ArenaPool, CancellationToken)"
@@ -1067,8 +1074,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(pool);
         RequireNamed(query);
-        return query.ExecuteAsync(
-            ParameterBinder.ResolveNamed(query.Parameters, parameters), context: null, pool, ct);
+        var (values, clock) = Named(query, parameters);
+        return query.ExecuteAsync(values, context: null, arena: null, ct, pool, clock);
     }
 
     /// <inheritdoc cref="ExecuteAsync(PreparedQuery, IReadOnlyList{object?}, ArenaPool, CancellationToken)"
@@ -1374,6 +1381,12 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                                 sharedRegistration.Shared!.Changed(shapeMayHaveChanged: false);
                             }
                         }
+
+                        // The clock moves with the rows: an execution pins both in one hold (D341).
+                        if (builder.ClockGiven is { } clock)
+                        {
+                            _engineClock?.Set(clock);
+                        }
                     }
                 }
                 finally
@@ -1397,6 +1410,57 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             _refreshing.Release();
         }
     }
+
+    /// <summary>
+    /// A statement's named values, with the engine's clock left to bind the parameter named after it
+    /// when the host binds none (D341): the values, with a placeholder of the right type there, and that
+    /// parameter's position among the statement's, or -1. The execution writes the clock in when it pins.
+    /// </summary>
+    private (object?[] Values, int Clock) Named(PreparedQuery query, object parameters)
+    {
+        var bag = ParameterBinder.Properties(parameters);
+        if (_engineClock is null || _options.Clock is not { } name)
+        {
+            return (ParameterBinder.ResolveNamed(query.Parameters, bag), -1);
+        }
+
+        var bare = name.TrimStart('@');
+        foreach (var key in bag.Keys)
+        {
+            if (string.Equals(key.TrimStart('@'), bare, StringComparison.OrdinalIgnoreCase))
+            {
+                return (ParameterBinder.ResolveNamed(query.Parameters, bag), -1);
+            }
+        }
+
+        for (var i = 0; i < query.Parameters.Count; i++)
+        {
+            var parameter = query.Parameters[i];
+            if (!string.Equals(parameter.Name?.TrimStart('@'), bare, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // A placeholder of the parameter's own type, so the binding takes it; boxed apart (F189).
+            object placeholder;
+            if (parameter.Type.Kind == Chalk.Ir.TypeKind.TimestampTz)
+            {
+                placeholder = DateTimeOffset.UnixEpoch;
+            }
+            else
+            {
+                placeholder = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Unspecified);
+            }
+
+            var filled = new Dictionary<string, object?>(bag, StringComparer.OrdinalIgnoreCase) { [bare] = placeholder };
+            return (ParameterBinder.ResolveNamed(query.Parameters, filled), i);
+        }
+
+        return (ParameterBinder.ResolveNamed(query.Parameters, bag), -1);
+    }
+
+    /// <summary>Whether this engine names a clock that no refresh has set yet (D341).</summary>
+    internal bool ClockUnset => _engineClock is { Committed: null };
 
     /// <summary>
     /// The epoch of the last refresh that named a table of a source outside epochs (D340): by table, by

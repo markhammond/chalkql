@@ -52,10 +52,16 @@ internal sealed class ExecutionReadSet
     {
         lock (Gate)
         {
-            for (var i = 0; i < _tables.Length; i++)
-            {
-                _pinned[i] = _tables[i].Source.Pin(_tables[i].Table);
-            }
+            PinHeld();
+        }
+    }
+
+    /// <summary>Pins every table. The caller holds <see cref="Gate"/>, to read something else in the same hold.</summary>
+    public void PinHeld()
+    {
+        for (var i = 0; i < _tables.Length; i++)
+        {
+            _pinned[i] = _tables[i].Source.Pin(_tables[i].Table);
         }
     }
 

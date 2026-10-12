@@ -1597,3 +1597,6 @@ Chalk.Client.RefreshBuilder.Delete<T>(Chalk.Sources.ITableTarget<T>! table, Syst
 Chalk.Client.RefreshBuilder.Upsert<T>(Chalk.Sources.ISourceRuntime! source, string! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
 Chalk.Client.RefreshBuilder.Upsert<T>(Chalk.Sources.ITableTarget<T>! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
 Chalk.Client.RefreshBuilder.Version(long version) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.ClockRequiredException
+Chalk.Client.ClockRequiredException.Clock.get -> string!
+Chalk.Client.ClockRequiredException.ClockRequiredException(string! clock) -> void
