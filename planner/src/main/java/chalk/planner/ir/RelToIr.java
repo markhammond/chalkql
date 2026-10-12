@@ -145,7 +145,8 @@ public final class RelToIr {
     for (RelDataTypeField field : parameterRowType.getFieldList()) {
       plan.addParameterTypes(types.toIr(field.getType()));
     }
-    Plan withoutDigest = plan.build();
+    // A subtree the plan repeats, such as a WITH block read twice, is written once (D338).
+    Plan withoutDigest = SharedSubtrees.share(plan.build());
     return withoutDigest.toBuilder().setPlanDigest(PlanDigest.compute(withoutDigest)).build();
   }
 

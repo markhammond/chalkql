@@ -73,6 +73,26 @@ internal sealed class OperatorContext
     /// </summary>
     public void RegisterScratch(Vectors.IArenaScratch scratch) => _scratch.Add(scratch);
 
+    /// <summary>Each shared subtree's result in this tree, by its id (D338).</summary>
+    private Dictionary<uint, SharedResult>? _shared;
+
+    /// <summary>
+    /// Shared subtree <paramref name="id"/>'s result in this tree: made by the first use the compiler
+    /// builds, which <paramref name="created"/> says, and found by every later one (D338).
+    /// </summary>
+    internal SharedResult Shared(uint id, Func<SharedResult> create, out bool created)
+    {
+        _shared ??= [];
+        created = !_shared.TryGetValue(id, out var shared);
+        if (created)
+        {
+            shared = create();
+            _shared[id] = shared;
+        }
+
+        return shared!;
+    }
+
     /// <summary>Points the tree at the next execution.</summary>
     public void Begin(
         ExecutionStats stats,

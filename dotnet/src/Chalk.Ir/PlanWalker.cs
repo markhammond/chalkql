@@ -25,12 +25,15 @@ namespace Chalk.Ir;
 public static class PlanWalker
 {
     /// <summary>
-    /// Every relation in the plan, the pushed subtrees included, root first, inputs left to right.
+    /// Every relation in the plan, the pushed subtrees included, root first, inputs left to right,
+    /// and then each subtree the plan shares, once (D338). A <c>SharedRef</c> is a leaf: what it
+    /// names is walked where the plan lists it, not at every use.
     /// </summary>
     public static IEnumerable<Rel> Rels(Plan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        return plan.Root is null ? [] : Rels(plan.Root);
+        var root = plan.Root is null ? [] : Rels(plan.Root);
+        return root.Concat(plan.Shared.Where(s => s.Rel is not null).SelectMany(s => Rels(s.Rel)));
     }
 
     /// <summary>
@@ -65,7 +68,8 @@ public static class PlanWalker
     public static IEnumerable<Rel> ExecutedRels(Plan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        return plan.Root is null ? [] : ExecutedRels(plan.Root);
+        var root = plan.Root is null ? [] : ExecutedRels(plan.Root);
+        return root.Concat(plan.Shared.Where(s => s.Rel is not null).SelectMany(s => ExecutedRels(s.Rel)));
     }
 
     /// <summary>The same, from one relation down.</summary>

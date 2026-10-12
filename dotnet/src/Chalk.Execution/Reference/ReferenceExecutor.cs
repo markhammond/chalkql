@@ -27,6 +27,9 @@ internal sealed class ReferenceExecutor
     private readonly ExecutionSettings _settings;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>> _relations;
 
+    /// <summary>Each shared subtree's rows for the execution under way, by id (D338).</summary>
+    private readonly Dictionary<uint, List<object?[]>> _sharedRows = [];
+
     public ReferenceExecutor(
         CompiledPlan plan,
         CatalogContext catalog,
@@ -59,6 +62,7 @@ internal sealed class ReferenceExecutor
         };
 
         List<object?[]> rows;
+        _sharedRows.Clear();
         try
         {
             rows = await EvaluateAsync(_plan.Plan.Root, "root", interpreter, stats, arena, ct)
@@ -383,6 +387,23 @@ internal sealed class ReferenceExecutor
             case Rel.KindOneofCase.AsOfLookupJoin:
                 return await AsOfJoinAsync(AsOfJoinOverTheTable(rel), path, interpreter, stats, arena, ct)
                     .ConfigureAwait(false);
+
+            case Rel.KindOneofCase.SharedRef:
+            {
+                // A shared subtree, evaluated once for the execution, its rows given to every use
+                // (D338). Each use gets its own list, because a sort orders the list it is given.
+                var id = rel.SharedRef.Id;
+                if (!_sharedRows.TryGetValue(id, out var shared))
+                {
+                    var body = _plan.Plan.Shared.FirstOrDefault(s => s.Id == id)?.Rel
+                        ?? throw new InvalidPlanException("I-IR-4", path, $"the plan lists no shared plan {id}");
+                    shared = await EvaluateAsync(body, $"shared#{id}", interpreter, stats, arena, ct)
+                        .ConfigureAwait(false);
+                    _sharedRows[id] = shared;
+                }
+
+                return [.. shared];
+            }
 
             case Rel.KindOneofCase.Window:
             {

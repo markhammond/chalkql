@@ -52,6 +52,9 @@ public static class PlanValidator
 
     private sealed class Validation(Plan plan, PlanValidationOptions options)
     {
+        /// <summary>The row type of each shared plan validated so far, by id (D338).</summary>
+        private readonly Dictionary<uint, RowType> _shared = [];
+
         public void Run()
         {
             CheckVersionAndUnknownFields();
@@ -70,6 +73,27 @@ public static class PlanValidator
             {
                 CheckType(type, $"plan.parameter_types[{i}]");
                 RefuseComposite(type, $"plan.parameter_types[{i}]", "a parameter's type");
+            }
+
+            // The subtrees the plan shares, each once and before the root, so that a use is checked
+            // against what it names; a shared plan names only the ones listed before it (D338).
+            for (var i = 0; i < plan.Shared.Count; i++)
+            {
+                var shared = plan.Shared[i];
+                var sharedPath = $"plan.shared[{i}]";
+                if (shared.Rel is null)
+                {
+                    throw Invalid("I-IR-4", sharedPath, "the shared plan has no relation");
+                }
+
+                if (_shared.ContainsKey(shared.Id))
+                {
+                    throw Invalid("I-IR-4", sharedPath, $"shared plan {shared.Id} is listed twice");
+                }
+
+                var sharedType = Rel(shared.Rel, sharedPath);
+                NoRemoteQueryUnderANestedLoop(shared.Rel, sharedPath);
+                _shared[shared.Id] = sharedType;
             }
 
             var rootType = Rel(plan.Root, "root");
@@ -499,6 +523,27 @@ public static class PlanValidator
 
                 case Chalk.Ir.Rel.KindOneofCase.AsOfLookupJoin:
                     AsOfLookupJoin(rel, output, kindPath);
+                    break;
+
+                case Chalk.Ir.Rel.KindOneofCase.SharedRef:
+                    if (!_shared.TryGetValue(rel.SharedRef.Id, out var sharedType))
+                    {
+                        throw Invalid(
+                            "I-IR-4",
+                            kindPath,
+                            $"the use names shared plan {rel.SharedRef.Id}, which the plan does not list "
+                            + "before it");
+                    }
+
+                    if (!output.Equals(sharedType))
+                    {
+                        throw Invalid(
+                            "I-IR-4",
+                            kindPath,
+                            $"the use's row type {IrTypes.Describe(output)} differs from shared plan "
+                            + $"{rel.SharedRef.Id}'s, {IrTypes.Describe(sharedType)}");
+                    }
+
                     break;
 
                 case Chalk.Ir.Rel.KindOneofCase.SetOp:

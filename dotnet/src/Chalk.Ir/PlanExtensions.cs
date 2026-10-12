@@ -34,6 +34,16 @@ public static class PlanExtensions
             Print(sb, plan.Root, 1);
         }
 
+        // Each subtree the plan shares, once, under the number its uses name (D338).
+        foreach (var shared in plan.Shared)
+        {
+            sb.Append(CultureInfo.InvariantCulture, $"Shared #{shared.Id}").AppendLine();
+            if (shared.Rel is not null)
+            {
+                Print(sb, shared.Rel, 1);
+            }
+        }
+
         return sb.ToString();
     }
 
@@ -152,6 +162,7 @@ public static class PlanExtensions
             + string.Create(
                 CultureInfo.InvariantCulture,
                 $" match=${rel.AsOfLookupJoin.LeftTime} {Describe(rel.AsOfLookupJoin.Match)} ${rel.AsOfLookupJoin.RightTime}"),
+        Rel.KindOneofCase.SharedRef => string.Create(CultureInfo.InvariantCulture, $"SharedRef #{rel.SharedRef.Id}"),
         Rel.KindOneofCase.SetOp => $"SetOp {rel.SetOp.Kind} inputs={rel.SetOp.Inputs.Count}",
         Rel.KindOneofCase.Hop => $"Hop time={Ref(rel.Hop.TimeColumn)} "
             + $"slide={rel.Hop.Slide.ToPlanText()} size={rel.Hop.Size.ToPlanText()}",

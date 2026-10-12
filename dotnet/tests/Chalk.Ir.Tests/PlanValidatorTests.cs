@@ -445,6 +445,71 @@ public sealed class PlanValidatorTests
         Assert.Equal("I-IR-7", AssertInvalid(Restamp(IrBuilder.Plan(rel))).Invariant);
     }
 
+    // ---- shared subtrees (D338) ----
+
+    /// <summary>
+    /// A plan that reads one aggregate twice: the aggregate is shared plan 1, and a union reads it
+    /// through two uses.
+    /// </summary>
+    private static Plan Shared(Action<Plan>? change = null)
+    {
+        var aggregate = new Aggregate { Input = BarsRead() };
+        aggregate.Groupings.Add(new Grouping { Keys = { 0u } });
+        aggregate.Measures.Add(Agg(AggregateFunctionId.Count, I64()));
+        var row = Row(F("symbol", Str()), F("n", I64()));
+        var body = new Rel { RowType = row, HashAggregate = new HashAggregate { Aggregate = aggregate } };
+        Rel Use() => new() { RowType = row.Clone(), SharedRef = new SharedRef { Id = 1 } };
+        var union = new SetOp { Kind = SetOpKind.UnionAll };
+        union.Inputs.AddRange([Use(), Use()]);
+        var plan = IrBuilder.Plan(new Rel { RowType = row.Clone(), SetOp = union });
+        plan.Shared.Add(new SharedPlan { Id = 1, Rel = body });
+        change?.Invoke(plan);
+        return Restamp(plan);
+    }
+
+    [Fact]
+    public void A_shared_plan_used_twice_validates()
+    {
+        PlanValidator.Validate(Shared());
+    }
+
+    [Fact]
+    public void A_use_names_a_shared_plan_the_plan_lists()
+    {
+        var ex = AssertInvalid(Shared(p => p.Root.SetOp.Inputs[1].SharedRef.Id = 2));
+
+        Assert.Equal("I-IR-4", ex.Invariant);
+        Assert.Contains("shared plan 2", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>A shared plan names only those listed before it, so no two name each other.</summary>
+    [Fact]
+    public void A_shared_plan_names_only_earlier_ones()
+    {
+        var ex = AssertInvalid(Shared(p =>
+        {
+            var first = p.Shared[0];
+            first.Id = 2;
+            var use = new Rel { RowType = first.Rel.RowType.Clone(), SharedRef = new SharedRef { Id = 1 } };
+            p.Shared.Add(new SharedPlan { Id = 1, Rel = first.Rel.Clone() });
+            p.Shared[0] = new SharedPlan { Id = 2, Rel = use };
+            foreach (var input in p.Root.SetOp.Inputs)
+            {
+                input.SharedRef.Id = 2;
+            }
+        }));
+
+        Assert.Equal("I-IR-4", ex.Invariant);
+    }
+
+    [Fact]
+    public void A_use_has_its_shared_plans_row_type()
+    {
+        var ex = AssertInvalid(Shared(p => p.Root.SetOp.Inputs[0].RowType.Fields[1].Type = I64(nullable: true)));
+
+        Assert.Equal("I-IR-4", ex.Invariant);
+    }
+
     // ---- AsOfLookupJoin (D338) ----
 
     /// <summary>

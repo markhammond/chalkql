@@ -1233,6 +1233,15 @@ each grouping as its own `GROUP BY`, and join them with `UNION ALL`. Grouping se
 computed in the host, never by a source. Under an access policy, every group of every grouping
 has the policy's minimum size.
 
+### A `WITH` block used more than once
+
+A statement that reads one `WITH` block several times, such as one `UNION ALL` branch for each
+level of total, computes the block once for each execution. ChalkQL keeps its rows and gives every
+use the same rows. The same goes for any part of a plan that repeats: a derived table joined to
+itself, or a subquery written twice. A table read on its own, even filtered, is cheaper to read
+again than to keep, so it is still read at each use. The kept rows count against the execution's
+memory budget, `ArenaOptions.MaxBytes`.
+
 ### The current time
 
 `CURRENT_TIMESTAMP`, `LOCALTIMESTAMP` and `CURRENT_DATE` read one instant for each

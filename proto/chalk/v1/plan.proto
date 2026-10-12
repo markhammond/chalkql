@@ -26,6 +26,24 @@ message Plan {
   Rel root = 6;
   // Types of the dynamic parameters, by DynamicParam.index.
   repeated Type parameter_types = 7;
+  // Subtrees the plan uses more than once, each computed once for an execution and read by every
+  // SharedRef that names it (design 63 §2). A shared plan may name only shared plans listed before
+  // it. Empty in a plan that repeats nothing, which is byte-identical to one from before the field.
+  repeated SharedPlan shared = 8;
+}
+
+// One subtree the plan uses more than once.
+message SharedPlan {
+  // Unique within the plan; what a SharedRef names.
+  uint32 id = 1;
+  Rel rel = 2;
+}
+
+// A use of a shared subtree: its rows, as if the subtree stood here. Rel.row_type is the shared
+// plan's. The executor computes the subtree the first time any use is read, keeps its rows for the
+// execution, and gives every use the same rows.
+message SharedRef {
+  uint32 id = 1;
 }
 
 message Rel {
@@ -86,6 +104,9 @@ message Rel {
 
     // ---- physical: as-of seeks ----
     AsOfLookupJoin as_of_lookup_join = 48;
+
+    // ---- shared subtrees ----
+    SharedRef shared_ref = 49;
   }
 }
 

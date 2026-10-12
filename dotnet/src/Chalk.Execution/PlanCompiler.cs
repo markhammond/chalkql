@@ -44,6 +44,7 @@ internal static class PlanCompiler
             [Rel.KindOneofCase.NestedLoopJoin] = static (c, rel, path) => c.NestedLoopJoin(rel, path),
             [Rel.KindOneofCase.AsOfJoin] = static (c, rel, path) => c.AsOfJoin(rel, path),
             [Rel.KindOneofCase.AsOfLookupJoin] = static (c, rel, path) => c.AsOfLookupJoin(rel, path),
+            [Rel.KindOneofCase.SharedRef] = static (c, rel, path) => c.SharedRef(rel, path),
             [Rel.KindOneofCase.Window] = static (c, rel, path) => c.Window(rel, path),
             [Rel.KindOneofCase.Hop] = static (c, rel, path) => c.Hop(rel, path),
             [Rel.KindOneofCase.Session] = static (c, rel, path) => c.Session(rel, path),
@@ -122,6 +123,7 @@ internal static class PlanCompiler
             boundSlots,
             settings.ForceBufferedWindows,
             redactedQueryText);
+        compilation.Share(plan.Shared);
         var root = compilation.Node(plan.Root, "root");
 
         // D244: the output row's STRING columns are declared here, once, and every batch carries an
@@ -186,6 +188,46 @@ internal static class PlanCompiler
             _boundSlots = boundSlots;
             _bufferedWindows = bufferedWindows;
             _redactedQueryText = redactedQueryText;
+        }
+
+        /// <summary>Each subtree the plan shares, by id (D338).</summary>
+        private readonly Dictionary<uint, Rel> _sharedPlans = [];
+
+        /// <summary>Each shared subtree's factory, compiled at its first use.</summary>
+        private readonly Dictionary<uint, OperatorFactory> _sharedFactories = [];
+
+        /// <summary>Takes note of the subtrees the plan shares, for its uses to compile.</summary>
+        public void Share(IEnumerable<SharedPlan> shared)
+        {
+            foreach (var plan in shared)
+            {
+                _sharedPlans[plan.Id] = plan.Rel;
+            }
+        }
+
+        /// <summary>
+        /// A use of a shared subtree (D338). The subtree is compiled once, and built once for each
+        /// tree, by the first use built: every use of it in the tree reads that one result.
+        /// </summary>
+        public OperatorFactory SharedRef(Rel rel, string path)
+        {
+            var id = rel.SharedRef.Id;
+            if (!_sharedFactories.TryGetValue(id, out var body))
+            {
+                var plan = _sharedPlans.TryGetValue(id, out var shared)
+                    ? shared
+                    : throw new InvalidPlanException("I-IR-4", path, $"the plan lists no shared plan {id}");
+                body = Node(plan, $"shared#{id}");
+                _sharedFactories[id] = body;
+            }
+
+            var schema = ArrowTypeMapping.ToArrowSchema(rel.RowType);
+            var types = Types(rel.RowType);
+            return context =>
+            {
+                var result = context.Shared(id, () => new SharedResult(context, body(context), types), out var created);
+                return new SharedInputOperator(context, path, schema, types, result, created);
+            };
         }
 
         /// <summary>The redaction recorded for this pushed query, or null when there is none.</summary>

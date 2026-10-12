@@ -168,6 +168,10 @@ final class DisclosureFlow {
               Rel.KindCase.MATERIALISED_INPUT),
           // Output i is input i of every branch, and the caller is told the least disclosing.
           of("set-op", rel -> rel instanceof SetOp, DisclosureFlow::branches, Rel.KindCase.SET_OP),
+          // A use of a shared subtree discloses what the subtree does. The walk reads the planner's
+          // own tree, in which every use is still the subtree itself; the IR writes it once only
+          // after, so no node here is one (D338).
+          of("shared", rel -> false, (flow, rel, width) -> filled(width, Disclosed.PER_ROW), Rel.KindCase.SHARED_REF),
           // The same shape: one branch per partition, all of the table's row type.
           of(
               "partitioned-scan",
