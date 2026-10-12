@@ -24,6 +24,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Chalk.Execution" />
     <InternalsVisibleTo Include="Chalk.Sources.Poco" />
+    <!-- A temporal bound back to the CLR type an Akade index is keyed by (D337). -->
+    <InternalsVisibleTo Include="Chalk.Sources.Akade" />
     <InternalsVisibleTo Include="Chalk.Client" />
     <InternalsVisibleTo Include="Chalk.Execution.Tests" />
     <InternalsVisibleTo Include="Chalk.Sources.Poco.Tests" />

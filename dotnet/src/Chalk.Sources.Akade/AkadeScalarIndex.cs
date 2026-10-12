@@ -26,6 +26,9 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>, IReversiblePoco
     private readonly IComparer<TKey> _comparer;
     private readonly long? _distinctKeys;
 
+    /// <summary>The key column's TIMESTAMP precision, which a temporal bound's units count in (D337).</summary>
+    private readonly int _precision;
+
     public AkadeScalarIndex(
         IndexDescriptor descriptor,
         IndexedSet<T> set,
@@ -33,7 +36,8 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>, IReversiblePoco
         string akadeIndexName,
         string sourceId,
         string table,
-        IComparer<TKey>? comparer = null)
+        IComparer<TKey>? comparer = null,
+        int precision = 9)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(set);
@@ -49,6 +53,7 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>, IReversiblePoco
         _sourceId = sourceId;
         _table = table;
         _comparer = comparer ?? AkadeKeyOrder.Ascending<TKey>() ?? Comparer<TKey>.Default;
+        _precision = precision;
 
         // Read once, here, off the execution path: the index is built once per snapshot.
         _distinctKeys = descriptor.Unique
@@ -317,7 +322,7 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>, IReversiblePoco
         }
     }
 
-    private static bool TryKey(object? value, out TKey key)
+    private bool TryKey(object? value, out TKey key)
     {
         if (value is null)
         {
@@ -325,7 +330,7 @@ internal sealed class AkadeScalarIndex<T, TKey> : IPocoIndex<T>, IReversiblePoco
             return false;
         }
 
-        key = AkadeBound.Coerce<TKey>(value);
+        key = AkadeBound.Coerce<TKey>(value, _precision);
         return true;
     }
 }
