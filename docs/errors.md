@@ -583,17 +583,22 @@ its arguments; otherwise move what it reads into a table refreshed in epochs, an
 
 A view's statement ends in an `ORDER BY` without a `LIMIT`, though a view's rows have no order; or
 takes a `LIMIT` whose order is not total — not its last step, or not ordered by every key column —
-so the input's order would choose which tied rows it keeps.
+so the input's order would choose which tied rows it keeps. Or, in a view that reads databases
+when they are refreshed, a database read takes values from the rest of the statement — a lookup,
+broadcast or adaptive join, or a scan pruned by keys — so it could not be kept between refreshes.
 
 **What to do:** Drop the `ORDER BY`; order a `LIMIT` by every key column, as the statement's last
-step, or drop it.
+step, or drop it. For a database read, let the join be local: drop the rule in
+`ViewOptions.Prepare.JoinPolicy` that asks otherwise for the pair of sources.
 
 ### SourceOutsideEpochs
 
 A view reads a source whose rows change outside the engine's refreshes: one over a database, which
 cannot take part in a refresh.
 
-**What to do:** Load what the view needs into an in-process table, and refresh it in epochs.
+**What to do:** Set `DatabaseReads = ViewDatabaseReads.WhenRefreshed`, and the view reads the
+database when it is made and again each time a refresh names the table; or load what the view
+needs into an in-process table, and refresh it in epochs.
 
 ## Engine and planner
 

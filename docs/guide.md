@@ -1440,6 +1440,7 @@ that is not a view is unchanged. A refresh without a version is numbered one pas
 await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKey, Cell>
 {
     Key = ["row_key", "column_key"],   // the result's key columns
+    LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,   // required: see below
     Map = Cells.Map,                   // (in ViewRow row, out CellKey key, out Cell cell)
     RowHash = Cells.Hash,              // optional: summed over the live rows as the checksum
     Parameters = new { venue = "LMAX" },
@@ -1460,6 +1461,42 @@ var outcome = view.Drain(ref cursor, sink, 4096); // copies what changed since t
   changes are no fewer than the view's rows, or who needs a delete the view has dropped, is reset:
   the whole result, then a commit.
 - **`ReachedAsync(version)`** waits for the engine to publish a version and brings the view to it.
+- **The local-join cap** is required of every view: `LocalJoinMaxRows`, the most rows a
+  cross-source join may fetch to join locally, by the planner's estimate. A statement whose plan
+  would fetch more is refused when the view is made, and zero or less is refused outright.
+  `StandingViews.DefaultLocalJoinMaxRows`, a million rows, is the planner's assumption for a table
+  of unknown size.
+
+### A view over a database
+
+A database changes outside the engine's refreshes, so a view over one — DuckDB, PostgreSQL, any
+ADO source — is refused unless it opts in with `DatabaseReads = ViewDatabaseReads.WhenRefreshed`.
+Then the view reads each database table when it is made, keeps what it read, and reads it again
+only at its first update after a refresh names the table:
+
+```csharp
+await engine.RefreshAsync(r => r.Version(v).Refresh(instruments)); // an AdoTable handle
+await view.UpdateAsync(); // reads instruments again, and replays what else it read
+```
+
+- **What names a table:** `Refresh(table)`; `Refresh(source)`, for each of the source's tables;
+  and a plain or scheduled refresh, for every source. For a table registered by hand a refresh
+  costs the database nothing; a source built with discovery or exact row counts is introspected
+  again each time.
+- **Between refreshes, nothing moves.** An update that in-process changes call for replays what
+  the view kept, with no round trip, and a database change the host does not refresh is not seen.
+- **Your own writes, through the version.** Commit a write, then refresh the table with
+  `Version(v)`: a view at version v or later has read the table after the write.
+- **No snapshot across reads.** Each read is its own statement on its own connection, and two
+  views read separately. `StandingView.DatabaseReads` says, for each source, when the view last read
+  it, for which version, how many times it has, and the rows it keeps.
+- **Joins are local.** Every cross-source join runs in ChalkQL, so no database read takes values
+  from the rest of the statement; a join the view's own `Prepare.JoinPolicy` asks to look up is
+  refused. The database side is read whole after its own filters and kept: `LocalJoinMaxRows`
+  bounds it by estimate, and `StateBudget` in bytes.
+- **The clock.** `CURRENT_TIMESTAMP` is never pushed into a database, so a comparison with it
+  filters what the view kept. The clock's parameter can be pushed, and a read compared with it is
+  read again when the clock moves.
 
 ### What a view refuses
 
@@ -1473,11 +1510,12 @@ what would make that untrue or unstable:
 | one that does not say `Immutable()`, under `RequireExplicitImmutable` | `NondeterministicFunction` | declare `Immutable()` |
 | the current time on an engine without a clock | `ClockRequired` | name `ChalkEngineOptions.Clock` |
 | `ORDER BY` without `LIMIT`; a `LIMIT` not ordered by the key | `UnsupportedInView` | drop it, or order by every key column |
-| a source over a database | `SourceOutsideEpochs` | load it into an in-process table |
+| a source over a database, without the opt-in | `SourceOutsideEpochs` | `DatabaseReads = WhenRefreshed`, or load it into an in-process table |
+| with it, a database read the rest of the statement binds: a lookup, broadcast or adaptive join | `UnsupportedInView` | let the join be local |
 
 A key the result gives twice faults the view with `DeclarationNotHeld`, naming the key, until the
-view is disposed. A view's own rows past its `StateBudget` fail the update with
-`MemoryBudgetExceeded`, and the view keeps the epoch it held.
+view is disposed. A view's rows, with what it keeps of its databases, past its `StateBudget` fail
+the update with `MemoryBudgetExceeded`, and the view keeps the epoch it held.
 
 Not in this release: a view through `EntitledEngine`, reading a view as of an earlier epoch, and a
 source that another engine also refreshes, whose changes a view sees only at its next update.
