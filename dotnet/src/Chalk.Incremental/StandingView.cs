@@ -27,6 +27,13 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 {
     private readonly ChalkEngine _engine;
     private readonly string _sql;
+
+    /// <summary>
+    /// What the statement is prepared with, again after a shape change: the view's own for text
+    /// (design 65), or the host's statement's own for one made from a prepared statement (D341).
+    /// </summary>
+    private readonly PrepareOptions _prepare;
+
     private readonly ViewOptions<TKey, TRow> _options;
     private readonly ViewBinding _binding;
     private readonly Lock _gate = new();
@@ -50,6 +57,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     private StandingView(
         ChalkEngine engine,
         string sql,
+        PrepareOptions prepare,
         ViewOptions<TKey, TRow> options,
         ViewBinding binding,
         PreparedQuery prepared,
@@ -57,6 +65,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     {
         _engine = engine;
         _sql = sql;
+        _prepare = prepare;
         _options = options;
         _binding = binding;
         _prepared = prepared;
@@ -137,6 +146,64 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
+        Validate(engine, binding, options);
+
+        var prepare = ViewPrepare.For(options);
+        var prepared = await engine.PrepareAsync(sql, prepare, ct).ConfigureAwait(false);
+        return await MakeAsync(engine, sql, prepare, prepared, binding, options, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A view over a statement the host has prepared (D341, design 66 §1): it runs the host's own
+    /// plan, so a run of the statement at the view's epoch gives its rows bit for bit.
+    /// </summary>
+    internal static async ValueTask<StandingView<TKey, TRow>> CreateAsync(
+        ChalkEngine engine,
+        PreparedQuery prepared,
+        ViewBinding binding,
+        ViewOptions<TKey, TRow> options,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(engine);
+        ArgumentNullException.ThrowIfNull(prepared);
+        Validate(engine, binding, options);
+        if (!ReferenceEquals(prepared.Engine, engine))
+        {
+            throw new ArgumentException(
+                "the statement was prepared on another engine. A view runs on the engine its statement was "
+                + "prepared on.",
+                nameof(prepared));
+        }
+
+        if (options.Prepare is not null)
+        {
+            throw new ArgumentException(
+                "the statement is prepared already, so ViewOptions.Prepare has nothing to prepare. Leave it "
+                + "unset, or make the view from the statement's text.",
+                nameof(options));
+        }
+
+        // A view that reads databases is planned under its own cap on local joins; one made from a
+        // prepared statement holds the statement to it.
+        var cap = prepared.Options.JoinPolicy?.LocalJoinMaxRows ?? 0;
+        if (options.DatabaseReads == ViewDatabaseReads.WhenRefreshed
+            && ViewPlan.ReadsOutsideEpochs(engine, prepared.Plan)
+            && cap != options.LocalJoinMaxRows)
+        {
+            throw new ArgumentException(
+                $"the view reads a database and states a cap on local joins of {options.LocalJoinMaxRows} rows, "
+                + $"and the statement was planned under {(cap > 0 ? $"a cap of {cap}" : "none")}. Prepare it with "
+                + "the view's cap in PrepareOptions.JoinPolicy.LocalJoinMaxRows, and every cross-source join local.",
+                nameof(prepared));
+        }
+
+        return await MakeAsync(engine, prepared.Sql, prepared.Options, prepared, binding, options, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Refuses options no view can be made with, before anything is prepared.</summary>
+    private static void Validate(ChalkEngine engine, ViewBinding binding, ViewOptions<TKey, TRow> options)
+    {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(options.Map);
         if (options.Key is not { Count: > 0 })
@@ -151,6 +218,15 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 nameof(options), options.StateBudget, "a view's StateBudget is a number of bytes, more than none.");
         }
 
+        if (!(options.ResetWhen > 0))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.ResetWhen,
+                "a view's ResetWhen is a fraction of its rows, more than none: 1 resets a reader whose "
+                + "changes are no fewer than the rows, and infinity never resets one for size.");
+        }
+
         if (options.LocalJoinMaxRows <= 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -162,11 +238,21 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         }
 
         binding.Refuse(engine.ClockName);
+    }
 
-        var prepared = await engine.PrepareAsync(sql, ViewPrepare.For(options), ct).ConfigureAwait(false);
+    /// <summary>Checks the prepared statement as a view, and computes it at the engine's current epoch.</summary>
+    private static async ValueTask<StandingView<TKey, TRow>> MakeAsync(
+        ChalkEngine engine,
+        string sql,
+        PrepareOptions prepare,
+        PreparedQuery prepared,
+        ViewBinding binding,
+        ViewOptions<TKey, TRow> options,
+        CancellationToken ct)
+    {
         var key = KeyOf(prepared, options.Key);
         ViewChecks.Check(engine, prepared, key, options);
-        var view = new StandingView<TKey, TRow>(engine, sql, options, binding, prepared, key);
+        var view = new StandingView<TKey, TRow>(engine, sql, prepare, options, binding, prepared, key);
         try
         {
             await view.UpdateAsync(ct).ConfigureAwait(false);
@@ -249,6 +335,12 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         }
     }
 
+    /// <summary>How many changes reset a reader: <paramref name="resetWhen"/> of the live rows, at least one.</summary>
+    private static int Enough(double resetWhen, int live) =>
+        double.IsPositiveInfinity(resetWhen)
+            ? int.MaxValue
+            : (int)Math.Min(int.MaxValue, Math.Max(1d, Math.Ceiling(resetWhen * live)));
+
     /// <summary>The view's rows, in bytes, without what it keeps of its databases.</summary>
     private long StateRowBytes()
     {
@@ -310,9 +402,10 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 || cursor.Generation != _generation
                 || cursor.Position < _table.DroppedThrough;
 
-            // What changed since the cursor, counted as far as the result's size: no fewer changes
-            // than rows, and the whole result is no more to send than the changes are.
-            var enough = Math.Max(1, _table.Live);
+            // What changed since the cursor, counted as far as the reset threshold: by default no
+            // fewer changes than rows, where the whole result is no more to send than the changes
+            // are (D341: ResetWhen, a fraction of the live rows).
+            var enough = Enough(_options.ResetWhen, _table.Live);
             var first = _table.FirstAfter(reset ? 0 : cursor.Position, enough, out var changed);
             if (!reset && cursor.ResetFrom == 0 && changed >= enough)
             {
@@ -532,7 +625,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
         try
         {
-            var prepared = await _engine.PrepareAsync(_sql, ViewPrepare.For(_options), ct).ConfigureAwait(false);
+            var prepared = await _engine.PrepareAsync(_sql, _prepare, ct).ConfigureAwait(false);
             var key = KeyOf(prepared, _options.Key);
             ViewChecks.Check(_engine, prepared, key, _options);
             lock (_gate)
@@ -751,6 +844,29 @@ public static class StandingViews
     {
         ArgumentNullException.ThrowIfNull(options);
         return StandingView<TKey, TRow>.CreateAsync(engine, sql, ViewBinding.Of(options.Parameters), options, ct);
+    }
+}
+
+/// <summary>
+/// Standing views of statements the host has already prepared (D341, design 66 §1). Beside
+/// <see cref="StandingViews"/> rather than in it, so that each <c>MaterializeAsync</c> can take its token
+/// optionally: called the same way, <c>engine.MaterializeAsync(prepared, options)</c>.
+/// </summary>
+public static class PreparedViews
+{
+    /// <summary>
+    /// Makes a standing view of a statement the host has prepared on this engine (D341): the view
+    /// runs its plan, so a run of the statement at the view's epoch gives the view's rows bit for bit.
+    /// <see cref="ViewOptions{TKey, TRow}.Prepare"/> must be unset; after a shape change the view
+    /// prepares the statement's text again with the statement's own options.
+    /// </summary>
+    public static ValueTask<StandingView<TKey, TRow>> MaterializeAsync<TKey, TRow>(
+        this ChalkEngine engine, PreparedQuery prepared, ViewOptions<TKey, TRow> options, CancellationToken ct = default)
+        where TKey : unmanaged
+        where TRow : unmanaged
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return StandingView<TKey, TRow>.CreateAsync(engine, prepared, ViewBinding.Of(options.Parameters), options, ct);
     }
 }
 

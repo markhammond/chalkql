@@ -11,6 +11,19 @@ namespace Chalk.Incremental;
 /// </summary>
 internal static class ViewPlan
 {
+    /// <summary>Whether the plan reads a source outside the engine's epochs, such as a database (D340).</summary>
+    public static bool ReadsOutsideEpochs(Chalk.Client.ChalkEngine engine, Plan plan)
+    {
+        var reads = false;
+        Walk(plan, message => reads |= message switch
+        {
+            TableRef table => engine.SourceById(table.SourceId) is not Chalk.Sources.IRefreshableSource,
+            RemoteQuery remote => engine.SourceById(remote.SourceId) is not Chalk.Sources.IRefreshableSource,
+            _ => false,
+        });
+        return reads;
+    }
+
     /// <summary>Whether the plan reads the current time: <c>CURRENT_TIMESTAMP</c> and its kin.</summary>
     public static bool ReadsCurrentTime(Plan plan)
     {

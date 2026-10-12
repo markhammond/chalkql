@@ -89,3 +89,7 @@ Chalk.Incremental.ViewOptions<TKey, TRow>.DatabaseReads.init -> void
 Chalk.Incremental.ViewOptions<TKey, TRow>.LocalJoinMaxRows.get -> long
 Chalk.Incremental.ViewOptions<TKey, TRow>.LocalJoinMaxRows.init -> void
 const Chalk.Incremental.StandingViews.DefaultLocalJoinMaxRows = 1000000 -> long
+Chalk.Incremental.ViewOptions<TKey, TRow>.ResetWhen.get -> double
+Chalk.Incremental.ViewOptions<TKey, TRow>.ResetWhen.init -> void
+Chalk.Incremental.PreparedViews
+static Chalk.Incremental.PreparedViews.MaterializeAsync<TKey, TRow>(this Chalk.Client.ChalkEngine! engine, Chalk.Client.PreparedQuery! prepared, Chalk.Incremental.ViewOptions<TKey, TRow>! options, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Incremental.StandingView<TKey, TRow>!>
