@@ -630,6 +630,15 @@ public final class PlannerPipeline implements AutoCloseable {
    * Parse, validate and convert — the half a narrowing skips when the sidecar retained it (D233).
    */
   public Front front(String sql) throws SqlParseException, ValidationException, RelConversionException {
+    return front(sql, java.util.List.of());
+  }
+
+  /**
+   * The same, holding each parameter to the type the request declared for it, if it declared any
+   * (D337).
+   */
+  public Front front(String sql, java.util.List<chalk.ir.v1.Type> declaredParameterTypes)
+      throws SqlParseException, ValidationException, RelConversionException {
     long t0 = System.nanoTime();
     SqlNode parsed = planner.parse(sql);
 
@@ -653,6 +662,13 @@ public final class PlannerPipeline implements AutoCloseable {
     // SQL bodies are inlined before validation, so a call to one disappears into ordinary algebra
     // and everything downstream — the validator, the optimiser, pushdown — sees only what the body
     // is made of (D78, docs/design/17-user-defined-functions.md §2).
+    // A declared parameter type holds at validation, rather than one Calcite infers from what is
+    // around the parameter (D337). Read from the statement as written, before a body is inlined.
+    planner.declareParameterTypes(
+        DeclaredParameters.of(
+            parsed,
+            declaredParameterTypes,
+            new chalk.planner.types.TypeMapper(planner.getTypeFactory())));
     SqlNode inlined = chalk.planner.ir.SqlBodyInliner.inline(parsed, catalog.functions());
     // The statement's own words, for a refusal that names an expression (D296). Nothing is read
     // from it unless a refusal asks.

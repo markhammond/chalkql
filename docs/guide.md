@@ -868,8 +868,15 @@ list gives no rows for `IN`, and all rows for `NOT IN`.
 
 ### What a value binds to
 
-A parameter's type comes from the statement: the column it is compared with, the
-function it is passed to, or `ParameterTypes`. A value binds only if that type holds it
+A parameter's type comes from the statement: the column it is compared with, or the
+function it is passed to. Or you declare it, in `PrepareOptions.ParameterTypes`, one type
+for each parameter in order. A declared type holds when the statement is checked, so
+`ts >= ? - INTERVAL '60' SECOND` works with the parameter declared `TIMESTAMP(9)`. Left
+to itself, the parameter would take the interval's type, and the comparison would be
+refused. A declared type's nullability holds too. A row count in `LIMIT` or `OFFSET`
+keeps the type it has always had, and must be declared an integer type.
+
+A value binds only if the parameter's type holds it
 **exactly**. Anything else is refused by `ExecuteAsync` with a `ParameterBindingException`,
 code `ParameterBinding`, before anything reaches a source. The error names the parameter
 (`@amount`, `$2`, or its position) and the CLR type you bound, but never the value:
