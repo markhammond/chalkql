@@ -6,7 +6,7 @@
 # start and a JDK to start it with. docs/tutorial.md quotes this script's output, and the comparison
 # below is what stops it quoting an older one.
 #
-#   ./scripts/tutorial.sh          # all eighteen chapters, then the comparison
+#   ./scripts/tutorial.sh          # all nineteen chapters, then the comparison
 #   ./scripts/tutorial.sh 3        # chapter 3 alone; nothing is compared, because nothing is whole
 set -euo pipefail
 
