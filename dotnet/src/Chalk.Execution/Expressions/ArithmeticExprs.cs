@@ -93,8 +93,10 @@ internal sealed class UnaryNumericExpr<T, TOp> : VectorExprBase
 }
 
 /// <summary>
-/// DECIMAL arithmetic, computed in <see cref="decimal"/> and rescaled half-even to the IR's result
-/// scale (§6.4). Overflow of either the 96-bit mantissa or the declared precision raises.
+/// DECIMAL arithmetic. A sum, difference, product or quotient is computed exactly on the unscaled
+/// integers and rounded half away from zero to the IR's result scale, which may be up to 38 digits
+/// (D338, design 63 §5); a remainder is computed in <see cref="decimal"/>. A result wider than its
+/// precision raises.
 /// </summary>
 internal sealed class DecimalArithmeticExpr : VectorExprBase
 {
@@ -134,18 +136,24 @@ internal sealed class DecimalArithmeticExpr : VectorExprBase
                 continue;
             }
 
-            var x = Decimals.Read(a[i], _leftScale);
-            var y = Decimals.Read(b[i], _rightScale);
-            var value = _function switch
+            if (_function == FunctionId.Modulus)
             {
-                FunctionId.Add => x + y,
-                FunctionId.Subtract => x - y,
-                FunctionId.Multiply => x * y,
-                FunctionId.Divide => x / y,
-                _ => x % y,
-            };
+                var x = Decimals.Read(a[i], _leftScale);
+                var y = Decimals.Read(b[i], _rightScale);
+                Decimals.Write(lane, x % y, Type.Precision, Type.Scale);
+                continue;
+            }
 
-            Decimals.Write(lane, value, Type.Precision, Type.Scale);
+            Decimals.WriteUnscaled(
+                lane,
+                DecimalArithmetic.Apply(
+                    _function,
+                    Decimals.ReadUnscaled(a[i]),
+                    _leftScale,
+                    Decimals.ReadUnscaled(b[i]),
+                    _rightScale,
+                    Type.Precision,
+                    Type.Scale));
         }
 
         return Scratch.Finish(length, nulls);

@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "17440540590047658465",
+  "planDigest": "4355823869140896705",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -24,7 +24,7 @@
           "kind": "TYPE_KIND_DECIMAL",
           "nullable": true,
           "precision": 38,
-          "scale": 10
+          "scale": 9
         }
       },
       {
@@ -58,7 +58,7 @@
             "kind": "TYPE_KIND_DECIMAL",
             "nullable": true,
             "precision": 38,
-            "scale": 10
+            "scale": 9
           }
         },
         {
@@ -223,7 +223,7 @@
             "kind": "TYPE_KIND_DECIMAL",
             "nullable": true,
             "precision": 38,
-            "scale": 10
+            "scale": 9
           },
           "call": {
             "function": "FUNCTION_ID_MULTIPLY",

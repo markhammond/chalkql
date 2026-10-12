@@ -497,7 +497,15 @@ internal sealed class ReferenceInterpreter
 
             FunctionId.Add or FunctionId.Subtract or FunctionId.Multiply
                 or FunctionId.Divide or FunctionId.Modulus =>
-                Arithmetic.Binary(call.Function, operands[0]!, operands[1]!, type),
+                type.Kind == TypeKind.Decimal && call.Function != FunctionId.Modulus
+                    ? Arithmetic.ExactDecimal(
+                        call.Function,
+                        operands[0]!,
+                        ChalkType.FromProto(call.Args[0].Type),
+                        operands[1]!,
+                        ChalkType.FromProto(call.Args[1].Type),
+                        type)
+                    : Arithmetic.Binary(call.Function, operands[0]!, operands[1]!, type),
             FunctionId.Negate or FunctionId.Abs or FunctionId.Floor
                 or FunctionId.Ceil or FunctionId.Round =>
                 Arithmetic.Unary(call.Function, operands, type),
@@ -637,6 +645,96 @@ internal sealed class ReferenceInterpreter
     /// <summary>Arithmetic, longhand, with the overflow and rounding rules of <c>02-ir.md</c> §6.</summary>
     private static class Arithmetic
     {
+        /// <summary>
+        /// A DECIMAL sum, difference, product or quotient, worked out longhand in a
+        /// <see cref="System.Numerics.BigInteger"/> on the unscaled values and rounded half away
+        /// from zero to the result's scale (D338, design 63 §5). Written apart from the engine's
+        /// kernel, as this interpreter's arithmetic is (D13). The value is a <see cref="decimal"/>
+        /// where one holds it, and its unscaled <see cref="Int128"/> where it is wider.
+        /// </summary>
+        public static object ExactDecimal(
+            FunctionId function, object left, ChalkType leftType, object right, ChalkType rightType, ChalkType type)
+        {
+            var (a, sa) = Unscaled(left, leftType);
+            var (b, sb) = Unscaled(right, rightType);
+            System.Numerics.BigInteger n;
+            System.Numerics.BigInteger d = System.Numerics.BigInteger.One;
+            switch (function)
+            {
+                case FunctionId.Add or FunctionId.Subtract:
+                {
+                    var common = Math.Max(sa, sb);
+                    var x = a * System.Numerics.BigInteger.Pow(10, common - sa);
+                    var y = b * System.Numerics.BigInteger.Pow(10, common - sb);
+                    n = function == FunctionId.Add ? x + y : x - y;
+                    n *= System.Numerics.BigInteger.Pow(10, Math.Max(0, type.Scale - common));
+                    d = System.Numerics.BigInteger.Pow(10, Math.Max(0, common - type.Scale));
+                    break;
+                }
+
+                case FunctionId.Multiply:
+                    n = a * b * System.Numerics.BigInteger.Pow(10, Math.Max(0, type.Scale - sa - sb));
+                    d = System.Numerics.BigInteger.Pow(10, Math.Max(0, sa + sb - type.Scale));
+                    break;
+
+                default:
+                    if (b.IsZero)
+                    {
+                        throw new DivideByZeroException("A DECIMAL was divided by zero.");
+                    }
+
+                    // a / 10^sa ÷ b / 10^sb, at the result's scale.
+                    n = a * System.Numerics.BigInteger.Pow(10, Math.Max(0, type.Scale + sb - sa));
+                    d = b * System.Numerics.BigInteger.Pow(10, Math.Max(0, sa - sb - type.Scale));
+                    break;
+            }
+
+            var q = System.Numerics.BigInteger.DivRem(n, d, out var r);
+            if (System.Numerics.BigInteger.Abs(r) * 2 >= System.Numerics.BigInteger.Abs(d))
+            {
+                q += n.Sign == d.Sign ? 1 : -1;
+            }
+
+            if (System.Numerics.BigInteger.Abs(q) >= System.Numerics.BigInteger.Pow(10, type.Precision))
+            {
+                throw new OverflowException($"A DECIMAL result does not fit in DECIMAL({type.Precision},{type.Scale}).");
+            }
+
+            var magnitude = System.Numerics.BigInteger.Abs(q);
+            if (type.Scale <= 28 && magnitude < (System.Numerics.BigInteger.One << 96))
+            {
+                var bytes = magnitude.ToByteArray();
+                Span<byte> padded = stackalloc byte[12];
+                bytes.AsSpan(0, Math.Min(12, bytes.Length)).CopyTo(padded);
+                return new decimal(
+                    BitConverter.ToInt32(padded[..4]),
+                    BitConverter.ToInt32(padded[4..8]),
+                    BitConverter.ToInt32(padded[8..12]),
+                    q.Sign < 0,
+                    (byte)type.Scale);
+            }
+
+            return (Int128)q;
+        }
+
+        /// <summary>A DECIMAL operand as its unscaled integer and scale.</summary>
+        private static (System.Numerics.BigInteger Value, int Scale) Unscaled(object value, ChalkType type)
+        {
+            if (value is Int128 wide)
+            {
+                return (wide, type.Scale);
+            }
+
+            var number = (decimal)value;
+            Span<int> bits = stackalloc int[4];
+            _ = decimal.GetBits(number, bits);
+            var mantissa =
+                ((System.Numerics.BigInteger)(uint)bits[2] << 64)
+                | ((System.Numerics.BigInteger)(uint)bits[1] << 32)
+                | (uint)bits[0];
+            return (bits[3] < 0 ? -mantissa : mantissa, (bits[3] >> 16) & 0xFF);
+        }
+
         public static object Binary(FunctionId function, object left, object right, ChalkType type)
         {
             switch (type.Kind)

@@ -1213,6 +1213,16 @@ the date in UTC. A timestamp has precision 6, microseconds, unless you write one
 9: `CURRENT_TIMESTAMP(9)`. A remote source is never sent the current time, so it cannot
 use a "now" of its own. A comparison with it is made in the host.
 
+### DECIMAL arithmetic
+
+A DECIMAL sum, difference, product or quotient is typed as SQL Server types it, with up to
+38 digits. A product of `DECIMAL(p1, s1)` and `DECIMAL(p2, s2)` has scale `s1 + s2`, and a
+quotient keeps at least six fractional digits. Where a result would need more than 38 digits,
+its integer digits are kept and its scale gives way, though not below six places unless the
+integer digits need them too. So `qty * usd_price / usd_rate` over three `DECIMAL(28,8)`
+columns is a `DECIMAL(38,6)`. Each result is computed exactly and rounded half away from zero
+to its scale, as every DECIMAL is. A result whose integer part still does not fit is refused.
+
 ### `LEAST` and `GREATEST`
 
 `LEAST(a, b, …)` and `GREATEST(a, b, …)` take values of any one comparable type: numbers,

@@ -732,7 +732,8 @@ internal sealed class TimestampDiffExpr : VectorExprBase
 
 /// <summary>
 /// An interval scaled by a number (D337, design 63 §6): its count of microseconds, or of months,
-/// times or divided by the number, rounded half-even to a whole count. Shared by both engines.
+/// times or divided by the number, rounded half away from zero to a whole count, as a DECIMAL
+/// result is. Shared by both engines.
 /// </summary>
 internal static class IntervalMath
 {
@@ -744,7 +745,7 @@ internal static class IntervalMath
         }
 
         var exact = divide ? count / factor : count * factor;
-        return checked((long)Math.Round(exact, MidpointRounding.ToEven));
+        return checked((long)Math.Round(exact, MidpointRounding.AwayFromZero));
     }
 
     /// <summary>A number's lane as a <see cref="decimal"/>, whatever numeric kind it is.</summary>
