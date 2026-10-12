@@ -2165,21 +2165,20 @@ The pivot clause is chapter 15's, character for character. What changed is under
         PIVOT (SUM(amount) AS qty FOR warehouse_id IN ('AMS' AS ams, 'SFO' AS sfo, 'SIN' AS sin))
 
     What changed is underneath it. An ASOF join takes, for each movement,
-    the last price at or before the movement's own timestamp — one pass
-    down two ordered streams rather than a range join and a window over
-    its output.
+    the last price at or before the movement's own timestamp, rather than
+    a range join and a window over its output. The prices are indexed by
+    product and time, so the plan seeks that index for each movement
+    instead of reading every price.
 plan as Finance:
-    Plan ir_version=1 digest=6f12b4fac53c82af context_id=tutorial-17 catalog_epoch=1
-      Sort [$0 ASC NULLS LAST] rows=1.833 out=[supplier_id:STRING, ams_qty:DECIMAL(38,2)?, sfo_qty:DECIMAL(38,2)?, sin_qty:DECIMAL(38,2)?] collations=[($0 ASC NULLS LAST)]
-        Project [$0, CASE WHEN EQ($2, CAST(0 AS I64)) THEN NULL:DECIMAL(38,2)? ELSE $1 END, CASE WHEN EQ($4, CAST(0 AS I64)) THEN NULL:DECIMAL(38,2)? ELSE $3 END, CASE WHEN EQ($6, CAST(0 AS I64)) THEN NULL:DECIMAL(38,2)? ELSE $5 END] rows=1.833 out=[supplier_id:STRING, ams_qty:DECIMAL(38,2)?, sfo_qty:DECIMAL(38,2)?, sin_qty:DECIMAL(38,2)?]
-          HashAggregate keys=[6] measures=[SUM0($1) FILTER ISTRUE($2)->DECIMAL(38,2), COUNT() FILTER ISTRUE($2)->I64, SUM0($1) FILTER ISTRUE($3)->DECIMAL(38,2), COUNT() FILTER ISTRUE($3)->I64, SUM0($1) FILTER ISTRUE($4)->DECIMAL(38,2), COUNT() FILTER ISTRUE($4)->I64] rows=1.833 out=[supplier_id:STRING, ams_qty:DECIMAL(38,2), $f2:I64, sfo_qty:DECIMAL(38,2), $f4:I64, sin_qty:DECIMAL(38,2), $f6:I64]
-            Project [$2, $3, $4, $5, $6, $0, $1] rows=2 out=[product_id:I32, amount:DECIMAL(38,2), $f3:BOOL, $f4:BOOL, $f5:BOOL, product_id0:I32, supplier_id:STRING]
-              HashJoin Inner left_keys=[0] right_keys=[0] rows=2 out=[product_id:I32, supplier_id:STRING, product_id0:I32, amount:DECIMAL(38,2), $f3:BOOL, $f4:BOOL, $f5:BOOL]
-                Read shop.main.products projection=[0,1] descriptor=a87b3b38d0608c63b89c102be0be5745 entitled rows=20 out=[product_id:I32, supplier_id:STRING] collations=[($0 ASC NULLS LAST)]
-                Project [$2, MULTIPLY(CAST($3 AS DECIMAL(28,2)), $6), EQ($1, 'AMS'), EQ($1, 'SFO'), EQ($1, 'SIN')] rows=2 out=[product_id:I32, amount:DECIMAL(38,2), $f3:BOOL, $f4:BOOL, $f5:BOOL]
-                  AsOfJoin Inner left_keys=[2] right_keys=[1] match=$0 >= $0 rows=2 out=[ts:TIMESTAMP(9), warehouse_id:STRING, product_id:I32, delta:I32, ts0:TIMESTAMP(9), product_id0:I32, price:DECIMAL(28,2)]
-                    Read shop.main.inventory_movements projection=[1,2,3,5] descriptor=4e9764dcaed50b7231bc4dd055426317 entitled rows=24 out=[ts:TIMESTAMP(9), warehouse_id:STRING, product_id:I32, delta:I32]
-                    Read shop.main.market_prices projection=[1,2,3] rows=96 out=[ts:TIMESTAMP(9), product_id:I32, price:DECIMAL(28,2)]
+    Plan ir_version=1 digest=f331a99390d73dad context_id=tutorial-17 catalog_epoch=1
+      Project [$0, CASE WHEN EQ($2, CAST(0 AS I64)) THEN NULL:DECIMAL(38,2)? ELSE $1 END, CASE WHEN EQ($4, CAST(0 AS I64)) THEN NULL:DECIMAL(38,2)? ELSE $3 END, CASE WHEN EQ($6, CAST(0 AS I64)) THEN NULL:DECIMAL(38,2)? ELSE $5 END] rows=5.925 out=[supplier_id:STRING, ams_qty:DECIMAL(38,2)?, sfo_qty:DECIMAL(38,2)?, sin_qty:DECIMAL(38,2)?] collations=[($0 ASC NULLS LAST)]
+        Sort [$0 ASC NULLS LAST] rows=5.925 out=[supplier_id:STRING, ams_qty:DECIMAL(38,2), $f2:I64, sfo_qty:DECIMAL(38,2), $f4:I64, sin_qty:DECIMAL(38,2), $f6:I64] collations=[($0 ASC NULLS LAST)]
+          HashAggregate keys=[6] measures=[SUM0($1) FILTER ISTRUE($2)->DECIMAL(38,2), COUNT() FILTER ISTRUE($2)->I64, SUM0($1) FILTER ISTRUE($3)->DECIMAL(38,2), COUNT() FILTER ISTRUE($3)->I64, SUM0($1) FILTER ISTRUE($4)->DECIMAL(38,2), COUNT() FILTER ISTRUE($4)->I64] rows=5.925 out=[supplier_id:STRING, ams_qty:DECIMAL(38,2), $f2:I64, sfo_qty:DECIMAL(38,2), $f4:I64, sin_qty:DECIMAL(38,2), $f6:I64]
+            HashJoin Inner left_keys=[0] right_keys=[0] rows=24 out=[product_id:I32, amount:DECIMAL(38,2), $f3:BOOL, $f4:BOOL, $f5:BOOL, product_id0:I32, supplier_id:STRING]
+              Project [$2, MULTIPLY(CAST($3 AS DECIMAL(28,2)), $6), EQ($1, 'AMS'), EQ($1, 'SFO'), EQ($1, 'SIN')] rows=24 out=[product_id:I32, amount:DECIMAL(38,2), $f3:BOOL, $f4:BOOL, $f5:BOOL]
+                AsOfLookupJoin Inner main.market_prices index=ix_market_prices_product_id_ts projection=[1,2,3] left_keys=[2] right_keys=[1] match=$0 >= $0 rows=24 out=[ts:TIMESTAMP(9), warehouse_id:STRING, product_id:I32, delta:I32, ts0:TIMESTAMP(9), product_id0:I32, price:DECIMAL(28,2)]
+                  Read shop.main.inventory_movements projection=[1,2,3,5] descriptor=4e9764dcaed50b7231bc4dd055426317 entitled rows=24 out=[ts:TIMESTAMP(9), warehouse_id:STRING, product_id:I32, delta:I32]
+              Read shop.main.products projection=[0,1] descriptor=a87b3b38d0608c63b89c102be0be5745 entitled rows=20 out=[product_id:I32, supplier_id:STRING] collations=[($0 ASC NULLS LAST)]
 ```
 
 ```
