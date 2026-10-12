@@ -749,7 +749,7 @@ public sealed class PreparedColumn
 /// </summary>
 public sealed class QueryExecution : IAsyncDisposable
 {
-    private readonly CompiledPlan _compiled;
+    private CompiledPlan _compiled;
     private readonly object?[] _parameters;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>>? _relations;
     private readonly ExecutionArena? _hostArena;
@@ -783,6 +783,12 @@ public sealed class QueryExecution : IAsyncDisposable
 
     /// <summary>The schema every batch matches — names, types, nullability and order.</summary>
     public ArrowSchema Schema { get; }
+
+    /// <summary>
+    /// Has this execution read <paramref name="clock"/> as the current time, instead of the engine's,
+    /// when called before it runs: a standing view's epoch's clock (D339).
+    /// </summary>
+    internal void UseClock(TimeProvider clock) => _compiled = _compiled.WithClock(clock);
 
     /// <summary>
     /// The plan this execution actually runs. Usually the prepared statement's own, but a statement

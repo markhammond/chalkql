@@ -156,8 +156,12 @@ public sealed class FunctionDescriptor
     /// <summary>A table function's <c>RETURNS TABLE</c>. Empty for the other kinds.</summary>
     public IReadOnlyList<ColumnDescriptor> ReturnsTable { get; init; } = [];
 
-    /// <summary>Foldable, once per execution, or per lane. Immutable when nothing is said.</summary>
-    public Volatility Volatility { get; init; } = Volatility.Immutable;
+    /// <summary>
+    /// Foldable, once per execution, or per lane. Unspecified when nothing is said, which reads as
+    /// immutable everywhere; only a standing view that asks for an explicit declaration tells the two
+    /// apart (D339).
+    /// </summary>
+    public Volatility Volatility { get; init; } = Volatility.Unspecified;
 
     /// <summary>
     /// <c>RETURNS NULL ON NULL INPUT</c>: the result is nullable when any argument is, and the

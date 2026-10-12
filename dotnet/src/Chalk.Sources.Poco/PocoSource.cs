@@ -193,26 +193,40 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
         SnapshotReleased?.Invoke(new PocoSnapshotRelease { Table = table, Collection = collection });
 
     /// <inheritdoc />
+    /// <remarks>
+    /// One refresh says once what each table becomes. A table takes rows given whole or appended, or
+    /// upserts and deletes by key, and beside either an advance of its frontier (D339); a table named
+    /// any other way twice is refused.
+    /// </remarks>
     public void ValidateRefresh(IReadOnlyList<SourceRefreshEntry> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
 
-        var named = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var named = new Dictionary<string, List<SourceRefreshKind>>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in entries)
         {
             var table = Require(entry.Table);
 
-            if (!named.Add(table.Name))
+            if (!named.TryGetValue(table.Name, out var kinds))
+            {
+                kinds = [];
+                named[table.Name] = kinds;
+            }
+
+            if (!Combines(kinds, entry.Kind))
             {
                 throw new SourceContractException(
                     ChalkErrorCodes.SourceRefresh,
                     SourceId,
                     entry.Table,
                     "a refresh names this table twice. One transaction says what a table becomes "
-                    + "once; put the rows together and say it once.");
+                    + "once: its rows given whole or appended, or upserts and deletes by key, and "
+                    + "beside either one advance of its frontier. Put the rows together and say it once.");
             }
 
-            if (entry.RowType != table.RowType)
+            kinds.Add(entry.Kind);
+
+            if (entry.Kind != SourceRefreshKind.Advance && entry.RowType != table.RowType)
             {
                 throw new SourceContractException(
                     ChalkErrorCodes.SourceRefresh,
@@ -226,6 +240,23 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
         }
     }
 
+    /// <summary>Whether a table already named for <paramref name="kinds"/> may also take <paramref name="next"/>.</summary>
+    private static bool Combines(List<SourceRefreshKind> kinds, SourceRefreshKind next)
+    {
+        if (kinds.Contains(next))
+        {
+            return false;
+        }
+
+        return next switch
+        {
+            SourceRefreshKind.Advance => true,
+            SourceRefreshKind.Upsert => kinds.TrueForAll(k => k is SourceRefreshKind.Delete or SourceRefreshKind.Advance),
+            SourceRefreshKind.Delete => kinds.TrueForAll(k => k is SourceRefreshKind.Upsert or SourceRefreshKind.Advance),
+            _ => kinds.TrueForAll(k => k is SourceRefreshKind.Advance),
+        };
+    }
+
     /// <inheritdoc />
     public ValueTask<ISourceRefreshCommit> PrepareRefreshAsync(
         IReadOnlyList<SourceRefreshEntry> entries, CancellationToken ct)
@@ -233,13 +264,29 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
         ArgumentNullException.ThrowIfNull(entries);
         ValidateRefresh(entries);
 
-        var prepared = new IPocoTableCommit[entries.Count];
+        // Each table's entries together, in the order the tables were first named.
+        var tables = new List<(PocoTableRuntime Table, List<SourceRefreshEntry> Entries)>();
+        foreach (var entry in entries)
+        {
+            var table = Require(entry.Table);
+            var found = tables.FindIndex(t => ReferenceEquals(t.Table, table));
+            if (found < 0)
+            {
+                tables.Add((table, [entry]));
+            }
+            else
+            {
+                tables[found].Entries.Add(entry);
+            }
+        }
+
+        var prepared = new IPocoTableCommit[tables.Count];
         lock (_refreshing)
         {
-            for (var i = 0; i < entries.Count; i++)
+            for (var i = 0; i < tables.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
-                prepared[i] = Require(entries[i].Table).PrepareRefresh(entries[i]);
+                prepared[i] = tables[i].Table.PrepareRefresh(SourceId, tables[i].Entries);
             }
         }
 
@@ -431,8 +478,11 @@ internal abstract class PocoTableRuntime
     /// <summary>Refuses an entry this table cannot serve, before anything is built.</summary>
     public abstract void ValidateRefresh(string sourceId, SourceRefreshEntry entry);
 
-    /// <summary>Builds the snapshot this entry asks for, without publishing it.</summary>
-    public abstract IPocoTableCommit PrepareRefresh(SourceRefreshEntry entry);
+    /// <summary>
+    /// Builds what this table's entries ask for, without publishing it: one that says what the rows
+    /// are, or upserts and deletes by key, and an advance of the frontier beside either (D339).
+    /// </summary>
+    public abstract IPocoTableCommit PrepareRefresh(string sourceId, IReadOnlyList<SourceRefreshEntry> entries);
 
     public abstract TableDescriptor Describe();
 
@@ -582,13 +632,35 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             return;
         }
 
-        Publish(Carry(_factory.From(collection), StatisticsRefresh.Now));
+        var next = Carry(_factory.From(collection), StatisticsRefresh.Now);
+        var frontier = _changes is { HasTime: true } timed ? Latest(timed, Values(next)) : null;
+        Publish(next);
+        if (_changes is not null)
+        {
+            _changes.Frontier = frontier;
+        }
+    }
+
+    /// <summary>The change kind this table declares (D339), or null for none.</summary>
+    private PocoChanges<T>? _changes;
+
+    /// <summary>
+    /// Takes the change kind the builder declared, and the frontier the registered rows already
+    /// reach: the greatest of their times.
+    /// </summary>
+    public void Declare(PocoChanges<T> changes)
+    {
+        _changes = changes;
+        if (changes.HasTime)
+        {
+            changes.Frontier = Latest(changes, Values(Current));
+        }
     }
 
     /// <inheritdoc />
     public override void ValidateRefresh(string sourceId, SourceRefreshEntry entry)
     {
-        if (entry.Rows is not IReadOnlyList<T>)
+        if (entry.Kind != SourceRefreshKind.Advance && entry.Rows is not IReadOnlyList<T>)
         {
             throw new SourceContractException(
                 ChalkErrorCodes.SourceRefresh,
@@ -598,36 +670,287 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
                 + $"IReadOnlyList<{typeof(T).Name}>.");
         }
 
-        if (entry.Kind is SourceRefreshKind.Append && !_factory.RandomAccess)
+        var kind = _changes?.Kind ?? PocoChangeKind.None;
+        switch (entry.Kind)
         {
-            throw new SourceContractException(
-                ChalkErrorCodes.SourceRefresh,
-                sourceId,
-                entry.Table,
-                "the collection was registered as an IReadOnlyCollection<T>, which only enumerates, "
-                + "so there are no positions to append after. Register an IReadOnlyList<T>, or "
-                + "replace the table's rows instead of appending to them.");
-        }
+            case SourceRefreshKind.Replace:
+                return;
 
-        if (entry.Kind is not (SourceRefreshKind.Replace or SourceRefreshKind.Append))
-        {
-            throw new SourceContractException(
-                ChalkErrorCodes.SourceRefresh,
-                sourceId,
-                entry.Table,
-                $"{entry.Kind} is not something this table can do.");
+            case SourceRefreshKind.Append:
+                if (!_factory.RandomAccess)
+                {
+                    throw new SourceContractException(
+                        ChalkErrorCodes.SourceRefresh,
+                        sourceId,
+                        entry.Table,
+                        "the collection was registered as an IReadOnlyCollection<T>, which only "
+                        + "enumerates, so there are no positions to append after. Register an "
+                        + "IReadOnlyList<T>, or replace the table's rows instead of appending to them.");
+                }
+
+                if (kind == PocoChangeKind.Keyed)
+                {
+                    throw new SourceContractException(
+                        ChalkErrorCodes.SourceRefresh,
+                        sourceId,
+                        entry.Table,
+                        $"the table declares {_changes!.Spelling}, so its rows change by key. Upsert "
+                        + "the new rows rather than appending them.");
+                }
+
+                return;
+
+            case SourceRefreshKind.Upsert or SourceRefreshKind.Delete:
+                if (kind != PocoChangeKind.Keyed)
+                {
+                    throw new SourceContractException(
+                        ChalkErrorCodes.SourceRefresh,
+                        sourceId,
+                        entry.Table,
+                        kind == PocoChangeKind.None
+                            ? $"{entry.Kind} changes rows by key, and the table declares no key to "
+                              + "change them by. Declare Keyed(…) on the table."
+                            : $"the table declares {_changes!.Spelling}, so its rows are only appended, "
+                              + $"and {entry.Kind} changes rows by key.");
+                }
+
+                return;
+
+            case SourceRefreshKind.Advance:
+                if (_changes is not { HasTime: true } timed)
+                {
+                    throw new SourceContractException(
+                        ChalkErrorCodes.SourceRefresh,
+                        sourceId,
+                        entry.Table,
+                        "an advance moves a table's frontier, and only a table that declares a time has "
+                        + "one. Declare AppendOnly(…) or AsOf(…) on the table.");
+                }
+
+                if (timed.Ticks(entry.Frontier) is null)
+                {
+                    throw new SourceContractException(
+                        ChalkErrorCodes.SourceRefresh,
+                        sourceId,
+                        entry.Table,
+                        $"the advance is to {(entry.Frontier is null ? "NULL" : "a " + entry.Frontier.GetType().Name)}, "
+                        + $"and the table's time, {timed.TimeMember}, is a {timed.TimeType!.Name}.");
+                }
+
+                return;
+
+            default:
+                throw new SourceContractException(
+                    ChalkErrorCodes.SourceRefresh,
+                    sourceId,
+                    entry.Table,
+                    $"{entry.Kind} is not something this table can do.");
         }
     }
 
     /// <inheritdoc />
-    public override IPocoTableCommit PrepareRefresh(SourceRefreshEntry entry) =>
-        new PreparedSnapshot(
-            this,
-            Carry(
-                entry.Kind == SourceRefreshKind.Append
-                    ? _factory.Appended(Current, (IReadOnlyList<T>)entry.Rows)
-                    : _factory.From((IReadOnlyList<T>)entry.Rows),
-                entry.Statistics));
+    public override IPocoTableCommit PrepareRefresh(string sourceId, IReadOnlyList<SourceRefreshEntry> entries)
+    {
+        SourceRefreshEntry? rows = null, upsert = null, delete = null, advance = null;
+        foreach (var entry in entries)
+        {
+            switch (entry.Kind)
+            {
+                case SourceRefreshKind.Replace or SourceRefreshKind.Append: rows = entry; break;
+                case SourceRefreshKind.Upsert: upsert = entry; break;
+                case SourceRefreshKind.Delete: delete = entry; break;
+                default: advance = entry; break;
+            }
+        }
+
+        // The frontier as it stood before this refresh: lateness is judged against it, so the rows of
+        // one refresh may come in any order among themselves.
+        var before = _changes?.Frontier;
+        var frontier = before;
+        PocoTableSnapshot<T>? next = null;
+
+        if (rows is { Kind: SourceRefreshKind.Replace })
+        {
+            var given = (IReadOnlyList<T>)rows.Rows;
+            if (_changes is { HasTime: true } timed)
+            {
+                frontier = Latest(timed, given);
+            }
+
+            next = Carry(_factory.From(given), rows.Statistics);
+        }
+        else if (rows is { Kind: SourceRefreshKind.Append })
+        {
+            var given = (IReadOnlyList<T>)rows.Rows;
+            if (_changes is { HasTime: true } timed)
+            {
+                (given, frontier) = Admit(timed, given, before);
+            }
+
+            next = Carry(_factory.Appended(Current, given), rows.Statistics);
+        }
+        else if (upsert is not null || delete is not null)
+        {
+            var changed = ByKey(
+                sourceId,
+                _changes!,
+                Current.Rows!,
+                (IReadOnlyList<T>?)upsert?.Rows ?? [],
+                (IReadOnlyList<T>?)delete?.Rows ?? []);
+            var statistics = upsert?.Statistics == StatisticsRefresh.Now || delete?.Statistics == StatisticsRefresh.Now
+                ? StatisticsRefresh.Now
+                : StatisticsRefresh.Defer;
+            next = Carry(_factory.Owned(changed), statistics);
+        }
+
+        if (advance is not null)
+        {
+            var timed = _changes!;
+            var to = timed.Ticks(advance.Frontier)!.Value;
+            if (before is { } from && to < from)
+            {
+                throw new SourceContractException(
+                    ChalkErrorCodes.SourceRefresh,
+                    sourceId,
+                    Name,
+                    $"the advance would move the table's frontier back, from {timed.Render(from)} to "
+                    + $"{timed.Render(to)}. A frontier only moves forward; nothing in the refresh was "
+                    + "applied.");
+            }
+
+            frontier = frontier is { } reached ? Math.Max(reached, to) : to;
+        }
+
+        return new PreparedChange(this, next, frontier);
+    }
+
+    /// <summary>
+    /// The rows an append-only or as-of table takes from an append: each one's time checked against
+    /// the frontier less the lateness, and the rows in time order when the table keeps that order,
+    /// which is when its lateness is zero. Returns the rows to append and the frontier after them.
+    /// </summary>
+    private (IReadOnlyList<T> Rows, long? Frontier) Admit(PocoChanges<T> timed, IReadOnlyList<T> rows, long? frontier)
+    {
+        var floor = frontier is { } reached ? reached - timed.LatenessTicks : long.MinValue;
+        var times = new long[rows.Count];
+        var latest = frontier;
+        var ordered = true;
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var time = timed.TicksOf(rows[i]) ?? throw PocoChangeRefusals.UntimedRow(Name, timed, i);
+            if (time < floor)
+            {
+                throw PocoChangeRefusals.Late(Name, timed, i, time, frontier!.Value);
+            }
+
+            ordered &= i == 0 || times[i - 1] <= time;
+            times[i] = time;
+            latest = latest is { } most && most >= time ? most : time;
+        }
+
+        if (ordered || timed.LatenessTicks != 0)
+        {
+            return (rows, latest);
+        }
+
+        // Stable, so rows of one time keep the order they were given in.
+        var order = new int[rows.Count];
+        for (var i = 0; i < order.Length; i++)
+        {
+            order[i] = i;
+        }
+
+        Array.Sort(order, (a, b) => times[a] != times[b] ? times[a].CompareTo(times[b]) : a.CompareTo(b));
+        return (Array.ConvertAll(order, i => rows[i]), latest);
+    }
+
+    /// <summary>The greatest time among <paramref name="rows"/>, refusing a row that has none.</summary>
+    private long? Latest(PocoChanges<T> timed, IReadOnlyCollection<T> rows)
+    {
+        long? latest = null;
+        var i = 0;
+        foreach (var row in rows)
+        {
+            var time = timed.TicksOf(row) ?? throw PocoChangeRefusals.UntimedRow(Name, timed, i);
+            latest = latest is { } most && most >= time ? most : time;
+            i++;
+        }
+
+        return latest;
+    }
+
+    private static IReadOnlyCollection<T> Values(PocoTableSnapshot<T> snapshot) => snapshot.Values;
+
+    /// <summary>
+    /// A keyed table's next rows: the current ones in their order with each upserted key's row in its
+    /// place and each deleted key's row gone, then the rows of keys it did not hold, in the order they
+    /// were given.
+    /// </summary>
+    private List<T> ByKey(
+        string sourceId,
+        PocoChanges<T> keyed,
+        IReadOnlyList<T> current,
+        IReadOnlyList<T> upserts,
+        IReadOnlyList<T> deletes)
+    {
+        var upserted = new Dictionary<object?[], int>(upserts.Count, PocoChanges<T>.KeyComparer);
+        for (var i = 0; i < upserts.Count; i++)
+        {
+            var key = keyed.KeyOf(upserts[i]);
+            if (!upserted.TryAdd(key, i))
+            {
+                throw PocoChangeRefusals.KeyTwice(Name, keyed, upserted[key], i, key);
+            }
+        }
+
+        var deleted = new HashSet<object?[]>(PocoChanges<T>.KeyComparer);
+        foreach (var row in deletes)
+        {
+            var key = keyed.KeyOf(row);
+            if (upserted.ContainsKey(key))
+            {
+                throw new SourceContractException(
+                    ChalkErrorCodes.SourceRefresh,
+                    sourceId,
+                    Name,
+                    $"the key {PocoChanges<T>.Render(key)} is both upserted and deleted in one refresh. "
+                    + "Say once what each key becomes; nothing in the refresh was applied.");
+            }
+
+            deleted.Add(key);
+        }
+
+        var next = new List<T>(current.Count + upserts.Count);
+        var placed = new bool[upserts.Count];
+        foreach (var row in current)
+        {
+            var key = keyed.KeyOf(row);
+            if (deleted.Contains(key))
+            {
+                continue;
+            }
+
+            if (upserted.TryGetValue(key, out var replacement))
+            {
+                next.Add(upserts[replacement]);
+                placed[replacement] = true;
+            }
+            else
+            {
+                next.Add(row);
+            }
+        }
+
+        for (var i = 0; i < upserts.Count; i++)
+        {
+            if (!placed[i])
+            {
+                next.Add(upserts[i]);
+            }
+        }
+
+        return next;
+    }
 
     /// <summary>
     /// Hands the next snapshot whatever statistics the current one has in force, and says whether
@@ -657,19 +980,35 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         return next;
     }
 
-    /// <summary>The snapshot a transaction built for this table, waiting for the engine to say when.</summary>
-    private sealed class PreparedSnapshot : IPocoTableCommit
+    /// <summary>
+    /// What a transaction built for this table, waiting for the engine to say when: a snapshot, a
+    /// frontier, or both. An advance alone moves the frontier and publishes no rows.
+    /// </summary>
+    private sealed class PreparedChange : IPocoTableCommit
     {
         private readonly PocoTableRuntime<T> _table;
-        private readonly PocoTableSnapshot<T> _snapshot;
+        private readonly PocoTableSnapshot<T>? _snapshot;
+        private readonly long? _frontier;
 
-        public PreparedSnapshot(PocoTableRuntime<T> table, PocoTableSnapshot<T> snapshot)
+        public PreparedChange(PocoTableRuntime<T> table, PocoTableSnapshot<T>? snapshot, long? frontier)
         {
             _table = table;
             _snapshot = snapshot;
+            _frontier = frontier;
         }
 
-        public void Commit() => _table.Publish(_snapshot);
+        public void Commit()
+        {
+            if (_snapshot is not null)
+            {
+                _table.Publish(_snapshot);
+            }
+
+            if (_table._changes is { } changes)
+            {
+                changes.Frontier = _frontier;
+            }
+        }
     }
 
     /// <summary>

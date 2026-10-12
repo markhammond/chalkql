@@ -216,6 +216,16 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             throw new ArgumentException("BatchSize must be at least 1", nameof(options));
         }
 
+        // D339: the clock is a parameter's name as a statement writes it after its '@'.
+        if (options.Clock is { } clock
+            && (clock.Length == 0 || clock[0] == '@' || !clock.All(c => char.IsLetterOrDigit(c) || c == '_')))
+        {
+            throw new ArgumentException(
+                $"Clock names '{clock}', and a clock is named as a parameter is, after its '@': "
+                + "letters, digits and underscores, such as \"now\".",
+                nameof(options));
+        }
+
         // D244: a host that accepts no layout accepts no STRING column, which is not a query this
         // engine could ever answer. Refused here rather than at the first prepare that has one.
         if (options.Output.Strings is not (
@@ -641,7 +651,16 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             
             // The shared source is already current: another engine performed the source refresh.
             // Re-publish only this engine's catalogue; do not invoke RefreshAsync on the source again.
-            await PublishAsync(ct).ConfigureAwait(false);
+            BeginChanges();
+            try
+            {
+                await PublishAsync(ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                EndChanges();
+            }
+
             CaptureSharedRevisions();
         }
         finally
@@ -1132,6 +1151,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     public async ValueTask<long> RefreshAsync(CancellationToken ct = default)
     {
         await _refreshing.WaitAsync(ct).ConfigureAwait(false);
+        BeginChanges();
         try
         {
             // Exclusive-only engines take exactly the pre-sharing path: the engine semaphore and
@@ -1160,6 +1180,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         }
         finally
         {
+            EndChanges();
             _refreshing.Release();
         }
     }
@@ -1192,9 +1213,20 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
         var builder = new RefreshBuilder();
         plan(builder);
-        if (builder.Entries.Count == 0 && builder.Scopes.Count == 0)
+        if (builder.Entries.Count == 0
+            && builder.Scopes.Count == 0
+            && builder.VersionGiven is null
+            && builder.ClockGiven is null)
         {
             return await RefreshAsync(ct).ConfigureAwait(false);
+        }
+
+        if (builder.ClockGiven is not null && _options.Clock is null)
+        {
+            throw new ArgumentException(
+                "the refresh advances the clock, and this engine declares none. Name one with "
+                + "ChalkEngineOptions.Clock; it is what a standing view reads as the current time.",
+                nameof(plan));
         }
 
         // Every scope is resolved to a source before the lock is taken, so a target this engine does
@@ -1249,6 +1281,19 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         await _refreshing.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            // The version and the clock are checked against the epoch this refresh follows, which
+            // only the lock fixes, and before anything is applied.
+            CheckStamp(builder.VersionGiven, builder.ClockGiven);
+            BeginChanges();
+        }
+        catch
+        {
+            _refreshing.Release();
+            throw;
+        }
+
+        try
+        {
             SharedSourceLease? sharedLease = null;
             if (_orderedSharedSourceStates.Length != 0)
             {
@@ -1301,13 +1346,14 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                     }
                 }
 
-                var epoch = await PublishAsync(ct).ConfigureAwait(false);
+                var epoch = await PublishAsync(builder.VersionGiven, builder.ClockGiven, ct).ConfigureAwait(false);
                 CaptureSharedRevisions();
                 return epoch;
             }
         }
         finally
         {
+            EndChanges();
             _refreshing.Release();
         }
     }
@@ -1390,7 +1436,14 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// it one epoch on. The caller holds the engine refresh lock and, when shared sources exist, all
     /// of this engine's shared-source refresh gates.
     /// </summary>
-    private async ValueTask<long> PublishAsync(CancellationToken ct)
+    private ValueTask<long> PublishAsync(CancellationToken ct) => PublishAsync(version: null, clock: null, ct);
+
+    /// <summary>
+    /// The same, numbering the epoch with the host's <paramref name="version"/> and moving the clock
+    /// to <paramref name="clock"/> when given (D339): one past the last version and the clock where
+    /// it was otherwise.
+    /// </summary>
+    private async ValueTask<long> PublishAsync(long? version, DateTimeOffset? clock, CancellationToken ct)
     {
         var schemas = new List<SchemaDescriptor>(_sourceRegistrations.Length);
         foreach (var registration in _sourceRegistrations)
@@ -1479,6 +1532,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
         _statisticsVersion = nextStatisticsVersion;
         Volatile.Write(ref _catalog, next);
+        Stamped(next.Epoch, version, clock);
         _log.LogInformation(
             "catalog refreshed: epoch {Epoch} -> {NextEpoch}, {Sources} sources, {Tables} tables, "
             + "{Change} (shape epoch {ShapeEpoch}, {Moved} statistics published)",

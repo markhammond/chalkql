@@ -1583,3 +1583,17 @@ Chalk.Client.GrpcQueryPlanner.PlanNestingLimit.get -> int
 Chalk.Client.IQueryPlanner.PlanNestingLimit.get -> int
 Chalk.Client.RecordedPlanner.PlanNestingLimit.get -> int
 Chalk.Client.RecordedPlanner.PlanNestingLimit.init -> void
+Chalk.Client.ChalkEngine.ClockTime.get -> System.DateTimeOffset?
+Chalk.Client.ChalkEngine.Version.get -> long
+Chalk.Client.ChalkEngineOptions.Clock.get -> string?
+Chalk.Client.ChalkEngineOptions.Clock.init -> void
+Chalk.Client.RefreshBuilder.Advance(Chalk.Sources.ISourceRuntime! source, string! table, System.DateTime time) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Advance(Chalk.Sources.ISourceRuntime! source, string! table, System.DateTimeOffset time) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Advance(Chalk.Sources.ITableTarget! table, System.DateTime time) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Advance(Chalk.Sources.ITableTarget! table, System.DateTimeOffset time) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.AdvanceClock(System.DateTimeOffset time) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Delete<T>(Chalk.Sources.ISourceRuntime! source, string! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Delete<T>(Chalk.Sources.ITableTarget<T>! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Upsert<T>(Chalk.Sources.ISourceRuntime! source, string! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Upsert<T>(Chalk.Sources.ITableTarget<T>! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Version(long version) -> Chalk.Client.RefreshBuilder!

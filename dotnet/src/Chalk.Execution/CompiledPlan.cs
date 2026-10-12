@@ -280,6 +280,31 @@ internal sealed class CompiledPlan
         LikeParameters = LikeParameters,
     };
 
+    /// <summary>
+    /// The same plan reading <paramref name="clock"/> as the current time, for a standing view, whose
+    /// statement reads its epoch's clock (D339). Kept once per clock, so a view that sets its clock
+    /// before each update keeps one copy and its warm tree; a query that is not a view never makes one.
+    /// </summary>
+    internal CompiledPlan WithClock(TimeProvider clock)
+    {
+        if (_clocked is { } kept && ReferenceEquals(kept._settings.TimeProvider, clock))
+        {
+            return kept;
+        }
+
+        var copy = new CompiledPlan(
+            Plan, OutputSchema, ParameterTypes, BoundScalars, _outputTypes, _root, _catalog, _sources,
+            _settings with { TimeProvider = clock })
+        {
+            Sharing = Sharing,
+            LikeParameters = LikeParameters,
+        };
+        _clocked = copy;
+        return copy;
+    }
+
+    private CompiledPlan? _clocked;
+
     /// <summary>Builds the immutable half of an execution context.</summary>
     internal OperatorContext NewContext() => new()
     {

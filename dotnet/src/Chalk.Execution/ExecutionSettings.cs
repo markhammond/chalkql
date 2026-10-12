@@ -4,7 +4,7 @@ namespace Chalk.Execution;
 /// What the client tells the engine about one execution. The mirror of the public
 /// <c>ExecutionOptions</c> (<c>docs/design/04-client.md</c> §2), reduced to what the engine acts on.
 /// </summary>
-internal sealed class ExecutionSettings
+internal sealed record ExecutionSettings
 {
     /// <summary>Upper bound on rows per batch, end to end: sources, operators and output.</summary>
     public int BatchSize { get; init; } = 4096;

@@ -44,6 +44,22 @@ public sealed class CatalogVerificationException : ChalkException
         RowIndex = rowIndex;
     }
 
+    /// <summary>
+    /// The same, where the remedy is not the collection's order: a refresh that a table's declared
+    /// change kind refuses (D339), whose detail names the row itself and whose
+    /// <paramref name="remedy"/> says what to do.
+    /// </summary>
+    public CatalogVerificationException(
+        string table, string declaration, long rowIndex, string detail, string remedy)
+        : base(
+            ChalkErrorCodes.DeclarationNotHeld,
+            $"Table '{table}' does not satisfy its declared {declaration}: {detail}. {remedy}")
+    {
+        Table = table;
+        Declaration = declaration;
+        RowIndex = rowIndex;
+    }
+
     public string Table { get; }
 
     /// <summary>The declaration that failed, e.g. <c>collation [ts ASC NULLS LAST, symbol ASC NULLS LAST]</c>.</summary>

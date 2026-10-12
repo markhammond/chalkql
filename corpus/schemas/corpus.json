@@ -2428,7 +2428,6 @@
           "returnType": {
             "kind": "TYPE_KIND_FP64"
           },
-          "volatility": "VOLATILITY_IMMUTABLE",
           "strict": true,
           "sql": {
             "text": "(b - a) / a"
@@ -2457,7 +2456,6 @@
             "kind": "TYPE_KIND_FP64",
             "nullable": true
           },
-          "volatility": "VOLATILITY_IMMUTABLE",
           "sql": {
             "text": "SUM(x * w) / SUM(w)"
           }
@@ -2497,7 +2495,6 @@
               }
             ]
           },
-          "volatility": "VOLATILITY_IMMUTABLE",
           "sql": {
             "text": "SELECT symbol, ts, \"close\" FROM bars WHERE symbol = sym"
           }
@@ -2541,7 +2538,6 @@
           "returnType": {
             "kind": "TYPE_KIND_FP64"
           },
-          "volatility": "VOLATILITY_IMMUTABLE",
           "strict": true,
           "client": {}
         },
@@ -2561,7 +2557,6 @@
             "kind": "TYPE_KIND_FP64",
             "nullable": true
           },
-          "volatility": "VOLATILITY_IMMUTABLE",
           "client": {}
         },
         {
@@ -2587,7 +2582,6 @@
             "kind": "TYPE_KIND_FP64",
             "nullable": true
           },
-          "volatility": "VOLATILITY_IMMUTABLE",
           "window": true,
           "client": {}
         },
@@ -2627,7 +2621,6 @@
               }
             ]
           },
-          "volatility": "VOLATILITY_IMMUTABLE",
           "client": {}
         },
         {
@@ -2645,7 +2638,6 @@
           "returnType": {
             "kind": "TYPE_KIND_I64"
           },
-          "volatility": "VOLATILITY_IMMUTABLE",
           "strict": true,
           "client": {}
         },
@@ -2684,7 +2676,6 @@
           "returnType": {
             "kind": "TYPE_KIND_I64"
           },
-          "volatility": "VOLATILITY_IMMUTABLE",
           "strict": true,
           "monotonicity": [
             "MONOTONICITY_INCREASING"
@@ -2727,7 +2718,6 @@
               }
             ]
           },
-          "volatility": "VOLATILITY_IMMUTABLE",
           "strict": true,
           "client": {}
         },
@@ -2761,7 +2751,6 @@
               }
             ]
           },
-          "volatility": "VOLATILITY_IMMUTABLE",
           "window": true,
           "client": {}
         },
@@ -2793,7 +2782,6 @@
             "precision": 15,
             "scale": 2
           },
-          "volatility": "VOLATILITY_IMMUTABLE",
           "strict": true,
           "client": {}
         },
@@ -2812,7 +2800,6 @@
           "returnType": {
             "kind": "TYPE_KIND_DATE"
           },
-          "volatility": "VOLATILITY_IMMUTABLE",
           "strict": true,
           "client": {}
         }

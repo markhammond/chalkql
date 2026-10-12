@@ -44,6 +44,7 @@ public sealed class PocoTableBuilder<T>
     private readonly List<HostIndexDeclaration> _hostIndexDeclarations = [];
     private readonly Dictionary<string, ColumnStatistics> _columnStatistics = new(StringComparer.Ordinal);
     private bool _verify = true;
+    private PocoChangeDeclaration<T>? _change;
     private StatisticsLevel _statisticsLevel = StatisticsLevel.Basic;
     private double _refreshWhenGrownBy;
     private int _histogramBuckets = 64;
@@ -126,6 +127,173 @@ public sealed class PocoTableBuilder<T>
 
         _uniqueKeys.Add(Array.ConvertAll(keys, k => PocoMembers.Resolve(k, _table, "UniqueKey(keys)").Name));
         return this;
+    }
+
+    /// <summary>
+    /// Declares the table a log read by <paramref name="time"/>, whose rows are only appended (D339,
+    /// <c>docs/design/64-incremental-views.md</c> §2). The table's frontier is the greatest time it
+    /// has been given; a row older than the frontier, less <paramref name="lateness"/>, refuses the
+    /// whole refresh it came in, naming the row. Zero, the default, refuses every late row.
+    /// </summary>
+    /// <remarks>
+    /// With zero lateness the rows stay in time order, as <see cref="OrderedBy{TKey}"/> declares, and
+    /// a refresh sorts the rows it appends; with a window a row may land in the middle, so the time
+    /// order is an index each append merges into. A <c>Replace</c> rewrites the log, and is how a
+    /// host trims it.
+    /// </remarks>
+    /// <param name="time">A <see cref="DateTime"/> or <see cref="DateTimeOffset"/> member.</param>
+    /// <param name="lateness">How far behind the frontier a row may still arrive.</param>
+    public PocoTableBuilder<T> AppendOnly<TTime>(
+        Expression<Func<T, TTime>> time, TimeSpan lateness = default)
+    {
+        ArgumentNullException.ThrowIfNull(time);
+        DeclareChange(PocoChangeKind.AppendOnly, nameof(AppendOnly), time, lateness, []);
+        return this;
+    }
+
+    /// <summary>
+    /// Declares the table a log read by key and time, as an ASOF join reads it (D339): appended to
+    /// only, with zero lateness, and indexed on <paramref name="keys"/> then <paramref name="time"/>,
+    /// which is the index an ASOF join seeks.
+    /// </summary>
+    /// <param name="time">A <see cref="DateTime"/> or <see cref="DateTimeOffset"/> member.</param>
+    /// <param name="keys">The members an ASOF join's <c>ON</c> matches, in the index's order.</param>
+    public PocoTableBuilder<T> AsOf<TTime>(
+        Expression<Func<T, TTime>> time, params Expression<Func<T, object?>>[] keys) =>
+        AsOf(time, TimeSpan.Zero, keys);
+
+    /// <summary>The same, with a window within which a row may arrive behind the frontier.</summary>
+    /// <param name="time">A <see cref="DateTime"/> or <see cref="DateTimeOffset"/> member.</param>
+    /// <param name="lateness">How far behind the frontier a row may still arrive.</param>
+    /// <param name="keys">The members an ASOF join's <c>ON</c> matches, in the index's order.</param>
+    public PocoTableBuilder<T> AsOf<TTime>(
+        Expression<Func<T, TTime>> time,
+        TimeSpan lateness,
+        params Expression<Func<T, object?>>[] keys)
+    {
+        ArgumentNullException.ThrowIfNull(time);
+        ArgumentNullException.ThrowIfNull(keys);
+        if (keys.Length == 0)
+        {
+            throw new ArgumentException(
+                $"Table '{_table}': an as-of table is read by key and time, so it needs at least one "
+                + "key. A log read by time alone is AppendOnly.",
+                nameof(keys));
+        }
+
+        DeclareChange(PocoChangeKind.AsOf, nameof(AsOf), time, lateness, keys);
+        return this;
+    }
+
+    /// <summary>
+    /// Declares that the table's rows change by key (D339): a refresh upserts and deletes them, and
+    /// a <c>Replace</c> says what they all are. The key is a unique key, verified as
+    /// <see cref="UniqueKey"/> verifies one.
+    /// </summary>
+    public PocoTableBuilder<T> Keyed(params Expression<Func<T, object?>>[] keys)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        if (keys.Length == 0)
+        {
+            throw new ArgumentException(
+                $"Table '{_table}': a keyed table needs at least one key column.", nameof(keys));
+        }
+
+        DeclareChange(PocoChangeKind.Keyed, nameof(Keyed), time: null, TimeSpan.Zero, keys);
+        return this;
+    }
+
+    private void DeclareChange(
+        PocoChangeKind kind,
+        string what,
+        LambdaExpression? time,
+        TimeSpan lateness,
+        Expression<Func<T, object?>>[] keys)
+    {
+        if (_change is not null)
+        {
+            throw new InvalidOperationException(
+                $"Table '{_table}' already declares {_change.Spelling}. A table changes in one way, so "
+                + "it declares one change kind.");
+        }
+
+        if (lateness < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(lateness),
+                lateness,
+                $"Table '{_table}': a lateness is a window of time behind the frontier, so it is zero "
+                + "or more.");
+        }
+
+        string? timeMember = null;
+        if (time is not null)
+        {
+            var type = Nullable.GetUnderlyingType(time.ReturnType) ?? time.ReturnType;
+            if (type != typeof(DateTime) && type != typeof(DateTimeOffset))
+            {
+                throw new ArgumentException(
+                    $"Table '{_table}': {what}(time) names a {time.ReturnType.Name}, and a time is a "
+                    + "DateTime or a DateTimeOffset.",
+                    nameof(time));
+            }
+
+            timeMember = PocoMembers.Resolve(time, _table, $"{what}(time)").Name;
+        }
+
+        _change = new PocoChangeDeclaration<T>
+        {
+            Kind = kind,
+            TimeMember = timeMember,
+            Time = time,
+            Lateness = lateness,
+            KeyMembers = Array.ConvertAll(keys, k => PocoMembers.Resolve(k, _table, $"{what}(keys)").Name),
+            Keys = keys,
+        };
+    }
+
+    /// <summary>
+    /// What a change kind asks of the table's shape, added at <c>Build()</c> where the table does not
+    /// already declare it: a time order kept with zero lateness, a time index with a window, an index
+    /// on an as-of table's keys and time, and a keyed table's unique key.
+    /// </summary>
+    private void DeclareWhatTheChangeKindNeeds()
+    {
+        if (_change is not { } change)
+        {
+            return;
+        }
+
+        if (change.TimeMember is { } time)
+        {
+            if (change.Lateness == TimeSpan.Zero)
+            {
+                if (!_collations.Any(c => c.Count > 0 && c[0].Member == time))
+                {
+                    _collations.Add([new KeyDeclaration(time, SortDirection.AscNullsLast)]);
+                }
+            }
+            else if (change.Kind == PocoChangeKind.AppendOnly
+                && !_indexes.Any(i => i.Members.Length > 0 && i.Members[0] == time))
+            {
+                _indexes.Add(new IndexDeclaration(null, IndexKind.Ordered, false, [], [time], null));
+            }
+
+            if (change.Kind == PocoChangeKind.AsOf)
+            {
+                string[] members = [.. change.KeyMembers, time];
+                if (!_indexes.Any(i => i.Members.SequenceEqual(members, StringComparer.Ordinal)))
+                {
+                    _indexes.Add(new IndexDeclaration(null, IndexKind.Ordered, false, [], members, null));
+                }
+            }
+        }
+
+        if (change.Kind == PocoChangeKind.Keyed
+            && !_uniqueKeys.Any(k => k.SequenceEqual(change.KeyMembers, StringComparer.Ordinal)))
+        {
+            _uniqueKeys.Add(change.KeyMembers);
+        }
     }
 
     /// <summary>
@@ -691,6 +859,17 @@ public sealed class PocoTableBuilder<T>
     internal PocoTableRuntime<T> Build(
         string sourceId, PocoNamingPolicy policy, int defaultDecimalScale, PocoRows<T> rows)
     {
+        if (_change is { Kind: not PocoChangeKind.None } declared && !rows.RandomAccess)
+        {
+            throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidIndex,
+                $"table '{_table}'",
+                $"it declares {declared.Spelling}, and its rows change by position or by key, but the "
+                + "collection was registered as an IReadOnlyCollection<T>, which only enumerates. "
+                + "Register an IReadOnlyList<T>.");
+        }
+
+        DeclareWhatTheChangeKindNeeds();
         var columns = new List<PocoColumn<T>>();
         var byMember = new Dictionary<string, int>(StringComparer.Ordinal);
 
@@ -811,9 +990,15 @@ public sealed class PocoTableBuilder<T>
         var factory = new PocoSnapshotFactory<T>(
             _table, rows, built, collations, uniqueKeys, plans, hostIndexes, _indexScratch, _verify);
 
-        return new PocoTableRuntime<T>(
+        var runtime = new PocoTableRuntime<T>(
             _table, factory, factory.FromRegistration(), built, uniqueKeys, collations, statistics,
             foreignKeys, byMember, _entitlement);
+        if (_change is { } change)
+        {
+            runtime.Declare(change.Compile());
+        }
+
+        return runtime;
     }
 
     /// <summary>

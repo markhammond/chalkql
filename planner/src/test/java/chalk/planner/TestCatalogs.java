@@ -246,11 +246,12 @@ public final class TestCatalogs {
         .build();
   }
 
+  // Volatility unset, as the client's FunctionBuilder leaves it until a host declares one: the planner
+  // reads unspecified as IMMUTABLE, and the recorded corpus catalog carries it unset.
   private static chalk.ir.v1.FunctionDescriptor.Builder scalar(String name, Type returnType) {
     return chalk.ir.v1.FunctionDescriptor.newBuilder()
         .setName(name)
         .setKind(chalk.ir.v1.FunctionKind.FUNCTION_KIND_SCALAR)
-        .setVolatility(chalk.ir.v1.Volatility.VOLATILITY_IMMUTABLE)
         .setReturnType(returnType);
   }
 
@@ -258,7 +259,6 @@ public final class TestCatalogs {
     return chalk.ir.v1.FunctionDescriptor.newBuilder()
         .setName(name)
         .setKind(chalk.ir.v1.FunctionKind.FUNCTION_KIND_AGGREGATE)
-        .setVolatility(chalk.ir.v1.Volatility.VOLATILITY_IMMUTABLE)
         .setReturnType(returnType);
   }
 
@@ -267,7 +267,6 @@ public final class TestCatalogs {
     return chalk.ir.v1.FunctionDescriptor.newBuilder()
         .setName(name)
         .setKind(chalk.ir.v1.FunctionKind.FUNCTION_KIND_TABLE)
-        .setVolatility(chalk.ir.v1.Volatility.VOLATILITY_IMMUTABLE)
         .setReturnsTable(returns);
   }
 
