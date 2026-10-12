@@ -556,10 +556,12 @@ equal to what its statement returns at each epoch.
 
 A view reads the current time — through `CURRENT_TIMESTAMP`, `LOCALTIMESTAMP`, `CURRENT_DATE`, or the
 parameter named as the engine's clock — and the engine has no clock, or no refresh has set it yet. In
-a view, the current time is the clock's time at the view's epoch.
+a view, the current time is the clock's time at the view's epoch. On an engine that names a clock,
+any query that reads the time is refused the same way, with `ClockRequiredException`, until a
+refresh sets the clock.
 
 **What to do:** Name the engine's clock with `ChalkEngineOptions.Clock`, and move it with
-`AdvanceClock` in a refresh before the view is updated.
+`AdvanceClock` in a refresh before a view is updated, or a query reads the time.
 
 ### InexactAccumulation
 
