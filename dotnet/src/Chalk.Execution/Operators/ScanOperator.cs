@@ -23,6 +23,14 @@ internal sealed class ScanOperator : OperatorBase
     private readonly ColumnarBatch _output;
     private readonly ColumnView[]?[] _children;
 
+    /// <summary>
+    /// This scan, as a standing view over a database keeps it (D340), when the source's rows change
+    /// outside the engine's refreshes; null for a source in epochs, whose scan is never kept.
+    /// </summary>
+    private readonly ReadSite? _site;
+
+    private static readonly object?[] NoValues = [];
+
     public ScanOperator(
         OperatorContext context,
         string path,
@@ -36,11 +44,59 @@ internal sealed class ScanOperator : OperatorBase
         _request = request;
         _output = NewOutput();
         _children = ArrowBatchViews.ChildHolders(columnTypes);
+        _site = source is IRefreshableSource ? null : new ReadSite(path, source.SourceId, [(source.SourceId, request.Table)]);
     }
 
     protected override ValueTask DisposeCoreAsync() => default;
 
-    protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
+    /// <remarks>
+    /// A standing view over a database keeps this scan, and replays it until a refresh names the table
+    /// (D340), in an iterator of its own: the scan every other query runs carries none of it, and
+    /// allocates what it did.
+    /// </remarks>
+    protected override IAsyncEnumerable<ColumnarBatch> RunAsync(CancellationToken ct) =>
+        _site is not null && Context.Settings.Reads is { } keeper ? KeptAsync(keeper, ct) : ScanAsync(ct);
+
+    private async IAsyncEnumerable<ColumnarBatch> KeptAsync(
+        IReadKeeper keeper, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        if (keeper.Replay(_site!, NoValues) is { } kept)
+        {
+            foreach (var batch in kept)
+            {
+                ArrowBatchViews.Fill(_output, batch, ColumnTypes, _children);
+                yield return _output;
+            }
+
+            yield break;
+        }
+
+        // Read through the Arrow path, whose batches the keeper can keep.
+        var first = true;
+        await foreach (var batch in _source.ScanAsync(_request, ScanContextFor(Context), ct).WithCancellation(ct))
+        {
+            try
+            {
+                if (first)
+                {
+                    first = false;
+                    Check(batch);
+                }
+
+                keeper.Keep(_site!, NoValues, batch);
+                ArrowBatchViews.Fill(_output, batch, ColumnTypes, _children);
+                yield return _output;
+            }
+            finally
+            {
+                batch.Dispose();
+            }
+        }
+
+        keeper.Kept(_site!, NoValues);
+    }
+
+    private async IAsyncEnumerable<ColumnarBatch> ScanAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         var scanContext = ScanContextFor(Context);
@@ -82,15 +138,7 @@ internal sealed class ScanOperator : OperatorBase
                 if (first)
                 {
                     first = false;
-                    if (!ArrowTypeMapping.AreEquivalent(Schema, batch.Schema))
-                    {
-                        throw new SourceContractException(
-                            ChalkErrorCodes.SourceContract,
-                            _source.SourceId,
-                            _request.Table,
-                            $"the first batch has schema {ArrowTypeMapping.DescribeArrow(batch.Schema)}, "
-                            + $"not the requested {ArrowTypeMapping.DescribeArrow(Schema)}.");
-                    }
+                    Check(batch);
                 }
 
                 ArrowBatchViews.Fill(_output, batch, ColumnTypes, _children);
@@ -100,6 +148,20 @@ internal sealed class ScanOperator : OperatorBase
             {
                 batch.Dispose();
             }
+        }
+    }
+
+    /// <summary>Refuses a batch whose schema is not the one asked for: a wrong answer, not a crash.</summary>
+    private void Check(RecordBatch batch)
+    {
+        if (!ArrowTypeMapping.AreEquivalent(Schema, batch.Schema))
+        {
+            throw new SourceContractException(
+                ChalkErrorCodes.SourceContract,
+                _source.SourceId,
+                _request.Table,
+                $"the first batch has schema {ArrowTypeMapping.DescribeArrow(batch.Schema)}, "
+                + $"not the requested {ArrowTypeMapping.DescribeArrow(Schema)}.");
         }
     }
 }

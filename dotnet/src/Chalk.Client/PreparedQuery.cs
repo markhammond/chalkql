@@ -791,6 +791,12 @@ public sealed class QueryExecution : IAsyncDisposable
     internal void UseClock(TimeProvider clock) => _compiled = _compiled.WithClock(clock);
 
     /// <summary>
+    /// Has this execution keep its reads of sources outside epochs in <paramref name="reads"/>, and
+    /// replay what it kept, when called before it runs: a standing view over a database (D340).
+    /// </summary>
+    internal void UseReads(Chalk.Sources.IReadKeeper reads) => _compiled = _compiled.WithReads(reads);
+
+    /// <summary>
     /// The plan this execution actually runs. Usually the prepared statement's own, but a statement
     /// with a list parameter is planned per list length (D29), so it is the executed plan — not the
     /// prepared one — whose collations and node kinds describe these rows.

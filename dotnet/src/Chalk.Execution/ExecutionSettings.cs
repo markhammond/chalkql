@@ -38,6 +38,12 @@ internal sealed record ExecutionSettings
     public Chalk.Sources.StringLayouts OutputStrings { get; init; } =
         Chalk.Sources.StringLayouts.Utf8View;
 
+    /// <summary>
+    /// Where a standing view keeps what it reads of sources outside epochs (D340), or null: every
+    /// execution that is not a view's over a database.
+    /// </summary>
+    public Chalk.Sources.IReadKeeper? Reads { get; init; }
+
     /// <summary>The clock <c>CURRENT_TIMESTAMP</c> would read. Injectable so tests are deterministic.</summary>
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
 

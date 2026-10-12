@@ -1163,7 +1163,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                     await registration.Source.RefreshAsync(ct).ConfigureAwait(false);
                 }
 
-                return await PublishAsync(ct).ConfigureAwait(false);
+                var only = await PublishAsync(ct).ConfigureAwait(false);
+                NamedEvery(only);
+                return only;
             }
 
             using var shared = await AcquireSharedSourcesAsync(ct).ConfigureAwait(false);
@@ -1175,6 +1177,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             }
 
             var epoch = await PublishAsync(ct).ConfigureAwait(false);
+            NamedEvery(epoch);
             CaptureSharedRevisions();
             return epoch;
         }
@@ -1379,6 +1382,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 }
 
                 var epoch = await PublishAsync(builder.VersionGiven, builder.ClockGiven, ct).ConfigureAwait(false);
+                Named(scopes, epoch);
                 CaptureSharedRevisions();
                 return epoch;
             }
@@ -1391,6 +1395,67 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             }
 
             _refreshing.Release();
+        }
+    }
+
+    /// <summary>
+    /// The epoch of the last refresh that named a table of a source outside epochs (D340): by table, by
+    /// source, and for every source. Written inside the change count's odd window, before the epoch is
+    /// let be read, so a standing view never replays a read the refresh asked it to make again.
+    /// </summary>
+    private readonly Lock _namedGate = new();
+    private readonly Dictionary<(string SourceId, string Table), long> _tablesNamed = [];
+    private readonly Dictionary<string, long> _sourcesNamed = new(StringComparer.Ordinal);
+    private long _everyNamed;
+
+    /// <summary>
+    /// The epoch of the last refresh that named <paramref name="table"/> of
+    /// <paramref name="sourceId"/>: by itself, by its source, or with every source, as a plain or
+    /// scheduled refresh does. Zero when none has. A standing view over a database reads a table again
+    /// when this passes the epoch it last read it at (D340).
+    /// </summary>
+    internal long NamedAt(string sourceId, string table)
+    {
+        lock (_namedGate)
+        {
+            var at = _everyNamed;
+            if (_sourcesNamed.TryGetValue(sourceId, out var source) && source > at)
+            {
+                at = source;
+            }
+
+            if (_tablesNamed.TryGetValue((sourceId, table.ToUpperInvariant()), out var named) && named > at)
+            {
+                at = named;
+            }
+
+            return at;
+        }
+    }
+
+    private void Named(List<(ISourceRuntime Source, string Table)> scopes, long epoch)
+    {
+        lock (_namedGate)
+        {
+            foreach (var (source, table) in scopes)
+            {
+                if (table.Length == 0)
+                {
+                    _sourcesNamed[source.SourceId] = epoch;
+                }
+                else
+                {
+                    _tablesNamed[(source.SourceId, table.ToUpperInvariant())] = epoch;
+                }
+            }
+        }
+    }
+
+    private void NamedEvery(long epoch)
+    {
+        lock (_namedGate)
+        {
+            _everyNamed = epoch;
         }
     }
 

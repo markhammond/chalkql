@@ -308,6 +308,31 @@ internal sealed class CompiledPlan
 
     private CompiledPlan? _clocked;
 
+    /// <summary>
+    /// The same plan keeping its reads of sources outside epochs in <paramref name="reads"/>, for a
+    /// standing view over a database (D340), which replays them until a refresh names their tables.
+    /// Kept once per keeper, as <see cref="WithClock"/> is per clock, so the view keeps its warm tree.
+    /// </summary>
+    internal CompiledPlan WithReads(IReadKeeper reads)
+    {
+        if (_keeping is { } kept && ReferenceEquals(kept._settings.Reads, reads))
+        {
+            return kept;
+        }
+
+        var copy = new CompiledPlan(
+            Plan, OutputSchema, ParameterTypes, BoundScalars, _outputTypes, _root, _catalog, _sources,
+            _settings with { Reads = reads })
+        {
+            Sharing = Sharing,
+            LikeParameters = LikeParameters,
+        };
+        _keeping = copy;
+        return copy;
+    }
+
+    private CompiledPlan? _keeping;
+
     /// <summary>The tables this plan reads from sources that pin (F188), found the first time it runs.</summary>
     private (string SourceId, string Table, IPinnableSource Source)[]? _pinnable;
 
@@ -350,43 +375,11 @@ internal sealed class CompiledPlan
     private (string SourceId, string Table, IPinnableSource Source)[] Pinnable()
     {
         var found = new List<(string SourceId, string Table, IPinnableSource Source)>();
-        var pending = new Stack<Google.Protobuf.IMessage>();
-        pending.Push(Plan);
-        while (pending.Count > 0)
+        foreach (var (sourceId, table) in PlanTables.Of(Plan))
         {
-            var message = pending.Pop();
-            if (message is Ir.TableRef table
-                && _sources.TryGetValue(table.SourceId, out var source)
-                && source is IPinnableSource pinnable
-                && !found.Exists(f => f.SourceId == table.SourceId
-                    && string.Equals(f.Table, table.Table, StringComparison.OrdinalIgnoreCase)))
+            if (_sources.TryGetValue(sourceId, out var source) && source is IPinnableSource pinnable)
             {
-                found.Add((table.SourceId, table.Table, pinnable));
-            }
-
-            foreach (var field in message.Descriptor.Fields.InDeclarationOrder())
-            {
-                if (field.FieldType != Google.Protobuf.Reflection.FieldType.Message)
-                {
-                    continue;
-                }
-
-                switch (field.Accessor.GetValue(message))
-                {
-                    case Google.Protobuf.IMessage child:
-                        pending.Push(child);
-                        break;
-                    case System.Collections.IList list:
-                        foreach (var item in list)
-                        {
-                            if (item is Google.Protobuf.IMessage element)
-                            {
-                                pending.Push(element);
-                            }
-                        }
-
-                        break;
-                }
+                found.Add((sourceId, table, pinnable));
             }
         }
 

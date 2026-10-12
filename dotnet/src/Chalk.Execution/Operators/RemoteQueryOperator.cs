@@ -69,6 +69,9 @@ internal sealed class RemoteQueryOperator : OperatorBase
     /// </summary>
     private readonly string? _redactedQueryText;
 
+    /// <summary>This read, as a standing view over a database keeps it (D340): its place and its tables.</summary>
+    private readonly ReadSite _site;
+
     public RemoteQueryOperator(
         OperatorContext context,
         string path,
@@ -85,6 +88,7 @@ internal sealed class RemoteQueryOperator : OperatorBase
         _source = source;
         _query = query;
         _redactedQueryText = redactedQueryText;
+        _site = new ReadSite(path, source.SourceId, PlanTables.Of(query.PushedPlan));
         _timeout = timeout;
         _output = NewOutput();
         _children = ArrowBatchViews.ChildHolders(columnTypes);
@@ -138,11 +142,28 @@ internal sealed class RemoteQueryOperator : OperatorBase
             _rendered[i] = _renderedBounds[i].Resolve(Context.Parameters, _renderedClauses[i]);
         }
 
+        var parameters = BindParameters();
+
+        // A standing view over a database keeps what this read returned, and replays it until a
+        // refresh names one of its tables (D340): no round trip, and no fetch to record.
+        var keeper = Context.Settings.Reads;
+        var values = keeper is null ? null : KeptValues();
+        if (keeper?.Replay(_site, values!) is { } kept)
+        {
+            foreach (var batch in kept)
+            {
+                ArrowBatchViews.Fill(_output, batch, ColumnTypes, _children);
+                yield return _output;
+            }
+
+            yield break;
+        }
+
         var request = new RemoteQueryRequest
         {
             QueryText = RenderedBounds.Substitute(_query.QueryText, _renderedPositions, _rendered),
             PushedPlan = _query.PushedPlan,
-            Parameters = BindParameters(),
+            Parameters = parameters,
             ParameterTypes = _parameterTypes,
             OutputSchema = Schema,
             BatchSize = Context.Settings.BatchSize,
@@ -185,6 +206,7 @@ internal sealed class RemoteQueryOperator : OperatorBase
 
                 Context.Stats.AddRowsFetched(batch.Length);
                 rows += batch.Length;
+                keeper?.Keep(_site, values!, batch);
                 ArrowBatchViews.Fill(_output, batch, ColumnTypes, _children);
                 yield return _output;
             }
@@ -197,6 +219,23 @@ internal sealed class RemoteQueryOperator : OperatorBase
         // D98, D101: no cross-source snapshot, so a host is told which moment each source was read
         // at rather than being left to assume they agree.
         Context.Stats.RecordFetch(_source.SourceId, rows, Context.Settings.TimeProvider.GetUtcNow());
+        keeper?.Kept(_site, values!);
+    }
+
+    /// <summary>
+    /// What this read is bound with, for a keeper to tell one run from another: the values the provider
+    /// binds and the bounds written into the text. A new array, made only for a standing view.
+    /// </summary>
+    private object?[] KeptValues()
+    {
+        var values = new object?[_bound.Length + _rendered.Length];
+        System.Array.Copy(_bound, values, _bound.Length);
+        for (var i = 0; i < _rendered.Length; i++)
+        {
+            values[_bound.Length + i] = _rendered[i];
+        }
+
+        return values;
     }
 
     /// <summary>
