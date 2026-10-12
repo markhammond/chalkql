@@ -37,6 +37,12 @@ internal sealed class ExpressionCompiler
     /// <summary>Where this operator's sharing is counted, for tests; null when nothing counts it.</summary>
     private readonly SharingTally? _tally;
 
+    /// <summary>
+    /// Above zero while the compiler is inside an expression of constants it is wrapping, so that only
+    /// the largest one is wrapped and not every part of it (D337).
+    /// </summary>
+    private int _withinConstant;
+
     /// <summary>A compiler for a plan that cannot name a user function — every test before step 22.</summary>
     public ExpressionCompiler()
         : this(null, HostFunctionSet.Empty)
@@ -64,6 +70,26 @@ internal sealed class ExpressionCompiler
     /// this compiler has met before is the node it compiled then (D299).
     /// </summary>
     public IVectorExpr Compile(Expr expr)
+    {
+        // An expression of constants is answered once for the execution, not once a row (D337).
+        if (_withinConstant == 0 && Memoisable(expr) && IsConstant(expr))
+        {
+            _withinConstant++;
+            try
+            {
+                return new ConstantExpr(CompileShared(expr));
+            }
+            finally
+            {
+                _withinConstant--;
+            }
+        }
+
+        return CompileShared(expr);
+    }
+
+    /// <summary>One expression, shared with an earlier occurrence when it can be (D299).</summary>
+    private IVectorExpr CompileShared(Expr expr)
     {
         if (!Memoisable(expr))
         {
@@ -107,6 +133,76 @@ internal sealed class ExpressionCompiler
         or Expr.KindOneofCase.InList
         or Expr.KindOneofCase.FieldAccess
         or Expr.KindOneofCase.ContextMembership;
+
+    /// <summary>
+    /// Whether <paramref name="expr"/> is the same for every row of an execution: it reads no column,
+    /// its leaves are literals, parameters and the current time, and it calls nothing
+    /// <c>VOLATILE</c> (D337). A membership reads the execution's relations and is left out, as is a
+    /// LIST or a composite, which have no single-value form here.
+    /// </summary>
+    private bool IsConstant(Expr expr)
+    {
+        if (expr.KindCase != Expr.KindOneofCase.EnumArg
+            && expr.Type is { } type
+            && type.Kind is Ir.TypeKind.List or Ir.TypeKind.Composite)
+        {
+            return false;
+        }
+
+        switch (expr.KindCase)
+        {
+            case Expr.KindOneofCase.Literal:
+            case Expr.KindOneofCase.Param:
+            case Expr.KindOneofCase.EnumArg:
+                return true;
+            case Expr.KindOneofCase.Call:
+                if (expr.Call.UserFunction.Length > 0 && IsVolatile(expr.Call.UserFunction))
+                {
+                    return false;
+                }
+
+                foreach (var arg in expr.Call.Args)
+                {
+                    if (!IsConstant(arg))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            case Expr.KindOneofCase.Cast:
+                return IsConstant(expr.Cast.Input);
+            case Expr.KindOneofCase.IfThen:
+                foreach (var clause in expr.IfThen.Clauses)
+                {
+                    if (!IsConstant(clause.Condition) || !IsConstant(clause.Result))
+                    {
+                        return false;
+                    }
+                }
+
+                return IsConstant(expr.IfThen.ElseBranch);
+            case Expr.KindOneofCase.InList:
+                if (!IsConstant(expr.InList.Value))
+                {
+                    return false;
+                }
+
+                foreach (var option in expr.InList.Options)
+                {
+                    if (!IsConstant(option))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            case Expr.KindOneofCase.FieldAccess:
+                return IsConstant(expr.FieldAccess.Input);
+            default:
+                return false;
+        }
+    }
 
     /// <summary>Whether <paramref name="expr"/> calls a <c>VOLATILE</c> user function anywhere in it.</summary>
     private bool ContainsVolatile(Expr expr)

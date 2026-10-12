@@ -97,6 +97,26 @@ internal sealed class EvalContext : Vectors.IArenaScratch
     /// </summary>
     public long BatchSequence { get; private set; }
 
+    /// <summary>
+    /// <paramref name="expr"/> evaluated over one row of no batch, the context then pointed back at
+    /// the batch it was on: how an expression of constants is answered once for an execution
+    /// (D337). The answer is read before anything else is evaluated, since it may be scratch.
+    /// </summary>
+    public Vectors.Vector EvaluateOnce(IVectorExpr expr)
+    {
+        var batch = Batch;
+        var length = Length;
+        SetBatch(null, 1);
+        try
+        {
+            return expr.Evaluate(this);
+        }
+        finally
+        {
+            SetBatch(batch, length);
+        }
+    }
+
     /// <summary>Points the context at the next batch. Cheap: an operator does this per batch.</summary>
     public void SetBatch(ColumnarBatch? batch, int length)
     {
