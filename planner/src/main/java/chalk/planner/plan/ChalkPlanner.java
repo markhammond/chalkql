@@ -435,7 +435,20 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
           setValidatedNodeType(expr, type);
           return type;
         }
-        return super.deriveType(scope, expr);
+        RelDataType derived = super.deriveType(scope, expr);
+        // TIMESTAMPDIFF counts in a BIGINT, as MySQL's does, rather than Calcite's INTEGER, which
+        // runs out of microseconds after about 35 minutes (D337).
+        if (expr.getKind() == org.apache.calcite.sql.SqlKind.TIMESTAMP_DIFF
+            && derived.getSqlTypeName() == org.apache.calcite.sql.type.SqlTypeName.INTEGER) {
+          derived =
+              getTypeFactory()
+                  .createTypeWithNullability(
+                      getTypeFactory()
+                          .createSqlType(org.apache.calcite.sql.type.SqlTypeName.BIGINT),
+                      derived.isNullable());
+          setValidatedNodeType(expr, derived);
+        }
+        return derived;
       }
 
       private @Nullable RelDataType declaredType(org.apache.calcite.sql.SqlNode node) {

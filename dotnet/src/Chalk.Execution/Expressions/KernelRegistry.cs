@@ -78,6 +78,7 @@ internal static class KernelRegistry
             FunctionId.Extract => Extract(call, result, compile),
             FunctionId.FloorTemporal => FloorTemporal(call, result, compile),
             FunctionId.TimeBucket => TimeBucket(call, result, compile),
+            FunctionId.TimestampDiff => TimestampDiff(call, result, compile),
             FunctionId.CurrentTimestamp or FunctionId.CurrentDate => new CurrentTimeExpr(result),
 
             // Lists (D58). Producing, projecting and indexing into one is all v1 does with them.
@@ -110,15 +111,9 @@ internal static class KernelRegistry
     private static IVectorExpr Comparison(
         FunctionId function, ChalkType result, IVectorExpr left, IVectorExpr right)
     {
+        // An INTERVAL_DAY counts microseconds and an INTERVAL_YEAR months, so two of one kind
+        // compare as the numbers they hold (D337).
         var operand = left.Type;
-        if (IrTypes.IsInterval(operand.Kind))
-        {
-            throw new UnsupportedFeatureException(
-                ChalkErrorCodes.UnsupportedFunction,
-                $"{function}({operand}, {operand})",
-                "This executor does not compare INTERVAL values.");
-        }
-
         return ColumnKinds.Of(operand) switch
         {
             ColumnKind.Boolean => Numeric<byte>(function, result, left, right),
@@ -184,6 +179,15 @@ internal static class KernelRegistry
         var left = compile(call.Args[0]);
         var right = compile(call.Args[1]);
 
+        // A temporal less a temporal is an interval (D337): (a - b) SECOND, (a - b) MONTH.
+        if (call.Function == FunctionId.Subtract
+            && IrTypes.IsInterval(result.Kind)
+            && IsInstant(left.Type.Kind)
+            && IsInstant(right.Type.Kind))
+        {
+            return new TemporalDifferenceExpr(result, left, right);
+        }
+
         // The one heterogeneous arithmetic 02-ir.md §6 defines: a temporal moved by a day-time
         // interval. TUMBLE's window_end is exactly this (D52), so the window step implements it.
         if (IrTypes.IsTemporal(result.Kind)
@@ -235,6 +239,31 @@ internal static class KernelRegistry
     /// <c>temporal ± INTERVAL_DAY</c>. The interval may be written either side of a <c>+</c>; a
     /// <c>-</c> only makes sense with the temporal on the left, which is the only form SQL builds.
     /// </summary>
+    /// <summary>A DATE, TIMESTAMP or TIMESTAMP_TZ: a kind two of which subtract to an interval.</summary>
+    private static bool IsInstant(TypeKind kind) =>
+        kind is TypeKind.Date or TypeKind.Timestamp or TypeKind.TimestampTz;
+
+    /// <summary>
+    /// <c>TIMESTAMPDIFF(unit, from, to)</c> (D337): the whole units from one DATE, TIMESTAMP or
+    /// TIMESTAMP_TZ to another.
+    /// </summary>
+    private static IVectorExpr TimestampDiff(
+        ScalarCall call, ChalkType result, Func<Expr, IVectorExpr> compile)
+    {
+        var unit = TemporalUnits.Parse(call.Args[0].EnumArg.Value, "TIMESTAMPDIFF");
+        var from = compile(call.Args[1]);
+        var to = compile(call.Args[2]);
+        if (!IsInstant(from.Type.Kind) || !IsInstant(to.Type.Kind) || !IrTypes.IsInteger(result.Kind))
+        {
+            throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
+                $"TIMESTAMPDIFF({unit}, {from.Type}, {to.Type})",
+                "TIMESTAMPDIFF counts between two DATE, TIMESTAMP or TIMESTAMP_TZ values, as an integer.");
+        }
+
+        return new TimestampDiffExpr(result, unit, from, to);
+    }
+
     private static IVectorExpr TemporalInterval(
         ScalarCall call, ChalkType result, IVectorExpr left, IVectorExpr right)
     {

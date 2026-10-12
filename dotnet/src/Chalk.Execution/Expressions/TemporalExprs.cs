@@ -526,3 +526,206 @@ internal static class CurrentTime
             : ticks / (TimeSpan.TicksPerSecond / perSecond);
     }
 }
+
+/// <summary>
+/// The difference between two temporals (D337, F175), shared by both engines. Each operand is read
+/// in its own type's units — days for a DATE, its precision's units for a TIMESTAMP — so a DATE and
+/// a TIMESTAMP, or two TIMESTAMPs of different precisions, subtract as the instants they are.
+/// </summary>
+internal static class TemporalDifference
+{
+    private const long MicrosPerDay = 86_400_000_000L;
+
+    /// <summary>A temporal's storage as microseconds since 1970, a nanosecond part truncated away.</summary>
+    public static long Micros(long value, ChalkType type)
+    {
+        if (type.Kind == TypeKind.Date)
+        {
+            return checked(value * MicrosPerDay);
+        }
+
+        var perSecond = IrTypes.TimestampUnitsPerSecond((uint)type.Precision);
+        return perSecond >= 1_000_000L
+            ? CivilTime.FloorDiv(value, perSecond / 1_000_000L)
+            : checked(value * (1_000_000L / perSecond));
+    }
+
+    /// <summary>
+    /// The whole months from <paramref name="from"/> to <paramref name="to"/>: the month numbers'
+    /// difference, less one where the later day and time of month has not reached the earlier's,
+    /// so 31 January to 28 February is no month and to 1 March is one.
+    /// </summary>
+    public static long Months(long from, ChalkType fromType, long to, ChalkType toType)
+    {
+        var start = Micros(from, fromType);
+        var end = Micros(to, toType);
+        CivilTime.ToCivil((int)CivilTime.FloorDiv(start, MicrosPerDay), out var fromYear, out var fromMonth, out var fromDay);
+        CivilTime.ToCivil((int)CivilTime.FloorDiv(end, MicrosPerDay), out var toYear, out var toMonth, out var toDay);
+        var fromWithin = (fromDay * MicrosPerDay) + CivilTime.FloorMod(start, MicrosPerDay);
+        var toWithin = (toDay * MicrosPerDay) + CivilTime.FloorMod(end, MicrosPerDay);
+
+        long months = ((toYear - fromYear) * 12L) + (toMonth - fromMonth);
+        if (months > 0 && toWithin < fromWithin)
+        {
+            months--;
+        }
+        else if (months < 0 && toWithin > fromWithin)
+        {
+            months++;
+        }
+
+        return months;
+    }
+
+    /// <summary>
+    /// <c>TIMESTAMPDIFF(unit, from, to)</c>: the whole units from <paramref name="from"/> to
+    /// <paramref name="to"/>, truncated toward zero.
+    /// </summary>
+    public static long Count(TemporalUnit unit, long from, ChalkType fromType, long to, ChalkType toType)
+    {
+        if (unit is TemporalUnit.Month or TemporalUnit.Quarter or TemporalUnit.Year)
+        {
+            var months = Months(from, fromType, to, toType);
+            return unit switch
+            {
+                TemporalUnit.Quarter => months / 3,
+                TemporalUnit.Year => months / 12,
+                _ => months,
+            };
+        }
+
+        var micros = checked(Micros(to, toType) - Micros(from, fromType));
+        return unit switch
+        {
+            TemporalUnit.Microsecond => micros,
+            TemporalUnit.Millisecond => micros / 1_000L,
+            TemporalUnit.Second => micros / 1_000_000L,
+            TemporalUnit.Minute => micros / 60_000_000L,
+            TemporalUnit.Hour => micros / 3_600_000_000L,
+            TemporalUnit.Day => micros / MicrosPerDay,
+            TemporalUnit.Week => micros / (7 * MicrosPerDay),
+            _ => throw new UnsupportedFeatureException(
+                ChalkErrorCodes.UnsupportedFunction,
+                $"TIMESTAMPDIFF({unit}, …)",
+                "TIMESTAMPDIFF counts YEAR, QUARTER, MONTH, WEEK, DAY, HOUR, MINUTE, SECOND, "
+                + "MILLISECOND or MICROSECOND."),
+        };
+    }
+
+    /// <summary>Refuses, as the plan compiles, a unit <c>TIMESTAMPDIFF</c> does not count in.</summary>
+    public static void Require(TemporalUnit unit)
+    {
+        if (unit is TemporalUnit.DayOfWeek or TemporalUnit.DayOfYear or TemporalUnit.Epoch)
+        {
+            _ = Count(unit, 0, ChalkType.Timestamp(), 0, ChalkType.Timestamp());
+        }
+    }
+
+    /// <summary>One lane of a DATE (four bytes) or a TIMESTAMP (eight) as a long.</summary>
+    public static long At(Vector vector, ChalkType type, int row) =>
+        ColumnKinds.Of(type) == ColumnKind.Int32 ? Lanes<int>.From(vector)[row] : Lanes<long>.From(vector)[row];
+}
+
+/// <summary>
+/// <c>a - b</c> between two temporals, an interval (D337, F175): an INTERVAL_DAY in microseconds,
+/// or an INTERVAL_YEAR in whole months for <c>(a - b) MONTH</c> or <c>YEAR</c>.
+/// </summary>
+internal sealed class TemporalDifferenceExpr : VectorExprBase
+{
+    private readonly IVectorExpr _left;
+    private readonly IVectorExpr _right;
+
+    public TemporalDifferenceExpr(ChalkType type, IVectorExpr left, IVectorExpr right)
+        : base(type)
+    {
+        _left = left;
+        _right = right;
+    }
+
+    public override Vector Evaluate(EvalContext context)
+    {
+        var left = _left.Evaluate(context);
+        var right = _right.Evaluate(context);
+        var length = context.Length;
+        var nulls = IntersectValidity(length, left, right, context.SelectionMask);
+        var valid = Scratch.CurrentValidity(length);
+        var months = Type.Kind == TypeKind.IntervalYear;
+        var monthResult = months ? Scratch.Values<int>(length) : default;
+        var microResult = months ? default : Scratch.Values<long>(length);
+
+        for (var i = 0; i < length; i++)
+        {
+            var present = valid.IsEmpty || BitUtility.GetBit(valid, i);
+            var to = present ? TemporalDifference.At(left, _left.Type, i) : 0;
+            var from = present ? TemporalDifference.At(right, _right.Type, i) : 0;
+            if (months)
+            {
+                monthResult[i] = present
+                    ? checked((int)TemporalDifference.Months(from, _right.Type, to, _left.Type))
+                    : 0;
+            }
+            else
+            {
+                microResult[i] = present
+                    ? checked(TemporalDifference.Micros(to, _left.Type) - TemporalDifference.Micros(from, _right.Type))
+                    : 0;
+            }
+        }
+
+        return Scratch.Finish(length, nulls);
+    }
+}
+
+/// <summary>
+/// <c>TIMESTAMPDIFF(unit, from, to)</c>, and <c>CAST((to - from) unit AS integer)</c>, which the
+/// planner writes the same way (D337, F175): whole units, truncated toward zero.
+/// </summary>
+internal sealed class TimestampDiffExpr : VectorExprBase
+{
+    private readonly TemporalUnit _unit;
+    private readonly IVectorExpr _from;
+    private readonly IVectorExpr _to;
+
+    public TimestampDiffExpr(ChalkType type, TemporalUnit unit, IVectorExpr from, IVectorExpr to)
+        : base(type)
+    {
+        _unit = unit;
+        _from = from;
+        _to = to;
+        TemporalDifference.Require(unit);
+    }
+
+    public override Vector Evaluate(EvalContext context)
+    {
+        var from = _from.Evaluate(context);
+        var to = _to.Evaluate(context);
+        var length = context.Length;
+        var nulls = IntersectValidity(length, from, to, context.SelectionMask);
+        var valid = Scratch.CurrentValidity(length);
+        var wide = ColumnKinds.Of(Type) == ColumnKind.Int64;
+        var wideResult = wide ? Scratch.Values<long>(length) : default;
+        var narrowResult = wide ? default : Scratch.Values<int>(length);
+
+        for (var i = 0; i < length; i++)
+        {
+            var count = valid.IsEmpty || BitUtility.GetBit(valid, i)
+                ? TemporalDifference.Count(
+                    _unit,
+                    TemporalDifference.At(from, _from.Type, i),
+                    _from.Type,
+                    TemporalDifference.At(to, _to.Type, i),
+                    _to.Type)
+                : 0;
+            if (wide)
+            {
+                wideResult[i] = count;
+            }
+            else
+            {
+                narrowResult[i] = checked((int)count);
+            }
+        }
+
+        return Scratch.Finish(length, nulls);
+    }
+}

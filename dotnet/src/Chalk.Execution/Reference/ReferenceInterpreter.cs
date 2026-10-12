@@ -412,6 +412,26 @@ internal sealed class ReferenceInterpreter
             case FunctionId.CurrentTimestamp or FunctionId.CurrentDate:
                 return Chalk.Execution.Expressions.CurrentTime.Units(Now, type);
 
+            // D337: the whole units from one temporal to another, through the same arithmetic as
+            // the vectorised kernel, which is the one place the two engines share it.
+            case FunctionId.TimestampDiff:
+            {
+                var from = Evaluate(call.Args[1], row);
+                var to = Evaluate(call.Args[2], row);
+                if (from is null || to is null)
+                {
+                    return null;
+                }
+
+                var count = Chalk.Execution.Expressions.TemporalDifference.Count(
+                    Chalk.Execution.Expressions.TemporalUnits.Parse(call.Args[0].EnumArg.Value, "TIMESTAMPDIFF"),
+                    (long)from,
+                    ChalkType.FromProto(call.Args[1].Type),
+                    (long)to,
+                    ChalkType.FromProto(call.Args[2].Type));
+                return type.Kind == TypeKind.I32 ? (long)checked((int)count) : count;
+            }
+
             default:
                 break;
         }
@@ -446,6 +466,15 @@ internal sealed class ReferenceInterpreter
             // 02-ir.md §6 defines; TUMBLE's window_end needs it (D52).
             FunctionId.Add or FunctionId.Subtract when IrTypes.IsTemporal(type.Kind) =>
                 Temporal.Shift(call.Function, call, operands, type),
+
+            // D337: a temporal less a temporal, in microseconds or whole months.
+            FunctionId.Subtract when IrTypes.IsInterval(type.Kind) => type.Kind == TypeKind.IntervalYear
+                ? (long)checked((int)Chalk.Execution.Expressions.TemporalDifference.Months(
+                    (long)operands[1]!, ChalkType.FromProto(call.Args[1].Type),
+                    (long)operands[0]!, ChalkType.FromProto(call.Args[0].Type)))
+                : checked(
+                    Chalk.Execution.Expressions.TemporalDifference.Micros((long)operands[0]!, ChalkType.FromProto(call.Args[0].Type))
+                    - Chalk.Execution.Expressions.TemporalDifference.Micros((long)operands[1]!, ChalkType.FromProto(call.Args[1].Type))),
 
             FunctionId.Add or FunctionId.Subtract or FunctionId.Multiply
                 or FunctionId.Divide or FunctionId.Modulus =>

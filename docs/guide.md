@@ -1196,6 +1196,26 @@ the date in UTC. A timestamp has precision 6, microseconds, unless you write one
 9: `CURRENT_TIMESTAMP(9)`. A remote source is never sent the current time, so it cannot
 use a "now" of its own. A comparison with it is made in the host.
 
+### Differences between timestamps
+
+`TIMESTAMPDIFF(unit, from, to)` counts the whole units from one `DATE`, `TIMESTAMP` or
+`TIMESTAMP WITH TIME ZONE` to another, as a `BIGINT`. The count is truncated toward zero,
+so 90 seconds back is minus one minute. Months count only once the later day and time of
+month reaches the earlier one: 31 January to 28 February is no month, and to 1 March is
+one. The units are `MICROSECOND`, `MILLISECOND`, `SECOND`, `MINUTE`, `HOUR`, `DAY`,
+`WEEK`, `MONTH`, `QUARTER` and `YEAR`.
+
+```sql
+SELECT id, TIMESTAMPDIFF(MINUTE, placed_at, shipped_at) AS minutes_to_ship FROM orders
+```
+
+The standard form, `(to - from) DAY TO SECOND`, is an interval, which reaches you as a
+`TimeSpan`. An interval compares with an interval, and cast to an integer it is the same
+count `TIMESTAMPDIFF` gives in its last unit: `CAST((to - from) MINUTE AS BIGINT)`. A bare
+`to - from`, with no unit, is refused, as the SQL standard has it. To keep the recent rows,
+compare the column with a bound, `ts >= CURRENT_TIMESTAMP - INTERVAL '5' MINUTE`, rather
+than a difference with an interval: the bound can use an index on `ts`.
+
 ### `Babel` also changes the parser
 
 `Babel` is the one level that swaps the parser itself. The sidecar ships Calcite's
