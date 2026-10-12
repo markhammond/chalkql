@@ -1151,6 +1151,23 @@ only under `C`). DuckDB folds a Turkish capital that `LOWER` leaves alone. Calci
 runtime folds ASCII only. So Chalk always evaluates an `ILIKE` itself, over the rows a
 source returns, and no index answers it, because an index is case-sensitive.
 
+### The current time
+
+`CURRENT_TIMESTAMP`, `LOCALTIMESTAMP` and `CURRENT_DATE` read one instant for each
+execution. It is taken from `ExecutionOptions.TimeProvider` when the execution starts, so
+every row and every operator see the same value, and the next execution reads its own:
+
+```sql
+SELECT symbol, price FROM trades
+WHERE ts >= CURRENT_TIMESTAMP - INTERVAL '5' MINUTE
+```
+
+ChalkQL has no session time zone, so the instant is read as a UTC wall clock.
+`CURRENT_TIMESTAMP` and `LOCALTIMESTAMP` are the same `TIMESTAMP`, and `CURRENT_DATE` is
+the date in UTC. A timestamp has precision 6, microseconds, unless you write one, up to
+9: `CURRENT_TIMESTAMP(9)`. A remote source is never sent the current time, so it cannot
+use a "now" of its own. A comparison with it is made in the host.
+
 ### `Babel` also changes the parser
 
 `Babel` is the one level that swaps the parser itself. The sidecar ships Calcite's

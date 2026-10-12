@@ -409,6 +409,9 @@ internal sealed class ReferenceInterpreter
                     Evaluate(call.Args[0], row),
                     ChalkType.FromProto(call.Args[0].Type));
 
+            case FunctionId.CurrentTimestamp or FunctionId.CurrentDate:
+                return Chalk.Execution.Expressions.CurrentTime.Units(Now, type);
+
             default:
                 break;
         }

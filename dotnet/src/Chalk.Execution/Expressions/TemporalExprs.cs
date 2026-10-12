@@ -478,3 +478,51 @@ internal sealed class FloorTemporalExpr : VectorExprBase
         return TemporalLanes.Combine(days, secondOfDay, subSecond, Type);
     }
 }
+
+/// <summary>
+/// <c>CURRENT_TIMESTAMP</c>, <c>LOCALTIMESTAMP</c> and <c>CURRENT_DATE</c> (D337): the execution's
+/// one instant, <see cref="EvalContext.Now"/>, as a UTC wall clock, so every row and every operator
+/// of one execution reads the same value and the next execution reads its own. A constant for the
+/// length of the execution, like a parameter.
+/// </summary>
+internal sealed class CurrentTimeExpr : IVectorExpr
+{
+    public CurrentTimeExpr(ChalkType type) => Type = type;
+
+    public ChalkType Type { get; }
+
+    public Vector Evaluate(EvalContext context) =>
+        Vector.FromScalar(
+            new ScalarValue { Type = Type, Integer = CurrentTime.Units(context.Now, Type) },
+            context.Length);
+}
+
+/// <summary>The current time in a type's storage units, shared by both engines.</summary>
+internal static class CurrentTime
+{
+    /// <summary>
+    /// <paramref name="now"/> as <paramref name="type"/> holds it: days since the epoch for a DATE,
+    /// and for a TIMESTAMP its precision's units since the epoch, truncated to the precision. The
+    /// clock has 100 ns ticks, so a precision past 7 adds zeros.
+    /// </summary>
+    public static long Units(DateTimeOffset now, ChalkType type)
+    {
+        var ticks = now.UtcTicks - DateTime.UnixEpoch.Ticks;
+        if (type.Kind == TypeKind.Date)
+        {
+            return ticks / TimeSpan.TicksPerDay;
+        }
+
+        var precision = Math.Clamp(type.Precision, 0, 9);
+        if (precision < 7)
+        {
+            var step = (long)Math.Pow(10, 7 - precision);
+            ticks -= ticks % step;
+        }
+
+        var perSecond = IrTypes.TimestampUnitsPerSecond((uint)precision);
+        return perSecond >= TimeSpan.TicksPerSecond
+            ? ticks * (perSecond / TimeSpan.TicksPerSecond)
+            : ticks / (TimeSpan.TicksPerSecond / perSecond);
+    }
+}

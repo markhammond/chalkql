@@ -92,6 +92,48 @@ public final class ChalkOperatorTable {
           org.apache.calcite.sql.fun.SqlLibraryOperators.ILIKE,
           org.apache.calcite.sql.fun.SqlLibraryOperators.NOT_ILIKE);
 
+  /** The precision of {@code CURRENT_TIMESTAMP} and {@code LOCALTIMESTAMP} when none is written. */
+  public static final int DEFAULT_TIMESTAMP_PRECISION = 6;
+
+  /**
+   * {@code CURRENT_TIMESTAMP} and {@code LOCALTIMESTAMP} as ChalkQL types them (D337): a timestamp
+   * of precision 6 when none is written, the SQL standard's default and PostgreSQL's, rather than
+   * Calcite's 0, which truncates to the second; and any precision up to the type system's 9 when
+   * one is. Both read the execution's one instant as a UTC wall clock: ChalkQL has no session time
+   * zone, so the two are the same value.
+   */
+  private static final class StandardTimestamp
+      extends org.apache.calcite.sql.fun.SqlAbstractTimeFunction {
+    StandardTimestamp(String name) {
+      super(name, SqlTypeName.TIMESTAMP);
+    }
+
+    @Override
+    public org.apache.calcite.rel.type.RelDataType inferReturnType(
+        org.apache.calcite.sql.SqlOperatorBinding binding) {
+      int precision = DEFAULT_TIMESTAMP_PRECISION;
+      if (binding.getOperandCount() == 1) {
+        Integer written = binding.getOperandLiteralValue(0, Integer.class);
+        int max = binding.getTypeFactory().getTypeSystem().getMaxPrecision(SqlTypeName.TIMESTAMP);
+        if (written == null || written < 0 || written > max) {
+          throw binding.newError(
+              org.apache.calcite.util.Static.RESOURCE.argumentMustBeValidPrecision(
+                  getName(), 0, max));
+        }
+        precision = written;
+      }
+      return binding.getTypeFactory().createSqlType(SqlTypeName.TIMESTAMP, precision);
+    }
+  }
+
+  /**
+   * Chained before the standard table, so a statement resolves these rather than Calcite's: a
+   * chain answers a name with every table's operator in order, and the first is the one used.
+   */
+  private static final ImmutableList<org.apache.calcite.sql.SqlOperator> TIME =
+      ImmutableList.of(
+          new StandardTimestamp("CURRENT_TIMESTAMP"), new StandardTimestamp("LOCALTIMESTAMP"));
+
   /** Just Chalk's own operators, for the clash check a user function is registered through. */
   public static SqlOperatorTable chalkOperators() {
     return SqlOperatorTables.of(OWN);
@@ -125,6 +167,7 @@ public final class ChalkOperatorTable {
       List<SqlLibrary> libraries, chalk.planner.catalog.UserFunctions functions) {
     SqlOperatorTable table =
         SqlOperatorTables.chain(
+            SqlOperatorTables.of(TIME),
             SqlStdOperatorTable.instance(),
             SqlOperatorTables.of(OWN));
     if (!libraries.isEmpty()) {

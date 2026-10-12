@@ -78,6 +78,7 @@ internal static class KernelRegistry
             FunctionId.Extract => Extract(call, result, compile),
             FunctionId.FloorTemporal => FloorTemporal(call, result, compile),
             FunctionId.TimeBucket => TimeBucket(call, result, compile),
+            FunctionId.CurrentTimestamp or FunctionId.CurrentDate => new CurrentTimeExpr(result),
 
             // Lists (D58). Producing, projecting and indexing into one is all v1 does with them.
             FunctionId.Cardinality => new CardinalityExpr(result, compile(call.Args[0])),
