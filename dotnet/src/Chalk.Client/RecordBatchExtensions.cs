@@ -340,9 +340,15 @@ public static class RecordBatchExtensions
     {
         var value = array.GetTimestamp(index)!.Value;
         var type = (TimestampType)array.Data.DataType;
-        return string.IsNullOrEmpty(type.Timezone)
-            ? DateTime.SpecifyKind(value.UtcDateTime, DateTimeKind.Unspecified)
-            : value.ToUniversalTime();
+
+        // Boxed apart on purpose (F189): as one conditional, the DateTime would widen to a
+        // DateTimeOffset, converted as local time, and move by the machine's offset.
+        if (string.IsNullOrEmpty(type.Timezone))
+        {
+            return DateTime.SpecifyKind(value.UtcDateTime, DateTimeKind.Unspecified);
+        }
+
+        return value.ToUniversalTime();
     }
 
     /// <summary>UUID is a 16-byte fixed-size binary in RFC 4122 order (02-ir.md §3).</summary>
