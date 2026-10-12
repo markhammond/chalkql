@@ -1054,7 +1054,21 @@ public final class RelToIr {
 
     // A parameter carries the type Calcite inferred for it, which the matcher already checked
     // against the key column's; the client binds it by that type.
-    return rex.convert(node);
+    if (node instanceof org.apache.calcite.rex.RexDynamicParam) {
+      return rex.convert(node);
+    }
+
+    // A computed bound (D337), cast to the key column's own type where it is not already: the
+    // client computes it once and compares the value with the keys in the column's units.
+    org.apache.calcite.rel.type.RelDataTypeFactory types = lookup.getCluster().getTypeFactory();
+    org.apache.calcite.rel.type.RelDataType column =
+        types.createTypeWithNullability(
+            new chalk.planner.types.TypeMapper(types).toCalcite(type), node.getType().isNullable());
+    RexNode cast =
+        org.apache.calcite.sql.type.SqlTypeUtil.equalSansNullability(types, node.getType(), column)
+            ? node
+            : lookup.getCluster().getRexBuilder().makeCast(column, node);
+    return rex.convert(cast);
   }
 
   /**

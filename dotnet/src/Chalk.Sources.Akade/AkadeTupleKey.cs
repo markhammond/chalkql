@@ -74,9 +74,14 @@ internal sealed class AkadeTupleKey<TKey>
     /// components a range does not reach are the extremes of the <em>index's</em> order, so a
     /// descending key fills below everything with its type's maximum.
     /// </param>
+    /// <param name="precisions">
+    /// Each component's TIMESTAMP precision, in key order, which a temporal bound's units count in
+    /// (D337); 9 for every component when null.
+    /// </param>
     public static AkadeTupleKey<TKey> Create(
         IReadOnlyList<object> componentComparers,
-        bool descending = false)
+        bool descending = false,
+        IReadOnlyList<int>? precisions = null)
     {
         ArgumentNullException.ThrowIfNull(componentComparers);
 
@@ -94,12 +99,13 @@ internal sealed class AkadeTupleKey<TKey>
         }
 
         return new AkadeTupleKey<TKey>(
-            CompileFill(types, descending),
+            CompileFill(types, descending, precisions),
             CompileComparer(types, componentComparers),
             types.Length);
     }
 
-    private static Func<IReadOnlyList<object?>, bool, TKey> CompileFill(Type[] types, bool descending)
+    private static Func<IReadOnlyList<object?>, bool, TKey> CompileFill(
+        Type[] types, bool descending, IReadOnlyList<int>? precisions)
     {
         var bounds = Expression.Parameter(typeof(IReadOnlyList<object?>), "bounds");
         var useMaximum = Expression.Parameter(typeof(bool), "useMaximum");
@@ -122,7 +128,8 @@ internal sealed class AkadeTupleKey<TKey>
                 Expression.Constant(i),
                 useMaximum,
                 Extreme(descending ? AkadeKeyOrder.Maximum(type) : AkadeKeyOrder.Minimum(type), type),
-                Extreme(descending ? AkadeKeyOrder.Minimum(type) : AkadeKeyOrder.Maximum(type), type));
+                Extreme(descending ? AkadeKeyOrder.Minimum(type) : AkadeKeyOrder.Maximum(type), type),
+                Expression.Constant(precisions is null ? 9 : precisions[i]));
         }
 
         var constructor = typeof(TKey).GetConstructor(types)

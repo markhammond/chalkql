@@ -115,6 +115,12 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
 
   // set in STATE_4_VALIDATE
   private @Nullable SqlValidator validator;
+
+  /**
+   * The type each parameter was declared, by ordinal, null where the validator infers it (D337).
+   * Set for each statement before it is validated.
+   */
+  private List<@Nullable RelDataType> declaredParameterTypes = List.of();
   private @Nullable SqlNode validatedSqlNode;
 
   /** Creates a driver over a framework config, as {@code Frameworks.getPlanner} creates Calcite's. */
@@ -258,6 +264,14 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
    * not. Null before the first call. Not a {@code PlannerImpl} member: the pipeline reads it between
    * validation and conversion.
    */
+  /**
+   * Holds the next statement's parameters to these types when it is validated, by ordinal; a null
+   * leaves that parameter's type to be inferred, as an empty list leaves all of them (D337).
+   */
+  public void declareParameterTypes(List<@Nullable RelDataType> types) {
+    this.declaredParameterTypes = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(types));
+  }
+
   public @Nullable SqlValidator validator() {
     return validator;
   }
@@ -380,6 +394,7 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
 
   private SqlValidator createSqlValidator(CalciteCatalogReader catalogReader) {
     final SqlOperatorTable opTab = SqlOperatorTables.chain(operatorTable, catalogReader);
+    final List<@Nullable RelDataType> declared = declaredParameterTypes;
     return new CalciteSqlValidator(
         opTab,
         catalogReader,
@@ -388,7 +403,61 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
             .withDefaultNullCollation(connectionConfig.defaultNullCollation())
             .withLenientOperatorLookup(connectionConfig.lenientOperatorLookup())
             .withConformance(connectionConfig.conformance())
-            .withIdentifierExpansion(true));
+            .withIdentifierExpansion(true)) {
+      /**
+       * A parameter the host declared a type for takes that type, rather than one inferred from
+       * what is around it (D337). Calcite's own inference stands for every other parameter.
+       */
+      @Override
+      protected void inferUnknownTypes(
+          RelDataType inferredType,
+          org.apache.calcite.sql.validate.SqlValidatorScope scope,
+          org.apache.calcite.sql.SqlNode node) {
+        RelDataType type = declaredType(node);
+        if (type != null) {
+          setValidatedNodeType(node, type);
+          return;
+        }
+        super.inferUnknownTypes(inferredType, scope, node);
+      }
+
+      /**
+       * The same, where a type is derived before any is inferred: an argument of a function call,
+       * whose types choose the function's overload, is derived first, and a parameter in one would
+       * otherwise be of no type yet.
+       */
+      @Override
+      public RelDataType deriveType(
+          org.apache.calcite.sql.validate.SqlValidatorScope scope,
+          org.apache.calcite.sql.SqlNode expr) {
+        RelDataType type = declaredType(expr);
+        if (type != null) {
+          setValidatedNodeType(expr, type);
+          return type;
+        }
+        RelDataType derived = super.deriveType(scope, expr);
+        // TIMESTAMPDIFF counts in a BIGINT, as MySQL's does, rather than Calcite's INTEGER, which
+        // runs out of microseconds after about 35 minutes (D337).
+        if (expr.getKind() == org.apache.calcite.sql.SqlKind.TIMESTAMP_DIFF
+            && derived.getSqlTypeName() == org.apache.calcite.sql.type.SqlTypeName.INTEGER) {
+          derived =
+              getTypeFactory()
+                  .createTypeWithNullability(
+                      getTypeFactory()
+                          .createSqlType(org.apache.calcite.sql.type.SqlTypeName.BIGINT),
+                      derived.isNullable());
+          setValidatedNodeType(expr, derived);
+        }
+        return derived;
+      }
+
+      private @Nullable RelDataType declaredType(org.apache.calcite.sql.SqlNode node) {
+        return node instanceof org.apache.calcite.sql.SqlDynamicParam param
+                && param.getIndex() < declared.size()
+            ? declared.get(param.getIndex())
+            : null;
+      }
+    };
   }
 
   private static SchemaPlus rootSchema(SchemaPlus schema) {

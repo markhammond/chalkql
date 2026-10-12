@@ -381,7 +381,9 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
           planning.getSessionMaxConcurrency(),
           () -> {
             PlannerPipeline.Front front =
-                leased != null ? leased.front() : pipeline.front(request.getSql());
+                leased != null
+                    ? leased.front()
+                    : pipeline.front(request.getSql(), request.getParameterTypesList());
             // What this request expects its parameters to be worth, for the whole of this request
             // and no further (D284). After the front half, because a hint is checked against the
             // type the statement inferred; before the pass, because that is where the estimates

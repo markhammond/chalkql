@@ -487,7 +487,10 @@ A batch's column was read after the producer had moved on to the next batch.
 
 ### ExecutionFailed
 
-An operator failed while the query ran. The inner exception says why.
+An exception that is not ChalkQL's was thrown while the query ran: one from a host's source or
+function, or from the runtime. It is wrapped in an `ExecutionException`, which names the operator
+and the plan. A ChalkQL exception is never wrapped: it reaches the host as itself, under its own
+code.
 
 **What to do:** See the inner exception.
 

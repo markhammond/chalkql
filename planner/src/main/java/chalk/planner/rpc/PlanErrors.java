@@ -30,6 +30,21 @@ public final class PlanErrors {
   public static final Metadata.Key<byte[]> TRAILER =
       Metadata.Key.of("chalk-plan-error-bin", Metadata.BINARY_BYTE_MARSHALLER);
 
+  /**
+   * The most characters of a message an error carries (D337, F174). A client refuses response
+   * headers past its limit and drops the whole connection with them, failing every call in flight
+   * on it, so what is sent in a trailer is bounded here. No message a person reads is longer, and
+   * Calcite's long ones repeat themselves — one argument type per argument, say.
+   */
+  public static final int MESSAGE_LIMIT = 4096;
+
+  /**
+   * The most bytes an error's trailer and status description may take on the wire: half the 1 MB
+   * of response headers the client accepts. Once messages are bounded, only a refusal's table model
+   * can reach it, and that is left out rather than sent.
+   */
+  public static final int TRAILER_BUDGET = 512 * 1024;
+
   private PlanErrors() {}
 
   /** Maps a planning failure to the status and trailer the client expects. */
@@ -232,7 +247,7 @@ public final class PlanErrors {
    * the violation, under the refusal's code; the result is the error's, whatever it refuses.
    */
   private static StatusRuntimeException policy(chalk.planner.entitlement.PolicyException policy) {
-    String text = message(policy);
+    String text = bounded(message(policy));
     PlanError.Builder error =
         PlanError.newBuilder()
             .setMessage(text)
@@ -264,7 +279,7 @@ public final class PlanErrors {
       int endLine,
       int endColumn,
       chalk.planner.rpc.v1.@org.checkerframework.checker.nullness.qual.Nullable PlanningState state) {
-    String text = message == null ? kind.wireName() : message;
+    String text = message == null ? kind.wireName() : bounded(message);
     PlanError.Builder builder =
         PlanError.newBuilder()
             .setMessage(text)
@@ -284,9 +299,53 @@ public final class PlanErrors {
   }
 
   private static StatusRuntimeException send(Status status, PlanError error) {
+    PlanError sent = withinBudget(error);
     Metadata trailers = new Metadata();
-    trailers.put(TRAILER, error.toByteArray());
-    return status.withDescription(error.getMessage()).asRuntimeException(trailers);
+    trailers.put(TRAILER, sent.toByteArray());
+    return status.withDescription(sent.getMessage()).asRuntimeException(trailers);
+  }
+
+  /**
+   * {@code text}, cut to {@link #MESSAGE_LIMIT} characters and saying how much was left out. The
+   * cut never splits a surrogate pair. The client still ends the message with its code.
+   */
+  public static String bounded(String text) {
+    if (text.length() <= MESSAGE_LIMIT) {
+      return text;
+    }
+    int end = MESSAGE_LIMIT;
+    if (Character.isHighSurrogate(text.charAt(end - 1))) {
+      end--;
+    }
+    return text.substring(0, end) + "… (" + (text.length() - end) + " more characters)";
+  }
+
+  /**
+   * {@code error} as it may be sent: whole when it fits {@link #TRAILER_BUDGET}, and otherwise
+   * without the refused statement's table model, its message saying so. Nothing else in an error
+   * can grow past the budget once its messages are bounded.
+   */
+  static PlanError withinBudget(PlanError error) {
+    if (wireSize(error) <= TRAILER_BUDGET
+        || (!error.hasOutput() && error.getDisclosuresCount() == 0)) {
+      return error;
+    }
+    return error.toBuilder()
+        .clearOutput()
+        .clearDisclosures()
+        .setMessage(
+            error.getMessage()
+                + " The statement's table model is left out: it is too large to send with an"
+                + " error.")
+        .build();
+  }
+
+  /**
+   * An error's size on the wire, at worst: the trailer is base64, and the status description is
+   * percent-encoded UTF-8, up to nine bytes for one character.
+   */
+  public static long wireSize(PlanError error) {
+    return 4L * ((error.getSerializedSize() + 2) / 3) + 9L * error.getMessage().length();
   }
 
   /**

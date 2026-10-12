@@ -94,6 +94,8 @@ public final class FunctionMapping {
     map.put("ENDS_WITH", FunctionId.FUNCTION_ID_ENDS_WITH);
 
     map.put("CURRENT_TIMESTAMP", FunctionId.FUNCTION_ID_CURRENT_TIMESTAMP);
+    // The same instant: ChalkQL has no session time zone, so the local wall clock is UTC's (D337).
+    map.put("LOCALTIMESTAMP", FunctionId.FUNCTION_ID_CURRENT_TIMESTAMP);
     map.put("CURRENT_DATE", FunctionId.FUNCTION_ID_CURRENT_DATE);
     map.put("TIMESTAMPDIFF", FunctionId.FUNCTION_ID_TIMESTAMP_DIFF);
     map.put("TIMESTAMPADD", FunctionId.FUNCTION_ID_TIMESTAMP_ADD);

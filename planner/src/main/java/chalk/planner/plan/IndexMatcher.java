@@ -520,10 +520,10 @@ public final class IndexMatcher {
   }
 
   /**
-   * {@code col OP value} where col is one of the key columns and value is a literal or a parameter.
-   * A cast on either side, a comparison between two columns and anything under a NOT are all
-   * refused: the bound has to be a constant of the key column's own type, or the range would not be
-   * the set of rows the predicate selects.
+   * {@code col OP value} where col is one of the key columns and value is a literal, a parameter or
+   * a bound computed once per execution. A cast on the column's side, a comparison between two
+   * columns and anything under a NOT are all refused: the bound has to be a constant of the key
+   * column's own type family, or the range would not be the set of rows the predicate selects.
    */
   private static @Nullable Comparison classify(
       RexNode conjunct, List<Integer> keyFields, int keyLength, RelDataType rowType) {
@@ -634,17 +634,19 @@ public final class IndexMatcher {
   }
 
   /**
-   * Whether {@code node} can bound {@code column}'s key: a literal or a parameter, of the column's
-   * own type family — and, for a parameter, of its exact precision and scale as well.
+   * Whether {@code node} can bound {@code column}'s key: a literal, a parameter or a computed bound,
+   * of the column's own type family — and, for a bare parameter, of its exact precision and scale
+   * as well.
    *
    * <p>A literal may be coarser than the column ({@code TIMESTAMP '…'} against a TIMESTAMP(9)
-   * column), because {@code RelToIr} re-expresses it in the column's units. A parameter cannot: the
-   * client binds it by the type the plan declares for it, and nothing re-scales that.
+   * column), because {@code RelToIr} re-expresses it in the column's units, and so may a computed
+   * bound, which {@code RelToIr} casts to the column's type. A bare parameter cannot: the client
+   * binds it by the type the plan declares for it, and nothing re-scales that.
    */
   private static boolean isBound(RexNode node, RexInputRef column, RelDataType rowType) {
     SqlTypeName wanted = rowType.getFieldList().get(column.getIndex()).getType().getSqlTypeName();
-    if (node instanceof RexLiteral literal) {
-      return literal.getType().getSqlTypeName().getFamily() == wanted.getFamily();
+    if (node instanceof RexLiteral || isComputed(node)) {
+      return node.getType().getSqlTypeName().getFamily() == wanted.getFamily();
     }
 
     if (!(node instanceof RexDynamicParam parameter)) {
@@ -656,6 +658,21 @@ public final class IndexMatcher {
     return parameterType.getSqlTypeName() == wanted
         && parameterType.getPrecision() == columnType.getPrecision()
         && parameterType.getScale() == columnType.getScale();
+  }
+
+  /**
+   * A bound the client computes once per execution and binds like a parameter (D337): an
+   * expression that reads no column, built of literals, parameters and the current time under
+   * functions and casts that are deterministic within an execution, such as {@code CAST(? AS
+   * TIMESTAMP(9)) - INTERVAL '5' MINUTE} or {@code CURRENT_TIMESTAMP - INTERVAL '5' MINUTE}.
+   */
+  static boolean isComputed(RexNode node) {
+    return node instanceof org.apache.calcite.rex.RexCall
+        && !org.apache.calcite.rex.RexUtil.containsInputRef(node)
+        && !org.apache.calcite.rex.RexUtil.containsFieldAccess(node)
+        && !org.apache.calcite.rex.RexUtil.containsCorrelation(node)
+        && !org.apache.calcite.rex.RexOver.containsOver(node)
+        && org.apache.calcite.rex.RexUtil.isDeterministic(node);
   }
 
   private static boolean isComparison(SqlKind kind) {

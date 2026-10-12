@@ -60,7 +60,7 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
     private readonly CallInvoker _invoker;
 
     private readonly GrpcChannel _channel;
-    private readonly SocketsHttpHandler? _handler;
+    private readonly SocketsHttpHandler _handler;
     private readonly PlannerService.PlannerServiceClient _client;
     private readonly GrpcPlannerOptions _options;
     private readonly ILogger _log;
@@ -89,6 +89,9 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
         }
         else
         {
+            _handler = PlannerAddress.TcpHandler();
+            channelOptions.HttpHandler = _handler;
+            channelOptions.DisposeHttpClient = false;
             _channel = GrpcChannel.ForAddress(options.Address, channelOptions);
         }
 
@@ -587,7 +590,7 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
     {
         await _channel.ShutdownAsync().ConfigureAwait(false);
         _channel.Dispose();
-        _handler?.Dispose();
+        _handler.Dispose();
     }
 
     private async Task<T> CallAsync<T>(Func<DateTime?, AsyncUnaryCall<T>> call, bool retryOnUnavailable)

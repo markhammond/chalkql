@@ -400,7 +400,11 @@ public final class SqlBodyInliner extends SqlShuttle {
       call ->
           call.getOperator() == STRICT_GUARD
               ? GUARD
-              : org.apache.calcite.sql2rel.StandardConvertletTable.INSTANCE.get(call);
+              // D337: TIMESTAMPDIFF stays the call the IR has a function for.
+              : call.getKind() == org.apache.calcite.sql.SqlKind.TIMESTAMP_DIFF
+                      && TimestampDiffConvertlet.unitOf(call) != null
+                  ? TimestampDiffConvertlet.INSTANCE
+                  : org.apache.calcite.sql2rel.StandardConvertletTable.INSTANCE.get(call);
 
   /**
    * {@code CAST(argument AS declared-type)}, so a call decides nothing about the body's types that

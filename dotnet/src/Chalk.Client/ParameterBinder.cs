@@ -390,7 +390,7 @@ internal static class ParameterBinder
     }
 
     /// <summary>
-    /// The value the parameter's inferred type holds exactly, after the engine's converters, or a
+    /// The value the parameter's type holds exactly, after the engine's converters, or a
     /// refusal naming the parameter as the statement wrote it (F155, D317, D323). The engine's binder
     /// applies the same rule again.
     /// </summary>
@@ -400,8 +400,10 @@ internal static class ParameterBinder
         {
             return type.Nullable
                 ? null
-                : throw new ArgumentException(
-                    $"null was bound to parameter {parameter}, whose inferred type {type} is not nullable");
+                : throw new ParameterBindingException(
+                    $"Parameter {parameter}",
+                    $"NULL was bound to parameter {parameter}, whose type {type} is not nullable. "
+                    + "Bind a value, or declare the parameter's type nullable.");
         }
 
         return binding.Bind(value, type, $"Parameter {parameter}");

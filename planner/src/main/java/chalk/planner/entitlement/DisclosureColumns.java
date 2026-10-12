@@ -229,16 +229,27 @@ public final class DisclosureColumns {
       }
     }
 
-    return new Carried(
-        LogicalJoin.create(
-            left.rel(),
-            right.rel(),
-            ImmutableList.<RelHint>of(),
-            permute(join.getCondition(), originals, rexBuilder),
-            join.getVariablesSet(),
-            join.getJoinType()),
-        originals,
-        sources);
+    RexNode condition = permute(join.getCondition(), originals, rexBuilder);
+    // An ASOF join stays one, its match condition carried over the same row (D337): Calcite reads a
+    // join of an ASOF type as a LogicalAsofJoin, and a plain join of that type would lose the match.
+    RelNode rebuilt =
+        join instanceof org.apache.calcite.rel.core.AsofJoin asof
+            ? org.apache.calcite.rel.logical.LogicalAsofJoin.create(
+                left.rel(),
+                right.rel(),
+                ImmutableList.<RelHint>of(),
+                condition,
+                permute(asof.getMatchCondition(), originals, rexBuilder),
+                join.getJoinType(),
+                ImmutableList.of())
+            : LogicalJoin.create(
+                left.rel(),
+                right.rel(),
+                ImmutableList.<RelHint>of(),
+                condition,
+                join.getVariablesSet(),
+                join.getJoinType());
+    return new Carried(rebuilt, originals, sources);
   }
 
   /**

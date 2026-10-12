@@ -125,6 +125,10 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
 
     switch (call.getKind()) {
       case CAST, SAFE_CAST -> {
+        Expr count = intervalCount(call, type);
+        if (count != null) {
+          return count;
+        }
         return Expr.newBuilder()
             .setType(type)
             .setCast(
@@ -262,6 +266,44 @@ public final class RexToIr extends RexVisitorImpl<Expr> {
     return Expr.newBuilder()
         .setType(type)
         .setLiteral(Literal.newBuilder().setListValue(elements))
+        .build();
+  }
+
+  /**
+   * {@code CAST((a - b) <unit> AS integer)}, the count of whole units from {@code b} to {@code a},
+   * as the IR's {@code TIMESTAMP_DIFF(unit, b, a)} (D337, F175). The IR's interval types keep no
+   * unit, so the cast alone could not say which unit it counts; the subtraction's interval
+   * qualifier says, and its end unit is the one counted, truncated toward zero. Null for any other
+   * cast.
+   */
+  private @org.checkerframework.checker.nullness.qual.Nullable Expr intervalCount(
+      RexCall cast, Type type) {
+    RexNode operand = cast.getOperands().get(0);
+    org.apache.calcite.sql.SqlIntervalQualifier qualifier = operand.getType().getIntervalQualifier();
+    if (qualifier == null
+        || !SqlTypeName.INT_TYPES.contains(cast.getType().getSqlTypeName())
+        || !(operand instanceof RexCall difference)
+        || difference.getKind() != SqlKind.MINUS
+        || difference.getOperands().size() != 2
+        || !SqlTypeName.DATETIME_TYPES.contains(
+            difference.getOperands().get(0).getType().getSqlTypeName())) {
+      return null;
+    }
+
+    Expr unit =
+        Expr.newBuilder()
+            .setEnumArg(EnumArg.newBuilder().setValue(qualifier.timeUnitRange.endUnit == null
+                ? qualifier.timeUnitRange.startUnit.name()
+                : qualifier.timeUnitRange.endUnit.name()))
+            .build();
+    return Expr.newBuilder()
+        .setType(type)
+        .setCall(
+            ScalarCall.newBuilder()
+                .setFunction(FunctionId.FUNCTION_ID_TIMESTAMP_DIFF)
+                .addArgs(unit)
+                .addArgs(convert(difference.getOperands().get(1)))
+                .addArgs(convert(difference.getOperands().get(0))))
         .build();
   }
 

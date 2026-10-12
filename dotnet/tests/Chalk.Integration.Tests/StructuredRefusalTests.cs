@@ -250,6 +250,27 @@ public sealed class StructuredRefusalTests(SharedSidecar sidecar) : IDisposable
         Assert.Null(refusal.OutputSchema);
     }
 
+    /// <summary>
+    /// D337: an ASOF join's condition on one input becomes a filter on that input, written as a star
+    /// over it. Neither the star policy nor a column the statement never names is held against it:
+    /// <c>national_id</c>, which no projection may carry, is not refused here.
+    /// </summary>
+    [Fact]
+    public async Task An_asof_condition_on_one_input_is_not_refused_for_a_column_the_statement_never_names()
+    {
+        await using var engine = await EngineAsync(Run.BoundAtPrepare);
+        const string Sql = "SELECT m.id, x.org_id FROM members m ASOF JOIN members x "
+            + "MATCH_CONDITION m.id >= x.id ON x.org_id = 1";
+
+        var prepared = await engine.WithEntitlements().PrepareAsync(Sql, Counter(1, 2));
+        var strict = await engine
+            .WithEntitlements(new EntitlementsOptions { StarPolicy = StarPolicy.RefuseWhenEntitled })
+            .PrepareAsync(Sql, Counter(1, 2));
+
+        Assert.Equal(["id", "org_id"], prepared.OutputSchema.FieldsList.Select(f => f.Name));
+        Assert.Equal(["id", "org_id"], strict.OutputSchema.FieldsList.Select(f => f.Name));
+    }
+
     [Fact]
     public async Task A_prepared_statements_model_becomes_an_empty_data_table()
     {

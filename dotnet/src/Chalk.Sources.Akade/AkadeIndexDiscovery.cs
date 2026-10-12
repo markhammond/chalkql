@@ -817,7 +817,8 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
                     _name,
                     _sourceId,
                     _table,
-                    comparer),
+                    comparer,
+                    AkadeBound.PrecisionOf(_members[0])),
                 selectors);
             return;
         }
@@ -826,7 +827,8 @@ internal sealed class AkadeIndexRegistration<T, TKey> : IAkadeIndexRegistration<
         // composed comparer depend on the key type and the direction alone.
         var shape = AkadeTupleKey<TKey>.Create(
             [.. _members.Select(m => Order(m, descending))],
-            descending);
+            descending,
+            [.. _members.Select(AkadeBound.PrecisionOf)]);
 
         table.Index(
             _name,

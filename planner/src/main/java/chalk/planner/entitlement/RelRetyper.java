@@ -75,6 +75,18 @@ final class RelRetyper {
           filter.getCondition().accept(refs),
           com.google.common.collect.ImmutableSet.copyOf(filter.getVariablesSet()));
     }
+    if (rel instanceof org.apache.calcite.rel.core.AsofJoin asof) {
+      // An ASOF join stays one, with its match condition (D337): Calcite reads a join of an ASOF
+      // type as a LogicalAsofJoin, and a plain join of that type would lose the match.
+      return org.apache.calcite.rel.logical.LogicalAsofJoin.create(
+          inputs.get(0),
+          inputs.get(1),
+          asof.getHints(),
+          asof.getCondition().accept(refs),
+          asof.getMatchCondition().accept(refs),
+          asof.getJoinType(),
+          com.google.common.collect.ImmutableList.of());
+    }
     if (rel instanceof Join join) {
       return LogicalJoin.create(
           inputs.get(0),

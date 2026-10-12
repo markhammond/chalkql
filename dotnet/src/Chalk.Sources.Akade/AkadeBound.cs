@@ -8,22 +8,32 @@ namespace Chalk.Sources.Akade;
 /// </summary>
 /// <remarks>
 /// The CLR type a bound arrives as is not required to be the one the rows hold: a STRING bound may
-/// be a <see cref="string"/> or a <see cref="Utf8String"/>, and an integer bound arrives at the
-/// column's width rather than the member's. This runs once per lookup, never per row.
+/// be a <see cref="string"/> or a <see cref="Utf8String"/>, an integer bound arrives at the column's
+/// width rather than the member's, and a temporal bound arrives as the column's storage units —
+/// days for a DATE, the precision's units since 1970 for a TIMESTAMP — and is turned back into the
+/// <see cref="DateTime"/>, <see cref="DateTimeOffset"/>, <see cref="DateOnly"/>,
+/// <see cref="TimeOnly"/> or <see cref="TimeSpan"/> the key holds (D337). This runs once per lookup,
+/// never per row.
 /// </remarks>
 internal static class AkadeBound
 {
     /// <summary>
     /// The bound as <typeparamref name="TValue"/>. Throws when the value is of a CLR type this key
     /// cannot consume at all, which is a plan the source was never able to serve.
+    /// <paramref name="precision"/> is the key column's, which a TIMESTAMP bound's units count in.
     /// </summary>
-    public static TValue Coerce<TValue>(object value)
+    public static TValue Coerce<TValue>(object value, int precision = 9)
     {
         ArgumentNullException.ThrowIfNull(value);
 
         if (value is TValue exact)
         {
             return exact;
+        }
+
+        if (Temporal(value, Nullable.GetUnderlyingType(typeof(TValue)) ?? typeof(TValue), precision) is TValue time)
+        {
+            return time;
         }
 
         // The two spellings of a STRING value. Convert.ChangeType knows neither direction.
@@ -66,7 +76,8 @@ internal static class AkadeBound
         int position,
         bool useMaximum,
         TValue minimum,
-        TValue maximum)
+        TValue maximum,
+        int precision = 9)
     {
         ArgumentNullException.ThrowIfNull(bounds);
 
@@ -77,6 +88,30 @@ internal static class AkadeBound
 
         // A NULL bound never reaches here: the caller answers such a range with no rows at all,
         // because a SQL comparison with NULL is unknown.
-        return Coerce<TValue>(bounds[position]!);
+        return Coerce<TValue>(bounds[position]!, precision);
     }
+
+    /// <summary>
+    /// A temporal bound, from the storage units it arrives as, as the CLR type a key holds; null when
+    /// <paramref name="key"/> is not temporal or the value is not in units.
+    /// </summary>
+    private static object? Temporal(object value, Type key, int precision) => value switch
+    {
+        long units when key == typeof(DateTime) => ClrStorage.DateTimeOf(units, precision),
+        long units when key == typeof(DateTimeOffset) => ClrStorage.InstantOf(units, precision),
+        long micros when key == typeof(TimeOnly) => ClrStorage.TimeOf(micros),
+        long micros when key == typeof(TimeSpan) => ClrStorage.IntervalOf(micros),
+        int days when key == typeof(DateOnly) => ClrStorage.DateOf(days),
+        _ => null,
+    };
+
+    /// <summary>
+    /// The precision a member's TIMESTAMP column has, as the POCO mapping decides it: the
+    /// <see cref="Poco.ChalkColumnAttribute"/>'s, else 9.
+    /// </summary>
+    public static int PrecisionOf(System.Reflection.MemberInfo member) =>
+        System.Reflection.CustomAttributeExtensions.GetCustomAttribute<Poco.ChalkColumnAttribute>(member)
+            is { Precision: >= 0 } attribute
+            ? attribute.Precision
+            : 9;
 }

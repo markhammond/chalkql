@@ -395,6 +395,17 @@ on the declared key but reads nothing from the parent, and the key is unique in 
 parent. Then the key promises that the join changes nothing, so the planner *deletes*
 it. If the key is wrong, the answer is wrong.
 
+An index serves a comparison on its leading columns. The value compared with may be a
+literal, a parameter, or an expression of them that is the same for the whole execution,
+such as `CURRENT_TIMESTAMP - INTERVAL '5' MINUTE`. Such an expression is computed once,
+as the lookup starts. Whether the planner reads the index or scans is a cost decision,
+made from the column's statistics. To estimate a bound that is only known when the query
+runs, the planner computes it as it plans: the current time is its own clock, and a
+parameter is its hint in `PrepareOptions.ParameterValueHints`. So a recent window such
+as `ts >= CURRENT_TIMESTAMP - INTERVAL '5' MINUTE` reads the index. A bound the planner
+cannot compute, such as a parameter with no hint, is guessed to keep half the rows, so a
+range open on one side usually scans.
+
 You can extend POCO indexing too. Implement `IPocoIndex<T>` to adapt an existing index
 structure. Then run the test kit's `PocoIndexConformance.Verify` against it. It compares
 the index with a full scan over a battery of ranges, to check that the index keeps
@@ -868,8 +879,15 @@ list gives no rows for `IN`, and all rows for `NOT IN`.
 
 ### What a value binds to
 
-A parameter's type comes from the statement: the column it is compared with, the
-function it is passed to, or `ParameterTypes`. A value binds only if that type holds it
+A parameter's type comes from the statement: the column it is compared with, or the
+function it is passed to. Or you declare it, in `PrepareOptions.ParameterTypes`, one type
+for each parameter in order. A declared type holds when the statement is checked, so
+`ts >= ? - INTERVAL '60' SECOND` works with the parameter declared `TIMESTAMP(9)`. Left
+to itself, the parameter would take the interval's type, and the comparison would be
+refused. A declared type's nullability holds too. A row count in `LIMIT` or `OFFSET`
+keeps the type it has always had, and must be declared an integer type.
+
+A value binds only if the parameter's type holds it
 **exactly**. Anything else is refused by `ExecuteAsync` with a `ParameterBindingException`,
 code `ParameterBinding`, before anything reaches a source. The error names the parameter
 (`@amount`, `$2`, or its position) and the CLR type you bound, but never the value:
@@ -1143,6 +1161,60 @@ Databases disagree about case. PostgreSQL folds case by its database's locale (A
 only under `C`). DuckDB folds a Turkish capital that `LOWER` leaves alone. Calcite's own
 runtime folds ASCII only. So Chalk always evaluates an `ILIKE` itself, over the rows a
 source returns, and no index answers it, because an index is case-sensitive.
+
+### `ASOF JOIN`
+
+An `ASOF JOIN` pairs each left row with the last right row its `MATCH_CONDITION` allows,
+such as the rate in force when a trade was made. Its `ON` takes equalities between the
+two inputs. It also takes a condition on one input, which filters that input:
+
+```sql
+SELECT t.id, r.rate
+FROM trades t
+ASOF JOIN fx_rates r MATCH_CONDITION t.ts >= r.ts ON r.currency = 'EUR'
+```
+
+Here only euro rates can be the match. A condition on the left input filters the left
+input of an `ASOF JOIN`. In a `LEFT ASOF JOIN` it is refused, because a left row that
+fails it must still appear, with NULLs; put it in `WHERE` instead. Qualify each column
+in `ON` with its input's alias, so ChalkQL can tell which input a condition is on.
+
+### The current time
+
+`CURRENT_TIMESTAMP`, `LOCALTIMESTAMP` and `CURRENT_DATE` read one instant for each
+execution. It is taken from `ExecutionOptions.TimeProvider` when the execution starts, so
+every row and every operator see the same value, and the next execution reads its own:
+
+```sql
+SELECT symbol, price FROM trades
+WHERE ts >= CURRENT_TIMESTAMP - INTERVAL '5' MINUTE
+```
+
+ChalkQL has no session time zone, so the instant is read as a UTC wall clock.
+`CURRENT_TIMESTAMP` and `LOCALTIMESTAMP` are the same `TIMESTAMP`, and `CURRENT_DATE` is
+the date in UTC. A timestamp has precision 6, microseconds, unless you write one, up to
+9: `CURRENT_TIMESTAMP(9)`. A remote source is never sent the current time, so it cannot
+use a "now" of its own. A comparison with it is made in the host.
+
+### Differences between timestamps
+
+`TIMESTAMPDIFF(unit, from, to)` counts the whole units from one `DATE`, `TIMESTAMP` or
+`TIMESTAMP WITH TIME ZONE` to another, as a `BIGINT`. The count is truncated toward zero,
+so 90 seconds back is minus one minute. Months count only once the later day and time of
+month reaches the earlier one: 31 January to 28 February is no month, and to 1 March is
+one. The units are `MICROSECOND`, `MILLISECOND`, `SECOND`, `MINUTE`, `HOUR`, `DAY`,
+`WEEK`, `MONTH`, `QUARTER` and `YEAR`.
+
+```sql
+SELECT id, TIMESTAMPDIFF(MINUTE, placed_at, shipped_at) AS minutes_to_ship FROM orders
+```
+
+The standard form, `(to - from) DAY TO SECOND`, is an interval, which reaches you as a
+`TimeSpan`. An interval compares with an interval, and cast to an integer it is the same
+count `TIMESTAMPDIFF` gives in its last unit: `CAST((to - from) MINUTE AS BIGINT)`. A bare
+`to - from`, with no unit, is refused, as the SQL standard has it. To keep the recent rows,
+compare the column with a bound, `ts >= CURRENT_TIMESTAMP - INTERVAL '5' MINUTE`, rather
+than a difference with an interval: the bound can use an index on `ts`.
 
 ### `Babel` also changes the parser
 
@@ -2357,6 +2429,23 @@ foreach (var violation in failure.Violations)
     log.LogWarning("{Code} ({Kind}): {Message}", violation.Code, violation.Kind, violation.Message);
 }
 ```
+
+An error raised while a query runs reaches you as itself, so you can catch the type you
+expect. Its message begins with the operator it broke in:
+
+```csharp
+catch (ArenaBudgetExceededException exceeded)
+{
+    // Execution failed at root/Sort/Read (plan 41b8eca5ff4a30c5): execution exceeded its arena
+    // budget of 4096 bytes: 1280 bytes were already outstanding and 4096 more were asked for
+    // [MemoryBudgetExceeded]
+    log.LogWarning("needed more than {Bytes} bytes", exceeded.MaxBytes);
+}
+```
+
+Only an exception that is not ChalkQL's arrives wrapped: one from your own source or function, or
+from the runtime. It comes as an `ExecutionException` with the code `ExecutionFailed`, which
+names the operator and the plan, and its `InnerException` is the one that was thrown.
 
 A planner's errors travel with their codes and kinds, so a `PlanningException` or an
 `EntitlementException` has the code the planner raised it with, and its `Kind` is one of

@@ -752,11 +752,24 @@ internal static class PlanCompiler
                 }
             }
 
+            // D337: each computed bound, compiled for the tree the factory builds, as the residual is.
+            var computed = ranges.SelectMany(r => r.Computed).Distinct().ToArray();
+            IReadOnlyDictionary<Expr, IVectorExpr>? Computed()
+            {
+                if (computed.Length == 0)
+                {
+                    return null;
+                }
+
+                var compiler = Expressions(path);
+                return computed.ToDictionary(e => e, compiler.Compile);
+            }
+
             if (lookup.Residual is not { } residual)
             {
                 return context => new IndexLookupOperator(
                     context, path, source, descriptor.Table.Name, index.Name, ranges, projection, schema,
-                    columnTypes, rowGoal, lookup.Reverse);
+                    columnTypes, rowGoal, lookup.Reverse, computed: Computed());
             }
 
             // D314: the residual reads the lookup's own row, which is a Filter's input row, so the
@@ -767,7 +780,7 @@ internal static class PlanCompiler
                 var gate = new IndexLookupOperator.ResidualGate(skippable);
                 var inner = new IndexLookupOperator(
                     context, path, source, descriptor.Table.Name, index.Name, ranges, projection, schema,
-                    columnTypes, rowGoal, lookup.Reverse, gate);
+                    columnTypes, rowGoal, lookup.Reverse, gate, Computed());
                 return new FilterOperator(
                     context, path, schema, columnTypes, inner,
                     new ResidualGateExpr(Expressions(path).Compile(residual), gate));
@@ -827,18 +840,35 @@ internal static class PlanCompiler
             return lookup.Ranges.Count > 0;
         }
 
-        /// <summary>A range bound: a literal the planner wrote down, or a parameter slot.</summary>
+        /// <summary>
+        /// A range bound: a literal the planner wrote down, a parameter slot, or an expression of
+        /// constants computed once per execution (D337).
+        /// </summary>
         private IndexLookupOperator.BoundPlan Bound(Expr bound, string path) => bound.KindCase switch
         {
             Expr.KindOneofCase.Literal =>
                 IndexLookupOperator.BoundPlan.Constant(Literals.ToScalar(bound).ToClr()),
             Expr.KindOneofCase.Param =>
                 IndexLookupOperator.BoundPlan.Parameter(BoundSlots.Of(bound.Param, _boundSlots)),
+            _ when !ReadsAColumn(bound) => IndexLookupOperator.BoundPlan.Computed(bound),
             _ => throw new InvalidPlanException(
                 "I-IR-6",
                 path,
-                $"an IndexLookup range bound is a {bound.KindCase}; only a literal or a parameter "
-                + "can bound an index key"),
+                $"an IndexLookup range bound is a {bound.KindCase} that reads a column; a bound is a "
+                + "literal, a parameter or an expression of them, the same for every row"),
+        };
+
+        /// <summary>Whether an expression reads a column of the row anywhere in it.</summary>
+        private static bool ReadsAColumn(Expr expr) => expr.KindCase switch
+        {
+            Expr.KindOneofCase.FieldRef or Expr.KindOneofCase.ContextMembership => true,
+            Expr.KindOneofCase.Call => expr.Call.Args.Any(ReadsAColumn),
+            Expr.KindOneofCase.Cast => ReadsAColumn(expr.Cast.Input),
+            Expr.KindOneofCase.IfThen => expr.IfThen.Clauses.Any(c => ReadsAColumn(c.Condition) || ReadsAColumn(c.Result))
+                || ReadsAColumn(expr.IfThen.ElseBranch),
+            Expr.KindOneofCase.InList => ReadsAColumn(expr.InList.Value) || expr.InList.Options.Any(ReadsAColumn),
+            Expr.KindOneofCase.FieldAccess => ReadsAColumn(expr.FieldAccess.Input),
+            _ => false,
         };
 
         /// <summary>

@@ -215,8 +215,17 @@ class IndexMatcherTest {
             eq(symbol, ref(2)), SYMBOL_TS, false, null, null),
         new Case("a cast on the column side",
             eq(cast(symbol, SqlTypeName.VARCHAR, 4), str("BTCU")), SYMBOL_TS, false, null, null),
-        new Case("a cast on the value side",
-            eq(ts, cast(p1, SqlTypeName.TIMESTAMP, 9)), SYMBOL_TS, false, null, null),
+        new Case("a cast on the value side is a bound computed once (D337)",
+            ge(ts, cast(p1, SqlTypeName.TIMESTAMP, 6)), TS_SYMBOL, false,
+            "[[CAST(?1):TIMESTAMP(6) NOT NULL], [-inf]]", null),
+        new Case("a parameter less an interval is a bound computed once (D337)",
+            ge(ts, minus(p1, minutes(5))), TS_SYMBOL, false,
+            "[[-(?1, 300000:INTERVAL MINUTE)], [-inf]]", null),
+        new Case("the current time less an interval is a bound computed once (D337)",
+            and(ge(ts, minus(now(), minutes(5))), le(ts, now())), TS_SYMBOL, false,
+            "[[-(CURRENT_TIMESTAMP, 300000:INTERVAL MINUTE)], [CURRENT_TIMESTAMP]]", null),
+        new Case("a computed value that reads a column is not a bound",
+            ge(ts, minus(ts, minutes(5))), TS_SYMBOL, false, null, null),
         new Case("a NOT over an equality",
             not(eq(symbol, btc)), SYMBOL_TS, false, null, null),
         new Case("a not-equals",
@@ -392,6 +401,23 @@ class IndexMatcherTest {
 
   private static RexNode date(String value) {
     return REX.makeDateLiteral(new DateString(value));
+  }
+
+  private static RexNode minus(RexNode left, RexNode right) {
+    return REX.makeCall(org.apache.calcite.sql.fun.SqlStdOperatorTable.MINUS, left, right);
+  }
+
+  private static RexNode minutes(int count) {
+    return REX.makeIntervalLiteral(
+        BigDecimal.valueOf(count * 60_000L),
+        new org.apache.calcite.sql.SqlIntervalQualifier(
+            org.apache.calcite.avatica.util.TimeUnit.MINUTE,
+            null,
+            org.apache.calcite.sql.parser.SqlParserPos.ZERO));
+  }
+
+  private static RexNode now() {
+    return REX.makeCall(org.apache.calcite.sql.fun.SqlStdOperatorTable.CURRENT_TIMESTAMP);
   }
 
   private static RexNode cast(RexNode node, SqlTypeName type, int precision) {

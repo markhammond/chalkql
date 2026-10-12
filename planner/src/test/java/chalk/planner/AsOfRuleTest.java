@@ -45,6 +45,55 @@ class AsOfRuleTest {
     assertThat(plan).contains("ChalkAsOfJoin").contains("joinType=[asof]");
   }
 
+  /**
+   * D337: a condition on the right input filters the right input, under the join, as if the
+   * statement had said so with a subquery; the ON keeps the equalities between the inputs.
+   */
+  @Test
+  void a_condition_on_the_right_input_filters_it_under_the_join() throws Exception {
+    String plan =
+        plan(
+            "SELECT b.symbol, f.rate FROM bars b LEFT ASOF JOIN funding f"
+                + " MATCH_CONDITION b.ts >= f.ts ON b.symbol = f.symbol AND f.rate > 0");
+
+    assertThat(plan).contains("ChalkAsOfJoin").contains("left_asof");
+    assertThat(plan.substring(plan.indexOf("ChalkAsOfJoin"))).contains("ChalkFilter");
+  }
+
+  /** And for an inner ASOF join, a condition on the left input filters the left input. */
+  @Test
+  void a_condition_on_the_left_input_of_an_inner_asof_join_filters_it() throws Exception {
+    String plan =
+        plan(
+            "SELECT b.symbol, f.rate FROM bars b ASOF JOIN funding f"
+                + " MATCH_CONDITION b.ts >= f.ts ON b.symbol = f.symbol AND b.volume > 10");
+
+    assertThat(plan).contains("ChalkAsOfJoin").contains("joinType=[asof]");
+    assertThat(plan.substring(plan.indexOf("ChalkAsOfJoin"))).contains("ChalkFilter");
+  }
+
+  @Test
+  void a_condition_on_the_left_input_of_a_left_asof_join_is_refused_saying_why() {
+    assertThatThrownBy(
+            () ->
+                plan(
+                    "SELECT b.symbol, f.rate FROM bars b LEFT ASOF JOIN funding f"
+                        + " MATCH_CONDITION b.ts >= f.ts ON b.symbol = f.symbol AND b.volume > 10"))
+        .isInstanceOf(InvalidArgumentException.class)
+        .hasMessageContaining("a left row that fails 'b.volume > 10' must still appear, with NULLs");
+  }
+
+  @Test
+  void a_condition_that_does_not_qualify_its_column_is_refused_saying_why() {
+    assertThatThrownBy(
+            () ->
+                plan(
+                    "SELECT b.symbol, f.rate FROM bars b ASOF JOIN funding f"
+                        + " MATCH_CONDITION b.ts >= f.ts ON rate > 0"))
+        .isInstanceOf(InvalidArgumentException.class)
+        .hasMessageContaining("'rate > 0' names a column without its input's alias");
+  }
+
   @ParameterizedTest(name = "{1}")
   @CsvSource(
       delimiter = '|',

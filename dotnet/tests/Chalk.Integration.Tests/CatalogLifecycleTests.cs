@@ -173,11 +173,12 @@ public sealed class CatalogLifecycleTests(SharedSidecar sidecar) : IDisposable
         });
 
         var prepared = await engine.PrepareAsync("SELECT l_orderkey FROM duck.lineitem");
-        var failure = await Assert.ThrowsAsync<ExecutionException>(() => CountAsync(engine, prepared));
+        var timeout = await Assert.ThrowsAsync<SourceTimeoutException>(() => CountAsync(engine, prepared));
 
-        // The engine attributes the fault to the operator that raised it and keeps the source's own
-        // exception inside, so a host reads both "which operator" and "which source" (§4).
-        var timeout = Assert.IsType<SourceTimeoutException>(failure.InnerException);
+        // The source's own exception reaches the host as itself, its message led by the operator
+        // that raised it, so a host reads both "which operator" and "which source" (§4, D337).
+        Assert.StartsWith("Execution failed at root", timeout.Message, StringComparison.Ordinal);
+        Assert.Equal(ChalkErrorCodes.SourceTimeout, timeout.Code);
         Assert.Equal("duck", timeout.SourceId);
         Assert.Equal(TimeSpan.FromTicks(1), timeout.Timeout);
     }

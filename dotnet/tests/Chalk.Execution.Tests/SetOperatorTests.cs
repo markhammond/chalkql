@@ -189,7 +189,7 @@ public sealed class SetOperatorTests
         using var arena = new ExecutionArena(new ArenaOptions { MaxBytes = 100_000 });
         var compiled = Runner.Compile(plan, source, batchSize: 512);
 
-        var failure = await Assert.ThrowsAsync<ExecutionException>(async () =>
+        var failure = await Assert.ThrowsAsync<ArenaBudgetExceededException>(async () =>
         {
             await foreach (var batch in compiled.ExecuteAsync(
                 [], new ExecutionStats(), arena, TestContext.Current.CancellationToken))
@@ -198,8 +198,8 @@ public sealed class SetOperatorTests
             }
         });
 
-        Assert.Contains("SetOp", failure.OperatorPath, StringComparison.Ordinal);
-        Assert.IsType<ArenaBudgetExceededException>(failure.InnerException);
+        Assert.Matches(@"^Execution failed at root\S*SetOp\S* \(plan [0-9a-f]{16}\): ", failure.Message);
+        Assert.Equal(ChalkErrorCodes.MemoryBudgetExceeded, failure.Code);
         Assert.Equal(0, arena.OutstandingBytes);
     }
 

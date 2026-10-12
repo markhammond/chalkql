@@ -83,6 +83,7 @@ internal static class PlannerAddress
     internal static SocketsHttpHandler UnixSocketHandler(string socketPath) =>
         new()
         {
+            MaxResponseHeadersLength = ResponseHeadersKilobytes,
             ConnectCallback = async (_, ct) =>
             {
                 var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
@@ -99,6 +100,24 @@ internal static class PlannerAddress
                 }
             },
         };
+
+    /// <summary>
+    /// A handler for a TCP planner: the one gRPC would create, which opens another HTTP/2 connection
+    /// when one is full, with this client's header limit.
+    /// </summary>
+    internal static SocketsHttpHandler TcpHandler() =>
+        new()
+        {
+            EnableMultipleHttp2Connections = true,
+            MaxResponseHeadersLength = ResponseHeadersKilobytes,
+        };
+
+    /// <summary>
+    /// How much of a response's headers, in kilobytes, the client reads: 1 MB, twice what the
+    /// planner lets an error's trailer take (D337). .NET's default is 64 KB, and a response past
+    /// the limit aborts the whole connection, failing every call in flight on it.
+    /// </summary>
+    internal const int ResponseHeadersKilobytes = 1024;
 
     /// <summary>The dummy authority a Unix-socket channel carries.</summary>
     internal static readonly Uri UnixChannelAuthority = new("http://localhost");

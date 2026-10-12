@@ -139,16 +139,33 @@ public sealed class IndexLookupOperatorTests
     }
 
     [Fact]
-    public async Task A_bound_that_is_not_a_constant_fails_at_compilation()
+    public async Task A_bound_that_reads_a_column_fails_at_compilation()
     {
         var source = Source();
         var row = Row(source, [0, 1, 2]);
-        var bound = IrBuilder.Call(FunctionId.Upper, IrBuilder.Str(), Text("a"));
+        var bound = IrBuilder.Call(FunctionId.Upper, IrBuilder.Str(), IrBuilder.Ref(row, 0));
         var plan = IrBuilder.Plan(IrBuilder.IndexLookup(
             "points", "ix_points_Group", row, [IrBuilder.Range([bound], [bound])]));
 
         var error = await Assert.ThrowsAsync<InvalidPlanException>(() => RunAsync(plan, source: source));
-        Assert.Contains("only a literal or a parameter", error.Message, StringComparison.Ordinal);
+        Assert.Contains("reads a column", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// D337: a bound computed from constants is computed once as the lookup binds, and reads the
+    /// rows its value would as a literal.
+    /// </summary>
+    [Fact]
+    public async Task A_bound_computed_from_constants_reads_the_rows_its_value_would()
+    {
+        var bound = IrBuilder.Call(FunctionId.Lower, IrBuilder.Str(), Text("B"));
+
+        var (computed, stats) = await RunAsync(Plan([IrBuilder.Range([bound], [bound])]));
+        var (literal, _) = await RunAsync(Plan([IrBuilder.Range([Text("b")], [Text("b")])]));
+
+        Assert.Equal(2, computed.Count);
+        Assert.Equal(literal.Select(r => r[1]), computed.Select(r => r[1]));
+        Assert.Equal(2, stats.RowsScanned);
     }
 
     /// <summary>
@@ -189,8 +206,7 @@ public sealed class IndexLookupOperatorTests
             [IrBuilder.Range([IrBuilder.Param(0, IrBuilder.Str(nullable: true))], [], prefix: true)],
             IrBuilder.Str(nullable: true));
 
-        var error = await Assert.ThrowsAsync<ExecutionException>(() => RunAsync(plan, ["a%b%"]));
-        var refusal = Assert.IsType<UnsupportedFeatureException>(error.InnerException);
+        var refusal = await Assert.ThrowsAsync<UnsupportedFeatureException>(() => RunAsync(plan, ["a%b%"]));
 
         Assert.Contains("ix_points_Group", refusal.Message, StringComparison.Ordinal);
         Assert.Contains("ranges do not decide", refusal.Message, StringComparison.Ordinal);
@@ -233,9 +249,9 @@ public sealed class IndexLookupOperatorTests
         var bareRange = Plan(
             [IrBuilder.Range([IrBuilder.Param(0, IrBuilder.Str(nullable: true))], [], prefix: true)],
             IrBuilder.Str(nullable: true));
-        var error = await Assert.ThrowsAsync<ExecutionException>(
+        var error = await Assert.ThrowsAsync<UnsupportedFeatureException>(
             () => RunAsync(bareRange, ["\U0010FFFF%"]));
-        Assert.IsType<UnsupportedFeatureException>(error.InnerException);
+        Assert.StartsWith("Execution failed at root", error.Message, StringComparison.Ordinal);
 
         var (rows, _) = await RunAsync(RechecksItsLike(escape: null), ["\U0010FFFF%"]);
         Assert.Empty(rows);

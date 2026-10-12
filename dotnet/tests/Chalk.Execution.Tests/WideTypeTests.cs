@@ -57,19 +57,23 @@ public sealed class WideTypeTests
         Assert.Null(times[2]);
     }
 
-    [Fact]
-    public void Comparing_intervals_is_refused_at_compilation()
+    /// <summary>
+    /// D337: an INTERVAL_DAY counts microseconds, so two compare as the numbers they hold, as a TIME
+    /// does. They were refused before, when nothing produced an interval to compare.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BatchSizes))]
+    public async Task An_interval_compares_as_its_count(int batchSize)
     {
-        // 02-ir.md §6 puts the INTERVAL kinds outside the comparison signature.
         var row = Table.RowType();
         var expr = IrBuilder.Call(
             FunctionId.Lt, IrBuilder.Bool(true), IrBuilder.Ref(row, 6), IrBuilder.LitIntervalDay(0L));
-        var plan = Runner.ProjectionPlan(expr, Table);
 
-        var failure = Assert.Throws<Chalk.Sources.UnsupportedFeatureException>(
-            () => Runner.Compile(plan, Source));
+        var intervals = await Runner.ProjectAsync(expr, Source, Table, batchSize);
 
-        Assert.Contains("INTERVAL_DAY", failure.Feature, StringComparison.Ordinal);
+        Assert.Equal(false, intervals[0]);
+        Assert.Equal(true, intervals[1]);
+        Assert.Null(intervals[2]);
     }
 
     [Theory]

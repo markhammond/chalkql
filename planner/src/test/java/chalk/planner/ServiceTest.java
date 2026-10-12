@@ -213,6 +213,118 @@ class ServiceTest {
     }
   }
 
+  /**
+   * A declared parameter type holds at validation (D337). Inferred from what is around it, the
+   * parameter takes the interval's type and the comparison is refused; declared, it is the
+   * timestamp it was declared, and the plan carries it with no cast.
+   */
+  @Test
+  void a_declared_parameter_type_holds_at_validation() {
+    String sql = "SELECT symbol FROM bars WHERE ts >= ? - INTERVAL '60' SECOND";
+    chalk.ir.v1.Type timestamp =
+        chalk.ir.v1.Type.newBuilder()
+            .setKind(chalk.ir.v1.TypeKind.TYPE_KIND_TIMESTAMP)
+            .setPrecision(9)
+            .build();
+
+    assertThat(kind(decode(refused(request(sql)))))
+        .isEqualTo(PlanErrorKind.VALIDATION);
+    PlanResponse response = client.plan(request(sql).addParameterTypes(timestamp).build());
+
+    assertThat(response.getPlan().getParameterTypesList()).containsExactly(timestamp);
+  }
+
+  /**
+   * The same inside a function's arguments, whose types Calcite derives before it infers any, to
+   * choose the function's overload. A host function's call, refused without the declaration, is
+   * covered from the host.
+   */
+  @Test
+  void a_declared_parameter_type_holds_inside_a_functions_arguments() {
+    String sql = "SELECT symbol FROM bars WHERE volume >= ABS(? + 1)";
+    chalk.ir.v1.Type integer =
+        chalk.ir.v1.Type.newBuilder().setKind(chalk.ir.v1.TypeKind.TYPE_KIND_I16).build();
+
+    PlanResponse response = client.plan(request(sql).addParameterTypes(integer).build());
+
+    assertThat(response.getPlan().getParameterTypesList()).containsExactly(integer);
+  }
+
+  /** A declaration has one type for each parameter, in order, or none. */
+  @Test
+  void a_declaration_that_does_not_have_one_type_per_parameter_is_refused() {
+    chalk.ir.v1.Type integer =
+        chalk.ir.v1.Type.newBuilder().setKind(chalk.ir.v1.TypeKind.TYPE_KIND_I64).build();
+
+    PlanError error =
+        decode(
+            refused(
+                request("SELECT symbol FROM bars WHERE volume > ?")
+                    .addParameterTypes(integer)
+                    .addParameterTypes(integer)));
+
+    assertThat(error.getViolations(0).getCode()).isEqualTo("ParameterBinding");
+    assertThat(error.getMessage())
+        .isEqualTo(
+            "The statement has 1 parameter, and 2 types were declared for them. Declare one type"
+                + " for each parameter, in order, or none.");
+  }
+
+  /** A row count keeps the type Calcite gives it, and is declared an integer or refused. */
+  @Test
+  void a_row_count_declared_other_than_an_integer_is_refused() {
+    chalk.ir.v1.Type text =
+        chalk.ir.v1.Type.newBuilder().setKind(chalk.ir.v1.TypeKind.TYPE_KIND_STRING).build();
+    chalk.ir.v1.Type integer =
+        chalk.ir.v1.Type.newBuilder().setKind(chalk.ir.v1.TypeKind.TYPE_KIND_I64).build();
+
+    assertThat(client.plan(request("SELECT symbol FROM bars LIMIT ?").addParameterTypes(integer).build())
+            .getPlan()
+            .getParameterTypesCount())
+        .isEqualTo(1);
+    PlanError error =
+        decode(refused(request("SELECT symbol FROM bars LIMIT ?").addParameterTypes(text)));
+
+    assertThat(error.getViolations(0).getCode()).isEqualTo("ParameterBinding");
+    assertThat(error.getMessage())
+        .isEqualTo(
+            "Parameter 1 is a row count in LIMIT, OFFSET or FETCH, so it must be declared an"
+                + " integer type, and it was declared STRING.");
+  }
+
+  /**
+   * The current time as ChalkQL types it (D337): a timestamp of precision 6 unless one is written,
+   * up to 9, and LOCALTIMESTAMP the same as CURRENT_TIMESTAMP, since there is no session time zone.
+   */
+  @Test
+  void the_current_time_is_a_timestamp_of_precision_six_unless_one_is_written() {
+    PlanResponse response =
+        client.plan(
+            request(
+                    "SELECT CURRENT_TIMESTAMP AS a, LOCALTIMESTAMP AS b, CURRENT_TIMESTAMP(3) AS c,"
+                        + " CURRENT_TIMESTAMP(9) AS d, CURRENT_DATE AS e FROM bars")
+                .build());
+
+    java.util.List<chalk.ir.v1.Field> fields = response.getPlan().getOutputType().getFieldsList();
+    assertThat(fields)
+        .extracting(f -> f.getType().getKind(), f -> f.getType().getPrecision())
+        .containsExactly(
+            org.assertj.core.groups.Tuple.tuple(chalk.ir.v1.TypeKind.TYPE_KIND_TIMESTAMP, 6),
+            org.assertj.core.groups.Tuple.tuple(chalk.ir.v1.TypeKind.TYPE_KIND_TIMESTAMP, 6),
+            org.assertj.core.groups.Tuple.tuple(chalk.ir.v1.TypeKind.TYPE_KIND_TIMESTAMP, 3),
+            org.assertj.core.groups.Tuple.tuple(chalk.ir.v1.TypeKind.TYPE_KIND_TIMESTAMP, 9),
+            org.assertj.core.groups.Tuple.tuple(chalk.ir.v1.TypeKind.TYPE_KIND_DATE, 0));
+
+    PlanError error = decode(refused(request("SELECT CURRENT_TIMESTAMP(10) AS a FROM bars")));
+    assertThat(error.getMessage())
+        .contains("must be a valid precision between '0' and '9'");
+  }
+
+  private static StatusRuntimeException refused(PlanRequest.Builder request) {
+    return (StatusRuntimeException)
+        org.assertj.core.api.Assertions.catchThrowable(() -> client.plan(request.build()));
+  }
+
   @Test
   void an_unknown_instance_is_answered_by_name() {
     StatusRuntimeException error =
