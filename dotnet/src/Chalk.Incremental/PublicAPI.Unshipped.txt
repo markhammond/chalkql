@@ -68,3 +68,24 @@ static Chalk.Incremental.StandingViews.MaterializeAsync<TKey, TRow>(this Chalk.C
 static Chalk.Incremental.ViewCursor.Start.get -> Chalk.Incremental.ViewCursor
 virtual Chalk.Incremental.ViewMapper<TKey, TRow>.Invoke(in Chalk.Incremental.ViewRow row, out TKey key, out TRow value) -> void
 virtual Chalk.Incremental.ViewRowHash.Invoke(System.ReadOnlySpan<byte> key, System.ReadOnlySpan<byte> row) -> uint
+Chalk.Incremental.StandingView<TKey, TRow>.DatabaseReads.get -> System.Collections.Generic.IReadOnlyList<Chalk.Incremental.ViewDatabaseRead!>!
+Chalk.Incremental.ViewDatabaseRead
+Chalk.Incremental.ViewDatabaseRead.LastReadAt.get -> System.DateTimeOffset
+Chalk.Incremental.ViewDatabaseRead.LastReadAt.init -> void
+Chalk.Incremental.ViewDatabaseRead.LastReadVersion.get -> long
+Chalk.Incremental.ViewDatabaseRead.LastReadVersion.init -> void
+Chalk.Incremental.ViewDatabaseRead.Reads.get -> long
+Chalk.Incremental.ViewDatabaseRead.Reads.init -> void
+Chalk.Incremental.ViewDatabaseRead.Rows.get -> long
+Chalk.Incremental.ViewDatabaseRead.Rows.init -> void
+Chalk.Incremental.ViewDatabaseRead.SourceId.get -> string!
+Chalk.Incremental.ViewDatabaseRead.SourceId.init -> void
+Chalk.Incremental.ViewDatabaseRead.ViewDatabaseRead() -> void
+Chalk.Incremental.ViewDatabaseReads
+Chalk.Incremental.ViewDatabaseReads.None = 0 -> Chalk.Incremental.ViewDatabaseReads
+Chalk.Incremental.ViewDatabaseReads.WhenRefreshed = 1 -> Chalk.Incremental.ViewDatabaseReads
+Chalk.Incremental.ViewOptions<TKey, TRow>.DatabaseReads.get -> Chalk.Incremental.ViewDatabaseReads
+Chalk.Incremental.ViewOptions<TKey, TRow>.DatabaseReads.init -> void
+Chalk.Incremental.ViewOptions<TKey, TRow>.LocalJoinMaxRows.get -> long
+Chalk.Incremental.ViewOptions<TKey, TRow>.LocalJoinMaxRows.init -> void
+const Chalk.Incremental.StandingViews.DefaultLocalJoinMaxRows = 1000000 -> long

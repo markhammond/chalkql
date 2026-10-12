@@ -69,6 +69,45 @@ public enum ViewExactness
 }
 
 /// <summary>
+/// Whether a view may read a source over a database, whose rows change outside the engine's
+/// refreshes (D340, design 65).
+/// </summary>
+public enum ViewDatabaseReads
+{
+    /// <summary>The view reads no database: a statement that would is refused when it is made.</summary>
+    None = 0,
+
+    /// <summary>
+    /// The view reads a database table when it is made, keeps what it read, and reads it again only at
+    /// its first update after a refresh names the table: by itself, by its source, or with every
+    /// source, as a plain or scheduled refresh does. Between refreshes it replays what it kept.
+    /// </summary>
+    WhenRefreshed = 1,
+}
+
+/// <summary>
+/// What a view keeps of one database source it reads (D340): when it last read it, for which
+/// version, how many times it has, and the rows it keeps of it.
+/// </summary>
+public sealed class ViewDatabaseRead
+{
+    /// <summary>The source read.</summary>
+    public required string SourceId { get; init; }
+
+    /// <summary>When the view last read it, by the system clock.</summary>
+    public required DateTimeOffset LastReadAt { get; init; }
+
+    /// <summary>The version the view was updating to when it last read it.</summary>
+    public required long LastReadVersion { get; init; }
+
+    /// <summary>How many reads of the source the view has made, over its life: one per round trip.</summary>
+    public required long Reads { get; init; }
+
+    /// <summary>The rows the view keeps of the source now, over every read of it.</summary>
+    public required long Rows { get; init; }
+}
+
+/// <summary>
 /// A reader's place in one view (D339, design 64 §5): where its last drain stopped, and what it last
 /// committed. Start each reader at <see cref="Start"/>; its first drain is a reset.
 /// </summary>
@@ -107,10 +146,25 @@ public sealed class ViewOptions<TKey, TRow>
     public ViewRowHash? RowHash { get; init; }
 
     /// <summary>
-    /// The most the view may hold, in bytes: its keyed table. An update that would hold more fails,
-    /// and the view keeps its last epoch. 64 MB by default.
+    /// The most the view may hold, in bytes: its keyed table, and what it keeps of its reads of
+    /// databases (D340). An update that would hold more fails, and the view keeps its last epoch.
+    /// 64 MB by default.
     /// </summary>
     public long StateBudget { get; init; } = 64L << 20;
+
+    /// <summary>
+    /// The most rows a cross-source join in the view may fetch to join locally, by the planner's
+    /// estimate: a statement whose plan would fetch more is refused when the view is made (D340).
+    /// Required, so that every view states it; zero or less is refused.
+    /// <see cref="StandingViews.DefaultLocalJoinMaxRows"/> is the value to pass without a better one.
+    /// </summary>
+    public required long LocalJoinMaxRows { get; init; }
+
+    /// <summary>
+    /// Whether the view may read a database, and how (D340). <see cref="ViewDatabaseReads.None"/>,
+    /// the default, refuses a statement that does.
+    /// </summary>
+    public ViewDatabaseReads DatabaseReads { get; init; } = ViewDatabaseReads.None;
 
     /// <summary>Whether a column computed by accumulating floating point is admitted.</summary>
     public ViewExactness Exactness { get; init; } = ViewExactness.Exact;

@@ -130,6 +130,7 @@ public sealed class StandingViewPivotTests(SharedSidecar sidecar)
         await using var view = await engine.MaterializeAsync(Report, new ViewOptions<PivotKey, PivotCell>
         {
             Key = ["row_key", "column_key"],
+            LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
             Map = Map,
             RowHash = Hash,
         }, Ct);

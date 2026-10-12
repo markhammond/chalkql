@@ -213,6 +213,7 @@ public sealed class StandingViewCheckTests(SharedSidecar sidecar) : IDisposable
         ViewExactness exactness = ViewExactness.Exact, bool requireExplicitImmutable = false) => new()
     {
         Key = ["book"],
+        LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
         Map = static (in ViewRow row, out Key key, out Row value) =>
         {
             key = new Key { Book = row.GetInt64(0) };

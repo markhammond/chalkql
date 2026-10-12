@@ -70,6 +70,7 @@ public sealed class StandingViewOracleTests(SharedSidecar sidecar)
         await using var view = await engine.MaterializeAsync(Exposure, new ViewOptions<Key, Row>
         {
             Key = ["book", "asset"],
+            LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
             Map = static (in ViewRow row, out Key key, out Row value) =>
             {
                 key = new Key { Book = row.GetInt32(0), Asset = row.GetInt32(1) };
