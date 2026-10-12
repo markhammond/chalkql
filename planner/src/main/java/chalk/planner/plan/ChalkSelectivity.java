@@ -114,9 +114,9 @@ public final class ChalkSelectivity {
     // column and turned into one interval width; everything else still multiplies.
     Map<Integer, Interval> intervals = new LinkedHashMap<>();
     for (RexNode conjunct : RelOptUtil.conjunctions(expanded)) {
-      Bound bound = bound(conjunct, table, fields, rows, hints);
+      Bound bound = bound(conjunct, table, fields, rows, hints, cluster);
       if (bound == null) {
-        estimate = estimate.times(conjunct(conjunct, table, fields, rows, hints));
+        estimate = estimate.times(conjunct(conjunct, table, fields, rows, hints, cluster));
       } else {
         intervals.computeIfAbsent(bound.column(), column -> new Interval(bound.hinted())).add(bound);
       }
@@ -215,7 +215,8 @@ public final class ChalkSelectivity {
       ChalkTable table,
       List<Integer> fields,
       @Nullable Double rows,
-      ParameterHints hints) {
+      ParameterHints hints,
+      RelOptCluster cluster) {
     if (!(conjunct instanceof RexCall call) || call.getOperands().size() != 2) {
       return null;
     }
@@ -256,6 +257,14 @@ public final class ChalkSelectivity {
       } catch (RuntimeException e) {
         return null;
       }
+    } else if (ComputedEstimate.of(value, hints, cluster) instanceof RexLiteral computed) {
+      // A bound computed once per execution, estimated with the clock and the hints (D337).
+      try {
+        wanted = LiteralValues.of(LiteralConverter.convert(computed, type));
+      } catch (RuntimeException e) {
+        return null;
+      }
+      hinted = hasParameter(value);
     } else {
       ParameterHints.Hint hint = hintFor(value, hints);
       // A NULL hint is not an interval bound: no row satisfies a comparison against NULL, so it is
@@ -277,7 +286,8 @@ public final class ChalkSelectivity {
       ChalkTable table,
       List<Integer> fields,
       @Nullable Double rows,
-      ParameterHints hints) {
+      ParameterHints hints,
+      RelOptCluster cluster) {
     if (conjunct.getKind() == SqlKind.IS_NULL || conjunct.getKind() == SqlKind.IS_NOT_NULL) {
       RexNode operand = ((RexCall) conjunct).getOperands().get(0);
       ColumnStatistics statistics = statisticsOf(operand, table, fields);
@@ -322,13 +332,18 @@ public final class ChalkSelectivity {
     // SQL NULL is a statement about the value too: no row satisfies a comparison against NULL, so
     // the estimate is the floor every estimate is clamped to rather than a guessed quarter.
     ParameterHints.@Nullable Hint hint = null;
-    if (!(value instanceof RexLiteral)) {
+    RexLiteral literal = value instanceof RexLiteral given ? given : null;
+    if (literal == null) {
       hint = hintFor(value, hints);
       if (hint == null) {
-        return guess(conjunct);
+        // A bound computed once per execution, estimated with the clock and the hints (D337).
+        literal = ComputedEstimate.of(value, hints, cluster);
+        if (literal == null) {
+          return guess(conjunct);
+        }
       }
 
-      if (hint.isNull()) {
+      if (hint != null && hint.isNull()) {
         return new Estimate(1e-9, false, true);
       }
     }
@@ -347,7 +362,7 @@ public final class ChalkSelectivity {
       wanted = hinted(hint, type);
     } else {
       try {
-        wanted = LiteralValues.of(LiteralConverter.convert((RexLiteral) value, type));
+        wanted = LiteralValues.of(LiteralConverter.convert(literal, type));
       } catch (RuntimeException e) {
         return guess(conjunct);
       }
@@ -357,7 +372,7 @@ public final class ChalkSelectivity {
       return guess(conjunct);
     }
 
-    boolean fromHint = hint != null;
+    boolean fromHint = hint != null || (literal != value && hasParameter(value));
     return switch (kind) {
       case EQUALS, IS_NOT_DISTINCT_FROM -> mark(equality(statistics, wanted, rows, conjunct), fromHint);
       case NOT_EQUALS, IS_DISTINCT_FROM -> {
@@ -368,6 +383,20 @@ public final class ChalkSelectivity {
           mark(range(statistics, wanted, kind, rows, conjunct), fromHint);
       default -> guess(conjunct);
     };
+  }
+
+  /** Whether a computed bound reads a parameter, so its estimate came from a hint. */
+  private static boolean hasParameter(RexNode value) {
+    boolean[] found = {false};
+    value.accept(
+        new org.apache.calcite.rex.RexVisitorImpl<Void>(true) {
+          @Override
+          public Void visitDynamicParam(org.apache.calcite.rex.RexDynamicParam parameter) {
+            found[0] = true;
+            return null;
+          }
+        });
+    return found[0];
   }
 
   private static Estimate mark(Estimate estimate, boolean hinted) {

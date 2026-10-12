@@ -65,6 +65,33 @@ class ParameterHintsTest {
     assertThat(text(FILTERED, List.of(i64(0, 9000), i32(1, 1)))).contains("sel=[hint(0.1110)]");
   }
 
+  /**
+   * D337, F178: a bound computed from a hinted parameter is computed with the hint and read off the
+   * statistics, as the hint itself would be; without a hint it is still a guess.
+   */
+  @Test
+  void a_bound_computed_from_a_hinted_parameter_is_estimated_with_the_hint() {
+    String computed = "SELECT symbol, ts FROM bars WHERE volume >= ? * 2 LIMIT ?";
+
+    assertThat(text(computed, List.of())).contains("sel=[guess(0.5000)]");
+    assertThat(text(computed, List.of(i64(0, 4500), i32(1, 1)))).contains("sel=[hint(0.1110)]");
+  }
+
+  /**
+   * And a bound computed from the current time is estimated with the time the planner plans at,
+   * as PostgreSQL does: the corpus's bars all lie before it, so a window on the last five minutes
+   * keeps next to none of them, measured rather than guessed.
+   */
+  @Test
+  void a_bound_computed_from_the_current_time_is_estimated_with_the_planning_clock() {
+    String window =
+        text(
+            "SELECT symbol, ts FROM bars WHERE ts >= CURRENT_TIMESTAMP - INTERVAL '5' MINUTE LIMIT 1",
+            List.of());
+
+    assertThat(window).contains("sel=[0.0000]").doesNotContain("guess(");
+  }
+
   /** The estimate says where it came from, so a reader of a bad plan can see which it was. */
   @Test
   void the_plan_text_distinguishes_measured_guessed_and_hinted() {

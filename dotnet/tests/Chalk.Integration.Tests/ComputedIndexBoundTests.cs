@@ -56,9 +56,39 @@ public sealed class ComputedIndexBoundTests(SharedSidecar sidecar) : IClassFixtu
         Assert.Empty(await IdsAsync(engine, prepared, [null, Now]));
     }
 
-    private async Task<ChalkEngine> CreateEngineAsync()
+    /// <summary>
+    /// F178: a window open on one side reads the index too. The planner estimates a bound built from
+    /// the current time with the time it plans at, and one built from a parameter with the
+    /// parameter's hint, against the column's statistics, rather than guessing at half the rows.
+    /// The rows end at the real clock, because that is the one the planner reads.
+    /// </summary>
+    [Fact]
+    public async Task A_window_open_on_one_side_reads_the_index_when_its_bound_can_be_estimated()
     {
-        var rows = Enumerable.Range(0, 20).Select(i => new Trade(i, Now.AddSeconds(-25 * i))).ToArray();
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var now = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
+        await using var engine = await CreateEngineAsync(now, 10_000);
+
+        var clock = await engine.PrepareAsync(
+            "SELECT id FROM ordered WHERE ts >= CURRENT_TIMESTAMP - INTERVAL '60' SECOND ORDER BY id");
+        var declared = new PrepareOptions { ParameterTypes = [ChalkType.Timestamp(9)] };
+        const string Parameter = "SELECT id FROM ordered WHERE ts >= ? - INTERVAL '60' SECOND ORDER BY id";
+        var unhinted = await engine.PrepareAsync(Parameter, declared);
+        var hinted = await engine.PrepareAsync(Parameter, declared with { ParameterValueHints = new object?[] { now } });
+
+        Assert.True(PlanWalker.Has(clock.Plan, Rel.KindOneofCase.IndexLookup), "the clock's window reads the index");
+        Assert.True(PlanWalker.Has(hinted.Plan, Rel.KindOneofCase.IndexLookup), "the hinted window reads the index");
+        Assert.False(PlanWalker.Has(unhinted.Plan, Rel.KindOneofCase.IndexLookup), "an unhinted window is guessed at half");
+        Assert.Equal([0, 1, 2], await IdsAsync(engine, clock, []));
+        Assert.Equal([0, 1, 2], await IdsAsync(engine, hinted, [now]));
+        Assert.Equal([0, 1, 2], await IdsAsync(engine, unhinted, [now]));
+    }
+
+    private Task<ChalkEngine> CreateEngineAsync() => CreateEngineAsync(Now, 20);
+
+    private async Task<ChalkEngine> CreateEngineAsync(DateTime now, int count)
+    {
+        var rows = Enumerable.Range(0, count).Select(i => new Trade(i, now.AddSeconds(-25 * i))).ToArray();
         return await ChalkEngine.CreateAsync(new ChalkEngineOptions
         {
             ContextId = "computed-bounds",
@@ -72,7 +102,7 @@ public sealed class ComputedIndexBoundTests(SharedSidecar sidecar) : IClassFixtu
                     .Build(),
             ],
             Planner = sidecar.CreatePlanner(),
-            Execution = new ExecutionOptions { TimeProvider = new Fixed(new DateTimeOffset(Now, TimeSpan.Zero)) },
+            Execution = new ExecutionOptions { TimeProvider = new Fixed(new DateTimeOffset(now, TimeSpan.Zero)) },
         });
     }
 

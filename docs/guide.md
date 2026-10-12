@@ -398,10 +398,13 @@ it. If the key is wrong, the answer is wrong.
 An index serves a comparison on its leading columns. The value compared with may be a
 literal, a parameter, or an expression of them that is the same for the whole execution,
 such as `CURRENT_TIMESTAMP - INTERVAL '5' MINUTE`. Such an expression is computed once,
-as the lookup starts. Whether the planner reads the index or scans is a cost decision.
-An equality, a range closed on both sides, or a `LIMIT` over the index's order usually
-reads the index. A range open on one side, whose bound the planner cannot know until the
-query runs, is estimated to keep half the rows, so it usually scans.
+as the lookup starts. Whether the planner reads the index or scans is a cost decision,
+made from the column's statistics. To estimate a bound that is only known when the query
+runs, the planner computes it as it plans: the current time is its own clock, and a
+parameter is its hint in `PrepareOptions.ParameterValueHints`. So a recent window such
+as `ts >= CURRENT_TIMESTAMP - INTERVAL '5' MINUTE` reads the index. A bound the planner
+cannot compute, such as a parameter with no hint, is guessed to keep half the rows, so a
+range open on one side usually scans.
 
 You can extend POCO indexing too. Implement `IPocoIndex<T>` to adapt an existing index
 structure. Then run the test kit's `PocoIndexConformance.Verify` against it. It compares
