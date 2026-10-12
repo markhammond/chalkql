@@ -561,6 +561,40 @@ a view, the current time is the clock's time at the view's epoch.
 **What to do:** Name the engine's clock with `ChalkEngineOptions.Clock`, and move it with
 `AdvanceClock` in a refresh before the view is updated.
 
+### InexactAccumulation
+
+A view computes a column by accumulating floating point: `SUM` or `AVG` over `REAL` or `DOUBLE`, as
+an aggregate or over a window, or a host aggregate over them. A floating-point sum moves with the
+order its rows are added in, so the view could differ from what its statement returns by rounding.
+
+**What to do:** Cast the value to `DECIMAL` to keep the view exact, or accept rounding with
+`Exactness = ViewExactness.EqualUpToRounding`.
+
+### NondeterministicFunction
+
+A view calls a host function declared `Stable()` or `Volatile()`, whose result can change while its
+arguments do not; or, where the view sets `RequireExplicitImmutable`, one whose registration does not
+say `Immutable()`.
+
+**What to do:** Declare `Immutable()` on the function's registration if its result depends only on
+its arguments; otherwise move what it reads into a table refreshed in epochs, and join it.
+
+### UnsupportedInView
+
+A view's statement ends in an `ORDER BY` without a `LIMIT`, though a view's rows have no order; or
+takes a `LIMIT` whose order is not total — not its last step, or not ordered by every key column —
+so the input's order would choose which tied rows it keeps.
+
+**What to do:** Drop the `ORDER BY`; order a `LIMIT` by every key column, as the statement's last
+step, or drop it.
+
+### SourceOutsideEpochs
+
+A view reads a source whose rows change outside the engine's refreshes: one over a database, which
+cannot take part in a refresh.
+
+**What to do:** Load what the view needs into an in-process table, and refresh it in epochs.
+
 ## Engine and planner
 
 Raised about the engine, the planner process or the request itself.

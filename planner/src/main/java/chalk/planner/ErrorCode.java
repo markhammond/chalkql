@@ -187,6 +187,14 @@ public enum ErrorCode {
 
   /** A view reads the current time, and the engine has no clock, or has not set it. */
   CLOCK_REQUIRED("ClockRequired"),
+  /** A view computes a column by accumulating floating point, and has not opted in to rounding. */
+  INEXACT_ACCUMULATION("InexactAccumulation"),
+  /** A view calls a host function whose result can change while its arguments do not. */
+  NONDETERMINISTIC_FUNCTION("NondeterministicFunction"),
+  /** A view's statement orders or limits its rows in a way a keyed result cannot keep. */
+  UNSUPPORTED_IN_VIEW("UnsupportedInView"),
+  /** A view reads a source whose rows change outside the engine's refreshes. */
+  SOURCE_OUTSIDE_EPOCHS("SourceOutsideEpochs"),
 
   // Engine and planner.
 

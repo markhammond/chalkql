@@ -141,8 +141,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         binding.Refuse(engine.ClockName);
 
         var prepared = await engine.PrepareAsync(sql, options.Prepare, ct).ConfigureAwait(false);
-        var view = new StandingView<TKey, TRow>(
-            engine, sql, options, binding, prepared, KeyOf(prepared, options.Key));
+        var key = KeyOf(prepared, options.Key);
+        ViewChecks.Check(engine, prepared, options.Key, key, options.Exactness, options.RequireExplicitImmutable);
+        var view = new StandingView<TKey, TRow>(engine, sql, options, binding, prepared, key);
         try
         {
             await view.UpdateAsync(ct).ConfigureAwait(false);
@@ -483,6 +484,8 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         {
             var prepared = await _engine.PrepareAsync(_sql, _options.Prepare, ct).ConfigureAwait(false);
             var key = KeyOf(prepared, _options.Key);
+            ViewChecks.Check(
+                _engine, prepared, _options.Key, key, _options.Exactness, _options.RequireExplicitImmutable);
             lock (_gate)
             {
                 Volatile.Write(ref _prepared, prepared);

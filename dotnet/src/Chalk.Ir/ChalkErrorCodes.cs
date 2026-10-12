@@ -257,6 +257,18 @@ public static class ChalkErrorCodes
     /// <summary>A view reads the current time, and the engine has no clock, or has not set it.</summary>
     public const string ClockRequired = nameof(ClockRequired);
 
+    /// <summary>A view computes a column by accumulating floating point, and has not opted in to rounding.</summary>
+    public const string InexactAccumulation = nameof(InexactAccumulation);
+
+    /// <summary>A view calls a host function whose result can change while its arguments do not.</summary>
+    public const string NondeterministicFunction = nameof(NondeterministicFunction);
+
+    /// <summary>A view's statement orders or limits its rows in a way a keyed result cannot keep.</summary>
+    public const string UnsupportedInView = nameof(UnsupportedInView);
+
+    /// <summary>A view reads a source whose rows change outside the engine's refreshes.</summary>
+    public const string SourceOutsideEpochs = nameof(SourceOutsideEpochs);
+
     // Engine and planner.
 
     /// <summary>The planner process could not be reached, or did not answer in time.</summary>
