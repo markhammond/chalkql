@@ -88,24 +88,34 @@ public final class ChalkAsOfLookupRule extends RelRule<ChalkRuleConfig> {
 
   @Override
   public void onMatch(RelOptRuleCall call) {
-    ChalkAsOfJoin join = call.rel(0);
-    ChalkFilter filter = filtered ? call.rel(2) : null;
-    ChalkTableScan scan = filtered ? call.rel(3) : call.rel(2);
+    ChalkAsOfLookupJoin seek =
+        seek(call.rel(0), filtered ? call.rel(2) : null, filtered ? call.rel(3) : call.rel(2));
+    if (seek != null) {
+      call.transformTo(seek);
+    }
+  }
 
+  /**
+   * The seek {@code join} can be, over {@code scan} or a filter on it, or null when none fits. Shared
+   * with the pass that prices ASOF joins again once the search is over (F198), so the two never
+   * disagree about what fits.
+   */
+  public static @Nullable ChalkAsOfLookupJoin seek(
+      ChalkAsOfJoin join, @Nullable ChalkFilter filter, ChalkTableScan scan) {
     // A goaled scan belongs to one limit (D276); an entitled one to its policy, whose filters and
     // masks must stay where the client's invariant checks for them.
     if (scan.rowGoal() > 0
         || scan.chalkTable().isEntitled()
         || chalk.planner.entitlement.EntitledRelOptTable.disclosureOf(scan.getTable()) != null) {
-      return;
+      return null;
     }
 
     if (ChalkInputs.hasNullSafeEquality(join)) {
-      return;
+      return null;
     }
     JoinInfo info = join.analyzeCondition();
     if (!info.isEqui()) {
-      return;
+      return null;
     }
 
     int leftFields = join.getLeft().getRowType().getFieldCount();
@@ -113,7 +123,7 @@ public final class ChalkAsOfLookupRule extends RelRule<ChalkRuleConfig> {
         || !(match.getOperands().get(0) instanceof RexInputRef first)
         || !(match.getOperands().get(1) instanceof RexInputRef second)
         || (first.getIndex() < leftFields) == (second.getIndex() < leftFields)) {
-      return;
+      return null;
     }
     boolean leftFirst = first.getIndex() < leftFields;
     int leftTime = (leftFirst ? first : second).getIndex();
@@ -130,7 +140,7 @@ public final class ChalkAsOfLookupRule extends RelRule<ChalkRuleConfig> {
       int column = projection.get(info.rightKeys.get(k));
       if (!held.add(column)
           || !sameType(leftRow, info.leftKeys.get(k), rightRow, info.rightKeys.get(k))) {
-        return;
+        return null;
       }
     }
 
@@ -141,7 +151,7 @@ public final class ChalkAsOfLookupRule extends RelRule<ChalkRuleConfig> {
       for (RexNode conjunct : RelOptUtil.conjunctions(filter.getCondition())) {
         Fixed fixed = fixed(conjunct);
         if (fixed == null || !held.add(projection.get(fixed.field()))) {
-          return;
+          return null;
         }
         fixedColumns.add(projection.get(fixed.field()));
         fixedValues.add(fixed.value());
@@ -150,27 +160,26 @@ public final class ChalkAsOfLookupRule extends RelRule<ChalkRuleConfig> {
 
     int timeColumn = projection.get(rightTime);
     if (held.contains(timeColumn) || !sameType(leftRow, leftTime, rightRow, rightTime)) {
-      return;
+      return null;
     }
 
     boolean backwards = kind == SqlKind.GREATER_THAN || kind == SqlKind.GREATER_THAN_OR_EQUAL;
     for (Index index : scan.chalkTable().indexes()) {
       if (fits(index, held, timeColumn, backwards)) {
-        call.transformTo(
-            ChalkAsOfLookupJoin.create(
-                join,
-                scan,
-                index,
-                info.leftKeys,
-                info.rightKeys,
-                fixedColumns,
-                fixedValues,
-                leftTime,
-                rightTime,
-                kind));
-        return;
+        return ChalkAsOfLookupJoin.create(
+            join,
+            scan,
+            index,
+            info.leftKeys,
+            info.rightKeys,
+            fixedColumns,
+            fixedValues,
+            leftTime,
+            rightTime,
+            kind);
       }
     }
+    return null;
   }
 
   /**

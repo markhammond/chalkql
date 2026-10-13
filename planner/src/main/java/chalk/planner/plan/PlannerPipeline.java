@@ -242,6 +242,12 @@ public final class PlannerPipeline implements AutoCloseable {
   public static final String STAGE_ROOT_PROJECT = "root-project";
 
   /**
+   * What the pass after the search says when it made ASOF joins seek (F198), with how many. A plan
+   * it leaves alone does not name it.
+   */
+  public static final String STAGE_ASOF_SEEKS = "as-of seeks after search";
+
+  /**
    * What the ordinals this request hinted are named by in the stage list (D284). The ordinals only:
    * a hint's value is not diagnostics, and a caller reading a log should never find one there.
    */
@@ -1014,6 +1020,15 @@ public final class PlannerPipeline implements AutoCloseable {
       }
     }
 
+    // ASOF joins priced again on the final plan's numbers (F198): the search priced each seek once,
+    // at estimates that can be far from these, and a plain join chosen on them reads a whole table.
+    int seeksAfterSearch = 0;
+    if (policy.allowsIndexLookup()) {
+      AsOfSeeks.Result seeks = AsOfSeeks.reprice(optimised);
+      optimised = seeks.plan();
+      seeksAfterSearch = seeks.swapped();
+    }
+
     // What the caller is told (§3.12), computed on the optimised tree before the root projection,
     // because Omit edits the field list that projection is built from.
     ImmutablePairList<Integer, String> fields = root.fields;
@@ -1078,6 +1093,10 @@ public final class PlannerPipeline implements AutoCloseable {
     // The stage says how the search ended when it did not simply finish, and says nothing extra when
     // it did — so every plan recorded before this existed keeps the stage list it had.
     stages.add(stageForVolcano(state));
+    // Named only when it changed the plan, so every plan it leaves alone keeps the stage list it had.
+    if (seeksAfterSearch > 0) {
+      stages.add(STAGE_ASOF_SEEKS + " " + seeksAfterSearch);
+    }
     stages.add(STAGE_ROOT_PROJECT);
     return new Result(
         physical,
