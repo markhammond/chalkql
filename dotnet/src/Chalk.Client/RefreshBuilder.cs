@@ -129,6 +129,39 @@ public sealed class RefreshBuilder
         Add(table, SourceRefreshKind.Append, rows, statistics);
 
     /// <summary>
+    /// The table takes a replacement prepared before this refresh (design 69 §3): the replacement's
+    /// rows, then the rows the table took since its cut, published in this refresh's epoch.
+    /// </summary>
+    /// <remarks>
+    /// Under the lock this costs what an append of the rows since the cut costs. It is refused when the
+    /// table was replaced after the replacement was prepared, and when the rows since the cut do not
+    /// follow the replacement in the table's declared order; nothing in the refresh is then applied.
+    /// </remarks>
+    /// <param name="prepared">What <c>ChalkEngine.PrepareReplaceAsync</c> returned, not yet committed.</param>
+    public RefreshBuilder Commit(PreparedReplacement prepared)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
+        if (!prepared.Pending)
+        {
+            throw new InvalidOperationException(
+                $"the replacement for '{prepared.Table}' has already been committed or disposed. Each "
+                + "one is committed once; prepare another for the next.");
+        }
+
+        _entries.Add(new RefreshEntry(
+            prepared.Source,
+            new SourceRefreshEntry
+            {
+                Table = prepared.Table,
+                Kind = SourceRefreshKind.Commit,
+                RowType = prepared.Prepared.RowType,
+                Rows = prepared.Prepared,
+            }));
+
+        return this;
+    }
+
+    /// <summary>
     /// Each row replaces the row with its key, or is added where the table holds none (D339,
     /// <c>docs/design/64-incremental-views.md</c> §2). Only a table that declares <c>Keyed(…)</c>
     /// takes one; a key given twice refuses the refresh, naming both rows.

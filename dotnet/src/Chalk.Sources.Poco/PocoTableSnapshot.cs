@@ -89,6 +89,14 @@ internal sealed class PocoTableSnapshot<T>
     public IPocoIndex<T>[] Indexes { get; }
 
     /// <summary>
+    /// How many times the table had been rewritten when this snapshot was published: replaced, changed
+    /// by key, re-read from its registration, or given a prepared replacement (design 69 §3). An append
+    /// keeps the count of the snapshot it extends, so two snapshots with one count differ only by
+    /// appended rows. Set by the table as it publishes, before any reader can see the snapshot.
+    /// </summary>
+    public long Rewrites { get; set; }
+
+    /// <summary>
     /// The collection the host handed over, which is what a release reports. Null for a snapshot an
     /// append built over arrays of Chalk's own: nobody outside gave those, so nobody is waiting to
     /// have them back.

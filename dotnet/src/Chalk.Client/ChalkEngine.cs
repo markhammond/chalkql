@@ -1414,6 +1414,78 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     }
 
     /// <summary>
+    /// Builds a replacement for <paramref name="table"/> from <paramref name="rows"/>, the host's
+    /// rewrite of the table's rows before row <paramref name="through"/>, for a later refresh to commit
+    /// with <see cref="RefreshBuilder.Commit"/> (design 69 §3).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The build runs on the caller's task and takes no refresh lock: the table's appends, and every
+    /// other refresh, keep landing while it runs. Its indexes are built and its declarations verified
+    /// here, as a <c>Replace</c> builds and verifies them, so the commit has only the rows appended since
+    /// the cut left to add.
+    /// </para>
+    /// <para>
+    /// The rows may be any rewrite of rows <c>[0, through)</c>: a compaction that keeps each key's last
+    /// row, or drops the rows before a time. They are copied into an array Chalk owns, so the list is the
+    /// host's again once this returns, and is never reported released.
+    /// </para>
+    /// <para>
+    /// Refused for a table that declares <c>Keyed(…)</c>, whose rows change by key rather than at its
+    /// end, and for a cut past the rows the table holds. Only an in-process POCO source prepares one.
+    /// </para>
+    /// </remarks>
+    /// <param name="source">A source this engine was built with.</param>
+    /// <param name="table">The table, as it is named in that source's schema.</param>
+    /// <param name="rows">The rewrite, of the type the table was built over.</param>
+    /// <param name="through">The cut: how many of the table's rows the rewrite covers.</param>
+    /// <param name="ct">Checked before the build starts.</param>
+    public async ValueTask<PreparedReplacement> PrepareReplaceAsync<T>(
+        ISourceRuntime source, string table, IReadOnlyList<T> rows, int through, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentOutOfRangeException.ThrowIfNegative(through);
+
+        if (!_sources.TryGetValue(source.SourceId, out var held) || !ReferenceEquals(held, source))
+        {
+            throw new ArgumentException(
+                $"the source '{source.SourceId}' is not one this engine was built with; a replacement "
+                + "is prepared for a source the engine is already serving.",
+                nameof(source));
+        }
+
+        if (source is not IPreparableSource preparable)
+        {
+            throw new ArgumentException(
+                $"the source '{source.SourceId}' is a {source.GetType().Name}, which cannot prepare a "
+                + "replacement before a refresh. An in-process POCO source can; any refreshable source "
+                + "can still replace a table's rows in a refresh.",
+                nameof(source));
+        }
+
+        var prepared = await preparable.PrepareReplaceAsync(table, typeof(T), rows, through, ct)
+            .ConfigureAwait(false);
+        return new PreparedReplacement(source, prepared);
+    }
+
+    /// <summary>
+    /// The same, naming the table by its handle (D271 (h)): the source travels with the name, and the
+    /// row type is checked by the compiler.
+    /// </summary>
+    /// <param name="table">The handle a source builder yielded, or one looked up on the source.</param>
+    /// <param name="rows">The rewrite, of the type the table was built over.</param>
+    /// <param name="through">The cut: how many of the table's rows the rewrite covers.</param>
+    /// <param name="ct">Checked before the build starts.</param>
+    public ValueTask<PreparedReplacement> PrepareReplaceAsync<T>(
+        ITableTarget<T> table, IReadOnlyList<T> rows, int through, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        return PrepareReplaceAsync(table.Runtime, table.Table, rows, through, ct);
+    }
+
+    /// <summary>
     /// A statement's named values, with the engine's clock left to bind the parameter named after it
     /// when the host binds none (D341): the values, with a placeholder of the right type there, and that
     /// parameter's position among the statement's, or -1. The execution writes the clock in when it pins.
