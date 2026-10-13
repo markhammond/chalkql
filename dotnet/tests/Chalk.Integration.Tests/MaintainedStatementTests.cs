@@ -311,7 +311,7 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
                 // Every run replaces each table at least twice: once compacted, keeping its rows' objects in
                 // their order, which a view reads as the rows taken out and appended; and once by copies,
                 // which it reads as a rewrite.
-                var roll = epoch switch { 10 => 0, 15 => 2, 20 => 1, 25 => 3, 27 => 4, _ => random.Next(18) };
+                var roll = epoch switch { 10 => 0, 15 => 2, 20 => 1, 22 => 5, 25 => 3, 27 => 4, _ => random.Next(20) };
                 if (roll == 0)
                 {
                     // A compaction: the oldest third of the trades gone.
@@ -342,6 +342,15 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
                 else if (roll == 3 && marks.Count > 8)
                 {
                     marks = [.. marks.Skip(marks.Count / 4).Select(m => m with { })];
+                    var kept = marks;
+                    await engine.RefreshAsync(r => r.Replace(desk, "marks", (IReadOnlyList<Mark>)kept), Ct);
+                }
+                else if (roll == 5 && marks.Count(m => m.Asset == marks[^1].Asset) > 1)
+                {
+                    // A compaction that takes out an asset's newest mark, which the latest trades match:
+                    // a removal that moves matches, unlike the compactions above.
+                    var newest = marks.Count - 1;
+                    marks = [.. marks.Where((_, i) => i != newest)];
                     var kept = marks;
                     await engine.RefreshAsync(r => r.Replace(desk, "marks", (IReadOnlyList<Mark>)kept), Ct);
                 }

@@ -88,6 +88,9 @@ internal sealed class KeyEncoder
         return true;
     }
 
+    /// <summary>Appends bytes another encoding made, such as a key encoded before.</summary>
+    public void Append(ReadOnlySpan<byte> bytes) => PutLane(bytes);
+
     private void Put(byte value)
     {
         Reserve(1);

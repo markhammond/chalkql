@@ -53,6 +53,7 @@ internal sealed class SeekState : IMaintainedState
         LeftKeys = new KeyColumns(leftTypes, leftKeys);
         Handed = new KeyColumns(leftTypes, Replayed);
         TableKeys = new KeyColumns(keyTypes, [.. Enumerable.Range(0, leftKeys.Length)]);
+        TableTime = new KeyColumns(keyTypes, [leftKeys.Length]);
         RightIdentity = KeyColumns.All(rightTypes);
         LeftTime = leftTime;
         RightTime = rightTime;
@@ -97,6 +98,9 @@ internal sealed class SeekState : IMaintainedState
 
     /// <summary>A table row's keys: the columns of the read of its keys.</summary>
     public KeyColumns TableKeys { get; }
+
+    /// <summary>A table row's time: the column after its keys in the read of its keys.</summary>
+    public KeyColumns TableTime { get; }
 
     public KeyColumns RightIdentity { get; }
 
@@ -236,8 +240,15 @@ internal sealed class SeekChanges : MaintainedOperator
     private readonly IBatchOperator _seek;
     private readonly IBatchOperator? _probe;
     private readonly int[] _rightColumns;
+    /// <summary>The keys a row was appended under in this update.</summary>
     private readonly ByteMap _reached = new();
+
+    /// <summary>The keys a row was taken out under, and each such row's key and time.</summary>
+    private readonly ByteMap _removedKeys = new();
+
+    private readonly ByteMap _removedAt = new();
     private readonly ByteMap _probing = new();
+    private readonly KeyEncoder _pair = new();
     private readonly KeyEncoder _first = new();
     private readonly KeyEncoder _second = new();
     private readonly KeyEncoder _key = new();
@@ -309,8 +320,9 @@ internal sealed class SeekChanges : MaintainedOperator
         // and its match is handed to a row arriving with its key and time.
         Leave();
 
-        // The held left rows whose match may have moved: every one after a rewrite, and otherwise those
-        // under a key a row was appended to.
+        // The held left rows whose match may have moved: every one after a rewrite; otherwise those under
+        // a key a row was appended to, and those whose match was a row taken out. Taking out any other
+        // row leaves a match where it was: the closest row of a key stays the closest.
         if (state.Keys.Rewritten)
         {
             for (var entry = 0; entry < state.LeftSlots.Entries; entry++)
@@ -330,6 +342,22 @@ internal sealed class SeekChanges : MaintainedOperator
                     foreach (var slot in bucket)
                     {
                         Owe(slot);
+                    }
+                }
+            }
+
+            for (var entry = 0; entry < _removedKeys.Entries; entry++)
+            {
+                if (_removedKeys.IsLive(entry)
+                    && !_reached.TryGet(_removedKeys.Key(entry), out _)
+                    && state.LeftBuckets.Find(_removedKeys.Key(entry)) is { } bucket)
+                {
+                    foreach (var slot in bucket)
+                    {
+                        if (MatchTakenOut(slot))
+                        {
+                            Owe(slot);
+                        }
                     }
                 }
             }
@@ -395,23 +423,57 @@ internal sealed class SeekChanges : MaintainedOperator
         return state.Output;
     }
 
-    /// <summary>The keys of the rows appended to the table, unless it was rewritten or read for the first time.</summary>
+    /// <summary>
+    /// The keys of the rows appended to the table, and the keys and times of the rows a replacement took
+    /// out (§17); nothing when it was rewritten whole or read for the first time.
+    /// </summary>
     private async ValueTask ReachAsync(CancellationToken ct)
     {
         var state = _state;
         _reached.Clear();
+        _removedKeys.Clear();
+        _removedAt.Clear();
         await foreach (var batch in _keys.ExecuteAsync(ct).ConfigureAwait(false))
         {
             var columns = batch.Columns;
             for (var i = 0; i < batch.Count; i++)
             {
-                // A row with a NULL key matches nothing.
-                if (state.TableKeys.Encode(state.Encoder, columns, batch.RowAt(i), normalise: true))
+                // A row with a NULL key matches nothing, and a row with a NULL time is no match.
+                var row = batch.RowAt(i);
+                if (!state.TableKeys.Encode(state.Encoder, columns, row, normalise: true))
+                {
+                    continue;
+                }
+
+                if (Weights.Of(batch, row) > 0)
                 {
                     _reached.GetOrAdd(state.Encoder.Span, out _);
                 }
+                else if (columns[state.TableTime.Columns[0]].IsValid(row))
+                {
+                    _removedKeys.GetOrAdd(state.Encoder.Span, out _);
+                    _pair.Reset();
+                    _pair.Append(state.Encoder.Span);
+                    _pair.Add(columns[state.TableTime.Columns[0]], row, state.TableTime.KindsOf[0], state.TableTime.Widths[0], normalise: false);
+                    _removedAt.GetOrAdd(_pair.Span, out _);
+                }
             }
         }
+    }
+
+    /// <summary>Whether a held row's match was a row taken out in this update: one with its key and time.</summary>
+    private bool MatchTakenOut(int slot)
+    {
+        var state = _state;
+        var match = state.LeftMatches[slot];
+        if (match < 0 || _removedAt.Count == 0)
+        {
+            return false;
+        }
+
+        state.LeftKeys.Encode(_pair, state.Left, state.LeftKeys.Columns, slot, normalise: true);
+        _pair.Add(state.Matches.Column(state.RightTime), match, normalise: false);
+        return _removedAt.TryGet(_pair.Span, out _);
     }
 
     /// <summary>
@@ -437,6 +499,24 @@ internal sealed class SeekChanges : MaintainedOperator
         {
             if (_reached.IsLive(entry) && state.LastIndex.Remove(_reached.Key(entry), out var last) && last >= 0)
             {
+                state.Lasts.Remove(last);
+            }
+        }
+
+        // A key's last row taken out goes with it; taking out an earlier row leaves it the last.
+        for (var entry = 0; entry < _removedKeys.Entries; entry++)
+        {
+            if (!_removedKeys.IsLive(entry) || !state.LastIndex.TryGet(_removedKeys.Key(entry), out var last) || last < 0)
+            {
+                continue;
+            }
+
+            _pair.Reset();
+            _pair.Append(_removedKeys.Key(entry));
+            _pair.Add(state.Lasts.Column(state.RightTime), last, normalise: false);
+            if (_removedAt.TryGet(_pair.Span, out _))
+            {
+                state.LastIndex.Remove(_removedKeys.Key(entry), out _);
                 state.Lasts.Remove(last);
             }
         }
@@ -726,7 +806,7 @@ internal sealed class SeekChanges : MaintainedOperator
             }
 
             var match = state.LeftMatches[slot];
-            if (!state.Keys.Rewritten && !_reached.TryGet(state.Encoder.Span, out _))
+            if (!state.Keys.Rewritten && !_reached.TryGet(state.Encoder.Span, out _) && !MatchTakenOut(slot))
             {
                 state.Handed.Encode(_handed, columns, row, normalise: true);
                 ref var handed = ref state.HandedOver.GetOrAdd(_handed.Span, out var added);

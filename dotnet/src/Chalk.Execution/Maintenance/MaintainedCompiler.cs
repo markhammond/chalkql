@@ -395,9 +395,10 @@ internal sealed class MaintainedCompiler
         var leftWidth = leftTypes.Length;
         var output = Types(rel.RowType);
 
-        // The table's key columns, in the order of the left's; with none, its time, to learn of appends.
+        // The table's key columns, in the order of the left's, and its time: what a row appended or taken
+        // out is known by.
         var keyColumns = seek.RightKeys.Select(k => projection[(int)k]).ToArray();
-        int[] read = keyColumns.Length == 0 ? [projection[(int)seek.RightTime]] : keyColumns;
+        int[] read = [.. keyColumns, projection[(int)seek.RightTime]];
         var keyRow = new RowType();
         foreach (var column in read)
         {
