@@ -282,14 +282,36 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
         await using var maintained = await prepared.MaintainAsync(Values(prepared, now), clock, key, Ct);
         var held = new Dictionary<string, object?[]>(StringComparer.Ordinal);
 
+        // A compaction of the marks prepared off the refresh lock (design 69), committed an epoch later.
+        PreparedReplacement? pending = null;
+        List<Mark> pendingRows = [];
+        var pendingCut = 0;
+
         for (var epoch = 0; epoch < 30; epoch++)
         {
-            if (epoch > 0)
+            if (pending is not null)
+            {
+                // The rows appended since its cut go onto it as it commits, and a maintained read takes
+                // the commit as the rows it took out, not as a rewrite: its rows are the same objects.
+                var commit = pending;
+                pending = null;
+                marks = [.. pendingRows, .. marks.Skip(pendingCut)];
+                var pinnable = (Chalk.Sources.IPinnableSource)desk;
+                var before = pinnable.Pin("marks")!;
+                await engine.RefreshAsync(r => r.Commit(commit), Ct);
+                commit.Dispose();
+                var after = pinnable.Pin("marks")!;
+                var diff = ((Chalk.Sources.ITrackedSource)desk).DiffFrom("marks", before, after);
+                Assert.True(diff is { Removed.Length: > 0 }, "a committed compaction is read as the rows it took out");
+                pinnable.Unpin("marks", before);
+                pinnable.Unpin("marks", after);
+            }
+            else if (epoch > 0)
             {
                 // Every run replaces each table at least twice: once compacted, keeping its rows' objects in
                 // their order, which a view reads as the rows taken out and appended; and once by copies,
                 // which it reads as a rewrite.
-                var roll = epoch switch { 10 => 0, 15 => 2, 20 => 1, 25 => 3, _ => random.Next(16) };
+                var roll = epoch switch { 10 => 0, 15 => 2, 20 => 1, 25 => 3, 27 => 4, _ => random.Next(18) };
                 if (roll == 0)
                 {
                     // A compaction: the oldest third of the trades gone.
@@ -322,6 +344,18 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
                     marks = [.. marks.Skip(marks.Count / 4).Select(m => m with { })];
                     var kept = marks;
                     await engine.RefreshAsync(r => r.Replace(desk, "marks", (IReadOnlyList<Mark>)kept), Ct);
+                }
+                else if (roll == 4 && marks.Count > 8)
+                {
+                    // A compaction prepared off the lock: every other one of the older half gone. A mark
+                    // is appended while it waits, and it commits at the next epoch.
+                    pendingCut = marks.Count;
+                    var half = pendingCut / 2;
+                    pendingRows = [.. marks.Where((_, i) => i >= half || i % 2 == 0)];
+                    pending = await engine.PrepareReplaceAsync(desk, "marks", (IReadOnlyList<Mark>)pendingRows, pendingCut, Ct);
+                    List<Mark> since = [new Mark(1 + random.Next(3), marks[^1].Ts, Math.Round(random.NextDouble() * 100, 3), ++tag)];
+                    marks.AddRange(since);
+                    await engine.RefreshAsync(r => r.Append(desk, "marks", (IReadOnlyList<Mark>)since), Ct);
                 }
                 else
                 {
