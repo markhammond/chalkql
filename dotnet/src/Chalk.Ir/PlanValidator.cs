@@ -52,6 +52,9 @@ public static class PlanValidator
 
     private sealed class Validation(Plan plan, PlanValidationOptions options)
     {
+        /// <summary>The row type of each shared plan validated so far, by id (D338).</summary>
+        private readonly Dictionary<uint, RowType> _shared = [];
+
         public void Run()
         {
             CheckVersionAndUnknownFields();
@@ -70,6 +73,27 @@ public static class PlanValidator
             {
                 CheckType(type, $"plan.parameter_types[{i}]");
                 RefuseComposite(type, $"plan.parameter_types[{i}]", "a parameter's type");
+            }
+
+            // The subtrees the plan shares, each once and before the root, so that a use is checked
+            // against what it names; a shared plan names only the ones listed before it (D338).
+            for (var i = 0; i < plan.Shared.Count; i++)
+            {
+                var shared = plan.Shared[i];
+                var sharedPath = $"plan.shared[{i}]";
+                if (shared.Rel is null)
+                {
+                    throw Invalid("I-IR-4", sharedPath, "the shared plan has no relation");
+                }
+
+                if (_shared.ContainsKey(shared.Id))
+                {
+                    throw Invalid("I-IR-4", sharedPath, $"shared plan {shared.Id} is listed twice");
+                }
+
+                var sharedType = Rel(shared.Rel, sharedPath);
+                NoRemoteQueryUnderANestedLoop(shared.Rel, sharedPath);
+                _shared[shared.Id] = sharedType;
             }
 
             var rootType = Rel(plan.Root, "root");
@@ -318,6 +342,15 @@ public static class PlanValidator
                     break;
 
                 case Chalk.Ir.Rel.KindOneofCase.StreamAggregate:
+                    // Its input is sorted on the grouping's keys, which only one grouping has (D338).
+                    if (rel.StreamAggregate.Aggregate.Groupings.Count > 1)
+                    {
+                        throw Invalid(
+                            "I-IR-7",
+                            kindPath,
+                            "a StreamAggregate carries one grouping; grouping sets are a HashAggregate's");
+                    }
+
                     AggregateNode(rel.StreamAggregate.Aggregate, output, kindPath);
                     break;
 
@@ -487,6 +520,31 @@ public static class PlanValidator
 
                     break;
                 }
+
+                case Chalk.Ir.Rel.KindOneofCase.AsOfLookupJoin:
+                    AsOfLookupJoin(rel, output, kindPath);
+                    break;
+
+                case Chalk.Ir.Rel.KindOneofCase.SharedRef:
+                    if (!_shared.TryGetValue(rel.SharedRef.Id, out var sharedType))
+                    {
+                        throw Invalid(
+                            "I-IR-4",
+                            kindPath,
+                            $"the use names shared plan {rel.SharedRef.Id}, which the plan does not list "
+                            + "before it");
+                    }
+
+                    if (!output.Equals(sharedType))
+                    {
+                        throw Invalid(
+                            "I-IR-4",
+                            kindPath,
+                            $"the use's row type {IrTypes.Describe(output)} differs from shared plan "
+                            + $"{rel.SharedRef.Id}'s, {IrTypes.Describe(sharedType)}");
+                    }
+
+                    break;
 
                 case Chalk.Ir.Rel.KindOneofCase.SetOp:
                 {
@@ -735,6 +793,81 @@ public static class PlanValidator
         /// equality, and the projection matching the row type. A range whose bounds disagree
         /// anywhere but in their last element would name a set of rows no index can produce.
         /// </summary>
+        /// <summary>
+        /// An ASOF join that seeks an index (D338): the plain join's rules over the left input and
+        /// the projection's fields, which are the output's past the left's, and values for the fixed
+        /// columns that read no row, as a range bound's do. That the index's key fits is the
+        /// executor's to check against the catalog, as an IndexLookup's index is.
+        /// </summary>
+        private void AsOfLookupJoin(Rel rel, RowType output, string path)
+        {
+            var seek = rel.AsOfLookupJoin;
+            var left = Rel(seek.Left, $"{path}.left");
+            if (seek.Table is null || seek.Table.Table.Length == 0)
+            {
+                throw Invalid("I-IR-6", path, "AsOfLookupJoin has no table reference");
+            }
+
+            if (seek.Index.Length == 0)
+            {
+                throw Invalid("I-IR-6", path, "AsOfLookupJoin.index names no index");
+            }
+
+            if (seek.Projection.Count == 0 || output.Fields.Count != left.Fields.Count + seek.Projection.Count)
+            {
+                throw Invalid(
+                    "I-IR-6",
+                    path,
+                    $"the row type has {output.Fields.Count} fields, not the left input's "
+                    + $"{left.Fields.Count} and the projection's {seek.Projection.Count}");
+            }
+
+            var right = new RowType();
+            right.Fields.AddRange(output.Fields.Skip(left.Fields.Count));
+            EquiJoin(left, right, seek.LeftKeys, seek.RightKeys, residual: null, path);
+            for (var i = 0; i < seek.LeftKeys.Count; i++)
+            {
+                RequireSameKind(
+                    left.Fields[(int)seek.LeftKeys[i]].Type,
+                    right.Fields[(int)seek.RightKeys[i]].Type,
+                    $"{path}.left_keys[{i}]",
+                    "the right key it is compared with");
+            }
+
+            if (seek.FixedColumns.Count != seek.FixedValues.Count)
+            {
+                throw Invalid(
+                    "I-IR-6",
+                    path,
+                    $"{seek.FixedColumns.Count} fixed columns against {seek.FixedValues.Count} values");
+            }
+
+            for (var i = 0; i < seek.FixedValues.Count; i++)
+            {
+                Expression(seek.FixedValues[i], EmptyRow, $"{path}.fixed_values[{i}]");
+            }
+
+            RequireIndex(seek.LeftTime, left, "I-IR-3", $"{path}.left_time");
+            RequireIndex(seek.RightTime, right, "I-IR-3", $"{path}.right_time");
+            RefuseNonScalar(left.Fields[(int)seek.LeftTime].Type, $"{path}.left_time", "an as-of join's time column");
+            RefuseNonScalar(right.Fields[(int)seek.RightTime].Type, $"{path}.right_time", "an as-of join's time column");
+            RequireSameKind(
+                left.Fields[(int)seek.LeftTime].Type,
+                right.Fields[(int)seek.RightTime].Type,
+                $"{path}.left_time",
+                "the right time column it is compared with");
+
+            if (seek.Match == AsOfMatch.Unspecified)
+            {
+                throw Invalid("I-IR-5", path, "AsOfLookupJoin.match is unspecified");
+            }
+
+            if (seek.Type is not (JoinType.Inner or JoinType.Left))
+            {
+                throw Invalid("I-IR-5", path, $"AsOfLookupJoin.type is {seek.Type}; only INNER and LEFT exist");
+            }
+        }
+
         private void IndexLookup(Rel rel, string path)
         {
             var lookup = rel.IndexLookup;
@@ -883,39 +1016,52 @@ public static class PlanValidator
         {
             var input = Rel(aggregate.Input, path);
 
-            if (aggregate.Groupings.Count != 1)
+            // One grouping is a GROUP BY; several are grouping sets (D338). GROUP BY () is one
+            // grouping with no keys, so none at all is a plan that says nothing.
+            if (aggregate.Groupings.Count == 0)
             {
                 throw Invalid(
                     "I-IR-7",
                     path,
-                    $"the aggregate has {aggregate.Groupings.Count} groupings; a plan carries exactly "
-                    + "one (grouping sets are reserved)");
+                    "the aggregate has no grouping; one with no keys is the whole input's");
             }
 
-            var keys = aggregate.Groupings[0].Keys;
-            for (var i = 0; i < keys.Count; i++)
+            for (var g = 0; g < aggregate.Groupings.Count; g++)
             {
-                RequireIndex(keys[i], input, "I-IR-3", $"{path}.groupings[0].keys[{i}]");
-                RefuseNonScalar(
-                    input.Fields[(int)keys[i]].Type,
-                    $"{path}.groupings[0].keys[{i}]",
-                    "grouped by");
+                var grouping = aggregate.Groupings[g].Keys;
+                for (var i = 0; i < grouping.Count; i++)
+                {
+                    RequireIndex(grouping[i], input, "I-IR-3", $"{path}.groupings[{g}].keys[{i}]");
+                    RefuseNonScalar(
+                        input.Fields[(int)grouping[i]].Type,
+                        $"{path}.groupings[{g}].keys[{i}]",
+                        "grouped by");
+                }
             }
 
-            if (output.Fields.Count != keys.Count + aggregate.Measures.Count)
+            var keys = GroupingKeys.Of(aggregate);
+            if (output.Fields.Count != keys.Length + aggregate.Measures.Count)
             {
                 throw Invalid(
                     "I-IR-7",
                     path,
-                    $"the aggregate's row type has {output.Fields.Count} fields but {keys.Count} keys "
+                    $"the aggregate's row type has {output.Fields.Count} fields but {keys.Length} keys "
                     + $"and {aggregate.Measures.Count} measures");
             }
 
-            for (var i = 0; i < keys.Count; i++)
+            for (var i = 0; i < keys.Length; i++)
             {
+                // A key some grouping leaves out is NULL in that grouping's rows.
+                var keyType = input.Fields[keys[i]].Type;
+                if (keyType is { Nullable: false } && !GroupingKeys.InEvery(aggregate, keys[i]))
+                {
+                    keyType = keyType.Clone();
+                    keyType.Nullable = true;
+                }
+
                 RequireSameType(
                     output.Fields[i].Type,
-                    input.Fields[(int)keys[i]].Type,
+                    keyType,
                     $"{path}.row_type[{i}]",
                     $"the type of grouping key ${keys[i]}");
             }
@@ -964,11 +1110,56 @@ public static class PlanValidator
                     throw Invalid("I-IR-7", measurePath, "COUNT(DISTINCT) needs an argument");
                 }
 
+                if (measure.UserFunction.Length == 0 && measure.Function == AggregateFunctionId.Grouping)
+                {
+                    GroupingMeasure(measure, keys, measurePath);
+                }
+
                 RequireSameType(
-                    output.Fields[keys.Count + m].Type,
+                    output.Fields[keys.Length + m].Type,
                     measure.Type,
-                    $"{path}.row_type[{keys.Count + m}]",
+                    $"{path}.row_type[{keys.Length + m}]",
                     "the measure's result type");
+            }
+        }
+
+        /// <summary>
+        /// <c>GROUPING</c> (D338): a bit for each argument, so one to 63 of them, each a key of the
+        /// aggregate. Its value is the row's grouping's, so it reads no row: it takes no DISTINCT or
+        /// FILTER, and it is never NULL.
+        /// </summary>
+        private static void GroupingMeasure(Measure measure, int[] keys, string path)
+        {
+            if (measure.Args.Count is 0 or > 63)
+            {
+                throw Invalid(
+                    "I-IR-7", path, $"GROUPING takes one to 63 keys, not {measure.Args.Count}");
+            }
+
+            for (var a = 0; a < measure.Args.Count; a++)
+            {
+                var argument = measure.Args[a];
+                if (argument.KindCase != Expr.KindOneofCase.FieldRef
+                    || !keys.Contains((int)argument.FieldRef.Index))
+                {
+                    throw Invalid(
+                        "I-IR-7",
+                        $"{path}.args[{a}]",
+                        "a GROUPING argument is a FieldRef to one of the aggregate's keys");
+                }
+            }
+
+            if (measure.Distinct || measure.Filter is not null)
+            {
+                throw Invalid("I-IR-7", path, "GROUPING takes no DISTINCT and no FILTER");
+            }
+
+            if (measure.Type is not { Kind: TypeKind.I64, Nullable: false })
+            {
+                throw Invalid(
+                    "I-IR-7",
+                    path,
+                    $"GROUPING is a non-null I64, not {IrTypes.Describe(measure.Type)}");
             }
         }
 

@@ -124,6 +124,10 @@ final class AsofConditions {
     }
 
     if (onRight.isEmpty() && onLeft.isEmpty()) {
+      // A row-value equality expanded into its equalities still changes the ON.
+      if (kept.size() != conjunctCount(condition)) {
+        join.setOperand(5, and(kept, condition.getParserPosition()));
+      }
       return;
     }
 
@@ -134,6 +138,18 @@ final class AsofConditions {
       join.setLeft(filtered(join.getLeft(), alias(join.getLeft()), onLeft));
     }
     join.setOperand(5, and(kept, condition.getParserPosition()));
+  }
+
+  /** How many conjuncts the condition has as written, a row equality counted once. */
+  private static int conjunctCount(SqlNode condition) {
+    if (condition.getKind() != SqlKind.AND) {
+      return 1;
+    }
+    int count = 0;
+    for (SqlNode operand : ((SqlCall) condition).getOperandList()) {
+      count += conjunctCount(operand);
+    }
+    return count;
   }
 
   /** {@code (SELECT * FROM input WHERE conditions) AS alias}. */
@@ -168,11 +184,27 @@ final class AsofConditions {
     return result;
   }
 
+  /**
+   * The condition's conjuncts, a row-value equality {@code (a, b) = (c, d)} counted as the
+   * equalities it stands for, {@code a = c} and {@code b = d}, which Calcite's ASOF check takes and
+   * the row form it does not (D337, design 63 §3).
+   */
   private static List<SqlNode> conjuncts(SqlNode condition) {
     List<SqlNode> out = new ArrayList<>();
     if (condition.getKind() == SqlKind.AND) {
       for (SqlNode operand : ((SqlCall) condition).getOperandList()) {
         out.addAll(conjuncts(operand));
+      }
+    } else if (condition.getKind() == SqlKind.EQUALS
+        && ((SqlCall) condition).operand(0) instanceof SqlCall left
+        && ((SqlCall) condition).operand(1) instanceof SqlCall right
+        && left.getKind() == SqlKind.ROW
+        && right.getKind() == SqlKind.ROW
+        && left.operandCount() == right.operandCount()) {
+      for (int i = 0; i < left.operandCount(); i++) {
+        out.add(
+            SqlStdOperatorTable.EQUALS.createCall(
+                condition.getParserPosition(), left.operand(i), right.operand(i)));
       }
     } else {
       out.add(condition);

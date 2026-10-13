@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "13158783822691745807",
+  "planDigest": "6538606491620749906",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -111,7 +111,7 @@
                     "name": "$f1",
                     "type": {
                       "kind": "TYPE_KIND_DECIMAL",
-                      "precision": 31,
+                      "precision": 32,
                       "scale": 4
                     }
                   },
@@ -144,7 +144,7 @@
                         "name": "$f1",
                         "type": {
                           "kind": "TYPE_KIND_DECIMAL",
-                          "precision": 31,
+                          "precision": 32,
                           "scale": 4
                         }
                       }
@@ -165,7 +165,7 @@
                             "name": "$f1",
                             "type": {
                               "kind": "TYPE_KIND_DECIMAL",
-                              "precision": 31,
+                              "precision": 32,
                               "scale": 4
                             }
                           },
@@ -204,7 +204,7 @@
                                 "name": "$f1",
                                 "type": {
                                   "kind": "TYPE_KIND_DECIMAL",
-                                  "precision": 31,
+                                  "precision": 32,
                                   "scale": 4
                                 }
                               }
@@ -231,7 +231,7 @@
                                     "name": "$f1",
                                     "type": {
                                       "kind": "TYPE_KIND_DECIMAL",
-                                      "precision": 31,
+                                      "precision": 32,
                                       "scale": 4
                                     }
                                   },
@@ -270,7 +270,7 @@
                                         "name": "$f1",
                                         "type": {
                                           "kind": "TYPE_KIND_DECIMAL",
-                                          "precision": 31,
+                                          "precision": 32,
                                           "scale": 4
                                         }
                                       }
@@ -309,7 +309,7 @@
                                             "name": "$f1",
                                             "type": {
                                               "kind": "TYPE_KIND_DECIMAL",
-                                              "precision": 31,
+                                              "precision": 32,
                                               "scale": 4
                                             }
                                           }
@@ -666,7 +666,7 @@
                                                 "name": "$f1",
                                                 "type": {
                                                   "kind": "TYPE_KIND_DECIMAL",
-                                                  "precision": 31,
+                                                  "precision": 32,
                                                   "scale": 4
                                                 }
                                               }
@@ -770,7 +770,7 @@
                                               {
                                                 "type": {
                                                   "kind": "TYPE_KIND_DECIMAL",
-                                                  "precision": 31,
+                                                  "precision": 32,
                                                   "scale": 4
                                                 },
                                                 "call": {
@@ -869,7 +869,7 @@
                                       {
                                         "type": {
                                           "kind": "TYPE_KIND_DECIMAL",
-                                          "precision": 31,
+                                          "precision": 32,
                                           "scale": 4
                                         },
                                         "fieldRef": {
@@ -947,7 +947,7 @@
                               {
                                 "type": {
                                   "kind": "TYPE_KIND_DECIMAL",
-                                  "precision": 31,
+                                  "precision": 32,
                                   "scale": 4
                                 },
                                 "fieldRef": {
@@ -1038,7 +1038,7 @@
                       {
                         "type": {
                           "kind": "TYPE_KIND_DECIMAL",
-                          "precision": 31,
+                          "precision": 32,
                           "scale": 4
                         },
                         "fieldRef": {
@@ -1236,7 +1236,7 @@
                   {
                     "type": {
                       "kind": "TYPE_KIND_DECIMAL",
-                      "precision": 31,
+                      "precision": 32,
                       "scale": 4
                     },
                     "fieldRef": {

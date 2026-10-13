@@ -1179,6 +1179,69 @@ input of an `ASOF JOIN`. In a `LEFT ASOF JOIN` it is refused, because a left row
 fails it must still appear, with NULLs; put it in `WHERE` instead. Qualify each column
 in `ON` with its input's alias, so ChalkQL can tell which input a condition is on.
 
+A key may be a row of columns, `ON (c.book, c.asset) = (k.book, k.asset)`. The match may
+be on a column the left side computes, such as each day's close in a `WITH` block:
+
+```sql
+WITH days (trading_day, closes) AS (
+  VALUES ('2026-10-11', TIMESTAMP '2026-10-12 00:00:00'),
+         ('2026-10-12', LEAST(TIMESTAMP '2026-10-13 00:00:00', CAST(@now AS TIMESTAMP(9))))
+)
+SELECT d.trading_day, k.asset, c.qty
+FROM days d
+CROSS JOIN positions k
+ASOF JOIN position_changes c MATCH_CONDITION c.ts <= d.closes ON c.asset = k.asset
+```
+
+`MATCH_CONDITION` itself compares a column of each input, so compute the value in the
+input, as here, rather than writing the expression in it.
+
+Over a long log, an `ASOF JOIN` need not read the whole log. If the right input is an
+in-process table with an ordered index on its `ON` columns and then its time, such as
+`(asset, ts)`, ChalkQL may seek the index once for each distinct key and time on the left,
+and read one row each time. It chooses by cost, so a short table is still read. A condition
+that fixes a key column, like `ON r.currency = 'EUR'`, is part of each seek. A match with `>=`
+or `>` reads the index backwards, which needs an index that can read backwards from any
+point: POCO's own indexes can, and Akade's cannot, so with Akade only `<=` and `<` seek.
+Where several rows share the keys and the closest time, the seek takes the first it reaches
+in the index, and a plain join the first in the table. An index whose key ends with a unique
+column has no such ties.
+
+### `GROUPING SETS`, `ROLLUP` and `CUBE`
+
+A statement can total by several groupings at once. `GROUP BY ROLLUP(asset, book)` gives a
+row for each asset and book, a subtotal for each asset, and a grand total. `CUBE(asset, book)`
+gives every combination, and `GROUPING SETS ((asset), (book), ())` gives exactly the ones you
+list. Several in one `GROUP BY` multiply: `ROLLUP(asset, book), ROLLUP(venue)` is six
+groupings. The input is read once, however many groupings there are.
+
+In a subtotal, a key the row is not grouped by is NULL. `GROUPING(key, …)` tells that NULL
+from a NULL in the data. It has a bit for each key, the first the most significant, set where
+the row's grouping leaves that key out. So it labels subtotals, and in `HAVING` it picks
+groupings:
+
+```sql
+SELECT CASE WHEN GROUPING(asset) = 1 THEN 'all' ELSE asset END AS asset,
+       venue, SUM(qty) AS qty
+FROM positions
+GROUP BY GROUPING SETS ((asset, venue), (venue))
+```
+
+`GROUPING_ID` is the same function, and `GROUP_ID()` numbers a grouping you list twice. A
+`DISTINCT` aggregate, such as `COUNT(DISTINCT venue)`, is refused with grouping sets: write
+each grouping as its own `GROUP BY`, and join them with `UNION ALL`. Grouping sets are
+computed in the host, never by a source. Under an access policy, every group of every grouping
+has the policy's minimum size.
+
+### A `WITH` block used more than once
+
+A statement that reads one `WITH` block several times, such as one `UNION ALL` branch for each
+level of total, computes the block once for each execution. ChalkQL keeps its rows and gives every
+use the same rows. The same goes for any part of a plan that repeats: a derived table joined to
+itself, or a subquery written twice. A table read on its own, even filtered, is cheaper to read
+again than to keep, so it is still read at each use. The kept rows count against the execution's
+memory budget, `ArenaOptions.MaxBytes`.
+
 ### The current time
 
 `CURRENT_TIMESTAMP`, `LOCALTIMESTAMP` and `CURRENT_DATE` read one instant for each
@@ -1196,6 +1259,23 @@ the date in UTC. A timestamp has precision 6, microseconds, unless you write one
 9: `CURRENT_TIMESTAMP(9)`. A remote source is never sent the current time, so it cannot
 use a "now" of its own. A comparison with it is made in the host.
 
+### DECIMAL arithmetic
+
+A DECIMAL sum, difference, product or quotient is typed as SQL Server types it, with up to
+38 digits. A product of `DECIMAL(p1, s1)` and `DECIMAL(p2, s2)` has scale `s1 + s2`, and a
+quotient keeps at least six fractional digits. Where a result would need more than 38 digits,
+its integer digits are kept and its scale gives way, though not below six places unless the
+integer digits need them too. So `qty * usd_price / usd_rate` over three `DECIMAL(28,8)`
+columns is a `DECIMAL(38,6)`. Each result is computed exactly and rounded half away from zero
+to its scale, as every DECIMAL is. A result whose integer part still does not fit is refused.
+
+### `LEAST` and `GREATEST`
+
+`LEAST(a, b, …)` and `GREATEST(a, b, …)` take values of any one comparable type: numbers,
+text, dates or timestamps. A NULL argument is skipped, as PostgreSQL and DuckDB skip it, so
+`LEAST(5, NULL)` is 5, and the result is NULL only when every argument is. Text compares by
+code point, as `ORDER BY` does.
+
 ### Differences between timestamps
 
 `TIMESTAMPDIFF(unit, from, to)` counts the whole units from one `DATE`, `TIMESTAMP` or
@@ -1210,7 +1290,10 @@ SELECT id, TIMESTAMPDIFF(MINUTE, placed_at, shipped_at) AS minutes_to_ship FROM 
 ```
 
 The standard form, `(to - from) DAY TO SECOND`, is an interval, which reaches you as a
-`TimeSpan`. An interval compares with an interval, and cast to an integer it is the same
+`TimeSpan`. An interval adds to or subtracts from one of its kind, is negated, and is
+multiplied or divided by a number, rounded to the microsecond: `utc_offset_minutes * INTERVAL
+'1' MINUTE` moves a timestamp by a zone's offset. A month interval is only multiplied, by a
+whole number. An interval compares with an interval, and cast to an integer it is the same
 count `TIMESTAMPDIFF` gives in its last unit: `CAST((to - from) MINUTE AS BIGINT)`. A bare
 `to - from`, with no unit, is refused, as the SQL standard has it. To keep the recent rows,
 compare the column with a bound, `ts >= CURRENT_TIMESTAMP - INTERVAL '5' MINUTE`, rather

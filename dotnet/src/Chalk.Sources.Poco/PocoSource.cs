@@ -1622,7 +1622,8 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
             _arena = context.Arena;
             _batchSize = request.BatchSize;
             _rowGoal = request.RowGoal;
-            _positions = Positions((IPositionalPocoIndex<T>)_snapshot.Indexes[ordinal], request.Ranges)
+            _positions = Positions(
+                    (IPositionalPocoIndex<T>)_snapshot.Indexes[ordinal], request.Ranges, request.RowsPerRange)
                 .GetEnumerator();
             _buffer = context.Arena.Rent<int>(Math.Max(1, request.BatchSize));
             try
@@ -1751,15 +1752,21 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
     /// emits sorted, non-overlapping ranges; the bitmap is the cheap insurance §3 asks for, and it
     /// keeps the union in index order.
     /// </summary>
+    /// <summary>
+    /// The positions the ranges cover, in index order and each once; only the first
+    /// <paramref name="perRange"/> of each range's where a number is given (D338).
+    /// </summary>
     private static IEnumerable<int> Positions(
         IPositionalPocoIndex<T> index,
-        IReadOnlyList<IndexKeyRange> ranges)
+        IReadOnlyList<IndexKeyRange> ranges,
+        int? perRange)
     {
         if (ranges.Count == 1)
         {
             var range = ranges[0];
 
             index.GetWindow(range, out var from, out var to);
+            to = Limited(from, to, perRange);
 
             for (var ordinal = from; ordinal < to; ordinal++)
             {
@@ -1774,6 +1781,7 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
         for (var r = 0; r < ranges.Count; r++)
         {
             index.GetWindow(ranges[r], out var from, out var to);
+            to = Limited(from, to, perRange);
 
             for (var ordinal = from; ordinal < to; ordinal++)
             {
@@ -1786,6 +1794,10 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
             }
         }
     }
+
+    /// <summary>The end of a window cut to its first <paramref name="perRange"/> rows, if a number is given.</summary>
+    internal static int Limited(int from, int to, int? perRange) =>
+        perRange is { } rows && to - from > rows ? from + Math.Max(rows, 0) : to;
 }
 
 /// <summary>
@@ -1854,7 +1866,8 @@ internal sealed class PocoIndexRowScan<T> : IAsyncEnumerable<RecordBatch>
             _batchSize = request.BatchSize;
             _rowGoal = request.RowGoal;
             _snapshot = table.Lease(captured);
-            _source = Rows(_snapshot.Indexes[ordinal], request.Ranges, request.Reverse).GetEnumerator();
+            _source = Rows(_snapshot.Indexes[ordinal], request.Ranges, request.Reverse, request.RowsPerRange)
+                .GetEnumerator();
             _staging = ArrayPool<T>.Shared.Rent(Math.Max(1, request.BatchSize));
             try
             {
@@ -1971,32 +1984,36 @@ internal sealed class PocoIndexRowScan<T> : IAsyncEnumerable<RecordBatch>
     /// so the planner's promise of non-overlapping ranges is what actually keeps this honest.
     /// </summary>
     private static IEnumerable<T> Rows(
-        IPocoIndex<T> index, IReadOnlyList<IndexKeyRange> ranges, bool reverse)
+        IPocoIndex<T> index, IReadOnlyList<IndexKeyRange> ranges, bool reverse, int? perRange)
     {
         if (ranges.Count == 1)
         {
-            return Lookup(index, ranges[0], reverse);
+            return Lookup(index, ranges[0], reverse, perRange);
         }
 
-        return Deduplicated(index, ranges, reverse);
+        return Deduplicated(index, ranges, reverse, perRange);
     }
 
     /// <summary>
     /// The rows one range matches, forwards or — where the plan asked and the index declared it —
-    /// from the last to the first (D283).
+    /// from the last to the first (D283); only the first <paramref name="perRange"/> of them where a
+    /// number is given (D338), which a host's own index then stops enumerating at.
     /// </summary>
-    private static IEnumerable<T> Lookup(IPocoIndex<T> index, IndexKeyRange range, bool reverse) =>
-        reverse && index is IReversiblePocoIndex<T> reversible
+    private static IEnumerable<T> Lookup(IPocoIndex<T> index, IndexKeyRange range, bool reverse, int? perRange)
+    {
+        var rows = reverse && index is IReversiblePocoIndex<T> reversible
             ? reversible.LookupReversed(range)
             : index.Lookup(range);
+        return perRange is { } count ? rows.Take(count) : rows;
+    }
 
     private static IEnumerable<T> Deduplicated(
-        IPocoIndex<T> index, IReadOnlyList<IndexKeyRange> ranges, bool reverse)
+        IPocoIndex<T> index, IReadOnlyList<IndexKeyRange> ranges, bool reverse, int? perRange)
     {
         var seen = new HashSet<T>();
         foreach (var range in ranges)
         {
-            foreach (var row in Lookup(index, range, reverse))
+            foreach (var row in Lookup(index, range, reverse, perRange))
             {
                 if (seen.Add(row))
                 {
@@ -2078,7 +2095,7 @@ internal sealed class PocoClusteredScan<T> : IAsyncEnumerable<RecordBatch>
             _batchSize = request.BatchSize;
             _rowGoal = request.RowGoal;
             _projection = [.. request.Projection];
-            _windows = Windows(_index, request.Ranges);
+            _windows = Windows(_index, request.Ranges, request.RowsPerRange);
             _position = _windows.Length == 0 ? 0 : _windows[0];
             Current = null!;
         }
@@ -2145,22 +2162,32 @@ internal sealed class PocoClusteredScan<T> : IAsyncEnumerable<RecordBatch>
         }
 
         /// <summary>
-        /// The ranges as half-open ordinal windows of the copy, flattened into (from, to) pairs.
-        /// The planner emits sorted, non-overlapping ranges; clipping each window to where the last
-        /// one ended is the same insurance the positional path's bitmap is, done on intervals — a
+        /// The ranges as half-open ordinal windows of the copy, flattened into (from, to) pairs, each
+        /// cut to its first <paramref name="perRange"/> rows where a number is given (D338). The
+        /// planner emits sorted, non-overlapping ranges, but an ASOF join's seeks come in the order of
+        /// its left rows, so the windows are put in order first; clipping each to where the last one
+        /// ended is then the same insurance the positional path's bitmap is, done on intervals — a
         /// row is never emitted twice, and what comes out is in the index's key order, which is what
         /// the IR node promises.
         /// </summary>
-        private static int[] Windows(ClusteredIndex<T> index, IReadOnlyList<IndexKeyRange> ranges)
+        private static int[] Windows(
+            ClusteredIndex<T> index, IReadOnlyList<IndexKeyRange> ranges, int? perRange)
         {
-            var windows = new int[ranges.Count * 2];
-            var count = 0;
-            var emitted = 0;
-
+            var found = new (int From, int To)[ranges.Count];
             for (var r = 0; r < ranges.Count; r++)
             {
                 index.GetWindow(ranges[r], out var from, out var to);
-                from = Math.Max(from, emitted);
+                found[r] = (from, PocoIndexScan<T>.Limited(from, to, perRange));
+            }
+
+            Array.Sort(found, static (a, b) => a.From.CompareTo(b.From));
+
+            var windows = new int[ranges.Count * 2];
+            var count = 0;
+            var emitted = 0;
+            foreach (var (start, to) in found)
+            {
+                var from = Math.Max(start, emitted);
                 if (from >= to)
                 {
                     continue;

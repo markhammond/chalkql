@@ -196,6 +196,13 @@ internal static class KernelRegistry
             return TemporalInterval(call, result, left, right);
         }
 
+        // D337: interval arithmetic. An interval plus or minus one of its kind is its count plus or
+        // minus the other's; a number scales one, or divides it.
+        if (IrTypes.IsInterval(result.Kind))
+        {
+            return IntervalArithmetic(call, result, left, right);
+        }
+
         if (!IrTypes.IsNumeric(result.Kind))
         {
             throw new UnsupportedFeatureException(
@@ -239,6 +246,51 @@ internal static class KernelRegistry
     /// <c>temporal ± INTERVAL_DAY</c>. The interval may be written either side of a <c>+</c>; a
     /// <c>-</c> only makes sense with the temporal on the left, which is the only form SQL builds.
     /// </summary>
+    /// <summary>
+    /// Interval arithmetic (D337, design 63 §6): an interval plus or minus one of its kind, an
+    /// interval times a number either way round, and an interval divided by a number. An
+    /// INTERVAL_YEAR, counted in months, is only multiplied, and only by an integer, since a fraction
+    /// of a month has no exact count.
+    /// </summary>
+    private static IVectorExpr IntervalArithmetic(
+        ScalarCall call, ChalkType result, IVectorExpr left, IVectorExpr right)
+    {
+        var months = result.Kind == TypeKind.IntervalYear;
+        switch (call.Function)
+        {
+            case FunctionId.Add or FunctionId.Subtract
+                when left.Type.Kind == result.Kind && right.Type.Kind == result.Kind:
+                return (months, call.Function) switch
+                {
+                    (false, FunctionId.Add) => new BinaryNumericExpr<long, AddOp<long>>(result, left, right),
+                    (false, _) => new BinaryNumericExpr<long, SubtractOp<long>>(result, left, right),
+                    (true, FunctionId.Add) => new BinaryNumericExpr<int, AddOp<int>>(result, left, right),
+                    _ => new BinaryNumericExpr<int, SubtractOp<int>>(result, left, right),
+                };
+            case FunctionId.Multiply or FunctionId.Divide:
+            {
+                var leftIsInterval = left.Type.Kind == result.Kind;
+                var (interval, factor) = leftIsInterval ? (left, right) : (right, left);
+                var divide = call.Function == FunctionId.Divide;
+                if (interval.Type.Kind == result.Kind
+                    && IrTypes.IsNumeric(factor.Type.Kind)
+                    && (!divide || leftIsInterval)
+                    && (!months || (!divide && IrTypes.IsInteger(factor.Type.Kind))))
+                {
+                    return new IntervalScaleExpr(result, interval, factor, divide);
+                }
+
+                break;
+            }
+        }
+
+        throw new UnsupportedFeatureException(
+            ChalkErrorCodes.UnsupportedFunction,
+            $"{call.Function}({left.Type}, {right.Type})",
+            "An interval adds to or subtracts from one of its kind, and is multiplied or divided by a "
+            + "number; an INTERVAL_YEAR, counted in months, only by a whole number.");
+    }
+
     /// <summary>A DATE, TIMESTAMP or TIMESTAMP_TZ: a kind two of which subtract to an interval.</summary>
     private static bool IsInstant(TypeKind kind) =>
         kind is TypeKind.Date or TypeKind.Timestamp or TypeKind.TimestampTz;
@@ -348,6 +400,14 @@ internal static class KernelRegistry
                 ChalkErrorCodes.UnsupportedFunction,
                 $"{call.Function}({operand.Type})",
                 "FLOOR, CEIL and ROUND are defined for FP and DECIMAL.");
+        }
+
+        // D337: an interval negated, its count negated.
+        if (IrTypes.IsInterval(result.Kind) && call.Function == FunctionId.Negate)
+        {
+            return result.Kind == TypeKind.IntervalYear
+                ? new UnaryNumericExpr<int, NegateOp<int>>(result, operand)
+                : new UnaryNumericExpr<long, NegateOp<long>>(result, operand);
         }
 
         if (!IrTypes.IsNumeric(result.Kind))

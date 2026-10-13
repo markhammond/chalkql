@@ -26,6 +26,24 @@ message Plan {
   Rel root = 6;
   // Types of the dynamic parameters, by DynamicParam.index.
   repeated Type parameter_types = 7;
+  // Subtrees the plan uses more than once, each computed once for an execution and read by every
+  // SharedRef that names it (design 63 §2). A shared plan may name only shared plans listed before
+  // it. Empty in a plan that repeats nothing, which is byte-identical to one from before the field.
+  repeated SharedPlan shared = 8;
+}
+
+// One subtree the plan uses more than once.
+message SharedPlan {
+  // Unique within the plan; what a SharedRef names.
+  uint32 id = 1;
+  Rel rel = 2;
+}
+
+// A use of a shared subtree: its rows, as if the subtree stood here. Rel.row_type is the shared
+// plan's. The executor computes the subtree the first time any use is read, keeps its rows for the
+// execution, and gives every use the same rows.
+message SharedRef {
+  uint32 id = 1;
 }
 
 message Rel {
@@ -83,6 +101,12 @@ message Rel {
     AdaptiveJoin adaptive_join = 45;
     MaterialisedInput materialised_input = 46;
     PartitionedScan partitioned_scan = 47;
+
+    // ---- physical: as-of seeks ----
+    AsOfLookupJoin as_of_lookup_join = 48;
+
+    // ---- shared subtrees ----
+    SharedRef shared_ref = 49;
   }
 }
 
@@ -234,9 +258,15 @@ message Project {
 }
 
 // Output row = grouping keys (in order) followed by measures (in order).
+//
+// One grouping is a GROUP BY: the keys are its keys, in its order. More than one is GROUPING SETS,
+// ROLLUP or CUBE: each grouping makes its own groups over the whole input, and the output's keys
+// are every key any grouping names, once each, in ascending field order. A key a grouping does not
+// name is NULL in that grouping's rows, so it is nullable in the output unless every grouping
+// names it. A grouping named twice makes its groups twice, as SQL says.
 message Aggregate {
   Rel input = 1;
-  // v1 executors accept exactly one grouping. Multiple groupings (grouping sets) are reserved.
+  // At least one.
   repeated Grouping groupings = 2;
   repeated Measure measures = 3;
 }
@@ -637,6 +667,47 @@ message AsOfJoin {
   AsOfMatch match = 7;
   // JOIN_TYPE_INNER or JOIN_TYPE_LEFT only.
   JoinType type = 8;
+}
+
+// An AsOfJoin whose right input is an in-process table, answered by seeking one of its ordered
+// indexes rather than reading it all (design 63 §4): for each distinct combination of a left row's
+// keys and time, one range of the index, whose first row is the match. Its answer is AsOfJoin's
+// over `Filter(fixed_columns = fixed_values, Read(table, projection))`, but for ties.
+//
+// The index's key columns begin with the right keys' columns and `fixed_columns`, each once and in
+// any order, and go on with `right_time`'s column, ascending. A range holds each key column to the
+// left row's value or its fixed value, and bounds the time column by the left row's time: it is read
+// backwards for GE and GT, which needs the index's reversal to be ANY, and forwards for LE and LT.
+// The executor asks the source for one row per range (IndexLookupRequest.RowsPerRange); a source
+// that returns more gives the same answer, more slowly.
+//
+// Ties: among right rows with the same keys and the closest time, AsOfJoin takes the first in the
+// right input's order, and this the first the index reads in its direction. The two agree for an
+// index whose key ends with a unique column.
+//
+// Output row = left fields then the projection's, as AsOfJoin's.
+message AsOfLookupJoin {
+  Rel left = 1;
+  TableRef table = 2;
+  string index = 3;
+  // Table column indexes, in output order: the right side's fields.
+  repeated uint32 projection = 4;
+  // Equality keys, pairwise of the same type: fields of the left input, and fields of the right
+  // side (positions in `projection`).
+  repeated uint32 left_keys = 5;
+  repeated uint32 right_keys = 6;
+  // Table columns held to one value for the whole execution, and the values: Literals,
+  // DynamicParams, or expressions over no column, as an IndexRange bound is, each of its column's
+  // type. A NULL value matches no row.
+  repeated uint32 fixed_columns = 7;
+  repeated Expr fixed_values = 8;
+  // The MATCH_CONDITION: a left field and a right field (a position in `projection`) of the same
+  // type, compared as `left_time <op> right_time`.
+  uint32 left_time = 9;
+  uint32 right_time = 10;
+  AsOfMatch match = 11;
+  // JOIN_TYPE_INNER or JOIN_TYPE_LEFT only.
+  JoinType type = 12;
 }
 
 enum AsOfMatch {

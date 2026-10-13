@@ -52,6 +52,57 @@ public sealed class AsofConditionTests(SharedSidecar sidecar) : IClassFixture<Sh
         Assert.Equal(explicitRows, rows);
     }
 
+    /// <summary>
+    /// D338, design 63 §3: a match column the left side computes — a <c>VALUES</c> timestamp, which
+    /// Calcite casts to the right side's precision, or <c>LEAST(…, @now)</c> — and a row-value key.
+    /// Each answers what the same statement over a column does. The first two were a planner
+    /// internal error, and the third was refused.
+    /// </summary>
+    [Theory]
+    [InlineData("ASOF JOIN", "WITH d (closes) AS (VALUES (TIMESTAMP '2026-10-12 12:00:12')) SELECT t.id, r.rate FROM d CROSS JOIN trades t ASOF JOIN fx_rates r MATCH_CONDITION r.ts <= d.closes ON r.currency = t.currency ORDER BY t.id", "1|0.9 2|1.2 3|0.9")]
+    [InlineData("LEFT ASOF JOIN", "WITH d (closes) AS (VALUES (TIMESTAMP '2026-10-11 00:00:00')) SELECT t.id, r.rate FROM d CROSS JOIN trades t LEFT ASOF JOIN fx_rates r MATCH_CONDITION r.ts <= d.closes ON r.currency = t.currency ORDER BY t.id", "1| 2| 3|")]
+    [InlineData("row key", "SELECT t.id, r.rate FROM trades t ASOF JOIN fx_rates r MATCH_CONDITION t.ts >= r.ts ON (r.currency, r.currency) = (t.currency, t.currency) ORDER BY t.id", "1|1 2|1.2 3|0.8")]
+    public async Task A_computed_match_column_and_a_row_key_join_as_a_column_does(string form, string sql, string expected)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var engine = await CreateEngineAsync();
+
+        Assert.Equal(expected, await RowsAsync(engine, sql));
+        Assert.NotEmpty(form);
+    }
+
+    /// <summary>
+    /// The owner's form: today's close is <c>LEAST(the day's close, @now)</c>, computed in a
+    /// <c>WITH</c> block and matched on as its column.
+    /// </summary>
+    [Fact]
+    public async Task A_close_computed_with_least_and_a_parameter_is_matched_on()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var engine = await CreateEngineAsync();
+        var prepared = await engine.PrepareAsync(
+            "WITH d (closes) AS (VALUES (LEAST(TIMESTAMP '2026-10-12 12:00:12', CAST(? AS TIMESTAMP(9))))) "
+            + "SELECT t.id, r.rate FROM d CROSS JOIN trades t "
+            + "ASOF JOIN fx_rates r MATCH_CONDITION r.ts <= d.closes ON r.currency = t.currency ORDER BY t.id");
+
+        var rows = new List<string>();
+        await using var execution = await engine.ExecuteAsync(prepared, (IReadOnlyList<object?>)[T0.AddSeconds(5)]);
+        await foreach (var batch in execution.Batches)
+        {
+            var ids = (Int32Array)batch.Column(0);
+            var rates = (DoubleArray)batch.Column(1);
+            for (var i = 0; i < batch.Length; i++)
+            {
+                rows.Add($"{ids.GetValue(i)}|{rates.GetValue(i)?.ToString(CultureInfo.InvariantCulture)}");
+            }
+
+            batch.Dispose();
+        }
+
+        // The close is @now, 12:00:05, the earlier of the two.
+        Assert.Equal("1|1 2|1.1 3|1", string.Join(' ', rows));
+    }
+
     [Fact]
     public async Task A_condition_on_the_left_input_of_a_left_asof_join_is_refused_saying_what_to_do()
     {

@@ -848,6 +848,7 @@ public final class PlannerPipeline implements AutoCloseable {
     // this row, so projecting first would leave it pointing at a column the row no longer has
     // (ADR 0014).
     RelNode logical = root.rel;
+    GroupingSetsSupport.check(logical);
 
     // The stages that actually ran. A narrowing that hit says which plan it started from in their
     // place, because parse, validation and conversion are exactly what it did not do (D233).

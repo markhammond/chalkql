@@ -666,7 +666,7 @@ public final class IndexMatcher {
    * functions and casts that are deterministic within an execution, such as {@code CAST(? AS
    * TIMESTAMP(9)) - INTERVAL '5' MINUTE} or {@code CURRENT_TIMESTAMP - INTERVAL '5' MINUTE}.
    */
-  static boolean isComputed(RexNode node) {
+  public static boolean isComputed(RexNode node) {
     return node instanceof org.apache.calcite.rex.RexCall
         && !org.apache.calcite.rex.RexUtil.containsInputRef(node)
         && !org.apache.calcite.rex.RexUtil.containsFieldAccess(node)

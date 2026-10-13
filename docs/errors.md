@@ -317,8 +317,8 @@ A statement that is not a query: one that changes a schema, a transaction or a s
 
 ### UnsupportedSql
 
-Valid SQL that ChalkQL does not plan: a join type, grouping sets, a LATERAL form it cannot
-decorrelate, a table function used outside its form.
+Valid SQL that ChalkQL does not plan: a join type, a `DISTINCT` aggregate with grouping sets, a
+LATERAL form it cannot decorrelate, a table function used outside its form.
 
 **What to do:** Rewrite the statement; the message says what is not planned.
 

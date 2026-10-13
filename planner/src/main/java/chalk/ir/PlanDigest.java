@@ -50,6 +50,11 @@ public final class PlanDigest {
     if (plan.hasRoot()) {
       builder.setRoot(stripEstimates(plan.getRoot()));
     }
+    // The subtrees the plan shares are its shape as much as the root is (D338).
+    for (int i = 0; i < builder.getSharedCount(); i++) {
+      chalk.ir.v1.SharedPlan shared = builder.getShared(i);
+      builder.setShared(i, shared.toBuilder().setRel(stripEstimates(shared.getRel())));
+    }
     return builder.build();
   }
 
@@ -72,7 +77,8 @@ public final class PlanDigest {
     return String.format("%016x", digest);
   }
 
-  private static Rel stripEstimates(Rel rel) {
+  /** {@code rel} with every estimate under it zeroed: its shape, which equal subtrees share. */
+  public static Rel stripEstimates(Rel rel) {
     Rel.Builder builder = rel.toBuilder();
     builder.setEstRowCount(0.0);
     switch (rel.getKindCase()) {
@@ -117,6 +123,10 @@ public final class PlanDigest {
         builder.getAsOfJoinBuilder().setLeft(stripEstimates(rel.getAsOfJoin().getLeft()));
         builder.getAsOfJoinBuilder().setRight(stripEstimates(rel.getAsOfJoin().getRight()));
       }
+      case AS_OF_LOOKUP_JOIN ->
+          builder
+              .getAsOfLookupJoinBuilder()
+              .setLeft(stripEstimates(rel.getAsOfLookupJoin().getLeft()));
       case SET_OP -> {
         SetOp.Builder setOp = builder.getSetOpBuilder();
         for (int i = 0; i < setOp.getInputsCount(); i++) {

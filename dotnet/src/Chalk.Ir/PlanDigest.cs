@@ -59,6 +59,15 @@ public static class PlanDigest
             StripEstimates(copy.Root);
         }
 
+        // The subtrees the plan shares are its shape as much as the root is (D338).
+        foreach (var shared in copy.Shared)
+        {
+            if (shared.Rel is not null)
+            {
+                StripEstimates(shared.Rel);
+            }
+        }
+
         return copy;
     }
 

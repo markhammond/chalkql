@@ -145,7 +145,8 @@ public final class RelToIr {
     for (RelDataTypeField field : parameterRowType.getFieldList()) {
       plan.addParameterTypes(types.toIr(field.getType()));
     }
-    Plan withoutDigest = plan.build();
+    // A subtree the plan repeats, such as a WITH block read twice, is written once (D338).
+    Plan withoutDigest = SharedSubtrees.share(plan.build());
     return withoutDigest.toBuilder().setPlanDigest(PlanDigest.compute(withoutDigest)).build();
   }
 
@@ -164,6 +165,8 @@ public final class RelToIr {
       builder.setRead(read(scan));
     } else if (node instanceof ChalkIndexLookup lookup) {
       builder.setIndexLookup(indexLookup(lookup));
+    } else if (node instanceof chalk.planner.plan.rel.ChalkAsOfLookupJoin seek) {
+      builder.setAsOfLookupJoin(asOfLookupJoin(seek));
     } else if (node instanceof ChalkFilter filter) {
       builder.setFilter(
           Filter.newBuilder()
@@ -544,6 +547,43 @@ public final class RelToIr {
         .setType(
             join.getJoinType() == JoinRelType.LEFT_ASOF ? JoinType.JOIN_TYPE_LEFT : JoinType.JOIN_TYPE_INNER)
         .build();
+  }
+
+  /**
+   * An ASOF join answered by seeking an index (D338): the plain join's keys, time and type, the
+   * table read as an index lookup reads it, and the values the right input's filter fixed, each in
+   * its column's own type, as a range bound is.
+   */
+  private chalk.ir.v1.AsOfLookupJoin asOfLookupJoin(chalk.planner.plan.rel.ChalkAsOfLookupJoin seek) {
+    // Its key columns are an index's, and no index is over a composite column, so there is no
+    // composite key here for refuseCompositeKeys to find.
+    ChalkTable table = seek.chalkTable();
+    chalk.ir.v1.AsOfLookupJoin.Builder ir =
+        chalk.ir.v1.AsOfLookupJoin.newBuilder()
+            .setLeft(toRel(seek.getInput()))
+            .setTable(
+                TableRef.newBuilder()
+                    .setSourceId(table.sourceId())
+                    .setSchema(table.schemaName())
+                    .setTable(table.tableName()))
+            .setIndex(seek.index().getName())
+            .addAllProjection(seek.projection())
+            .addAllLeftKeys(unsigned(seek.leftKeys()))
+            .addAllRightKeys(unsigned(seek.rightKeys()))
+            .setLeftTime(seek.leftTime())
+            .setRightTime(seek.rightTime())
+            .setMatch(asOfMatch(seek.match()))
+            .setType(
+                seek.joinType() == JoinRelType.LEFT_ASOF
+                    ? JoinType.JOIN_TYPE_LEFT
+                    : JoinType.JOIN_TYPE_INNER);
+    for (int i = 0; i < seek.fixedColumns().size(); i++) {
+      int column = seek.fixedColumns().get(i);
+      ir.addFixedColumns(column);
+      ir.addFixedValues(
+          boundOfType(seek.fixedValues().get(i), table.column(column).getType(), seek.getCluster()));
+    }
+    return ir.build();
   }
 
   private static AsOfMatch asOfMatch(SqlKind kind) {
@@ -1045,6 +1085,11 @@ public final class RelToIr {
    */
   private Expr bound(RexNode node, ChalkIndexLookup lookup, int keyPosition) {
     Type type = lookup.chalkTable().column(lookup.index().getColumns(keyPosition)).getType();
+    return boundOfType(node, type, lookup.getCluster());
+  }
+
+  /** A value compared with a column of {@code type}, written in that type, as a range bound is. */
+  private Expr boundOfType(RexNode node, Type type, org.apache.calcite.plan.RelOptCluster cluster) {
     if (node instanceof RexLiteral literal) {
       return Expr.newBuilder()
           .setType(type)
@@ -1060,14 +1105,14 @@ public final class RelToIr {
 
     // A computed bound (D337), cast to the key column's own type where it is not already: the
     // client computes it once and compares the value with the keys in the column's units.
-    org.apache.calcite.rel.type.RelDataTypeFactory types = lookup.getCluster().getTypeFactory();
+    org.apache.calcite.rel.type.RelDataTypeFactory types = cluster.getTypeFactory();
     org.apache.calcite.rel.type.RelDataType column =
         types.createTypeWithNullability(
             new chalk.planner.types.TypeMapper(types).toCalcite(type), node.getType().isNullable());
     RexNode cast =
         org.apache.calcite.sql.type.SqlTypeUtil.equalSansNullability(types, node.getType(), column)
             ? node
-            : lookup.getCluster().getRexBuilder().makeCast(column, node);
+            : cluster.getRexBuilder().makeCast(column, node);
     return rex.convert(cast);
   }
 
@@ -1251,15 +1296,31 @@ public final class RelToIr {
   }
 
   private Aggregate aggregate(org.apache.calcite.rel.core.Aggregate node) {
-    if (node.getGroupSets().size() != 1) {
+    // One grouping per set (D338): GROUPING SETS, ROLLUP and CUBE, and two ROLLUPs side by side,
+    // all arrive as one aggregate with a list of sets. The output's keys are the sets' union in
+    // ascending field order, which is Calcite's group set, so the two must agree: a group set that
+    // named a key no set does would make a key that is always NULL, which no SQL Calcite converts
+    // produces.
+    if (node.getGroupSets().size() > 1
+        && !org.apache.calcite.util.ImmutableBitSet.union(node.getGroupSets())
+            .equals(node.getGroupSet())) {
       throw new UnsupportedFeatureException(
           ErrorCode.UNSUPPORTED_SQL,
-          "grouping sets", "A plan carries exactly one grouping.");
+          "an aggregate whose keys are not its grouping sets' keys",
+          "It groups by " + node.getGroupSet() + " over the sets " + node.getGroupSets() + ".");
     }
     Aggregate.Builder aggregate = Aggregate.newBuilder().setInput(toRel(node.getInput()));
-    Grouping.Builder grouping = Grouping.newBuilder();
-    node.getGroupSet().forEach(grouping::addKeys);
-    aggregate.addGroupings(grouping);
+    if (node.getGroupSets().size() == 1) {
+      Grouping.Builder grouping = Grouping.newBuilder();
+      node.getGroupSet().forEach(grouping::addKeys);
+      aggregate.addGroupings(grouping);
+    } else {
+      for (org.apache.calcite.util.ImmutableBitSet set : node.getGroupSets()) {
+        Grouping.Builder grouping = Grouping.newBuilder();
+        set.forEach(grouping::addKeys);
+        aggregate.addGroupings(grouping);
+      }
+    }
 
     RelDataType inputRow = node.getInput().getRowType();
     // D58: a LIST has no equality, so nothing groups by one, and nothing de-duplicates one for a

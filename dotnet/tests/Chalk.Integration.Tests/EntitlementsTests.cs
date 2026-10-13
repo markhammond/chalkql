@@ -186,6 +186,35 @@ public sealed class EntitlementsTests(SharedSidecar sidecar)
                 "SELECT org_id, SUM(amount) FROM orders GROUP BY org_id ORDER BY org_id", mixed));
     }
 
+    /// <summary>
+    /// Under grouping sets every group of every set has the floor (D338, design 63 §8 b): an
+    /// auditor of O1 and O2 sees O1's four orders summed, O2's two as NULL, and the grand total of
+    /// all six, which clears the floor. The total less O1 is O2's sum, as two statements already
+    /// gave it: the guard is query-set-size control, and that is its stated limit.
+    /// </summary>
+    [Fact]
+    public async Task Q13_every_set_of_a_rollup_has_the_floor()
+    {
+        var auditor = TenancyFixture.Principal(
+            user: 7, managerOrgs: [], agentOrgs: [], auditorOrgs: [1, 2], subjectPairs: []);
+        var o1 = TenancyFixture.Orders.Where(o => o.OrgId == 1).Sum(o => o.Amount);
+        var all = TenancyFixture.Orders.Where(o => o.OrgId is 1 or 2).Sum(o => o.Amount);
+
+        Assert.Equal(
+            [$"1|{o1}", "2|", $"|{all}"],
+            await RowsAsync(
+                "SELECT org_id, SUM(amount) FROM orders GROUP BY ROLLUP(org_id) ORDER BY org_id NULLS LAST",
+                auditor));
+
+        // GROUPING reads no value, so it is no disclosure of the key it names.
+        Assert.Equal(
+            [$"1|0|{o1}", "2|0|", $"|1|{all}"],
+            await RowsAsync(
+                "SELECT org_id, GROUPING(org_id), SUM(amount) FROM orders GROUP BY ROLLUP(org_id) "
+                + "ORDER BY org_id NULLS LAST",
+                auditor));
+    }
+
     /// <summary>§8's query 12: every value and query use of a population-only column is refused.</summary>
     [Theory]
     [InlineData("SELECT amount - amount FROM orders")]

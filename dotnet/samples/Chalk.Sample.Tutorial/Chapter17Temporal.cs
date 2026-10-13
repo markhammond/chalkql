@@ -61,9 +61,10 @@ public static class Chapter17Temporal
         Console.WriteLine("        " + Live.Pivot);
         Console.WriteLine();
         Console.WriteLine("    What changed is underneath it. An ASOF join takes, for each movement,");
-        Console.WriteLine("    the last price at or before the movement's own timestamp — one pass");
-        Console.WriteLine("    down two ordered streams rather than a range join and a window over");
-        Console.WriteLine("    its output.");
+        Console.WriteLine("    the last price at or before the movement's own timestamp, rather than");
+        Console.WriteLine("    a range join and a window over its output. The prices are indexed by");
+        Console.WriteLine("    product and time, so the plan seeks that index for each movement");
+        Console.WriteLine("    instead of reading every price.");
 
         var valuation = await entitled.PrepareAsync(Live.Valuation, entitlements.Bind(finance));
         Tutorial.Plan("plan as Finance", valuation.Plan);

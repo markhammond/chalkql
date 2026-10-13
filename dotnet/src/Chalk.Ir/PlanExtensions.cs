@@ -34,6 +34,16 @@ public static class PlanExtensions
             Print(sb, plan.Root, 1);
         }
 
+        // Each subtree the plan shares, once, under the number its uses name (D338).
+        foreach (var shared in plan.Shared)
+        {
+            sb.Append(CultureInfo.InvariantCulture, $"Shared #{shared.Id}").AppendLine();
+            if (shared.Rel is not null)
+            {
+                Print(sb, shared.Rel, 1);
+            }
+        }
+
         return sb.ToString();
     }
 
@@ -142,6 +152,17 @@ public static class PlanExtensions
             + string.Create(
                 CultureInfo.InvariantCulture,
                 $" match=${rel.AsOfJoin.LeftTime} {Describe(rel.AsOfJoin.Match)} ${rel.AsOfJoin.RightTime}"),
+        Rel.KindOneofCase.AsOfLookupJoin => $"AsOfLookupJoin {rel.AsOfLookupJoin.Type} "
+            + $"{rel.AsOfLookupJoin.Table?.Schema}.{rel.AsOfLookupJoin.Table?.Table} index={rel.AsOfLookupJoin.Index} "
+            + $"projection=[{string.Join(",", rel.AsOfLookupJoin.Projection)}] "
+            + $"left_keys=[{string.Join(",", rel.AsOfLookupJoin.LeftKeys)}] right_keys=[{string.Join(",", rel.AsOfLookupJoin.RightKeys)}]"
+            + (rel.AsOfLookupJoin.FixedColumns.Count == 0
+                ? string.Empty
+                : $" fixed=[{string.Join(", ", rel.AsOfLookupJoin.FixedColumns.Zip(rel.AsOfLookupJoin.FixedValues, (c, v) => $"{c}={v.ToPlanText()}"))}]")
+            + string.Create(
+                CultureInfo.InvariantCulture,
+                $" match=${rel.AsOfLookupJoin.LeftTime} {Describe(rel.AsOfLookupJoin.Match)} ${rel.AsOfLookupJoin.RightTime}"),
+        Rel.KindOneofCase.SharedRef => string.Create(CultureInfo.InvariantCulture, $"SharedRef #{rel.SharedRef.Id}"),
         Rel.KindOneofCase.SetOp => $"SetOp {rel.SetOp.Kind} inputs={rel.SetOp.Inputs.Count}",
         Rel.KindOneofCase.Hop => $"Hop time={Ref(rel.Hop.TimeColumn)} "
             + $"slide={rel.Hop.Slide.ToPlanText()} size={rel.Hop.Size.ToPlanText()}",

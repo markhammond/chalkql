@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "13678986616649079713",
+  "planDigest": "13915804674910308852",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -242,7 +242,7 @@
                         "name": "$f3",
                         "type": {
                           "kind": "TYPE_KIND_DECIMAL",
-                          "precision": 31,
+                          "precision": 32,
                           "scale": 4
                         }
                       }
@@ -851,7 +851,7 @@
                             "name": "$f3",
                             "type": {
                               "kind": "TYPE_KIND_DECIMAL",
-                              "precision": 31,
+                              "precision": 32,
                               "scale": 4
                             }
                           }
@@ -1167,7 +1167,7 @@
                           {
                             "type": {
                               "kind": "TYPE_KIND_DECIMAL",
-                              "precision": 31,
+                              "precision": 32,
                               "scale": 4
                             },
                             "call": {
@@ -1264,7 +1264,7 @@
                       {
                         "type": {
                           "kind": "TYPE_KIND_DECIMAL",
-                          "precision": 31,
+                          "precision": 32,
                           "scale": 4
                         },
                         "fieldRef": {

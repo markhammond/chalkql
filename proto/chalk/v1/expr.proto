@@ -368,4 +368,10 @@ enum AggregateFunctionId {
   AGGREGATE_FUNCTION_ID_MODE = 15;
 
   AGGREGATE_FUNCTION_ID_APPROX_COUNT_DISTINCT = 20;
+
+  // (key, …) -> I64, never NULL: SQL's GROUPING, and GROUPING_ID, which is the same function. One
+  // bit for each argument, the first the most significant, set where the row's grouping does not
+  // name that key, so a subtotal's rolled-up key is told apart from a key that is NULL. Every
+  // argument is a FieldRef to one of the aggregate's keys. Under one grouping it is 0.
+  AGGREGATE_FUNCTION_ID_GROUPING = 21;
 }

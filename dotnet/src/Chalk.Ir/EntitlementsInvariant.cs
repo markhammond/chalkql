@@ -75,6 +75,8 @@ internal static class EntitlementsInvariant
         Rel.KindOneofCase.MergeJoin,
         Rel.KindOneofCase.NestedLoopJoin,
         Rel.KindOneofCase.AsOfJoin,
+        Rel.KindOneofCase.AsOfLookupJoin,
+        Rel.KindOneofCase.SharedRef,
         Rel.KindOneofCase.LookupJoin,
         Rel.KindOneofCase.AdaptiveJoin,
         Rel.KindOneofCase.SetOp,
@@ -143,8 +145,15 @@ internal static class EntitlementsInvariant
             return;
         }
 
-        var state = new Walk(options);
+        // A subtree the plan shares is walked once, where the plan lists it, and a use of it traces
+        // to it (D338).
+        var state = new Walk(options, plan.Shared.Where(s => s.Rel is not null).ToDictionary(s => s.Id, s => s.Rel));
         state.Reads(plan.Root, "root");
+        foreach (var shared in plan.Shared)
+        {
+            state.Reads(shared.Rel, $"shared#{shared.Id}");
+        }
+
         if (!state.AnyEntitled)
         {
             return;
@@ -152,11 +161,16 @@ internal static class EntitlementsInvariant
 
         var atRoot = state.Of(plan.Root, "root");
         state.Tainted(plan.Root, "root");
+        foreach (var shared in plan.Shared)
+        {
+            state.Tainted(shared.Rel, $"shared#{shared.Id}");
+        }
+
         state.RootColumns(plan, atRoot);
         state.Labels(plan, atRoot);
     }
 
-    private sealed class Walk(PlanValidationOptions options)
+    private sealed class Walk(PlanValidationOptions options, IReadOnlyDictionary<uint, Rel> shared)
     {
         private readonly Dictionary<Rel, IReadOnlyList<HashSet<Origin>>> _cache = new(Same.Instance);
 
@@ -514,6 +528,18 @@ internal static class EntitlementsInvariant
                     return Joined(
                         rel.AsOfJoin.Left, rel.AsOfJoin.Right, rel.AsOfJoin.Type, path, width);
 
+                case Rel.KindOneofCase.AsOfLookupJoin:
+                    // The left's columns, then the table's read through its index, as an
+                    // IndexLookup reads it: the planner seeks no entitled table, and the compiler
+                    // refuses a plan that does (D338).
+                    return Widen(Of(rel.AsOfLookupJoin.Left, path), width);
+
+                case Rel.KindOneofCase.SharedRef:
+                    // The rows of the subtree it names, whose columns' origins are its (D338).
+                    return shared.TryGetValue(rel.SharedRef.Id, out var body)
+                        ? Widen(Of(body, $"{path}/shared#{rel.SharedRef.Id}"), width)
+                        : None(width);
+
                 case Rel.KindOneofCase.LookupJoin:
                     return Joined(
                         rel.LookupJoin.Driving, rel.LookupJoin.Lookup, rel.LookupJoin.Type, path, width);
@@ -655,23 +681,20 @@ internal static class EntitlementsInvariant
             // Keys then measures (I-IR-7). A key is the input column itself — which is why the
             // planner ships its own column-origin handler for Aggregate rather than Calcite's, whose
             // index is off by the group set (CALCITE-4250) — and a measure is derived from its
-            // arguments.
-            foreach (var grouping in aggregate.Groupings)
+            // arguments. Under grouping sets the keys are every set's, once each (D338).
+            foreach (var key in GroupingKeys.Of(aggregate))
             {
-                foreach (var key in grouping.Keys)
+                if (at >= width)
                 {
-                    if (at >= width)
-                    {
-                        break;
-                    }
-
-                    if (key < input.Count)
-                    {
-                        origins[at].UnionWith(input[(int)key]);
-                    }
-
-                    at++;
+                    break;
                 }
+
+                if (key < input.Count)
+                {
+                    origins[at].UnionWith(input[key]);
+                }
+
+                at++;
             }
 
             foreach (var measure in aggregate.Measures)
@@ -684,10 +707,14 @@ internal static class EntitlementsInvariant
                 // A measure is a value of its *arguments*. Its FILTER decides which rows are
                 // counted rather than what the count is made of, and the report judges an aggregate
                 // the same way — which is why COUNT(*) FILTER (WHERE …) is a count and not a
-                // disclosure of what it filtered on.
-                foreach (var argument in measure.Args)
+                // disclosure of what it filtered on. GROUPING is a value of the row's grouping and
+                // of no column (D338).
+                if (!IsGrouping(measure))
                 {
-                    Derive(origins[at], input, argument);
+                    foreach (var argument in measure.Args)
+                    {
+                        Derive(origins[at], input, argument);
+                    }
                 }
 
                 at++;
@@ -1265,6 +1292,8 @@ internal static class EntitlementsInvariant
                         break;
                     case Rel.KindOneofCase.Read:
                     case Rel.KindOneofCase.IndexLookup:
+                    case Rel.KindOneofCase.AsOfLookupJoin:
+                    case Rel.KindOneofCase.SharedRef:
                     case Rel.KindOneofCase.RemoteQuery:
                     case Rel.KindOneofCase.VirtualTable:
                     case Rel.KindOneofCase.PartitionedScan:
@@ -1307,6 +1336,13 @@ internal static class EntitlementsInvariant
 
             foreach (var measure in aggregate.Measures)
             {
+                // GROUPING's arguments are keys, held to a key's rule above, and it reads none of
+                // their values (D338).
+                if (IsGrouping(measure))
+                {
+                    continue;
+                }
+
                 // A user aggregate is a population aggregate when the client's own catalog says its
                 // host declared it one (D295), which is the question I-IR-E asks of reads too.
                 var population = measure.UserFunction.Length == 0
@@ -1328,6 +1364,9 @@ internal static class EntitlementsInvariant
                 }
             }
         }
+
+        private static bool IsGrouping(Measure measure) =>
+            measure.UserFunction.Length == 0 && measure.Function == AggregateFunctionId.Grouping;
 
         private void Refuse(
             IReadOnlyList<HashSet<Origin>> input, Expr expr, string path, string use) =>

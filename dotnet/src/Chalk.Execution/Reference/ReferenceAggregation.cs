@@ -14,8 +14,61 @@ internal static class ReferenceAggregation
     public static List<object?[]> Run(
         Aggregate aggregate, List<object?[]> input, ReferenceInterpreter interpreter)
     {
-        var keys = aggregate.Groupings[0].Keys.Select(k => (int)k).ToArray();
-        var measures = aggregate.Measures;
+        var keys = GroupingKeys.Of(aggregate);
+        if (aggregate.Groupings.Count == 1 && !aggregate.Measures.Any(IsGrouping))
+        {
+            return Group(keys, aggregate.Measures, input, interpreter);
+        }
+
+        // Grouping sets (D338), the plain way: each set grouped over the whole input by itself, its
+        // rows widened to the output's keys with NULL in each key it does not name, and GROUPING
+        // the bits of the keys it leaves out, the first argument the most significant.
+        var measures = aggregate.Measures.Where(m => !IsGrouping(m)).ToList();
+        var results = new List<object?[]>();
+        foreach (var grouping in aggregate.Groupings)
+        {
+            var named = grouping.Keys.Select(k => (int)k).ToHashSet();
+            foreach (var row in Group([.. keys.Where(named.Contains)], measures, input, interpreter))
+            {
+                var values = new object?[keys.Length + aggregate.Measures.Count];
+                var at = 0;
+                for (var k = 0; k < keys.Length; k++)
+                {
+                    values[k] = named.Contains(keys[k]) ? row[at++] : null;
+                }
+
+                for (var m = 0; m < aggregate.Measures.Count; m++)
+                {
+                    var measure = aggregate.Measures[m];
+                    if (!IsGrouping(measure))
+                    {
+                        values[keys.Length + m] = row[at++];
+                        continue;
+                    }
+
+                    var bits = 0L;
+                    foreach (var argument in measure.Args)
+                    {
+                        bits = bits * 2 + (named.Contains((int)argument.FieldRef.Index) ? 0 : 1);
+                    }
+
+                    values[keys.Length + m] = bits;
+                }
+
+                results.Add(values);
+            }
+        }
+
+        return results;
+    }
+
+    private static bool IsGrouping(Measure measure) =>
+        measure.UserFunction.Length == 0 && measure.Function == AggregateFunctionId.Grouping;
+
+    /// <summary>One grouping: a row for each distinct tuple of <paramref name="keys"/>.</summary>
+    private static List<object?[]> Group(
+        int[] keys, IReadOnlyList<Measure> measures, List<object?[]> input, ReferenceInterpreter interpreter)
+    {
         var order = new List<ReferenceValues.RowKey>();
         var states = new Dictionary<ReferenceValues.RowKey, MeasureState[]>();
 

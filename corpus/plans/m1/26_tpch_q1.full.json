@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "4487219107716264834",
+  "planDigest": "6827638175389747800",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -370,7 +370,7 @@
                         "name": "$f4",
                         "type": {
                           "kind": "TYPE_KIND_DECIMAL",
-                          "precision": 31,
+                          "precision": 32,
                           "scale": 4
                         }
                       },
@@ -590,7 +590,7 @@
                       {
                         "type": {
                           "kind": "TYPE_KIND_DECIMAL",
-                          "precision": 31,
+                          "precision": 32,
                           "scale": 4
                         },
                         "call": {
@@ -671,7 +671,7 @@
                             {
                               "type": {
                                 "kind": "TYPE_KIND_DECIMAL",
-                                "precision": 31,
+                                "precision": 32,
                                 "scale": 4
                               },
                               "call": {
@@ -743,7 +743,7 @@
                             {
                               "type": {
                                 "kind": "TYPE_KIND_DECIMAL",
-                                "precision": 31,
+                                "precision": 32,
                                 "scale": 4
                               },
                               "cast": {
@@ -861,7 +861,7 @@
                       {
                         "type": {
                           "kind": "TYPE_KIND_DECIMAL",
-                          "precision": 31,
+                          "precision": 32,
                           "scale": 4
                         },
                         "fieldRef": {
@@ -991,7 +991,7 @@
                   "type": {
                     "kind": "TYPE_KIND_DECIMAL",
                     "precision": 35,
-                    "scale": 6
+                    "scale": 22
                   },
                   "call": {
                     "function": "FUNCTION_ID_DIVIDE",
@@ -1051,7 +1051,7 @@
                   "type": {
                     "kind": "TYPE_KIND_DECIMAL",
                     "precision": 35,
-                    "scale": 6
+                    "scale": 22
                   },
                   "call": {
                     "function": "FUNCTION_ID_DIVIDE",
@@ -1111,7 +1111,7 @@
                   "type": {
                     "kind": "TYPE_KIND_DECIMAL",
                     "precision": 35,
-                    "scale": 6
+                    "scale": 22
                   },
                   "call": {
                     "function": "FUNCTION_ID_DIVIDE",

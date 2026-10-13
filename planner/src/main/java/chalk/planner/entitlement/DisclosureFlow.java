@@ -144,16 +144,22 @@ final class DisclosureFlow {
               Rel.KindCase.HASH_AGGREGATE,
               Rel.KindCase.STREAM_AGGREGATE),
           // Concatenation by position, left then right — and left alone for a semi or anti join,
-          // which projects no right column. A correlate is the same shape.
+          // which projects no right column. A correlate is the same shape. An ASOF join that seeks
+          // its table has the left as its one input, and the table's columns past it are FULL: the
+          // seek is never chosen over an entitled table (D338).
           of(
               "join",
-              rel -> rel instanceof Join || rel instanceof Correlate,
+              rel ->
+                  rel instanceof Join
+                      || rel instanceof Correlate
+                      || rel instanceof chalk.planner.plan.rel.ChalkAsOfLookupJoin,
               DisclosureFlow::join,
               Rel.KindCase.JOIN,
               Rel.KindCase.HASH_JOIN,
               Rel.KindCase.MERGE_JOIN,
               Rel.KindCase.NESTED_LOOP_JOIN,
               Rel.KindCase.AS_OF_JOIN,
+              Rel.KindCase.AS_OF_LOOKUP_JOIN,
               Rel.KindCase.LOOKUP_JOIN,
               // An adaptive join is a join whose branches the executor chooses between; a
               // MaterialisedInput is the slot standing for its shared input, and neither branch can
@@ -162,6 +168,10 @@ final class DisclosureFlow {
               Rel.KindCase.MATERIALISED_INPUT),
           // Output i is input i of every branch, and the caller is told the least disclosing.
           of("set-op", rel -> rel instanceof SetOp, DisclosureFlow::branches, Rel.KindCase.SET_OP),
+          // A use of a shared subtree discloses what the subtree does. The walk reads the planner's
+          // own tree, in which every use is still the subtree itself; the IR writes it once only
+          // after, so no node here is one (D338).
+          of("shared", rel -> false, (flow, rel, width) -> filled(width, Disclosed.PER_ROW), Rel.KindCase.SHARED_REF),
           // The same shape: one branch per partition, all of the table's row type.
           of(
               "partitioned-scan",

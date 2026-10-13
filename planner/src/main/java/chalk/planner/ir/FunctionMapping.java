@@ -218,6 +218,9 @@ public final class FunctionMapping {
       case LISTAGG, STRING_AGG -> AggregateFunctionId.AGGREGATE_FUNCTION_ID_LISTAGG;
       case ARRAY_AGG -> AggregateFunctionId.AGGREGATE_FUNCTION_ID_ARRAY_AGG;
       case MODE -> AggregateFunctionId.AGGREGATE_FUNCTION_ID_MODE;
+      // GROUPING_ID is GROUPING under another name, as Calcite defines both (D338). GROUP_ID never
+      // arrives: Calcite numbers a repeated set itself, as a literal in a union of aggregates.
+      case GROUPING, GROUPING_ID -> AggregateFunctionId.AGGREGATE_FUNCTION_ID_GROUPING;
       default ->
           switch (function.getName().toUpperCase(Locale.ROOT)) {
             case "BOOL_AND", "EVERY" -> AggregateFunctionId.AGGREGATE_FUNCTION_ID_BOOL_AND;

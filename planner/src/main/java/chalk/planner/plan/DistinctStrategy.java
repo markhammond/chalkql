@@ -109,7 +109,8 @@ public enum DistinctStrategy {
               : Math.min(inputRows, distinct * Math.max(groups, 1.0));
     }
 
-    // Grouping sets have no native path either; a tree that still has them has already lost.
+    // A DISTINCT measure under grouping sets is refused before this runs (GroupingSetsSupport);
+    // should one arrive, the join expansion is the one strategy that has ever handled it.
     if (any && aggregate.getGroupSets().size() != 1) {
       return Double.MAX_VALUE;
     }

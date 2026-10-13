@@ -105,6 +105,9 @@ public final class RuleSets {
         CoreRules.FILTER_INTO_JOIN,
         CoreRules.JOIN_CONDITION_PUSH,
         CoreRules.JOIN_PUSH_EXPRESSIONS,
+        // An ASOF join's match condition the same way: each side of it a column of its own input
+        // (D337, design 63 §3).
+        chalk.planner.plan.rules.AsofMatchExpressionsRule.INSTANCE,
         CoreRules.PROJECT_JOIN_TRANSPOSE,
 
         // 4a. F16(d): a join whose other side contributes no column and is joined on a key that side
@@ -323,6 +326,8 @@ public final class RuleSets {
     rules.add(ChalkMergeJoinRule.INSTANCE);
     rules.add(ChalkNestedLoopJoinRule.INSTANCE);
     rules.add(ChalkAsOfJoinRule.INSTANCE);
+    // D338: an ASOF join over an in-process table, answered by seeking an index on it.
+    rules.addAll(chalk.planner.plan.rules.ChalkAsOfLookupRule.rules(policy));
 
     // Join order, for the queries small enough to enumerate (D44).
     if (enumerateJoinOrders) {

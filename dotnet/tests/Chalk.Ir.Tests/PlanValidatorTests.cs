@@ -445,23 +445,238 @@ public sealed class PlanValidatorTests
         Assert.Equal("I-IR-7", AssertInvalid(Restamp(IrBuilder.Plan(rel))).Invariant);
     }
 
-    [Fact]
-    public void Grouping_sets_are_reserved_in_v1()
+    // ---- shared subtrees (D338) ----
+
+    /// <summary>
+    /// A plan that reads one aggregate twice: the aggregate is shared plan 1, and a union reads it
+    /// through two uses.
+    /// </summary>
+    private static Plan Shared(Action<Plan>? change = null)
     {
-        var read = BarsRead();
-        var aggregate = new Aggregate { Input = read };
+        var aggregate = new Aggregate { Input = BarsRead() };
         aggregate.Groupings.Add(new Grouping { Keys = { 0u } });
-        aggregate.Groupings.Add(new Grouping { Keys = { 1u } });
+        aggregate.Measures.Add(Agg(AggregateFunctionId.Count, I64()));
+        var row = Row(F("symbol", Str()), F("n", I64()));
+        var body = new Rel { RowType = row, HashAggregate = new HashAggregate { Aggregate = aggregate } };
+        Rel Use() => new() { RowType = row.Clone(), SharedRef = new SharedRef { Id = 1 } };
+        var union = new SetOp { Kind = SetOpKind.UnionAll };
+        union.Inputs.AddRange([Use(), Use()]);
+        var plan = IrBuilder.Plan(new Rel { RowType = row.Clone(), SetOp = union });
+        plan.Shared.Add(new SharedPlan { Id = 1, Rel = body });
+        change?.Invoke(plan);
+        return Restamp(plan);
+    }
+
+    [Fact]
+    public void A_shared_plan_used_twice_validates()
+    {
+        PlanValidator.Validate(Shared());
+    }
+
+    [Fact]
+    public void A_use_names_a_shared_plan_the_plan_lists()
+    {
+        var ex = AssertInvalid(Shared(p => p.Root.SetOp.Inputs[1].SharedRef.Id = 2));
+
+        Assert.Equal("I-IR-4", ex.Invariant);
+        Assert.Contains("shared plan 2", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>A shared plan names only those listed before it, so no two name each other.</summary>
+    [Fact]
+    public void A_shared_plan_names_only_earlier_ones()
+    {
+        var ex = AssertInvalid(Shared(p =>
+        {
+            var first = p.Shared[0];
+            first.Id = 2;
+            var use = new Rel { RowType = first.Rel.RowType.Clone(), SharedRef = new SharedRef { Id = 1 } };
+            p.Shared.Add(new SharedPlan { Id = 1, Rel = first.Rel.Clone() });
+            p.Shared[0] = new SharedPlan { Id = 2, Rel = use };
+            foreach (var input in p.Root.SetOp.Inputs)
+            {
+                input.SharedRef.Id = 2;
+            }
+        }));
+
+        Assert.Equal("I-IR-4", ex.Invariant);
+    }
+
+    [Fact]
+    public void A_use_has_its_shared_plans_row_type()
+    {
+        var ex = AssertInvalid(Shared(p => p.Root.SetOp.Inputs[0].RowType.Fields[1].Type = I64(nullable: true)));
+
+        Assert.Equal("I-IR-4", ex.Invariant);
+    }
+
+    // ---- AsOfLookupJoin (D338) ----
+
+    /// <summary>
+    /// An ASOF join that seeks <c>bars</c>' (symbol, ts) index, with the left's fields and then the
+    /// projection's (symbol, ts, close) as its row.
+    /// </summary>
+    private static Rel Seek(Action<AsOfLookupJoin>? change = null)
+    {
+        var seek = new AsOfLookupJoin
+        {
+            Left = BarsRead(),
+            Table = new TableRef { SourceId = "mem", Schema = "main", Table = "bars" },
+            Index = "ix_bars_symbol_ts",
+            LeftTime = 1,
+            RightTime = 1,
+            Match = AsOfMatch.Ge,
+            Type = JoinType.Inner,
+        };
+        seek.Projection.AddRange([0u, 1u, 2u]);
+        seek.LeftKeys.Add(0u);
+        seek.RightKeys.Add(0u);
+        change?.Invoke(seek);
+        var row = Row([.. Bars.Fields, F("symbol0", Str()), F("ts0", Timestamp()), F("close0", Fp64())]);
+        return new Rel { RowType = row, AsOfLookupJoin = seek };
+    }
+
+    [Fact]
+    public void A_seek_validates()
+    {
+        PlanValidator.Validate(Restamp(IrBuilder.Plan(Seek())));
+    }
+
+    [Fact]
+    public void A_seek_with_a_fixed_value_validates()
+    {
+        PlanValidator.Validate(Restamp(IrBuilder.Plan(Seek(s =>
+        {
+            s.LeftKeys.Clear();
+            s.RightKeys.Clear();
+            s.FixedColumns.Add(0u);
+            s.FixedValues.Add(Lit("EUR"));
+        }))));
+    }
+
+    [Fact]
+    public void A_fixed_column_needs_a_value()
+    {
+        var ex = AssertInvalid(Restamp(IrBuilder.Plan(Seek(s => s.FixedColumns.Add(0u)))));
+
+        Assert.Equal("I-IR-6", ex.Invariant);
+    }
+
+    /// <summary>A fixed value is the same for every row, so it reads no column.</summary>
+    [Fact]
+    public void A_fixed_value_reads_no_column()
+    {
+        var ex = AssertInvalid(Restamp(IrBuilder.Plan(Seek(s =>
+        {
+            s.FixedColumns.Add(0u);
+            s.FixedValues.Add(Ref(Bars, 0));
+        }))));
+
+        Assert.Equal("I-IR-3", ex.Invariant);
+    }
+
+    [Fact]
+    public void A_seeks_row_is_the_left_and_the_projection()
+    {
+        var ex = AssertInvalid(Restamp(IrBuilder.Plan(Seek(s => s.Projection.Add(3u)))));
+
+        Assert.Equal("I-IR-6", ex.Invariant);
+    }
+
+    /// <summary>
+    /// Grouping sets (D338): the output's keys are every set's, once each, in ascending field order,
+    /// whatever order a set lists them in, and a key some set leaves out is nullable. GROUPING names
+    /// keys.
+    /// </summary>
+    [Fact]
+    public void Grouping_sets_carry_the_union_of_their_keys()
+    {
+        var aggregate = new Aggregate { Input = BarsRead() };
+        aggregate.Groupings.Add(new Grouping { Keys = { 1u, 0u } });
+        aggregate.Groupings.Add(new Grouping { Keys = { 0u } });
+        aggregate.Groupings.Add(new Grouping());
+        aggregate.Measures.Add(Agg(AggregateFunctionId.Count, I64()));
+        aggregate.Measures.Add(
+            Agg(AggregateFunctionId.Grouping, I64(), Ref(Bars, 0), extraArgs: [Ref(Bars, 1)]));
+        var rel = new Rel
+        {
+            RowType = Row(
+                F("symbol", Str(nullable: true)),
+                F("ts", Timestamp(nullable: true)),
+                F("n", I64()),
+                F("g", I64())),
+            HashAggregate = new HashAggregate { Aggregate = aggregate },
+        };
+
+        PlanValidator.Validate(Restamp(IrBuilder.Plan(rel)));
+    }
+
+    /// <summary>The grand total's symbol is NULL, so a NOT NULL key type is wrong.</summary>
+    [Fact]
+    public void A_key_a_set_leaves_out_is_nullable()
+    {
+        var aggregate = new Aggregate { Input = BarsRead() };
+        aggregate.Groupings.Add(new Grouping { Keys = { 0u } });
+        aggregate.Groupings.Add(new Grouping());
         var rel = new Rel
         {
             RowType = Row(F("symbol", Str())),
             HashAggregate = new HashAggregate { Aggregate = aggregate },
         };
 
+        Assert.Equal("I-IR-4", AssertInvalid(Restamp(IrBuilder.Plan(rel))).Invariant);
+    }
+
+    [Fact]
+    public void A_grouping_measure_names_only_keys()
+    {
+        var aggregate = new Aggregate { Input = BarsRead() };
+        aggregate.Groupings.Add(new Grouping { Keys = { 0u } });
+        aggregate.Groupings.Add(new Grouping());
+        aggregate.Measures.Add(Agg(AggregateFunctionId.Grouping, I64(), Ref(Bars, 2)));
+        var rel = new Rel
+        {
+            RowType = Row(F("symbol", Str(nullable: true)), F("g", I64())),
+            HashAggregate = new HashAggregate { Aggregate = aggregate },
+        };
+
         var ex = AssertInvalid(Restamp(IrBuilder.Plan(rel)));
 
         Assert.Equal("I-IR-7", ex.Invariant);
-        Assert.Contains("grouping sets are reserved", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("one of the aggregate's keys", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>A sorted aggregate's input is in one grouping's order, so it has one grouping.</summary>
+    [Fact]
+    public void A_stream_aggregate_carries_one_grouping()
+    {
+        var aggregate = new Aggregate { Input = BarsRead() };
+        aggregate.Groupings.Add(new Grouping { Keys = { 0u } });
+        aggregate.Groupings.Add(new Grouping());
+        var rel = new Rel
+        {
+            RowType = Row(F("symbol", Str(nullable: true))),
+            StreamAggregate = new StreamAggregate { Aggregate = aggregate },
+        };
+
+        var ex = AssertInvalid(Restamp(IrBuilder.Plan(rel)));
+
+        Assert.Equal("I-IR-7", ex.Invariant);
+        Assert.Contains("one grouping", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void An_aggregate_has_at_least_one_grouping()
+    {
+        var aggregate = new Aggregate { Input = BarsRead() };
+        aggregate.Measures.Add(Agg(AggregateFunctionId.Count, I64()));
+        var rel = new Rel
+        {
+            RowType = Row(F("n", I64())),
+            HashAggregate = new HashAggregate { Aggregate = aggregate },
+        };
+
+        Assert.Equal("I-IR-7", AssertInvalid(Restamp(IrBuilder.Plan(rel))).Invariant);
     }
 
     [Fact]

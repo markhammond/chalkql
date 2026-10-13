@@ -27,6 +27,9 @@ internal sealed class ReferenceExecutor
     private readonly ExecutionSettings _settings;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>> _relations;
 
+    /// <summary>Each shared subtree's rows for the execution under way, by id (D338).</summary>
+    private readonly Dictionary<uint, List<object?[]>> _sharedRows = [];
+
     public ReferenceExecutor(
         CompiledPlan plan,
         CatalogContext catalog,
@@ -59,6 +62,7 @@ internal sealed class ReferenceExecutor
         };
 
         List<object?[]> rows;
+        _sharedRows.Clear();
         try
         {
             rows = await EvaluateAsync(_plan.Plan.Root, "root", interpreter, stats, arena, ct)
@@ -380,6 +384,27 @@ internal sealed class ReferenceExecutor
                 return await AsOfJoinAsync(rel.AsOfJoin, path, interpreter, stats, arena, ct)
                     .ConfigureAwait(false);
 
+            case Rel.KindOneofCase.AsOfLookupJoin:
+                return await AsOfJoinAsync(AsOfJoinOverTheTable(rel), path, interpreter, stats, arena, ct)
+                    .ConfigureAwait(false);
+
+            case Rel.KindOneofCase.SharedRef:
+            {
+                // A shared subtree, evaluated once for the execution, its rows given to every use
+                // (D338). Each use gets its own list, because a sort orders the list it is given.
+                var id = rel.SharedRef.Id;
+                if (!_sharedRows.TryGetValue(id, out var shared))
+                {
+                    var body = _plan.Plan.Shared.FirstOrDefault(s => s.Id == id)?.Rel
+                        ?? throw new InvalidPlanException("I-IR-4", path, $"the plan lists no shared plan {id}");
+                    shared = await EvaluateAsync(body, $"shared#{id}", interpreter, stats, arena, ct)
+                        .ConfigureAwait(false);
+                    _sharedRows[id] = shared;
+                }
+
+                return [.. shared];
+            }
+
             case Rel.KindOneofCase.Window:
             {
                 var input = await EvaluateAsync(rel.Window.Input, path, interpreter, stats, arena, ct)
@@ -595,6 +620,81 @@ internal sealed class ReferenceExecutor
             stats,
             arena,
             ct);
+    }
+
+    /// <summary>
+    /// An ASOF join that seeks an index (D338), as the plain join it answers: over the whole table,
+    /// read and filtered to the fixed values, with no index at all. A fixed column the projection does
+    /// not carry is read for the filter and projected away again.
+    /// </summary>
+    private AsOfJoin AsOfJoinOverTheTable(Rel rel)
+    {
+        var seek = rel.AsOfLookupJoin;
+        var descriptor = _catalog.FindTable(seek.Table.Schema, seek.Table.Table)
+            ?? throw new InvalidPlanException(
+                "I-IR-6", "AsOfLookupJoin", $"the catalog has no table {seek.Table.Schema}.{seek.Table.Table}");
+
+        var read = new Read { Table = seek.Table };
+        read.Projection.AddRange(seek.Projection);
+        foreach (var column in seek.FixedColumns.Where(c => !seek.Projection.Contains(c)))
+        {
+            read.Projection.Add(column);
+        }
+
+        var row = new RowType();
+        foreach (var column in read.Projection)
+        {
+            var declared = descriptor.Table.Columns[(int)column];
+            row.Fields.Add(new Chalk.Ir.Field { Name = declared.Name, Type = declared.Type.ToProto() });
+        }
+
+        var right = new Rel { RowType = row, Read = read };
+        if (seek.FixedColumns.Count > 0)
+        {
+            var conjuncts = seek.FixedColumns.Select((column, i) =>
+            {
+                var at = read.Projection.IndexOf(column);
+                var call = new ScalarCall { Function = FunctionId.Eq };
+                call.Args.Add(new Expr { Type = row.Fields[at].Type, FieldRef = new FieldRef { Index = (uint)at } });
+                call.Args.Add(seek.FixedValues[i]);
+                return new Expr { Type = new Chalk.Ir.Type { Kind = TypeKind.Bool, Nullable = true }, Call = call };
+            }).ToList();
+            var condition = conjuncts[0];
+            if (conjuncts.Count > 1)
+            {
+                var and = new ScalarCall { Function = FunctionId.And };
+                and.Args.AddRange(conjuncts);
+                condition = new Expr { Type = new Chalk.Ir.Type { Kind = TypeKind.Bool, Nullable = true }, Call = and };
+            }
+
+            right = new Rel { RowType = row, Filter = new Filter { Input = right, Condition = condition } };
+        }
+
+        if (read.Projection.Count > seek.Projection.Count)
+        {
+            var kept = new RowType();
+            var project = new Project { Input = right };
+            for (var i = 0; i < seek.Projection.Count; i++)
+            {
+                kept.Fields.Add(row.Fields[i]);
+                project.Exprs.Add(new Expr { Type = row.Fields[i].Type, FieldRef = new FieldRef { Index = (uint)i } });
+            }
+
+            right = new Rel { RowType = kept, Project = project };
+        }
+
+        var join = new AsOfJoin
+        {
+            Left = seek.Left,
+            Right = right,
+            LeftTime = seek.LeftTime,
+            RightTime = seek.RightTime,
+            Match = seek.Match,
+            Type = seek.Type,
+        };
+        join.LeftKeys.AddRange(seek.LeftKeys);
+        join.RightKeys.AddRange(seek.RightKeys);
+        return join;
     }
 
     /// <summary>
