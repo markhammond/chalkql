@@ -2,8 +2,9 @@ namespace Chalk.Sources;
 
 /// <summary>
 /// A source that can say what changed in a table between two of its pinned states, for a view kept by
-/// incremental maintenance (D343, <c>docs/design/68-incremental-maintenance.md</c> §3): the rows an
-/// append added, or that the table was rewritten some other way.
+/// incremental maintenance (D343, <c>docs/design/68-incremental-maintenance.md</c> §3, §15): the rows an
+/// append added; the rows a replacement took out and appended, when it kept the rest in their order; or
+/// that the table was rewritten some other way.
 /// </summary>
 /// <remarks>
 /// The states are the ones <see cref="IPinnableSource.Pin"/> hands out. A maintained view holds the state
@@ -31,4 +32,22 @@ internal interface ITrackedSource : IPinnableSource
     /// order, as <paramref name="request"/> asks: what changed since a state whose rows ended there.
     /// </summary>
     IColumnarScan ScanFrom(string table, object pinned, long from, ScanRequest request, ScanContext context);
+
+    /// <summary>
+    /// When <paramref name="later"/> holds <paramref name="earlier"/>'s rows with some taken out, the
+    /// rest in their order, and rows appended after them — as a host's compaction of a log makes it —
+    /// the rows taken out and where the appended rows begin; null for any other rewrite, which is read
+    /// whole. Asked only when <see cref="AppendedFrom"/> says -1.
+    /// </summary>
+    TableDiff? DiffFrom(string table, object earlier, object later);
+
+    /// <summary>A scan of <paramref name="pinned"/>'s rows at <paramref name="positions"/>, ascending.</summary>
+    IColumnarScan ScanAt(string table, object pinned, int[] positions, ScanRequest request, ScanContext context);
 }
+
+/// <summary>
+/// What a replacement changed in a table, when it kept the rest of its rows in their order (§15): the
+/// positions of the rows it took out, in the earlier state, ascending; and the first of the rows it
+/// appended, in the later state.
+/// </summary>
+internal sealed record TableDiff(int[] Removed, long AppendedFrom);

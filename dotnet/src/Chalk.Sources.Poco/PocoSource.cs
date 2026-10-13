@@ -240,6 +240,21 @@ public sealed class PocoSource
     }
 
     /// <inheritdoc />
+    TableDiff? ITrackedSource.DiffFrom(string table, object earlier, object later) =>
+        Require(table).DiffFrom(earlier, later);
+
+    /// <inheritdoc />
+    IColumnarScan ITrackedSource.ScanAt(
+        string table, object pinned, int[] positions, ScanRequest request, ScanContext context)
+    {
+        ArgumentNullException.ThrowIfNull(positions);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+        RequireBatchSize(request.BatchSize);
+        return Require(table).ScanAt(SourceId, pinned, positions, request, context);
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// One refresh says once what each table becomes. A table takes rows given whole, appended or
     /// prepared before the refresh (design 69 §3), or upserts and deletes by key, and beside any of
@@ -599,6 +614,16 @@ internal abstract class PocoTableRuntime
         string sourceId, object pinned, long from, ScanRequest request, ScanContext context);
 
     /// <summary>
+    /// The rows a replacement took out of <paramref name="earlier"/> and where its appended rows begin,
+    /// when it kept the rest in their order; null otherwise (design 68 §15).
+    /// </summary>
+    public abstract TableDiff? DiffFrom(object earlier, object later);
+
+    /// <summary>A scan of a pinned snapshot's rows at the given positions (design 68 §15).</summary>
+    public abstract IColumnarScan ScanAt(
+        string sourceId, object pinned, int[] positions, ScanRequest request, ScanContext context);
+
+    /// <summary>
     /// Builds what this table's entries ask for, without publishing it: one that says what the rows
     /// are, or upserts and deletes by key, and an advance of the frontier beside either (D339).
     /// </summary>
@@ -836,6 +861,84 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         return new PocoScan<T>(
             this, snapshot, request.Projection, request.OutputSchema, request.BatchSize, request.RowGoal,
             context, CancellationToken.None, (int)from).Columnar();
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A snapshot holds the host's rows, and the host never changes what it gave Chalk, which scans read
+    /// in place (design 35 §1), so a row the later snapshot holds is one the earlier held, values and
+    /// all, when it is the same object. One walk of
+    /// the two in step finds the rows taken out: a row of the earlier the later does not hold next is
+    /// taken out, and what is left of the later once the earlier ends was appended. A replacement that
+    /// took out more rows than it kept, or that did not keep the rest in their order — which the walk
+    /// sees as most rows taken out — is read whole instead, which then costs no more.
+    /// </remarks>
+    public override TableDiff? DiffFrom(object earlier, object later)
+    {
+        var before = (PocoTableSnapshot<T>)earlier;
+        var after = (PocoTableSnapshot<T>)later;
+        if (typeof(T).IsValueType || before.Rows is not { } old || after.Rows is not { } rows)
+        {
+            return null;
+        }
+
+        var count = before.RowCount;
+        var limit = count / 2;
+        var removed = new List<int>();
+        var i = 0;
+        var j = 0;
+        while (i < count && j < after.RowCount)
+        {
+            if (ReferenceEquals(old[i], rows[j]))
+            {
+                i++;
+                j++;
+                continue;
+            }
+
+            removed.Add(i++);
+            if (removed.Count > limit)
+            {
+                return null;
+            }
+        }
+
+        if (removed.Count + (count - i) > limit)
+        {
+            return null;
+        }
+
+        for (; i < count; i++)
+        {
+            removed.Add(i);
+        }
+
+        return new TableDiff([.. removed], j);
+    }
+
+    /// <inheritdoc />
+    public override IColumnarScan ScanAt(
+        string sourceId, object pinned, int[] positions, ScanRequest request, ScanContext context)
+    {
+        CheckProjection(sourceId, request.Projection, request.OutputSchema);
+        var snapshot = (PocoTableSnapshot<T>)pinned;
+        if (positions.Length == 0)
+        {
+            return PocoEmptyScan.Instance;
+        }
+
+        var rows = snapshot.Rows
+            ?? throw new InvalidOperationException(
+                $"table '{Name}' only enumerates, so its rows have no positions to scan at.");
+        var gathered = new T[positions.Length];
+        for (var i = 0; i < positions.Length; i++)
+        {
+            gathered[i] = rows[positions[i]];
+        }
+
+        return new PocoScan<T>(
+            this, snapshot, request.Projection, request.OutputSchema, request.BatchSize, request.RowGoal,
+            context, CancellationToken.None, rows: gathered).Columnar();
     }
 
     /// <summary>
@@ -1955,6 +2058,9 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
 
     /// <summary>The first row read: zero, or where a maintained view's last read ended (D343).</summary>
     private readonly int _from;
+
+    /// <summary>Rows of the snapshot gathered to read in its place, or null to read the snapshot's own (§15).</summary>
+    private readonly IReadOnlyList<T>? _rows;
     private readonly IReadOnlyList<int> _projection;
     private readonly ArrowSchema _schema;
     private readonly int _batchSize;
@@ -1971,11 +2077,13 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
         long? rowGoal,
         ScanContext context,
         CancellationToken ct,
-        int from = 0)
+        int from = 0,
+        IReadOnlyList<T>? rows = null)
     {
         _table = table;
         _snapshot = snapshot;
         _from = from;
+        _rows = rows;
         _projection = projection;
         _schema = schema;
         _batchSize = batchSize;
@@ -1987,7 +2095,7 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
     public IAsyncEnumerator<RecordBatch> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
         _snapshot.RandomAccess
             ? new ListEnumerator(
-                _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct, cancellationToken, _from)
+                _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct, cancellationToken, _from, _rows)
             : new CollectionEnumerator(
                 _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct, cancellationToken);
 
@@ -1996,7 +2104,7 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
         _snapshot.RandomAccess
             ? new ListEnumerator(
                 _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct,
-                CancellationToken.None, _from)
+                CancellationToken.None, _from, _rows)
             : new CollectionEnumerator(
                 _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct,
                 CancellationToken.None);
@@ -2027,7 +2135,8 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
             ScanContext context,
             CancellationToken scanToken,
             CancellationToken enumerationToken,
-            int from = 0)
+            int from = 0,
+            IReadOnlyList<T>? gathered = null)
         {
             _stats = context.Stats;
             _scanToken = scanToken;
@@ -2041,8 +2150,8 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
             // The row count is the snapshot's rather than the collection's, which is what lets an
             // append share a buffer with the snapshot before it and still leave this scan its prefix.
             _snapshot = table.Lease(captured);
-            _rows = _snapshot.Rows!;
-            _rowCount = _snapshot.RowCount;
+            _rows = gathered ?? _snapshot.Rows!;
+            _rowCount = gathered?.Count ?? _snapshot.RowCount;
 
             try
             {
