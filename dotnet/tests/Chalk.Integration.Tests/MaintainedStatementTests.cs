@@ -286,20 +286,40 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
         {
             if (epoch > 0)
             {
-                // Every run rewrites each table at least once.
-                var roll = epoch switch { 10 => 0, 20 => 1, _ => random.Next(12) };
+                // Every run replaces each table at least twice: once compacted, keeping its rows' objects in
+                // their order, which a view reads as the rows taken out and appended; and once by copies,
+                // which it reads as a rewrite.
+                var roll = epoch switch { 10 => 0, 15 => 2, 20 => 1, 25 => 3, _ => random.Next(16) };
                 if (roll == 0)
                 {
-                    // A rewrite: the oldest third of the trades gone.
+                    // A compaction: the oldest third of the trades gone.
                     trades = [.. trades.Skip(trades.Count / 3)];
                     var kept = trades;
                     await engine.RefreshAsync(r => r.Replace(desk, "trades", (IReadOnlyList<Trade>)kept), Ct);
                 }
                 else if (roll == 1 && marks.Count > 8)
                 {
-                    // The marks compacted, in place: every other one of the older half gone.
+                    // The marks compacted as a host compacts a log: every other one of the older half gone,
+                    // and new marks appended in the same replacement.
                     var half = marks.Count / 2;
-                    marks = [.. marks.Where((_, i) => i >= half || i % 2 == 0)];
+                    var latest = marks[^1].Ts;
+                    var fresh = Enumerable.Range(0, 1 + random.Next(3))
+                        .Select(_ => new Mark(1 + random.Next(3), latest.AddSeconds(random.Next(2)), Math.Round(random.NextDouble() * 100, 3), ++tag))
+                        .OrderBy(m => m.Ts);
+                    marks = [.. marks.Where((_, i) => i >= half || i % 2 == 0), .. fresh];
+                    var kept = marks;
+                    await engine.RefreshAsync(r => r.Replace(desk, "marks", (IReadOnlyList<Mark>)kept), Ct);
+                }
+                else if (roll == 2)
+                {
+                    // A rewrite: a quarter of the trades gone and the rest copied, which no diff follows.
+                    trades = [.. trades.Skip(trades.Count / 4).Select(t => t with { })];
+                    var kept = trades;
+                    await engine.RefreshAsync(r => r.Replace(desk, "trades", (IReadOnlyList<Trade>)kept), Ct);
+                }
+                else if (roll == 3 && marks.Count > 8)
+                {
+                    marks = [.. marks.Skip(marks.Count / 4).Select(m => m with { })];
                     var kept = marks;
                     await engine.RefreshAsync(r => r.Replace(desk, "marks", (IReadOnlyList<Mark>)kept), Ct);
                 }

@@ -339,6 +339,9 @@ internal sealed class MaintainedCompiler
         var leftFactory = _compilation.Node(Rewrite(join.Left, path), path);
         var rightRewritten = Rewrite(join.Right, path);
         var rightFactory = _compilation.Node(rightRewritten, path);
+
+        // Its right rows are placed by their order in the table, so a replacement is read whole.
+        _reads[rightRead].WholeOnRewrite = true;
         var state = new AsOfState(
             leftTypes,
             rightTypes,

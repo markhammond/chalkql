@@ -42,6 +42,13 @@ internal sealed class ReadState : IMaintainedState
     /// </summary>
     public bool NewRowsOnRewrite { get; set; }
 
+    /// <summary>
+    /// Whether any change but an append is read as a rewrite, never as the rows a replacement took out
+    /// and appended (§15): set when what reads the table places its rows by their order in it, as an
+    /// as-of join reading its right side whole does.
+    /// </summary>
+    public bool WholeOnRewrite { get; set; }
+
     /// <summary>The state the last update read, or null before the first.</summary>
     public object? Held => _held;
 
@@ -78,7 +85,9 @@ internal sealed class ReadState : IMaintainedState
 
 /// <summary>
 /// The changes of one table read in one update: at the first, every row in; after an append, the
-/// rows it added; after anything else, every old row out and every new row in (design 68 §3).
+/// rows it added; after a replacement that kept the rest of the rows in their order, the rows it took
+/// out and the rows it appended (§15); after anything else, every old row out and every new row in
+/// (design 68 §3).
 /// </summary>
 /// <remarks>
 /// A read of appends only, as a maintained as-of seek reads its table's keys, gives the rows an
@@ -141,6 +150,20 @@ internal sealed class ReadChanges : OperatorBase
                     yield return batch;
                 }
             }
+            else if (!_state.WholeOnRewrite && _state.Source.DiffFrom(_state.Table, held, now) is { } diff)
+            {
+                // A replacement that kept the rest of the rows in their order, as a compaction does: the
+                // rows it took out, and the rows it appended.
+                await foreach (var batch in ScanAt(held, diff.Removed, ct))
+                {
+                    yield return batch;
+                }
+
+                await foreach (var batch in Scan(now, diff.AppendedFrom, +1, ct))
+                {
+                    yield return batch;
+                }
+            }
             else
             {
                 _state.Rewritten = true;
@@ -180,6 +203,32 @@ internal sealed class ReadChanges : OperatorBase
                 }
 
                 _slot.Set(_weightColumn, Weight(weight, _slot.RowCount));
+                yield return _slot;
+            }
+        }
+    }
+
+    /// <summary>The rows of <paramref name="pinned"/> at <paramref name="positions"/>, taken out.</summary>
+    private async IAsyncEnumerable<ColumnarBatch> ScanAt(
+        object pinned, int[] positions, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        if (positions.Length == 0)
+        {
+            yield break;
+        }
+
+        var scan = _state.Source.ScanAt(_state.Table, pinned, positions, _state.Request, ScanContextFor(Context));
+        await using (scan.ConfigureAwait(false))
+        {
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!scan.TryNext(_slot) && !await scan.WaitAsync(_slot, ct).ConfigureAwait(false))
+                {
+                    yield break;
+                }
+
+                _slot.Set(_weightColumn, Weight(-1, _slot.RowCount));
                 yield return _slot;
             }
         }
