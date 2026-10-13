@@ -87,6 +87,7 @@ public static class Chapter19StandingViews
         await using var view = await engine.MaterializeAsync(OnHand, new ViewOptions<StockKey, Stock>
         {
             Key = ["warehouse", "product"],
+            LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
             Map = Map,
             RowHash = Hash,
         });
@@ -138,7 +139,12 @@ public static class Chapter19StandingViews
         {
             await engine.MaterializeAsync(
                 OnHand + "\nORDER BY on_hand",
-                new ViewOptions<StockKey, Stock> { Key = ["warehouse", "product"], Map = Map });
+                new ViewOptions<StockKey, Stock>
+                {
+                    Key = ["warehouse", "product"],
+                    LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
+                    Map = Map,
+                });
         }
         catch (ChalkException refused)
         {

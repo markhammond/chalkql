@@ -245,6 +245,7 @@ public sealed class StandingViewTests(SharedSidecar sidecar)
             await desk.Engine.MaterializeAsync(Totals, new ViewOptions<BookKey, BookRow>
             {
                 Key = ["book"],
+                LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
                 Map = static (in ViewRow row, out BookKey key, out BookRow value) =>
                 {
                     key = new BookKey { Book = row.GetInt64(0) % 2 };
@@ -348,6 +349,7 @@ public sealed class StandingViewTests(SharedSidecar sidecar)
         var options = new ViewOptions<BookKey, BookRow>
         {
             Key = ["book"],
+            LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
             Map = (in ViewRow row, out BookKey key, out BookRow value) =>
             {
                 mapped++;
@@ -378,6 +380,7 @@ public sealed class StandingViewTests(SharedSidecar sidecar)
     private static ViewOptions<BookKey, BookRow> Options(object? parameters = null) => new()
     {
         Key = ["book"],
+        LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
         Map = static (in ViewRow row, out BookKey key, out BookRow value) =>
         {
             key = new BookKey { Book = row.GetInt64(0) };

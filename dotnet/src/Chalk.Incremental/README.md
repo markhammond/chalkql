@@ -36,6 +36,7 @@ await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
 await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKey, Cell>
 {
     Key = ["row_key", "column_key"],
+    LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows, // required: the most a cross-source join may fetch
     Map = Cells.Map,          // (in ViewRow row, out CellKey key, out Cell cell)
     RowHash = Cells.Hash,     // optional: a hash of each mapped row, summed as the checksum
 });
@@ -77,8 +78,10 @@ So a view refuses, when it is made, what would make that untrue or unstable:
   a view.
 - **An `ORDER BY` without a `LIMIT`**, since a keyed result has no order, and a `LIMIT` whose order
   does not include the view's key.
-- **A source whose rows change outside the engine's refreshes**, such as a database. Load what the
-  view needs into an in-process table and refresh it in epochs.
+- **A source whose rows change outside the engine's refreshes**, such as a database, unless the
+  view sets `DatabaseReads = ViewDatabaseReads.WhenRefreshed`: then it reads the database when it is
+  made, keeps what it read, and reads it again only after a refresh names the table. Otherwise,
+  load what the view needs into an in-process table and refresh it in epochs.
 
 A key the result gives twice faults the view, naming the key, until the view is disposed.
 

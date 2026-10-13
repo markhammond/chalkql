@@ -34,6 +34,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     private readonly KeyedTable<TKey, TRow> _table = new();
     private readonly ViewClock _clock = new();
 
+    /// <summary>What the view keeps of its reads of databases (D340); null without the opt-in.</summary>
+    private readonly ViewReads? _reads;
+
     private PreparedQuery _prepared;
     private int[] _key;
     private bool _readsTime;
@@ -59,6 +62,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         _prepared = prepared;
         _key = key;
         _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
+        _reads = options.DatabaseReads == ViewDatabaseReads.WhenRefreshed ? new ViewReads(engine) : null;
     }
 
     /// <summary>The result's key columns.</summary>
@@ -91,17 +95,26 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         }
     }
 
-    /// <summary>What the view holds, in bytes, against <see cref="ViewOptions{TKey, TRow}.StateBudget"/>.</summary>
+    /// <summary>
+    /// What the view holds, in bytes, against <see cref="ViewOptions{TKey, TRow}.StateBudget"/>: its
+    /// rows, and what it keeps of its reads of databases (D340).
+    /// </summary>
     public long StateBytes
     {
         get
         {
             lock (_gate)
             {
-                return _table.Bytes;
+                return _table.Bytes + (_reads?.Bytes ?? 0);
             }
         }
     }
+
+    /// <summary>
+    /// What the view keeps of each database it reads (D340): when it last read it, for which version,
+    /// how many times it has, and the rows it keeps. Empty for a view that reads no database.
+    /// </summary>
+    public IReadOnlyList<ViewDatabaseRead> DatabaseReads => _reads?.Summary() ?? [];
 
     /// <summary>The sum of the live rows' hashes, mod 2³²: zero without a row hash.</summary>
     public uint Checksum
@@ -138,11 +151,21 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 nameof(options), options.StateBudget, "a view's StateBudget is a number of bytes, more than none.");
         }
 
+        if (options.LocalJoinMaxRows <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.LocalJoinMaxRows,
+                "a view's LocalJoinMaxRows is a number of rows, more than none: the most a cross-source join "
+                + "may fetch to join locally. StandingViews.DefaultLocalJoinMaxRows is the value to pass "
+                + "without a better one.");
+        }
+
         binding.Refuse(engine.ClockName);
 
-        var prepared = await engine.PrepareAsync(sql, options.Prepare, ct).ConfigureAwait(false);
+        var prepared = await engine.PrepareAsync(sql, ViewPrepare.For(options), ct).ConfigureAwait(false);
         var key = KeyOf(prepared, options.Key);
-        ViewChecks.Check(engine, prepared, options.Key, key, options.Exactness, options.RequireExplicitImmutable);
+        ViewChecks.Check(engine, prepared, key, options);
         var view = new StandingView<TKey, TRow>(engine, sql, options, binding, prepared, key);
         try
         {
@@ -183,6 +206,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
                 if (_engine.Stamp.Epoch == _epoch)
                 {
+                    _reads?.Abandon();
                     return _version;
                 }
 
@@ -213,9 +237,24 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 return _version;
             }
         }
+        catch
+        {
+            // A failed update keeps nothing new: the view keeps the epoch, and the reads, it held.
+            _reads?.Abandon();
+            throw;
+        }
         finally
         {
             _updating.Release();
+        }
+    }
+
+    /// <summary>The view's rows, in bytes, without what it keeps of its databases.</summary>
+    private long StateRowBytes()
+    {
+        lock (_gate)
+        {
+            return _table.Bytes;
         }
     }
 
@@ -347,6 +386,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         try
         {
             _disposed = true;
+            _reads?.Dispose();
         }
         finally
         {
@@ -387,6 +427,13 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         {
             _clock.Now = stamp.Clock!.Value;
             execution.UseClock(_clock);
+        }
+
+        if (_reads is not null)
+        {
+            // What the update keeps of its databases' rows shares the budget with the view's rows.
+            _reads.Begin(stamp, _options.StateBudget - StateRowBytes());
+            execution.UseReads(_reads);
         }
 
         var staged = new Staged();
@@ -444,14 +491,16 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             }
         }
 
-        var bytes = _table.BytesWith(added);
+        var kept = _reads?.BytesKept ?? 0;
+        var bytes = _table.BytesWith(added) + kept;
         if (bytes > _options.StateBudget)
         {
             throw new StandingViewException(
                 ChalkErrorCodes.MemoryBudgetExceeded,
-                $"The view would hold about {bytes} bytes at version {stamp.Version}, past its StateBudget of "
-                + $"{_options.StateBudget}. It keeps the epoch it held; raise ViewOptions.StateBudget, or "
-                + "narrow the statement's result.");
+                $"The view would hold about {bytes} bytes at version {stamp.Version}"
+                + (kept > 0 ? $", {kept} of them kept from its databases," : string.Empty)
+                + $" past its StateBudget of {_options.StateBudget}. It keeps the epoch it held; raise "
+                + "ViewOptions.StateBudget, or narrow the statement's result.");
         }
 
         lock (_gate)
@@ -464,6 +513,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
             _table.DeleteUnseen(seen);
             _table.Compact();
+            _reads?.Commit();
             _epoch = stamp.Epoch;
             _version = stamp.Version;
         }
@@ -482,10 +532,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
         try
         {
-            var prepared = await _engine.PrepareAsync(_sql, _options.Prepare, ct).ConfigureAwait(false);
+            var prepared = await _engine.PrepareAsync(_sql, ViewPrepare.For(_options), ct).ConfigureAwait(false);
             var key = KeyOf(prepared, _options.Key);
-            ViewChecks.Check(
-                _engine, prepared, _options.Key, key, _options.Exactness, _options.RequireExplicitImmutable);
+            ViewChecks.Check(_engine, prepared, key, _options);
             lock (_gate)
             {
                 Volatile.Write(ref _prepared, prepared);
@@ -493,6 +542,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
                 _generation++;
             }
+
+            // The plan is a new one, and its reads are in new places: read them all again.
+            _reads?.Clear();
         }
         catch (Exception failure) when (failure is ChalkException or ArgumentException)
         {
@@ -681,6 +733,13 @@ internal sealed class ViewBinding
 /// <summary>Standing views over an engine (D339): <c>engine.MaterializeAsync(sql, options)</c>.</summary>
 public static class StandingViews
 {
+    /// <summary>
+    /// The value to pass as <see cref="ViewOptions{TKey, TRow}.LocalJoinMaxRows"/> without a better
+    /// one (D340): a million rows, the planner's assumption for a table of unknown size, so one such
+    /// table a join is admitted.
+    /// </summary>
+    public const long DefaultLocalJoinMaxRows = 1_000_000;
+
     /// <summary>
     /// Prepares <paramref name="sql"/> as a standing view, checks it, and computes it at the engine's
     /// current epoch. Its parameters bind once, from <see cref="ViewOptions{TKey, TRow}.Parameters"/>.

@@ -14,16 +14,34 @@ namespace Chalk.Incremental;
 /// </summary>
 internal static class ViewChecks
 {
-    public static void Check(
-        ChalkEngine engine,
-        PreparedQuery prepared,
-        IReadOnlyList<string> key,
-        int[] keyColumns,
-        ViewExactness exactness,
-        bool requireExplicitImmutable)
+    public static void Check<TKey, TRow>(
+        ChalkEngine engine, PreparedQuery prepared, int[] keyColumns, ViewOptions<TKey, TRow> options)
+        where TKey : unmanaged
+        where TRow : unmanaged
     {
         var plan = prepared.Plan;
-        Order(plan.Root, key, keyColumns);
+        var exactness = options.Exactness;
+        var requireExplicitImmutable = options.RequireExplicitImmutable;
+        var databases = options.DatabaseReads;
+        var reads = databases == ViewDatabaseReads.WhenRefreshed;
+        Order(plan.Root, options.Key, keyColumns);
+
+        // Without the opt-in, a database is refused by its source, whichever node reads it first.
+        if (!reads)
+        {
+            ViewPlan.Walk(plan, message =>
+            {
+                switch (message)
+                {
+                    case TableRef table:
+                        InEpochs(engine, table.SourceId, $"{table.Schema}.{table.Table}", databases);
+                        break;
+                    case RemoteQuery remote:
+                        InEpochs(engine, remote.SourceId, null, databases);
+                        break;
+                }
+            });
+        }
 
         if (engine.ClockName is null && ViewPlan.ReadsCurrentTime(plan))
         {
@@ -55,14 +73,89 @@ internal static class ViewChecks
                     Deterministic(functions, scan.Function, requireExplicitImmutable);
                     break;
                 case TableRef table:
-                    InEpochs(engine, table.SourceId, $"{table.Schema}.{table.Table}");
+                    InEpochs(engine, table.SourceId, $"{table.Schema}.{table.Table}", databases);
                     break;
                 case RemoteQuery remote:
-                    InEpochs(engine, remote.SourceId, null);
+                    InEpochs(engine, remote.SourceId, null, databases);
+                    if (reads && Fed(remote))
+                    {
+                        throw FedRead(remote.SourceId, "a read bound with keys from the rest of the statement");
+                    }
+
                     break;
+                // A database read is kept between refreshes only when nothing else in the statement
+                // binds it (D340); without the opt-in the source itself is refused, as above.
+                case LookupJoin join when reads && Outside(engine, join.Lookup):
+                    throw FedRead(SourceOf(join.Lookup), "a lookup join");
+                case AdaptiveJoin join when reads && Outside(engine, join.Lookup?.Lookup):
+                    throw FedRead(SourceOf(join.Lookup?.Lookup), "an adaptive join");
+                case PartitionedScan { KeySet: not null } scan when reads && scan.Partitions.Any(p => Outside(engine, p)):
+                    throw FedRead(SourceOf(scan.Partitions.First(p => Outside(engine, p))), "a scan pruned by keys at execution");
+                case IndexLookup lookup when reads && engine.SourceById(lookup.Table.SourceId) is not IRefreshableSource:
+                    throw FedRead(lookup.Table.SourceId, "an index lookup");
+                case AsOfLookupJoin join when reads && engine.SourceById(join.Table.SourceId) is not IRefreshableSource:
+                    throw FedRead(join.Table.SourceId, "an as-of lookup join");
             }
         });
     }
+
+    /// <summary>Whether a remote read is bound with a key set: values taken from the rest of the statement.</summary>
+    private static bool Fed(RemoteQuery remote)
+    {
+        var fed = false;
+        ViewPlan.Walk(remote, message => fed |= message is KeySetParam or KeySetMatch);
+        return fed;
+    }
+
+    /// <summary>Whether a part of the plan reads a source outside epochs.</summary>
+    private static bool Outside(ChalkEngine engine, Rel? rel)
+    {
+        var outside = false;
+        if (rel is not null)
+        {
+            ViewPlan.Walk(rel, message => outside |= message switch
+            {
+                RemoteQuery remote => engine.SourceById(remote.SourceId) is not IRefreshableSource,
+                TableRef table => engine.SourceById(table.SourceId) is not IRefreshableSource,
+                _ => false,
+            });
+        }
+
+        return outside;
+    }
+
+    private static string SourceOf(Rel? rel)
+    {
+        var source = string.Empty;
+        if (rel is not null)
+        {
+            ViewPlan.Walk(rel, message =>
+            {
+                if (source.Length == 0)
+                {
+                    source = message switch
+                    {
+                        RemoteQuery remote => remote.SourceId,
+                        TableRef table => table.SourceId,
+                        _ => source,
+                    };
+                }
+            });
+        }
+
+        return source;
+    }
+
+    /// <summary>
+    /// Refuses a database read that takes values from the rest of the statement: a view keeps a read
+    /// between refreshes, and this one would change whenever the statement's other inputs do (D340).
+    /// </summary>
+    private static StandingViewException FedRead(string sourceId, string what) => new(
+        ChalkErrorCodes.UnsupportedInView,
+        $"The view reads source '{sourceId}' through {what}, so what it reads from the database changes "
+        + "whenever the rest of the statement does, and could not be kept between refreshes. Let the "
+        + "join be local: drop the rule in ViewOptions.Prepare.JoinPolicy that asks otherwise for this "
+        + "pair of sources.");
 
     /// <summary>
     /// A keyed result has no order, so a statement that ends in an <c>ORDER BY</c> without a
@@ -226,26 +319,26 @@ internal static class ViewChecks
     }
 
     /// <summary>
-    /// Refuses a source whose rows change outside this engine's refreshes: one that cannot take part
-    /// in a refresh, such as a database.
+    /// Refuses a source whose rows change outside this engine's refreshes, such as a database, unless
+    /// the view reads databases when they are refreshed (D340).
     /// </summary>
     /// <remarks>
     /// A source another engine also refreshes changes when that engine says, which no refusal here can
     /// know when the view is made; a view over one sees such a change at its next update.
     /// </remarks>
-    private static void InEpochs(ChalkEngine engine, string sourceId, string? table)
+    private static void InEpochs(ChalkEngine engine, string sourceId, string? table, ViewDatabaseReads databases)
     {
         var source = engine.SourceById(sourceId);
         var what = table is null ? $"source '{sourceId}'" : $"{table}, from source '{sourceId}'";
-        if (source is not IRefreshableSource)
+        if (source is not IRefreshableSource && databases == ViewDatabaseReads.None)
         {
             throw new StandingViewException(
                 ChalkErrorCodes.SourceOutsideEpochs,
                 $"The view reads {what}, whose rows change outside this engine's refreshes, so the view "
                 + "could not read it as of an epoch. Load what the view needs into an in-process table "
-                + "and refresh it in epochs.");
+                + "and refresh it in epochs, or set DatabaseReads = ViewDatabaseReads.WhenRefreshed to "
+                + "read it again each time a refresh names it.");
         }
-
     }
 
     /// <summary>The catalog's functions by their <c>schema.name</c>, as a plan names one.</summary>

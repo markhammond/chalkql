@@ -1067,12 +1067,28 @@ internal sealed class ReferenceExecutor
         };
 
         var rows = new List<object?[]>();
+
+        // A standing view over a database keeps this read and replays it until a refresh names the
+        // table (D340), as the vectorised scan does.
+        var keeper = source is IRefreshableSource ? null : _settings.Reads;
+        var site = keeper is null ? null : new ReadSite(path, table.SourceId, [(table.SourceId, descriptor.Table.Name)]);
+        if (keeper?.Replay(site!, NoValues) is { } kept)
+        {
+            foreach (var batch in kept)
+            {
+                ReferenceValues.ReadBatch(batch, types, rows);
+            }
+
+            return rows;
+        }
+
         await foreach (var batch in source
             .ScanAsync(request, new ScanContext { Stats = stats, Arena = arena }, ct)
             .WithCancellation(ct))
         {
             try
             {
+                keeper?.Keep(site!, NoValues, batch);
                 ReferenceValues.ReadBatch(batch, types, rows);
             }
             finally
@@ -1081,8 +1097,11 @@ internal sealed class ReferenceExecutor
             }
         }
 
+        keeper?.Kept(site!, NoValues);
         return rows;
     }
+
+    private static readonly object?[] NoValues = [];
 }
 
 /// <summary>Row ordering for the reference <c>Sort</c> and <c>TopN</c>: a plain <c>List.Sort</c> comparer.</summary>

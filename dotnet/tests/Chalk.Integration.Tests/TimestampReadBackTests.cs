@@ -85,6 +85,7 @@ public sealed class TimestampReadBackTests(SharedSidecar sidecar)
             new ViewOptions<Key, Row>
             {
                 Key = ["id"],
+                LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
                 Map = (in ViewRow row, out Key key, out Row value) =>
                 {
                     read = row.GetValue(1);
