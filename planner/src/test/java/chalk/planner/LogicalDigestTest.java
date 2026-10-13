@@ -152,8 +152,18 @@ class LogicalDigestTest {
         .isNotEqualTo(plan(String.format(window, 3)).getLogicalDigest());
   }
 
+  /**
+   * The milestones the corpus catalog plans, as {@code CorrelateFreeTest} takes them: the join
+   * corpus among them, whose largest statements have their joins ordered by statistics (D44).
+   */
   static Stream<CorpusQueries.Query> queries() {
-    return CorpusQueries.all().stream();
+    return Stream.of(
+            CorpusQueries.all(),
+            CorpusQueries.m2(),
+            CorpusQueries.m3(),
+            CorpusQueries.m4(),
+            CorpusQueries.m5())
+        .flatMap(java.util.List::stream);
   }
 
   /**
