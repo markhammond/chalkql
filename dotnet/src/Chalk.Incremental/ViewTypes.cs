@@ -166,6 +166,19 @@ public sealed class ViewOptions<TKey, TRow>
     /// </summary>
     public ViewDatabaseReads DatabaseReads { get; init; } = ViewDatabaseReads.None;
 
+    /// <summary>
+    /// When a reader is sent the whole result rather than what changed: once its changes reach this
+    /// fraction of the view's live rows (D341). 1, the default, is no fewer changes than rows; a half
+    /// resets sooner; <see cref="double.PositiveInfinity"/> never resets for size. Zero or less is
+    /// refused.
+    /// </summary>
+    /// <remarks>
+    /// A reader is reset besides when it is new, when the statement was prepared anew, and when it
+    /// needs a delete the view has dropped. A host resets one at any moment by starting its cursor
+    /// over, at <see cref="ViewCursor.Start"/>.
+    /// </remarks>
+    public double ResetWhen { get; init; } = 1;
+
     /// <summary>Whether a column computed by accumulating floating point is admitted.</summary>
     public ViewExactness Exactness { get; init; } = ViewExactness.Exact;
 

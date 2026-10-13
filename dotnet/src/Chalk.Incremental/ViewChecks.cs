@@ -154,8 +154,8 @@ internal static class ViewChecks
         ChalkErrorCodes.UnsupportedInView,
         $"The view reads source '{sourceId}' through {what}, so what it reads from the database changes "
         + "whenever the rest of the statement does, and could not be kept between refreshes. Let the "
-        + "join be local: drop the rule in ViewOptions.Prepare.JoinPolicy that asks otherwise for this "
-        + "pair of sources.");
+        + "join be local: drop the rule that asks otherwise for this pair of sources from the join policy "
+        + "the statement is prepared with, ViewOptions.Prepare's or the prepared statement's own.");
 
     /// <summary>
     /// A keyed result has no order, so a statement that ends in an <c>ORDER BY</c> without a

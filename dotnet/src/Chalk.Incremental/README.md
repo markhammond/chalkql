@@ -65,6 +65,12 @@ public interface IViewSink<TKey, TRow>
 }
 ```
 
+A reader is sent the whole result when it is new, and when its changes reach `ResetWhen` of the
+view's rows (1 by default). A host resets one at any moment by starting its cursor over. To check a
+view against its statement, make it from the host's own prepared statement,
+`engine.MaterializeAsync(prepared, options)`: a run of that statement at the view's epoch gives
+the view's rows bit for bit, and its checksum.
+
 ## What a view promises
 
 After each update, a view's rows are exactly what its statement returns when run at that epoch.

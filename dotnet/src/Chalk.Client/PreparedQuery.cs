@@ -97,6 +97,15 @@ public sealed class PreparedQuery
     /// <summary>The SQL as the host wrote it, parameter styles and all.</summary>
     public string Sql { get; }
 
+    /// <summary>The engine this statement was prepared on (D341: a view made from it must be that engine's).</summary>
+    internal ChalkEngine Engine => _engine;
+
+    /// <summary>
+    /// The options this statement was prepared with: what a view made from it prepares its text with
+    /// again after a shape change, and the cap on local joins it was planned under (D341).
+    /// </summary>
+    internal PrepareOptions Options => _options;
+
     /// <summary>
     /// Which of this statement's placeholders were planned against a value the caller expected
     /// (D284), in order. The ordinals only: nothing of a hint's value is retained.
@@ -491,7 +500,8 @@ public sealed class PreparedQuery
         RequestContext? context,
         ExecutionArena? arena,
         CancellationToken ct,
-        ArenaPool? pool = null)
+        ArenaPool? pool = null,
+        int clockParameter = -1)
     {
         // An execution's own context is checked as a prepare's is, once, here (D317, D323).
         var bindings = Bindings(context?.Bound(_engine.Binding));
@@ -528,10 +538,17 @@ public sealed class PreparedQuery
             _engine.RequireCurrentCatalog(plan.Compiled.Plan, _tablesRead);
         }
 
+        // On an engine that names a clock, a query that reads the time reads the clock, which must be
+        // set; the parameter named after it, left unbound, is the clock too (D341).
+        if (_engine.ClockUnset && (plan.Compiled.ReadsCurrentTime || clockParameter >= 0))
+        {
+            throw new ClockRequiredException(_engine.ClockName!);
+        }
+
         var flat = ParameterBinder.Flatten(
             Parameters, values, plan.Rendered.Slots, plan.Compiled.ParameterTypes, _engine.Binding);
 
-        return new QueryExecution(
+        var execution = new QueryExecution(
             plan.Compiled,
             WithBoundScalars(flat, plan.Compiled.BoundScalars, bindings),
             BoundRelations(bindings),
@@ -539,6 +556,27 @@ public sealed class PreparedQuery
             pool ?? _engine.Arenas,
             ct,
             _engine.Log);
+        if (clockParameter >= 0)
+        {
+            execution.UseClockSlots(ClockSlots(plan.Rendered.Slots, clockParameter));
+        }
+
+        return execution;
+    }
+
+    /// <summary>The placeholders the parameter at <paramref name="parameter"/> fills: one for each time the text names it.</summary>
+    private static int[] ClockSlots(IReadOnlyList<PlaceholderSlot> slots, int parameter)
+    {
+        var found = new List<int>();
+        for (var i = 0; i < slots.Count; i++)
+        {
+            if (slots[i].ParameterIndex == parameter)
+            {
+                found.Add(i);
+            }
+        }
+
+        return [.. found];
     }
 
     /// <summary>
@@ -789,6 +827,12 @@ public sealed class QueryExecution : IAsyncDisposable
     /// when called before it runs: a standing view's epoch's clock (D339).
     /// </summary>
     internal void UseClock(TimeProvider clock) => _compiled = _compiled.WithClock(clock);
+
+    /// <summary>
+    /// Has this execution write the engine's clock into <paramref name="slots"/> when it pins its
+    /// tables: the parameter named as the clock, which the host left unbound (D341).
+    /// </summary>
+    internal void UseClockSlots(int[] slots) => _compiled = _compiled.WithClockSlots(slots);
 
     /// <summary>
     /// Has this execution keep its reads of sources outside epochs in <paramref name="reads"/>, and

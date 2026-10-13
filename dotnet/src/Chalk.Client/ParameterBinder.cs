@@ -99,6 +99,21 @@ internal static class ParameterBinder
             return ResolveNamed(parameters, dictionary);
         }
 
+        return ResolveNamed(parameters, Properties(values));
+    }
+
+    /// <summary>
+    /// An anonymous object's or POCO's public readable properties, by name, as <c>ResolveNamed</c>
+    /// reads them; a dictionary as it is. Accessors are compiled once per CLR type and cached.
+    /// </summary>
+    public static IReadOnlyDictionary<string, object?> Properties(object values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        if (values is IReadOnlyDictionary<string, object?> dictionary)
+        {
+            return dictionary;
+        }
+
         var type = values.GetType();
         var accessors = Accessors.GetOrAdd(type, Compile);
         var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -111,7 +126,7 @@ internal static class ParameterBinder
             bag[properties[i].Name] = accessors[i](values, properties[i].Name);
         }
 
-        return ResolveNamed(parameters, bag);
+        return bag;
     }
 
     private static Func<object, string, object?>[] Compile(ClrType type)

@@ -45,30 +45,32 @@ internal sealed class ReferenceExecutor
     }
 
     public async IAsyncEnumerable<RecordBatch> ExecuteAsync(
-        IReadOnlyList<ScalarValue> parameters,
+        ScalarValue[] parameters,
         ExecutionStats stats,
         ExecutionArena arena,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         var started = _settings.TimeProvider.GetTimestamp();
-        var interpreter = new ReferenceInterpreter(
-            [.. parameters.Select(ToReferenceValue)],
-            _catalog,
-            _settings.Functions,
-            BoundSlots.Of(_plan.BoundScalars, _plan.ParameterTypes.Count))
-        {
-            Now = _settings.TimeProvider.GetUtcNow(),
-            ContextRelations = name => _relations.TryGetValue(name, out var rows) ? rows : null,
-        };
 
+        // Every row is read here, so the tables are pinned for this and let go after it (F188), and
+        // the time is read with them (D341).
+        var readSet = _plan.NewReadSet();
         List<object?[]> rows;
         _sharedRows.Clear();
-
-        // Every row is read here, so the tables are pinned for this and let go after it (F188).
-        var readSet = _plan.NewReadSet();
-        CompiledPlan.Pin(readSet, arena);
+        var now = _plan.PinNow(readSet, arena);
         try
         {
+            _plan.ClockInto(parameters, now);
+            var interpreter = new ReferenceInterpreter(
+                [.. parameters.Select(ToReferenceValue)],
+                _catalog,
+                _settings.Functions,
+                BoundSlots.Of(_plan.BoundScalars, _plan.ParameterTypes.Count))
+            {
+                Now = now,
+                ContextRelations = name => _relations.TryGetValue(name, out var relation) ? relation : null,
+            };
+
             rows = await EvaluateAsync(_plan.Plan.Root, "root", interpreter, stats, arena, ct)
                 .ConfigureAwait(false);
         }

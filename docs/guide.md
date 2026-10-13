@@ -1430,9 +1430,18 @@ await engine.RefreshAsync(epoch => epoch
     .AdvanceClock(now));             // the engine's clock, which only moves forward
 ```
 
-`ChalkEngineOptions.Clock` names the clock. In a view, the parameter of that name and
-`CURRENT_TIMESTAMP`, `LOCALTIMESTAMP` and `CURRENT_DATE` read it as of the view's epoch; a query
-that is not a view is unchanged. A refresh without a version is numbered one past the last.
+`ChalkEngineOptions.Clock` names the clock, and on that engine every query reads it, a view or not:
+
+- `CURRENT_TIMESTAMP`, `LOCALTIMESTAMP` and `CURRENT_DATE` read the clock as of the refresh the
+  query's tables are read at, taken in one step with them, so a query's rows and its time are of one
+  refresh. A view reads it as of the view's epoch.
+- The parameter named after the clock, `@now`, is the clock when the host binds none, and the host's
+  value when it binds one.
+- Before any refresh sets the clock, a query that reads the time is refused with
+  `ClockRequiredException`; one that does not runs.
+
+An engine without a clock reads the wall clock, as before. A refresh without a version is numbered
+one past the last.
 
 ### A view
 
@@ -1461,6 +1470,16 @@ var outcome = view.Drain(ref cursor, sink, 4096); // copies what changed since t
   changes are no fewer than the view's rows, or who needs a delete the view has dropped, is reset:
   the whole result, then a commit.
 - **`ReachedAsync(version)`** waits for the engine to publish a version and brings the view to it.
+- **Resets.** `ResetWhen` sets how many changes reset a reader, as a fraction of the view's rows: 1,
+  the default, is the rule above; a half resets sooner; infinity never resets for size. A host
+  resets a reader at any moment by starting its cursor over, at `ViewCursor.Start`.
+- **A view of a prepared statement.** `engine.MaterializeAsync(prepared, options)` makes a view of
+  a statement the host has already prepared on the engine, and runs its plan: a run of that
+  statement at the view's epoch gives the view's rows bit for bit, `DOUBLE` sums included, so a
+  host can check a view by its checksum. `ViewOptions.Prepare` is refused beside it, and a view of a
+  prepared statement that reads a database needs the statement planned with the view's
+  `LocalJoinMaxRows`. Two plans of one statement can sum `DOUBLE`s in different orders, and so
+  differ in the last bits; one plan, run twice over the same rows, does not.
 - **The local-join cap** is required of every view: `LocalJoinMaxRows`, the most rows a
   cross-source join may fetch to join locally, by the planner's estimate. A statement whose plan
   would fetch more is refused when the view is made, and zero or less is refused outright.
