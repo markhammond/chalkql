@@ -53,6 +53,16 @@ internal sealed class CompiledPlan
 
     private readonly ChalkType[] _boundTypes;
 
+    /// <summary>The types an execution binds: the statement's parameters, then the plan's bound scalars.</summary>
+    internal IReadOnlyList<ChalkType> BoundTypes => _boundTypes;
+
+    /// <summary>What the plan was compiled against, for a maintained plan to compile it again (D343).</summary>
+    internal CatalogContext Catalog => _catalog;
+
+    internal IReadOnlyDictionary<string, ISourceRuntime> Sources => _sources;
+
+    internal ExecutionSettings Settings => _settings;
+
     /// <summary>
     /// How each expression-evaluating operator's subtrees were shared (D299), by operator path — for
     /// tests, which read how many nodes an operator shares and how often they ran. Empty for a plan

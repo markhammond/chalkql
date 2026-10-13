@@ -153,8 +153,32 @@ internal static class PlanCompiler
         return compiled;
     }
 
+    /// <summary>
+    /// A compilation a maintained plan builds its operators through (D343,
+    /// <c>docs/design/68-incremental-maintenance.md</c> §1): the ordinary operators for the nodes it
+    /// runs as they are, and its own, through <see cref="IPlanCompilation.Substitute"/>, for the nodes
+    /// it keeps state for.
+    /// </summary>
+    internal static IPlanCompilation Begin(
+        Plan plan,
+        CatalogContext catalog,
+        IReadOnlyDictionary<string, ISourceRuntime> sourcesBySourceId,
+        ExecutionSettings settings)
+    {
+        var boundScalars = Chalk.Ir.BoundScalars.Of(plan);
+        var boundSlots = BoundSlots.Of(boundScalars, plan.ParameterTypes.Count);
+        var compilation = new Compilation(
+            catalog,
+            sourcesBySourceId,
+            settings.Functions,
+            boundSlots,
+            settings.ForceBufferedWindows);
+        compilation.Share(plan.Shared);
+        return compilation;
+    }
+
     /// <summary>Compilation state: the catalog, the sources and the one expression compiler.</summary>
-    private sealed class Compilation
+    private sealed class Compilation : IPlanCompilation
     {
         private readonly CatalogContext _catalog;
         private readonly IReadOnlyDictionary<string, ISourceRuntime> _sources;
@@ -262,9 +286,20 @@ internal static class PlanCompiler
         /// </summary>
         private Materialisation? _materialisation;
 
+        /// <inheritdoc />
+        public Func<Rel, string, OperatorFactory?>? Substitute { get; set; }
+
+        /// <inheritdoc />
+        public ExpressionCompiler ExpressionsAt(string path) => Expressions(path);
+
         public OperatorFactory Node(Rel rel, string parentPath)
         {
             var path = $"{parentPath}/{rel.KindCase}";
+            if (Substitute?.Invoke(rel, path) is { } substituted)
+            {
+                return substituted;
+            }
+
             if (!Registry.TryGetValue(rel.KindCase, out var factory))
             {
                 throw new UnsupportedFeatureException(
@@ -1972,4 +2007,20 @@ internal static class IrBuilders
 {
     public static Expr FieldRef(int index, Ir.Type type) =>
         new() { Type = type, FieldRef = new FieldRef { Index = (uint)index } };
+}
+
+/// <summary>A plan's compilation, opened to a maintained plan (D343): its nodes, its expressions, and a hook.</summary>
+internal interface IPlanCompilation
+{
+    /// <summary>
+    /// Asked first for every node: a factory of the caller's own to build in its place, or null for the
+    /// ordinary one.
+    /// </summary>
+    Func<Rel, string, OperatorFactory?>? Substitute { get; set; }
+
+    /// <summary>The factory for <paramref name="rel"/>, under <paramref name="parentPath"/>.</summary>
+    OperatorFactory Node(Rel rel, string parentPath);
+
+    /// <summary>The expression compiler of the operator at <paramref name="path"/>.</summary>
+    ExpressionCompiler ExpressionsAt(string path);
 }

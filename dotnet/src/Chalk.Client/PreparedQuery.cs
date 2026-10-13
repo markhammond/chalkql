@@ -719,32 +719,9 @@ public sealed class PreparedQuery
         
         _beforeExecute?.Invoke(this, bindings);
 
-        var shape = ParameterBinder.ShapeOf(Parameters, values);
-        var key = Key(shape);
-
         // One read: this execution runs the plan it finds here, whatever swaps in while it runs.
         var state = Volatile.Read(ref _state);
-        if (!state.Shapes.TryGetValue(key, out var plan))
-        {
-            var rendered = _rewriter.Render(shape);
-            var result =
-                await _engine.PlanAsync(rendered.Sql, _options, Context, ct).ConfigureAwait(false);
-
-            // A plan the prepare never saw is checked as the prepare's was, and refuses the execution
-            // when it fails.
-            _checkPlan?.Invoke(result);
-            var compiled = await _engine.CompileAsync(result.Plan, _options, Context, ct).ConfigureAwait(false);
-            if (_decorateSchema is { } decorate)
-            {
-                var decorated = decorate(compiled.OutputSchema);
-                if (!ReferenceEquals(decorated, compiled.OutputSchema))
-                {
-                    compiled = compiled.WithOutputSchema(decorated);
-                }
-            }
-
-            plan = state.Shapes.GetOrAdd(key, new ShapePlan(compiled, rendered));
-        }
+        var plan = await ShapePlanAsync(state, values, ct).ConfigureAwait(false);
 
         if (_options.RequireCurrentCatalog)
         {
@@ -776,6 +753,74 @@ public sealed class PreparedQuery
 
         return execution;
     }
+
+    /// <summary>
+    /// The plan for the shape of <paramref name="values"/>: a list parameter's length, say, which the
+    /// statement is planned for once and then keeps.
+    /// </summary>
+    private async ValueTask<ShapePlan> ShapePlanAsync(PlanState state, object?[] values, CancellationToken ct)
+    {
+        var shape = ParameterBinder.ShapeOf(Parameters, values);
+        var key = Key(shape);
+        if (state.Shapes.TryGetValue(key, out var plan))
+        {
+            return plan;
+        }
+
+        var rendered = _rewriter.Render(shape);
+        var result = await _engine.PlanAsync(rendered.Sql, _options, Context, ct).ConfigureAwait(false);
+
+        // A plan the prepare never saw is checked as the prepare's was, and refuses the execution
+        // when it fails.
+        _checkPlan?.Invoke(result);
+        var compiled = await _engine.CompileAsync(result.Plan, _options, Context, ct).ConfigureAwait(false);
+        if (_decorateSchema is { } decorate)
+        {
+            var decorated = decorate(compiled.OutputSchema);
+            if (!ReferenceEquals(decorated, compiled.OutputSchema))
+            {
+                compiled = compiled.WithOutputSchema(decorated);
+            }
+        }
+
+        return state.Shapes.GetOrAdd(key, new ShapePlan(compiled, rendered));
+    }
+
+    /// <summary>
+    /// This statement kept by incremental maintenance for a standing view (D343,
+    /// <c>docs/design/68-incremental-maintenance.md</c>), its parameters of the shape of
+    /// <paramref name="values"/>, the parameter at <paramref name="clockParameter"/> (or none, -1) the
+    /// engine's clock, and its result keyed by the output columns <paramref name="key"/>. A statement
+    /// that cannot be maintained is refused with <see cref="NotMaintainableException"/>, naming why.
+    /// </summary>
+    internal async ValueTask<MaintainedQuery> MaintainAsync(
+        object?[] values, int clockParameter, int[] key, CancellationToken ct)
+    {
+        if (RequiredContext.Count > 0)
+        {
+            throw new NotMaintainableException(
+                "the statement reads a request's context, which a maintained view does not bind.", "root");
+        }
+
+        var plan = await ShapePlanAsync(Volatile.Read(ref _state), values, ct).ConfigureAwait(false);
+        var clockSlots = clockParameter >= 0 ? ClockSlots(plan.Rendered.Slots, clockParameter) : [];
+        Chalk.Execution.Maintenance.MaintainedPlan maintained;
+        try
+        {
+            maintained = Chalk.Execution.Maintenance.MaintainedPlan.Create(plan.Compiled, clockSlots);
+        }
+        catch (Chalk.Execution.Maintenance.NotMaintainedException refusal)
+        {
+            throw new NotMaintainableException(refusal.Message, refusal.Path ?? "root");
+        }
+
+        maintained.Key = key;
+        return new MaintainedQuery(this, maintained, plan.Rendered.Slots, plan.Compiled.ParameterTypes);
+    }
+
+    /// <summary>The values a maintained update binds, flattened as an execution's are.</summary>
+    internal object?[] Flatten(object?[] values, IReadOnlyList<PlaceholderSlot> slots, IReadOnlyList<ChalkType> types) =>
+        ParameterBinder.Flatten(Parameters, values, slots, types, _engine.Binding);
 
     /// <summary>The placeholders the parameter at <paramref name="parameter"/> fills: one for each time the text names it.</summary>
     private static int[] ClockSlots(IReadOnlyList<PlaceholderSlot> slots, int parameter)
