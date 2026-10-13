@@ -64,6 +64,22 @@ internal abstract class MaintainedMeasure
     /// </summary>
     public static MaintainedMeasure Create(Measure measure, ChalkType resultType, ChalkType? argumentType)
     {
+        Admit(measure);
+        return measure.Function switch
+        {
+            AggregateFunctionId.Count => new MaintainedCount(resultType),
+            AggregateFunctionId.Sum or AggregateFunctionId.Sum0 =>
+                SumOf(resultType, argumentType ?? resultType, measure.Function == AggregateFunctionId.Sum0),
+            _ => new MaintainedExtremum(resultType, measure.Function == AggregateFunctionId.Max),
+        };
+    }
+
+    /// <summary>
+    /// Refuses a measure no maintained aggregate keeps, naming it: anything but <c>COUNT</c>, <c>SUM</c>,
+    /// <c>SUM0</c>, <c>MIN</c>, <c>MAX</c> and <c>GROUPING</c>, and any of them <c>DISTINCT</c> or ordered.
+    /// </summary>
+    public static void Admit(Measure measure)
+    {
         if (measure.UserFunction.Length > 0)
         {
             throw new NotMaintainedException(
@@ -74,27 +90,38 @@ internal abstract class MaintainedMeasure
         if (measure.Distinct)
         {
             throw new NotMaintainedException(
-                $"{measure.Function.ToString().ToUpperInvariant()}(DISTINCT …) is not maintained.");
+                $"{SqlName(measure.Function)}(DISTINCT …) is not maintained.");
         }
 
         if (measure.OrderBy.Count > 0)
         {
             throw new NotMaintainedException(
-                $"{measure.Function.ToString().ToUpperInvariant()} with an ordering is not maintained.");
+                $"{SqlName(measure.Function)} with an ordering is not maintained.");
         }
 
-        return measure.Function switch
+        if (measure.Function is not (AggregateFunctionId.Count or AggregateFunctionId.Sum or AggregateFunctionId.Sum0
+            or AggregateFunctionId.Min or AggregateFunctionId.Max or AggregateFunctionId.Grouping))
         {
-            AggregateFunctionId.Count => new MaintainedCount(resultType),
-            AggregateFunctionId.Sum or AggregateFunctionId.Sum0 =>
-                SumOf(resultType, argumentType ?? resultType, measure.Function == AggregateFunctionId.Sum0),
-            AggregateFunctionId.Min or AggregateFunctionId.Max =>
-                new MaintainedExtremum(resultType, measure.Function == AggregateFunctionId.Max),
-            _ => throw new NotMaintainedException(
-                $"the aggregate {measure.Function.ToString().ToUpperInvariant()} is not maintained: a "
-                + "maintained view keeps COUNT, SUM, MIN and MAX."),
-        };
+            throw new NotMaintainedException(
+                $"the aggregate {SqlName(measure.Function)} is not maintained: a maintained view keeps "
+                + "COUNT, SUM, MIN and MAX.");
+        }
     }
+
+    /// <summary>An aggregate as SQL spells it, for a refusal.</summary>
+    private static string SqlName(AggregateFunctionId function) => function switch
+    {
+        AggregateFunctionId.AnyValue => "ANY_VALUE",
+        AggregateFunctionId.BoolAnd => "BOOL_AND",
+        AggregateFunctionId.BoolOr => "BOOL_OR",
+        AggregateFunctionId.PercentileCont => "PERCENTILE_CONT",
+        AggregateFunctionId.PercentileDisc => "PERCENTILE_DISC",
+        AggregateFunctionId.Listagg => "LISTAGG",
+        AggregateFunctionId.StringAgg => "STRING_AGG",
+        AggregateFunctionId.ArrayAgg => "ARRAY_AGG",
+        AggregateFunctionId.ApproxCountDistinct => "APPROX_COUNT_DISTINCT",
+        _ => function.ToString().ToUpperInvariant(),
+    };
 
     private static MaintainedMeasure SumOf(ChalkType resultType, ChalkType argumentType, bool zeroWhenEmpty) =>
         ColumnKinds.Of(resultType) switch

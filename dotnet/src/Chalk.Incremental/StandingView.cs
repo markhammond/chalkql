@@ -11,9 +11,10 @@ namespace Chalk.Incremental;
 /// <remarks>
 /// <para>
 /// <see cref="UpdateAsync"/> brings the view to the engine's latest epoch, and is the only thing
-/// that computes: as of writing it runs the statement in full and compares the result with the rows
-/// the view holds, so only the delivery is incremental. <see cref="Drain"/> copies what changed into
-/// a sink, and never computes. A view computes only when asked, so epochs nobody reads cost nothing.
+/// that computes: it runs the statement in full and compares the result with the rows the view
+/// holds, or, under <see cref="ViewMaintenance.Incremental"/> (D343), computes only what changed since
+/// the last update and applies the keys whose rows changed. <see cref="Drain"/> copies what changed
+/// into a sink, and never computes. A view computes only when asked, so epochs nobody reads cost nothing.
 /// </para>
 /// <para>
 /// An update reads one epoch whole: should a refresh land while it runs, it runs again, and holds
@@ -683,14 +684,16 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             }
         }
 
-        var kept = _reads?.BytesKept ?? 0;
+        var kept = (_reads?.BytesKept ?? 0) + (_maintained?.StateBytes ?? 0);
         var bytes = _table.BytesWith(added) + kept;
         if (bytes > _options.StateBudget)
         {
             throw new StandingViewException(
                 ChalkErrorCodes.MemoryBudgetExceeded,
                 $"The view would hold about {bytes} bytes at version {stamp.Version}"
-                + (kept > 0 ? $", {kept} of them kept from its databases," : string.Empty)
+                + (_maintained is not null
+                    ? $", {kept} of them kept by its incremental maintenance,"
+                    : kept > 0 ? $", {kept} of them kept from its databases," : string.Empty)
                 + $" past its StateBudget of {_options.StateBudget}. It keeps the epoch it held; raise "
                 + "ViewOptions.StateBudget, or narrow the statement's result.");
         }

@@ -191,6 +191,7 @@ internal sealed class AggregateState : IMaintainedState
         var measureTypes = Measures.Select(m => ChalkType.FromProto(m.Type)).ToArray();
         foreach (var measure in Measures)
         {
+            MaintainedMeasure.Admit(measure);
             if (measure.Args.Any(a => a.KindCase != Expr.KindOneofCase.FieldRef))
             {
                 throw new NotMaintainedException("an aggregate's argument is an expression, which is not maintained.");
