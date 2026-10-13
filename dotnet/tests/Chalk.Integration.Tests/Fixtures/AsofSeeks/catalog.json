@@ -1,0 +1,1397 @@
+{
+ "ContextId": "asof-seeks",
+ "Schemas": [
+  {
+   "SourceId": "desk",
+   "Name": "main",
+   "Kind": "Local",
+   "Dialect": null,
+   "Capabilities": {
+    "QueryLanguage": "None",
+    "PushablePredicates": [],
+    "PushableFunctions": [],
+    "PushableAggregates": [],
+    "NativeFunctions": [],
+    "SupportsProject": false,
+    "SupportsSort": false,
+    "SupportsLimit": false,
+    "SupportsOffset": false,
+    "SupportsDistinct": false,
+    "SupportsGroupBy": false,
+    "SupportsHaving": false,
+    "SupportsInnerJoin": false,
+    "SupportsOuterJoin": false,
+    "SupportsSemiAntiJoin": false,
+    "MaxPushdownRows": 0,
+    "MaxInList": 0,
+    "SupportsParameters": false,
+    "SupportsValuesJoin": false,
+    "SupportsMaskPushdown": false,
+    "SupportsCase": true,
+    "SupportsRowValueInList": false,
+    "UnsupportedFunctions": []
+   },
+   "DialectProfile": {
+    "Dialect": "",
+    "Quoting": "Unspecified",
+    "QuotedCasing": "Unspecified",
+    "UnquotedCasing": "Unspecified",
+    "CaseSensitiveIdentifiers": false,
+    "Conformance": null,
+    "Libraries": [],
+    "MaxNumericPrecision": 0,
+    "MaxTimestampPrecision": 0,
+    "HasBoolean": false,
+    "TimeZone": "",
+    "DefaultNullCollation": "Unspecified",
+    "SupportsNullOrderingClause": false,
+    "StringCollation": "Unspecified",
+    "LikeMatchesCodePoints": false,
+    "ApproximateDecimal": false,
+    "ApproximateDistinctCount": false,
+    "ApproximateTopN": false,
+    "ImplicitCoercionMatches": false,
+    "ParameterPlaceholder": "Unspecified",
+    "DynamicallyTyped": false
+   },
+   "CostProfile": {
+    "ScanRowCost": 0,
+    "LookupSeekCost": 0,
+    "LookupRowCost": 0,
+    "RemoteCallCost": 0,
+    "RemoteRowCost": 0,
+    "IsInherit": true
+   },
+   "Tables": [
+    {
+     "Name": "zones",
+     "Columns": [
+      {
+       "Name": "zone",
+       "Type": {
+        "Kind": "String",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": 9,
+        "NullCount": 0,
+        "Min": "America/Chicago",
+        "Max": "UTC",
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "starts",
+       "Type": {
+        "Kind": "Timestamp",
+        "Nullable": false,
+        "Precision": 9,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": 161,
+        "NullCount": 0,
+        "Min": 1577836800000000000,
+        "Max": 2204175600000000000,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "ends",
+       "Type": {
+        "Kind": "Timestamp",
+        "Nullable": false,
+        "Precision": 9,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 1583650800000000000,
+        "Max": 2208988800000000000,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "utc_offset_minutes",
+       "Type": {
+        "Kind": "I32",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": -360,
+        "Max": 660,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "local_starts",
+       "Type": {
+        "Kind": "Timestamp",
+        "Nullable": false,
+        "Precision": 9,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 1577815200000000000,
+        "Max": 2204154000000000000,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "previous_offset_minutes",
+       "Type": {
+        "Kind": "I32",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": -360,
+        "Max": 660,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      }
+     ],
+     "RowCount": 209,
+     "RowCountKind": "Exact",
+     "CostProfile": {
+      "ScanRowCost": 0,
+      "LookupSeekCost": 0,
+      "LookupRowCost": 0,
+      "RemoteCallCost": 0,
+      "RemoteRowCost": 0,
+      "IsInherit": true
+     },
+     "UniqueKeys": [],
+     "Collations": [
+      {
+       "Keys": [
+        {
+         "Column": 0,
+         "Direction": "AscNullsLast"
+        },
+        {
+         "Column": 1,
+         "Direction": "AscNullsLast"
+        }
+       ]
+      }
+     ],
+     "Indexes": [],
+     "ForeignKeys": [],
+     "Partitioning": null,
+     "Entitlement": null,
+     "IsPublic": false
+    },
+    {
+     "Name": "currencies",
+     "Columns": [
+      {
+       "Name": "currency_id",
+       "Type": {
+        "Kind": "I16",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": 20,
+        "NullCount": 0,
+        "Min": 1,
+        "Max": 108,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "currency_name",
+       "Type": {
+        "Kind": "String",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": "ADA-USD-PERP",
+        "Max": "XRP-USD-PERP",
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "is_deliverable",
+       "Type": {
+        "Kind": "Bool",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 0,
+        "Max": 1,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "underlying",
+       "Type": {
+        "Kind": "String",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": "ADA",
+        "Max": "XRP",
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "quote",
+       "Type": {
+        "Kind": "String",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": "AUD",
+        "Max": "USDT",
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      }
+     ],
+     "RowCount": 20,
+     "RowCountKind": "Exact",
+     "CostProfile": {
+      "ScanRowCost": 0,
+      "LookupSeekCost": 0,
+      "LookupRowCost": 0,
+      "RemoteCallCost": 0,
+      "RemoteRowCost": 0,
+      "IsInherit": true
+     },
+     "UniqueKeys": [],
+     "Collations": [
+      {
+       "Keys": [
+        {
+         "Column": 0,
+         "Direction": "AscNullsLast"
+        }
+       ]
+      }
+     ],
+     "Indexes": [],
+     "ForeignKeys": [],
+     "Partitioning": null,
+     "Entitlement": null,
+     "IsPublic": false
+    },
+    {
+     "Name": "parties",
+     "Columns": [
+      {
+       "Name": "party_id",
+       "Type": {
+        "Kind": "I64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": 13,
+        "NullCount": 0,
+        "Min": 1,
+        "Max": 13,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "party_name",
+       "Type": {
+        "Kind": "String",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": "Acorn Fund",
+        "Max": "Laurel & Co",
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "cpty_ref",
+       "Type": {
+        "Kind": "String",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": "ACORN",
+        "Max": "LAUREL",
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "is_house",
+       "Type": {
+        "Kind": "Bool",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 0,
+        "Max": 1,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "metadata",
+       "Type": {
+        "Kind": "String",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": "{\"role\":\"principal\"}",
+        "Max": "{\"tier\":3}",
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "update_time",
+       "Type": {
+        "Kind": "Timestamp",
+        "Nullable": false,
+        "Precision": 9,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 1790910000000000000,
+        "Max": 1790910000000000000,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      }
+     ],
+     "RowCount": 13,
+     "RowCountKind": "Exact",
+     "CostProfile": {
+      "ScanRowCost": 0,
+      "LookupSeekCost": 0,
+      "LookupRowCost": 0,
+      "RemoteCallCost": 0,
+      "RemoteRowCost": 0,
+      "IsInherit": true
+     },
+     "UniqueKeys": [],
+     "Collations": [
+      {
+       "Keys": [
+        {
+         "Column": 0,
+         "Direction": "AscNullsLast"
+        }
+       ]
+      }
+     ],
+     "Indexes": [],
+     "ForeignKeys": [],
+     "Partitioning": null,
+     "Entitlement": null,
+     "IsPublic": false
+    },
+    {
+     "Name": "accounts",
+     "Columns": [
+      {
+       "Name": "account_id",
+       "Type": {
+        "Kind": "I64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": 56,
+        "NullCount": 0,
+        "Min": 1,
+        "Max": 56,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "account_ref",
+       "Type": {
+        "Kind": "String",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": "ACORN-AVAX-USD-PERP",
+        "Max": "LAUREL-USD",
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "party_id",
+       "Type": {
+        "Kind": "I64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 1,
+        "Max": 13,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "currency_id",
+       "Type": {
+        "Kind": "I16",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 1,
+        "Max": 108,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "currency_name",
+       "Type": {
+        "Kind": "String",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": "ADA-USD-PERP",
+        "Max": "XRP-USD-PERP",
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "metadata",
+       "Type": {
+        "Kind": "String",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": "{\"holds\":\"pnl\"}",
+        "Max": "{\"holds\":\"position\"}",
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "update_time",
+       "Type": {
+        "Kind": "Timestamp",
+        "Nullable": false,
+        "Precision": 9,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 1790910000000000000,
+        "Max": 1790910000000000000,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      }
+     ],
+     "RowCount": 56,
+     "RowCountKind": "Exact",
+     "CostProfile": {
+      "ScanRowCost": 0,
+      "LookupSeekCost": 0,
+      "LookupRowCost": 0,
+      "RemoteCallCost": 0,
+      "RemoteRowCost": 0,
+      "IsInherit": true
+     },
+     "UniqueKeys": [],
+     "Collations": [
+      {
+       "Keys": [
+        {
+         "Column": 0,
+         "Direction": "AscNullsLast"
+        }
+       ]
+      }
+     ],
+     "Indexes": [],
+     "ForeignKeys": [],
+     "Partitioning": null,
+     "Entitlement": null,
+     "IsPublic": false
+    },
+    {
+     "Name": "positions",
+     "Columns": [
+      {
+       "Name": "position_id",
+       "Type": {
+        "Kind": "I64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 1,
+        "Max": 178775,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "party_id",
+       "Type": {
+        "Kind": "I64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 2,
+        "Max": 13,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "account_id",
+       "Type": {
+        "Kind": "I64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": 35,
+        "NullCount": 0,
+        "Min": 11,
+        "Max": 56,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "currency_id",
+       "Type": {
+        "Kind": "I16",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 101,
+        "Max": 108,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "channel",
+       "Type": {
+        "Kind": "String",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": 5,
+        "NullCount": 0,
+        "Min": "API",
+        "Max": "Voice",
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "journal_id",
+       "Type": {
+        "Kind": "I64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 1,
+        "Max": 560125,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "amt_signed",
+       "Type": {
+        "Kind": "Decimal",
+        "Nullable": false,
+        "Precision": 28,
+        "Scale": 8,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": -300000,
+        "Max": 410000,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "avg_usd_prc",
+       "Type": {
+        "Kind": "Fp64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 0,
+        "Max": 121211.7,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "mark_usd_prc",
+       "Type": {
+        "Kind": "Fp64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 0.031585514280174976,
+        "Max": 120788.93883695493,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "update_time",
+       "Type": {
+        "Kind": "Timestamp",
+        "Nullable": false,
+        "Precision": 9,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": 17441,
+        "NullCount": 0,
+        "Min": 1790918553917190400,
+        "Max": 1791860867685717700,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "offset_pnl",
+       "Type": {
+        "Kind": "Fp64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 0,
+        "Max": 0,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "cumulative_realized_pnl",
+       "Type": {
+        "Kind": "Fp64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": -123444.85599988971,
+        "Max": 18842.800000010004,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "cumulative_volume",
+       "Type": {
+        "Kind": "Fp64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 971.588,
+        "Max": 151808516.38600147,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "trade_count",
+       "Type": {
+        "Kind": "I64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 1,
+        "Max": 11331,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      }
+     ],
+     "RowCount": 17441,
+     "RowCountKind": "Exact",
+     "CostProfile": {
+      "ScanRowCost": 0,
+      "LookupSeekCost": 0,
+      "LookupRowCost": 0,
+      "RemoteCallCost": 0,
+      "RemoteRowCost": 0,
+      "IsInherit": true
+     },
+     "UniqueKeys": [],
+     "Collations": [
+      {
+       "Keys": [
+        {
+         "Column": 9,
+         "Direction": "AscNullsLast"
+        }
+       ]
+      }
+     ],
+     "Indexes": [
+      {
+       "Name": "ix_positions_account_id_channel_update_time",
+       "Kind": "Ordered",
+       "Columns": [
+        2,
+        4,
+        9
+       ],
+       "Unique": false,
+       "Directions": [],
+       "Covering": [],
+       "Reversal": "Any"
+      }
+     ],
+     "ForeignKeys": [],
+     "Partitioning": null,
+     "Entitlement": null,
+     "IsPublic": false
+    },
+    {
+     "Name": "prices",
+     "Columns": [
+      {
+       "Name": "ts",
+       "Type": {
+        "Kind": "Timestamp",
+        "Nullable": false,
+        "Precision": 9,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": 266,
+        "NullCount": 0,
+        "Min": 1790906400000000000,
+        "Max": 1791860400000000000,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "asset",
+       "Type": {
+        "Kind": "String",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": 8,
+        "NullCount": 0,
+        "Min": "ADA",
+        "Max": "XRP",
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "usd_price",
+       "Type": {
+        "Kind": "Fp64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 0.031585514280174976,
+        "Max": 120788.93883695493,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      }
+     ],
+     "RowCount": 2128,
+     "RowCountKind": "Exact",
+     "CostProfile": {
+      "ScanRowCost": 0,
+      "LookupSeekCost": 0,
+      "LookupRowCost": 0,
+      "RemoteCallCost": 0,
+      "RemoteRowCost": 0,
+      "IsInherit": true
+     },
+     "UniqueKeys": [],
+     "Collations": [
+      {
+       "Keys": [
+        {
+         "Column": 0,
+         "Direction": "AscNullsLast"
+        },
+        {
+         "Column": 1,
+         "Direction": "AscNullsLast"
+        }
+       ]
+      }
+     ],
+     "Indexes": [
+      {
+       "Name": "ix_prices_asset_ts",
+       "Kind": "Ordered",
+       "Columns": [
+        1,
+        0
+       ],
+       "Unique": false,
+       "Directions": [],
+       "Covering": [],
+       "Reversal": "Any"
+      }
+     ],
+     "ForeignKeys": [],
+     "Partitioning": null,
+     "Entitlement": null,
+     "IsPublic": false
+    },
+    {
+     "Name": "rates",
+     "Columns": [
+      {
+       "Name": "ts",
+       "Type": {
+        "Kind": "Timestamp",
+        "Nullable": false,
+        "Precision": 9,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": 266,
+        "NullCount": 0,
+        "Min": 1790906400000000000,
+        "Max": 1791860400000000000,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "symbol",
+       "Type": {
+        "Kind": "String",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": 12,
+        "NullCount": 0,
+        "Min": "AUD",
+        "Max": "USDT",
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "usd_rate",
+       "Type": {
+        "Kind": "Fp64",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Basic",
+        "DistinctCount": -1,
+        "NullCount": 0,
+        "Min": 0.006696585378154899,
+        "Max": 1.2743748422351715,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      }
+     ],
+     "RowCount": 3192,
+     "RowCountKind": "Exact",
+     "CostProfile": {
+      "ScanRowCost": 0,
+      "LookupSeekCost": 0,
+      "LookupRowCost": 0,
+      "RemoteCallCost": 0,
+      "RemoteRowCost": 0,
+      "IsInherit": true
+     },
+     "UniqueKeys": [],
+     "Collations": [
+      {
+       "Keys": [
+        {
+         "Column": 0,
+         "Direction": "AscNullsLast"
+        },
+        {
+         "Column": 1,
+         "Direction": "AscNullsLast"
+        }
+       ]
+      }
+     ],
+     "Indexes": [
+      {
+       "Name": "ix_rates_symbol_ts",
+       "Kind": "Ordered",
+       "Columns": [
+        1,
+        0
+       ],
+       "Unique": false,
+       "Directions": [],
+       "Covering": [],
+       "Reversal": "Any"
+      }
+     ],
+     "ForeignKeys": [],
+     "Partitioning": null,
+     "Entitlement": null,
+     "IsPublic": false
+    }
+   ],
+   "Functions": [
+    {
+     "Name": "format_date",
+     "Kind": "Scalar",
+     "Parameters": [
+      {
+       "Name": "ts",
+       "Type": {
+        "Kind": "Timestamp",
+        "Nullable": true,
+        "Precision": 9,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Optional": false,
+       "Default": null
+      }
+     ],
+     "ReturnType": {
+      "Kind": "String",
+      "Nullable": false,
+      "Precision": 0,
+      "Scale": 0,
+      "Element": null,
+      "Fields": []
+     },
+     "ReturnsTable": [],
+     "Volatility": "Immutable",
+     "Strict": true,
+     "Leakproof": false,
+     "Monotonicity": [],
+     "Cost": 0,
+     "Rows": 0,
+     "Window": false,
+     "Ordered": false,
+     "NullTreatment": false,
+     "Population": false,
+     "Body": {}
+    },
+    {
+     "Name": "day_windows",
+     "Kind": "Table",
+     "Parameters": [
+      {
+       "Name": "zone_name",
+       "Type": {
+        "Kind": "String",
+        "Nullable": true,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Optional": false,
+       "Default": null
+      },
+      {
+       "Name": "cutoff_hour",
+       "Type": {
+        "Kind": "I32",
+        "Nullable": true,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Optional": false,
+       "Default": null
+      }
+     ],
+     "ReturnType": null,
+     "ReturnsTable": [
+      {
+       "Name": "day_label",
+       "Type": {
+        "Kind": "String",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Unknown",
+        "DistinctCount": -1,
+        "NullCount": -1,
+        "Min": null,
+        "Max": null,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "days_ago",
+       "Type": {
+        "Kind": "I32",
+        "Nullable": false,
+        "Precision": 0,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Unknown",
+        "DistinctCount": -1,
+        "NullCount": -1,
+        "Min": null,
+        "Max": null,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "opens",
+       "Type": {
+        "Kind": "Timestamp",
+        "Nullable": false,
+        "Precision": 9,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Unknown",
+        "DistinctCount": -1,
+        "NullCount": -1,
+        "Min": null,
+        "Max": null,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      },
+      {
+       "Name": "closes",
+       "Type": {
+        "Kind": "Timestamp",
+        "Nullable": false,
+        "Precision": 9,
+        "Scale": 0,
+        "Element": null,
+        "Fields": []
+       },
+       "Statistics": {
+        "Level": "Unknown",
+        "DistinctCount": -1,
+        "NullCount": -1,
+        "Min": null,
+        "Max": null,
+        "Histogram": [],
+        "FrequentValues": []
+       }
+      }
+     ],
+     "Volatility": "Unspecified",
+     "Strict": false,
+     "Leakproof": false,
+     "Monotonicity": [],
+     "Cost": 0,
+     "Rows": 0,
+     "Window": false,
+     "Ordered": false,
+     "NullTreatment": false,
+     "Population": false,
+     "Body": {}
+    }
+   ],
+   "TrustSourceRowLevelSecurity": false,
+   "Zone": ""
+  }
+ ],
+ "Epoch": 2,
+ "JoinPolicy": {
+  "DefaultStrategy": "Unspecified",
+  "BroadcastMaxRows": 0,
+  "LookupMaxCalls": 0,
+  "LocalJoinMaxRows": 0,
+  "UnknownRowCountAssumption": 0,
+  "Pairs": []
+ },
+ "Associations": []
+}
