@@ -31,7 +31,8 @@ internal sealed class ReadState : IMaintainedState
 
     /// <summary>
     /// Whether the update now running found the table rewritten, so that its changes are every old
-    /// row out and every new row in: an as-of join then places its right rows afresh (§5).
+    /// row out and every new row in: an as-of join then places its right rows afresh (§5). A read of
+    /// appends only says so too when it reads the table for the first time.
     /// </summary>
     public bool Rewritten { get; set; }
 
@@ -73,19 +74,31 @@ internal sealed class ReadState : IMaintainedState
 /// The changes of one table read in one update: at the first, every row in; after an append, the
 /// rows it added; after anything else, every old row out and every new row in (design 68 §3).
 /// </summary>
+/// <remarks>
+/// A read of appends only, as a maintained as-of seek reads its table's keys, gives the rows an
+/// append added and nothing else: at the first read and after a rewrite it gives no rows and says
+/// <see cref="ReadState.Rewritten"/>.
+/// </remarks>
 internal sealed class ReadChanges : OperatorBase
 {
     private readonly ReadState _state;
+    private readonly bool _appendsOnly;
     private readonly ColumnarBatch _slot;
     private readonly int _weightColumn;
     private byte[] _plus = [];
     private byte[] _minus = [];
 
     public ReadChanges(
-        OperatorContext context, string path, ArrowSchema schema, IReadOnlyList<ChalkType> types, ReadState state)
+        OperatorContext context,
+        string path,
+        ArrowSchema schema,
+        IReadOnlyList<ChalkType> types,
+        ReadState state,
+        bool appendsOnly = false)
         : base(context, schema, types, path)
     {
         _state = state;
+        _appendsOnly = appendsOnly;
         _slot = NewOutput();
         _weightColumn = types.Count - 1;
     }
@@ -103,9 +116,13 @@ internal sealed class ReadChanges : OperatorBase
 
         if (held is null)
         {
-            await foreach (var batch in Scan(now, 0, +1, ct))
+            _state.Rewritten = _appendsOnly;
+            if (!_appendsOnly)
             {
-                yield return batch;
+                await foreach (var batch in Scan(now, 0, +1, ct))
+                {
+                    yield return batch;
+                }
             }
         }
         else if (!ReferenceEquals(held, now))
@@ -121,14 +138,17 @@ internal sealed class ReadChanges : OperatorBase
             else
             {
                 _state.Rewritten = true;
-                await foreach (var batch in Scan(held, 0, -1, ct))
+                if (!_appendsOnly)
                 {
-                    yield return batch;
-                }
+                    await foreach (var batch in Scan(held, 0, -1, ct))
+                    {
+                        yield return batch;
+                    }
 
-                await foreach (var batch in Scan(now, 0, +1, ct))
-                {
-                    yield return batch;
+                    await foreach (var batch in Scan(now, 0, +1, ct))
+                    {
+                        yield return batch;
+                    }
                 }
             }
         }

@@ -349,21 +349,20 @@ internal sealed class MaintainedCompiler
             (int)join.RightTime,
             join.Match,
             join.Type == JoinType.Left,
-            lastTieWins: false,
             _reads[rightRead],
-            fixedColumns: null,
             _settings.BatchSize);
         States.Add(state);
         var weighted = Weighted(rel.RowType);
         var schema = ArrowTypeMapping.ToArrowSchema(weighted);
         var types = Types(weighted);
         return Substituted(weighted, context => new AsOfChanges(
-            context, path, schema, types, state, leftFactory(context), rightFactory(context), rightTypes));
+            context, path, schema, types, state, leftFactory(context), rightFactory(context)));
     }
 
     /// <summary>
-    /// An as-of seek into a table's index: its right side a maintained read of the table's projected
-    /// columns, and of its fixed columns after them.
+    /// An as-of seek into a table's index (design 68 §13): the statement's own seek, run over the left
+    /// rows whose match may have moved, and a read of the keys of the rows appended to the table. None
+    /// of the table's rows are kept.
     /// </summary>
     private Rel AsOfSeek(Rel rel, string path)
     {
@@ -373,69 +372,93 @@ internal sealed class MaintainedCompiler
             throw new NotMaintainedException($"a {seek.Type} as-of join is not maintained.");
         }
 
-        var descriptor = _catalog.FindTable(seek.Table.Schema, seek.Table.Table)
-            ?? throw new InvalidPlanException("I-IR-6", path, $"the catalog has no table {seek.Table.Schema}.{seek.Table.Table}");
-        var projection = seek.Projection.Select(i => (int)i).ToArray();
-        var fixedColumns = seek.FixedColumns.Select(c => (int)c).ToArray();
-        var held = seek.RightKeys.Select(k => projection[(int)k]).Concat(fixedColumns).ToArray();
-        var index = descriptor.Table.Indexes.FirstOrDefault(
-            i => string.Equals(i.Name, seek.Index, StringComparison.OrdinalIgnoreCase));
-        if (index is null || index.Columns.Count != held.Length + 1)
-        {
-            throw new NotMaintainedException(
-                $"an as-of seek on index '{seek.Index}', whose key goes on past its time column, breaks ties by "
-                + "that key, which is not maintained.");
-        }
-
-        var leftTypes = Types(seek.Left.RowType);
-        var leftWidth = leftTypes.Length;
-        var output = Types(rel.RowType);
-        var rightTypes = output.Skip(leftWidth).ToArray();
-        var scanned = projection.Concat(fixedColumns).ToArray();
-        var scanRow = new RowType();
-        foreach (var column in scanned)
-        {
-            var described = descriptor.Table.Columns[column];
-            scanRow.Fields.Add(new Field { Name = described.Name, Type = described.Type.ToProto() });
-        }
-
-        var scanTypes = Types(scanRow);
-        var read = ReadOf(seek.Table, scanned, scanRow);
-        var weighted = Weighted(scanRow);
-        var readSchema = ArrowTypeMapping.ToArrowSchema(weighted);
-        var readTypes = Types(weighted);
-        var readPath = $"{path}/Read";
-        OperatorFactory rightFactory = context => new ReadChanges(context, readPath, readSchema, readTypes, read);
-        var leftFactory = _compilation.Node(Rewrite(seek.Left, path), path);
-        var fixedHeld = fixedColumns.Length == 0
-            ? null
-            : new FixedColumns(
-                [.. Enumerable.Range(projection.Length, fixedColumns.Length)], [.. seek.FixedValues], scanTypes);
+        // A seek's matches move only when rows are appended under its keys, or the table is rewritten;
+        // a fixed value that read the clock would move them as the clock does.
         foreach (var value in seek.FixedValues)
         {
             RefuseClock(value, "an as-of seek's fixed value");
         }
 
-        var state = new AsOfState(
+        var descriptor = _catalog.FindTable(seek.Table.Schema, seek.Table.Table)
+            ?? throw new InvalidPlanException("I-IR-6", path, $"the catalog has no table {seek.Table.Schema}.{seek.Table.Table}");
+        var projection = seek.Projection.Select(i => (int)i).ToArray();
+        var leftKeys = seek.LeftKeys.Select(k => (int)k).ToArray();
+        var leftRow = seek.Left.RowType;
+        var leftTypes = Types(leftRow);
+        var leftWidth = leftTypes.Length;
+        var output = Types(rel.RowType);
+
+        // The table's key columns, in the order of the left's; with none, its time, to learn of appends.
+        var keyColumns = seek.RightKeys.Select(k => projection[(int)k]).ToArray();
+        int[] read = keyColumns.Length == 0 ? [projection[(int)seek.RightTime]] : keyColumns;
+        var keyRow = new RowType();
+        foreach (var column in read)
+        {
+            var described = descriptor.Table.Columns[column];
+            keyRow.Fields.Add(new Field { Name = described.Name, Type = described.Type.ToProto() });
+        }
+
+        var keyTypes = Types(keyRow);
+        for (var k = 0; k < keyColumns.Length; k++)
+        {
+            if (leftTypes[leftKeys[k]].WithNullable(false) != keyTypes[k].WithNullable(false))
+            {
+                throw new NotMaintainedException(
+                    $"an as-of seek whose key '{keyRow.Fields[k].Name}' has one type in its table and another on "
+                    + "its left is not maintained.");
+            }
+        }
+
+        var keys = ReadOf(seek.Table, read, keyRow);
+        var leftFactory = _compilation.Node(Rewrite(seek.Left, path), path);
+        var state = new SeekState(
             leftTypes,
-            rightTypes,
+            output[leftWidth..],
             output,
-            [.. seek.LeftKeys.Select(k => (int)k)],
-            [.. seek.RightKeys.Select(k => (int)k)],
+            keyTypes,
+            leftKeys,
             (int)seek.LeftTime,
             (int)seek.RightTime,
-            seek.Match,
             seek.Type == JoinType.Left,
-            lastTieWins: seek.Match is AsOfMatch.Ge or AsOfMatch.Gt,
-            read,
-            fixedHeld,
+            keys,
             _settings.BatchSize);
         States.Add(state);
-        var outputWeighted = Weighted(rel.RowType);
-        var schema = ArrowTypeMapping.ToArrowSchema(outputWeighted);
-        var types = Types(outputWeighted);
-        return Substituted(outputWeighted, context => new AsOfChanges(
-            context, path, schema, types, state, leftFactory(context), rightFactory(context), scanTypes));
+
+        // The statement's own seek, as a left join, over the left rows the update matches, each with its
+        // place among them after its own columns.
+        var place = new Field { Name = "$place", Type = SeekState.Place.ToProto() };
+        var pendingRow = leftRow.Clone();
+        pendingRow.Fields.Add(place);
+        var pendingPath = $"{path}/Pending";
+        var pendingSchema = ArrowTypeMapping.ToArrowSchema(pendingRow);
+        var pendingTypes = Types(pendingRow);
+        var pending = Substituted(pendingRow, context => new PendingRows(context, pendingPath, pendingSchema, pendingTypes, state));
+        var matcher = rel.Clone();
+        matcher.AsOfLookupJoin.Left = pending;
+        matcher.AsOfLookupJoin.Type = JoinType.Left;
+        for (var i = leftWidth; i < matcher.RowType.Fields.Count; i++)
+        {
+            matcher.RowType.Fields[i].Type.Nullable = true;
+        }
+
+        matcher.RowType.Fields.Insert(leftWidth, place.Clone());
+        var seekFactory = _compilation.Node(matcher, path);
+        var keysPath = $"{path}/Read";
+        var keysWeighted = Weighted(keyRow);
+        var keysSchema = ArrowTypeMapping.ToArrowSchema(keysWeighted);
+        var keysTypes = Types(keysWeighted);
+        var weighted = Weighted(rel.RowType);
+        var schema = ArrowTypeMapping.ToArrowSchema(weighted);
+        var types = Types(weighted);
+        return Substituted(weighted, context => new SeekChanges(
+            context,
+            path,
+            schema,
+            types,
+            state,
+            leftFactory(context),
+            new ReadChanges(context, keysPath, keysSchema, keysTypes, keys, appendsOnly: true),
+            seekFactory(context)));
     }
 
     private Rel Aggregate(Rel rel, string path, Aggregate aggregate)

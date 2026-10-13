@@ -1,6 +1,5 @@
 using Chalk.Catalog;
 using Chalk.Execution.Aggregation;
-using Chalk.Execution.Expressions;
 using Chalk.Execution.Operators;
 using Chalk.Execution.Vectors;
 using Chalk.Ir;
@@ -21,9 +20,8 @@ namespace Chalk.Execution.Maintenance;
 /// re-matches every left row. Either way a left row's output changes only when its match's values do.
 /// </para>
 /// <para>
-/// Ties break as the executor breaks them. An as-of join reading its right input whole takes the first
-/// of the closest rows in the right input's order; an as-of seek takes the first its index reads,
-/// which going back from a <c>&gt;=</c> or <c>&gt;</c> match is the last in row order.
+/// Ties break as the executor's as-of join breaks them: the first of the closest rows in the right
+/// input's order. An as-of seek, which breaks them by its index, is <see cref="SeekState"/>.
 /// </para>
 /// </remarks>
 internal sealed class AsOfState : IMaintainedState
@@ -38,9 +36,7 @@ internal sealed class AsOfState : IMaintainedState
         int rightTime,
         AsOfMatch match,
         bool leftJoin,
-        bool lastTieWins,
         ReadState rightRead,
-        FixedColumns? fixedColumns,
         int batchSize)
     {
         LeftWidth = leftTypes.Count;
@@ -53,9 +49,7 @@ internal sealed class AsOfState : IMaintainedState
         RightTime = rightTime;
         Match = match;
         LeftJoin = leftJoin;
-        LastTieWins = lastTieWins;
         RightRead = rightRead;
-        Fixed = fixedColumns;
         Times = new TimeOrder(leftTypes[leftTime]);
         Left = new RowStore(leftTypes);
         Right = new RowStore(rightTypes);
@@ -84,13 +78,8 @@ internal sealed class AsOfState : IMaintainedState
 
     public bool LeftJoin { get; }
 
-    public bool LastTieWins { get; }
-
     /// <summary>The read under the right input, which says when the table was rewritten.</summary>
     public ReadState RightRead { get; }
-
-    /// <summary>An as-of seek's columns held to one value each, or null.</summary>
-    public FixedColumns? Fixed { get; }
 
     public TimeOrder Times { get; }
 
@@ -106,8 +95,6 @@ internal sealed class AsOfState : IMaintainedState
     public ChangeWriter Output { get; }
 
     public KeyEncoder Encoder { get; } = new();
-
-    public KeyEncoder Other { get; } = new();
 
     /// <summary>The left rows held: how many times, by key, and the right slot each matches, or -1.</summary>
     public long[] LeftCounts { get; set; } = [];
@@ -153,62 +140,6 @@ internal sealed class AsOfState : IMaintainedState
         public byte[] Key { get; } = key;
 
         public List<(int Slot, long Arrival)> Rows { get; } = [];
-    }
-}
-
-/// <summary>An as-of seek's columns held to one value for the execution, and the values, as key bytes.</summary>
-internal sealed class FixedColumns
-{
-    public FixedColumns(int[] columns, Expr[] values, IReadOnlyList<ChalkType> types)
-    {
-        Columns = columns;
-        Values = values;
-        Keys = new KeyColumns(types, columns);
-    }
-
-    /// <summary>Where the held columns are in the scanned row, after the projection's.</summary>
-    public int[] Columns { get; }
-
-    public Expr[] Values { get; }
-
-    public KeyColumns Keys { get; }
-
-    /// <summary>The values as key bytes, or null when one is NULL and no row can match.</summary>
-    public byte[]? Encode(IReadOnlyList<ScalarValue> parameters)
-    {
-        var bytes = new List<byte>();
-        Span<byte> lane = stackalloc byte[16];
-        for (var i = 0; i < Values.Length; i++)
-        {
-            var value = Values[i].KindCase switch
-            {
-                Expr.KindOneofCase.Literal => Literals.ToScalar(Values[i]),
-                Expr.KindOneofCase.Param => parameters[(int)Values[i].Param.Index],
-                _ => throw new NotMaintainedException("an as-of seek's fixed value is an expression, which is not maintained."),
-            };
-            if (value.IsNull)
-            {
-                return null;
-            }
-
-            bytes.Add(1);
-            var kind = Keys.KindsOf[i];
-            if (ColumnKinds.IsVariableLength(kind))
-            {
-                var text = value.Type.Kind == TypeKind.String
-                    ? System.Text.Encoding.UTF8.GetBytes(value.Text ?? string.Empty)
-                    : value.Bytes ?? [];
-                bytes.AddRange(BitConverter.GetBytes(text.Length));
-                bytes.AddRange(text);
-                continue;
-            }
-
-            lane.Clear();
-            ScalarLanes.Write(kind, value, lane[..Keys.Widths[i]]);
-            bytes.AddRange(LaneAccess.Normalise(kind, lane[..Keys.Widths[i]]).ToArray());
-        }
-
-        return [.. bytes];
     }
 }
 
@@ -263,14 +194,13 @@ internal sealed class AsOfChanges : MaintainedOperator
         IReadOnlyList<ChalkType> types,
         AsOfState state,
         IBatchOperator left,
-        IBatchOperator right,
-        IReadOnlyList<ChalkType> rightScanTypes)
+        IBatchOperator right)
         : base(context, path, schema, types)
     {
         _state = state;
         _left = left;
         _right = right;
-        _arrived = new ChangeWriter(rightScanTypes, context.Settings.BatchSize);
+        _arrived = new ChangeWriter(state.Right.Types, context.Settings.BatchSize);
         _rightColumns = [.. Enumerable.Range(0, state.RightWidth)];
     }
 
@@ -316,7 +246,6 @@ internal sealed class AsOfChanges : MaintainedOperator
     private void Append()
     {
         var state = _state;
-        var fixedKey = state.Fixed?.Encode(Context.Parameters);
         _reached.Clear();
         for (var b = 0; b < _arrived.BatchCount; b++)
         {
@@ -333,7 +262,7 @@ internal sealed class AsOfChanges : MaintainedOperator
 
                 for (var copy = 0; copy < weight; copy++)
                 {
-                    if (Place(state.Right, state.Runs, columns, row, fixedKey) is { } key)
+                    if (Place(state.Right, state.Runs, columns, row) is { } key)
                     {
                         _reached.Add(key);
                     }
@@ -357,7 +286,6 @@ internal sealed class AsOfChanges : MaintainedOperator
     private void Rebuild()
     {
         var state = _state;
-        var fixedKey = state.Fixed?.Encode(Context.Parameters);
         var fresh = state.Spare.Slots == 0 && state.Right.Slots > 0
             ? state.Spare = new RowStore(state.Right.Types, Math.Max(state.Right.Count, _rebuiltSize))
             : state.Spare;
@@ -374,7 +302,7 @@ internal sealed class AsOfChanges : MaintainedOperator
                 var weight = Weights.Of(batch, row);
                 for (var copy = 0; copy < weight; copy++)
                 {
-                    Place(fresh, runs, columns, row, fixedKey);
+                    Place(fresh, runs, columns, row);
                 }
             }
         }
@@ -399,22 +327,10 @@ internal sealed class AsOfChanges : MaintainedOperator
         state.Runs = runs;
     }
 
-    /// <summary>
-    /// Keeps a right row, unless its key or time is NULL or a fixed column holds another value, and
-    /// returns its key; null for a row kept nowhere.
-    /// </summary>
-    private byte[]? Place(RowStore store, Dictionary<byte[], AsOfState.Run> runs, ReadOnlySpan<ColumnView> columns, int row, byte[]? fixedKey)
+    /// <summary>Keeps a right row, unless its key or time is NULL, and returns its key; null for a row kept nowhere.</summary>
+    private byte[]? Place(RowStore store, Dictionary<byte[], AsOfState.Run> runs, ReadOnlySpan<ColumnView> columns, int row)
     {
         var state = _state;
-        if (state.Fixed is { } held)
-        {
-            if (fixedKey is null || !held.Keys.Encode(state.Other, columns, row, normalise: true)
-                || !state.Other.Span.SequenceEqual(fixedKey))
-            {
-                return null;
-            }
-        }
-
         if (!columns[state.RightTime].IsValid(row) || !state.RightKeys.Encode(state.Encoder, columns, row, normalise: true))
         {
             return null;
@@ -500,14 +416,12 @@ internal sealed class AsOfChanges : MaintainedOperator
                 return -1;
             }
 
+            // Among rows of the closest time, the first.
             var found = low - 1;
-            if (!state.LastTieWins)
+            var closest = store.Column(state.RightTime).Lane(rows[found].Slot);
+            while (found > 0 && state.Times.Compare(store.Column(state.RightTime).Lane(rows[found - 1].Slot), closest) == 0)
             {
-                var closest = store.Column(state.RightTime).Lane(rows[found].Slot);
-                while (found > 0 && state.Times.Compare(store.Column(state.RightTime).Lane(rows[found - 1].Slot), closest) == 0)
-                {
-                    found--;
-                }
+                found--;
             }
 
             return rows[found].Slot;
