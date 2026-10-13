@@ -111,8 +111,9 @@ await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKe
 });
 ```
 
-- A table gives the rows appended since the last update; after any other change, its old rows out
-  and its new rows in.
+- A table gives the rows appended since the last update. A `Replace` that keeps the rest of the rows,
+  the same objects in their order, gives the rows it took out and appended, as a compaction does; any
+  other change gives its old rows out and its new rows in.
 - Joins (inner and left), as-of joins, aggregates with grouping sets, filters, projections,
   `UNION ALL`, `VALUES` and `WITH` subtrees are maintained, and the clock in a filter or a
   projection.
