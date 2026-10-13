@@ -2392,9 +2392,9 @@ never a queue of every change. A key the answer no longer has arrives as a delet
 This view runs the statement in full at each update and compares the result with the rows it
 already holds; a view made with `Maintenance = ViewMaintenance.Incremental` computes only what
 changed instead (the guide's *Incremental maintenance*). The views live in `Chalk.Incremental`.
-They are experimental: their types carry the diagnostic `CHALK003`, which this sample's project
-acknowledges with `<NoWarn>$(NoWarn);CHALK003</NoWarn>`, and their behaviour and API may change in
-any release.
+Incremental maintenance is experimental: `ViewMaintenance.Incremental` carries the diagnostic
+`CHALK003`, which a project acknowledges before it can ask for it. This chapter's view recomputes,
+and needs none.
 
 The inputs say how they change. The ledger is a log: `AppendOnly(m => m.Ts)` lets it take only
 appends, none older than the newest time it has already been given. The engine names a clock,

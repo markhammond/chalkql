@@ -21,6 +21,14 @@
     <PackageReference Include="Google.Protobuf" />
   </ItemGroup>
 
+  <!--
+    CHALK003 is the experimental id incremental maintenance carries (ViewMaintenance.Incremental): this
+    assembly implements it, so it reads its own option.
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CHALK003</NoWarn>
+  </PropertyGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Chalk.Integration.Tests" />
     <InternalsVisibleTo Include="Chalk.TestKit" />

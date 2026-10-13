@@ -19,14 +19,6 @@
   </ItemGroup>
 
   <!--
-    Chapter 19's standing views are experimental, under CHALK003: a host acknowledges the id to use
-    them, as this one does here.
-  -->
-  <PropertyGroup>
-    <NoWarn>$(NoWarn);CHALK003</NoWarn>
-  </PropertyGroup>
-
-  <!--
     `Chalk.Sources.DuckDb` references `DuckDB.NET.Data`, which is the provider and nothing else: the
     native library is the host's choice (README, "DuckDB"). This sample is a host, so it picks one —
     `DuckDB.NET.Data.Full` at the same version, because both packages carry the same

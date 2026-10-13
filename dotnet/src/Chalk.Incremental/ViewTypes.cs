@@ -81,6 +81,14 @@ public enum ViewMaintenance
     /// A <c>DOUBLE</c> or <c>REAL</c> sum is kept exactly and rounded once, so it may differ from a
     /// recompute's sum, which adds in input order, in the last bits.
     /// </summary>
+    /// <remarks>
+    /// Experimental under <c>CHALK003</c>: a host acknowledges it to ask for incremental maintenance,
+    /// in its project with <c>&lt;NoWarn&gt;$(NoWarn);CHALK003&lt;/NoWarn&gt;</c> or where it asks with
+    /// <c>#pragma warning disable CHALK003</c>. Until it is declared stable, its behaviour and its API may
+    /// change in any release; check what a maintained view gives against its statement before relying
+    /// on it. A view that recomputes carries no such mark.
+    /// </remarks>
+    [System.Diagnostics.CodeAnalysis.Experimental("CHALK003")]
     Incremental = 1,
 }
 

@@ -13,9 +13,4 @@
     <ProjectReference Include="../Chalk.TestKit/Chalk.TestKit.csproj" />
   </ItemGroup>
 
-  <!-- CHALK003 is the experimental id standing views carry: these tests read their assembly's shape. -->
-  <PropertyGroup>
-    <NoWarn>$(NoWarn);CHALK003</NoWarn>
-  </PropertyGroup>
-
 </Project>

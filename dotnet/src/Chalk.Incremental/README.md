@@ -1,10 +1,10 @@
 # Chalk.Incremental: standing views
 
-> **Experimental.** Everything here carries the diagnostic `CHALK003`, which a project acknowledges
-> before it can use a view: `<NoWarn>$(NoWarn);CHALK003</NoWarn>` in the project, or
-> `#pragma warning disable CHALK003` where views are used. Until views are declared stable, their
-> behaviour and their API may change in any release; check what a view gives against its statement
-> before relying on it.
+> **Experimental: incremental maintenance.** `ViewMaintenance.Incremental` carries the diagnostic
+> `CHALK003`, which a project acknowledges before it can ask for it: `<NoWarn>$(NoWarn);CHALK003</NoWarn>`
+> in the project, or `#pragma warning disable CHALK003` where it asks. Until it is declared stable,
+> its behaviour and its API may change in any release; check what a maintained view gives against its
+> statement before relying on it. A view that recomputes carries no such mark.
 
 A standing view is a statement kept current as one row per key. A reader drains it from a cursor and
 gets the latest row of each key that changed since, never a queue of every change. Deletes arrive as
