@@ -83,6 +83,13 @@ internal sealed class PocoSnapshotFactory<T>
     /// <summary>Whether this table's rows can be reached by position (§1).</summary>
     public bool RandomAccess => _registration.RandomAccess;
 
+    /// <summary>
+    /// Whether <paramref name="index"/> is one this table builds itself, whose rows with equal keys
+    /// keep their order in the table; a host's index promises only its key order.
+    /// </summary>
+    public bool Builds(string index) =>
+        _indexes.Any(i => string.Equals(i.Descriptor.Name, index, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>What the registration reports now — the <c>Func</c>, re-read.</summary>
     public IReadOnlyCollection<T> Registration() => _registration.Read();
 

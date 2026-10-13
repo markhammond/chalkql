@@ -100,6 +100,7 @@ internal sealed class MaintainedCompiler
             return rel.KindCase switch
             {
                 Rel.KindOneofCase.Read => Read(rel, path),
+                Rel.KindOneofCase.IndexLookup => Lookup(rel, path),
                 Rel.KindOneofCase.Filter => Filter(rel, path),
                 Rel.KindOneofCase.Project => Project(rel, path),
                 Rel.KindOneofCase.Sort => Rewrite(rel.Sort.Input, path),
@@ -137,8 +138,6 @@ internal sealed class MaintainedCompiler
         Rel.KindOneofCase.Window => "a window function over a table is not maintained.",
         Rel.KindOneofCase.Hop or Rel.KindOneofCase.Session => "a hopping or session window is not maintained.",
         Rel.KindOneofCase.Unnest => "UNNEST over a table is not maintained.",
-        Rel.KindOneofCase.IndexLookup =>
-            "an index lookup is not maintained; a maintained view reads its tables whole.",
         Rel.KindOneofCase.RemoteQuery or Rel.KindOneofCase.LookupJoin or Rel.KindOneofCase.AdaptiveJoin
             or Rel.KindOneofCase.PartitionedScan or Rel.KindOneofCase.MaterialisedInput =>
             "a read of a source outside the engine's epochs is not maintained.",
@@ -172,6 +171,103 @@ internal sealed class MaintainedCompiler
         var schema = ArrowTypeMapping.ToArrowSchema(weighted);
         var types = Types(weighted);
         return Substituted(weighted, context => new ReadChanges(context, path, schema, types, state));
+    }
+
+    /// <summary>
+    /// An index lookup pinned to keys — a constant key, an IN list — read as its table is (design 68
+    /// §19): the table's changes, kept to the rows whose key columns hold one of the lookup's keys, then
+    /// its own residual. A lookup over a range of keys is refused.
+    /// </summary>
+    private Rel Lookup(Rel rel, string path)
+    {
+        var lookup = rel.IndexLookup;
+        if (!lookup.Ranges.All(Pinned))
+        {
+            throw new NotMaintainedException(
+                "an index lookup over a range of keys is not maintained; a lookup pinned to keys, as a constant "
+                + "key or an IN list makes, is.");
+        }
+
+        var descriptor = _catalog.FindTable(lookup.Table.Schema, lookup.Table.Table)
+            ?? throw new InvalidPlanException("I-IR-6", path, $"the catalog has no table {lookup.Table.Schema}.{lookup.Table.Table}");
+        var index = descriptor.Table.Indexes.FirstOrDefault(i => string.Equals(i.Name, lookup.Index, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidPlanException("I-IR-6", path, $"table {lookup.Table.Schema}.{lookup.Table.Table} declares no index named '{lookup.Index}'");
+
+        // The lookup's own columns, then the key columns it does not hand over, which the filter reads.
+        var columns = lookup.Projection.Select(c => (int)c).ToList();
+        var row = rel.RowType.Clone();
+        foreach (var bound in lookup.Ranges.SelectMany(r => r.Lower.Select((value, k) => (value, k))))
+        {
+            RefuseClock(bound.value, "an index lookup's key");
+            var column = index.Columns[bound.k];
+            if (!columns.Contains(column))
+            {
+                columns.Add(column);
+                var described = descriptor.Table.Columns[column];
+                row.Fields.Add(new Field { Name = described.Name, Type = described.Type.ToProto() });
+            }
+        }
+
+        var read = new Rel { RowType = row, Read = new Ir.Read { Table = lookup.Table } };
+        read.Read.Projection.AddRange(columns.Select(c => (uint)c));
+        var condition = lookup.Ranges.Count == 0
+            ? new Expr { Type = ChalkType.Bool().ToProto(), Literal = new Literal { BoolValue = false } }
+            : AnyOf([.. lookup.Ranges.Select(range => AllOf([.. range.Lower.Select((value, k) => KeyEquals(row, columns.IndexOf(index.Columns[k]), value))]))]);
+        var kept = new Rel { RowType = row, Filter = new Ir.Filter { Input = read, Condition = condition } };
+        if (columns.Count > lookup.Projection.Count)
+        {
+            var project = new Ir.Project { Input = kept };
+            project.Exprs.AddRange(rel.RowType.Fields.Select((field, i) => new Expr { Type = field.Type, FieldRef = new FieldRef { Index = (uint)i } }));
+            kept = new Rel { RowType = rel.RowType, Project = project };
+        }
+
+        if (lookup.Residual is { } residual)
+        {
+            kept = new Rel { RowType = rel.RowType, Filter = new Ir.Filter { Input = kept, Condition = residual } };
+        }
+
+        var rewritten = Rewrite(kept, path);
+        _reads[rel] = _reads[read];
+        return rewritten;
+    }
+
+    /// <summary>Whether a range is one key: equal bounds over the same columns, both inclusive, and no prefix.</summary>
+    private static bool Pinned(IndexRange range) =>
+        range is { LowerInclusive: true, UpperInclusive: true, Prefix: false }
+        && range.Lower.Count > 0
+        && range.Lower.Equals(range.Upper);
+
+    /// <summary>A key column equal to a lookup's bound, the bound cast to the column's type if it has another.</summary>
+    private static Expr KeyEquals(RowType row, int slot, Expr bound)
+    {
+        var type = row.Fields[slot].Type;
+        var column = ChalkType.FromProto(type);
+        var given = ChalkType.FromProto(bound.Type);
+        var value = given.WithNullable(false) == column.WithNullable(false)
+            ? bound
+            : new Expr { Type = column.WithNullable(given.Nullable).ToProto(), Cast = new Ir.Cast { Input = bound, OnFailure = CastFailure.Error } };
+        var equals = new Expr { Type = ChalkType.Bool(nullable: true).ToProto(), Call = new ScalarCall { Function = FunctionId.Eq } };
+        equals.Call.Args.Add(new Expr { Type = type, FieldRef = new FieldRef { Index = (uint)slot } });
+        equals.Call.Args.Add(value);
+        return equals;
+    }
+
+    /// <summary>The conjunction of <paramref name="terms"/>, or the one term.</summary>
+    private static Expr AllOf(Expr[] terms) => Joined(FunctionId.And, terms);
+
+    /// <summary>The disjunction of <paramref name="terms"/>, or the one term.</summary>
+    private static Expr AnyOf(Expr[] terms) => Joined(FunctionId.Or, terms);
+
+    private static Expr Joined(FunctionId function, Expr[] terms)
+    {
+        if (terms.Length == 1)
+        {
+            return terms[0];
+        }
+
+        var joined = new Expr { Type = ChalkType.Bool(nullable: true).ToProto(), Call = new ScalarCall { Function = function } };
+        joined.Call.Args.AddRange(terms);
+        return joined;
     }
 
     /// <summary>The state of a read of <paramref name="table"/>'s <paramref name="projection"/>.</summary>
@@ -342,6 +438,15 @@ internal sealed class MaintainedCompiler
         var rightTypes = Types(join.Right.RowType);
         var leftFactory = _compilation.Node(Rewrite(join.Left, path), path);
         var rightRewritten = Rewrite(join.Right, path);
+        if (rightRead.KindCase == Rel.KindOneofCase.IndexLookup && !InTableOrder(join, rightRead.IndexLookup))
+        {
+            throw new NotMaintainedException(
+                "an as-of join over an index lookup that may hand over rows of one key and time out of their order "
+                + "in the table is not maintained: its ties would break by an order the view cannot keep. A lookup "
+                + "of one key, read forwards through an ordered index the table builds, whose later columns are the "
+                + "join's keys or its time, is maintained; or key the join on both sides.");
+        }
+
         var rightFactory = _compilation.Node(rightRewritten, path);
 
         // Its right rows are placed by their order in the table, so a replacement is read whole.
@@ -525,14 +630,54 @@ internal sealed class MaintainedCompiler
     }
 
     /// <summary>
-    /// The read at the bottom of a right input that is a table read through filters and projections, or
-    /// null for any other right input (design 68 §5).
+    /// The read or the index lookup at the bottom of an input that is a table read through filters and
+    /// projections, or null for any other input (design 68 §5, §19).
     /// </summary>
     private static Rel? TableUnder(Rel rel) => rel.KindCase switch
     {
-        Rel.KindOneofCase.Read => rel,
+        Rel.KindOneofCase.Read or Rel.KindOneofCase.IndexLookup => rel,
         Rel.KindOneofCase.Filter => TableUnder(rel.Filter.Input),
         Rel.KindOneofCase.Project => TableUnder(rel.Project.Input),
+        _ => null,
+    };
+
+    /// <summary>
+    /// Whether a lookup under an as-of join hands over the rows of one key and time in their order in the
+    /// table, as a read does, so their ties break as the view keeps them (design 68 §19): one range, read
+    /// forwards, through an ordered index the table builds — which keeps rows with equal keys in their
+    /// order — whose columns after the pinned ones are the join's keys or its time.
+    /// </summary>
+    private bool InTableOrder(AsOfJoin join, IndexLookup lookup)
+    {
+        var table = _catalog.FindTable(lookup.Table.Schema, lookup.Table.Table)?.Table;
+        var index = table?.Indexes.FirstOrDefault(i => string.Equals(i.Name, lookup.Index, StringComparison.OrdinalIgnoreCase));
+        if (table is null
+            || index is not { Kind: IndexKind.Ordered or IndexKind.Clustered }
+            || lookup.Reverse
+            || lookup.Ranges.Count != 1
+            || !_sources.TryGetValue(lookup.Table.SourceId, out var source)
+            || source is not ITrackedSource tracked
+            || !tracked.OrdersTiesByPlace(table.Name, index.Name))
+        {
+            return false;
+        }
+
+        HashSet<int?> joined = [.. join.RightKeys.Select(k => TableColumn(join.Right, (int)k)), TableColumn(join.Right, (int)join.RightTime)];
+        return index.Columns.Skip(lookup.Ranges[0].Lower.Count).All(c => joined.Contains(c));
+    }
+
+    /// <summary>
+    /// The table column an output column of a table read through filters and projections hands over, or
+    /// null for one it computes.
+    /// </summary>
+    private static int? TableColumn(Rel rel, int column) => rel.KindCase switch
+    {
+        Rel.KindOneofCase.Read => (int)rel.Read.Projection[column],
+        Rel.KindOneofCase.IndexLookup => (int)rel.IndexLookup.Projection[column],
+        Rel.KindOneofCase.Filter => TableColumn(rel.Filter.Input, column),
+        Rel.KindOneofCase.Project => rel.Project.Exprs[column] is { KindCase: Expr.KindOneofCase.FieldRef } field
+            ? TableColumn(rel.Project.Input, (int)field.FieldRef.Index)
+            : null,
         _ => null,
     };
 

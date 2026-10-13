@@ -255,6 +255,10 @@ public sealed class PocoSource
     }
 
     /// <inheritdoc />
+    bool ITrackedSource.OrdersTiesByPlace(string table, string index) =>
+        Require(table).OrdersTiesByPlace(index);
+
+    /// <inheritdoc />
     /// <remarks>
     /// One refresh says once what each table becomes. A table takes rows given whole, appended or
     /// prepared before the refresh (design 69 §3), or upserts and deletes by key, and beside any of
@@ -624,6 +628,12 @@ internal abstract class PocoTableRuntime
         string sourceId, object pinned, int[] positions, ScanRequest request, ScanContext context);
 
     /// <summary>
+    /// Whether an index hands over rows with equal keys in their order in the table: one this source
+    /// builds does, and a host's promises only its key order (design 68 §19).
+    /// </summary>
+    public abstract bool OrdersTiesByPlace(string index);
+
+    /// <summary>
     /// Builds what this table's entries ask for, without publishing it: one that says what the rows
     /// are, or upserts and deletes by key, and an advance of the frontier beside either (D339).
     /// </summary>
@@ -940,6 +950,9 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             this, snapshot, gathered, request.Projection, request.OutputSchema, request.BatchSize, request.RowGoal,
             context);
     }
+
+    /// <inheritdoc />
+    public override bool OrdersTiesByPlace(string index) => _factory.Builds(index);
 
     /// <summary>
     /// The snapshot a scan of one execution reads (F188): the one the execution pinned when it began,

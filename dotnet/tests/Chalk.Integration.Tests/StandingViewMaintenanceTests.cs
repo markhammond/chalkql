@@ -16,6 +16,8 @@ public sealed class StandingViewMaintenanceTests(SharedSidecar sidecar)
 {
     private sealed record Fill(int Seq, int Book, long Qty, DateTime Ts);
 
+    private sealed record Rate(string Symbol, DateTime Ts, double Usd);
+
     private struct BookKey
     {
         public long Book;
@@ -201,6 +203,113 @@ public sealed class StandingViewMaintenanceTests(SharedSidecar sidecar)
         Assert.Equal(ChalkErrorCodes.DeclarationNotHeld, fault.Code);
         Assert.Contains("mapped to one host key", fault.Message, StringComparison.Ordinal);
         await Assert.ThrowsAsync<StandingViewException>(async () => await view.UpdateAsync(Ct));
+    }
+
+    /// <summary>
+    /// A view whose as-of join has a constant key on its right side, which the planner reads for many
+    /// left rows through an index lookup of that key, is maintained (design 68 §19): after appends, a
+    /// second rate at one time and a compaction of the rates, it is the statement.
+    /// </summary>
+    [Fact]
+    public async Task A_view_over_an_as_of_join_with_a_constant_key_is_maintained()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        const string Converted = """
+            SELECT f.book, SUM(CAST(f.qty * r.usd * 1000 AS BIGINT)) AS qty
+            FROM fills f ASOF JOIN rates r MATCH_CONDITION r.ts <= f.ts ON r.symbol = 'EUR'
+            GROUP BY f.book
+            """;
+        string[] symbols = ["EUR", "GBP", "USD"];
+        var fills = Enumerable.Range(1, 1_500).Select(i => new Fill(i, 1 + (i % 3), i % 7, Open.AddSeconds(i))).ToList();
+        var rates = Enumerable.Range(0, 600)
+            .SelectMany(i => symbols.Select(symbol => new Rate(symbol, Open.AddSeconds(i * 3), 1 + (i % 10 / 10.0))))
+            .ToList();
+        var source = new PocoSourceBuilder("desk")
+            .NamingPolicy(PocoNamingPolicy.SnakeCase)
+            .AddTable("fills", (IReadOnlyList<Fill>)fills, t => t.AppendOnly(x => x.Ts))
+            .AddTable("rates", (IReadOnlyList<Rate>)rates, t =>
+            {
+                t.OrderedBy(x => x.Ts).ThenBy(x => x.Symbol);
+                t.Index(x => x.Symbol, x => x.Ts);
+            })
+            .Build();
+        await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+        {
+            Sources = [source],
+            Planner = sidecar.CreatePlanner(),
+            Clock = "now",
+        }, Ct);
+        await engine.RefreshAsync(r => r.AdvanceClock(new DateTimeOffset(Open, TimeSpan.Zero)), Ct);
+        var prepared = await engine.PrepareAsync(Converted, ct: Ct);
+        Assert.True(ReadsRatesThroughALookup(prepared.Plan.Root), $"the as-of join is not planned over a lookup: {prepared.Plan.Root}");
+
+        await using var view = await engine.MaterializeAsync(Converted, Options(ViewMaintenance.Incremental), Ct);
+        var replica = new Replica();
+        var cursor = ViewCursor.Start;
+        view.Drain(ref cursor, replica);
+        await AssertIsTheStatementAsync(engine, replica, Converted);
+
+        // Fills after every rate, and new rates with a second EUR rate at their time, which ties.
+        var at = Open.AddSeconds(1_800);
+        List<Fill> later = [.. Enumerable.Range(1_501, 9).Select(i => new Fill(i, 1 + (i % 3), 3, at.AddSeconds(i - 1_500)))];
+        List<Rate> newer = [new("EUR", at, 2.5), new("EUR", at, 3.5), new("GBP", at, 1.5), new("USD", at, 1)];
+        rates.AddRange(newer);
+        await engine.RefreshAsync(r =>
+        {
+            r.Append(source, "fills", (IReadOnlyList<Fill>)later);
+            r.Append(source, "rates", (IReadOnlyList<Rate>)newer);
+        }, Ct);
+        await view.UpdateAsync(Ct);
+        view.Drain(ref cursor, replica);
+        await AssertIsTheStatementAsync(engine, replica, Converted);
+
+        // A compaction: every other rate of the older half gone, the rest the same objects in their order.
+        var half = rates.Count / 2;
+        rates = [.. rates.Where((_, i) => i >= half || i % 2 == 0)];
+        var kept = rates;
+        await engine.RefreshAsync(r => r.Replace(source, "rates", (IReadOnlyList<Rate>)kept), Ct);
+        await view.UpdateAsync(Ct);
+        view.Drain(ref cursor, replica);
+        await AssertIsTheStatementAsync(engine, replica, Converted);
+    }
+
+    /// <summary>Whether the plan has an as-of join whose right input is an index lookup, through filters and projections.</summary>
+    private static bool ReadsRatesThroughALookup(Google.Protobuf.IMessage message)
+    {
+        if (message is Chalk.Ir.Rel { KindCase: Chalk.Ir.Rel.KindOneofCase.AsOfJoin } join)
+        {
+            var right = join.AsOfJoin.Right;
+            while (right.KindCase is Chalk.Ir.Rel.KindOneofCase.Filter or Chalk.Ir.Rel.KindOneofCase.Project)
+            {
+                right = right.KindCase == Chalk.Ir.Rel.KindOneofCase.Filter ? right.Filter.Input : right.Project.Input;
+            }
+
+            if (right.KindCase == Chalk.Ir.Rel.KindOneofCase.IndexLookup)
+            {
+                return true;
+            }
+        }
+
+        foreach (var field in message.Descriptor.Fields.InDeclarationOrder())
+        {
+            switch (field.Accessor.GetValue(message))
+            {
+                case Google.Protobuf.IMessage child when ReadsRatesThroughALookup(child):
+                    return true;
+                case System.Collections.IList list:
+                    foreach (var item in list)
+                    {
+                        if (item is Google.Protobuf.IMessage element && ReadsRatesThroughALookup(element))
+                        {
+                            return true;
+                        }
+                    }
+
+                    break;
+            }
+        }
+
+        return false;
     }
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

@@ -14,10 +14,11 @@ namespace Chalk.Execution.Maintenance;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The right input is a table read through filters and projections only, so its changes are rows
-/// appended, in the table's order, or, after the table was rewritten, every row afresh: an append
-/// re-matches the left rows of the keys it reached, and a rewrite places every right row again and
-/// re-matches every left row. Either way a left row's output changes only when its match's values do.
+/// The right input is a table read, or a lookup of one key whose ties are the table's (§19), through
+/// filters and projections only, so its changes are rows appended, in the table's order, or, after
+/// the table was rewritten, every row afresh: an append re-matches the left rows of the keys it
+/// reached, and a rewrite places every right row again and re-matches every left row. Either way a
+/// left row's output changes only when its match's values do.
 /// </para>
 /// <para>
 /// Ties break as the executor's as-of join breaks them: the first of the closest rows in the right

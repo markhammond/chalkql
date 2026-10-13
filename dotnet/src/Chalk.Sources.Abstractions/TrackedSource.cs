@@ -43,6 +43,14 @@ internal interface ITrackedSource : IPinnableSource
 
     /// <summary>A scan of <paramref name="pinned"/>'s rows at <paramref name="positions"/>, ascending.</summary>
     IColumnarScan ScanAt(string table, object pinned, int[] positions, ScanRequest request, ScanContext context);
+
+    /// <summary>
+    /// Whether <paramref name="index"/> on <paramref name="table"/> hands over rows with equal keys in
+    /// their order in the table, as an index the source builds itself does: what lets a view keep the
+    /// ties of an as-of join over a lookup (design 68 §19). False for an index it cannot vouch for, such
+    /// as one a host supplied.
+    /// </summary>
+    bool OrdersTiesByPlace(string table, string index);
 }
 
 /// <summary>

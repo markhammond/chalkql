@@ -154,8 +154,8 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
     /// <summary>
     /// Statements over tables large enough that the planner seeks an index for an as-of join — back and
     /// forward, strict and not, with a fixed key, on an index whose key goes on past its time, at the
-    /// clock, and with left rows that move with the clock — and hashes a left join: each plan is
-    /// checked to be what it means to test.
+    /// clock, and with left rows that move with the clock — hashes a left join, and looks keys up in an
+    /// index, under an as-of join and for a filter: each plan is checked to be what it means to test.
     /// </summary>
     [Theory]
     [InlineData(
@@ -198,20 +198,60 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
         "SELECT t.seq, l.lim FROM trades t LEFT JOIN limits l ON l.book = t.book AND l.asset = t.asset AND l.lim > t.qty",
         "HashJoin Left",
         false)]
+    [InlineData(
+        "an as-of join over a lookup of one key, ties",
+        "SELECT t.seq, m.px, m.tag FROM trades t ASOF JOIN marks m MATCH_CONDITION m.ts <= t.ts ON m.asset = 2",
+        "AsOfJoin over IndexLookup",
+        false)]
+    [InlineData(
+        "a lookup of keys, upserted",
+        "SELECT l.book * 1000 + l.asset AS k, l.lim FROM limits l WHERE l.book = 2 AND l.asset IN (1, 3)",
+        "IndexLookup",
+        false)]
     public async Task Every_epoch_a_seek_or_a_hashed_join_is_the_statement(string name, string sql, string planned, bool tagged)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         _ = name;
         foreach (var seed in new[] { 5, 29 })
         {
-            // A seek is chosen for a few left rows over many right ones; a hash join for many each side.
-            var seek = planned.StartsWith("AsOf", StringComparison.Ordinal);
+            // A seek is chosen for a few left rows over many right ones; a hash join, or a whole as-of
+            // join over a lookup, for many each side.
+            var seek = planned.StartsWith("AsOfLookupJoin", StringComparison.Ordinal);
             await RunAsync(sql, [0], seed, initial: seek ? 12 : 1_500, planned, marksAtStart: seek ? 4_000 : 0, tagged);
         }
     }
 
+    /// <summary>
+    /// Lookups maintenance does not keep (design 68 §19): one over a range of keys; and one under an
+    /// as-of join whose index orders the rows of one key and time by a column the join does not read,
+    /// so its ties are not the table's order.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        "SELECT l.book * 1000 + l.asset AS k, l.lim FROM limits l WHERE l.book = 2 AND l.asset BETWEEN 5 AND 9",
+        "IndexLookup",
+        false,
+        "an index lookup over a range of keys")]
+    [InlineData(
+        "SELECT t.seq, m.px, m.tag FROM trades t ASOF JOIN marks m MATCH_CONDITION m.ts <= t.ts ON m.asset = 2",
+        "AsOfJoin over IndexLookup",
+        true,
+        "key the join on both sides")]
+    public async Task A_lookup_maintenance_does_not_keep_is_refused(string sql, string planned, bool tagged, string says)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await RunAsync(sql, [0], 5, initial: 1_500, planned, marksAtStart: 0, tagged, refused: says);
+    }
+
     private async Task RunAsync(
-        string sql, int[] key, int seed, int initial = 12, string? planned = null, int marksAtStart = 0, bool tagged = false)
+        string sql,
+        int[] key,
+        int seed,
+        int initial = 12,
+        string? planned = null,
+        int marksAtStart = 0,
+        bool tagged = false,
+        string? refused = null)
     {
         var random = new Random(seed);
         var trades = new List<Trade>();
@@ -239,9 +279,10 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
 
         if (initial > 12)
         {
-            for (var i = 0; i < 100; i++)
+            // Enough limits that a few keys of them are looked up in their index rather than scanned.
+            for (var i = 0; i < 2_000; i++)
             {
-                var limit = new Limit(1 + random.Next(3), 1 + random.Next(40), random.Next(1, 50));
+                var limit = new Limit(1 + random.Next(3), 1 + random.Next(1_000), random.Next(1, 50));
                 limits[(limit.Book, limit.Asset)] = limit;
             }
         }
@@ -263,7 +304,11 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
                 }
             })
             .AddTable("books", (IReadOnlyList<Book>)[.. books.Values], t => t.Keyed(x => x.Id))
-            .AddTable("limits", (IReadOnlyList<Limit>)[.. limits.Values], t => t.Keyed(x => x.Book, x => x.Asset))
+            .AddTable("limits", (IReadOnlyList<Limit>)[.. limits.Values], t =>
+            {
+                t.Keyed(x => x.Book, x => x.Asset);
+                t.Index(x => x.Book, x => x.Asset);
+            })
             .Build();
         await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
         {
@@ -279,6 +324,14 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
         }
         var clock = Enumerable.Range(0, prepared.Parameters.Count)
             .FirstOrDefault(i => string.Equals(prepared.Parameters[i].Name?.TrimStart('@'), "now", StringComparison.OrdinalIgnoreCase), -1);
+        if (refused is not null)
+        {
+            var refusal = await Assert.ThrowsAsync<NotMaintainableException>(async () =>
+                await prepared.MaintainAsync(Values(prepared, now), clock, key, Ct));
+            Assert.Contains(refused, refusal.Message, StringComparison.Ordinal);
+            return;
+        }
+
         await using var maintained = await prepared.MaintainAsync(Values(prepared, now), clock, key, Ct);
         var held = new Dictionary<string, object?[]>(StringComparer.Ordinal);
 
@@ -473,6 +526,9 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
                         && rel.AsOfLookupJoin.FixedColumns.Count > 0,
                     "HashJoin Left" => rel.KindCase == Chalk.Ir.Rel.KindOneofCase.HashJoin
                         && rel.HashJoin.Type == Chalk.Ir.JoinType.Left,
+                    "AsOfJoin over IndexLookup" => rel.KindCase == Chalk.Ir.Rel.KindOneofCase.AsOfJoin
+                        && Under(rel.AsOfJoin.Right).KindCase == Chalk.Ir.Rel.KindOneofCase.IndexLookup,
+                    "IndexLookup" => rel.KindCase == Chalk.Ir.Rel.KindOneofCase.IndexLookup,
                     _ => false,
                 };
             }
@@ -500,6 +556,13 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
 
         Visit(plan.Root);
         return found;
+
+        static Chalk.Ir.Rel Under(Chalk.Ir.Rel rel) => rel.KindCase switch
+        {
+            Chalk.Ir.Rel.KindOneofCase.Filter => Under(rel.Filter.Input),
+            Chalk.Ir.Rel.KindOneofCase.Project => Under(rel.Project.Input),
+            _ => rel,
+        };
     }
 
     private static Trade NewTrade(Random random, int seq, DateTime ts) =>
