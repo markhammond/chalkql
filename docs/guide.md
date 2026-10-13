@@ -1677,7 +1677,8 @@ left rows and its right rows by key, an aggregate its groups — so an update re
 
 - **What a table gives.** The rows an append added since the view's last update. After any other
   change — a `Replace`, an upsert, a delete — every old row out and every new row in, which costs
-  about what a recompute does, in that update only.
+  about what a recompute does, in that update only. An aggregate over a table, through filters and
+  projections, takes the new rows only, and builds its groups again from them.
 - **The clock.** A filter or a projection that reads the clock runs on its changes while the clock
   stands, and on every row it holds when the clock moves. A part of the statement that reads no table
   at all, such as the days a report is computed for, is computed whole when the clock moves.
@@ -1686,9 +1687,12 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   drifts. A recompute adds in input order, so the two may differ in the last bits, which is what
   `EqualUpToRounding` admits. Integer and `DECIMAL` sums are exact either way.
 - **As-of seeks.** An as-of join the planner chose to seek an index keeps none of its table: only its
-  left rows, each with the values of the row it matches. The statement's own seek runs again for the
-  left rows that arrive, for those under a key a row was appended to, and, after any other change to
-  the table, for every one. Its state does not grow with the table's history.
+  left rows, each with the values of the row it matches. The left rows that arrive, those under a key
+  a row was appended to, and, after any other change to the table, every one are matched again. Its
+  state does not grow with the table's history. Most need no seek: a row that leaves hands its match
+  to a row arriving with the same key and time, and a seek back from a time keeps each key's last
+  row, which a row at or after it matches — at the clock, in the usual case. The statement's own seek
+  finds the rest, and each key's last row once a row is appended under the key.
 - **Ties** break as the executor breaks them: an as-of join's right rows keep their places in their
   table, and an as-of seek's ties are the seek's own.
 - **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's

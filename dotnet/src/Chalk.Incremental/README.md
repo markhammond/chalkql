@@ -117,7 +117,8 @@ await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKe
   `UNION ALL`, `VALUES` and `WITH` subtrees are maintained, and the clock in a filter or a
   projection.
 - An as-of join that seeks an index keeps only its left rows and the rows they match, never the
-  table's, so its state does not grow with the table's history.
+  table's, so its state does not grow with the table's history; it keeps each key's last row too,
+  so a row at the clock needs no seek.
 - A `DOUBLE` or `REAL` sum is kept exactly and rounded once, so it never drifts; a recompute adds in
   input order, so the two may differ in the last bits.
 - What the statement keeps counts in `StateBytes`, against `StateBudget`.
