@@ -57,7 +57,8 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         IReadOnlyList<string> keyColumnNames,
         PermutationIndexScratch scratch,
         PermutationIndex<T>? previous,
-        int appendedFrom)
+        int appendedFrom,
+        PocoColumn<T>[]? keyColumns = null)
     {
         Descriptor = descriptor;
         _rows = rows;
@@ -80,6 +81,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                 MaterialiseKey(
                     rows,
                     keys[k],
+                    keyColumns?[k],
                     direction,
                     k,
                     scratch,
@@ -794,9 +796,48 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
     // Materialisation
     // ------------------------------------------------------------------
 
+    /// <summary>
+    /// Row <paramref name="i"/>'s key, through the column's typed reader when it has one (design 69
+    /// §5) and boxed otherwise; false for NULL.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool ReadKey<TValue>(
+        IReadOnlyList<T> rows,
+        int i,
+        PocoValueReader<T, TValue>? typed,
+        Func<T, object?> accessor,
+        out TValue value)
+    {
+        if (typed is not null)
+        {
+            return typed(rows[i], out value);
+        }
+
+        var boxed =
+            accessor(rows[i]);
+
+        if (boxed is null)
+        {
+            value = default!;
+            return false;
+        }
+
+        if (boxed is not TValue cast)
+        {
+            throw new InvalidCastException(
+                $"index key produced both "
+                + $"{typeof(TValue).Name} and "
+                + $"{boxed.GetType().Name}");
+        }
+
+        value = cast;
+        return true;
+    }
+
     private static IMaterialisedKey MaterialiseKey(
         IReadOnlyList<T> rows,
         Func<T, object?> accessor,
+        PocoColumn<T>? column,
         SortDirection direction,
         int keyOrdinal,
         PermutationIndexScratch scratch,
@@ -837,7 +878,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     byte,
                     SByteEncoding,
                     ComparableOrder<sbyte>>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value,
                     keyOrdinal, scratch,
                     out searchKey),
@@ -848,7 +889,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     byte,
                     ByteEncoding,
                     ComparableOrder<byte>>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value,
                     keyOrdinal, scratch,
                     out searchKey),
@@ -859,7 +900,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     ushort,
                     Int16Encoding,
                     ComparableOrder<short>>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value,
                     keyOrdinal, scratch,
                     out searchKey),
@@ -870,7 +911,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     ushort,
                     UInt16Encoding,
                     ComparableOrder<ushort>>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value,
                     keyOrdinal, scratch,
                     out searchKey),
@@ -881,7 +922,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     uint,
                     Int32Encoding,
                     ComparableOrder<int>>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value,
                     keyOrdinal, scratch,
                     out searchKey),
@@ -892,7 +933,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     uint,
                     UInt32Encoding,
                     ComparableOrder<uint>>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value,
                     keyOrdinal, scratch,
                     out searchKey),
@@ -903,7 +944,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     ulong,
                     Int64Encoding,
                     ComparableOrder<long>>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value,
                     keyOrdinal, scratch,
                     out searchKey),
@@ -914,7 +955,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     ulong,
                     UInt64Encoding,
                     ComparableOrder<ulong>>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value,
                     keyOrdinal, scratch,
                     out searchKey),
@@ -925,7 +966,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     uint,
                     SingleEncoding,
                     FloatOrder>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value,
                     keyOrdinal, scratch,
                     out searchKey),
@@ -936,7 +977,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     ulong,
                     DoubleEncoding,
                     DoubleOrder>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value,
                     keyOrdinal, scratch,
                     out searchKey),
@@ -947,7 +988,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     ulong,
                     DateTimeEncoding,
                     ComparableOrder<DateTime>>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value,
                     keyOrdinal, scratch,
                     out searchKey),
@@ -958,7 +999,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     ulong,
                     DateTimeOffsetEncoding,
                     ComparableOrder<DateTimeOffset>>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value,
                     keyOrdinal, scratch,
                     out searchKey),
@@ -969,6 +1010,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     StringOrder>(
                     rows,
                     accessor,
+                    column,
                     direction,
                     firstNonNull,
                     value,
@@ -981,6 +1023,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     Utf8Order>(
                     rows,
                     accessor,
+                    column,
                     direction,
                     firstNonNull,
                     value,
@@ -990,24 +1033,24 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
             // Leave these as logical representations for this iteration.
             decimal value =>
                 Materialise<decimal, ComparableOrder<decimal>>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value, out searchKey),
 
             Guid value =>
                 Materialise<Guid, ComparableOrder<Guid>>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value, out searchKey),
 
             byte[] value =>
                 Materialise<byte[], ByteArrayOrder>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value, out searchKey),
 
             ReadOnlyMemory<byte> value =>
                 Materialise<
                     ReadOnlyMemory<byte>,
                     MemoryByteOrder>(
-                    rows, accessor, direction,
+                    rows, accessor, column, direction,
                     firstNonNull, value, out searchKey),
 
             _ =>
@@ -1028,6 +1071,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         TLogicalOrder>(
         IReadOnlyList<T> rows,
         Func<T, object?> accessor,
+        PocoColumn<T>? column,
         SortDirection direction,
         int firstNonNull,
         TValue firstValue,
@@ -1088,14 +1132,14 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                 firstValue,
                 descending);
 
+        // Every row's key, on every build: read unboxed where the column can (design 69 §5).
+        var typed = column?.Reader<TValue>();
+
         for (var i = firstNonNull + 1;
              i < count;
              i++)
         {
-            var boxed =
-                accessor(rows[i]);
-
-            if (boxed is null)
+            if (!ReadKey(rows, i, typed, accessor, out TValue value))
             {
                 if (nulls is null)
                 {
@@ -1107,14 +1151,6 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
 
                 nulls[i] = true;
                 continue;
-            }
-
-            if (boxed is not TValue value)
-            {
-                throw new InvalidCastException(
-                    $"index key produced both "
-                    + $"{typeof(TValue).Name} and "
-                    + $"{boxed.GetType().Name}");
             }
 
             codes[i] =
@@ -1691,6 +1727,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         TOrder>(
         IReadOnlyList<T> rows,
         Func<T, object?> accessor,
+        PocoColumn<T>? column,
         SortDirection direction,
         int firstNonNull,
         TSymbol firstValue,
@@ -1780,14 +1817,14 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         var symbolCandidate =
             true;
 
+        // Every row's key, on every build: read unboxed where the column can (design 69 §5).
+        var typed = column?.Reader<TSymbol>();
+
         for (var i = firstNonNull + 1;
              i < rowCount;
              i++)
         {
-            var boxed =
-                accessor(rows[i]);
-
-            if (boxed is null)
+            if (!ReadKey(rows, i, typed, accessor, out TSymbol value))
             {
                 if (nulls is null)
                 {
@@ -1799,14 +1836,6 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
 
                 nulls[i] = true;
                 continue;
-            }
-
-            if (boxed is not TSymbol value)
-            {
-                throw new InvalidCastException(
-                    $"index key produced both "
-                    + $"{typeof(TSymbol).Name} and "
-                    + $"{boxed.GetType().Name}");
             }
 
             values[i] =
@@ -2041,6 +2070,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         TOrder>(
         IReadOnlyList<T> rows,
         Func<T, object?> accessor,
+        PocoColumn<T>? column,
         SortDirection direction,
         int firstNonNull,
         TValue firstValue,
@@ -2068,28 +2098,20 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         values[firstNonNull] =
             firstValue;
 
+        // Every row's key, on every build: read unboxed where the column can (design 69 §5).
+        var typed = column?.Reader<TValue>();
+
         for (var i = firstNonNull + 1;
              i < rows.Count;
              i++)
         {
-            var boxed =
-                accessor(rows[i]);
-
-            if (boxed is null)
+            if (!ReadKey(rows, i, typed, accessor, out TValue value))
             {
                 nulls ??=
                     new bool[rows.Count];
 
                 nulls[i] = true;
                 continue;
-            }
-
-            if (boxed is not TValue value)
-            {
-                throw new InvalidCastException(
-                    $"index key produced both "
-                    + $"{typeof(TValue).Name} and "
-                    + $"{boxed.GetType().Name}");
             }
 
             values[i] = value;

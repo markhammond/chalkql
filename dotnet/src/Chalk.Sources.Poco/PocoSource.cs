@@ -1146,7 +1146,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         var accessors = new Func<T, object?>[columns.Count];
         for (var i = 0; i < accessors.Length; i++)
         {
-            accessors[i] = _columns[columns[i]].CompileLogicalAccessor();
+            accessors[i] = _columns[columns[i]].LogicalAccessor;
         }
 
         var rows = Current.Values;
@@ -1175,7 +1175,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         var accessors = new Func<T, object?>[key.Columns.Count];
         for (var i = 0; i < accessors.Length; i++)
         {
-            accessors[i] = _columns[key.Columns[i]].CompileLogicalAccessor();
+            accessors[i] = _columns[key.Columns[i]].LogicalAccessor;
         }
 
         var declaration = "foreign key ("

@@ -50,7 +50,8 @@ internal sealed class PocoStatisticsPlan
 /// </summary>
 /// <remarks>
 /// This runs at registration — <c>Build()</c> and every <c>DescribeSchema()</c> where the collection
-/// has changed — never on the scan path, so it is allowed to box.
+/// has changed — never on the scan path. Each column is read through its own typed reader, so a value
+/// is boxed only when a statistic reports it (design 69 §5).
 /// </remarks>
 internal static class PocoStatistics
 {
@@ -147,54 +148,8 @@ internal static class PocoStatistics
             }
         }
 
-        var accessors = new Func<T, object?>[columnCount];
-        var ordered = new bool[columnCount];
-
-        for (var c = 0; c < columnCount; c++)
-        {
-            // D302: a composite column carries no statistics at all, so its records are never read here.
-            accessors[c] = IsComposite(columns[c]) ? static _ => null : columns[c].CompileLogicalAccessor();
-            ordered[c] = columns[c].Type.Kind != Chalk.Ir.TypeKind.List && !IsComposite(columns[c]);
-        }
-
-        var nulls = new int[columnCount];
-        var minimum = new object?[columnCount];
-        var maximum = new object?[columnCount];
-
-        var comparers =
-            new SourceValueOrder.ISourceValueComparer?[columnCount];
-
-        var distinct =
-            new HashSet<object>?[columnCount];
-
         var histogram =
             plan.Level == StatisticsLevel.Histogram;
-
-        var samples =
-            histogram
-                ? new List<object>?[columnCount]
-                : null;
-
-        for (var c = 0; c < columnCount; c++)
-        {
-            if (!ordered[c])
-            {
-                continue;
-            }
-
-            if (counted[c] && exactDistinct[c] < 0)
-            {
-                distinct[c] =
-                    new HashSet<object>(PocoValueEquality.Instance);
-            }
-
-            if (histogram)
-            {
-                samples![c] =
-                    new List<object>(
-                        Math.Min(rows.Count, MaxStatisticsSample));
-            }
-        }
 
         var target =
             Math.Min(rows.Count, MaxStatisticsSample);
@@ -203,6 +158,24 @@ internal static class PocoStatistics
             Math.Max(
                 1,
                 (rows.Count + target - 1) / target);
+
+        // One pass per column, through the column's own reader. D302: a composite column carries no
+        // statistics at all, so its records are never read here.
+        var passes = new PocoStatisticsPass<T>?[columnCount];
+
+        for (var c = 0; c < columnCount; c++)
+        {
+            if (IsComposite(columns[c]))
+            {
+                continue;
+            }
+
+            passes[c] =
+                columns[c].Statistics.Begin(
+                    countDistinct: counted[c] && exactDistinct[c] < 0,
+                    sample: histogram,
+                    sampleCapacity: target);
+        }
 
         var row = 0;
         var sampledRows = 0;
@@ -219,49 +192,7 @@ internal static class PocoStatistics
 
             for (var c = 0; c < columnCount; c++)
             {
-                var value = accessors[c](item);
-
-                if (value is null)
-                {
-                    nulls[c]++;
-                    continue;
-                }
-
-                if (!ordered[c])
-                {
-                    continue;
-                }
-
-                var comparer = comparers[c];
-
-                if (comparer is null)
-                {
-                    // Statistics want ascending value ordering. NULL position
-                    // is immaterial because only non-NULLs reach here.
-                    comparer =
-                        SourceValueOrder.CreateComparer(
-                            value,
-                            Chalk.Ir.SortDirection.AscNullsFirst);
-
-                    comparers[c] = comparer;
-                    minimum[c] = value;
-                    maximum[c] = value;
-                }
-                else
-                {
-                    if (comparer.Compare(value, minimum[c]) < 0)
-                    {
-                        minimum[c] = value;
-                    }
-
-                    if (comparer.Compare(value, maximum[c]) > 0)
-                    {
-                        maximum[c] = value;
-                    }
-                }
-
-                distinct[c]?.Add(value);
-                samples?[c]?.Add(value);
+                passes[c]?.Add(item);
             }
 
             row++;
@@ -274,11 +205,17 @@ internal static class PocoStatistics
 
         for (var c = 0; c < columnCount; c++)
         {
+            if (passes[c] is not { } pass)
+            {
+                result[c] = ColumnStatistics.Unknown;
+                continue;
+            }
+
             var estimatedNulls =
                 Math.Min(
                     rows.Count,
                     (long)Math.Round(
-                        nulls[c] * scale,
+                        pass.Nulls * scale,
                         MidpointRounding.AwayFromZero));
 
             long distinctCount;
@@ -287,11 +224,11 @@ internal static class PocoStatistics
             {
                 distinctCount = exactDistinct[c];
             }
-            else if (distinct[c] is { } set)
+            else if (pass.Distinct is var seen and >= 0)
             {
                 if (sampledRows == rows.Count)
                 {
-                    distinctCount = set.Count;
+                    distinctCount = seen;
                 }
                 else
                 {
@@ -303,7 +240,7 @@ internal static class PocoStatistics
                     distinctCount =
                         Math.Min(
                             nonNullRows,
-                            (long)Math.Ceiling(set.Count * scale));
+                            (long)Math.Ceiling(seen * scale));
                 }
             }
             else
@@ -311,47 +248,23 @@ internal static class PocoStatistics
                 distinctCount = -1;
             }
 
-            HistogramBucket[] buckets = [];
-            FrequentValue[] frequent = [];
-
-            if (samples?[c] is { Count: > 0 } sample)
-            {
-                var comparer = comparers[c]!;
-
-                sample.Sort(
-                    (left, right) =>
-                        comparer.Compare(left, right));
-
-                buckets =
-                    Buckets(
-                        sample,
-                        plan.HistogramBuckets,
-                        rows.Count,
-                        comparer);
-
-                frequent =
-                    Frequent(
-                        sample,
-                        rows.Count,
-                        comparer);
-            }
-
-            if (IsComposite(columns[c]))
-            {
-                result[c] = ColumnStatistics.Unknown;
-                continue;
-            }
+            var (buckets, frequent) =
+                histogram
+                    ? pass.Histogram(plan.HistogramBuckets, rows.Count)
+                    : ([], []);
 
             result[c] = new ColumnStatistics
             {
                 Level = plan.Level,
                 DistinctCount = distinctCount,
                 NullCount = estimatedNulls,
-                Min = minimum[c],
-                Max = maximum[c],
+                Min = pass.Min,
+                Max = pass.Max,
                 Histogram = buckets,
                 FrequentValues = frequent,
             };
+
+            pass.End();
         }
 
         return Apply(result, columns, plan);
@@ -392,11 +305,11 @@ internal static class PocoStatistics
     /// bucket holds roughly the same number of rows, which is what makes range selectivity
     /// interpolable.
     /// </summary>
-    private static HistogramBucket[] Buckets(
-        List<object> sample,
+    internal static HistogramBucket[] Buckets<TValue>(
+        List<TValue> sample,
         int buckets,
         int rowCount,
-        SourceValueOrder.ISourceValueComparer comparer)
+        IComparer<TValue> comparer)
     {
         var wanted = Math.Min(buckets, sample.Count);
         var result = new List<HistogramBucket>(wanted);
@@ -454,16 +367,16 @@ internal static class PocoStatistics
     }
 
     /// <summary>The most common values of an already-sorted sample, scaled to the table's row count.</summary>
-    private static FrequentValue[] Frequent(
-        List<object> sample,
+    internal static FrequentValue[] Frequent<TValue>(
+        List<TValue> sample,
         int rowCount,
-        SourceValueOrder.ISourceValueComparer comparer)
+        IComparer<TValue> comparer)
     {
         var scale = (double)rowCount / sample.Count;
 
         // Number of runs is generally far smaller than number of sampled rows,
         // but allocate lazily rather than capacity == sample.Count.
-        var best = new List<(object Value, int Count)>();
+        var best = new List<(TValue Value, int Count)>();
 
         var runStart = 0;
 
@@ -516,50 +429,5 @@ internal static class PocoStatistics
         }
 
         return result;
-    }
-
-    /// <summary>Equality that agrees with <see cref="SourceValueOrder"/>: BINARY compares by content.</summary>
-    private sealed class PocoValueEquality : IEqualityComparer<object>
-    {
-        public static PocoValueEquality Instance { get; } = new();
-
-        public new bool Equals(object? x, object? y)
-        {
-            if (ReferenceEquals(x, y))
-            {
-                return true;
-            }
-
-            return (x, y) switch
-            {
-                (ReadOnlyMemory<byte> a, ReadOnlyMemory<byte> b) =>
-                    a.Span.SequenceEqual(b.Span),
-
-                (byte[] a, byte[] b) =>
-                    a.AsSpan().SequenceEqual(b),
-
-                (ReadOnlyMemory<byte> a, byte[] b) =>
-                    a.Span.SequenceEqual(b),
-
-                (byte[] a, ReadOnlyMemory<byte> b) =>
-                    a.AsSpan().SequenceEqual(b.Span),
-
-                _ => object.Equals(x, y),
-            };
-        }
-
-        public int GetHashCode(object obj) => obj switch
-        {
-            ReadOnlyMemory<byte> bytes => Hash(bytes.Span),
-            byte[] bytes => Hash(bytes),
-            _ => obj.GetHashCode(),
-        };
-
-        private static int Hash(ReadOnlySpan<byte> bytes)
-        {
-            var hash = new HashCode();
-            hash.AddBytes(bytes);
-            return hash.ToHashCode();
-        }
     }
 }

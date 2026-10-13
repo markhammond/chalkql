@@ -28,7 +28,7 @@ internal static class PocoVerification
     public static void VerifyCollation<T>(
         string table,
         IReadOnlyList<T> rows,
-        IReadOnlyList<(string Column, SortDirection Direction, Func<T, object?> Value)> keys,
+        IReadOnlyList<(string Column, SortDirection Direction, PocoStatisticsColumn<T> Order)> keys,
         int from = 1)
     {
         var declaration = "collation ["
@@ -39,9 +39,12 @@ internal static class PocoVerification
         {
             var previous = rows[i - 1];
             var current = rows[i];
-            foreach (var key in keys)
+
+            // Indexed, not enumerated: an enumerator per row was an object per row.
+            for (var k = 0; k < keys.Count; k++)
             {
-                var comparison = Compare(key.Value(previous), key.Value(current), key.Direction);
+                var key = keys[k];
+                var comparison = key.Order.CompareRows(previous, current, key.Direction);
                 if (comparison > 0)
                 {
                     throw new CatalogVerificationException(
@@ -89,7 +92,7 @@ internal static class PocoVerification
     /// means "these two rows are in the wrong order". NULL placement follows the direction, exactly
     /// as Calcite reads it (D15, <c>NullCollation.HIGH</c>).
     /// </summary>
-    private static int Compare(object? left, object? right, SortDirection direction)
+    internal static int Compare(object? left, object? right, SortDirection direction)
     {
         var descending = direction is SortDirection.DescNullsFirst or SortDirection.DescNullsLast;
         var nullsFirst = direction is SortDirection.AscNullsFirst or SortDirection.DescNullsFirst;

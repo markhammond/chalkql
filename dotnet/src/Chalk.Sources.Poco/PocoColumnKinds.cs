@@ -42,6 +42,8 @@ internal sealed class PocoFixedWidthColumn<T, TStorage> : PocoColumn<T>
     public override Func<T, object?> CompileLogicalAccessor() =>
         PocoChunkCompiler.CompileLogicalAccessor<T>(_binding);
 
+    protected override PocoStatisticsColumn<T> CompileStatistics() => new PocoStatisticsColumn<T, TStorage>(_binding);
+
     private sealed class Writer : PocoChunkWriter<T>
     {
         private readonly PocoChunkLoopSet<T, TStorage> _loops;
@@ -116,6 +118,8 @@ internal sealed class PocoBooleanColumn<T> : PocoColumn<T>
 
     public override Func<T, object?> CompileLogicalAccessor() =>
         PocoChunkCompiler.CompileLogicalAccessor<T>(_binding);
+
+    protected override PocoStatisticsColumn<T> CompileStatistics() => new PocoStatisticsColumn<T, byte>(_binding);
 
     private sealed class Writer : PocoChunkWriter<T>
     {
@@ -223,6 +227,8 @@ internal sealed class PocoStringColumn<T> : PocoColumn<T>
 
     public override Func<T, object?> CompileLogicalAccessor() =>
         PocoChunkCompiler.CompileLogicalAccessor<T>(_binding);
+
+    protected override PocoStatisticsColumn<T> CompileStatistics() => new PocoStatisticsColumn<T, string>(_binding);
 
     private sealed class Writer : PocoChunkWriter<T>, IManagedColumnPublisher
     {
@@ -510,6 +516,8 @@ internal sealed class PocoUtf8Column<T> : PocoColumn<T>
     public override Func<T, object?> CompileLogicalAccessor() =>
         PocoChunkCompiler.CompileLogicalAccessor<T>(
             _binding);
+
+    protected override PocoStatisticsColumn<T> CompileStatistics() => new PocoStatisticsColumn<T, Utf8String>(_binding);
 
     private sealed class Writer : PocoChunkWriter<T>
     {
@@ -930,6 +938,8 @@ internal sealed class PocoBinaryColumn<T> : PocoColumn<T>
     public override Func<T, object?> CompileLogicalAccessor() =>
         PocoChunkCompiler.CompileLogicalAccessor<T>(_binding);
 
+    protected override PocoStatisticsColumn<T> CompileStatistics() => new PocoStatisticsColumn<T, ReadOnlyMemory<byte>>(_binding);
+
     private sealed class Writer : PocoChunkWriter<T>
     {
         private readonly PocoChunkLoopSet<T, ReadOnlyMemory<byte>> _loops;
@@ -1078,6 +1088,8 @@ internal sealed class PocoDecimalColumn<T> : PocoColumn<T>
     public override Func<T, object?> CompileLogicalAccessor() =>
         PocoChunkCompiler.CompileLogicalAccessor<T>(_binding);
 
+    protected override PocoStatisticsColumn<T> CompileStatistics() => new PocoStatisticsColumn<T, decimal>(_binding);
+
     private sealed class Writer : PocoChunkWriter<T>
     {
         private readonly PocoChunkLoopSet<T, decimal> _loops;
@@ -1199,6 +1211,8 @@ internal sealed class PocoUuidColumn<T> : PocoColumn<T>
 
     public override Func<T, object?> CompileLogicalAccessor() =>
         PocoChunkCompiler.CompileLogicalAccessor<T>(_binding);
+
+    protected override PocoStatisticsColumn<T> CompileStatistics() => new PocoStatisticsColumn<T, Guid>(_binding);
 
     private sealed class Writer : PocoChunkWriter<T>
     {

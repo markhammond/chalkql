@@ -156,7 +156,7 @@ internal sealed class PocoSnapshotFactory<T>
         {
             if (!accessors.TryGetValue(column, out var accessor))
             {
-                accessor = _columns[column].CompileLogicalAccessor();
+                accessor = _columns[column].LogicalAccessor;
                 accessors[column] = accessor;
             }
 
@@ -172,7 +172,7 @@ internal sealed class PocoSnapshotFactory<T>
                 _table,
                 rows,
                 collation.Keys
-                    .Select(k => (_columns[k.Column].Name, k.Direction, Accessor(k.Column)))
+                    .Select(k => (_columns[k.Column].Name, k.Direction, _columns[k.Column].Statistics))
                     .ToArray(),
                 Math.Max(1, appendedFrom));
         }
@@ -216,7 +216,13 @@ internal sealed class PocoIndexPlan<T>
                 previous as ClusteredIndex<T>, appendedFrom)
             : new PermutationIndex<T>(
                 Descriptor, rows, Accessors, CollationBacked, table, KeyColumnNames, scratch,
-                previous as PermutationIndex<T>, appendedFrom);
+                previous as PermutationIndex<T>, appendedFrom, KeyColumns(columns));
+
+    private PocoColumn<T>[]? _keyColumns;
+
+    /// <summary>The key columns, so that the index reads their values unboxed (design 69 §5).</summary>
+    public PocoColumn<T>[] KeyColumns(PocoColumn<T>[] columns) =>
+        _keyColumns ??= [.. Descriptor.Columns.Select(c => columns[c])];
 }
 
 /// <summary>
