@@ -114,7 +114,8 @@ await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKe
 - A table gives the rows appended since the last update. A `Replace` that keeps the rest of the rows,
   the same objects in their order, gives the rows it took out and appended, as a compaction does; any
   other change gives its old rows out and its new rows in. A replacement prepared off the refresh lock
-  and committed later reaches the view the same way.
+  and committed later reaches the view the same way, and a compaction that takes out only rows no
+  as-of join matches moves no match.
 - A plan the background made under `DeferPlanning()` is taken at the view's next update, maintained
   from the start; a plan the view cannot maintain is declined, as the one it keeps answers the same
   rows.

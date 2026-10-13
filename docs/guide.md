@@ -1696,7 +1696,9 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   `EqualUpToRounding` admits. Integer and `DECIMAL` sums are exact either way.
 - **As-of seeks.** An as-of join the planner chose to seek an index keeps none of its table: only its
   left rows, each with the values of the row it matches. The left rows that arrive, those under a key
-  a row was appended to, and, after any other change to the table, every one are matched again. Its
+  a row was appended to, those whose match a compaction took out, and, after any other change to the
+  table, every one are matched again; a compaction that takes out only rows nothing matches moves no
+  match. Its
   state does not grow with the table's history. Most need no seek: a row that leaves hands its match
   to a row arriving with the same key and time, and a seek back from a time keeps each key's last
   row, which a row at or after it matches — at the clock, in the usual case. The statement's own seek
