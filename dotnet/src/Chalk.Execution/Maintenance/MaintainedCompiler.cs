@@ -65,6 +65,9 @@ internal sealed class MaintainedCompiler
     /// <summary>Every state the plan's operators keep.</summary>
     public List<IMaintainedState> States { get; } = [];
 
+    /// <summary>What replacements changed in the plan's tables, shared by every read of one in an update.</summary>
+    public TableDiffs Diffs { get; } = new();
+
     /// <summary>
     /// The maintained plan's root: a factory for the operator whose batches are the result's changes,
     /// the output columns then the weight.
@@ -198,7 +201,8 @@ internal sealed class MaintainedCompiler
                 Projection = projection,
                 OutputSchema = ArrowTypeMapping.ToArrowSchema(row),
                 BatchSize = _settings.BatchSize,
-            });
+            },
+            Diffs);
         States.Add(state);
         return state;
     }

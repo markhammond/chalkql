@@ -13,13 +13,17 @@ internal sealed class ReadState : IMaintainedState
 {
     private object? _held;
 
-    public ReadState(ITrackedSource source, string sourceId, string table, ScanRequest request)
+    public ReadState(ITrackedSource source, string sourceId, string table, ScanRequest request, TableDiffs diffs)
     {
         Source = source;
         SourceId = sourceId;
         Table = table;
         Request = request;
+        Diffs = diffs;
     }
+
+    /// <summary>What replacements changed, found once in an update for every read of a table (§17).</summary>
+    public TableDiffs Diffs { get; }
 
     public ITrackedSource Source { get; }
 
@@ -150,7 +154,7 @@ internal sealed class ReadChanges : OperatorBase
                     yield return batch;
                 }
             }
-            else if (!_state.WholeOnRewrite && _state.Source.DiffFrom(_state.Table, held, now) is { } diff)
+            else if (!_state.WholeOnRewrite && _state.Diffs.DiffFrom(_state, held, now) is { } diff)
             {
                 // A replacement that kept the rest of the rows in their order, as a compaction does: the
                 // rows it took out, and the rows it appended.
@@ -252,6 +256,44 @@ internal sealed class ReadChanges : OperatorBase
             Values = lanes.AsMemory(0, rows * sizeof(long)),
             NullCount = 0,
         };
+    }
+}
+
+/// <summary>
+/// What replacements changed in an update's tables (design 68 §17): a table read by several operators
+/// is walked once, and the first read's answer is every other read's. Kept for one update only, so no
+/// state a replacement left behind is held past it.
+/// </summary>
+internal sealed class TableDiffs
+{
+    private readonly Dictionary<(string Source, string Table), (object Earlier, object Later, TableDiff? Diff)> _found = [];
+    private readonly Lock _gate = new();
+
+    /// <summary>What a replacement changed between two of a table's states, as its source says.</summary>
+    public TableDiff? DiffFrom(ReadState read, object earlier, object later)
+    {
+        lock (_gate)
+        {
+            if (_found.TryGetValue((read.SourceId, read.Table), out var known)
+                && ReferenceEquals(known.Earlier, earlier)
+                && ReferenceEquals(known.Later, later))
+            {
+                return known.Diff;
+            }
+
+            var diff = read.Source.DiffFrom(read.Table, earlier, later);
+            _found[(read.SourceId, read.Table)] = (earlier, later, diff);
+            return diff;
+        }
+    }
+
+    /// <summary>Forgets what this update found, and the states it named.</summary>
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            _found.Clear();
+        }
     }
 }
 

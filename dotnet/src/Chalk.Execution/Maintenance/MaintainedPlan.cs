@@ -26,16 +26,18 @@ internal sealed class MaintainedPlan : IAsyncDisposable
     private readonly CompiledPlan _compiled;
     private readonly OperatorFactory _root;
     private readonly List<IMaintainedState> _states;
+    private readonly TableDiffs _diffs;
     private readonly ResultState _result;
     private readonly IReadOnlyList<ChalkType> _outputTypes;
     private Tree? _tree;
     private bool _restart = true;
 
-    private MaintainedPlan(CompiledPlan compiled, OperatorFactory root, List<IMaintainedState> states)
+    private MaintainedPlan(CompiledPlan compiled, OperatorFactory root, List<IMaintainedState> states, TableDiffs diffs)
     {
         _compiled = compiled;
         _root = root;
         _states = states;
+        _diffs = diffs;
         _outputTypes = compiled.OutputTypes;
         _result = new ResultState(_outputTypes);
     }
@@ -50,7 +52,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         var compiler = new MaintainedCompiler(
             compiled.Plan, compiled.Catalog, compiled.Sources, compiled.Settings, clockSlots);
         var root = compiler.Compile();
-        var plan = new MaintainedPlan(compiled, root, compiler.States);
+        var plan = new MaintainedPlan(compiled, root, compiler.States, compiler.Diffs);
 
         // Build a tree once, so that a kernel or a type the operators cannot take is refused now.
         plan._tree = plan.Build();
@@ -135,6 +137,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         }
         finally
         {
+            _diffs.Clear();
             arena.EndExecution();
             if (!completed)
             {
