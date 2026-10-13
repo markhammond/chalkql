@@ -1705,6 +1705,12 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   finds the rest, and each key's last row once a row is appended under the key.
 - **Ties** break as the executor breaks them: an as-of join's right rows keep their places in their
   table, and an as-of seek's ties are the seek's own.
+- **Lookups.** An index lookup pinned to keys, as a constant key or an `IN` list makes, is read as
+  its table is: the table's changes, kept to those keys. Under an as-of join, such as one keyed
+  `ON r.symbol = 'EUR'`, it is maintained when it looks up one key, forwards, through an ordered index
+  the table builds whose later columns are the join's keys or its time: that index keeps rows with
+  one key and time in their order in the table, so the ties are the table's. Otherwise key the join
+  on both sides. Which the planner chooses, a seek or a lookup, depends on the tables' sizes.
 - **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's
   `StateBudget`: a budget tuned for a recompute may need raising. The first update computes
   everything, and takes longer than a recompute.
@@ -1714,9 +1720,10 @@ left rows and its right rows by key, an aggregate its groups — so an update re
 - **What is not maintained.** A statement with any of these is refused when the view is made, with
   `UnsupportedInView`, naming the operator and where it is in the plan: window functions; `LIMIT` and
   `FETCH`; set operations but `UNION ALL`; right, full, semi and anti joins; `DISTINCT`, ordered,
-  holistic and host aggregates; an as-of join whose right input is not a table read through filters
-  and projections; an as-of seek whose key has one type in its table and another on its left; an
-  index lookup in place of a read; the clock in a join's condition; a source
+  holistic and host aggregates; an as-of join whose right input is not a table read, or a lookup
+  of one key in the table's order, through filters and projections; an as-of seek whose key has one
+  type in its table and another on its left; an index lookup over a range of keys; the clock in a
+  join's condition; a source
   outside the engine's epochs; a `LIST`, composite or `BINARY` value in what an operator keeps; and
   the reference executor. A view that recomputes takes all of them.
 

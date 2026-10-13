@@ -120,8 +120,9 @@ await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKe
   from the start; a plan the view cannot maintain is declined, as the one it keeps answers the same
   rows.
 - Joins (inner and left), as-of joins, aggregates with grouping sets, filters, projections,
-  `UNION ALL`, `VALUES` and `WITH` subtrees are maintained, and the clock in a filter or a
-  projection.
+  `UNION ALL`, `VALUES` and `WITH` subtrees are maintained, the clock in a filter or a projection,
+  and an index lookup pinned to keys, as a constant key or an `IN` list makes, which is read as its
+  table is, kept to those keys.
 - An as-of join that seeks an index keeps only its left rows and the rows they match, never the
   table's, so its state does not grow with the table's history; it keeps each key's last row too,
   so a row at the clock needs no seek.
@@ -131,8 +132,9 @@ await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKe
 - An update that fails part way leaves the next to start from nothing; readers get only the keys
   that differ.
 - A statement maintenance does not keep — window functions, `LIMIT`, set operations but `UNION ALL`,
-  right, full, semi and anti joins, `DISTINCT` and ordered aggregates, the reference executor — is
-  refused when the view is made, with `UnsupportedInView`, naming it.
+  right, full, semi and anti joins, `DISTINCT` and ordered aggregates, an index lookup over a range
+  of keys, the reference executor — is refused when the view is made, with `UnsupportedInView`,
+  naming it.
 
 ## Inputs
 
