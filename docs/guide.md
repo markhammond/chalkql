@@ -1678,10 +1678,15 @@ left rows and its right rows by key, an aggregate its groups — so an update re
 - **What a table gives.** The rows an append added since the view's last update. After a `Replace`
   whose rows are the old ones — the same objects, in their order — with some taken out and rows
   appended after them, as a compaction of a log makes them, the rows it took out and the rows it
-  appended. After any other change — another `Replace`, an upsert, a delete — every old row out and
-  every new row in, which costs about what a recompute does, in that update only; an aggregate over
-  a table, through filters and projections, then takes the new rows only and builds its groups again
-  from them.
+  appended. A replacement prepared off the refresh lock and committed later (`PrepareReplaceAsync`,
+  `Commit`) reaches the view the same way, the rows appended since its cut included. After any other
+  change — another `Replace`, an upsert, a delete — every old row out and every new row in, which costs
+  about what a recompute does, in that update only; an aggregate over a table, through filters and
+  projections, then takes the new rows only and builds its groups again from them.
+- **Plans made in the background.** Under `DeferPlanning()`, a plan the background made swaps into the
+  view's statement at a refresh. The view is maintained from it from its next update, which gives the
+  whole result once; readers keep their place, sent only the keys that differ. A new plan the view
+  cannot maintain is declined: the plan it keeps answers the same rows.
 - **The clock.** A filter or a projection that reads the clock runs on its changes while the clock
   stands, and on every row it holds when the clock moves. A part of the statement that reads no table
   at all, such as the days a report is computed for, is computed whole when the clock moves.
