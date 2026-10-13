@@ -419,6 +419,7 @@ internal sealed class MaintainedCompiler
             leftKeys,
             (int)seek.LeftTime,
             (int)seek.RightTime,
+            seek.Match,
             seek.Type == JoinType.Left,
             keys,
             _settings.BatchSize);
@@ -469,7 +470,8 @@ internal sealed class MaintainedCompiler
             state,
             leftFactory(context),
             new ReadChanges(context, keysPath, keysSchema, keysTypes, keys, appendsOnly: true),
-            seekFactory(context)));
+            seekFactory(context),
+            state.LargestTime is null ? null : seekFactory(context)));
     }
 
     private Rel Aggregate(Rel rel, string path, Aggregate aggregate)
