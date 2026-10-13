@@ -1216,7 +1216,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// what it reads under the process-wide gate the commits take (F188), in this engine or any other
     /// sharing a source. A re-introspection the transaction names publishes as it reads, before the
     /// commits, so it is not part of what an execution sees whole. A <see cref="PreparedQuery"/>
-    /// survives — a replacement changes rows, and rows are not shape (<see cref="PreparedQuery.IsStale"/>).
+    /// survives — a replacement changes rows, and rows are not shape — though one over a table whose
+    /// rows moved tenfold reads as stale, so that a host prepares it again for the numbers there are
+    /// now (<see cref="PreparedQuery.IsStale"/>, D342).
     /// </para>
     /// </remarks>
     public async ValueTask<long> RefreshAsync(Action<RefreshBuilder> plan, CancellationToken ct = default)
@@ -1979,11 +1981,16 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         // prepare with no stop token sends no id and takes no entry in the sidecar's registry.
         var requestId = planning.StopToken.CanBeCanceled ? Guid.NewGuid().ToString("n") : string.Empty;
 
+        // One read of the catalog: the epoch the planner is asked for, and the counts a prepared
+        // statement keeps to judge drift by (D342), are of the same catalog. Read before the versions:
+        // a refresh between the two reads gives the plan newer numbers than the ones kept, which can
+        // make the statement stale once too often but never hides a drift.
+        var catalog = Catalog;
         var request = new PlanRequest
         {
             Sql = sql,
-            ContextId = Catalog.ContextId,
-            CatalogEpoch = Catalog.Epoch,
+            ContextId = catalog.ContextId,
+            CatalogEpoch = catalog.Epoch,
             InstanceId = _instanceId,
             ShapeVersion = _shapeVersion,
             StatisticsVersion = _statisticsVersion,
@@ -2104,6 +2111,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 PlanErrorKinds.Internal, tooDeep.Message, position: null, planningState: null, tooDeep);
         }
 
+        result.PlannedOn = catalog;
         return result;
     }
 

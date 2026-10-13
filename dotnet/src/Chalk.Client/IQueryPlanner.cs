@@ -324,6 +324,13 @@ public sealed class PlanResult
 {
     public required Plan Plan { get; init; }
 
+    /// <summary>
+    /// The catalog this plan was made against, as the engine held it when it asked (D342): what a
+    /// prepared statement compares its tables' row counts with later. Null from a planner called
+    /// directly, without an engine.
+    /// </summary>
+    internal Chalk.Catalog.CatalogContext? PlannedOn { get; set; }
+
     public ulong PlanDigest => Plan.PlanDigest;
 
     /// <summary>Diagnostics only; nothing parses it.</summary>
