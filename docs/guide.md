@@ -1237,8 +1237,11 @@ input, as here, rather than writing the expression in it.
 Over a long log, an `ASOF JOIN` need not read the whole log. If the right input is an
 in-process table with an ordered index on its `ON` columns and then its time, such as
 `(asset, ts)`, ChalkQL may seek the index once for each distinct key and time on the left,
-and read one row each time. It chooses by cost, so a short table is still read. A condition
-that fixes a key column, like `ON r.currency = 'EUR'`, is part of each seek. A match with `>=`
+and read one row each time. It chooses by cost, so a short table is still read. While it
+searches for a plan, the planner's row estimates can be far from the final plan's, so once the
+search is over it prices each plain `ASOF JOIN` again on the final numbers and seeks wherever
+that is cheaper. The plan's stage list then says `as-of seeks after search`, and how many. A
+condition that fixes a key column, like `ON r.currency = 'EUR'`, is part of each seek. A match with `>=`
 or `>` reads the index backwards, which needs an index that can read backwards from any
 point: POCO's own indexes can, and Akade's cannot, so with Akade only `<=` and `<` seek.
 Where several rows share the keys and the closest time, the seek takes the first it reaches
