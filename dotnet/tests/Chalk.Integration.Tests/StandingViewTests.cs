@@ -337,10 +337,13 @@ public sealed class StandingViewTests(SharedSidecar sidecar)
 
     /// <summary>
     /// A refresh that lands while an update reads is never half seen: the update notices the engine
-    /// moved, and runs again at the new epoch.
+    /// moved, and runs again at the new epoch. A maintained view, whose statement moved on with the
+    /// update it did not apply, takes the whole result the second time (D343).
     /// </summary>
-    [Fact]
-    public async Task An_update_a_refresh_overtakes_runs_again()
+    [Theory]
+    [InlineData(ViewMaintenance.Recompute)]
+    [InlineData(ViewMaintenance.Incremental)]
+    public async Task An_update_a_refresh_overtakes_runs_again(ViewMaintenance maintenance)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         await using var desk = await DeskAsync();
@@ -350,6 +353,7 @@ public sealed class StandingViewTests(SharedSidecar sidecar)
         {
             Key = ["book"],
             LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
+            Maintenance = maintenance,
             Map = (in ViewRow row, out BookKey key, out BookRow value) =>
             {
                 mapped++;
@@ -372,7 +376,7 @@ public sealed class StandingViewTests(SharedSidecar sidecar)
 
         var (sink, _) = Drained(view);
         Assert.Equal(new Dictionary<long, long> { [1] = 11, [2] = 20, [3] = 33 }, sink.Rows);
-        Assert.True(mapped - before > 3, "the update ran again after the refresh landed");
+        Assert.True(mapped - before > (maintenance == ViewMaintenance.Incremental ? 1 : 3), "the update ran again after the refresh landed");
     }
 
     // ---- the scaffolding ----
