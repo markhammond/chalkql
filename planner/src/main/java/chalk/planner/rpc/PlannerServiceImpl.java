@@ -443,6 +443,7 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
             PlanResponse.Builder response =
                 PlanResponse.newBuilder()
                     .setPlan(plan)
+                    .setLogicalDigest(result.logicalDigest())
                     .setStats(stats)
                     // How this planning ended, always (D237). A request that carried no option gets
                     // the times, the reason CONVERGED and no costs, because nothing sampled any.

@@ -177,6 +177,7 @@ public final class PlannerPipeline implements AutoCloseable {
   public record Result(
       RelNode physical,
       RelDataType parameterRowType,
+      long logicalDigest,
       String logicalPlanText,
       String physicalPlanText,
       List<String> rulesFired,
@@ -902,6 +903,10 @@ public final class PlannerPipeline implements AutoCloseable {
       chalk.planner.entitlement.TaintCheck.logical(logical);
     }
 
+    // The statement's identity, before any rule (D342): the rules below read statistics in two
+    // places, and this must not move with them.
+    long logicalDigest = LogicalDigest.of(logical);
+
     // Which of this request's parameters were planned against a value the caller expected (D284).
     // The ordinals and nothing else: a hint's value never reaches a stage list, a log line, an
     // exception, the plan text or a digest. A request that sent none adds nothing here, so every
@@ -1077,6 +1082,7 @@ public final class PlannerPipeline implements AutoCloseable {
     return new Result(
         physical,
         parameterRowType,
+        logicalDigest,
         logicalText,
         includePlanText ? explainWithCost(physical, redactor) : "",
         ruleTrace.rulesFired(),

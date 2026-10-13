@@ -333,6 +333,13 @@ public sealed class PlanResult
 
     public ulong PlanDigest => Plan.PlanDigest;
 
+    /// <summary>
+    /// The statement's identity, which statistics do not move (D342): a digest of its logical plan,
+    /// as conversion and the entitlement rewrite left it, before any rule. Zero from a planner that
+    /// computes none, such as <see cref="RecordedPlanner"/>.
+    /// </summary>
+    public ulong LogicalDigest { get; init; }
+
     /// <summary>Diagnostics only; nothing parses it.</summary>
     public string? PlanText { get; init; }
 

@@ -67,6 +67,7 @@ public sealed class PreparedQuery
         _plannedRows = PlannedRows(result.PlannedOn ?? engine.Catalog, _tablesRead);
         Sql = sql;
         Plan = result.Plan;
+        LogicalDigest = result.LogicalDigest;
         // When the prepare asked for a redaction and the statement's parameters are named, the
         // names go back where the rewrite put a `?` — in the statement and in the plan text, whose
         // dynamic parameters read `?0`, `?1`, … (D287). Anything else is served as it came.
@@ -219,6 +220,19 @@ public sealed class PreparedQuery
     public Plan Plan { get; }
 
     public ulong PlanDigest => Plan.PlanDigest;
+
+    /// <summary>
+    /// The statement's identity, which statistics do not move (D342): a digest of its logical plan,
+    /// before the planner chose anything by cost.
+    /// </summary>
+    /// <remarks>
+    /// The same for a statement however it is spaced or its keywords cased; different for other
+    /// values, aliases, windows, tables or policy, as <see cref="PlanDigest"/> is. Unlike
+    /// <see cref="PlanDigest"/>, the identity of the plan that runs, it does not move when new
+    /// statistics change the plan's operators, so it is what to name shared work by. Zero when the
+    /// plan came from a planner that computes none, such as <see cref="RecordedPlanner"/>.
+    /// </remarks>
+    public ulong LogicalDigest { get; }
 
     /// <summary>The Arrow schema every produced batch matches.</summary>
     public ArrowSchema OutputSchema { get; private set; }

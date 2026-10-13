@@ -1600,3 +1600,9 @@ Chalk.Client.RefreshBuilder.Version(long version) -> Chalk.Client.RefreshBuilder
 Chalk.Client.ClockRequiredException
 Chalk.Client.ClockRequiredException.Clock.get -> string!
 Chalk.Client.ClockRequiredException.ClockRequiredException(string! clock) -> void
+Chalk.Client.PlanResult.LogicalDigest.get -> ulong
+Chalk.Client.PlanResult.LogicalDigest.init -> void
+Chalk.Client.PreparedQuery.LogicalDigest.get -> ulong
+Chalk.Client.Rpc.PlanResponse.LogicalDigest.get -> ulong
+Chalk.Client.Rpc.PlanResponse.LogicalDigest.set -> void
+const Chalk.Client.Rpc.PlanResponse.LogicalDigestFieldNumber = 9 -> int

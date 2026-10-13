@@ -530,6 +530,10 @@ message PlanResponse {
   // Empty unless the request carried a `redaction` message, which is what makes the sidecar run the
   // visitor at all.
   string redacted_sql = 8;
+  // The statement's identity, which statistics do not move (D342): a digest of the logical plan as
+  // conversion and the entitlement rewrite left it, before any rule. `plan.plan_digest` is the
+  // identity of the plan that runs, and moves when statistics change its operators.
+  uint64 logical_digest = 9;
   // Moved into `PlanResponse.extensions` as `chalk.v1.EntitlementsReport` and
   // `chalk.v1.EntitlementsExplain`.
   reserved 4, 5;
