@@ -153,8 +153,9 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
 
     /// <summary>
     /// Statements over tables large enough that the planner seeks an index for an as-of join — back and
-    /// forward, strict and not, with a fixed key, on an index whose key goes on past its time — and
-    /// hashes a left join: each plan is checked to be what it means to test.
+    /// forward, strict and not, with a fixed key, on an index whose key goes on past its time, at the
+    /// clock, and with left rows that move with the clock — and hashes a left join: each plan is
+    /// checked to be what it means to test.
     /// </summary>
     [Theory]
     [InlineData(
@@ -180,6 +181,16 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
     [InlineData(
         "a strict as-of seek forward on an index going on past its time",
         "SELECT t.seq, t.asset, m.px, m.tag FROM trades t LEFT ASOF JOIN marks m MATCH_CONDITION m.ts > t.ts ON m.asset = t.asset",
+        "AsOfLookupJoin",
+        true)]
+    [InlineData(
+        "an as-of seek at the clock, with marks after it",
+        "SELECT x.seq, x.asset, m.px, m.tag FROM (SELECT seq, asset, CAST(@now AS TIMESTAMP(9)) AS upto FROM trades) x LEFT ASOF JOIN marks m MATCH_CONDITION m.ts <= x.upto ON m.asset = x.asset",
+        "AsOfLookupJoin",
+        false)]
+    [InlineData(
+        "a strict as-of seek whose left rows move with the clock",
+        "SELECT x.seq, x.seen, m.px, m.tag FROM (SELECT seq, asset, ts, CAST(@now AS TIMESTAMP(9)) AS seen FROM trades) x ASOF JOIN marks m MATCH_CONDITION m.ts < x.ts ON m.asset = x.asset",
         "AsOfLookupJoin",
         true)]
     [InlineData(
