@@ -15,8 +15,8 @@ namespace Chalk.Execution.Maintenance;
 /// <para>
 /// The seeking is the executor's own: the statement's as-of seek, compiled as it is but over a replay
 /// of the left rows to match, and as a left join, so that every one of them comes back. Its matches,
-/// ties and NULLs are therefore a recompute's. Each row replayed carries its place in the replay, by
-/// which what the seek found comes back to it.
+/// ties and NULLs are therefore a recompute's. A row is replayed as all the seek reads of it, its keys
+/// and its time, and its place in the replay, by which what the seek found comes back to it.
 /// </para>
 /// <para>
 /// A left row is matched when it arrives; again when a row is appended to the table under its key;
@@ -40,6 +40,7 @@ internal sealed class SeekState : IMaintainedState
     {
         LeftWidth = leftTypes.Count;
         RightWidth = rightTypes.Count;
+        Replayed = [.. leftKeys, leftTime];
         LeftKeys = new KeyColumns(leftTypes, leftKeys);
         TableKeys = new KeyColumns(keyTypes, [.. Enumerable.Range(0, leftKeys.Length)]);
         RightIdentity = KeyColumns.All(rightTypes);
@@ -51,7 +52,7 @@ internal sealed class SeekState : IMaintainedState
         Matches = new RowStore(rightTypes);
         Found = new RowStore(rightTypes);
         LeftChanges = new ChangeSet(leftTypes);
-        Pending = new ChangeWriter([.. leftTypes, Place], batchSize);
+        Pending = new ChangeWriter([.. Replayed.Select(c => leftTypes[c]), Place], batchSize);
         Output = new ChangeWriter(outputTypes, batchSize);
     }
 
@@ -61,6 +62,9 @@ internal sealed class SeekState : IMaintainedState
     public int LeftWidth { get; }
 
     public int RightWidth { get; }
+
+    /// <summary>The left columns a row is replayed with, its keys and then its time; its place follows them.</summary>
+    public int[] Replayed { get; }
 
     /// <summary>A left row's equality keys, encoded as a table row's are.</summary>
     public KeyColumns LeftKeys { get; }
@@ -100,7 +104,7 @@ internal sealed class SeekState : IMaintainedState
 
     public ChangeSet LeftChanges { get; }
 
-    /// <summary>The left rows this update matches, each with its place, replayed to the seek.</summary>
+    /// <summary>The left rows this update matches, as they are replayed to the seek.</summary>
     public ChangeWriter Pending { get; }
 
     public ChangeWriter Output { get; }
@@ -125,7 +129,7 @@ internal sealed class SeekState : IMaintainedState
     }
 }
 
-/// <summary>The left rows a maintained seek matches in this update, each with its place, replayed without weights.</summary>
+/// <summary>The left rows a maintained seek matches in this update: their keys, time and place, without weights.</summary>
 internal sealed class PendingRows : OperatorBase
 {
     private readonly SeekState _state;
@@ -150,7 +154,7 @@ internal sealed class PendingRows : OperatorBase
             ct.ThrowIfCancellationRequested();
             var batch = pending.Batch(i);
             _slot.Begin(batch.RowCount);
-            for (var c = 0; c <= _state.LeftWidth; c++)
+            for (var c = 0; c <= _state.Replayed.Length; c++)
             {
                 _slot.Set(c, batch.Column(c));
             }
@@ -325,24 +329,25 @@ internal sealed class SeekChanges : MaintainedOperator
         var place = _owners.Count;
         _owners.Add(owner);
         var into = state.Pending;
+        var replayed = state.Replayed;
         into.Begin();
         if (owner >= 0)
         {
-            for (var c = 0; c < state.LeftWidth; c++)
+            for (var c = 0; c < replayed.Length; c++)
             {
-                into.Column(c).Append(state.Left.Column(c), owner);
+                into.Column(c).Append(state.Left.Column(replayed[c]), owner);
             }
         }
         else
         {
             var columns = state.LeftChanges.Columns;
-            for (var c = 0; c < state.LeftWidth; c++)
+            for (var c = 0; c < replayed.Length; c++)
             {
-                into.Column(c).Append(columns[c], ~owner);
+                into.Column(c).Append(columns[replayed[c]], ~owner);
             }
         }
 
-        into.Column(state.LeftWidth).AppendInt64(place);
+        into.Column(replayed.Length).AppendInt64(place);
         into.End(1);
         return place;
     }
@@ -366,12 +371,12 @@ internal sealed class SeekChanges : MaintainedOperator
             return;
         }
 
-        var right = state.LeftWidth + 1;
+        var right = state.Replayed.Length + 1;
         var time = right + state.RightTime;
         await foreach (var batch in _seek.ExecuteAsync(ct).ConfigureAwait(false))
         {
             var columns = batch.Columns;
-            var places = columns[state.LeftWidth].Lanes<long>();
+            var places = columns[right - 1].Lanes<long>();
             for (var i = 0; i < batch.Count; i++)
             {
                 var row = batch.RowAt(i);

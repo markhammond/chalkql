@@ -424,24 +424,35 @@ internal sealed class MaintainedCompiler
             _settings.BatchSize);
         States.Add(state);
 
-        // The statement's own seek, as a left join, over the left rows the update matches, each with its
-        // place among them after its own columns.
-        var place = new Field { Name = "$place", Type = SeekState.Place.ToProto() };
-        var pendingRow = leftRow.Clone();
-        pendingRow.Fields.Add(place);
+        // The statement's own seek, as a left join, over the left rows the update matches: each as all the
+        // seek reads of it, its keys and its time, and its place among them.
+        var pendingRow = new RowType();
+        for (var i = 0; i < state.Replayed.Length; i++)
+        {
+            // Named by place: a key may be the time too.
+            var replayed = leftRow.Fields[state.Replayed[i]].Clone();
+            replayed.Name = $"$replayed{i}";
+            pendingRow.Fields.Add(replayed);
+        }
+
+        pendingRow.Fields.Add(new Field { Name = "$place", Type = SeekState.Place.ToProto() });
         var pendingPath = $"{path}/Pending";
         var pendingSchema = ArrowTypeMapping.ToArrowSchema(pendingRow);
         var pendingTypes = Types(pendingRow);
         var pending = Substituted(pendingRow, context => new PendingRows(context, pendingPath, pendingSchema, pendingTypes, state));
-        var matcher = rel.Clone();
+        var matcher = new Rel { RowType = pendingRow.Clone(), AsOfLookupJoin = seek.Clone() };
         matcher.AsOfLookupJoin.Left = pending;
         matcher.AsOfLookupJoin.Type = JoinType.Left;
-        for (var i = leftWidth; i < matcher.RowType.Fields.Count; i++)
+        matcher.AsOfLookupJoin.LeftKeys.Clear();
+        matcher.AsOfLookupJoin.LeftKeys.Add(Enumerable.Range(0, leftKeys.Length).Select(k => (uint)k));
+        matcher.AsOfLookupJoin.LeftTime = (uint)leftKeys.Length;
+        foreach (var field in rel.RowType.Fields.Skip(leftWidth))
         {
-            matcher.RowType.Fields[i].Type.Nullable = true;
+            var right = field.Clone();
+            right.Type.Nullable = true;
+            matcher.RowType.Fields.Add(right);
         }
 
-        matcher.RowType.Fields.Insert(leftWidth, place.Clone());
         var seekFactory = _compilation.Node(matcher, path);
         var keysPath = $"{path}/Read";
         var keysWeighted = Weighted(keyRow);
