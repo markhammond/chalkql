@@ -389,6 +389,10 @@ if (cached.IsStale)
 Prepare after the first load where you can. A statement prepared before it is stale as
 soon as the load lands, and runs its empty-table plan until it is prepared again.
 
+A host whose refreshes [defer their planning](#leaving-statistics-and-plans-to-the-background)
+need not do this itself: Chalk plans the statements it holds again in the background, once a
+table they read has moved twofold, and swaps the new plans in at a refresh.
+
 Two digests name a statement:
 
 - **`PlanDigest`** names the plan that runs. New statistics that change the plan's
@@ -515,6 +519,85 @@ leaves every `PreparedQuery` runnable, and it runs against the new rows. A schem
 makes them stale, as before (`PreparedQuery.IsStale`, `ChalkEngine.ShapeEpoch`). So does a
 load that moves a table's row count tenfold, though such a statement still runs: see
 [Preparing again](#preparing-again). There is no operation that updates or deletes rows.
+
+#### Compacting a table while appends land
+
+A table that is only ever appended to grows without end, so a host compacts it now and then:
+it rewrites the rows it has, keeping each key's last row, or dropping the old ones. A
+`Replace` can do that, but it builds the new snapshot under the refresh lock, and every
+append waits for the whole build.
+
+Prepare the replacement first instead. Chalk builds it on your task, holding no lock, while
+appends keep landing. A later refresh commits it, together with the rows the table took
+since.
+
+```csharp
+// The host's rewrite of the rows the table had at the cut: here, each symbol's last row.
+var cut = ticks.Count;
+var compacted = ticks.Take(cut)
+    .GroupBy(t => t.Symbol).Select(g => g.Last())
+    .OrderBy(t => t.Ts).ToList();
+
+// Built here, off the lock. Appends meanwhile commit as usual.
+using var prepared = await engine.PrepareReplaceAsync(mem, "ticks", compacted, through: cut, ct);
+
+// Then, in an ordinary refresh: the rewrite, followed by every row appended since the cut.
+await engine.RefreshAsync(refresh => refresh.Commit(prepared), ct);
+```
+
+- **The cut** is a row count: the rewrite stands for the table's first `cut` rows. The rows
+  from the cut on are the ones appended since. The commit appends them to the replacement, and
+  checks that they follow it in the table's declared order.
+- **Under the lock**, a commit costs what appending those rows costs, plus whatever the
+  refresh does about statistics: see
+  [Leaving statistics and plans to the background](#leaving-statistics-and-plans-to-the-background).
+- **The rows are copied**, as an append's are, so your list is yours again as soon as
+  `PrepareReplaceAsync` returns. It is never reported released.
+- **A commit is refused**, and the refresh changes nothing, when the table was replaced
+  after the prepare, and when the rows since the cut do not follow the rewrite in the table's
+  declared order. Prepare again from the rows the table holds now.
+- **A keyed table** (`Keyed(…)`) is refused when you prepare. Its rows change by key, not only
+  at its end, so there are no rows since a cut to carry over. Replace it in a refresh.
+- **A timed table's frontier** never moves back at a commit: the rows since the cut were
+  admitted against it.
+- A replacement is committed once. Dispose one you will not commit.
+
+#### Leaving statistics and plans to the background
+
+A refresh computes the statistics of the tables it changed, and sends them to the planner,
+before it returns. `DeferPlanning()` leaves both to the background:
+
+```csharp
+await engine.RefreshAsync(refresh => refresh.Append(mem, "ticks", batch).DeferPlanning(), ct);
+```
+
+- **Under the refresh lock**, nothing is computed and nothing is sent. The tables keep the
+  statistics they had, and their row counts are exact, so `IsStale` still sees a drift.
+- **After it, one run in the background** computes the statistics over the rows just
+  published, and sends them to the planner. Then it plans again every statement whose tables'
+  rows have moved twofold since it was planned: a standing view's, and every prepared
+  statement you still hold. A refresh that defers while a run is busy asks for one more run,
+  over whatever is published when it starts.
+- **At the next refresh**, deferred or not, the run's statistics enter the catalog and its
+  plans swap in. So a plan changes only at a refresh you make, never underneath one. A
+  statement then runs its new plan, and an execution already running keeps the one it began
+  with. `PlanDigest` moves, `LogicalDigest` does not, and the rows are the same.
+- **An entitled statement** takes a new plan only when it passes the checks its first plan
+  passed, and comes with the same entitlements report. Its labels and audit events then stay
+  true, and an audit event names the plan that ran. A plan whose report differs, as when a
+  database source pushes a row predicate down differently, is not taken; the statement keeps
+  its plan, and a later run may bring one that passes.
+- **A statement prepared with any other planner extension** keeps its plan. Its `IsStale` still
+  says when to prepare it again.
+- **A run that fails** is logged, and the plans stay as they were. The next refresh that
+  defers runs again.
+- **POCO tables** get their statistics in the background. Other sources' tables keep the ones
+  they had until a refresh that does not defer.
+- **A refresh that defers cannot also re-read** a source or table (`refresh.Refresh(…)`): a
+  re-read describes its tables with their statistics at once.
+
+Compacting with a prepared replacement, in a refresh that defers its planning, holds the lock
+for about as long as an append does.
 
 ### ADO.NET — a real database
 
@@ -2336,6 +2419,14 @@ source for.
     - no root column is a masked or redacted column itself;
     - every output column's label, worked out again from the reads, matches the
       report's.
+
+     The client checks every plan a statement runs, not only the one it was prepared with:
+     each further length of a list parameter is planned at its first execution, and a
+     refresh that [defers its planning](#leaving-statistics-and-plans-to-the-background) can
+     swap a new plan in. Such a plan must also come with the same report as the prepared
+     one, since the statement's labels and audit events describe that report. A list length
+     whose plan fails is refused with `PlanBreaksEntitlements`; a background plan that fails
+     is not taken.
 
   These checks catch *escapes*. Catching misclassification is the job of the corpus and
   of the package's `Reconcile`.
