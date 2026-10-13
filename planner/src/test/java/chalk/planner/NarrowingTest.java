@@ -68,6 +68,9 @@ class NarrowingTest {
     assertThat(narrowed.getPlan().getPlanDigest()).isEqualTo(fromScratch.getPlan().getPlanDigest());
     assertThat(narrowed.getPlan()).isEqualTo(fromScratch.getPlan());
     assertThat(narrowed.getPlan().getPlanDigest()).isNotEqualTo(base.getPlan().getPlanDigest());
+    // The statement's identity too (D342): the narrowed tree is the one the union rewrites to.
+    assertThat(narrowed.getLogicalDigest()).isEqualTo(fromScratch.getLogicalDigest());
+    assertThat(narrowed.getLogicalDigest()).isNotEqualTo(base.getLogicalDigest());
   }
 
   @Test

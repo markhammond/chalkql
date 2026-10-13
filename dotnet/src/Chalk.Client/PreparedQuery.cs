@@ -64,8 +64,10 @@ public sealed class PreparedQuery
         // The tables this plan reads, collected once (D271 (d)): staleness is per table now, and
         // asking the plan again on every execution would put a tree walk on the execution path.
         _tablesRead = ChalkEngine.TablesRead(result.Plan);
+        _plannedRows = PlannedRows(result.PlannedOn ?? engine.Catalog, _tablesRead);
         Sql = sql;
         Plan = result.Plan;
+        LogicalDigest = result.LogicalDigest;
         // When the prepare asked for a redaction and the statement's parameters are named, the
         // names go back where the rewrite put a `?` — in the statement and in the plan text, whose
         // dynamic parameters read `?0`, `?1`, … (D287). Anything else is served as it came.
@@ -218,6 +220,19 @@ public sealed class PreparedQuery
     public Plan Plan { get; }
 
     public ulong PlanDigest => Plan.PlanDigest;
+
+    /// <summary>
+    /// The statement's identity, which statistics do not move (D342): a digest of its logical plan,
+    /// before the planner chose anything by cost.
+    /// </summary>
+    /// <remarks>
+    /// The same for a statement however it is spaced or its keywords cased; different for other
+    /// values, aliases, windows, tables or policy, as <see cref="PlanDigest"/> is. Unlike
+    /// <see cref="PlanDigest"/>, the identity of the plan that runs, it does not move when new
+    /// statistics change the plan's operators, so it is what to name shared work by. Zero when the
+    /// plan came from a planner that computes none, such as <see cref="RecordedPlanner"/>.
+    /// </remarks>
+    public ulong LogicalDigest { get; }
 
     /// <summary>The Arrow schema every produced batch matches.</summary>
     public ArrowSchema OutputSchema { get; private set; }
@@ -451,20 +466,24 @@ public sealed class PreparedQuery
     /// <summary>
     /// True once a table <em>this query reads</em> has changed shape since it was planned (D86,
     /// amended by D260 and made per table by D271 (d)) — after a refresh in which that table gained a
-    /// column, lost an index or otherwise stopped being the table this plan was compiled against.
+    /// column, lost an index or otherwise stopped being the table this plan was compiled against — or
+    /// its row count has drifted tenfold, either way (D342).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Executing a stale query throws <see cref="Chalk.Sources.StalePlanException"/>. This is the
-    /// question to ask first, because the answer is actionable: prepare the statement again. A host
-    /// that keeps a pool of prepared statements across a schema change checks this rather than
-    /// catching the exception on the first row of a result it has already started streaming.
+    /// Executing a query whose table changed shape throws <see cref="Chalk.Sources.StalePlanException"/>.
+    /// This is the question to ask first, because the answer is actionable: prepare the statement
+    /// again. A host that keeps a pool of prepared statements across a schema change checks this rather
+    /// than catching the exception on the first row of a result it has already started streaming.
     /// </para>
     /// <para>
-    /// A refresh that only replaced rows leaves this false and the query runnable: the compiled plan
-    /// holds column positions and source references, and a replacement changes neither. Statistics
-    /// may have moved with the rows, so preparing again may well find a better plan — but nothing
-    /// forces it (<c>docs/design/35-poco-refresh.md</c> §2).
+    /// A refresh that only replaced rows leaves the query runnable: the compiled plan holds column
+    /// positions and source references, and a replacement changes neither
+    /// (<c>docs/design/35-poco-refresh.md</c> §2). But a plan made on other numbers can be a poor one
+    /// — one made on empty tables scans and loops where one made on loaded tables seeks and hashes —
+    /// so this is also true once a table the query reads has drifted tenfold, either way, since it was
+    /// planned (D342). A table whose row count is unknown is not judged. The query still runs, and runs
+    /// correctly; preparing it again finds the plan for the numbers there are now.
     /// </para>
     /// <para>
     /// So does a shape change in a table this query does not read: since D271 (d) the comparison is
@@ -472,10 +491,102 @@ public sealed class PreparedQuery
     /// leaves the ones that read <c>orders</c> exactly where they were.
     /// </para>
     /// </remarks>
-    public bool IsStale => !_engine.IsCurrent(Plan, _tablesRead);
+    public bool IsStale => !_engine.IsCurrent(Plan, _tablesRead) || Drifted();
 
     /// <summary>The tables this plan reads, which is what its staleness is measured over.</summary>
     private readonly IReadOnlyList<TableKey>? _tablesRead;
+
+    /// <summary>
+    /// The row count of each table this plan reads, as the catalog it was made against gave it, for
+    /// the tables whose count was known (D342): what drift is judged against.
+    /// </summary>
+    private readonly (TableKey Table, long Rows)[] _plannedRows;
+
+    /// <summary>How far a table's row count may move, either way, before the plan made on it is stale.</summary>
+    private const double Drift = 10;
+
+    /// <summary>
+    /// Whether a table this plan reads has drifted tenfold, either way, since the plan was made (D342,
+    /// F196). A table whose count is unknown, then or now, is not judged. One comparison per table,
+    /// and no planner round trip.
+    /// </summary>
+    private bool Drifted()
+    {
+        if (_plannedRows.Length == 0)
+        {
+            return false;
+        }
+
+        var live = _engine.Catalog;
+        foreach (var (table, planned) in _plannedRows)
+        {
+            if (RowsOf(live, table) is not { } now)
+            {
+                continue;
+            }
+
+            // Counted from one, so that an empty table is a table of one row: nothing is divided by
+            // zero, and a table that grew from empty to a few rows has not drifted.
+            var ratio = (Math.Max(now, 1) + 0d) / Math.Max(planned, 1);
+            if (ratio >= Drift || ratio <= 1 / Drift)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The known row counts of <paramref name="tables"/> in <paramref name="catalog"/>.</summary>
+    private static (TableKey Table, long Rows)[] PlannedRows(
+        Chalk.Catalog.CatalogContext catalog, IReadOnlyList<TableKey>? tables)
+    {
+        if (tables is null || tables.Count == 0)
+        {
+            return [];
+        }
+
+        var found = new List<(TableKey Table, long Rows)>(tables.Count);
+        foreach (var table in tables)
+        {
+            if (RowsOf(catalog, table) is { } rows)
+            {
+                found.Add((table, rows));
+            }
+        }
+
+        return [.. found];
+    }
+
+    /// <summary>
+    /// A table's row count in a catalog, or null when the catalog does not know it or no longer
+    /// declares the table. Found as the engine finds a table it checks for shape.
+    /// </summary>
+    private static long? RowsOf(Chalk.Catalog.CatalogContext catalog, TableKey table)
+    {
+        // Indexed rather than enumerated, so that the drift check adds no allocation to IsStale.
+        var schemas = catalog.Schemas;
+        for (var i = 0; i < schemas.Count; i++)
+        {
+            var schema = schemas[i];
+            if (!string.Equals(schema.SourceId, table.SourceId, StringComparison.Ordinal)
+                || !string.Equals(schema.Name, table.Schema, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var tables = schema.Tables;
+            for (var j = 0; j < tables.Count; j++)
+            {
+                if (string.Equals(tables[j].Name, table.Table, StringComparison.OrdinalIgnoreCase))
+                {
+                    return tables[j].RowCount >= 0 ? tables[j].RowCount : null;
+                }
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Binds values and returns an execution. Asynchronous only because a list length not seen before

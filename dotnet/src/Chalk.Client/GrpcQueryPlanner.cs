@@ -478,6 +478,7 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
         return new PlanResult
         {
             Plan = response.Plan,
+            LogicalDigest = response.LogicalDigest,
             PlanText = response.PlanText.Length == 0 ? null : response.PlanText,
             RedactedSql = response.RedactedSql.Length == 0 ? null : response.RedactedSql,
             Stats = response.Stats ?? new PlanningStats(),

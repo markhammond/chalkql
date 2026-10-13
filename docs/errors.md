@@ -537,7 +537,8 @@ A source did not answer within its `QueryTimeout`.
 ### StalePlan
 
 A plan was prepared against a catalog that has since changed: a table it reads has a different
-shape now.
+shape now. A table whose row count has moved tenfold makes a statement stale too, but such a
+statement still runs, so nothing is raised: `PreparedQuery.IsStale` says to prepare it again.
 
 **What to do:** Prepare the statement again.
 

@@ -80,6 +80,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// <summary>The result's columns, as a <see cref="ViewRow"/> reads them.</summary>
     public Schema Columns => Volatile.Read(ref _prepared).OutputSchema;
 
+    /// <summary>The statement the view runs now; for tests that watch it prepared again.</summary>
+    internal PreparedQuery Statement => Volatile.Read(ref _prepared);
+
     /// <summary>The version of the epoch the view was last updated to.</summary>
     public long Version
     {
@@ -613,8 +616,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     }
 
     /// <summary>
-    /// Prepares the statement anew when the catalog's shape has changed since it was prepared: the
-    /// view's readers then reset. A statement that no longer prepares faults the view.
+    /// Prepares the statement anew when it is stale: a table it reads changed shape, or drifted tenfold
+    /// in its row count (D342). The view's readers reset only when the result's columns or key changed;
+    /// otherwise they keep their place. A statement that no longer prepares faults the view.
     /// </summary>
     private async ValueTask PreparedCurrentAsync(CancellationToken ct)
     {
@@ -630,10 +634,17 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             ViewChecks.Check(_engine, prepared, key, _options);
             lock (_gate)
             {
+                // A result with the columns and key it had keeps its readers where they are: the next
+                // update diffs the new plan's rows against the view's, as any update does (D342). Only
+                // a result that changed resets them.
+                if (!SameResult(_prepared.OutputSchema, prepared.OutputSchema) || !_key.AsSpan().SequenceEqual(key))
+                {
+                    _generation++;
+                }
+
                 Volatile.Write(ref _prepared, prepared);
                 _key = key;
                 _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
-                _generation++;
             }
 
             // The plan is a new one, and its reads are in new places: read them all again.
@@ -645,6 +656,47 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             throw;
         }
     }
+
+    /// <summary>Whether two results have the same columns: names, types and nullability, in order.</summary>
+    private static bool SameResult(Schema before, Schema after)
+    {
+        if (before.FieldsList.Count != after.FieldsList.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < before.FieldsList.Count; i++)
+        {
+            if (!SameField(before.FieldsList[i], after.FieldsList[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool SameField(Field before, Field after) =>
+        string.Equals(before.Name, after.Name, StringComparison.Ordinal)
+        && before.IsNullable == after.IsNullable
+        && SameType(before.DataType, after.DataType);
+
+    private static bool SameType(Apache.Arrow.Types.IArrowType before, Apache.Arrow.Types.IArrowType after) =>
+        (before, after) switch
+        {
+            (Apache.Arrow.Types.Decimal128Type a, Apache.Arrow.Types.Decimal128Type b) =>
+                a.Precision == b.Precision && a.Scale == b.Scale,
+            (Apache.Arrow.Types.TimestampType a, Apache.Arrow.Types.TimestampType b) =>
+                a.Unit == b.Unit && string.Equals(a.Timezone, b.Timezone, StringComparison.Ordinal),
+            (Apache.Arrow.Types.Time64Type a, Apache.Arrow.Types.Time64Type b) => a.Unit == b.Unit,
+            (Apache.Arrow.Types.FixedSizeBinaryType a, Apache.Arrow.Types.FixedSizeBinaryType b) =>
+                a.ByteWidth == b.ByteWidth,
+            (Apache.Arrow.Types.NestedType a, Apache.Arrow.Types.NestedType b) =>
+                a.TypeId == b.TypeId
+                && a.Fields.Count == b.Fields.Count
+                && a.Fields.Zip(b.Fields).All(pair => SameField(pair.First, pair.Second)),
+            _ => before.TypeId == after.TypeId,
+        };
 
     /// <summary>The key columns' positions in the result, refusing a name it does not have.</summary>
     private static int[] KeyOf(PreparedQuery prepared, IReadOnlyList<string> key)
@@ -857,8 +909,10 @@ public static class PreparedViews
     /// <summary>
     /// Makes a standing view of a statement the host has prepared on this engine (D341): the view
     /// runs its plan, so a run of the statement at the view's epoch gives the view's rows bit for bit.
-    /// <see cref="ViewOptions{TKey, TRow}.Prepare"/> must be unset; after a shape change the view
-    /// prepares the statement's text again with the statement's own options.
+    /// <see cref="ViewOptions{TKey, TRow}.Prepare"/> must be unset. Once the statement is stale, after
+    /// a shape change or a tenfold drift in a table's rows (D342), the view prepares its text again
+    /// with the statement's own options. The host's statement is then stale too, and one it prepares
+    /// in its place on the same catalog runs the view's new plan.
     /// </summary>
     public static ValueTask<StandingView<TKey, TRow>> MaterializeAsync<TKey, TRow>(
         this ChalkEngine engine, PreparedQuery prepared, ViewOptions<TKey, TRow> options, CancellationToken ct = default)
