@@ -161,10 +161,10 @@ public sealed class PreparedQuery
 
     /// <summary>
     /// Lets one extension decorate the schema every batch of this query carries, hear about each
-    /// execution before it runs (step 26c, D213), and check each plan a background run makes for it.
-    /// The one seam the core keeps for a feature it does not itself know: today the entitlement
-    /// wrapper puts <c>chalk.disclosure</c> on the fields, raises its audit event and checks plans
-    /// against its report through it, and nothing in this package names any of them.
+    /// execution before it runs (step 26c, D213), and check each plan the query takes after its
+    /// prepare. The one seam the core keeps for a feature it does not itself know: today the
+    /// entitlement wrapper puts <c>chalk.disclosure</c> on the fields, raises its audit event and
+    /// checks plans against its report through it, and nothing in this package names any of them.
     /// </summary>
     /// <param name="decorateSchema">What every batch's schema becomes.</param>
     /// <param name="beforeExecute">
@@ -173,9 +173,10 @@ public sealed class PreparedQuery
     /// values (F166). Never the prepare's shape, which holds no values and belongs to no request.
     /// </param>
     /// <param name="checkPlan">
-    /// Shown each plan a background run made for the query, before it swaps in (design 69 §4). It
-    /// throws to refuse one, and the plan is not taken. A query decorated without one is never planned
-    /// again in the background.
+    /// Shown each plan the query takes after its prepare, before it is used: one for another length of
+    /// a list parameter, at its first execution, and one a background run made (design 69 §4). It
+    /// throws to refuse one: the execution is then refused, or the background plan is not taken. A
+    /// query decorated without one is never planned again in the background.
     /// </param>
     internal void Decorate(
         Func<ArrowSchema, ArrowSchema>? decorateSchema,
@@ -728,6 +729,10 @@ public sealed class PreparedQuery
             var rendered = _rewriter.Render(shape);
             var result =
                 await _engine.PlanAsync(rendered.Sql, _options, Context, ct).ConfigureAwait(false);
+
+            // A plan the prepare never saw is checked as the prepare's was, and refuses the execution
+            // when it fails.
+            _checkPlan?.Invoke(result);
             var compiled = await _engine.CompileAsync(result.Plan, _options, Context, ct).ConfigureAwait(false);
             if (_decorateSchema is { } decorate)
             {

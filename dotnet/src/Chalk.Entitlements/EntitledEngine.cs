@@ -154,9 +154,10 @@ public sealed class EntitledQuery
     private readonly Rpc.EntitlementsReport? _reported;
 
     /// <summary>
-    /// A plan a background run made for this statement, checked as the prepare's was (design 69 §4).
+    /// A plan this statement takes after its prepare, checked as the prepare's was (design 69 §4): one
+    /// for another length of a list parameter, at its first execution, or one a background run made.
     /// It must come with the report this statement holds, which its labels and its audit describe, and
-    /// keep it. Throws to refuse it, and the plan is not taken.
+    /// keep it. Throws to refuse it: the execution is then refused, or the background plan not taken.
     /// </summary>
     private void Check(PlanResult candidate)
     {
