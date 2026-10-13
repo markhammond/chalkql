@@ -48,7 +48,23 @@ public sealed class StandingViewOracleTests(SharedSidecar sidecar)
     [InlineData(ExecutionEngine.Vectorised, 11)]
     [InlineData(ExecutionEngine.Vectorised, 23)]
     [InlineData(ExecutionEngine.Reference, 37)]
-    public async Task Every_epoch_the_readers_are_the_statement(ExecutionEngine executor, int seed)
+    public Task Every_epoch_the_readers_are_the_statement(ExecutionEngine executor, int seed) =>
+        EveryEpochAsync(executor, seed, ViewMaintenance.Recompute);
+
+    /// <summary>
+    /// The same oracle over a view kept by incremental maintenance (D343, design 68 §9): its join, its
+    /// clocked filter, its aggregate and its <c>HAVING</c> run on each epoch's changes, and after every
+    /// epoch the readers hold exactly what the statement returns.
+    /// </summary>
+    [Theory]
+    [InlineData(11)]
+    [InlineData(23)]
+    [InlineData(37)]
+    [InlineData(53)]
+    public Task Every_epoch_a_maintained_view_is_the_statement(int seed) =>
+        EveryEpochAsync(ExecutionEngine.Vectorised, seed, ViewMaintenance.Incremental);
+
+    private async Task EveryEpochAsync(ExecutionEngine executor, int seed, ViewMaintenance maintenance)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         var random = new Random(seed);
@@ -71,6 +87,7 @@ public sealed class StandingViewOracleTests(SharedSidecar sidecar)
         {
             Key = ["book", "asset"],
             LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
+            Maintenance = maintenance,
             Map = static (in ViewRow row, out Key key, out Row value) =>
             {
                 key = new Key { Book = row.GetInt32(0), Asset = row.GetInt32(1) };

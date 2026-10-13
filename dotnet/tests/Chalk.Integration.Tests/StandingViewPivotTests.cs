@@ -87,10 +87,13 @@ public sealed class StandingViewPivotTests(SharedSidecar sidecar)
 
     /// <summary>
     /// Each tick's unit carries only the cells that moved, under the host's version, and the grid the
-    /// ingest holds after it is the report as of that version, checksum and all.
+    /// ingest holds after it is the report as of that version, checksum and all — recomputed, and kept
+    /// by incremental maintenance (D343).
     /// </summary>
-    [Fact]
-    public async Task Each_tick_posts_the_cells_that_moved()
+    [Theory]
+    [InlineData(ViewMaintenance.Recompute)]
+    [InlineData(ViewMaintenance.Incremental)]
+    public async Task Each_tick_posts_the_cells_that_moved(ViewMaintenance maintenance)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         var desk = new PocoSourceBuilder("desk")
@@ -131,6 +134,7 @@ public sealed class StandingViewPivotTests(SharedSidecar sidecar)
         {
             Key = ["row_key", "column_key"],
             LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
+            Maintenance = maintenance,
             Map = Map,
             RowHash = Hash,
         }, Ct);
