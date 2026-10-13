@@ -21,10 +21,16 @@ internal sealed class RowStore
     private int _freeCount;
     private int _used;
 
-    public RowStore(IReadOnlyList<ChalkType> types)
+    /// <param name="types">The rows' types.</param>
+    /// <param name="capacity">Slots to make room for at once: a store built to replace one of that size.</param>
+    public RowStore(IReadOnlyList<ChalkType> types, int capacity = 0)
     {
         Types = [.. types];
         _columns = [.. types.Select(t => new StoredColumn(t))];
+        foreach (var column in _columns)
+        {
+            column.Ensure(capacity);
+        }
     }
 
     public IReadOnlyList<ChalkType> Types { get; }

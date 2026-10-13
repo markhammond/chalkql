@@ -253,6 +253,9 @@ internal sealed class AsOfChanges : MaintainedOperator
     private readonly KeyEncoder _second = new();
     private readonly int[] _rightColumns;
 
+    /// <summary>How many slots the last rebuild's store reached, to make room for at once the next time.</summary>
+    private int _rebuiltSize;
+
     public AsOfChanges(
         OperatorContext context,
         string path,
@@ -355,7 +358,9 @@ internal sealed class AsOfChanges : MaintainedOperator
     {
         var state = _state;
         var fixedKey = state.Fixed?.Encode(Context.Parameters);
-        var fresh = state.Spare;
+        var fresh = state.Spare.Slots == 0 && state.Right.Slots > 0
+            ? state.Spare = new RowStore(state.Right.Types, Math.Max(state.Right.Count, _rebuiltSize))
+            : state.Spare;
         var runs = state.SpareRuns;
         fresh.Clear();
         runs.Clear();
@@ -387,6 +392,7 @@ internal sealed class AsOfChanges : MaintainedOperator
         // The old rows go with their store: a rewrite is rare, and a store as large as the table kept
         // empty for the next one would hold its memory against the view's budget meanwhile.
         state.Spare = new RowStore(old.Types);
+        _rebuiltSize = fresh.Slots;
         state.Right = fresh;
         state.SpareRuns = state.Runs;
         state.SpareRuns.Clear();
