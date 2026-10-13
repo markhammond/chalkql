@@ -936,9 +936,9 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             gathered[i] = rows[positions[i]];
         }
 
-        return new PocoScan<T>(
-            this, snapshot, request.Projection, request.OutputSchema, request.BatchSize, request.RowGoal,
-            context, CancellationToken.None, rows: gathered).Columnar();
+        return PocoScan<T>.Gathered(
+            this, snapshot, gathered, request.Projection, request.OutputSchema, request.BatchSize, request.RowGoal,
+            context);
     }
 
     /// <summary>
@@ -2058,9 +2058,6 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
 
     /// <summary>The first row read: zero, or where a maintained view's last read ended (D343).</summary>
     private readonly int _from;
-
-    /// <summary>Rows of the snapshot gathered to read in its place, or null to read the snapshot's own (§15).</summary>
-    private readonly IReadOnlyList<T>? _rows;
     private readonly IReadOnlyList<int> _projection;
     private readonly ArrowSchema _schema;
     private readonly int _batchSize;
@@ -2077,13 +2074,11 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
         long? rowGoal,
         ScanContext context,
         CancellationToken ct,
-        int from = 0,
-        IReadOnlyList<T>? rows = null)
+        int from = 0)
     {
         _table = table;
         _snapshot = snapshot;
         _from = from;
-        _rows = rows;
         _projection = projection;
         _schema = schema;
         _batchSize = batchSize;
@@ -2095,16 +2090,34 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
     public IAsyncEnumerator<RecordBatch> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
         _snapshot.RandomAccess
             ? new ListEnumerator(
-                _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct, cancellationToken, _from, _rows)
+                _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct, cancellationToken, _from)
             : new CollectionEnumerator(
                 _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct, cancellationToken);
+
+    /// <summary>
+    /// A scan of rows a snapshot holds, gathered by a maintained view from where a replacement took
+    /// them out (design 68 §15), read as the snapshot's own would be. Built here rather than by the
+    /// scan above so that a plain scan carries nothing for it.
+    /// </summary>
+    public static IColumnarScan Gathered(
+        PocoTableRuntime<T> table,
+        PocoTableSnapshot<T> snapshot,
+        IReadOnlyList<T> rows,
+        IReadOnlyList<int> projection,
+        ArrowSchema schema,
+        int batchSize,
+        long? rowGoal,
+        ScanContext context) =>
+        new ListEnumerator(
+            table, snapshot, projection, schema, batchSize, rowGoal, context, CancellationToken.None,
+            CancellationToken.None, gathered: rows);
 
     /// <summary>The same scan as an <see cref="IColumnarScan"/>, which fills the caller's slot (§1).</summary>
     public IColumnarScan Columnar() =>
         _snapshot.RandomAccess
             ? new ListEnumerator(
                 _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct,
-                CancellationToken.None, _from, _rows)
+                CancellationToken.None, _from)
             : new CollectionEnumerator(
                 _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct,
                 CancellationToken.None);
