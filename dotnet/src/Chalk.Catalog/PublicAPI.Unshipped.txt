@@ -692,3 +692,4 @@ static Chalk.Entitlements.RowLevelSecurityPreconditionsExtensions.Missing(this C
 static Chalk.Entitlements.RowLevelSecurityPreconditionsExtensions.RequireAll(this Chalk.Entitlements.RowLevelSecurityPreconditions asserted, string! paramName) -> void
 Chalk.Catalog.SchemaDescriptor.Zone.get -> string!
 Chalk.Catalog.SchemaDescriptor.Zone.init -> void
+Chalk.Catalog.CatalogVerificationException.CatalogVerificationException(string! table, string! declaration, long rowIndex, string! detail, string! remedy) -> void

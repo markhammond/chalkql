@@ -1,8 +1,9 @@
 # The ChalkQL tutorial
 
-Eighteen chapters over one marketplace — customers, suppliers, products, orders and their
-lines, employees, regions, warehouses, stock and rates — each one a small program that prints
-what it does, the SQL it runs, the plan where the plan is the point, and the result.
+Nineteen chapters — eighteen over one marketplace of customers, suppliers, products, orders
+and their lines, employees, regions, warehouses, stock and rates, and a last over a small ledger
+of its own — each one a small program that prints what it does, the SQL it runs, the plan where
+the plan is the point, and the result.
 
 Every block of output below was **captured from a real run** in this repository. Nothing
 here was typed by hand, and `scripts/tutorial.sh` checks it: every block in this document
@@ -13,7 +14,7 @@ and the script says so before anybody reads a stale number.
 export JAVA_HOME="$(bash scripts/java-home.sh)"
 export PATH="$JAVA_HOME/bin:$PATH"
 ./planner/gradlew -p planner shadowJar      # once; scripts/tutorial.sh does it for you if the jar is missing
-./scripts/tutorial.sh                       # all eighteen chapters, then the comparison with this document
+./scripts/tutorial.sh                       # all nineteen chapters, then the comparison with this document
 ./scripts/tutorial.sh 3                     # chapter 3 alone (no comparison)
 ```
 
@@ -2372,12 +2373,103 @@ report:
     compiler checking the *names*, and what it keeps is everything else —
     a kind where a kind belongs, a column that must come from the table it
     is on, and a source a table is obtained from rather than guessed at.
-
-Done. docs/tutorial.md walks through this output.
 ```
 
 **Why this matters.** What a configuration loses is the compiler checking the *names*.
 What it keeps is everything else: a kind where a kind belongs, a column that must come from
 the table it is on, and a source a table is obtained from rather than guessed at.
+
+---
+
+## 19. Standing views
+
+Chapters 16 and 17 keep a pivot live by running its statement again after every batch, and a
+host that wants to send each screen only what changed then has to work that out itself. A
+**standing view** does that part: it keeps a statement's answer as one row per key, and a reader
+drains it from a cursor, getting the latest row of each key that changed since it last read —
+never a queue of every change. A key the answer no longer has arrives as a delete.
+
+As of writing, only the delivery is incremental. Each update runs the statement in full and
+compares the result with the rows the view already holds; computing only what changed is not
+built. The views live in `Chalk.Incremental`.
+
+The inputs say how they change. The ledger is a log: `AppendOnly(m => m.Ts)` lets it take only
+appends, none older than the newest time it has already been given. The engine names a clock,
+`Clock = "now"`, and in a view `@now` reads it as of the view's epoch.
+
+```
+-- a view over it, keyed by warehouse and product
+
+    SELECT warehouse, product, SUM(delta) AS on_hand
+    FROM movements
+    WHERE ts <= CAST(@now AS TIMESTAMP(9))
+    GROUP BY warehouse, product
+    HAVING SUM(delta) <> 0
+```
+
+A view keeps the host's own structs. Its `Map` turns each row of the result into a key and a
+row the host defines — here two short UTF-8 labels kept inline — and a drain hands them to the
+host's sink by reference, with a checksum of the rows at each commit.
+
+```
+-- a reader's first drain is a reset: every row, then a commit
+    reset
+    upsert North · widget = 12
+    upsert North · gadget = 5
+    upsert South · widget = 7
+    commit version 1, checksum 4731f23b
+```
+
+A refresh is an epoch: everything in it lands at once, and the host numbers it with its own
+version. The view is brought up to date with `UpdateAsync`, and the next drain sends only what
+moved: South's gadgets, which are new, and North's widgets, which the batch took to zero.
+
+```
+-- the next drain carries only what moved: North's widgets are gone, South has gadgets
+    upsert South · gadget = 3
+    delete North · widget
+    commit version 2, checksum 2b888c46
+```
+
+A reader that falls behind is sent the latest of each key once, not each change. When what
+changed is no fewer rows than the view holds, the whole result is no more to send, so it is sent
+as a reset.
+
+```
+-- one more epoch; a reader that skipped one has as many changes waiting as rows,
+   so it is sent the whole result again, as a reset
+    reset
+    upsert South · widget = 7
+    upsert South · gadget = 3
+    upsert North · gadget = 6
+    commit version 3, checksum ce272d25
+```
+
+The rules that keep a view equal to its statement are checked where they can be broken. A
+movement older than the ledger's frontier is refused with the refresh it came in, and nothing in
+that refresh is applied:
+
+```
+-- a movement older than the ledger's frontier refuses the whole refresh
+    Table 'movements' does not satisfy its declared AppendOnly(Ts): row 0 of the rows
+    appended has Ts 2026-10-12T09:03:00.0000000, older than the table's frontier,
+    2026-10-12T09:08:00.0000000, which no row may be. Nothing in the refresh was applied.
+    Declare a lateness on the table for a feed whose rows arrive late, or replace the
+    table's rows to rewrite its history. [DeclarationNotHeld]
+```
+
+And a view refuses, when it is made, a statement whose rows it could not keep:
+
+```
+-- a view refuses what it could not keep, such as an order its rows do not have
+    The view's statement ends in an ORDER BY with no LIMIT, and a view's rows have no order:
+    a reader is sent them by key. Drop the ORDER BY. [UnsupportedInView]
+
+Done. docs/tutorial.md walks through this output.
+```
+
+**Why this matters.** A screen that shows a statement's answer wants the answer's changes, at
+its own pace. The view does the comparing once, for every reader, and each reader asks only for
+what it has not seen — so a slow one is never sent more than the whole result.
 
 ---

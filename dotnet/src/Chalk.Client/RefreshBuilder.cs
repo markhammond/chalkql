@@ -26,6 +26,8 @@ public sealed class RefreshBuilder
 {
     private readonly List<RefreshEntry> _entries = [];
     private readonly List<IRefreshTarget> _scopes = [];
+    private long? _version;
+    private DateTimeOffset? _clock;
 
     internal RefreshBuilder()
     {
@@ -126,6 +128,124 @@ public sealed class RefreshBuilder
         ITableTarget<T> table, IReadOnlyList<T> rows, StatisticsRefresh statistics) =>
         Add(table, SourceRefreshKind.Append, rows, statistics);
 
+    /// <summary>
+    /// Each row replaces the row with its key, or is added where the table holds none (D339,
+    /// <c>docs/design/64-incremental-views.md</c> §2). Only a table that declares <c>Keyed(…)</c>
+    /// takes one; a key given twice refuses the refresh, naming both rows.
+    /// </summary>
+    /// <param name="source">A source the engine was built with.</param>
+    /// <param name="table">The table, as it is named in that source's schema.</param>
+    /// <param name="rows">The rows, of the type the table was built over.</param>
+    public RefreshBuilder Upsert<T>(ISourceRuntime source, string table, IReadOnlyList<T> rows) =>
+        Add(source, table, SourceRefreshKind.Upsert, rows);
+
+    /// <inheritdoc cref="Upsert{T}(ISourceRuntime, string, IReadOnlyList{T})"/>
+    /// <param name="table">The handle a source builder yielded, or one looked up on the source.</param>
+    /// <param name="rows">The rows, of the type the table was built over.</param>
+    public RefreshBuilder Upsert<T>(ITableTarget<T> table, IReadOnlyList<T> rows) =>
+        Add(table, SourceRefreshKind.Upsert, rows);
+
+    /// <summary>
+    /// Removes the rows with the keys of <paramref name="rows"/>, of which only the key members are
+    /// read (D339). A key the table does not hold removes nothing; a key also upserted in this
+    /// refresh refuses it.
+    /// </summary>
+    /// <param name="source">A source the engine was built with.</param>
+    /// <param name="table">The table, as it is named in that source's schema.</param>
+    /// <param name="rows">Rows carrying the keys to remove.</param>
+    public RefreshBuilder Delete<T>(ISourceRuntime source, string table, IReadOnlyList<T> rows) =>
+        Add(source, table, SourceRefreshKind.Delete, rows);
+
+    /// <inheritdoc cref="Delete{T}(ISourceRuntime, string, IReadOnlyList{T})"/>
+    /// <param name="table">The handle a source builder yielded, or one looked up on the source.</param>
+    /// <param name="rows">Rows carrying the keys to remove.</param>
+    public RefreshBuilder Delete<T>(ITableTarget<T> table, IReadOnlyList<T> rows) =>
+        Add(table, SourceRefreshKind.Delete, rows);
+
+    /// <summary>
+    /// Moves an append-only or as-of table's frontier to <paramref name="time"/> without a row
+    /// (D339): no row older than it, less the table's lateness, can arrive after this. It may stand
+    /// beside the same table's rows, and may not move the frontier back.
+    /// </summary>
+    /// <param name="source">A source the engine was built with.</param>
+    /// <param name="table">The table, as it is named in that source's schema.</param>
+    /// <param name="time">A time of the type the table declares.</param>
+    public RefreshBuilder Advance(ISourceRuntime source, string table, DateTime time) =>
+        AddAdvance(source, table, time);
+
+    /// <inheritdoc cref="Advance(ISourceRuntime, string, DateTime)"/>
+    public RefreshBuilder Advance(ISourceRuntime source, string table, DateTimeOffset time) =>
+        AddAdvance(source, table, time);
+
+    /// <inheritdoc cref="Advance(ISourceRuntime, string, DateTime)"/>
+    /// <param name="table">The handle a source builder yielded, or one looked up on the source.</param>
+    /// <param name="time">A time of the type the table declares.</param>
+    public RefreshBuilder Advance(ITableTarget table, DateTime time)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        return AddAdvance(table.Runtime, table.Table, time);
+    }
+
+    /// <inheritdoc cref="Advance(ITableTarget, DateTime)"/>
+    public RefreshBuilder Advance(ITableTarget table, DateTimeOffset time)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        return AddAdvance(table.Runtime, table.Table, time);
+    }
+
+    /// <summary>
+    /// Moves the engine's clock (<see cref="ChalkEngineOptions.Clock"/>) to <paramref name="time"/> in
+    /// this refresh's epoch (D339). A standing view reads it as the current time. It moves only
+    /// forward; an engine without a clock refuses the refresh.
+    /// </summary>
+    public RefreshBuilder AdvanceClock(DateTimeOffset time)
+    {
+        if (_clock is not null)
+        {
+            throw new InvalidOperationException(
+                "this refresh already advances the clock. An epoch has one clock time.");
+        }
+
+        _clock = time;
+        return this;
+    }
+
+    /// <summary>
+    /// Numbers this refresh's epoch with the host's own version of its data (D339): what a standing
+    /// view hands its sink as it commits, and what <see cref="ChalkEngine.Version"/> reads after.
+    /// It must exceed the engine's version; a refresh without one is numbered one past it.
+    /// </summary>
+    public RefreshBuilder Version(long version)
+    {
+        if (_version is not null)
+        {
+            throw new InvalidOperationException(
+                $"this refresh is already numbered version {_version}. An epoch has one version.");
+        }
+
+        _version = version;
+        return this;
+    }
+
+    private RefreshBuilder AddAdvance(ISourceRuntime source, string table, object time)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+
+        _entries.Add(new RefreshEntry(
+            source,
+            new SourceRefreshEntry
+            {
+                Table = table,
+                Kind = SourceRefreshKind.Advance,
+                RowType = typeof(object),
+                Rows = Array.Empty<object>(),
+                Frontier = time,
+            }));
+
+        return this;
+    }
+
     private RefreshBuilder Add<T>(
         ITableTarget<T> table,
         SourceRefreshKind kind,
@@ -163,6 +283,12 @@ public sealed class RefreshBuilder
 
     /// <summary>The entries in the order they were written, which is the order they are validated in.</summary>
     internal IReadOnlyList<RefreshEntry> Entries => _entries;
+
+    /// <summary>The version this refresh numbers its epoch with, if it says one (D339).</summary>
+    internal long? VersionGiven => _version;
+
+    /// <summary>Where this refresh moves the clock to, if anywhere (D339).</summary>
+    internal DateTimeOffset? ClockGiven => _clock;
 
     /// <summary>What this transaction re-reads, in the order it was written (D271 (f)).</summary>
     internal IReadOnlyList<IRefreshTarget> Scopes => _scopes;

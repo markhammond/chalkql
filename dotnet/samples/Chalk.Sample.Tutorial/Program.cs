@@ -37,6 +37,7 @@ internal static class Program
         (16, "Streaming live pivot", Chapter16Streaming.RunAsync),
         (17, "Temporal streaming live pivot", Chapter17Temporal.RunAsync),
         (18, "Advanced topics: runtime policy configuration", Chapter18Advanced.RunAsync),
+        (19, "Standing views", Chapter19StandingViews.RunAsync),
     ];
 
     private static async Task<int> Main(string[] args)

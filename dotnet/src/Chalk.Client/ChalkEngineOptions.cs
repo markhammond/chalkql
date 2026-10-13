@@ -247,6 +247,16 @@ public sealed class ChalkEngineOptions
     public IReadOnlyList<AssociationDescriptor> Associations { get; init; } = [];
 
     /// <summary>
+    /// The name of the engine's clock, or null — the default — for none (D339,
+    /// <c>docs/design/64-incremental-views.md</c> §3). In a standing view, the parameter of this
+    /// name, and <c>CURRENT_TIMESTAMP</c>, <c>LOCALTIMESTAMP</c> and <c>CURRENT_DATE</c>, read the
+    /// clock as of the view's epoch; a refresh moves it with <see cref="RefreshBuilder.AdvanceClock"/>.
+    /// A query that is not a view binds its parameters and reads the time as it always has.
+    /// </summary>
+    /// <example><c>Clock = "now"</c>, for a statement that writes <c>@now</c>.</example>
+    public string? Clock { get; init; }
+
+    /// <summary>
     /// What may end a search early for every statement this engine prepares (D234). The default
     /// runs every search to completion; a prepare that sets <see cref="PrepareOptions.Planning"/>
     /// overrides this one whole.

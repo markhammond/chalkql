@@ -1389,6 +1389,99 @@ it uses every available processor.
 
 See chapter 14 of [the tutorial](tutorial.md).
 
+## Standing views
+
+A standing view keeps a statement's answer current as one row per key. A reader drains it from a
+cursor and gets the latest row of each key that changed since it last read — never a queue of every
+change — and a key the answer no longer has as a delete. Views live in `Chalk.Incremental`, and the
+tutorial's chapter 19 walks through one.
+
+> **As of writing, only the delivery is incremental.** Each update runs the statement in full and
+> compares the result with the rows the view holds. Computing only what changed, in the manner of
+> Differential Dataflow, is aspirational: the API leaves room for it, so a host would not change,
+> but it is not built.
+
+### Inputs that say how they change
+
+A POCO table may declare one change kind. A refresh that does not fit it is refused before anything
+is applied.
+
+| Declaration | Changes by | What it is |
+|---|---|---|
+| `AppendOnly(t => t.Ts, lateness)` | `Append` | a log, read by time |
+| `AsOf(t => t.Ts, lateness, t => t.Key…)` | `Append` | a log read by key and time; indexed on the keys, then the time |
+| `Keyed(t => t.Key…)` | `Upsert`, `Delete`, `Replace` | rows that change by key; the key is a unique key |
+
+A log's **frontier** is the greatest time it has been given. A row older than the frontier, less the
+table's lateness, refuses the whole refresh it came in, naming the row; the lateness is zero unless
+the table declares a window. `Advance` moves a frontier without a row, and a `Replace` rewrites a
+log, which is how a host trims one.
+
+### Epochs and the clock
+
+A refresh is an epoch: everything in it is seen whole or not at all. Beside `Replace` and `Append`
+it takes `Upsert` and `Delete` for a keyed table, `Advance` for a log, and two things of its own:
+
+```csharp
+await engine.RefreshAsync(epoch => epoch
+    .Version(v)                      // the host's own version; it must exceed the engine's
+    .Append(desk, "fills", fills)
+    .Upsert(desk, "positions", opened)
+    .AdvanceClock(now));             // the engine's clock, which only moves forward
+```
+
+`ChalkEngineOptions.Clock` names the clock. In a view, the parameter of that name and
+`CURRENT_TIMESTAMP`, `LOCALTIMESTAMP` and `CURRENT_DATE` read it as of the view's epoch; a query
+that is not a view is unchanged. A refresh without a version is numbered one past the last.
+
+### A view
+
+```csharp
+await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKey, Cell>
+{
+    Key = ["row_key", "column_key"],   // the result's key columns
+    Map = Cells.Map,                   // (in ViewRow row, out CellKey key, out Cell cell)
+    RowHash = Cells.Hash,              // optional: summed over the live rows as the checksum
+    Parameters = new { venue = "LMAX" },
+});
+
+await view.UpdateAsync();                         // computes, at the engine's latest epoch
+var outcome = view.Drain(ref cursor, sink, 4096); // copies what changed since the cursor
+```
+
+- **The host's structs.** `Map` reads a result row through `ViewRow`'s typed getters — text as
+  UTF-8 spans — and returns the host's own unmanaged key and row, which the view keeps. A drain
+  hands them to the sink by reference and allocates nothing.
+- **Updates** compute only when asked, so an epoch nobody reads costs nothing. An update at the
+  epoch the view holds does nothing; one that a refresh overtakes runs again, so a view always
+  reads one epoch whole.
+- **Drains** send each changed key once, with its latest row, then commit the view's version and
+  checksum. Out of budget a drain returns `Partial` and carries on at the next call. A reader whose
+  changes are no fewer than the view's rows, or who needs a delete the view has dropped, is reset:
+  the whole result, then a commit.
+- **`ReachedAsync(version)`** waits for the engine to publish a version and brings the view to it.
+
+### What a view refuses
+
+A view's rows are exactly what its statement returns at each epoch, so it refuses, when it is made,
+what would make that untrue or unstable:
+
+| Refused | Code | Instead |
+|---|---|---|
+| `SUM` or `AVG` over `REAL` or `DOUBLE` | `InexactAccumulation` | cast to `DECIMAL`, or `Exactness = EqualUpToRounding` |
+| a host function declared `Stable()` or `Volatile()` | `NondeterministicFunction` | declare `Immutable()`, or join what it reads |
+| one that does not say `Immutable()`, under `RequireExplicitImmutable` | `NondeterministicFunction` | declare `Immutable()` |
+| the current time on an engine without a clock | `ClockRequired` | name `ChalkEngineOptions.Clock` |
+| `ORDER BY` without `LIMIT`; a `LIMIT` not ordered by the key | `UnsupportedInView` | drop it, or order by every key column |
+| a source over a database | `SourceOutsideEpochs` | load it into an in-process table |
+
+A key the result gives twice faults the view with `DeclarationNotHeld`, naming the key, until the
+view is disposed. A view's own rows past its `StateBudget` fail the update with
+`MemoryBudgetExceeded`, and the view keeps the epoch it held.
+
+Not in this release: a view through `EntitledEngine`, reading a view as of an earlier epoch, and a
+source that another engine also refreshes, whose changes a view sees only at its next update.
+
 ## Logging a statement safely
 
 Parameters keep values out of the SQL text. But hosts also write literal values into

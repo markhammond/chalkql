@@ -63,6 +63,10 @@ internal sealed class ReferenceExecutor
 
         List<object?[]> rows;
         _sharedRows.Clear();
+
+        // Every row is read here, so the tables are pinned for this and let go after it (F188).
+        var readSet = _plan.NewReadSet();
+        CompiledPlan.Pin(readSet, arena);
         try
         {
             rows = await EvaluateAsync(_plan.Plan.Root, "root", interpreter, stats, arena, ct)
@@ -71,6 +75,10 @@ internal sealed class ReferenceExecutor
         catch (Exception exception) when (exception is not (OperationCanceledException or ChalkException))
         {
             throw new ExecutionException(_plan.Plan.PlanDigest, "root", exception.Message, exception);
+        }
+        finally
+        {
+            CompiledPlan.Unpin(readSet, arena);
         }
 
         try

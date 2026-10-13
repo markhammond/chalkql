@@ -101,6 +101,14 @@ internal sealed class PocoSnapshotFactory<T>
         return Build(rows, hostCollection: null, rows, previous);
     }
 
+    /// <summary>
+    /// A snapshot over rows Chalk assembled itself — a keyed table's rows after a refresh's upserts
+    /// and deletes (D339) — built whole, as a replacement is. No host collection is reported released
+    /// for it: the one the previous snapshot held is, when that snapshot retires.
+    /// </summary>
+    public PocoTableSnapshot<T> Owned(IReadOnlyList<T> rows) =>
+        Build(rows, hostCollection: null, rows, previous: null);
+
     private PocoTableSnapshot<T> Build(
         IReadOnlyCollection<T> values,
         object? hostCollection,

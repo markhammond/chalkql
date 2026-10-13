@@ -28,6 +28,7 @@ projects=(
   "$root/dotnet/src/Chalk.Client"
   "$root/dotnet/src/Chalk.Entitlements"
   "$root/dotnet/src/Chalk.Entitlements.Tenancy"
+  "$root/dotnet/src/Chalk.Incremental"
 )
 
 log="$(mktemp)"

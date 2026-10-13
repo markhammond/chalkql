@@ -8,6 +8,25 @@ public enum SourceRefreshKind
 
     /// <summary>The rows given are added after the ones the table already holds (§3).</summary>
     Append = 1,
+
+    /// <summary>
+    /// Each row given replaces the row with its key, or is added where there is none (D339,
+    /// <c>docs/design/64-incremental-views.md</c> §2). Only a table that declares a key takes one.
+    /// </summary>
+    Upsert = 2,
+
+    /// <summary>
+    /// The rows with the keys of the rows given are removed; only the key members of each row given
+    /// are read, and a key the table does not hold removes nothing (D339).
+    /// </summary>
+    Delete = 3,
+
+    /// <summary>
+    /// The table's frontier moves to <see cref="SourceRefreshEntry.Frontier"/> without a row: no row
+    /// older than it, less the table's lateness, can arrive after this (D339). Only a table that
+    /// declares a time takes one.
+    /// </summary>
+    Advance = 4,
 }
 
 /// <summary>
@@ -49,7 +68,7 @@ public sealed class SourceRefreshEntry
     /// <summary>The table, as it is named in the source's schema.</summary>
     public required string Table { get; init; }
 
-    /// <summary>Replace the rows, or add to them.</summary>
+    /// <summary>Replace the rows, add to them, change them by key, or move the table's frontier.</summary>
     public required SourceRefreshKind Kind { get; init; }
 
     /// <summary>The CLR row type the caller wrote, which the table must have been built over.</summary>
@@ -64,6 +83,12 @@ public sealed class SourceRefreshEntry
     /// what a table's own policy is then free to turn down.
     /// </summary>
     public StatisticsRefresh Statistics { get; init; } = StatisticsRefresh.Now;
+
+    /// <summary>
+    /// For <see cref="SourceRefreshKind.Advance"/>, the time the table's frontier moves to, of the
+    /// type of the time the table declares. Null for every other kind.
+    /// </summary>
+    public object? Frontier { get; init; }
 }
 
 /// <summary>

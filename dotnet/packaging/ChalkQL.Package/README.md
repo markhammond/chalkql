@@ -69,6 +69,12 @@ On macOS and Linux the local sidecar uses a Unix domain socket by default, so th
 
 Results arrive as Apache Arrow record batches. A prepared statement's `OutputSchema` describes their columns before anything runs, and `ToDataTable()` turns it into an empty `DataTable` for code that works with `System.Data`.
 
+## Standing views
+
+`engine.MaterializeAsync(sql, options)` keeps a statement's answer current as one row per key, mapped to the host's own structs. A reader drains it from a cursor and gets the latest row of each key that changed since it last read, never a queue of every change, with a checksum at each commit. Inputs say how they change — append-only logs with a lateness, logs read by key and time, tables changed by key — and the host numbers each refresh as an epoch.
+
+As of writing, only the delivery is incremental: each update recomputes the statement in full. Support for computing only what changed, in the manner of Differential Dataflow, is aspirational.
+
 ## Federation for (almost) everyone
 
 ChalkQL queries data on demand, wherever it resides, without introducing a persistence layer.

@@ -43,7 +43,9 @@ public sealed class FunctionBuilder
 
     private FunctionKind _kind = FunctionKind.Scalar;
     private ChalkType? _returnType;
-    private Volatility _volatility = Volatility.Immutable;
+    // Unspecified until the host says (D339): it reads as IMMUTABLE everywhere, and a standing view
+    // that asks for an explicit Immutable() can tell the default from the declaration.
+    private Volatility _volatility = Volatility.Unspecified;
     private bool _strict;
     private bool _leakproof;
     private double _cost;
@@ -190,7 +192,10 @@ public sealed class FunctionBuilder
         return this;
     }
 
-    /// <summary>Foldable and cacheable. The default.</summary>
+    /// <summary>
+    /// Foldable and cacheable. What a function is when nothing is said; saying it explicitly is what
+    /// a standing view with <c>RequireExplicitImmutable</c> asks for (D339).
+    /// </summary>
     public FunctionBuilder Immutable()
     {
         _volatility = Volatility.Immutable;

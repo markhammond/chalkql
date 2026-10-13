@@ -189,6 +189,13 @@ public sealed class ExecutionArena : IDisposable
     public long TrimmedBytes => Volatile.Read(ref _trimmedBytes);
 
     /// <summary>
+    /// The table states the execution using this arena pinned when it began (F188), which its scans
+    /// read in place of what their tables serve when each scan starts. Set and cleared by the executor
+    /// around the execution; null between executions and for a scan run outside one.
+    /// </summary>
+    internal ExecutionReadSet? ReadSet { get; set; }
+
+    /// <summary>
     /// Claims the arena for one execution and points its high-water mark at
     /// <paramref name="stats"/>. Paired with <see cref="EndExecution"/> in a <c>finally</c>.
     /// </summary>

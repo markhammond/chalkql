@@ -53,6 +53,7 @@
     <InternalsVisibleTo Include="Chalk.Client.Tests" />
     <!-- The one extension package in the tree; the seam it uses is documented on PreparedQuery.Decorate. -->
     <InternalsVisibleTo Include="Chalk.Entitlements" />
+    <InternalsVisibleTo Include="Chalk.Incremental" />
     <InternalsVisibleTo Include="Chalk.Integration.Tests" />
     <InternalsVisibleTo Include="Chalk.TestKit" />
     <InternalsVisibleTo Include="Chalk.CorpusTool" />

@@ -39,6 +39,7 @@ GROUPS = {
         "Chalk.Entitlements",
         "Chalk.Entitlements.Tenancy",
         "Chalk.Execution",
+        "Chalk.Incremental",
         "Chalk.Ir",
         "Chalk.Sources.Abstractions",
     ],

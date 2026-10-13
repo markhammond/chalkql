@@ -216,6 +216,16 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             throw new ArgumentException("BatchSize must be at least 1", nameof(options));
         }
 
+        // D339: the clock is a parameter's name as a statement writes it after its '@'.
+        if (options.Clock is { } clock
+            && (clock.Length == 0 || clock[0] == '@' || !clock.All(c => char.IsLetterOrDigit(c) || c == '_')))
+        {
+            throw new ArgumentException(
+                $"Clock names '{clock}', and a clock is named as a parameter is, after its '@': "
+                + "letters, digits and underscores, such as \"now\".",
+                nameof(options));
+        }
+
         // D244: a host that accepts no layout accepts no STRING column, which is not a query this
         // engine could ever answer. Refused here rather than at the first prepare that has one.
         if (options.Output.Strings is not (
@@ -641,7 +651,16 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             
             // The shared source is already current: another engine performed the source refresh.
             // Re-publish only this engine's catalogue; do not invoke RefreshAsync on the source again.
-            await PublishAsync(ct).ConfigureAwait(false);
+            BeginChanges();
+            try
+            {
+                await PublishAsync(ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                EndChanges();
+            }
+
             CaptureSharedRevisions();
         }
         finally
@@ -1132,6 +1151,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     public async ValueTask<long> RefreshAsync(CancellationToken ct = default)
     {
         await _refreshing.WaitAsync(ct).ConfigureAwait(false);
+        BeginChanges();
         try
         {
             // Exclusive-only engines take exactly the pre-sharing path: the engine semaphore and
@@ -1160,6 +1180,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         }
         finally
         {
+            EndChanges();
             _refreshing.Release();
         }
     }
@@ -1181,9 +1202,11 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// The engine refresh lock is held for all of it; when this engine contains shared sources, their
     /// process-wide refresh gates are held too. A scheduled or second-engine refresh therefore waits
     /// rather than publishing between two of the swaps: an execution sees this transaction whole or not at all.
-    /// Executions already running keep the state they captured, and a
-    /// <see cref="PreparedQuery"/> survives — a replacement changes rows, and rows are not shape
-    /// (<see cref="PreparedQuery.IsStale"/>).
+    /// Executions already running read every table as it was when they began, since an execution pins
+    /// what it reads under the process-wide gate the commits take (F188), in this engine or any other
+    /// sharing a source. A re-introspection the transaction names publishes as it reads, before the
+    /// commits, so it is not part of what an execution sees whole. A <see cref="PreparedQuery"/>
+    /// survives — a replacement changes rows, and rows are not shape (<see cref="PreparedQuery.IsStale"/>).
     /// </para>
     /// </remarks>
     public async ValueTask<long> RefreshAsync(Action<RefreshBuilder> plan, CancellationToken ct = default)
@@ -1192,9 +1215,20 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
         var builder = new RefreshBuilder();
         plan(builder);
-        if (builder.Entries.Count == 0 && builder.Scopes.Count == 0)
+        if (builder.Entries.Count == 0
+            && builder.Scopes.Count == 0
+            && builder.VersionGiven is null
+            && builder.ClockGiven is null)
         {
             return await RefreshAsync(ct).ConfigureAwait(false);
+        }
+
+        if (builder.ClockGiven is not null && _options.Clock is null)
+        {
+            throw new ArgumentException(
+                "the refresh advances the clock, and this engine declares none. Name one with "
+                + "ChalkEngineOptions.Clock; it is what a standing view reads as the current time.",
+                nameof(plan));
         }
 
         // Every scope is resolved to a source before the lock is taken, so a target this engine does
@@ -1249,6 +1283,22 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         await _refreshing.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            // The version and the clock are checked against the epoch this refresh follows, which
+            // only the lock fixes, and before anything is applied.
+            CheckStamp(builder.VersionGiven, builder.ClockGiven);
+        }
+        catch
+        {
+            _refreshing.Release();
+            throw;
+        }
+
+        // Odd only from the first change a reader could see to the epoch that names it: the scopes,
+        // which publish as they read, or else the commits. Building the new state changes nothing
+        // anyone can read, so a view does not wait for it.
+        var changing = false;
+        try
+        {
             SharedSourceLease? sharedLease = null;
             if (_orderedSharedSourceStates.Length != 0)
             {
@@ -1260,6 +1310,12 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 // The scopes first: a re-introspection is the source going to look again, and a
                 // replacement in the same transaction is the host saying what the rows are. The host's
                 // word is the one that survives, so it is applied last.
+                if (scopes.Count > 0)
+                {
+                    BeginChanges();
+                    changing = true;
+                }
+
                 foreach (var (source, table) in scopes)
                 {
                     if (table.Length == 0)
@@ -1287,29 +1343,79 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                         await source.PrepareRefreshAsync(entries, ct).ConfigureAwait(false)));
                 }
 
-                // The one moment the transaction is not atomic is this loop, and it is a handful of
-                // reference writes with nothing between them that can fail: everything that could was
-                // done above. Replace/Append cannot change table shape, so cross-engine shape invalidation
-                // is not needed for this publication.
-                foreach (var (runtime, commit) in commits)
+                // The commits are a handful of reference writes with nothing between them that can
+                // fail: everything that could was done above. Replace/Append cannot change table shape,
+                // so cross-engine shape invalidation is not needed for this publication.
+                if (!changing)
                 {
-                    commit.Commit();
-                    if (_sharedSourceRegistrationsById is { } sharedById
-                        && sharedById.TryGetValue(runtime.SourceId, out var sharedRegistration))
-                    {
-                        sharedRegistration.Shared!.Changed(shapeMayHaveChanged: false);
-                    }
+                    BeginChanges();
+                    changing = true;
                 }
 
-                var epoch = await PublishAsync(ct).ConfigureAwait(false);
+                // The states the commits replace are held across them, so one that no execution reads
+                // is let go after the gate: the host hears of its release while nothing waits on it.
+                var replaced = Replaced(bySource);
+                replaced?.Pin();
+                try
+                {
+                    // Under the gate every execution in the process takes to pin the tables it reads
+                    // (F188): it pins before the first commit here or after the last, never between two.
+                    lock (ExecutionReadSet.Gate)
+                    {
+                        foreach (var (runtime, commit) in commits)
+                        {
+                            commit.Commit();
+                            if (_sharedSourceRegistrationsById is { } sharedById
+                                && sharedById.TryGetValue(runtime.SourceId, out var sharedRegistration))
+                            {
+                                sharedRegistration.Shared!.Changed(shapeMayHaveChanged: false);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    replaced?.Unpin();
+                }
+
+                var epoch = await PublishAsync(builder.VersionGiven, builder.ClockGiven, ct).ConfigureAwait(false);
                 CaptureSharedRevisions();
                 return epoch;
             }
         }
         finally
         {
+            if (changing)
+            {
+                EndChanges();
+            }
+
             _refreshing.Release();
         }
+    }
+
+    /// <summary>
+    /// The tables a transaction's commits replace, in sources that pin, for the engine to hold across
+    /// the commits (F188); null when there are none.
+    /// </summary>
+    private static ExecutionReadSet? Replaced(
+        List<(ISourceRuntime Runtime, IRefreshableSource Refreshable, List<SourceRefreshEntry> Entries)> bySource)
+    {
+        var tables = new List<(string SourceId, string Table, IPinnableSource Source)>();
+        foreach (var (runtime, refreshable, entries) in bySource)
+        {
+            if (refreshable is not IPinnableSource pinnable)
+            {
+                continue;
+            }
+
+            foreach (var entry in entries)
+            {
+                tables.Add((runtime.SourceId, entry.Table, pinnable));
+            }
+        }
+
+        return tables.Count == 0 ? null : new ExecutionReadSet([.. tables]);
     }
 
     /// <summary>
@@ -1390,7 +1496,14 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// it one epoch on. The caller holds the engine refresh lock and, when shared sources exist, all
     /// of this engine's shared-source refresh gates.
     /// </summary>
-    private async ValueTask<long> PublishAsync(CancellationToken ct)
+    private ValueTask<long> PublishAsync(CancellationToken ct) => PublishAsync(version: null, clock: null, ct);
+
+    /// <summary>
+    /// The same, numbering the epoch with the host's <paramref name="version"/> and moving the clock
+    /// to <paramref name="clock"/> when given (D339): one past the last version and the clock where
+    /// it was otherwise.
+    /// </summary>
+    private async ValueTask<long> PublishAsync(long? version, DateTimeOffset? clock, CancellationToken ct)
     {
         var schemas = new List<SchemaDescriptor>(_sourceRegistrations.Length);
         foreach (var registration in _sourceRegistrations)
@@ -1479,6 +1592,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
         _statisticsVersion = nextStatisticsVersion;
         Volatile.Write(ref _catalog, next);
+        Stamped(next.Epoch, version, clock);
         _log.LogInformation(
             "catalog refreshed: epoch {Epoch} -> {NextEpoch}, {Sources} sources, {Tables} tables, "
             + "{Change} (shape epoch {ShapeEpoch}, {Moved} statistics published)",

@@ -564,3 +564,8 @@ static Chalk.Sources.ArenaHandle.operator !=(Chalk.Sources.ArenaHandle left, Cha
 static Chalk.Sources.ArenaHandle.operator ==(Chalk.Sources.ArenaHandle left, Chalk.Sources.ArenaHandle right) -> bool
 ~override Chalk.Sources.ArenaHandle.Equals(object obj) -> bool
 ~override Chalk.Sources.ArenaHandle.ToString() -> string
+Chalk.Sources.SourceRefreshEntry.Frontier.get -> object?
+Chalk.Sources.SourceRefreshEntry.Frontier.init -> void
+Chalk.Sources.SourceRefreshKind.Advance = 4 -> Chalk.Sources.SourceRefreshKind
+Chalk.Sources.SourceRefreshKind.Delete = 3 -> Chalk.Sources.SourceRefreshKind
+Chalk.Sources.SourceRefreshKind.Upsert = 2 -> Chalk.Sources.SourceRefreshKind

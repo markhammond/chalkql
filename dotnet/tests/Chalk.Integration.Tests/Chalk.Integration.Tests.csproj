@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Chalk.Client/Chalk.Client.csproj" />
+    <ProjectReference Include="../../src/Chalk.Incremental/Chalk.Incremental.csproj" />
     <ProjectReference Include="../../src/Chalk.Entitlements.Tenancy/Chalk.Entitlements.Tenancy.csproj" />
     <ProjectReference Include="../Chalk.TestKit/Chalk.TestKit.csproj" />
     <ProjectReference Include="../../src/Chalk.Sources.Conformance/Chalk.Sources.Conformance.csproj" />

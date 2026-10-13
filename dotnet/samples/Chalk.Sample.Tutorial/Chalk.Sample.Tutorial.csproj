@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Chalk.Client/Chalk.Client.csproj" />
+    <ProjectReference Include="../../src/Chalk.Incremental/Chalk.Incremental.csproj" />
     <ProjectReference Include="../../src/Chalk.Sources.Poco/Chalk.Sources.Poco.csproj" />
     <ProjectReference Include="../../src/Chalk.Sources.Ado/Chalk.Sources.Ado.csproj" />
     <ProjectReference Include="../../src/Chalk.Sources.DuckDb/Chalk.Sources.DuckDb.csproj" />

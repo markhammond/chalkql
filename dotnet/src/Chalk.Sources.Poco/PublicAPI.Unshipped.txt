@@ -149,3 +149,7 @@ static Chalk.Sources.Poco.PocoTable<T>.operator !=(Chalk.Sources.Poco.PocoTable<
 static Chalk.Sources.Poco.PocoTable<T>.operator ==(Chalk.Sources.Poco.PocoTable<T> left, Chalk.Sources.Poco.PocoTable<T> right) -> bool
 ~override Chalk.Sources.Poco.PocoTable<T>.Equals(object obj) -> bool
 Chalk.Sources.Poco.PocoSourceBuilder.Zone(string! zone) -> Chalk.Sources.Poco.PocoSourceBuilder!
+Chalk.Sources.Poco.PocoTableBuilder<T>.AppendOnly<TTime>(System.Linq.Expressions.Expression<System.Func<T, TTime>!>! time, System.TimeSpan lateness = default(System.TimeSpan)) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.AsOf<TTime>(System.Linq.Expressions.Expression<System.Func<T, TTime>!>! time, System.TimeSpan lateness, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.AsOf<TTime>(System.Linq.Expressions.Expression<System.Func<T, TTime>!>! time, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.Keyed(params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
