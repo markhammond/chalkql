@@ -18,7 +18,7 @@ namespace Chalk.Sources.Poco;
 /// </summary>
 public sealed class PocoSource
     : ISourceRuntime, IColumnarBatchSource, IRefreshableSource, IPinnableSource, IPreparableSource,
-        IDeferredStatisticsSource
+        IDeferredStatisticsSource, ITrackedSource
 {
     private readonly PocoTableRuntime[] _tables;
     private readonly string _zone;
@@ -220,6 +220,23 @@ public sealed class PocoSource
                 return;
             }
         }
+    }
+
+    /// <inheritdoc />
+    long ITrackedSource.AppendedFrom(string table, object earlier, object later) =>
+        Require(table).AppendedFrom(earlier, later);
+
+    /// <inheritdoc />
+    object ITrackedSource.Retain(string table, object pinned) => Require(table).Retain(pinned);
+
+    /// <inheritdoc />
+    IColumnarScan ITrackedSource.ScanFrom(
+        string table, object pinned, long from, ScanRequest request, ScanContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+        RequireBatchSize(request.BatchSize);
+        return Require(table).ScanFrom(SourceId, pinned, from, request, context);
     }
 
     /// <inheritdoc />
@@ -569,6 +586,19 @@ internal abstract class PocoTableRuntime
     public abstract void Unpin(object pinned);
 
     /// <summary>
+    /// Where <paramref name="later"/> continues <paramref name="earlier"/> (D343): the first row an
+    /// append added after it, or -1 when the table was rewritten in between.
+    /// </summary>
+    public abstract long AppendedFrom(object earlier, object later);
+
+    /// <summary>Another reader's reference on a snapshot the caller already holds.</summary>
+    public abstract object Retain(object pinned);
+
+    /// <summary>A scan of a pinned snapshot's rows from position <paramref name="from"/> on (D343).</summary>
+    public abstract IColumnarScan ScanFrom(
+        string sourceId, object pinned, long from, ScanRequest request, ScanContext context);
+
+    /// <summary>
     /// Builds what this table's entries ask for, without publishing it: one that says what the rows
     /// are, or upserts and deletes by key, and an advance of the frontier beside either (D339).
     /// </summary>
@@ -755,6 +785,58 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
 
     /// <inheritdoc />
     public override void Unpin(object pinned) => ((PocoTableSnapshot<T>)pinned).Release();
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Equal rewrite counts mean only appends were published between the two, and an append leaves
+    /// every row before it where it was (§3), so the later snapshot's rows from the earlier one's count
+    /// on are exactly what was added.
+    /// </remarks>
+    public override long AppendedFrom(object earlier, object later)
+    {
+        var before = (PocoTableSnapshot<T>)earlier;
+        var after = (PocoTableSnapshot<T>)later;
+        if (ReferenceEquals(before, after))
+        {
+            return before.RowCount;
+        }
+
+        return after.Rewrites == before.Rewrites && after.RowCount >= before.RowCount && after.RandomAccess
+            ? before.RowCount
+            : -1;
+    }
+
+    /// <inheritdoc />
+    public override object Retain(object pinned)
+    {
+        var snapshot = (PocoTableSnapshot<T>)pinned;
+        return snapshot.TryAcquire()
+            ? snapshot
+            : throw new InvalidOperationException(
+                $"table '{Name}': a snapshot can be retained only while its holder still holds it.");
+    }
+
+    /// <inheritdoc />
+    public override IColumnarScan ScanFrom(
+        string sourceId, object pinned, long from, ScanRequest request, ScanContext context)
+    {
+        CheckProjection(sourceId, request.Projection, request.OutputSchema);
+        var snapshot = (PocoTableSnapshot<T>)pinned;
+        if (from >= snapshot.RowCount)
+        {
+            return PocoEmptyScan.Instance;
+        }
+
+        if (from > 0 && !snapshot.RandomAccess)
+        {
+            throw new InvalidOperationException(
+                $"table '{Name}' only enumerates, so its rows have no positions to scan from.");
+        }
+
+        return new PocoScan<T>(
+            this, snapshot, request.Projection, request.OutputSchema, request.BatchSize, request.RowGoal,
+            context, CancellationToken.None, (int)from).Columnar();
+    }
 
     /// <summary>
     /// The snapshot a scan of one execution reads (F188): the one the execution pinned when it began,
@@ -1870,6 +1952,9 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
 {
     private readonly PocoTableRuntime<T> _table;
     private readonly PocoTableSnapshot<T> _snapshot;
+
+    /// <summary>The first row read: zero, or where a maintained view's last read ended (D343).</summary>
+    private readonly int _from;
     private readonly IReadOnlyList<int> _projection;
     private readonly ArrowSchema _schema;
     private readonly int _batchSize;
@@ -1885,10 +1970,12 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
         int batchSize,
         long? rowGoal,
         ScanContext context,
-        CancellationToken ct)
+        CancellationToken ct,
+        int from = 0)
     {
         _table = table;
         _snapshot = snapshot;
+        _from = from;
         _projection = projection;
         _schema = schema;
         _batchSize = batchSize;
@@ -1900,7 +1987,7 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
     public IAsyncEnumerator<RecordBatch> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
         _snapshot.RandomAccess
             ? new ListEnumerator(
-                _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct, cancellationToken)
+                _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct, cancellationToken, _from)
             : new CollectionEnumerator(
                 _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct, cancellationToken);
 
@@ -1909,7 +1996,7 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
         _snapshot.RandomAccess
             ? new ListEnumerator(
                 _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct,
-                CancellationToken.None)
+                CancellationToken.None, _from)
             : new CollectionEnumerator(
                 _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct,
                 CancellationToken.None);
@@ -1939,13 +2026,15 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
             long? rowGoal,
             ScanContext context,
             CancellationToken scanToken,
-            CancellationToken enumerationToken)
+            CancellationToken enumerationToken,
+            int from = 0)
         {
             _stats = context.Stats;
             _scanToken = scanToken;
             _enumerationToken = enumerationToken;
             _batchSize = batchSize;
             _rowGoal = rowGoal;
+            _position = from;
 
             // No lock and no copy: this snapshot's rows are immutable for as long as this reference
             // is counted, so the batching walks a collection nothing can change under it (D260 §1).
