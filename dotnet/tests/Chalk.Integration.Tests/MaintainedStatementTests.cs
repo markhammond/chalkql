@@ -152,23 +152,42 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
     }
 
     /// <summary>
-    /// Statements over tables large enough that the planner seeks an index for an as-of join, with a
-    /// fixed key and without, and hashes a left join: each plan is checked to be what it means to test.
+    /// Statements over tables large enough that the planner seeks an index for an as-of join — back and
+    /// forward, strict and not, with a fixed key, on an index whose key goes on past its time — and
+    /// hashes a left join: each plan is checked to be what it means to test.
     /// </summary>
     [Theory]
     [InlineData(
         "an as-of seek, ties and NULL keys",
         "SELECT t.seq, t.asset, m.px, m.tag FROM trades t LEFT ASOF JOIN marks m MATCH_CONDITION m.ts <= t.ts ON m.asset = t.asset",
-        "AsOfLookupJoin")]
+        "AsOfLookupJoin",
+        false)]
     [InlineData(
         "an as-of seek with a fixed key",
         "SELECT t.seq, m.px, m.tag FROM trades t ASOF JOIN marks m MATCH_CONDITION m.ts <= t.ts ON m.asset = 2",
-        "AsOfLookupJoin fixed")]
+        "AsOfLookupJoin fixed",
+        false)]
+    [InlineData(
+        "an as-of seek forward, ties",
+        "SELECT t.seq, t.asset, m.px, m.tag FROM trades t LEFT ASOF JOIN marks m MATCH_CONDITION m.ts >= t.ts ON m.asset = t.asset",
+        "AsOfLookupJoin",
+        false)]
+    [InlineData(
+        "a strict as-of seek on an index going on past its time",
+        "SELECT t.seq, t.asset, m.px, m.tag FROM trades t ASOF JOIN marks m MATCH_CONDITION m.ts < t.ts ON m.asset = t.asset",
+        "AsOfLookupJoin",
+        true)]
+    [InlineData(
+        "a strict as-of seek forward on an index going on past its time",
+        "SELECT t.seq, t.asset, m.px, m.tag FROM trades t LEFT ASOF JOIN marks m MATCH_CONDITION m.ts > t.ts ON m.asset = t.asset",
+        "AsOfLookupJoin",
+        true)]
     [InlineData(
         "a hashed left join with a condition",
         "SELECT t.seq, l.lim FROM trades t LEFT JOIN limits l ON l.book = t.book AND l.asset = t.asset AND l.lim > t.qty",
-        "HashJoin Left")]
-    public async Task Every_epoch_a_seek_or_a_hashed_join_is_the_statement(string name, string sql, string planned)
+        "HashJoin Left",
+        false)]
+    public async Task Every_epoch_a_seek_or_a_hashed_join_is_the_statement(string name, string sql, string planned, bool tagged)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         _ = name;
@@ -176,12 +195,12 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
         {
             // A seek is chosen for a few left rows over many right ones; a hash join for many each side.
             var seek = planned.StartsWith("AsOf", StringComparison.Ordinal);
-            await RunAsync(sql, [0], seed, initial: seek ? 12 : 1_500, planned, marksAtStart: seek ? 4_000 : 0);
+            await RunAsync(sql, [0], seed, initial: seek ? 12 : 1_500, planned, marksAtStart: seek ? 4_000 : 0, tagged);
         }
     }
 
     private async Task RunAsync(
-        string sql, int[] key, int seed, int initial = 12, string? planned = null, int marksAtStart = 0)
+        string sql, int[] key, int seed, int initial = 12, string? planned = null, int marksAtStart = 0, bool tagged = false)
     {
         var random = new Random(seed);
         var trades = new List<Trade>();
@@ -220,7 +239,18 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
         var desk = new PocoSourceBuilder("desk")
             .NamingPolicy(PocoNamingPolicy.SnakeCase)
             .AddTable("trades", (IReadOnlyList<Trade>)trades, t => t.OrderedBy(x => x.Ts))
-            .AddTable("marks", (IReadOnlyList<Mark>)marks, t => t.OrderedBy(x => x.Ts).Index(x => x.Asset, x => x.Ts))
+            .AddTable("marks", (IReadOnlyList<Mark>)marks, t =>
+            {
+                t.OrderedBy(x => x.Ts);
+                if (tagged)
+                {
+                    t.Index(x => x.Asset, x => x.Ts, x => x.Tag);
+                }
+                else
+                {
+                    t.Index(x => x.Asset, x => x.Ts);
+                }
+            })
             .AddTable("books", (IReadOnlyList<Book>)[.. books.Values], t => t.Keyed(x => x.Id))
             .AddTable("limits", (IReadOnlyList<Limit>)[.. limits.Values], t => t.Keyed(x => x.Book, x => x.Asset))
             .Build();
@@ -245,13 +275,22 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
         {
             if (epoch > 0)
             {
-                var roll = random.Next(12);
+                // Every run rewrites each table at least once.
+                var roll = epoch switch { 10 => 0, 20 => 1, _ => random.Next(12) };
                 if (roll == 0)
                 {
                     // A rewrite: the oldest third of the trades gone.
                     trades = [.. trades.Skip(trades.Count / 3)];
                     var kept = trades;
                     await engine.RefreshAsync(r => r.Replace(desk, "trades", (IReadOnlyList<Trade>)kept), Ct);
+                }
+                else if (roll == 1 && marks.Count > 8)
+                {
+                    // The marks compacted, in place: every other one of the older half gone.
+                    var half = marks.Count / 2;
+                    marks = [.. marks.Where((_, i) => i >= half || i % 2 == 0)];
+                    var kept = marks;
+                    await engine.RefreshAsync(r => r.Replace(desk, "marks", (IReadOnlyList<Mark>)kept), Ct);
                 }
                 else
                 {
