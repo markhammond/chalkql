@@ -39,8 +39,9 @@
     <PackageReference Include="Npgsql" />
   </ItemGroup>
 
+  <!-- CHALK003 is the experimental id standing views carry: these tests are their checks. -->
   <PropertyGroup>
-    <NoWarn>$(NoWarn);CHALK001</NoWarn>
+    <NoWarn>$(NoWarn);CHALK001;CHALK003</NoWarn>
   </PropertyGroup>
 
 </Project>

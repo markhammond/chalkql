@@ -1520,6 +1520,12 @@ cursor and gets the latest row of each key that changed since it last read — n
 change — and a key the answer no longer has as a delete. Views live in `Chalk.Incremental`, and the
 tutorial's chapter 19 walks through one.
 
+Standing views are **experimental**. Their types carry the diagnostic `CHALK003`, which a project
+acknowledges before it can use them: `<NoWarn>$(NoWarn);CHALK003</NoWarn>` in the project, or
+`#pragma warning disable CHALK003` where they are used. Until views are declared stable, their
+behaviour and their API may change in any release; check what a view gives against its statement
+before relying on it.
+
 A view computes an update one of two ways, which `ViewOptions.Maintenance` chooses. By default
 each update runs the statement in full and compares the result with the rows the view holds. With
 `ViewMaintenance.Incremental`, each update computes only what changed since the last: see

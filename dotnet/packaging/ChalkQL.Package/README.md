@@ -71,6 +71,8 @@ Results arrive as Apache Arrow record batches. A prepared statement's `OutputSch
 
 ## Standing views
 
+Standing views are **experimental**: their types carry the diagnostic `CHALK003`, which a project acknowledges with `<NoWarn>$(NoWarn);CHALK003</NoWarn>` before it can use them, and their behaviour and API may change in any release. Check what a view gives against its statement before relying on it.
+
 `engine.MaterializeAsync(sql, options)` keeps a statement's answer current as one row per key, mapped to the host's own structs. A reader drains it from a cursor and gets the latest row of each key that changed since it last read, never a queue of every change, with a checksum at each commit. Inputs say how they change — append-only logs with a lateness, logs read by key and time, tables changed by key — and the host numbers each refresh as an epoch.
 
 By default each update recomputes the statement in full. With `Maintenance = ViewMaintenance.Incremental`, a view computes only what changed: its statement's plan runs on the changes to its tables, and its joins, as-of joins and aggregates keep state between updates.

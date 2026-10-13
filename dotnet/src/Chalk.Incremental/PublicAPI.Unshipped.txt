@@ -1,101 +1,101 @@
 #nullable enable
-Chalk.Incremental.DrainOutcome
-Chalk.Incremental.DrainOutcome.Complete = 0 -> Chalk.Incremental.DrainOutcome
-Chalk.Incremental.DrainOutcome.Partial = 1 -> Chalk.Incremental.DrainOutcome
-Chalk.Incremental.IViewSink<TKey, TRow>
-Chalk.Incremental.IViewSink<TKey, TRow>.Commit(long version, uint checksum) -> void
-Chalk.Incremental.IViewSink<TKey, TRow>.Delete(in TKey key) -> void
-Chalk.Incremental.IViewSink<TKey, TRow>.Reset() -> void
-Chalk.Incremental.IViewSink<TKey, TRow>.Upsert(in TKey key, in TRow row) -> void
-Chalk.Incremental.StandingView<TKey, TRow>
-Chalk.Incremental.StandingView<TKey, TRow>.Checksum.get -> uint
-Chalk.Incremental.StandingView<TKey, TRow>.Columns.get -> Apache.Arrow.Schema!
-Chalk.Incremental.StandingView<TKey, TRow>.Count.get -> int
-Chalk.Incremental.StandingView<TKey, TRow>.DisposeAsync() -> System.Threading.Tasks.ValueTask
-Chalk.Incremental.StandingView<TKey, TRow>.Drain(ref Chalk.Incremental.ViewCursor cursor, Chalk.Incremental.IViewSink<TKey, TRow>! sink, int budget = 2147483647) -> Chalk.Incremental.DrainOutcome
-Chalk.Incremental.StandingView<TKey, TRow>.Key.get -> System.Collections.Generic.IReadOnlyList<string!>!
-Chalk.Incremental.StandingView<TKey, TRow>.ReachedAsync(long version, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
-Chalk.Incremental.StandingView<TKey, TRow>.StateBytes.get -> long
-Chalk.Incremental.StandingView<TKey, TRow>.UpdateAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<long>
-Chalk.Incremental.StandingView<TKey, TRow>.Version.get -> long
-Chalk.Incremental.StandingViewException
-Chalk.Incremental.StandingViewException.StandingViewException(string! code, string! message) -> void
-Chalk.Incremental.StandingViewException.StandingViewException(string! code, string! message, System.Exception? innerException) -> void
-Chalk.Incremental.StandingViews
-Chalk.Incremental.ViewCursor
-Chalk.Incremental.ViewCursor.IsStart.get -> bool
-Chalk.Incremental.ViewCursor.Version.get -> long
-Chalk.Incremental.ViewCursor.ViewCursor() -> void
-Chalk.Incremental.ViewExactness
-Chalk.Incremental.ViewExactness.EqualUpToRounding = 1 -> Chalk.Incremental.ViewExactness
-Chalk.Incremental.ViewExactness.Exact = 0 -> Chalk.Incremental.ViewExactness
-Chalk.Incremental.ViewMapper<TKey, TRow>
-Chalk.Incremental.ViewOptions<TKey, TRow>
-Chalk.Incremental.ViewOptions<TKey, TRow>.Exactness.get -> Chalk.Incremental.ViewExactness
-Chalk.Incremental.ViewOptions<TKey, TRow>.Exactness.init -> void
-Chalk.Incremental.ViewOptions<TKey, TRow>.Key.get -> System.Collections.Generic.IReadOnlyList<string!>!
-Chalk.Incremental.ViewOptions<TKey, TRow>.Key.init -> void
-Chalk.Incremental.ViewOptions<TKey, TRow>.Map.get -> Chalk.Incremental.ViewMapper<TKey, TRow>!
-Chalk.Incremental.ViewOptions<TKey, TRow>.Map.init -> void
-Chalk.Incremental.ViewOptions<TKey, TRow>.Parameters.get -> object?
-Chalk.Incremental.ViewOptions<TKey, TRow>.Parameters.init -> void
-Chalk.Incremental.ViewOptions<TKey, TRow>.Prepare.get -> Chalk.Client.PrepareOptions?
-Chalk.Incremental.ViewOptions<TKey, TRow>.Prepare.init -> void
-Chalk.Incremental.ViewOptions<TKey, TRow>.RequireExplicitImmutable.get -> bool
-Chalk.Incremental.ViewOptions<TKey, TRow>.RequireExplicitImmutable.init -> void
-Chalk.Incremental.ViewOptions<TKey, TRow>.RowHash.get -> Chalk.Incremental.ViewRowHash?
-Chalk.Incremental.ViewOptions<TKey, TRow>.RowHash.init -> void
-Chalk.Incremental.ViewOptions<TKey, TRow>.StateBudget.get -> long
-Chalk.Incremental.ViewOptions<TKey, TRow>.StateBudget.init -> void
-Chalk.Incremental.ViewOptions<TKey, TRow>.ViewOptions() -> void
-Chalk.Incremental.ViewRow
-Chalk.Incremental.ViewRow.ColumnCount.get -> int
-Chalk.Incremental.ViewRow.GetBoolean(int column) -> bool
-Chalk.Incremental.ViewRow.GetDateTime(int column) -> System.DateTime
-Chalk.Incremental.ViewRow.GetDecimal(int column) -> decimal
-Chalk.Incremental.ViewRow.GetDouble(int column) -> double
-Chalk.Incremental.ViewRow.GetInt32(int column) -> int
-Chalk.Incremental.ViewRow.GetInt64(int column) -> long
-Chalk.Incremental.ViewRow.GetString(int column) -> string?
-Chalk.Incremental.ViewRow.GetUtf8(int column) -> System.ReadOnlySpan<byte>
-Chalk.Incremental.ViewRow.GetValue(int column) -> object?
-Chalk.Incremental.ViewRow.IsNull(int column) -> bool
-Chalk.Incremental.ViewRow.Name(int column) -> string!
-Chalk.Incremental.ViewRow.Ordinal(string! name) -> int
-Chalk.Incremental.ViewRow.ViewRow() -> void
-Chalk.Incremental.ViewRowHash
-static Chalk.Incremental.StandingViews.MaterializeAsync<TKey, TRow>(this Chalk.Client.ChalkEngine! engine, string! sql, Chalk.Incremental.ViewOptions<TKey, TRow>! options, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Incremental.StandingView<TKey, TRow>!>
-static Chalk.Incremental.ViewCursor.Start.get -> Chalk.Incremental.ViewCursor
-virtual Chalk.Incremental.ViewMapper<TKey, TRow>.Invoke(in Chalk.Incremental.ViewRow row, out TKey key, out TRow value) -> void
-virtual Chalk.Incremental.ViewRowHash.Invoke(System.ReadOnlySpan<byte> key, System.ReadOnlySpan<byte> row) -> uint
-Chalk.Incremental.StandingView<TKey, TRow>.DatabaseReads.get -> System.Collections.Generic.IReadOnlyList<Chalk.Incremental.ViewDatabaseRead!>!
-Chalk.Incremental.ViewDatabaseRead
-Chalk.Incremental.ViewDatabaseRead.LastReadAt.get -> System.DateTimeOffset
-Chalk.Incremental.ViewDatabaseRead.LastReadAt.init -> void
-Chalk.Incremental.ViewDatabaseRead.LastReadVersion.get -> long
-Chalk.Incremental.ViewDatabaseRead.LastReadVersion.init -> void
-Chalk.Incremental.ViewDatabaseRead.Reads.get -> long
-Chalk.Incremental.ViewDatabaseRead.Reads.init -> void
-Chalk.Incremental.ViewDatabaseRead.Rows.get -> long
-Chalk.Incremental.ViewDatabaseRead.Rows.init -> void
-Chalk.Incremental.ViewDatabaseRead.SourceId.get -> string!
-Chalk.Incremental.ViewDatabaseRead.SourceId.init -> void
-Chalk.Incremental.ViewDatabaseRead.ViewDatabaseRead() -> void
-Chalk.Incremental.ViewDatabaseReads
-Chalk.Incremental.ViewDatabaseReads.None = 0 -> Chalk.Incremental.ViewDatabaseReads
-Chalk.Incremental.ViewDatabaseReads.WhenRefreshed = 1 -> Chalk.Incremental.ViewDatabaseReads
-Chalk.Incremental.ViewOptions<TKey, TRow>.DatabaseReads.get -> Chalk.Incremental.ViewDatabaseReads
-Chalk.Incremental.ViewOptions<TKey, TRow>.DatabaseReads.init -> void
-Chalk.Incremental.ViewOptions<TKey, TRow>.LocalJoinMaxRows.get -> long
-Chalk.Incremental.ViewOptions<TKey, TRow>.LocalJoinMaxRows.init -> void
-const Chalk.Incremental.StandingViews.DefaultLocalJoinMaxRows = 1000000 -> long
-Chalk.Incremental.ViewOptions<TKey, TRow>.ResetWhen.get -> double
-Chalk.Incremental.ViewOptions<TKey, TRow>.ResetWhen.init -> void
-Chalk.Incremental.PreparedViews
-static Chalk.Incremental.PreparedViews.MaterializeAsync<TKey, TRow>(this Chalk.Client.ChalkEngine! engine, Chalk.Client.PreparedQuery! prepared, Chalk.Incremental.ViewOptions<TKey, TRow>! options, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Incremental.StandingView<TKey, TRow>!>
-Chalk.Incremental.StandingView<TKey, TRow>.Maintenance.get -> Chalk.Incremental.ViewMaintenance
-Chalk.Incremental.ViewMaintenance
-Chalk.Incremental.ViewMaintenance.Incremental = 1 -> Chalk.Incremental.ViewMaintenance
-Chalk.Incremental.ViewMaintenance.Recompute = 0 -> Chalk.Incremental.ViewMaintenance
-Chalk.Incremental.ViewOptions<TKey, TRow>.Maintenance.get -> Chalk.Incremental.ViewMaintenance
-Chalk.Incremental.ViewOptions<TKey, TRow>.Maintenance.init -> void
+[CHALK003]Chalk.Incremental.DrainOutcome
+[CHALK003]Chalk.Incremental.DrainOutcome.Complete = 0 -> Chalk.Incremental.DrainOutcome
+[CHALK003]Chalk.Incremental.DrainOutcome.Partial = 1 -> Chalk.Incremental.DrainOutcome
+[CHALK003]Chalk.Incremental.IViewSink<TKey, TRow>
+[CHALK003]Chalk.Incremental.IViewSink<TKey, TRow>.Commit(long version, uint checksum) -> void
+[CHALK003]Chalk.Incremental.IViewSink<TKey, TRow>.Delete(in TKey key) -> void
+[CHALK003]Chalk.Incremental.IViewSink<TKey, TRow>.Reset() -> void
+[CHALK003]Chalk.Incremental.IViewSink<TKey, TRow>.Upsert(in TKey key, in TRow row) -> void
+[CHALK003]Chalk.Incremental.StandingView<TKey, TRow>
+[CHALK003]Chalk.Incremental.StandingView<TKey, TRow>.Checksum.get -> uint
+[CHALK003]Chalk.Incremental.StandingView<TKey, TRow>.Columns.get -> Apache.Arrow.Schema!
+[CHALK003]Chalk.Incremental.StandingView<TKey, TRow>.Count.get -> int
+[CHALK003]Chalk.Incremental.StandingView<TKey, TRow>.DisposeAsync() -> System.Threading.Tasks.ValueTask
+[CHALK003]Chalk.Incremental.StandingView<TKey, TRow>.Drain(ref Chalk.Incremental.ViewCursor cursor, Chalk.Incremental.IViewSink<TKey, TRow>! sink, int budget = 2147483647) -> Chalk.Incremental.DrainOutcome
+[CHALK003]Chalk.Incremental.StandingView<TKey, TRow>.Key.get -> System.Collections.Generic.IReadOnlyList<string!>!
+[CHALK003]Chalk.Incremental.StandingView<TKey, TRow>.ReachedAsync(long version, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+[CHALK003]Chalk.Incremental.StandingView<TKey, TRow>.StateBytes.get -> long
+[CHALK003]Chalk.Incremental.StandingView<TKey, TRow>.UpdateAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<long>
+[CHALK003]Chalk.Incremental.StandingView<TKey, TRow>.Version.get -> long
+[CHALK003]Chalk.Incremental.StandingViewException
+[CHALK003]Chalk.Incremental.StandingViewException.StandingViewException(string! code, string! message) -> void
+[CHALK003]Chalk.Incremental.StandingViewException.StandingViewException(string! code, string! message, System.Exception? innerException) -> void
+[CHALK003]Chalk.Incremental.StandingViews
+[CHALK003]Chalk.Incremental.ViewCursor
+[CHALK003]Chalk.Incremental.ViewCursor.IsStart.get -> bool
+[CHALK003]Chalk.Incremental.ViewCursor.Version.get -> long
+[CHALK003]Chalk.Incremental.ViewCursor.ViewCursor() -> void
+[CHALK003]Chalk.Incremental.ViewExactness
+[CHALK003]Chalk.Incremental.ViewExactness.EqualUpToRounding = 1 -> Chalk.Incremental.ViewExactness
+[CHALK003]Chalk.Incremental.ViewExactness.Exact = 0 -> Chalk.Incremental.ViewExactness
+[CHALK003]Chalk.Incremental.ViewMapper<TKey, TRow>
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.Exactness.get -> Chalk.Incremental.ViewExactness
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.Exactness.init -> void
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.Key.get -> System.Collections.Generic.IReadOnlyList<string!>!
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.Key.init -> void
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.Map.get -> Chalk.Incremental.ViewMapper<TKey, TRow>!
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.Map.init -> void
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.Parameters.get -> object?
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.Parameters.init -> void
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.Prepare.get -> Chalk.Client.PrepareOptions?
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.Prepare.init -> void
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.RequireExplicitImmutable.get -> bool
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.RequireExplicitImmutable.init -> void
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.RowHash.get -> Chalk.Incremental.ViewRowHash?
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.RowHash.init -> void
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.StateBudget.get -> long
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.StateBudget.init -> void
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.ViewOptions() -> void
+[CHALK003]Chalk.Incremental.ViewRow
+[CHALK003]Chalk.Incremental.ViewRow.ColumnCount.get -> int
+[CHALK003]Chalk.Incremental.ViewRow.GetBoolean(int column) -> bool
+[CHALK003]Chalk.Incremental.ViewRow.GetDateTime(int column) -> System.DateTime
+[CHALK003]Chalk.Incremental.ViewRow.GetDecimal(int column) -> decimal
+[CHALK003]Chalk.Incremental.ViewRow.GetDouble(int column) -> double
+[CHALK003]Chalk.Incremental.ViewRow.GetInt32(int column) -> int
+[CHALK003]Chalk.Incremental.ViewRow.GetInt64(int column) -> long
+[CHALK003]Chalk.Incremental.ViewRow.GetString(int column) -> string?
+[CHALK003]Chalk.Incremental.ViewRow.GetUtf8(int column) -> System.ReadOnlySpan<byte>
+[CHALK003]Chalk.Incremental.ViewRow.GetValue(int column) -> object?
+[CHALK003]Chalk.Incremental.ViewRow.IsNull(int column) -> bool
+[CHALK003]Chalk.Incremental.ViewRow.Name(int column) -> string!
+[CHALK003]Chalk.Incremental.ViewRow.Ordinal(string! name) -> int
+[CHALK003]Chalk.Incremental.ViewRow.ViewRow() -> void
+[CHALK003]Chalk.Incremental.ViewRowHash
+[CHALK003]static Chalk.Incremental.StandingViews.MaterializeAsync<TKey, TRow>(this Chalk.Client.ChalkEngine! engine, string! sql, Chalk.Incremental.ViewOptions<TKey, TRow>! options, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Incremental.StandingView<TKey, TRow>!>
+[CHALK003]static Chalk.Incremental.ViewCursor.Start.get -> Chalk.Incremental.ViewCursor
+[CHALK003]virtual Chalk.Incremental.ViewMapper<TKey, TRow>.Invoke(in Chalk.Incremental.ViewRow row, out TKey key, out TRow value) -> void
+[CHALK003]virtual Chalk.Incremental.ViewRowHash.Invoke(System.ReadOnlySpan<byte> key, System.ReadOnlySpan<byte> row) -> uint
+[CHALK003]Chalk.Incremental.StandingView<TKey, TRow>.DatabaseReads.get -> System.Collections.Generic.IReadOnlyList<Chalk.Incremental.ViewDatabaseRead!>!
+[CHALK003]Chalk.Incremental.ViewDatabaseRead
+[CHALK003]Chalk.Incremental.ViewDatabaseRead.LastReadAt.get -> System.DateTimeOffset
+[CHALK003]Chalk.Incremental.ViewDatabaseRead.LastReadAt.init -> void
+[CHALK003]Chalk.Incremental.ViewDatabaseRead.LastReadVersion.get -> long
+[CHALK003]Chalk.Incremental.ViewDatabaseRead.LastReadVersion.init -> void
+[CHALK003]Chalk.Incremental.ViewDatabaseRead.Reads.get -> long
+[CHALK003]Chalk.Incremental.ViewDatabaseRead.Reads.init -> void
+[CHALK003]Chalk.Incremental.ViewDatabaseRead.Rows.get -> long
+[CHALK003]Chalk.Incremental.ViewDatabaseRead.Rows.init -> void
+[CHALK003]Chalk.Incremental.ViewDatabaseRead.SourceId.get -> string!
+[CHALK003]Chalk.Incremental.ViewDatabaseRead.SourceId.init -> void
+[CHALK003]Chalk.Incremental.ViewDatabaseRead.ViewDatabaseRead() -> void
+[CHALK003]Chalk.Incremental.ViewDatabaseReads
+[CHALK003]Chalk.Incremental.ViewDatabaseReads.None = 0 -> Chalk.Incremental.ViewDatabaseReads
+[CHALK003]Chalk.Incremental.ViewDatabaseReads.WhenRefreshed = 1 -> Chalk.Incremental.ViewDatabaseReads
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.DatabaseReads.get -> Chalk.Incremental.ViewDatabaseReads
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.DatabaseReads.init -> void
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.LocalJoinMaxRows.get -> long
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.LocalJoinMaxRows.init -> void
+[CHALK003]const Chalk.Incremental.StandingViews.DefaultLocalJoinMaxRows = 1000000 -> long
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.ResetWhen.get -> double
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.ResetWhen.init -> void
+[CHALK003]Chalk.Incremental.PreparedViews
+[CHALK003]static Chalk.Incremental.PreparedViews.MaterializeAsync<TKey, TRow>(this Chalk.Client.ChalkEngine! engine, Chalk.Client.PreparedQuery! prepared, Chalk.Incremental.ViewOptions<TKey, TRow>! options, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Incremental.StandingView<TKey, TRow>!>
+[CHALK003]Chalk.Incremental.StandingView<TKey, TRow>.Maintenance.get -> Chalk.Incremental.ViewMaintenance
+[CHALK003]Chalk.Incremental.ViewMaintenance
+[CHALK003]Chalk.Incremental.ViewMaintenance.Incremental = 1 -> Chalk.Incremental.ViewMaintenance
+[CHALK003]Chalk.Incremental.ViewMaintenance.Recompute = 0 -> Chalk.Incremental.ViewMaintenance
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.Maintenance.get -> Chalk.Incremental.ViewMaintenance
+[CHALK003]Chalk.Incremental.ViewOptions<TKey, TRow>.Maintenance.init -> void

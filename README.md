@@ -34,7 +34,7 @@ The architecture may already have evolved, the data may already be distributed, 
 
 The [tutorial](docs/tutorial.md) develops this step by step, culminating in a live inventory view combining streaming state, temporal joins and tenancy-aware access control — using idiomatic SQL throughout.
 
-A **standing view** keeps a statement's answer current as one row per key, and sends each reader only what changed since it last read. By default each update recomputes the statement in full; a view that asks for incremental maintenance computes only what changed, in the manner of DBSP and Differential Dataflow. See [`Chalk.Incremental`](dotnet/src/Chalk.Incremental/README.md).
+A **standing view** keeps a statement's answer current as one row per key, and sends each reader only what changed since it last read. By default each update recomputes the statement in full; a view that asks for incremental maintenance computes only what changed, in the manner of DBSP and Differential Dataflow. Standing views are experimental (`CHALK003`). See [`Chalk.Incremental`](dotnet/src/Chalk.Incremental/README.md).
 
 ### Access control you can reason about.
 

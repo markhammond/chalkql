@@ -21,6 +21,11 @@ namespace Chalk.Incremental;
 /// refreshes off on its third attempt. Updates are taken one at a time; drains may run beside them
 /// and see each update whole or not at all.
 /// </para>
+/// <para>
+/// Experimental under <c>CHALK003</c>, as everything in <c>Chalk.Incremental</c> is: until views are
+/// declared stable, their behaviour and their API may change in any release. Check what a view gives
+/// against its statement before relying on it.
+/// </para>
 /// </remarks>
 public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     where TKey : unmanaged
@@ -1100,6 +1105,7 @@ internal sealed class ViewBinding
 }
 
 /// <summary>Standing views over an engine (D339): <c>engine.MaterializeAsync(sql, options)</c>.</summary>
+/// <remarks>Experimental under <c>CHALK003</c>, as everything in <c>Chalk.Incremental</c> is.</remarks>
 public static class StandingViews
 {
     /// <summary>
@@ -1128,6 +1134,7 @@ public static class StandingViews
 /// <see cref="StandingViews"/> rather than in it, so that each <c>MaterializeAsync</c> can take its token
 /// optionally: called the same way, <c>engine.MaterializeAsync(prepared, options)</c>.
 /// </summary>
+/// <remarks>Experimental under <c>CHALK003</c>, as everything in <c>Chalk.Incremental</c> is.</remarks>
 public static class PreparedViews
 {
     /// <summary>
