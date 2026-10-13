@@ -79,12 +79,21 @@ public static class Chapter04Utf8
         await using var engine = await EngineAsync(planner, contextId, Data.ProductRepeat(count), 1 << 17);
         var query = await engine.PrepareAsync(Sql);
 
-        // The first run warms the compiled chunk writers, the JIT and the arena's pools; the second
-        // is the one that is counted. Process-wide and precise, so a thread hop cannot flatter it.
+        // The first run warms the compiled chunk writers, the JIT and the arena's pools; the next three
+        // are counted, and the least of them is reported. Process-wide and precise, so a thread hop
+        // cannot flatter a count; the least of three, so a collection that lands beside one run, and
+        // empties pools that run then fills again, cannot inflate it either.
         await Tutorial.DrainAsync(await engine.ExecuteAsync(query));
-        var before = GC.GetTotalAllocatedBytes(precise: true);
-        var rows = await Tutorial.DrainAsync(await engine.ExecuteAsync(query));
-        return (rows, GC.GetTotalAllocatedBytes(precise: true) - before);
+        var rows = 0;
+        var least = long.MaxValue;
+        for (var run = 0; run < 3; run++)
+        {
+            var before = GC.GetTotalAllocatedBytes(precise: true);
+            rows = await Tutorial.DrainAsync(await engine.ExecuteAsync(query));
+            least = Math.Min(least, GC.GetTotalAllocatedBytes(precise: true) - before);
+        }
+
+        return (rows, least);
     }
 
     private static ValueTask<ChalkEngine> EngineAsync(
