@@ -364,6 +364,43 @@ DataTable table = q.OutputSchema.ToDataTable("usd_rates");   // three columns, n
 A statement the entitlements refuse still has a shape, and the refusal carries it: see
 [When a statement is refused](#when-a-statement-is-refused).
 
+### Preparing again
+
+A `PreparedQuery` keeps the plan it was given. `IsStale` says when to prepare the
+statement again:
+
+- **A table it reads changed shape.** A column came or went, or an index, a key or a
+  collation changed. Running the statement is refused with `StalePlanException`.
+- **A table it reads has drifted tenfold** in its row count, either way, since the
+  statement was planned. The statement still runs, and runs correctly, but its plan was
+  chosen for other numbers: a plan made on empty tables scans and loops where one made on
+  loaded tables seeks and hashes. A table whose row count is unknown is not judged.
+
+Asking costs one comparison per table the statement reads, and no call to the planner. A
+host that keeps prepared statements drops a stale one and prepares it again:
+
+```csharp
+if (cached.IsStale)
+{
+    cached = await engine.PrepareAsync(sql, options, ct);
+}
+```
+
+Prepare after the first load where you can. A statement prepared before it is stale as
+soon as the load lands, and runs its empty-table plan until it is prepared again.
+
+Two digests name a statement:
+
+- **`PlanDigest`** names the plan that runs. New statistics that change the plan's
+  operators change it. Recorded plans and telemetry are keyed by it.
+- **`LogicalDigest`** names the statement. It is a digest of the logical plan before the
+  planner chooses anything by cost, so statistics never move it. Name shared work by it,
+  such as a cache of results or a topic several readers share.
+
+Both are the same however a statement is spaced or its keywords cased. Both move for
+other values, names, windows, tables or policy. A plan served by `RecordedPlanner` has no
+logical digest, and reads zero.
+
 
 ## Sources
 
@@ -474,9 +511,10 @@ collection is no longer being read.
 
 A table's *shape* is its columns, keys, collations, indexes and foreign keys.
 (Statistics and row counts are not part of it.) A refresh that changes no table's shape
-leaves every `PreparedQuery` valid, and it runs against the new rows. A schema change
-makes them stale, as before (`PreparedQuery.IsStale`, `ChalkEngine.ShapeEpoch`). There
-is no operation that updates or deletes rows.
+leaves every `PreparedQuery` runnable, and it runs against the new rows. A schema change
+makes them stale, as before (`PreparedQuery.IsStale`, `ChalkEngine.ShapeEpoch`). So does a
+load that moves a table's row count tenfold, though such a statement still runs: see
+[Preparing again](#preparing-again). There is no operation that updates or deletes rows.
 
 ### ADO.NET — a real database
 
@@ -1480,6 +1518,12 @@ var outcome = view.Drain(ref cursor, sink, 4096); // copies what changed since t
   prepared statement that reads a database needs the statement planned with the view's
   `LocalJoinMaxRows`. Two plans of one statement can sum `DOUBLE`s in different orders, and so
   differ in the last bits; one plan, run twice over the same rows, does not.
+- **A statement prepared again.** Once its statement is stale (see
+  [Preparing again](#preparing-again)), a view prepares it again at its next update. If the
+  result keeps its columns and key, the readers keep their place, and the next drain sends only
+  what changed; if not, they are reset. After a view of a prepared statement does this, the
+  host's statement is stale too, and one prepared in its place on the same catalog runs the
+  view's new plan.
 - **The local-join cap** is required of every view: `LocalJoinMaxRows`, the most rows a
   cross-source join may fetch to join locally, by the planner's estimate. A statement whose plan
   would fetch more is refused when the view is made, and zero or less is refused outright.
