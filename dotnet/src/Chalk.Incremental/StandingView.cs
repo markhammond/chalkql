@@ -817,6 +817,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     {
         if (!_prepared.IsStale)
         {
+            await MaintainedCurrentAsync(ct).ConfigureAwait(false);
             return;
         }
 
@@ -858,6 +859,39 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             throw;
         }
     }
+
+    /// <summary>
+    /// Takes the plan the background made for the statement, once it has swapped in (design 69 §4):
+    /// the view is maintained from it from the start, and its next update is whole, as after the
+    /// statement is prepared again; readers keep their place, as the result's columns and key are the
+    /// same. A new plan that cannot be maintained is declined: the plan the view keeps answers the same
+    /// rows.
+    /// </summary>
+    private async ValueTask MaintainedCurrentAsync(CancellationToken ct)
+    {
+        if (_maintained is not { IsCurrent: false } kept)
+        {
+            return;
+        }
+
+        MaintainedQuery next;
+        try
+        {
+            next = await MaintainAsync(_prepared, _key, ct).ConfigureAwait(false);
+        }
+        catch (StandingViewException refusal) when (refusal.Code == ChalkErrorCodes.UnsupportedInView)
+        {
+            kept.PlannedWith = _prepared.Plans;
+            return;
+        }
+
+        _maintained = next;
+        await kept.DisposeAsync().ConfigureAwait(false);
+        _resync = true;
+    }
+
+    /// <summary>Whether the view is maintained from the plans its statement runs now; true for a view that recomputes.</summary>
+    internal bool MaintainsCurrentPlan => _maintained?.IsCurrent ?? true;
 
     /// <summary>Whether two results have the same columns: names, types and nullability, in order.</summary>
     private static bool SameResult(Schema before, Schema after)

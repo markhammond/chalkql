@@ -252,6 +252,39 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         Assert.Equal(await RowsAsync(desk.Engine, view.Statement), sink.Rows);
     }
 
+    /// <summary>
+    /// A view kept by incremental maintenance takes the new plan too, at the same update: it is
+    /// maintained from the new plan from the start, and its readers keep their place, sent only the
+    /// keys whose rows differ from what they hold.
+    /// </summary>
+    [Fact]
+    public async Task A_maintained_view_takes_its_new_plan_and_keeps_its_readers()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync(new GatedPlanner(sidecar.CreatePlanner()), [], []);
+        await using var view = await desk.Engine.MaterializeAsync(ByDesk, DeskOptions(ViewMaintenance.Incremental), Ct);
+        var sink = new Recorder();
+        var cursor = ViewCursor.Start;
+        Assert.Equal(DrainOutcome.Complete, view.Drain(ref cursor, sink));
+        sink.Calls.Clear();
+        var statement = view.Statement;
+        var planned = statement.PlanDigest;
+        Assert.True(view.MaintainsCurrentPlan);
+
+        await desk.LoadAsync(Fills(3_000, books: 3), Books(3), deferred: true);
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        Assert.False(view.MaintainsCurrentPlan);
+        await view.UpdateAsync(Ct);
+
+        Assert.True(view.MaintainsCurrentPlan);
+        Assert.Same(statement, view.Statement);
+        Assert.NotEqual(planned, view.Statement.PlanDigest);
+        Assert.Equal(DrainOutcome.Complete, view.Drain(ref cursor, sink));
+        Assert.DoesNotContain("reset", sink.Calls);
+        Assert.Equal(await RowsAsync(desk.Engine, view.Statement), sink.Rows);
+    }
+
     // ---- the parts ----
 
     private static IReadOnlyList<Fill> Fills(int count, int books, long? qty = null) =>
@@ -270,9 +303,10 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
                 .Single(c => c.Name == "qty").Statistics.Max,
             System.Globalization.CultureInfo.InvariantCulture);
 
-    private static ViewOptions<One, One> DeskOptions() => new()
+    private static ViewOptions<One, One> DeskOptions(ViewMaintenance maintenance = ViewMaintenance.Recompute) => new()
     {
         Key = ["desk"],
+        Maintenance = maintenance,
         LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
         Map = static (in ViewRow row, out One key, out One value) =>
         {

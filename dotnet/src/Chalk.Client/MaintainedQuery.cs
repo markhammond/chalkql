@@ -24,13 +24,27 @@ internal sealed class MaintainedQuery : IAsyncDisposable
         PreparedQuery query,
         MaintainedPlan plan,
         IReadOnlyList<PlaceholderSlot> slots,
-        IReadOnlyList<ChalkType> parameterTypes)
+        IReadOnlyList<ChalkType> parameterTypes,
+        object plans)
     {
         _query = query;
         _plan = plan;
         _slots = slots;
         _parameterTypes = parameterTypes;
+        PlannedWith = plans;
     }
+
+    /// <summary>
+    /// The statement's plans this query was made from (<see cref="PreparedQuery.Plans"/>), or the ones
+    /// it was told to stay on when it could not follow newer ones.
+    /// </summary>
+    internal object PlannedWith { get; set; }
+
+    /// <summary>
+    /// Whether the statement still runs the plans this query was made from: false once plans the
+    /// background made have swapped in (design 69 §4). The query answers the same rows either way.
+    /// </summary>
+    internal bool IsCurrent => ReferenceEquals(PlannedWith, _query.Plans);
 
     /// <summary>Bytes the statement's operators and its result hold, against the view's state budget.</summary>
     public long StateBytes => _plan.StateBytes;

@@ -802,7 +802,8 @@ public sealed class PreparedQuery
                 "the statement reads a request's context, which a maintained view does not bind.", "root");
         }
 
-        var plan = await ShapePlanAsync(Volatile.Read(ref _state), values, ct).ConfigureAwait(false);
+        var state = Volatile.Read(ref _state);
+        var plan = await ShapePlanAsync(state, values, ct).ConfigureAwait(false);
         var clockSlots = clockParameter >= 0 ? ClockSlots(plan.Rendered.Slots, clockParameter) : [];
         Chalk.Execution.Maintenance.MaintainedPlan maintained;
         try
@@ -815,8 +816,14 @@ public sealed class PreparedQuery
         }
 
         maintained.Key = key;
-        return new MaintainedQuery(this, maintained, plan.Rendered.Slots, plan.Compiled.ParameterTypes);
+        return new MaintainedQuery(this, maintained, plan.Rendered.Slots, plan.Compiled.ParameterTypes, state);
     }
+
+    /// <summary>
+    /// The plans this statement runs, as an object that is another once plans the background made
+    /// swap in (design 69 §4): what a maintained query compares the plans it was made from with.
+    /// </summary>
+    internal object Plans => Volatile.Read(ref _state);
 
     /// <summary>The values a maintained update binds, flattened as an execution's are.</summary>
     internal object?[] Flatten(object?[] values, IReadOnlyList<PlaceholderSlot> slots, IReadOnlyList<ChalkType> types) =>
