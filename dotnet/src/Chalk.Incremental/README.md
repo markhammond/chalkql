@@ -110,6 +110,8 @@ await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKe
 - Joins (inner and left), as-of joins, aggregates with grouping sets, filters, projections,
   `UNION ALL`, `VALUES` and `WITH` subtrees are maintained, and the clock in a filter or a
   projection.
+- An as-of join that seeks an index keeps only its left rows and the rows they match, never the
+  table's, so its state does not grow with the table's history.
 - A `DOUBLE` or `REAL` sum is kept exactly and rounded once, so it never drifts; a recompute adds in
   input order, so the two may differ in the last bits.
 - What the statement keeps counts in `StateBytes`, against `StateBudget`.

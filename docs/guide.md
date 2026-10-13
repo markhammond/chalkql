@@ -1679,8 +1679,12 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   correctly rounded sum of the group's rows, whatever order they arrived and left in, so it never
   drifts. A recompute adds in input order, so the two may differ in the last bits, which is what
   `EqualUpToRounding` admits. Integer and `DECIMAL` sums are exact either way.
+- **As-of seeks.** An as-of join the planner chose to seek an index keeps none of its table: only its
+  left rows, each with the values of the row it matches. The statement's own seek runs again for the
+  left rows that arrive, for those under a key a row was appended to, and, after any other change to
+  the table, for every one. Its state does not grow with the table's history.
 - **Ties** break as the executor breaks them: an as-of join's right rows keep their places in their
-  table.
+  table, and an as-of seek's ties are the seek's own.
 - **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's
   `StateBudget`: a budget tuned for a recompute may need raising. The first update computes
   everything, and takes longer than a recompute.
@@ -1691,7 +1695,8 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   `UnsupportedInView`, naming the operator and where it is in the plan: window functions; `LIMIT` and
   `FETCH`; set operations but `UNION ALL`; right, full, semi and anti joins; `DISTINCT`, ordered,
   holistic and host aggregates; an as-of join whose right input is not a table read through filters
-  and projections; an index lookup in place of a read; the clock in a join's condition; a source
+  and projections; an as-of seek whose key has one type in its table and another on its left; an
+  index lookup in place of a read; the clock in a join's condition; a source
   outside the engine's epochs; a `LIST`, composite or `BINARY` value in what an operator keeps; and
   the reference executor. A view that recomputes takes all of them.
 
