@@ -44,6 +44,15 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// <summary>What the view keeps of its reads of databases (D340); null without the opt-in.</summary>
     private readonly ViewReads? _reads;
 
+    /// <summary>The statement kept by incremental maintenance (D343); null for a view that recomputes.</summary>
+    private MaintainedQuery? _maintained;
+
+    /// <summary>
+    /// Whether the view's rows may lag what the maintained statement holds — before its first update,
+    /// and after one the view did not apply — so that the next update takes the whole result.
+    /// </summary>
+    private bool _resync = true;
+
     private PreparedQuery _prepared;
     private int[] _key;
     private bool _readsTime;
@@ -76,6 +85,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
     /// <summary>The result's key columns.</summary>
     public IReadOnlyList<string> Key => _options.Key;
+
+    /// <summary>How the view computes an update (D343): as the host asked in its options.</summary>
+    public ViewMaintenance Maintenance => _options.Maintenance;
 
     /// <summary>The result's columns, as a <see cref="ViewRow"/> reads them.</summary>
     public Schema Columns => Volatile.Read(ref _prepared).OutputSchema;
@@ -117,7 +129,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         {
             lock (_gate)
             {
-                return _table.Bytes + (_reads?.Bytes ?? 0);
+                return _table.Bytes + (_reads?.Bytes ?? 0) + (_maintained?.StateBytes ?? 0);
             }
         }
     }
@@ -230,6 +242,14 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 + "changes are no fewer than the rows, and infinity never resets one for size.");
         }
 
+        if (!Enum.IsDefined(options.Maintenance))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.Maintenance,
+                "a view's Maintenance is Recompute or Incremental.");
+        }
+
         if (options.LocalJoinMaxRows <= 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -258,6 +278,11 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         var view = new StandingView<TKey, TRow>(engine, sql, prepare, options, binding, prepared, key);
         try
         {
+            if (options.Maintenance == ViewMaintenance.Incremental)
+            {
+                view._maintained = await view.MaintainAsync(prepared, key, ct).ConfigureAwait(false);
+            }
+
             await view.UpdateAsync(ct).ConfigureAwait(false);
         }
         catch
@@ -483,6 +508,11 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         {
             _disposed = true;
             _reads?.Dispose();
+            if (_maintained is { } maintained)
+            {
+                _maintained = null;
+                await maintained.DisposeAsync().ConfigureAwait(false);
+            }
         }
         finally
         {
@@ -518,6 +548,31 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         }
 
         var values = _binding.Values(prepared, _engine.ClockName, stamp.Clock);
+        if (_maintained is { } maintained)
+        {
+            // Until it is applied, this update leaves the view behind the statement (D343).
+            var whole = _resync;
+            _resync = true;
+            MaintainedUpdate update;
+            try
+            {
+                update = await maintained.UpdateAsync(values, stamp.Clock ?? default, whole, ct).ConfigureAwait(false);
+            }
+            catch (MaintainedKeyFault duplicate)
+            {
+                var fault = new StandingViewException(
+                    ChalkErrorCodes.DeclarationNotHeld,
+                    $"The view's key ({string.Join(", ", _options.Key)}) = ({duplicate.Key}) is given by two rows "
+                    + $"of the result at version {stamp.Version}. A view keeps one row per key: correct the "
+                    + "statement's key, or the Map that builds the host's key from it. The view keeps this fault "
+                    + "until it is disposed.");
+                _fault = fault;
+                throw fault;
+            }
+
+            return Changes(update, stamp);
+        }
+
         await using var execution = await prepared.ExecuteAsync(values, context: null, arena: null, ct).ConfigureAwait(false);
         if (_readsTime)
         {
@@ -575,9 +630,50 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// A maintained update's rows, mapped (D343): every row, after a restart or when the view asked for
+    /// the whole result; otherwise the rows each changed key holds now, and the host keys of the rows
+    /// they held before.
+    /// </summary>
+    private Staged Changes(MaintainedUpdate update, EpochStamp stamp)
+    {
+        var staged = new Staged { Delta = !update.Whole };
+        Map(update.Now, staged, stamp);
+        if (update.Whole)
+        {
+            return staged;
+        }
+
+        var before = update.Before;
+        if (before.Length > 0)
+        {
+            var columns = new IArrowArray[before.ColumnCount];
+            for (var c = 0; c < columns.Length; c++)
+            {
+                columns[c] = before.Column(c);
+            }
+
+            for (var i = 0; i < before.Length; i++)
+            {
+                var row = new ViewRow(columns, before.Schema, i);
+                _options.Map(in row, out var key, out _);
+                staged.Before.Add(key);
+            }
+        }
+
+        return staged;
+    }
+
     /// <summary>Makes the staged rows the view's, whole, under the lock drains take.</summary>
     private void Apply(Staged staged, EpochStamp stamp)
     {
+        if (staged.Delta)
+        {
+            ApplyChanges(staged, stamp);
+            _resync = false;
+            return;
+        }
+
         var added = 0L;
         for (var i = 0; i < staged.Count; i++)
         {
@@ -613,6 +709,95 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             _epoch = stamp.Epoch;
             _version = stamp.Version;
         }
+
+        _resync = false;
+    }
+
+    /// <summary>
+    /// Applies a maintained update's changes (D343): a key whose row is gone is deleted, and each row a
+    /// changed key holds now is put. A host key another unchanged row holds faults the view, as two
+    /// rows mapped to one key in a recompute do.
+    /// </summary>
+    private void ApplyChanges(Staged staged, EpochStamp stamp)
+    {
+        var freed = new HashSet<TKey>(staged.Before, Bytes<TKey>.Comparer);
+        var added = 0L;
+        for (var i = 0; i < staged.Count; i++)
+        {
+            ref readonly var key = ref staged.Keys[i];
+            if (!_table.Contains(in key))
+            {
+                added++;
+            }
+            else if (_table.IsLive(in key) && !freed.Contains(key))
+            {
+                var fault = new StandingViewException(
+                    ChalkErrorCodes.DeclarationNotHeld,
+                    $"Two keys of the view's result, ({string.Join(", ", _options.Key)}), are mapped to one host "
+                    + $"key at version {stamp.Version}. A view keeps one row per key: correct the Map that builds "
+                    + "the host's key from the row. The view keeps this fault until it is disposed.");
+                _fault = fault;
+                throw fault;
+            }
+        }
+
+        var bytes = _table.BytesWith(added) + (_maintained?.StateBytes ?? 0);
+        if (bytes > _options.StateBudget)
+        {
+            throw new StandingViewException(
+                ChalkErrorCodes.MemoryBudgetExceeded,
+                $"The view would hold about {bytes} bytes at version {stamp.Version}, what its incremental "
+                + $"maintenance keeps included, past its StateBudget of {_options.StateBudget}. It keeps the epoch "
+                + "it held; raise ViewOptions.StateBudget, or narrow the statement's result.");
+        }
+
+        // A key put again is not deleted first: a row put equal to the one it holds is no change.
+        for (var i = 0; i < staged.Count; i++)
+        {
+            freed.Remove(staged.Keys[i]);
+        }
+
+        lock (_gate)
+        {
+            var seen = ++_updates;
+            foreach (var key in freed)
+            {
+                _table.Delete(in key, seen);
+            }
+
+            for (var i = 0; i < staged.Count; i++)
+            {
+                _table.Put(in staged.Keys[i], in staged.Rows[i], staged.Hashes[i], seen);
+            }
+
+            _table.Compact();
+            _epoch = stamp.Epoch;
+            _version = stamp.Version;
+        }
+    }
+
+    /// <summary>
+    /// Keeps the prepared statement by incremental maintenance (D343), or refuses the view naming what
+    /// in it cannot be kept so.
+    /// </summary>
+    private async ValueTask<MaintainedQuery> MaintainAsync(PreparedQuery prepared, int[] key, CancellationToken ct)
+    {
+        try
+        {
+            return await prepared.MaintainAsync(
+                _binding.Values(prepared, _engine.ClockName, time: null),
+                ViewBinding.ClockIndex(prepared, _engine.ClockName),
+                key,
+                ct).ConfigureAwait(false);
+        }
+        catch (NotMaintainableException refusal)
+        {
+            throw new StandingViewException(
+                ChalkErrorCodes.UnsupportedInView,
+                $"The view asks for incremental maintenance, and its statement cannot be maintained: "
+                + $"{refusal.Message} The operator is at {refusal.Path} in the plan. Make the view with "
+                + "ViewMaintenance.Recompute, or write the statement without it.");
+        }
     }
 
     /// <summary>
@@ -632,6 +817,15 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             var prepared = await _engine.PrepareAsync(_sql, _prepare, ct).ConfigureAwait(false);
             var key = KeyOf(prepared, _options.Key);
             ViewChecks.Check(_engine, prepared, key, _options);
+            if (_maintained is { } kept)
+            {
+                // The plan is a new one: it is maintained from the start, and its first update is whole.
+                _maintained = null;
+                await kept.DisposeAsync().ConfigureAwait(false);
+                _maintained = await MaintainAsync(prepared, key, ct).ConfigureAwait(false);
+                _resync = true;
+            }
+
             lock (_gate)
             {
                 // A result with the columns and key it had keeps its readers where they are: the next
@@ -722,6 +916,14 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     {
         private readonly Dictionary<TKey, int> _seen = new(Bytes<TKey>.Comparer);
 
+        /// <summary>
+        /// Whether the rows are a maintained update's changes (D343): the rows changed keys hold now,
+        /// with <see cref="Before"/> the host keys of the rows they held. Otherwise the whole result.
+        /// </summary>
+        public bool Delta { get; init; }
+
+        public List<TKey> Before { get; } = [];
+
         public TKey[] Keys = new TKey[16];
         public TRow[] Rows = new TRow[16];
         public uint[] Hashes = new uint[16];
@@ -801,6 +1003,25 @@ internal sealed class ViewBinding
                 + "clock: it reads the time of the view's epoch. Leave it out of the parameters.",
                 "parameters");
         }
+    }
+
+    /// <summary>The position of the parameter the statement names the engine's clock by, or -1.</summary>
+    public static int ClockIndex(PreparedQuery prepared, string? clock)
+    {
+        if (clock is null)
+        {
+            return -1;
+        }
+
+        for (var i = 0; i < prepared.Parameters.Count; i++)
+        {
+            if (prepared.Parameters[i].Name is { } name && Name(name) == Name(clock))
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>Whether the statement names the engine's clock as a parameter.</summary>

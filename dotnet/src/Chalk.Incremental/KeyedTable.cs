@@ -133,6 +133,32 @@ internal sealed class KeyedTable<TKey, TRow>
         Append(slot);
     }
 
+    /// <summary>The key's row is gone, as of the update <paramref name="seen"/> (D343): a delete, if it was live.</summary>
+    public void Delete(in TKey key, long seen)
+    {
+        if (!_index.TryGetValue(key, out var slot))
+        {
+            return;
+        }
+
+        ref var entry = ref _entries[slot];
+        entry.Seen = seen;
+        if (!entry.Live)
+        {
+            return;
+        }
+
+        entry.Live = false;
+        Checksum -= entry.Hash;
+        Live--;
+        Deleted++;
+        Unlink(slot);
+        Append(slot);
+    }
+
+    /// <summary>Whether the key holds a live row.</summary>
+    public bool IsLive(in TKey key) => _index.TryGetValue(key, out var slot) && _entries[slot].Live;
+
     /// <summary>Every live key the update <paramref name="seen"/> did not see becomes a delete.</summary>
     public void DeleteUnseen(long seen)
     {

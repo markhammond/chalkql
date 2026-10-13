@@ -93,3 +93,9 @@ Chalk.Incremental.ViewOptions<TKey, TRow>.ResetWhen.get -> double
 Chalk.Incremental.ViewOptions<TKey, TRow>.ResetWhen.init -> void
 Chalk.Incremental.PreparedViews
 static Chalk.Incremental.PreparedViews.MaterializeAsync<TKey, TRow>(this Chalk.Client.ChalkEngine! engine, Chalk.Client.PreparedQuery! prepared, Chalk.Incremental.ViewOptions<TKey, TRow>! options, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Incremental.StandingView<TKey, TRow>!>
+Chalk.Incremental.StandingView<TKey, TRow>.Maintenance.get -> Chalk.Incremental.ViewMaintenance
+Chalk.Incremental.ViewMaintenance
+Chalk.Incremental.ViewMaintenance.Incremental = 1 -> Chalk.Incremental.ViewMaintenance
+Chalk.Incremental.ViewMaintenance.Recompute = 0 -> Chalk.Incremental.ViewMaintenance
+Chalk.Incremental.ViewOptions<TKey, TRow>.Maintenance.get -> Chalk.Incremental.ViewMaintenance
+Chalk.Incremental.ViewOptions<TKey, TRow>.Maintenance.init -> void

@@ -68,6 +68,22 @@ public enum ViewExactness
     EqualUpToRounding = 1,
 }
 
+/// <summary>How a view computes an update (D343, <c>docs/design/68-incremental-maintenance.md</c>).</summary>
+public enum ViewMaintenance
+{
+    /// <summary>Every update runs the statement in full and compares the result with the view's rows.</summary>
+    Recompute = 0,
+
+    /// <summary>
+    /// Every update computes only what changed since the last: the statement's plan runs on the
+    /// changes to its tables, and its joins, as-of joins and aggregates keep state between updates. A
+    /// statement that cannot be maintained so is refused when the view is made, naming what and why.
+    /// A <c>DOUBLE</c> or <c>REAL</c> sum is kept exactly and rounded once, so it may differ from a
+    /// recompute's sum, which adds in input order, in the last bits.
+    /// </summary>
+    Incremental = 1,
+}
+
 /// <summary>
 /// Whether a view may read a source over a database, whose rows change outside the engine's
 /// refreshes (D340, design 65).
@@ -181,6 +197,12 @@ public sealed class ViewOptions<TKey, TRow>
 
     /// <summary>Whether a column computed by accumulating floating point is admitted.</summary>
     public ViewExactness Exactness { get; init; } = ViewExactness.Exact;
+
+    /// <summary>
+    /// How the view computes an update (D343): <see cref="ViewMaintenance.Recompute"/>, the default,
+    /// runs the statement in full; <see cref="ViewMaintenance.Incremental"/> computes only what changed.
+    /// </summary>
+    public ViewMaintenance Maintenance { get; init; } = ViewMaintenance.Recompute;
 
     /// <summary>
     /// Admit only a host function registered with <c>Immutable()</c>, rather than any function
