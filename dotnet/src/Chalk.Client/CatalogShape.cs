@@ -258,12 +258,19 @@ internal sealed class CatalogShape
     /// moved with it, which is the ordinary case: the shape travels in the delta and the numbers in
     /// the statistics message, and the planner joins them.
     /// </summary>
-    public IReadOnlyList<TableKey> StatisticsChangesSince(CatalogShape previous)
+    public IReadOnlyList<TableKey> StatisticsChangesSince(CatalogShape previous) =>
+        StatisticsChangesSince(previous.Statistics);
+
+    /// <summary>
+    /// The same against numbers kept on their own: the ones the planner holds, which a refresh that
+    /// deferred its planning has not sent (design 69 §4).
+    /// </summary>
+    public IReadOnlyList<TableKey> StatisticsChangesSince(IReadOnlyDictionary<TableKey, byte[]> previous)
     {
         var moved = new List<TableKey>();
         foreach (var (key, numbers) in Statistics)
         {
-            if (!previous.Statistics.TryGetValue(key, out var before)
+            if (!previous.TryGetValue(key, out var before)
                 || !numbers.AsSpan().SequenceEqual(before))
             {
                 moved.Add(key);
@@ -271,5 +278,24 @@ internal sealed class CatalogShape
         }
 
         return moved;
+    }
+
+    /// <summary>
+    /// <paramref name="held"/> with the numbers of <paramref name="tables"/> taken from this shape:
+    /// what the planner holds once those tables' numbers have been sent to it.
+    /// </summary>
+    public IReadOnlyDictionary<TableKey, byte[]> NumbersSent(
+        IReadOnlyDictionary<TableKey, byte[]> held, IReadOnlyCollection<TableKey> tables)
+    {
+        var merged = new Dictionary<TableKey, byte[]>(held);
+        foreach (var table in tables)
+        {
+            if (Statistics.TryGetValue(table, out var numbers))
+            {
+                merged[table] = numbers;
+            }
+        }
+
+        return merged;
     }
 }

@@ -43,6 +43,9 @@ internal sealed class PocoTableSnapshot<T>
     private ColumnStatistics[]? _carried;
     private int _carriedAt;
 
+    /// <summary>The <see cref="Sequence"/> of the snapshot the carried statistics were computed over.</summary>
+    private long _carriedOn;
+
     /// <summary>
     /// The operation that built this snapshot said <see cref="StatisticsRefresh.Defer"/>, so the
     /// carried statistics stand until the next plain refresh recomputes them — whatever the table's
@@ -50,8 +53,16 @@ internal sealed class PocoTableSnapshot<T>
     /// </summary>
     private bool _deferred;
 
+    /// <summary>
+    /// Statistics computed in the background over exactly these rows have been taken in (design 69
+    /// §4), so this snapshot awaits nothing more, though it still hands them on as deferred ones.
+    /// </summary>
+    private bool _settled;
+
     /// <summary>The table's own reference while this snapshot is the current one.</summary>
     private int _readers = 1;
+
+    private static long s_sequence;
 
     public PocoTableSnapshot(
         IReadOnlyCollection<T> values,
@@ -64,7 +75,14 @@ internal sealed class PocoTableSnapshot<T>
         Indexes = indexes;
         HostCollection = hostCollection;
         RowCount = values.Count;
+        Sequence = Interlocked.Increment(ref s_sequence);
     }
+
+    /// <summary>
+    /// Which snapshot this is, among every one of this row type: what statistics computed in the
+    /// background name, so that their admission can tell whether they were computed over these rows.
+    /// </summary>
+    public long Sequence { get; }
 
     /// <summary>
     /// The rows by position, or null when the registration only enumerates
@@ -148,24 +166,28 @@ internal sealed class PocoTableSnapshot<T>
     public void Retire() => Release();
 
     /// <summary>
-    /// Takes the statistics the previous snapshot had in force, and the row count they describe
-    /// (D271 (g)). Called before the snapshot is published, so nothing can read half of it.
+    /// Takes the statistics the previous snapshot had in force, the row count they describe and the
+    /// snapshot they were computed over (D271 (g)). Called before the snapshot is published, so
+    /// nothing can read half of it.
     /// </summary>
-    public void Carry(ColumnStatistics[]? statistics, int computedOver, bool deferred)
+    public void Carry(ColumnStatistics[]? statistics, int computedOver, long computedOn, bool deferred)
     {
         _carried = statistics;
         _carriedAt = computedOver;
+        _carriedOn = computedOn;
         _deferred = deferred;
     }
 
     /// <summary>
-    /// What the next snapshot may carry: the statistics in force here, and the row count they were
-    /// computed over — which is this snapshot's own when it computed them and the inherited one when
-    /// it carried them. Null when nothing has been computed yet, in which case the next snapshot
-    /// computes rather than carrying nothing forward.
+    /// What the next snapshot may carry: the statistics in force here, the row count they were
+    /// computed over and the snapshot they were computed on — this one when it computed them, and the
+    /// inherited ones when it carried them. Null when nothing has been computed yet, in which case the
+    /// next snapshot computes rather than carrying nothing forward.
     /// </summary>
-    public (ColumnStatistics[]? Statistics, int ComputedOver, bool Deferred) Carryable =>
-        _carried is not null ? (_carried, _carriedAt, _deferred) : (_statistics, RowCount, _deferred);
+    public (ColumnStatistics[]? Statistics, int ComputedOver, long ComputedOn, bool Deferred) Carryable =>
+        _carried is not null
+            ? (_carried, _carriedAt, _carriedOn, _deferred)
+            : (_statistics, RowCount, Sequence, _deferred);
 
     /// <summary>
     /// Ends a deferral (D271 (g)): the next <see cref="Statistics"/> computes rather than carrying.
@@ -185,8 +207,60 @@ internal sealed class PocoTableSnapshot<T>
             }
 
             _deferred = false;
+            _settled = false;
             _carried = null;
             _carriedAt = 0;
+            Volatile.Write(ref _statistics, null);
+        }
+    }
+
+    /// <summary>
+    /// Whether this snapshot's statistics were deferred and nothing has computed statistics over its
+    /// rows since (design 69 §4): what a background run computes statistics for.
+    /// </summary>
+    public bool AwaitsStatistics
+    {
+        get
+        {
+            lock (_statisticsGate)
+            {
+                return _deferred && !_settled && _carried is not null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Statistics computed now over these rows, as a describe would compute them, whatever this
+    /// snapshot carries, and kept nowhere: a background run computes them beside the refreshes and
+    /// hands them to <see cref="Admit"/> at a later one (design 69 §4).
+    /// </summary>
+    public ColumnStatistics[] ComputeStatistics(
+        PocoColumn<T>[] columns,
+        IReadOnlyList<CollationDescriptor> collations,
+        PocoStatisticsPlan plan) =>
+        PocoStatistics.Compute(columns, Values, collations, Indexes, plan);
+
+    /// <summary>
+    /// Takes statistics computed in the background as this snapshot's (design 69 §4): over these very
+    /// rows, or over the earlier snapshot <paramref name="computedOn"/> names, of
+    /// <paramref name="computedOver"/> rows. They stand as deferred ones do, so the next snapshot
+    /// carries them on, and a snapshot whose own rows they were computed over awaits nothing more.
+    /// Statistics computed over a snapshot older than the ones this one carries are not taken.
+    /// </summary>
+    public void Admit(ColumnStatistics[] statistics, int computedOver, long computedOn)
+    {
+        lock (_statisticsGate)
+        {
+            // A snapshot that carries nothing computes its own when described, which is newer.
+            if (!_deferred || _settled || _carried is null || computedOn <= _carriedOn)
+            {
+                return;
+            }
+
+            _carried = statistics;
+            _carriedAt = computedOver;
+            _carriedOn = computedOn;
+            _settled = computedOn == Sequence;
             Volatile.Write(ref _statistics, null);
         }
     }

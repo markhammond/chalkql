@@ -1617,3 +1617,4 @@ Chalk.Client.PreparedReplacement.Table.get -> string!
 Chalk.Client.PreparedReplacement.Through.get -> int
 Chalk.Client.RefreshBuilder.Commit(Chalk.Client.PreparedReplacement! prepared) -> Chalk.Client.RefreshBuilder!
 override Chalk.Client.PreparedReplacement.ToString() -> string!
+Chalk.Client.RefreshBuilder.DeferPlanning() -> Chalk.Client.RefreshBuilder!

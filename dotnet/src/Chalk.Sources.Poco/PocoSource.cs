@@ -17,7 +17,8 @@ namespace Chalk.Sources.Poco;
 /// real indexes and statistics, which is the whole point of Chalk (rev 3 §6).
 /// </summary>
 public sealed class PocoSource
-    : ISourceRuntime, IColumnarBatchSource, IRefreshableSource, IPinnableSource, IPreparableSource
+    : ISourceRuntime, IColumnarBatchSource, IRefreshableSource, IPinnableSource, IPreparableSource,
+        IDeferredStatisticsSource
 {
     private readonly PocoTableRuntime[] _tables;
     private readonly string _zone;
@@ -348,6 +349,32 @@ public sealed class PocoSource
         return ValueTask.FromResult(runtime.PrepareReplacement(SourceId, rows, through));
     }
 
+    /// <inheritdoc />
+    IReadOnlyList<DeferredStatistics> IDeferredStatisticsSource.ComputeDeferredStatistics(CancellationToken ct)
+    {
+        var computed = new List<DeferredStatistics>();
+        foreach (var table in _tables)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (table.ComputeDeferredStatistics() is { } statistics)
+            {
+                computed.Add(statistics);
+            }
+        }
+
+        return computed;
+    }
+
+    /// <inheritdoc />
+    void IDeferredStatisticsSource.AdmitStatistics(IReadOnlyList<DeferredStatistics> statistics)
+    {
+        ArgumentNullException.ThrowIfNull(statistics);
+        foreach (var computed in statistics)
+        {
+            Require(computed.Table).AdmitStatistics(computed);
+        }
+    }
+
     /// <summary>Every table's new snapshot, built and waiting for the engine to say when.</summary>
     private sealed class PreparedRefresh : ISourceRefreshCommit
     {
@@ -552,6 +579,16 @@ internal abstract class PocoTableRuntime
     /// beside this table's refreshes, for a later refresh to commit (design 69 §3).
     /// </summary>
     public abstract IPreparedReplacement PrepareReplacement(string sourceId, object rows, int through);
+
+    /// <summary>
+    /// Statistics computed now over the snapshot this table serves, and the table described with
+    /// them, when a refresh deferred its statistics and nothing has computed them since (design 69
+    /// §4); null otherwise.
+    /// </summary>
+    public abstract DeferredStatistics? ComputeDeferredStatistics();
+
+    /// <summary>Takes statistics computed in the background, when this table still awaits them.</summary>
+    public abstract void AdmitStatistics(DeferredStatistics statistics);
 
     public abstract TableDescriptor Describe();
 
@@ -1171,10 +1208,10 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     /// </summary>
     private PocoTableSnapshot<T> Carry(PocoTableSnapshot<T> next, StatisticsRefresh statistics)
     {
-        var (carried, computedOver, wasDeferred) = Current.Carryable;
+        var (carried, computedOver, computedOn, wasDeferred) = Current.Carryable;
         if (statistics == StatisticsRefresh.Defer)
         {
-            next.Carry(carried, computedOver, deferred: true);
+            next.Carry(carried, computedOver, computedOn, deferred: true);
             return next;
         }
 
@@ -1187,7 +1224,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             return next;
         }
 
-        next.Carry(carried, computedOver, deferred: false);
+        next.Carry(carried, computedOver, computedOn, deferred: false);
         return next;
     }
 
@@ -1415,24 +1452,50 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         var snapshot = Acquire();
         try
         {
-            var statistics = snapshot.Statistics(_columns, _collations, _statisticsPlan);
+            return Describe(snapshot, snapshot.Statistics(_columns, _collations, _statisticsPlan));
+        }
+        finally
+        {
+            snapshot.Release();
+        }
+    }
 
-            return new TableDescriptor
+    private TableDescriptor Describe(PocoTableSnapshot<T> snapshot, ColumnStatistics[] statistics) => new()
+    {
+        Name = Name,
+        Columns = [.. _columns.Select((c, i) => new ColumnDescriptor
+        {
+            Name = c.Name,
+            Type = c.Type,
+            Statistics = statistics[i],
+        })],
+        RowCount = snapshot.RowCount,
+        RowCountKind = RowCountKind.Exact,
+        UniqueKeys = _uniqueKeys,
+        Collations = _collations,
+        Indexes = [.. snapshot.Indexes.Select(i => i.Descriptor)],
+        ForeignKeys = _foreignKeys,
+        Entitlement = _entitlement,
+    };
+
+    /// <inheritdoc />
+    public override DeferredStatistics? ComputeDeferredStatistics()
+    {
+        var snapshot = Acquire();
+        try
+        {
+            if (!snapshot.AwaitsStatistics)
             {
-                Name = Name,
-                Columns = [.. _columns.Select((c, i) => new ColumnDescriptor
-                {
-                    Name = c.Name,
-                    Type = c.Type,
-                    Statistics = statistics[i],
-                })],
+                return null;
+            }
+
+            var statistics = snapshot.ComputeStatistics(_columns, _collations, _statisticsPlan);
+            return new DeferredStatistics
+            {
+                Table = Name,
+                Descriptor = Describe(snapshot, statistics),
+                Statistics = new ComputedStatistics(snapshot.Sequence, statistics),
                 RowCount = snapshot.RowCount,
-                RowCountKind = RowCountKind.Exact,
-                UniqueKeys = _uniqueKeys,
-                Collations = _collations,
-                Indexes = [.. snapshot.Indexes.Select(i => i.Descriptor)],
-                ForeignKeys = _foreignKeys,
-                Entitlement = _entitlement,
             };
         }
         finally
@@ -1440,6 +1503,18 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             snapshot.Release();
         }
     }
+
+    /// <inheritdoc />
+    public override void AdmitStatistics(DeferredStatistics statistics)
+    {
+        if (statistics.Statistics is ComputedStatistics computed)
+        {
+            Current.Admit(computed.Columns, statistics.RowCount, computed.Snapshot);
+        }
+    }
+
+    /// <summary>Statistics a background run computed, and the snapshot they were computed over.</summary>
+    private sealed record ComputedStatistics(long Snapshot, ColumnStatistics[] Columns);
 
     public override IEnumerable<(string Index, long BytesPerRow)> IndexSizes() =>
         Current.Indexes.Select(i => (i.Descriptor.Name, i.BytesPerRow));

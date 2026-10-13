@@ -36,6 +36,64 @@ internal static class Disclosures
     }
 
     /// <summary>
+    /// What differs between the report a statement holds and the one a later plan came with, or null
+    /// when nothing does (design 69 §4): the columns' disclosures, the tables read and what the
+    /// rewrite did to each, their descriptor hashes, the context the plan needs, and whether Omit
+    /// fell back to placeholders. The context's names are compared as sets: a plan lists them in the
+    /// order it reads them, and another plan of the same statement may read them in another.
+    /// </summary>
+    internal static string? Difference(Rpc.EntitlementsReport? held, Rpc.EntitlementsReport? candidate)
+    {
+        if (held is null || candidate is null)
+        {
+            return held is null && candidate is null
+                ? null
+                : held is null ? "the statement's own plan came with none" : "this plan came with none";
+        }
+
+        if (!held.Columns.SequenceEqual(candidate.Columns))
+        {
+            return "its columns' disclosures differ";
+        }
+
+        if (held.Tables.Count != candidate.Tables.Count)
+        {
+            return "it reads other entitled tables";
+        }
+
+        for (var i = 0; i < held.Tables.Count; i++)
+        {
+            var (before, after) = (held.Tables[i], candidate.Tables[i]);
+            if (before.Equals(after))
+            {
+                continue;
+            }
+
+            var pushedOnly = after.Clone();
+            pushedOnly.RowPredicatePushed = before.RowPredicatePushed;
+            return pushedOnly.Equals(before)
+                ? $"{before.Schema}.{before.Table}'s row predicate "
+                  + (after.RowPredicatePushed ? "reaches its source, where it did not" : "stays local, where it reached its source")
+                : $"the rewrite did otherwise to {before.Schema}.{before.Table}";
+        }
+
+        if (!held.DescriptorHashes.SequenceEqual(candidate.DescriptorHashes))
+        {
+            return "its descriptor hashes differ";
+        }
+
+        if (!held.RequiredScalars.ToHashSet(StringComparer.Ordinal).SetEquals(candidate.RequiredScalars)
+            || !held.RequiredRelations.ToHashSet(StringComparer.Ordinal).SetEquals(candidate.RequiredRelations))
+        {
+            return "it needs other context at execution";
+        }
+
+        return held.OmitDegradedToPlaceholder != candidate.OmitDegradedToPlaceholder
+            ? "Omit falls back to placeholders in one and not the other"
+            : null;
+    }
+
+    /// <summary>
     /// The rewrite's report out of the prepared query's extension slot (step 26c, D212), as this
     /// package's own types. Empty when no extension carried one, which is every plan the pass did
     /// not run for.

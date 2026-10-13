@@ -129,6 +129,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         _statisticsVersion = versions.StatisticsVersion;
         _registeredShapeVersion = versions.ShapeVersion;
         _registeredStatisticsVersion = versions.StatisticsVersion;
+        _plannedNumbers = versions.Shape.Statistics;
+        _plannerCatalog = catalog;
         PlannerInfo = plannerInfo;
         _log = (options.LoggerFactory ?? NullLoggerFactory.Instance).CreateLogger<ChalkEngine>();
         _engineClock = options.Clock is null ? null : new EngineClock();
@@ -1165,6 +1167,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             // source refreshes, with no process-wide source coordination.
             if (_orderedSharedSourceStates.Length == 0)
             {
+                AdmitBackgroundPlanning();
                 foreach (var registration in _sourceRegistrations)
                 {
                     await registration.Source.RefreshAsync(ct).ConfigureAwait(false);
@@ -1176,7 +1179,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             }
 
             using var shared = await AcquireSharedSourcesAsync(ct).ConfigureAwait(false);
-            
+            AdmitBackgroundPlanning();
+
             foreach (var registration in _sourceRegistrations)
             {
                 await registration.Source.RefreshAsync(ct).ConfigureAwait(false);
@@ -1227,12 +1231,24 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
         var builder = new RefreshBuilder();
         plan(builder);
+        var deferred = builder.PlanningDeferred;
         if (builder.Entries.Count == 0
             && builder.Scopes.Count == 0
             && builder.VersionGiven is null
-            && builder.ClockGiven is null)
+            && builder.ClockGiven is null
+            && !deferred)
         {
             return await RefreshAsync(ct).ConfigureAwait(false);
+        }
+
+        if (deferred && builder.Scopes.Count > 0)
+        {
+            throw new ArgumentException(
+                "the refresh defers its planning and re-reads "
+                + string.Join(", ", builder.Scopes.Select(Describe))
+                + ". A re-read describes its tables with their statistics now, which is what deferring "
+                + "leaves to the background; re-read in a refresh of its own.",
+                nameof(plan));
         }
 
         if (builder.ClockGiven is not null && _options.Clock is null)
@@ -1255,8 +1271,10 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         // all of its tables at once and the validation message names the entry the host wrote.
         var bySource =
             new List<(ISourceRuntime Runtime, IRefreshableSource Refreshable, List<SourceRefreshEntry> Entries)>();
-        foreach (var (source, entry) in builder.Entries)
+        foreach (var (source, given) in builder.Entries)
         {
+            // Deferred, every table this refresh changes keeps the statistics it had (design 69 §4).
+            var entry = deferred ? Deferred(given) : given;
             if (!_sources.TryGetValue(source.SourceId, out var held) || !ReferenceEquals(held, source))
             {
                 throw new ArgumentException(
@@ -1309,6 +1327,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         // which publish as they read, or else the commits. Building the new state changes nothing
         // anyone can read, so a view does not wait for it.
         var changing = false;
+        long published;
         try
         {
             SharedSourceLease? sharedLease = null;
@@ -1319,6 +1338,10 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
             using (sharedLease)
             {
+                // What background runs produced since the last refresh takes effect here, first, so
+                // that the snapshots this refresh builds carry the statistics they computed.
+                AdmitBackgroundPlanning();
+
                 // The scopes first: a re-introspection is the source going to look again, and a
                 // replacement in the same transaction is the host saying what the rows are. The host's
                 // word is the one that survives, so it is applied last.
@@ -1396,10 +1419,11 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                     replaced?.Unpin();
                 }
 
-                var epoch = await PublishAsync(builder.VersionGiven, builder.ClockGiven, ct).ConfigureAwait(false);
+                var epoch = await PublishAsync(builder.VersionGiven, builder.ClockGiven, deferred, ct)
+                    .ConfigureAwait(false);
                 Named(scopes, epoch);
                 CaptureSharedRevisions();
-                return epoch;
+                published = epoch;
             }
         }
         finally
@@ -1411,7 +1435,36 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
             _refreshing.Release();
         }
+
+        // After the lock: the statistics and plans this refresh left behind are worked out beside the
+        // next refreshes, not in front of them.
+        if (deferred)
+        {
+            RequestBackgroundPlanning();
+        }
+
+        return published;
     }
+
+    /// <summary>The entry a refresh that defers its planning applies: the same, with its statistics deferred.</summary>
+    private static SourceRefreshEntry Deferred(SourceRefreshEntry entry) =>
+        entry.Statistics == StatisticsRefresh.Defer
+            ? entry
+            : new SourceRefreshEntry
+            {
+                Table = entry.Table,
+                Kind = entry.Kind,
+                RowType = entry.RowType,
+                Rows = entry.Rows,
+                Statistics = StatisticsRefresh.Defer,
+                Frontier = entry.Frontier,
+            };
+
+    /// <summary>A scope as a refusal names it.</summary>
+    private static string Describe(IRefreshTarget target) =>
+        target.Table.Length > 0
+            ? $"'{(target.Schema.Length > 0 ? target.Schema : target.SourceId)}.{target.Table}'"
+            : $"source '{(target.SourceId.Length > 0 ? target.SourceId : target.Schema)}'";
 
     /// <summary>
     /// Builds a replacement for <paramref name="table"/> from <paramref name="rows"/>, the host's
@@ -1699,14 +1752,17 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// it one epoch on. The caller holds the engine refresh lock and, when shared sources exist, all
     /// of this engine's shared-source refresh gates.
     /// </summary>
-    private ValueTask<long> PublishAsync(CancellationToken ct) => PublishAsync(version: null, clock: null, ct);
+    private ValueTask<long> PublishAsync(CancellationToken ct) =>
+        PublishAsync(version: null, clock: null, deferStatistics: false, ct);
 
     /// <summary>
     /// The same, numbering the epoch with the host's <paramref name="version"/> and moving the clock
     /// to <paramref name="clock"/> when given (D339): one past the last version and the clock where
-    /// it was otherwise.
+    /// it was otherwise. With <paramref name="deferStatistics"/>, no table's numbers are sent to the
+    /// planner: a background run sends them (design 69 §4).
     /// </summary>
-    private async ValueTask<long> PublishAsync(long? version, DateTimeOffset? clock, CancellationToken ct)
+    private async ValueTask<long> PublishAsync(
+        long? version, DateTimeOffset? clock, bool deferStatistics, CancellationToken ct)
     {
         var schemas = new List<SchemaDescriptor>(_sourceRegistrations.Length);
         foreach (var registration in _sourceRegistrations)
@@ -1734,7 +1790,6 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         var shape = CatalogShape.Of(next);
         var changed = shape.ShapeChangesSince(_shape);
         var removed = shape.RemovedSince(_shape);
-        var moved = shape.StatisticsChangesSince(_shape);
         var schemaChange = changed.Count > 0 || removed.Count > 0;
 
         // The join policy and the cost profiles decide how the next plan is built and nothing about
@@ -1742,7 +1797,6 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         // version of its own so the planner plans under them, and strands no plan doing so.
         var policiesMoved = !schemaChange && shape.PoliciesChangedSince(_shape);
         var nextShapeVersion = schemaChange || policiesMoved ? CatalogVersions.Mint() : _shapeVersion;
-        var nextStatisticsVersion = moved.Count > 0 ? CatalogVersions.Mint() : _statisticsVersion;
 
         if (schemaChange)
         {
@@ -1753,11 +1807,16 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             await RegisterPoliciesAsync(next, nextShapeVersion, ct).ConfigureAwait(false);
         }
 
-        if (moved.Count > 0)
+        // The numbers the planner does not hold: sent now, or left to the background (design 69 §4).
+        var sent = 0;
+        var behind = false;
+        if (deferStatistics)
         {
-            await _options.Planner.RegisterStatisticsAsync(
-                StatisticsFor(next, _instanceId, nextStatisticsVersion, moved), ct).ConfigureAwait(false);
-            _registeredStatisticsVersion = nextStatisticsVersion;
+            behind = NoteNumbers(next, shape);
+        }
+        else
+        {
+            sent = await SendNumbersAsync(next, shape, ct).ConfigureAwait(false);
         }
 
         // The shape first, so a reader that sees the new catalog has already seen the epoch its
@@ -1793,12 +1852,11 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             }
         }
 
-        _statisticsVersion = nextStatisticsVersion;
         Volatile.Write(ref _catalog, next);
         Stamped(next.Epoch, version, clock);
         _log.LogInformation(
             "catalog refreshed: epoch {Epoch} -> {NextEpoch}, {Sources} sources, {Tables} tables, "
-            + "{Change} (shape epoch {ShapeEpoch}, {Moved} statistics published)",
+            + "{Change} (shape epoch {ShapeEpoch}, {Moved} statistics published{Deferred})",
             current.Epoch,
             next.Epoch,
             schemas.Count,
@@ -1807,7 +1865,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 ? $"shape changed in {changed.Count} table(s), {removed.Count} removed"
                 : policiesMoved ? "policies only" : "data only",
             ShapeEpoch,
-            moved.Count);
+            sent,
+            behind ? ", the rest deferred" : string.Empty);
         return next.Epoch;
     }
 
@@ -1877,9 +1936,15 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 "the planner no longer holds catalog version {Base}; registering the catalog whole",
                 _registeredShapeVersion);
             await _options.Planner.RegisterCatalogAsync(whole, ct).ConfigureAwait(false);
-            await _options.Planner.RegisterStatisticsAsync(
-                StatisticsFor(next, _instanceId, _statisticsVersion, tables: null), ct).ConfigureAwait(false);
-            _registeredStatisticsVersion = _statisticsVersion;
+            await _registering.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await RegisterNumbersAsync(next, CatalogShape.Of(next), tables: null, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _registering.Release();
+            }
         }
 
         _registeredShapeVersion = shapeVersion;
@@ -1968,6 +2033,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             await _refreshTimer.DisposeAsync().ConfigureAwait(false);
         }
 
+        await StopBackgroundPlanningAsync().ConfigureAwait(false);
+
         await _refreshing.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
@@ -2053,11 +2120,18 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         // prepare with no stop token sends no id and takes no entry in the sidecar's registry.
         var requestId = planning.StopToken.CanBeCanceled ? Guid.NewGuid().ToString("n") : string.Empty;
 
-        // One read of the catalog: the epoch the planner is asked for, and the counts a prepared
-        // statement keeps to judge drift by (D342), are of the same catalog. Read before the versions:
-        // a refresh between the two reads gives the plan newer numbers than the ones kept, which can
-        // make the statement stale once too often but never hides a drift.
+        // The epoch the planner is asked for, and the counts a prepared statement keeps to judge drift
+        // by (D342): the planner's, which are what the plan is made on, and which a refresh that
+        // deferred its planning has left behind the catalog's (design 69 §4). Read before the
+        // versions: a refresh between the reads gives the plan newer numbers than the ones kept, which
+        // can make the statement stale once too often but never hides a drift.
         var catalog = Catalog;
+        CatalogContext plannedOn;
+        lock (_plannedGate)
+        {
+            plannedOn = _plannerCatalog;
+        }
+
         var request = new PlanRequest
         {
             Sql = sql,
@@ -2183,7 +2257,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 PlanErrorKinds.Internal, tooDeep.Message, position: null, planningState: null, tooDeep);
         }
 
-        result.PlannedOn = catalog;
+        result.PlannedOn = plannedOn;
         return result;
     }
 
@@ -2205,7 +2279,6 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         {
             var catalog = Catalog;
             var shapeVersion = _shapeVersion;
-            var statisticsVersion = _statisticsVersion;
             await _options.Planner.RegisterCatalogAsync(
                 new CatalogRegistration
                 {
@@ -2214,11 +2287,11 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                     ShapeVersion = shapeVersion,
                 },
                 ct).ConfigureAwait(false);
-            await _options.Planner.RegisterStatisticsAsync(
-                StatisticsFor(catalog, _instanceId, statisticsVersion, tables: null),
-                ct).ConfigureAwait(false);
+
+            // The numbers whole, under a version minted now, so that a planner which kept newer ones
+            // takes these all the same and holds exactly what this engine records it holds.
+            await RegisterNumbersAsync(catalog, CatalogShape.Of(catalog), tables: null, ct).ConfigureAwait(false);
             _registeredShapeVersion = shapeVersion;
-            _registeredStatisticsVersion = statisticsVersion;
         }
         finally
         {

@@ -24,8 +24,13 @@ public sealed class PreparedQuery
     private readonly ChalkEngine _engine;
     private readonly ParameterRewriter _rewriter;
     private readonly PrepareOptions _options;
-    private readonly ConcurrentDictionary<string, ShapePlan> _shapes = new(StringComparer.Ordinal);
     private readonly RenderedStatement _prepared;
+
+    /// <summary>
+    /// Everything that belongs to the plan this statement runs, replaced whole when a plan made in the
+    /// background swaps in (design 69 §4): an execution reads it once, so it runs one plan throughout.
+    /// </summary>
+    private PlanState _state;
 
     /// <summary>
     /// This statement's hints, kept so a narrowing plans under the same ones (D284, ADR 0074). Not
@@ -61,39 +66,28 @@ public sealed class PreparedQuery
 
         _rewriter = rewriter;
         _options = options;
-        // The tables this plan reads, collected once (D271 (d)): staleness is per table now, and
-        // asking the plan again on every execution would put a tree walk on the execution path.
-        _tablesRead = ChalkEngine.TablesRead(result.Plan);
-        _plannedRows = PlannedRows(result.PlannedOn ?? engine.Catalog, _tablesRead);
         Sql = sql;
-        Plan = result.Plan;
         LogicalDigest = result.LogicalDigest;
         // When the prepare asked for a redaction and the statement's parameters are named, the
-        // names go back where the rewrite put a `?` — in the statement and in the plan text, whose
-        // dynamic parameters read `?0`, `?1`, … (D287). Anything else is served as it came.
+        // names go back where the rewrite put a `?` — in the statement and in the redacted text
+        // (D287). Anything else is served as it came.
         var names = result.RedactedSql is null ? null : rewriter.SlotNames(rendered);
-        PlanText =
-            names is null || result.PlanText is null
-                ? result.PlanText
-                : ParameterNames.Substitute(result.PlanText, names, indexed: true);
         RedactedSql =
             names is null || result.RedactedSql is null
                 ? result.RedactedSql
                 : ParameterNames.Substitute(result.RedactedSql, names, indexed: false);
-        PlanningStats = result.Stats;
-        PlanningState = result.PlanningState;
 
         Columns = Names(compiled.OutputSchema);
         Extensions = result.Extensions;
 
-        _compiled = compiled;
         OutputSchema = compiled.OutputSchema;
         ParameterTypes = compiled.ParameterTypes;
 
         _prepared = rendered;
         _prepareShape = prepareShape;
-        _shapes[Key(prepareShape)] = new ShapePlan(compiled, rendered);
+        _state = PlanState.Of(engine, result, compiled, Key(prepareShape), rendered, names);
         AssignParameterTypes(rendered, compiled.ParameterTypes);
+        engine.Track(this);
     }
 
     /// <summary>The SQL as the host wrote it, parameter styles and all.</summary>
@@ -166,10 +160,11 @@ public sealed class PreparedQuery
     }
 
     /// <summary>
-    /// Lets one extension decorate the schema every batch of this query carries, and hear about each
-    /// execution before it runs (step 26c, D213). The one seam the core keeps for a feature it does
-    /// not itself know: today the entitlement wrapper puts <c>chalk.disclosure</c> on the fields and
-    /// raises its audit event through it, and nothing in this package names either.
+    /// Lets one extension decorate the schema every batch of this query carries, hear about each
+    /// execution before it runs (step 26c, D213), and check each plan a background run makes for it.
+    /// The one seam the core keeps for a feature it does not itself know: today the entitlement
+    /// wrapper puts <c>chalk.disclosure</c> on the fields, raises its audit event and checks plans
+    /// against its report through it, and nothing in this package names any of them.
     /// </summary>
     /// <param name="decorateSchema">What every batch's schema becomes.</param>
     /// <param name="beforeExecute">
@@ -177,30 +172,39 @@ public sealed class PreparedQuery
     /// a query prepared with shapes, or the one it was prepared with, for a query that folded its
     /// values (F166). Never the prepare's shape, which holds no values and belongs to no request.
     /// </param>
+    /// <param name="checkPlan">
+    /// Shown each plan a background run made for the query, before it swaps in (design 69 §4). It
+    /// throws to refuse one, and the plan is not taken. A query decorated without one is never planned
+    /// again in the background.
+    /// </param>
     internal void Decorate(
-        Func<ArrowSchema, ArrowSchema>? decorateSchema, Action<PreparedQuery, RequestContext?>? beforeExecute)
+        Func<ArrowSchema, ArrowSchema>? decorateSchema,
+        Action<PreparedQuery, RequestContext?>? beforeExecute,
+        Action<PlanResult>? checkPlan = null)
     {
         _decorateSchema = decorateSchema;
         _beforeExecute = beforeExecute;
+        _checkPlan = checkPlan;
         if (decorateSchema is null)
         {
             return;
         }
 
-        var decorated = decorateSchema(_compiled.OutputSchema);
-        if (ReferenceEquals(decorated, _compiled.OutputSchema))
+        var state = Volatile.Read(ref _state);
+        var decorated = decorateSchema(state.Compiled.OutputSchema);
+        if (ReferenceEquals(decorated, state.Compiled.OutputSchema))
         {
             return;
         }
 
-        _compiled = _compiled.WithOutputSchema(decorated);
-        OutputSchema = _compiled.OutputSchema;
-        _shapes[Key(_prepareShape)] = new ShapePlan(_compiled, _prepared);
+        var compiled = state.Compiled.WithOutputSchema(decorated);
+        OutputSchema = compiled.OutputSchema;
+        Volatile.Write(ref _state, state.With(compiled, Key(_prepareShape), _prepared));
     }
 
     private Func<ArrowSchema, ArrowSchema>? _decorateSchema;
     private Action<PreparedQuery, RequestContext?>? _beforeExecute;
-    private CompiledPlan _compiled;
+    private Action<PlanResult>? _checkPlan;
     private readonly IReadOnlyList<int> _prepareShape;
 
     /// <summary>The output columns, named. A column discloses nothing beyond its name to this package.</summary>
@@ -217,7 +221,11 @@ public sealed class PreparedQuery
     }
 
     /// <summary>The plan for the shape prepared at prepare time.</summary>
-    public Plan Plan { get; }
+    /// <remarks>
+    /// The one a refresh last swapped in, under deferred planning (design 69 §4); otherwise the one
+    /// it was prepared with.
+    /// </remarks>
+    public Plan Plan => Volatile.Read(ref _state).Plan;
 
     public ulong PlanDigest => Plan.PlanDigest;
 
@@ -251,7 +259,7 @@ public sealed class PreparedQuery
     /// the prepare (D262), so a host that logs the plan text logs the same pseudonyms it logs in
     /// <see cref="RedactedSql"/>.
     /// </remarks>
-    public string? PlanText { get; }
+    public string? PlanText => Volatile.Read(ref _state).PlanText;
 
     /// <summary>
     /// This statement with every literal replaced by a keyed pseudonym, so the text can be logged
@@ -367,7 +375,7 @@ public sealed class PreparedQuery
         }
     }
 
-    public PlanningStats PlanningStats { get; }
+    public PlanningStats PlanningStats => Volatile.Read(ref _state).Stats;
 
     /// <summary>
     /// How the optimiser ended for this statement, and what it cost (D237,
@@ -380,7 +388,7 @@ public sealed class PreparedQuery
     /// and the two costs as well, and <see cref="PlanningState.CostRatio"/> is what the search
     /// bought after its first complete answer.
     /// </remarks>
-    public PlanningState PlanningState { get; }
+    public PlanningState PlanningState => Volatile.Read(ref _state).PlanningState;
 
     /// <summary>
     /// The plan this one was narrowed from, when the sidecar still held that plan's converted tree
@@ -392,10 +400,7 @@ public sealed class PreparedQuery
     /// <em>built</em> and never about what it is: a narrowing that misses this gets the same plan and
     /// the same digest, and the corpus asserts exactly that.
     /// </remarks>
-    public ulong? NarrowedFrom =>
-        _narrowedFrom ??= ReadNarrowedFrom(PlanningStats);
-
-    private ulong? _narrowedFrom;
+    public ulong? NarrowedFrom => ReadNarrowedFrom(PlanningStats);
 
     private const string NarrowedFromStage = "narrowed from ";
 
@@ -491,34 +496,37 @@ public sealed class PreparedQuery
     /// leaves the ones that read <c>orders</c> exactly where they were.
     /// </para>
     /// </remarks>
-    public bool IsStale => !_engine.IsCurrent(Plan, _tablesRead) || Drifted();
-
-    /// <summary>The tables this plan reads, which is what its staleness is measured over.</summary>
-    private readonly IReadOnlyList<TableKey>? _tablesRead;
-
-    /// <summary>
-    /// The row count of each table this plan reads, as the catalog it was made against gave it, for
-    /// the tables whose count was known (D342): what drift is judged against.
-    /// </summary>
-    private readonly (TableKey Table, long Rows)[] _plannedRows;
+    public bool IsStale
+    {
+        get
+        {
+            var state = Volatile.Read(ref _state);
+            return !_engine.IsCurrent(state.Plan, state.TablesRead) || Drifted(state, _engine.Catalog, Drift);
+        }
+    }
 
     /// <summary>How far a table's row count may move, either way, before the plan made on it is stale.</summary>
     private const double Drift = 10;
 
     /// <summary>
-    /// Whether a table this plan reads has drifted tenfold, either way, since the plan was made (D342,
-    /// F196). A table whose count is unknown, then or now, is not judged. One comparison per table,
-    /// and no planner round trip.
+    /// How far a table's row count may move, either way, before a background run plans the statement
+    /// again (design 69 §4): sooner than <see cref="Drift"/> calls it stale.
     /// </summary>
-    private bool Drifted()
+    internal const double PlanAgainDrift = 2;
+
+    /// <summary>
+    /// Whether a table the plan reads has drifted by <paramref name="factor"/>, either way, between the
+    /// numbers it was made on and <paramref name="live"/> (D342, F196). A table whose count is unknown,
+    /// then or now, is not judged. One comparison per table, and no planner round trip.
+    /// </summary>
+    private static bool Drifted(PlanState state, Chalk.Catalog.CatalogContext live, double factor)
     {
-        if (_plannedRows.Length == 0)
+        if (state.PlannedRows.Length == 0)
         {
             return false;
         }
 
-        var live = _engine.Catalog;
-        foreach (var (table, planned) in _plannedRows)
+        foreach (var (table, planned) in state.PlannedRows)
         {
             if (RowsOf(live, table) is not { } now)
             {
@@ -528,13 +536,100 @@ public sealed class PreparedQuery
             // Counted from one, so that an empty table is a table of one row: nothing is divided by
             // zero, and a table that grew from empty to a few rows has not drifted.
             var ratio = (Math.Max(now, 1) + 0d) / Math.Max(planned, 1);
-            if (ratio >= Drift || ratio <= 1 / Drift)
+            if (ratio >= factor || ratio <= 1 / factor)
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Whether a background run may plan this statement again (design 69 §4): not when it was
+    /// prepared with a planner extension that checked the plan it was handed and does not check the
+    /// plans it takes later, nor when its plan carries no logical digest to prove the new one the same
+    /// statement.
+    /// </summary>
+    internal bool MayPlanAgain =>
+        LogicalDigest != 0
+        && (_checkPlan is not null
+            || (_options.Extensions.Count == 0 && _decorateSchema is null && _beforeExecute is null))
+        && !_notTheSame
+        && _engine.IsCurrent(Volatile.Read(ref _state).Plan, Volatile.Read(ref _state).TablesRead);
+
+    /// <summary>
+    /// A background run planned this statement again and got another statement back, which it will
+    /// not swap in; it is not asked again. A shape change makes the statement stale instead, and the
+    /// host prepares it again, as it always has.
+    /// </summary>
+    private bool _notTheSame;
+
+    /// <summary>
+    /// Whether a table this statement's plan reads has moved by <see cref="PlanAgainDrift"/> between
+    /// the numbers the plan was made on and <paramref name="catalog"/>'s.
+    /// </summary>
+    internal bool DriftedFrom(Chalk.Catalog.CatalogContext catalog) =>
+        Drifted(Volatile.Read(ref _state), catalog, PlanAgainDrift);
+
+    /// <summary>
+    /// This statement planned and compiled again, on the numbers the planner holds now (design 69
+    /// §4), ready to swap in; null when what came back is not the same statement: another logical
+    /// plan, or other parameters or context to bind. Every plan of a statement answers the same rows,
+    /// so the one that comes back differs only in what it costs.
+    /// </summary>
+    internal async ValueTask<PlanState?> PlanAgainAsync(CancellationToken ct)
+    {
+        var current = Volatile.Read(ref _state);
+        var result = await _engine
+            .PlanAsync(_prepared.Sql, _options, Context, _hints, ct)
+            .ConfigureAwait(false);
+        if (result.LogicalDigest != LogicalDigest
+            || !RequiredNames(result.Plan, Context).SequenceEqual(RequiredContext, StringComparer.Ordinal))
+        {
+            _notTheSame = true;
+            return null;
+        }
+
+        // The extension's check, as at prepare; a refusal keeps the plan this statement has, and a
+        // later run, on other numbers, may bring one it takes.
+        _checkPlan?.Invoke(result);
+
+        var compiled = await _engine.CompileAsync(result.Plan, _options, Context, ct).ConfigureAwait(false);
+        if (!compiled.ParameterTypes.SequenceEqual(current.Compiled.ParameterTypes))
+        {
+            _notTheSame = true;
+            return null;
+        }
+
+        if (_decorateSchema is { } decorate)
+        {
+            var decorated = decorate(compiled.OutputSchema);
+            if (!ReferenceEquals(decorated, compiled.OutputSchema))
+            {
+                compiled = compiled.WithOutputSchema(decorated);
+            }
+        }
+
+        var names = result.RedactedSql is null ? null : _rewriter.SlotNames(_prepared);
+        return PlanState.Of(_engine, result, compiled, Key(_prepareShape), _prepared, names);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="next"/> from now on, when it is still current: a refresh may have changed
+    /// a table it reads since it was planned, and then neither plan runs. Called under the refresh
+    /// lock, at the refresh that takes a background run's work in. An execution already running keeps
+    /// the plan it read when it began.
+    /// </summary>
+    internal bool Adopt(PlanState next)
+    {
+        if (!_engine.IsCurrent(next.Plan, next.TablesRead))
+        {
+            return false;
+        }
+
+        Volatile.Write(ref _state, next);
+        return true;
     }
 
     /// <summary>The known row counts of <paramref name="tables"/> in <paramref name="catalog"/>.</summary>
@@ -626,7 +721,9 @@ public sealed class PreparedQuery
         var shape = ParameterBinder.ShapeOf(Parameters, values);
         var key = Key(shape);
 
-        if (!_shapes.TryGetValue(key, out var plan))
+        // One read: this execution runs the plan it finds here, whatever swaps in while it runs.
+        var state = Volatile.Read(ref _state);
+        if (!state.Shapes.TryGetValue(key, out var plan))
         {
             var rendered = _rewriter.Render(shape);
             var result =
@@ -641,12 +738,12 @@ public sealed class PreparedQuery
                 }
             }
 
-            plan = _shapes.GetOrAdd(key, new ShapePlan(compiled, rendered));
+            plan = state.Shapes.GetOrAdd(key, new ShapePlan(compiled, rendered));
         }
 
         if (_options.RequireCurrentCatalog)
         {
-            _engine.RequireCurrentCatalog(plan.Compiled.Plan, _tablesRead);
+            _engine.RequireCurrentCatalog(plan.Compiled.Plan, state.TablesRead);
         }
 
         // On an engine that names a clock, a query that reads the time reads the clock, which must be
@@ -856,7 +953,7 @@ public sealed class PreparedQuery
         }
 
         await using var execution = await ExecuteAsync([], arena: null, ct).ConfigureAwait(false);
-        return _shapes[Key(ParameterBinder.ShapeOf(Parameters, []))].Compiled;
+        return Volatile.Read(ref _state).Shapes[Key(ParameterBinder.ShapeOf(Parameters, []))].Compiled;
     }
 
     /// <summary>
@@ -882,7 +979,102 @@ public sealed class PreparedQuery
     private static string Key(IReadOnlyList<int> shape) =>
         shape.Count == 0 ? string.Empty : string.Join(',', shape);
 
-    private sealed record ShapePlan(CompiledPlan Compiled, RenderedStatement Rendered);
+    internal sealed record ShapePlan(CompiledPlan Compiled, RenderedStatement Rendered);
+
+    /// <summary>
+    /// One plan of this statement and what belongs to it: the plan, its text and its planning stats,
+    /// the compiled plan of every binding shape planned under it, the tables it reads, and the row
+    /// counts it was made on (D342).
+    /// </summary>
+    internal sealed class PlanState
+    {
+        private PlanState(
+            Plan plan,
+            string? planText,
+            PlanningStats stats,
+            PlanningState planningState,
+            CompiledPlan compiled,
+            ConcurrentDictionary<string, ShapePlan> shapes,
+            IReadOnlyList<TableKey>? tablesRead,
+            (TableKey Table, long Rows)[] plannedRows)
+        {
+            Plan = plan;
+            PlanText = planText;
+            Stats = stats;
+            PlanningState = planningState;
+            Compiled = compiled;
+            Shapes = shapes;
+            TablesRead = tablesRead;
+            PlannedRows = plannedRows;
+        }
+
+        public Plan Plan { get; }
+
+        public string? PlanText { get; }
+
+        public PlanningStats Stats { get; }
+
+        public PlanningState PlanningState { get; }
+
+        /// <summary>The compiled plan of the shape prepared at prepare time.</summary>
+        public CompiledPlan Compiled { get; }
+
+        /// <summary>Every binding shape planned under this plan, by its key.</summary>
+        public ConcurrentDictionary<string, ShapePlan> Shapes { get; }
+
+        /// <summary>
+        /// The tables this plan reads, collected once (D271 (d)): staleness is per table, and asking
+        /// the plan again on every execution would put a tree walk on the execution path.
+        /// </summary>
+        public IReadOnlyList<TableKey>? TablesRead { get; }
+
+        /// <summary>
+        /// The row count of each table this plan reads, as the numbers it was made on gave it, for the
+        /// tables whose count was known (D342): what drift is judged against.
+        /// </summary>
+        public (TableKey Table, long Rows)[] PlannedRows { get; }
+
+        /// <summary>
+        /// The state of a plan the engine returned: <paramref name="names"/>, when the prepare asked
+        /// for a redaction and named its parameters, go back where the rewrite put a <c>?</c> in the
+        /// plan text, whose dynamic parameters read <c>?0</c>, <c>?1</c>, … (D287).
+        /// </summary>
+        public static PlanState Of(
+            ChalkEngine engine,
+            PlanResult result,
+            CompiledPlan compiled,
+            string key,
+            RenderedStatement rendered,
+            IReadOnlyList<string>? names)
+        {
+            var tablesRead = ChalkEngine.TablesRead(result.Plan);
+            var shapes = new ConcurrentDictionary<string, ShapePlan>(StringComparer.Ordinal)
+            {
+                [key] = new ShapePlan(compiled, rendered),
+            };
+            return new PlanState(
+                result.Plan,
+                names is null || result.PlanText is null
+                    ? result.PlanText
+                    : ParameterNames.Substitute(result.PlanText, names, indexed: true),
+                result.Stats,
+                result.PlanningState,
+                compiled,
+                shapes,
+                tablesRead,
+                PlannedRows(result.PlannedOn ?? engine.Catalog, tablesRead));
+        }
+
+        /// <summary>The same plan with the prepare shape's compiled plan replaced, as a decoration does.</summary>
+        public PlanState With(CompiledPlan compiled, string key, RenderedStatement rendered)
+        {
+            var shapes = new ConcurrentDictionary<string, ShapePlan>(Shapes, StringComparer.Ordinal)
+            {
+                [key] = new ShapePlan(compiled, rendered),
+            };
+            return new PlanState(Plan, PlanText, Stats, PlanningState, compiled, shapes, TablesRead, PlannedRows);
+        }
+    }
 }
 
 /// <summary>One output column of a prepared statement.</summary>
