@@ -36,6 +36,12 @@ internal sealed class ReadState : IMaintainedState
     /// </summary>
     public bool Rewritten { get; set; }
 
+    /// <summary>
+    /// Whether a rewrite gives the new rows only, without every old row out: set when what reads the
+    /// table builds its state again from them, as an aggregate over the table does (design 68 §14).
+    /// </summary>
+    public bool NewRowsOnRewrite { get; set; }
+
     /// <summary>The state the last update read, or null before the first.</summary>
     public object? Held => _held;
 
@@ -140,9 +146,12 @@ internal sealed class ReadChanges : OperatorBase
                 _state.Rewritten = true;
                 if (!_appendsOnly)
                 {
-                    await foreach (var batch in Scan(held, 0, -1, ct))
+                    if (!_state.NewRowsOnRewrite)
                     {
-                        yield return batch;
+                        await foreach (var batch in Scan(held, 0, -1, ct))
+                        {
+                            yield return batch;
+                        }
                     }
 
                     await foreach (var batch in Scan(now, 0, +1, ct))

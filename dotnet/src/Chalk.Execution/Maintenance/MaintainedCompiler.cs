@@ -479,10 +479,19 @@ internal sealed class MaintainedCompiler
         var state = new AggregateState(Types(aggregate.Input.RowType), Types(rel.RowType), aggregate, _settings.BatchSize);
         States.Add(state);
         var input = _compilation.Node(Rewrite(aggregate.Input, path), path);
+
+        // Over a table read through filters and projections that do not read the clock, a rewrite of
+        // the table gives the aggregate the new rows only, and it builds its groups again from them
+        // rather than taking every old row out one by one (design 68 §14).
+        var rebuildsOn = TableUnder(aggregate.Input) is { } read && !ReadsClock(aggregate.Input)
+            && _reads.TryGetValue(read, out var whole)
+                ? whole
+                : null;
+        rebuildsOn?.NewRowsOnRewrite = true;
         var weighted = Weighted(rel.RowType);
         var schema = ArrowTypeMapping.ToArrowSchema(weighted);
         var types = Types(weighted);
-        return Substituted(weighted, context => new AggregateChanges(context, path, schema, types, state, input(context)));
+        return Substituted(weighted, context => new AggregateChanges(context, path, schema, types, state, input(context), rebuildsOn));
     }
 
     private Rel Shared(Rel rel, string path)

@@ -273,6 +273,7 @@ internal sealed class AggregateChanges : MaintainedOperator
 {
     private readonly AggregateState _state;
     private readonly IBatchOperator _input;
+    private readonly ReadState? _rebuildsOn;
     private readonly byte[] _scratch = new byte[16];
     private readonly byte[] _keyLane = new byte[16];
     private Vector[] _arguments = [];
@@ -283,11 +284,13 @@ internal sealed class AggregateChanges : MaintainedOperator
         ArrowSchema schema,
         IReadOnlyList<ChalkType> types,
         AggregateState state,
-        IBatchOperator input)
+        IBatchOperator input,
+        ReadState? rebuildsOn = null)
         : base(context, path, schema, types)
     {
         _state = state;
         _input = input;
+        _rebuildsOn = rebuildsOn;
     }
 
     protected override ValueTask DisposeCoreAsync() => _input.DisposeAsync();
@@ -297,6 +300,11 @@ internal sealed class AggregateChanges : MaintainedOperator
         var state = _state;
         await DrainAsync(_input, state.Changes, ct).ConfigureAwait(false);
         state.Output.Clear();
+        if (_rebuildsOn is { Rewritten: true })
+        {
+            Rebuild();
+        }
+
         var changes = state.Changes;
         var columns = changes.Columns;
         var measures = state.Measures;
@@ -423,6 +431,41 @@ internal sealed class AggregateChanges : MaintainedOperator
 
         state.Started = true;
         return state.Output;
+    }
+
+    /// <summary>
+    /// The table under the aggregate was rewritten, and its read gives only the new rows (design 68 §14):
+    /// every group's row goes out, and the groups are built again from the new rows as at a first
+    /// update. A group whose row comes back the same is taken out and put in again, which what reads
+    /// the aggregate adds up to nothing.
+    /// </summary>
+    private void Rebuild()
+    {
+        var state = _state;
+        foreach (var set in state.Sets)
+        {
+            if (set.IsGrandTotal)
+            {
+                if (state.Started)
+                {
+                    WriteRow(set, 0, -1);
+                }
+            }
+            else
+            {
+                for (var entry = 0; entry < set.Groups.Entries; entry++)
+                {
+                    if (set.Groups.IsLive(entry) && set.Counts[set.Groups.Value(entry)] > 0)
+                    {
+                        WriteRow(set, set.Groups.Value(entry), -1);
+                    }
+                }
+            }
+
+            set.Clear();
+        }
+
+        state.Started = false;
     }
 
     /// <summary>
