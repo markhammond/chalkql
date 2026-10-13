@@ -16,7 +16,9 @@ namespace Chalk.Sources.Poco;
 /// first-class SQL table with a real row count, real unique keys, real collations and — from M2 —
 /// real indexes and statistics, which is the whole point of Chalk (rev 3 §6).
 /// </summary>
-public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefreshableSource, IPinnableSource
+public sealed class PocoSource
+    : ISourceRuntime, IColumnarBatchSource, IRefreshableSource, IPinnableSource, IPreparableSource,
+        IDeferredStatisticsSource
 {
     private readonly PocoTableRuntime[] _tables;
     private readonly string _zone;
@@ -222,9 +224,9 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
 
     /// <inheritdoc />
     /// <remarks>
-    /// One refresh says once what each table becomes. A table takes rows given whole or appended, or
-    /// upserts and deletes by key, and beside either an advance of its frontier (D339); a table named
-    /// any other way twice is refused.
+    /// One refresh says once what each table becomes. A table takes rows given whole, appended or
+    /// prepared before the refresh (design 69 §3), or upserts and deletes by key, and beside any of
+    /// them an advance of its frontier (D339); a table named any other way twice is refused.
     /// </remarks>
     public void ValidateRefresh(IReadOnlyList<SourceRefreshEntry> entries)
     {
@@ -248,8 +250,9 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
                     SourceId,
                     entry.Table,
                     "a refresh names this table twice. One transaction says what a table becomes "
-                    + "once: its rows given whole or appended, or upserts and deletes by key, and "
-                    + "beside either one advance of its frontier. Put the rows together and say it once.");
+                    + "once: its rows given whole, appended or prepared before the refresh, or upserts "
+                    + "and deletes by key, and beside any of them one advance of its frontier. Put the "
+                    + "rows together and say it once.");
             }
 
             kinds.Add(entry.Kind);
@@ -319,6 +322,57 @@ public sealed class PocoSource : ISourceRuntime, IColumnarBatchSource, IRefresha
         }
 
         return ValueTask.FromResult<ISourceRefreshCommit>(new PreparedRefresh(prepared));
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Takes neither this source's refresh lock nor the engine's: the build runs beside the table's
+    /// refreshes, and its commit is what checks that the table was not replaced meanwhile.
+    /// </remarks>
+    ValueTask<IPreparedReplacement> IPreparableSource.PrepareReplaceAsync(
+        string table, Type rowType, object rows, int through, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        ct.ThrowIfCancellationRequested();
+
+        var runtime = Require(table);
+        if (rowType != runtime.RowType)
+        {
+            throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
+                SourceId,
+                table,
+                $"the rows are {rowType.Name}, but this table was built over {runtime.RowType.Name}. "
+                + "A replacement replaces a table's rows, not its shape.");
+        }
+
+        return ValueTask.FromResult(runtime.PrepareReplacement(SourceId, rows, through));
+    }
+
+    /// <inheritdoc />
+    IReadOnlyList<DeferredStatistics> IDeferredStatisticsSource.ComputeDeferredStatistics(CancellationToken ct)
+    {
+        var computed = new List<DeferredStatistics>();
+        foreach (var table in _tables)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (table.ComputeDeferredStatistics() is { } statistics)
+            {
+                computed.Add(statistics);
+            }
+        }
+
+        return computed;
+    }
+
+    /// <inheritdoc />
+    void IDeferredStatisticsSource.AdmitStatistics(IReadOnlyList<DeferredStatistics> statistics)
+    {
+        ArgumentNullException.ThrowIfNull(statistics);
+        foreach (var computed in statistics)
+        {
+            Require(computed.Table).AdmitStatistics(computed);
+        }
     }
 
     /// <summary>Every table's new snapshot, built and waiting for the engine to say when.</summary>
@@ -520,6 +574,22 @@ internal abstract class PocoTableRuntime
     /// </summary>
     public abstract IPocoTableCommit PrepareRefresh(string sourceId, IReadOnlyList<SourceRefreshEntry> entries);
 
+    /// <summary>
+    /// Builds a replacement from the host's rewrite of the rows before <paramref name="through"/>,
+    /// beside this table's refreshes, for a later refresh to commit (design 69 §3).
+    /// </summary>
+    public abstract IPreparedReplacement PrepareReplacement(string sourceId, object rows, int through);
+
+    /// <summary>
+    /// Statistics computed now over the snapshot this table serves, and the table described with
+    /// them, when a refresh deferred its statistics and nothing has computed them since (design 69
+    /// §4); null otherwise.
+    /// </summary>
+    public abstract DeferredStatistics? ComputeDeferredStatistics();
+
+    /// <summary>Takes statistics computed in the background, when this table still awaits them.</summary>
+    public abstract void AdmitStatistics(DeferredStatistics statistics);
+
     public abstract TableDescriptor Describe();
 
     public abstract IEnumerable<(string Index, long BytesPerRow)> IndexSizes();
@@ -670,7 +740,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
 
         var next = Carry(_factory.From(collection), StatisticsRefresh.Now);
         var frontier = _changes is { HasTime: true } timed ? Latest(timed, Values(next)) : null;
-        Publish(next);
+        Publish(next, rewrites: true);
         if (_changes is not null)
         {
             _changes.Frontier = frontier;
@@ -710,6 +780,22 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     /// <inheritdoc />
     public override void ValidateRefresh(string sourceId, SourceRefreshEntry entry)
     {
+        if (entry.Kind == SourceRefreshKind.Commit)
+        {
+            if (entry.Rows is not PocoPreparedReplacement<T> prepared || !ReferenceEquals(prepared.Owner, this))
+            {
+                throw new SourceContractException(
+                    ChalkErrorCodes.SourceRefresh,
+                    sourceId,
+                    entry.Table,
+                    "the replacement committed was not prepared for this table.");
+            }
+
+            // Committed or let go already: refused before anything is built.
+            _ = prepared.Snapshot(sourceId);
+            return;
+        }
+
         if (entry.Kind != SourceRefreshKind.Advance && entry.Rows is not IReadOnlyList<T>)
         {
             throw new SourceContractException(
@@ -806,7 +892,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         {
             switch (entry.Kind)
             {
-                case SourceRefreshKind.Replace or SourceRefreshKind.Append: rows = entry; break;
+                case SourceRefreshKind.Replace or SourceRefreshKind.Append or SourceRefreshKind.Commit: rows = entry; break;
                 case SourceRefreshKind.Upsert: upsert = entry; break;
                 case SourceRefreshKind.Delete: delete = entry; break;
                 default: advance = entry; break;
@@ -818,6 +904,8 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         var before = _changes?.Frontier;
         var frontier = before;
         PocoTableSnapshot<T>? next = null;
+        PocoPreparedReplacement<T>? committing = null;
+        var replaces = false;
 
         if (rows is { Kind: SourceRefreshKind.Replace })
         {
@@ -828,6 +916,20 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             }
 
             next = Carry(_factory.From(given), rows.Statistics);
+            replaces = true;
+        }
+        else if (rows is { Kind: SourceRefreshKind.Commit })
+        {
+            committing = (PocoPreparedReplacement<T>)rows.Rows;
+            next = Carry(Rebase(sourceId, committing), rows.Statistics);
+            replaces = true;
+
+            // The rows since the cut were admitted against the frontier as it stands, so a commit
+            // never moves it back; a rewrite with a later time moves it on.
+            if (committing.Frontier is { } rewritten)
+            {
+                frontier = frontier is { } reached ? Math.Max(reached, rewritten) : rewritten;
+            }
         }
         else if (rows is { Kind: SourceRefreshKind.Append })
         {
@@ -851,6 +953,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
                 ? StatisticsRefresh.Now
                 : StatisticsRefresh.Defer;
             next = Carry(_factory.Owned(changed), statistics);
+            replaces = true;
         }
 
         if (advance is not null)
@@ -871,7 +974,102 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             frontier = frontier is { } reached ? Math.Max(reached, to) : to;
         }
 
-        return new PreparedChange(this, next, frontier);
+        return new PreparedChange(this, next, frontier, replaces, committing);
+    }
+
+    /// <inheritdoc />
+    public override IPreparedReplacement PrepareReplacement(string sourceId, object rows, int through)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(through);
+        if (rows is not IReadOnlyList<T> given)
+        {
+            throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
+                sourceId,
+                Name,
+                $"the rows are {rows.GetType().Name}, which is not an IReadOnlyList<{typeof(T).Name}>.");
+        }
+
+        if (_changes is { Kind: PocoChangeKind.Keyed } keyed)
+        {
+            throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
+                sourceId,
+                Name,
+                $"the table declares {keyed.Spelling}, so its rows change by key and not only at its "
+                + "end. A replacement prepared before its refresh takes the rows appended since its "
+                + "cut, and a keyed table has no such rows. Replace it in a refresh instead.");
+        }
+
+        // The cut is judged against one snapshot, and the commit compares that snapshot's rewrite
+        // count with its own table's: equal only when appends alone came between.
+        var current = Current;
+        if (through > current.RowCount)
+        {
+            throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
+                sourceId,
+                Name,
+                $"the replacement rewrites the table's rows before row {through}, and the table holds "
+                + $"{current.RowCount}. The cut counts rows the table already has.");
+        }
+
+        if (!_factory.RandomAccess && through != current.RowCount)
+        {
+            throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
+                sourceId,
+                Name,
+                "the collection was registered as an IReadOnlyCollection<T>, which takes no appends, "
+                + $"so a replacement rewrites all of its rows: the cut is its row count, {current.RowCount}.");
+        }
+
+        var frontier = _changes is { HasTime: true } timed ? Latest(timed, given) : null;
+        return new PocoPreparedReplacement<T>(this, _factory.Prepared(given), through, current.Rewrites, frontier);
+    }
+
+    /// <summary>
+    /// A prepared replacement followed by the rows this table took since its cut (design 69 §3),
+    /// appended to it as an append's rows are. Refused when the table was replaced after the
+    /// replacement was prepared, and when the rows since the cut do not follow the rewrite in the
+    /// table's declared order.
+    /// </summary>
+    private PocoTableSnapshot<T> Rebase(string sourceId, PocoPreparedReplacement<T> prepared)
+    {
+        var snapshot = prepared.Snapshot(sourceId);
+        var current = Current;
+        if (current.Rewrites != prepared.Rewrites || current.RowCount < prepared.Through)
+        {
+            throw new SourceContractException(
+                ChalkErrorCodes.SourceRefresh,
+                sourceId,
+                Name,
+                "the table's rows were replaced after the replacement was prepared, so the rows before "
+                + "its cut are no longer the ones it rewrote. Prepare it again from the rows the table "
+                + "holds now; nothing in the refresh was applied.");
+        }
+
+        var since = current.RowCount - prepared.Through;
+        if (since == 0)
+        {
+            return snapshot;
+        }
+
+        try
+        {
+            return _factory.Appended(snapshot, new PocoRowSlice<T>(current.Rows!, prepared.Through, since));
+        }
+        catch (CatalogVerificationException failure) when (failure.RowIndex == prepared.RowCount)
+        {
+            throw new CatalogVerificationException(
+                Name,
+                failure.Declaration,
+                failure.RowIndex,
+                $"the first row appended since the cut, row {prepared.Through} of the table, comes "
+                + "before the replacement's last row",
+                "A replacement's rows must end where the rows appended after its cut begin; nothing in "
+                + "the refresh was applied.");
+        }
     }
 
     /// <summary>
@@ -1010,10 +1208,10 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     /// </summary>
     private PocoTableSnapshot<T> Carry(PocoTableSnapshot<T> next, StatisticsRefresh statistics)
     {
-        var (carried, computedOver, wasDeferred) = Current.Carryable;
+        var (carried, computedOver, computedOn, wasDeferred) = Current.Carryable;
         if (statistics == StatisticsRefresh.Defer)
         {
-            next.Carry(carried, computedOver, deferred: true);
+            next.Carry(carried, computedOver, computedOn, deferred: true);
             return next;
         }
 
@@ -1026,7 +1224,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             return next;
         }
 
-        next.Carry(carried, computedOver, deferred: false);
+        next.Carry(carried, computedOver, computedOn, deferred: false);
         return next;
     }
 
@@ -1039,20 +1237,31 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         private readonly PocoTableRuntime<T> _table;
         private readonly PocoTableSnapshot<T>? _snapshot;
         private readonly long? _frontier;
+        private readonly bool _replaces;
+        private readonly PocoPreparedReplacement<T>? _committing;
 
-        public PreparedChange(PocoTableRuntime<T> table, PocoTableSnapshot<T>? snapshot, long? frontier)
+        public PreparedChange(
+            PocoTableRuntime<T> table,
+            PocoTableSnapshot<T>? snapshot,
+            long? frontier,
+            bool replaces,
+            PocoPreparedReplacement<T>? committing)
         {
             _table = table;
             _snapshot = snapshot;
             _frontier = frontier;
+            _replaces = replaces;
+            _committing = committing;
         }
 
         public void Commit()
         {
             if (_snapshot is not null)
             {
-                _table.Publish(_snapshot);
+                _table.Publish(_snapshot, _replaces);
             }
+
+            _committing?.Committed();
 
             if (_table._changes is { } changes)
             {
@@ -1066,9 +1275,18 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     /// publish comes first: a reader that arrives between the two takes the new snapshot, and a
     /// reader already on the old one keeps it until it is done.
     /// </summary>
-    public void Publish(PocoTableSnapshot<T> next)
+    /// <param name="next">The snapshot to serve.</param>
+    /// <param name="rewrites">
+    /// Whether <paramref name="next"/> rewrites the table rather than appending to the snapshot it
+    /// replaces, which moves the table's rewrite count on.
+    /// </param>
+    public void Publish(PocoTableSnapshot<T> next, bool rewrites)
     {
         next.OnReleased = Report;
+
+        // Refreshes of a table are serialised, so the snapshot replaced is the one read here.
+        var current = Volatile.Read(ref _snapshot);
+        next.Rewrites = rewrites ? current.Rewrites + 1 : current.Rewrites;
         var previous = Interlocked.Exchange(ref _snapshot, next);
         previous.Retire();
     }
@@ -1146,7 +1364,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         var accessors = new Func<T, object?>[columns.Count];
         for (var i = 0; i < accessors.Length; i++)
         {
-            accessors[i] = _columns[columns[i]].CompileLogicalAccessor();
+            accessors[i] = _columns[columns[i]].LogicalAccessor;
         }
 
         var rows = Current.Values;
@@ -1175,7 +1393,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         var accessors = new Func<T, object?>[key.Columns.Count];
         for (var i = 0; i < accessors.Length; i++)
         {
-            accessors[i] = _columns[key.Columns[i]].CompileLogicalAccessor();
+            accessors[i] = _columns[key.Columns[i]].LogicalAccessor;
         }
 
         var declaration = "foreign key ("
@@ -1234,24 +1452,50 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         var snapshot = Acquire();
         try
         {
-            var statistics = snapshot.Statistics(_columns, _collations, _statisticsPlan);
+            return Describe(snapshot, snapshot.Statistics(_columns, _collations, _statisticsPlan));
+        }
+        finally
+        {
+            snapshot.Release();
+        }
+    }
 
-            return new TableDescriptor
+    private TableDescriptor Describe(PocoTableSnapshot<T> snapshot, ColumnStatistics[] statistics) => new()
+    {
+        Name = Name,
+        Columns = [.. _columns.Select((c, i) => new ColumnDescriptor
+        {
+            Name = c.Name,
+            Type = c.Type,
+            Statistics = statistics[i],
+        })],
+        RowCount = snapshot.RowCount,
+        RowCountKind = RowCountKind.Exact,
+        UniqueKeys = _uniqueKeys,
+        Collations = _collations,
+        Indexes = [.. snapshot.Indexes.Select(i => i.Descriptor)],
+        ForeignKeys = _foreignKeys,
+        Entitlement = _entitlement,
+    };
+
+    /// <inheritdoc />
+    public override DeferredStatistics? ComputeDeferredStatistics()
+    {
+        var snapshot = Acquire();
+        try
+        {
+            if (!snapshot.AwaitsStatistics)
             {
-                Name = Name,
-                Columns = [.. _columns.Select((c, i) => new ColumnDescriptor
-                {
-                    Name = c.Name,
-                    Type = c.Type,
-                    Statistics = statistics[i],
-                })],
+                return null;
+            }
+
+            var statistics = snapshot.ComputeStatistics(_columns, _collations, _statisticsPlan);
+            return new DeferredStatistics
+            {
+                Table = Name,
+                Descriptor = Describe(snapshot, statistics),
+                Statistics = new ComputedStatistics(snapshot.Sequence, statistics),
                 RowCount = snapshot.RowCount,
-                RowCountKind = RowCountKind.Exact,
-                UniqueKeys = _uniqueKeys,
-                Collations = _collations,
-                Indexes = [.. snapshot.Indexes.Select(i => i.Descriptor)],
-                ForeignKeys = _foreignKeys,
-                Entitlement = _entitlement,
             };
         }
         finally
@@ -1259,6 +1503,18 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             snapshot.Release();
         }
     }
+
+    /// <inheritdoc />
+    public override void AdmitStatistics(DeferredStatistics statistics)
+    {
+        if (statistics.Statistics is ComputedStatistics computed)
+        {
+            Current.Admit(computed.Columns, statistics.RowCount, computed.Snapshot);
+        }
+    }
+
+    /// <summary>Statistics a background run computed, and the snapshot they were computed over.</summary>
+    private sealed record ComputedStatistics(long Snapshot, ColumnStatistics[] Columns);
 
     public override IEnumerable<(string Index, long BytesPerRow)> IndexSizes() =>
         Current.Indexes.Select(i => (i.Descriptor.Name, i.BytesPerRow));

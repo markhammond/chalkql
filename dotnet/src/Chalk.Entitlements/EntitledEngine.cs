@@ -132,31 +132,66 @@ public sealed class EntitledQuery
         _options = options;
         _audit = audit;
         Query = prepared;
+        _reported = prepared.Extension<Rpc.EntitlementsReport>();
         Entitlements = Disclosures.Report(prepared);
 
         // The plan against the report (I-IR-E's last clause, §3.10, D201). The core validated
         // everything its own catalog can answer for before it compiled; this is the clause that
         // needs the report, so the package that has the report is the one that asks for it (D213).
-        if (Entitlements.Tables.Count > 0)
-        {
-            Chalk.Ir.PlanValidator.Validate(
-                prepared.Plan,
-                new Chalk.Ir.PlanValidationOptions
-                {
-                    EntitledTables = engine.Engine.EntitledColumnCount,
-                    PopulationAggregates = engine.Engine.IsPopulationAggregate,
-                    ReportedDisclosures = Disclosures.Outcomes(prepared),
-                    ReportedDescriptorHashes = DescriptorHashOf,
-                    NestingLimit = engine.Engine.PlanNestingLimit,
-                });
-        }
+        Validate(prepared.Plan, _reported);
 
-        // `chalk.disclosure` on every field that discloses anything but the value itself, and the
-        // audit event before each execution. Both through the one seam the core keeps for an
-        // extension; a plan with nothing to say leaves the compiler's own schema by reference.
+        // `chalk.disclosure` on every field that discloses anything but the value itself, the audit
+        // event before each execution, and the same check on every plan the statement takes after
+        // this one. All through the one seam the core keeps for an extension; a plan with nothing to
+        // say leaves the compiler's own schema by reference.
         prepared.Decorate(
             schema => Disclosures.Decorate(schema, Entitlements.Columns),
-            audit is null || Entitlements.Tables.Count == 0 ? null : (q, context) => Audit(audit, q, context));
+            audit is null || Entitlements.Tables.Count == 0 ? null : (q, context) => Audit(audit, q, context),
+            Check);
+    }
+
+    /// <summary>The report the planner sent with the plan this statement was prepared with.</summary>
+    private readonly Rpc.EntitlementsReport? _reported;
+
+    /// <summary>
+    /// A plan this statement takes after its prepare, checked as the prepare's was (design 69 §4): one
+    /// for another length of a list parameter, at its first execution, or one a background run made.
+    /// It must come with the report this statement holds, which its labels and its audit describe, and
+    /// keep it. Throws to refuse it: the execution is then refused, or the background plan not taken.
+    /// </summary>
+    private void Check(PlanResult candidate)
+    {
+        var reported = Disclosures.Find<Rpc.EntitlementsReport>(candidate.Extensions);
+        if (Disclosures.Difference(_reported, reported) is { } difference)
+        {
+            throw new Chalk.Ir.InvalidPlanException(
+                ChalkErrorCodes.PlanBreaksEntitlements,
+                "I-IR-E",
+                "plan",
+                $"a plan this statement took after its prepare came with another entitlements report: {difference}");
+        }
+
+        Validate(candidate.Plan, reported);
+    }
+
+    /// <summary>I-IR-E's last clause: <paramref name="plan"/> against the report it came with.</summary>
+    private void Validate(Chalk.Ir.Plan plan, Rpc.EntitlementsReport? reported)
+    {
+        if (Entitlements.Tables.Count == 0)
+        {
+            return;
+        }
+
+        Chalk.Ir.PlanValidator.Validate(
+            plan,
+            new Chalk.Ir.PlanValidationOptions
+            {
+                EntitledTables = _engine.Engine.EntitledColumnCount,
+                PopulationAggregates = _engine.Engine.IsPopulationAggregate,
+                ReportedDisclosures = Disclosures.Outcomes(reported),
+                ReportedDescriptorHashes = DescriptorHashOf,
+                NestingLimit = _engine.Engine.PlanNestingLimit,
+            });
     }
 
     /// <summary>

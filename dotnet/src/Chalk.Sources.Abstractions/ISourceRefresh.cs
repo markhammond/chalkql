@@ -27,6 +27,13 @@ public enum SourceRefreshKind
     /// declares a time takes one.
     /// </summary>
     Advance = 4,
+
+    /// <summary>
+    /// The table takes a replacement prepared before the refresh (design 69 §3): its rows, then the
+    /// rows the table took since the replacement's cut. <see cref="SourceRefreshEntry.Rows"/> carries
+    /// the replacement, and only the source that prepared it takes one.
+    /// </summary>
+    Commit = 5,
 }
 
 /// <summary>

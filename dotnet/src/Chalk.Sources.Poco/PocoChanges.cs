@@ -64,6 +64,7 @@ internal sealed class PocoChangeDeclaration<T>
 internal sealed class PocoChanges<T>
 {
     private readonly Func<T, object?>? _time;
+    private readonly Func<T, long?>? _ticks;
     private readonly Func<T, object?>[] _keys;
 
     public PocoChanges(PocoChangeDeclaration<T> declaration)
@@ -79,6 +80,7 @@ internal sealed class PocoChanges<T>
             var boxed = Expression.Lambda<Func<T, object?>>(
                 Expression.Convert(time.Body, typeof(object)), time.Parameters);
             _time = boxed.Compile();
+            _ticks = CompileTicks(time, TimeType);
         }
 
         _keys = Array.ConvertAll(declaration.Keys, key => key.Compile());
@@ -103,7 +105,37 @@ internal sealed class PocoChanges<T>
     public long? Frontier { get; set; }
 
     /// <summary>A row's time as ticks — UTC ticks for an offset — or null when it has none.</summary>
-    public long? TicksOf(T row) => Ticks(_time!(row));
+    public long? TicksOf(T row) => _ticks!(row);
+
+    /// <summary>
+    /// The time member read as ticks, unboxed (design 69 §5): a refresh reads every row's time to find
+    /// the frontier, and a boxed read made one object per row.
+    /// </summary>
+    private static Func<T, long?> CompileTicks(LambdaExpression time, Type timeType)
+    {
+        var ticks = timeType == typeof(DateTimeOffset) ? nameof(DateTimeOffset.UtcTicks) : nameof(DateTime.Ticks);
+        Expression body;
+        if (Nullable.GetUnderlyingType(time.Body.Type) is not null)
+        {
+            var local = Expression.Variable(time.Body.Type, "t");
+            body = Expression.Block(
+                typeof(long?),
+                new[] { local },
+                Expression.Assign(local, time.Body),
+                Expression.Condition(
+                    Expression.Property(local, nameof(Nullable<DateTime>.HasValue)),
+                    Expression.Convert(
+                        Expression.Property(Expression.Property(local, nameof(Nullable<DateTime>.Value)), ticks),
+                        typeof(long?)),
+                    Expression.Constant(null, typeof(long?))));
+        }
+        else
+        {
+            body = Expression.Convert(Expression.Property(time.Body, ticks), typeof(long?));
+        }
+
+        return Expression.Lambda<Func<T, long?>>(body, time.Parameters).Compile();
+    }
 
     /// <summary>A time of this table's type as ticks, or null when it is not one.</summary>
     public long? Ticks(object? value) => value switch

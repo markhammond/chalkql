@@ -66,7 +66,7 @@ public sealed class ClusteredIndex<T> : IPositionalPocoIndex<T>, IReversiblePoco
     {
         _keys = new PermutationIndex<T>(
             descriptor, rows, keys, collationBacked, table, keyColumnNames, scratch,
-            previous?._keys, appendedFrom);
+            previous?._keys, appendedFrom, [.. descriptor.Columns.Select(c => columns[c])]);
 
         var covered = CoveredColumns(descriptor, columns.Length);
         _copy = previous is not null && appendedFrom > 0 && _keys.ExtendedInOrder

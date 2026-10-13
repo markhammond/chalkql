@@ -1606,3 +1606,15 @@ Chalk.Client.PreparedQuery.LogicalDigest.get -> ulong
 Chalk.Client.Rpc.PlanResponse.LogicalDigest.get -> ulong
 Chalk.Client.Rpc.PlanResponse.LogicalDigest.set -> void
 const Chalk.Client.Rpc.PlanResponse.LogicalDigestFieldNumber = 9 -> int
+Chalk.Client.ChalkEngine.PrepareReplaceAsync<T>(Chalk.Sources.ISourceRuntime! source, string! table, System.Collections.Generic.IReadOnlyList<T>! rows, int through, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PreparedReplacement!>
+Chalk.Client.ChalkEngine.PrepareReplaceAsync<T>(Chalk.Sources.ITableTarget<T>! table, System.Collections.Generic.IReadOnlyList<T>! rows, int through, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PreparedReplacement!>
+Chalk.Client.PreparedReplacement
+Chalk.Client.PreparedReplacement.Dispose() -> void
+Chalk.Client.PreparedReplacement.Pending.get -> bool
+Chalk.Client.PreparedReplacement.RowCount.get -> int
+Chalk.Client.PreparedReplacement.Source.get -> Chalk.Sources.ISourceRuntime!
+Chalk.Client.PreparedReplacement.Table.get -> string!
+Chalk.Client.PreparedReplacement.Through.get -> int
+Chalk.Client.RefreshBuilder.Commit(Chalk.Client.PreparedReplacement! prepared) -> Chalk.Client.RefreshBuilder!
+override Chalk.Client.PreparedReplacement.ToString() -> string!
+Chalk.Client.RefreshBuilder.DeferPlanning() -> Chalk.Client.RefreshBuilder!

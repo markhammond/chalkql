@@ -16,6 +16,12 @@ internal delegate void PocoChunkLoop<TList, TStorage>(
     TList rows, int start, int count, TStorage[] values, byte[]? valid);
 
 /// <summary>
+/// One column's value of one row, in the column's storage type, or false for NULL. What statistics read
+/// with, so that a value is never boxed to be counted or compared.
+/// </summary>
+internal delegate bool PocoValueReader<in T, TStorage>(T row, out TStorage value);
+
+/// <summary>
 /// The same loop over <c>rows[positions[start + i]]</c> instead of <c>rows[start + i]</c>: what an
 /// index lookup gathers with (M2, §5). Compiled on first use, so a table nobody looks up in pays
 /// nothing for it.
@@ -162,6 +168,43 @@ internal static class PocoChunkCompiler
         }
 
         return Expression.Lambda<Func<T, object?>>(body, binding.Row).Compile();
+    }
+
+    /// <summary>
+    /// The column's value in its storage type, as <see cref="CompileLogicalAccessor{T}"/> gives it but
+    /// unboxed: the same conversion, written to an out parameter, with false for NULL.
+    /// </summary>
+    public static PocoValueReader<T, TStorage> CompileReader<T, TStorage>(PocoValueBinding binding)
+    {
+        var value = Expression.Parameter(typeof(TStorage).MakeByRefType(), "value");
+        Expression body;
+        if (!binding.CanBeNull)
+        {
+            body = Expression.Block(
+                typeof(bool),
+                Expression.Assign(value, binding.ToStorage(binding.Value)),
+                Expression.Constant(true));
+        }
+        else
+        {
+            var local = Expression.Variable(binding.Value.Type, "v");
+            body = Expression.Block(
+                typeof(bool),
+                new[] { local },
+                Expression.Assign(local, binding.Value),
+                Expression.Condition(
+                    HasValue(local),
+                    Expression.Block(
+                        typeof(bool),
+                        Expression.Assign(value, binding.ToStorage(Unwrap(local))),
+                        Expression.Constant(true)),
+                    Expression.Block(
+                        typeof(bool),
+                        Expression.Assign(value, Expression.Default(typeof(TStorage))),
+                        Expression.Constant(false))));
+        }
+
+        return Expression.Lambda<PocoValueReader<T, TStorage>>(body, binding.Row, value).Compile();
     }
 
     private static PocoChunkLoop<TList, TStorage> CompileLoop<TList, TStorage>(

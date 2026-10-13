@@ -61,6 +61,29 @@ internal abstract class PocoColumn<T>
 
     /// <summary>The value this column will emit, boxed. Verification only; see <see cref="PocoChunkCompiler"/>.</summary>
     public abstract Func<T, object?> CompileLogicalAccessor();
+
+    private Func<T, object?>? _logicalAccessor;
+    private PocoStatisticsColumn<T>? _statistics;
+
+    /// <summary><see cref="CompileLogicalAccessor"/>, compiled once for the column's life.</summary>
+    public Func<T, object?> LogicalAccessor => _logicalAccessor ??= CompileLogicalAccessor();
+
+    /// <summary>
+    /// How this column's statistics are gathered, compiled once (design 69 §5): through a typed reader
+    /// where the column has one, and boxed otherwise.
+    /// </summary>
+    public PocoStatisticsColumn<T> Statistics => _statistics ??=
+        CompileStatistics()
+        ?? new PocoBoxedStatisticsColumn<T>(LogicalAccessor, ordered: Type.Kind != Chalk.Ir.TypeKind.List);
+
+    /// <summary>A typed statistics reader, or null for a column whose values statistics read boxed.</summary>
+    protected virtual PocoStatisticsColumn<T>? CompileStatistics() => null;
+
+    /// <summary>
+    /// The column's value read unboxed, when <typeparamref name="TValue"/> is its storage type, or null
+    /// (design 69 §5). What an index's keys are materialised with.
+    /// </summary>
+    public PocoValueReader<T, TValue>? Reader<TValue>() => (Statistics as PocoStatisticsColumn<T, TValue>)?.Read;
 }
 
 /// <summary>

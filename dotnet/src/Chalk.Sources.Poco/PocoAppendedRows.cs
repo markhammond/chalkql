@@ -64,6 +64,19 @@ internal sealed class PocoAppendedRows<T> : IReadOnlyList<T>
         return new PocoAppendedRows<T>(buffer, wanted);
     }
 
+    /// <summary>
+    /// <paramref name="rows"/> copied into an array Chalk owns, with room for as many again: a
+    /// replacement prepared before its refresh (design 69 §3). Its commit writes the rows appended
+    /// since its cut into the room, rather than copying the replacement again under the lock.
+    /// </summary>
+    public static PocoAppendedRows<T> Own(IReadOnlyList<T> rows)
+    {
+        var count = rows.Count;
+        var buffer = new T[Math.Max(4, (int)Math.Min(Array.MaxLength, 2L * count))];
+        Copy(rows, count, buffer);
+        return new PocoAppendedRows<T>(buffer, count);
+    }
+
     public IEnumerator<T> GetEnumerator()
     {
         for (var i = 0; i < Count; i++)
@@ -117,4 +130,38 @@ internal sealed class PocoAppendedRows<T> : IReadOnlyList<T>
                 return;
         }
     }
+}
+
+/// <summary>
+/// Rows <c>[from, from + count)</c> of a table's rows, read in place: the rows the table took since a
+/// prepared replacement's cut, which the replacement's commit appends to it (design 69 §3).
+/// </summary>
+internal sealed class PocoRowSlice<T> : IReadOnlyList<T>
+{
+    private readonly IReadOnlyList<T> _rows;
+    private readonly int _from;
+
+    public PocoRowSlice(IReadOnlyList<T> rows, int from, int count)
+    {
+        _rows = rows;
+        _from = from;
+        Count = count;
+    }
+
+    public int Count { get; }
+
+    public T this[int index] =>
+        (uint)index < (uint)Count
+            ? _rows[_from + index]
+            : throw new ArgumentOutOfRangeException(nameof(index), index, "row is outside this slice");
+
+    public IEnumerator<T> GetEnumerator()
+    {
+        for (var i = 0; i < Count; i++)
+        {
+            yield return _rows[_from + i];
+        }
+    }
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

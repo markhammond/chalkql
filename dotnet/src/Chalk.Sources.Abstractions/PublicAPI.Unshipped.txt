@@ -567,5 +567,6 @@ static Chalk.Sources.ArenaHandle.operator ==(Chalk.Sources.ArenaHandle left, Cha
 Chalk.Sources.SourceRefreshEntry.Frontier.get -> object?
 Chalk.Sources.SourceRefreshEntry.Frontier.init -> void
 Chalk.Sources.SourceRefreshKind.Advance = 4 -> Chalk.Sources.SourceRefreshKind
+Chalk.Sources.SourceRefreshKind.Commit = 5 -> Chalk.Sources.SourceRefreshKind
 Chalk.Sources.SourceRefreshKind.Delete = 3 -> Chalk.Sources.SourceRefreshKind
 Chalk.Sources.SourceRefreshKind.Upsert = 2 -> Chalk.Sources.SourceRefreshKind

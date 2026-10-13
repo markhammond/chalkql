@@ -20,7 +20,7 @@ namespace Chalk.Sources.Poco;
 /// A host-supplied <see cref="IPocoIndex{T}"/> registered as an instance is carried into every
 /// snapshot unchanged, so the structure behind it must not change while any snapshot built over it
 /// may still be read. One registered as a factory is made here, once per snapshot, over the
-/// collection that snapshot is built from — under the same gate, off the execution path — and each
+/// collection that snapshot is built from — one at a time, off the execution path — and each
 /// product is checked against the declaration the catalog carries (F110): a snapshot then owns its
 /// index the way it owns its columns, and a host replaces both by handing a new collection to a
 /// refresh.
@@ -34,6 +34,19 @@ internal sealed class PocoSnapshotFactory<T>
     /// source; this is the belt to that braces.
     /// </summary>
     private readonly Lock _gate = new();
+
+    /// <summary>
+    /// A replacement prepared before its refresh (design 69 §3) builds with scratch of its own, under
+    /// a gate of its own, so that the table's refreshes never wait for it.
+    /// </summary>
+    private readonly Lock _preparing = new();
+    private PermutationIndexScratch? _preparingScratch;
+
+    /// <summary>
+    /// A host's index factory is called one snapshot at a time, as it was before a replacement could
+    /// be prepared beside a refresh.
+    /// </summary>
+    private readonly Lock _hostGate = new();
 
     private readonly string _table;
     private readonly PocoRows<T> _registration;
@@ -109,39 +122,68 @@ internal sealed class PocoSnapshotFactory<T>
     public PocoTableSnapshot<T> Owned(IReadOnlyList<T> rows) =>
         Build(rows, hostCollection: null, rows, previous: null);
 
+    /// <summary>
+    /// A replacement prepared before its refresh (design 69 §3): a snapshot over a copy of
+    /// <paramref name="rows"/> in an array Chalk owns, built beside the table's refreshes rather than
+    /// after them. The host's list is not held afterwards and is never reported released, as an
+    /// append's rows are not.
+    /// </summary>
+    public PocoTableSnapshot<T> Prepared(IReadOnlyList<T> rows)
+    {
+        var owned = PocoAppendedRows<T>.Own(rows);
+        lock (_preparing)
+        {
+            _preparingScratch ??= new PermutationIndexScratch();
+            return Build(owned, hostCollection: null, RandomAccess ? owned : null, previous: null, _preparingScratch);
+        }
+    }
+
     private PocoTableSnapshot<T> Build(
         IReadOnlyCollection<T> values,
         object? hostCollection,
         IReadOnlyList<T>? rows,
         PocoTableSnapshot<T>? previous)
     {
+        lock (_gate)
+        {
+            return Build(values, hostCollection, rows, previous, _scratch);
+        }
+    }
+
+    private PocoTableSnapshot<T> Build(
+        IReadOnlyCollection<T> values,
+        object? hostCollection,
+        IReadOnlyList<T>? rows,
+        PocoTableSnapshot<T>? previous,
+        PermutationIndexScratch scratch)
+    {
         // A collection that only enumerates has no positions, so it declares no collation and no
         // built-in index (§1); the one materialisation here is for verification, and it is dropped
         // as soon as the snapshot is built.
         var indexed = rows ?? [.. values];
 
-        lock (_gate)
+        var appendedFrom = previous?.RowCount ?? 0;
+        var indexes = new IPocoIndex<T>[_indexes.Length + _hostIndexes.Length];
+        for (var i = 0; i < _indexes.Length; i++)
         {
-            var appendedFrom = previous?.RowCount ?? 0;
-            var indexes = new IPocoIndex<T>[_indexes.Length + _hostIndexes.Length];
-            for (var i = 0; i < _indexes.Length; i++)
-            {
-                indexes[i] = _indexes[i].Build(
-                    _table, indexed, _columns, _scratch, previous?.Indexes[i], appendedFrom);
-            }
+            indexes[i] = _indexes[i].Build(
+                _table, indexed, _columns, scratch, previous?.Indexes[i], appendedFrom);
+        }
 
-            for (var i = 0; i < _hostIndexes.Length; i++)
+        for (var i = 0; i < _hostIndexes.Length; i++)
+        {
+            lock (_hostGate)
             {
                 indexes[_indexes.Length + i] = _hostIndexes[i].Make(_table, values);
             }
-
-            if (_verify)
-            {
-                Verify(indexed, appendedFrom);
-            }
-
-            return new PocoTableSnapshot<T>(values, rows, indexes, hostCollection);
         }
+
+        if (_verify)
+        {
+            Verify(indexed, appendedFrom);
+        }
+
+        return new PocoTableSnapshot<T>(values, rows, indexes, hostCollection);
     }
 
     /// <summary>
@@ -156,7 +198,7 @@ internal sealed class PocoSnapshotFactory<T>
         {
             if (!accessors.TryGetValue(column, out var accessor))
             {
-                accessor = _columns[column].CompileLogicalAccessor();
+                accessor = _columns[column].LogicalAccessor;
                 accessors[column] = accessor;
             }
 
@@ -172,7 +214,7 @@ internal sealed class PocoSnapshotFactory<T>
                 _table,
                 rows,
                 collation.Keys
-                    .Select(k => (_columns[k.Column].Name, k.Direction, Accessor(k.Column)))
+                    .Select(k => (_columns[k.Column].Name, k.Direction, _columns[k.Column].Statistics))
                     .ToArray(),
                 Math.Max(1, appendedFrom));
         }
@@ -216,7 +258,13 @@ internal sealed class PocoIndexPlan<T>
                 previous as ClusteredIndex<T>, appendedFrom)
             : new PermutationIndex<T>(
                 Descriptor, rows, Accessors, CollationBacked, table, KeyColumnNames, scratch,
-                previous as PermutationIndex<T>, appendedFrom);
+                previous as PermutationIndex<T>, appendedFrom, KeyColumns(columns));
+
+    private PocoColumn<T>[]? _keyColumns;
+
+    /// <summary>The key columns, so that the index reads their values unboxed (design 69 §5).</summary>
+    public PocoColumn<T>[] KeyColumns(PocoColumn<T>[] columns) =>
+        _keyColumns ??= [.. Descriptor.Columns.Select(c => columns[c])];
 }
 
 /// <summary>

@@ -509,9 +509,12 @@ a table or index it does not hold.
 ### SourceRefresh
 
 A refresh does not fit its source: it names a table twice, carries rows of another type, changes
-the row shape, or comes from an editor that returned nothing.
+the row shape, or comes from an editor that returned nothing. A prepared replacement is refused
+here too: for a keyed table, for a cut past the table's rows, once it has been committed or
+disposed, and at its commit when the table was replaced after it was prepared.
 
-**What to do:** Correct the refresh.
+**What to do:** Correct the refresh. A replacement refused at its commit is prepared again from the
+rows the table holds now.
 
 ### DeclarationNotHeld
 
@@ -659,10 +662,12 @@ had got.
 ### PlanBreaksEntitlements
 
 The client checked a plan against the catalog's own entitlements before running it and found a
-read or a disclosure that contradicts them. The plan does not run.
+read or a disclosure that contradicts them. The plan does not run. The same code refuses a plan a
+statement took after its prepare, for another length of a list parameter, that came with another
+entitlements report than the statement's.
 
 **What to do:** Report it with the statement: the planner returned a plan that breaks the
-policy.
+policy, or a report that differs for the same statement.
 
 ### Internal
 

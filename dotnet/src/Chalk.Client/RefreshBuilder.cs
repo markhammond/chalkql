@@ -28,6 +28,7 @@ public sealed class RefreshBuilder
     private readonly List<IRefreshTarget> _scopes = [];
     private long? _version;
     private DateTimeOffset? _clock;
+    private bool _deferPlanning;
 
     internal RefreshBuilder()
     {
@@ -129,6 +130,39 @@ public sealed class RefreshBuilder
         Add(table, SourceRefreshKind.Append, rows, statistics);
 
     /// <summary>
+    /// The table takes a replacement prepared before this refresh (design 69 §3): the replacement's
+    /// rows, then the rows the table took since its cut, published in this refresh's epoch.
+    /// </summary>
+    /// <remarks>
+    /// Under the lock this costs what an append of the rows since the cut costs. It is refused when the
+    /// table was replaced after the replacement was prepared, and when the rows since the cut do not
+    /// follow the replacement in the table's declared order; nothing in the refresh is then applied.
+    /// </remarks>
+    /// <param name="prepared">What <c>ChalkEngine.PrepareReplaceAsync</c> returned, not yet committed.</param>
+    public RefreshBuilder Commit(PreparedReplacement prepared)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
+        if (!prepared.Pending)
+        {
+            throw new InvalidOperationException(
+                $"the replacement for '{prepared.Table}' has already been committed or disposed. Each "
+                + "one is committed once; prepare another for the next.");
+        }
+
+        _entries.Add(new RefreshEntry(
+            prepared.Source,
+            new SourceRefreshEntry
+            {
+                Table = prepared.Table,
+                Kind = SourceRefreshKind.Commit,
+                RowType = prepared.Prepared.RowType,
+                Rows = prepared.Prepared,
+            }));
+
+        return this;
+    }
+
+    /// <summary>
     /// Each row replaces the row with its key, or is added where the table holds none (D339,
     /// <c>docs/design/64-incremental-views.md</c> §2). Only a table that declares <c>Keyed(…)</c>
     /// takes one; a key given twice refuses the refresh, naming both rows.
@@ -227,6 +261,39 @@ public sealed class RefreshBuilder
         return this;
     }
 
+    /// <summary>
+    /// Leaves this refresh's statistics and plans to the background (design 69 §4): the rows are
+    /// published now, and the statistics and plans follow at a later refresh.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Under the refresh lock, the tables this refresh changes keep the statistics they had, with
+    /// their row counts exact, and nothing is sent to the planner. After it, one run in the
+    /// background computes their statistics, sends them to the planner, and plans again each statement
+    /// whose tables' rows have moved twofold since it was planned: a standing view's, and every
+    /// prepared statement this engine made that is still held. One run at a time: a refresh that
+    /// defers while one is running asks for another, over whatever is published when it starts.
+    /// </para>
+    /// <para>
+    /// What the run produced takes effect at the next refresh, deferred or not, under its lock: the
+    /// statistics enter the catalog and the plans swap in. A prepared statement then runs its new plan,
+    /// and reports its <see cref="PreparedQuery.PlanDigest"/> and plan text; its
+    /// <see cref="PreparedQuery.LogicalDigest"/> is the same, and so are its results. An execution
+    /// already running keeps the plan it started with. A statement prepared through an extension
+    /// takes a new plan only when the extension checks it, as entitlements do: the new plan must pass
+    /// the checks the first one passed and come with the same report.
+    /// </para>
+    /// <para>
+    /// A refresh that defers its planning re-reads nothing: a scope re-describes its tables with
+    /// their statistics now, which is the opposite request, and is refused beside this.
+    /// </para>
+    /// </remarks>
+    public RefreshBuilder DeferPlanning()
+    {
+        _deferPlanning = true;
+        return this;
+    }
+
     private RefreshBuilder AddAdvance(ISourceRuntime source, string table, object time)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -289,6 +356,9 @@ public sealed class RefreshBuilder
 
     /// <summary>Where this refresh moves the clock to, if anywhere (D339).</summary>
     internal DateTimeOffset? ClockGiven => _clock;
+
+    /// <summary>Whether this refresh leaves its statistics and plans to the background (design 69 §4).</summary>
+    internal bool PlanningDeferred => _deferPlanning;
 
     /// <summary>What this transaction re-reads, in the order it was written (D271 (f)).</summary>
     internal IReadOnlyList<IRefreshTarget> Scopes => _scopes;
