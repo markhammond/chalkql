@@ -1520,10 +1520,11 @@ cursor and gets the latest row of each key that changed since it last read — n
 change — and a key the answer no longer has as a delete. Views live in `Chalk.Incremental`, and the
 tutorial's chapter 19 walks through one.
 
-> **As of writing, only the delivery is incremental.** Each update runs the statement in full and
-> compares the result with the rows the view holds. Computing only what changed, in the manner of
-> Differential Dataflow, is aspirational: the API leaves room for it, so a host would not change,
-> but it is not built.
+A view computes an update one of two ways, which `ViewOptions.Maintenance` chooses. By default
+each update runs the statement in full and compares the result with the rows the view holds. With
+`ViewMaintenance.Incremental`, each update computes only what changed since the last: see
+[Incremental maintenance](#incremental-maintenance). Either way, a reader is sent only the keys that
+changed.
 
 ### Inputs that say how they change
 
@@ -1647,6 +1648,53 @@ await view.UpdateAsync(); // reads instruments again, and replays what else it r
   filters what the view kept. The clock's parameter can be pushed, and a read compared with it is
   read again when the clock moves.
 
+### Incremental maintenance
+
+A view's update costs what its statement costs, however little changed — unless the view asks for
+incremental maintenance:
+
+```csharp
+await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKey, Cell>
+{
+    Key = ["row_key", "column_key"],
+    LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
+    Exactness = ViewExactness.EqualUpToRounding,   // the statement sums DOUBLE
+    Maintenance = ViewMaintenance.Incremental,
+    Map = Cells.Map,
+});
+```
+
+The view keeps the statement's own plan and runs it on **changes**: the rows each refresh added or
+took out. Filters, projections and `UNION ALL` run on the changes as they would on the rows. Joins,
+as-of joins and aggregates keep state between updates — a join both its sides, an as-of join its
+left rows and its right rows by key, an aggregate its groups — so an update reads no table whole.
+
+- **What a table gives.** The rows an append added since the view's last update. After any other
+  change — a `Replace`, an upsert, a delete — every old row out and every new row in, which costs
+  about what a recompute does, in that update only.
+- **The clock.** A filter or a projection that reads the clock runs on its changes while the clock
+  stands, and on every row it holds when the clock moves. A part of the statement that reads no table
+  at all, such as the days a report is computed for, is computed whole when the clock moves.
+- **Exact sums.** A `DOUBLE` or `REAL` sum is kept exactly and rounded once when read: it is the
+  correctly rounded sum of the group's rows, whatever order they arrived and left in, so it never
+  drifts. A recompute adds in input order, so the two may differ in the last bits, which is what
+  `EqualUpToRounding` admits. Integer and `DECIMAL` sums are exact either way.
+- **Ties** break as the executor breaks them: an as-of join's right rows keep their places in their
+  table.
+- **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's
+  `StateBudget`: a budget tuned for a recompute may need raising. The first update computes
+  everything, and takes longer than a recompute.
+- **A failed update** — a fault, a cancellation, the budget — leaves the view at the epoch it held.
+  The next computes the statement from nothing, and a reader is sent only the keys that differ from
+  what it holds.
+- **What is not maintained.** A statement with any of these is refused when the view is made, with
+  `UnsupportedInView`, naming the operator and where it is in the plan: window functions; `LIMIT` and
+  `FETCH`; set operations but `UNION ALL`; right, full, semi and anti joins; `DISTINCT`, ordered,
+  holistic and host aggregates; an as-of join whose right input is not a table read through filters
+  and projections; an index lookup in place of a read; the clock in a join's condition; a source
+  outside the engine's epochs; a `LIST`, composite or `BINARY` value in what an operator keeps; and
+  the reference executor. A view that recomputes takes all of them.
+
 ### What a view refuses
 
 A view's rows are exactly what its statement returns at each epoch, so it refuses, when it is made,
@@ -1661,10 +1709,12 @@ what would make that untrue or unstable:
 | `ORDER BY` without `LIMIT`; a `LIMIT` not ordered by the key | `UnsupportedInView` | drop it, or order by every key column |
 | a source over a database, without the opt-in | `SourceOutsideEpochs` | `DatabaseReads = WhenRefreshed`, or load it into an in-process table |
 | with it, a database read the rest of the statement binds: a lookup, broadcast or adaptive join | `UnsupportedInView` | let the join be local |
+| under `Maintenance = Incremental`, what incremental maintenance does not keep | `UnsupportedInView` | `ViewMaintenance.Recompute` |
 
 A key the result gives twice faults the view with `DeclarationNotHeld`, naming the key, until the
-view is disposed. A view's rows, with what it keeps of its databases, past its `StateBudget` fail
-the update with `MemoryBudgetExceeded`, and the view keeps the epoch it held.
+view is disposed. A view's rows, with what it keeps of its databases or by incremental
+maintenance, past its `StateBudget` fail the update with `MemoryBudgetExceeded`, and the view keeps
+the epoch it held.
 
 Not in this release: a view through `EntitledEngine`, reading a view as of an earlier epoch, and a
 source that another engine also refreshes, whose changes a view sees only at its next update.

@@ -4,10 +4,10 @@ A standing view is a statement kept current as one row per key. A reader drains 
 gets the latest row of each key that changed since, never a queue of every change. Deletes arrive as
 deletes, and a reader that falls too far behind gets the whole result again, marked as a reset.
 
-> **As of writing, only the delivery is incremental.** Each update recomputes the statement in full
-> and compares the result with the rows the view already holds. Support for computing only what
-> changed, in the manner of Differential Dataflow, is aspirational: the API is shaped so that it could
-> be added without changing anything a host writes, but it is not built.
+By default each update recomputes the statement in full and compares the result with the rows the
+view already holds. A view made with `Maintenance = ViewMaintenance.Incremental` computes only what
+changed instead: its statement's plan runs on the changes to its tables, and its joins, as-of joins
+and aggregates keep state between updates (see [Incremental maintenance](#incremental-maintenance)).
 
 The view keeps the rows the host maps them to, so a drain copies the host's own structs into the
 host's own sink, and keeps a checksum of them as they change.
@@ -92,6 +92,32 @@ So a view refuses, when it is made, what would make that untrue or unstable:
   load what the view needs into an in-process table and refresh it in epochs.
 
 A key the result gives twice faults the view, naming the key, until the view is disposed.
+
+## Incremental maintenance
+
+```csharp
+await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKey, Cell>
+{
+    Key = ["row_key", "column_key"],
+    LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
+    Maintenance = ViewMaintenance.Incremental,  // compute only what changed
+    Map = Cells.Map,
+});
+```
+
+- A table gives the rows appended since the last update; after any other change, its old rows out
+  and its new rows in.
+- Joins (inner and left), as-of joins, aggregates with grouping sets, filters, projections,
+  `UNION ALL`, `VALUES` and `WITH` subtrees are maintained, and the clock in a filter or a
+  projection.
+- A `DOUBLE` or `REAL` sum is kept exactly and rounded once, so it never drifts; a recompute adds in
+  input order, so the two may differ in the last bits.
+- What the statement keeps counts in `StateBytes`, against `StateBudget`.
+- An update that fails part way leaves the next to start from nothing; readers get only the keys
+  that differ.
+- A statement maintenance does not keep — window functions, `LIMIT`, set operations but `UNION ALL`,
+  right, full, semi and anti joins, `DISTINCT` and ordered aggregates, the reference executor — is
+  refused when the view is made, with `UnsupportedInView`, naming it.
 
 ## Inputs
 

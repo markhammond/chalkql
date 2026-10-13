@@ -2389,9 +2389,9 @@ host that wants to send each screen only what changed then has to work that out 
 drains it from a cursor, getting the latest row of each key that changed since it last read —
 never a queue of every change. A key the answer no longer has arrives as a delete.
 
-As of writing, only the delivery is incremental. Each update runs the statement in full and
-compares the result with the rows the view already holds; computing only what changed is not
-built. The views live in `Chalk.Incremental`.
+This view runs the statement in full at each update and compares the result with the rows it
+already holds; a view made with `Maintenance = ViewMaintenance.Incremental` computes only what
+changed instead (the guide's *Incremental maintenance*). The views live in `Chalk.Incremental`.
 
 The inputs say how they change. The ledger is a log: `AppendOnly(m => m.Ts)` lets it take only
 appends, none older than the newest time it has already been given. The engine names a clock,

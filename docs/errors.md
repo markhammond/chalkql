@@ -592,10 +592,14 @@ takes a `LIMIT` whose order is not total — not its last step, or not ordered b
 so the input's order would choose which tied rows it keeps. Or, in a view that reads databases
 when they are refreshed, a database read takes values from the rest of the statement — a lookup,
 broadcast or adaptive join, or a scan pruned by keys — so it could not be kept between refreshes.
+Or a view asks for incremental maintenance, and its statement has something maintenance does not
+keep: the message names it, and where it is in the plan.
 
 **What to do:** Drop the `ORDER BY`; order a `LIMIT` by every key column, as the statement's last
 step, or drop it. For a database read, let the join be local: drop the rule in
-`ViewOptions.Prepare.JoinPolicy` that asks otherwise for the pair of sources.
+`ViewOptions.Prepare.JoinPolicy` that asks otherwise for the pair of sources. For incremental
+maintenance, make the view with `ViewMaintenance.Recompute`, or write the statement without what
+the message names.
 
 ### SourceOutsideEpochs
 
