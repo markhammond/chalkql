@@ -98,7 +98,7 @@ internal sealed class AsOfState : IMaintainedState
 
     public RowStore Right { get; set; }
 
-    /// <summary>The store a rewrite builds the right rows into, swapped with <see cref="Right"/>.</summary>
+    /// <summary>The store a rewrite builds the right rows into, then <see cref="Right"/>; empty between rewrites.</summary>
     public RowStore Spare { get; set; }
 
     public ChangeSet LeftChanges { get; }
@@ -384,8 +384,9 @@ internal sealed class AsOfChanges : MaintainedOperator
             }
         }
 
-        old.Clear();
-        state.Spare = old;
+        // The old rows go with their store: a rewrite is rare, and a store as large as the table kept
+        // empty for the next one would hold its memory against the view's budget meanwhile.
+        state.Spare = new RowStore(old.Types);
         state.Right = fresh;
         state.SpareRuns = state.Runs;
         state.SpareRuns.Clear();
