@@ -130,6 +130,16 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
             [0]
         },
         {
+            "a one-row table crossed in, keying an as-of join under an aggregate",
+            """
+            WITH pinned AS (SELECT 2 AS asset)
+            SELECT t.book, COUNT(*) AS n, SUM(m.px) AS px, MAX(m.tag) AS tag
+            FROM trades t CROSS JOIN pinned p ASOF JOIN marks m MATCH_CONDITION m.ts <= t.ts ON m.asset = p.asset
+            GROUP BY t.book
+            """,
+            [0]
+        },
+        {
             "a three-way join with a keyed table",
             """
             SELECT t.seq, b.name, l.lim, t.qty * l.lim AS exposure

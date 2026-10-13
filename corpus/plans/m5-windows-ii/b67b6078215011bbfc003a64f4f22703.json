@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "6815173913871140619",
+  "planDigest": "11016179594698041442",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -286,24 +286,12 @@
                           "type": {
                             "kind": "TYPE_KIND_FP64"
                           }
-                        },
-                        {
-                          "name": "$f0",
-                          "type": {
-                            "kind": "TYPE_KIND_FP64"
-                          }
-                        },
-                        {
-                          "name": "ZERO",
-                          "type": {
-                            "kind": "TYPE_KIND_I32"
-                          }
                         }
                       ]
                     },
                     "estRowCount": 250,
-                    "nestedLoopJoin": {
-                      "left": {
+                    "filter": {
+                      "input": {
                         "rowType": {
                           "fields": [
                             {
@@ -317,156 +305,60 @@
                               "type": {
                                 "kind": "TYPE_KIND_FP64"
                               }
-                            },
-                            {
-                              "name": "$f0",
-                              "type": {
-                                "kind": "TYPE_KIND_FP64"
-                              }
                             }
                           ]
                         },
-                        "estRowCount": 250,
-                        "project": {
-                          "input": {
-                            "rowType": {
-                              "fields": [
-                                {
-                                  "name": "high",
-                                  "type": {
-                                    "kind": "TYPE_KIND_FP64"
-                                  }
-                                },
-                                {
-                                  "name": "low",
-                                  "type": {
-                                    "kind": "TYPE_KIND_FP64"
-                                  }
-                                }
-                              ]
-                            },
-                            "estRowCount": 250,
-                            "filter": {
-                              "input": {
-                                "rowType": {
-                                  "fields": [
-                                    {
-                                      "name": "high",
-                                      "type": {
-                                        "kind": "TYPE_KIND_FP64"
-                                      }
-                                    },
-                                    {
-                                      "name": "low",
-                                      "type": {
-                                        "kind": "TYPE_KIND_FP64"
-                                      }
+                        "estRowCount": 500,
+                        "hashAggregate": {
+                          "aggregate": {
+                            "input": {
+                              "rowType": {
+                                "fields": [
+                                  {
+                                    "name": "high",
+                                    "type": {
+                                      "kind": "TYPE_KIND_FP64"
                                     }
-                                  ]
-                                },
-                                "estRowCount": 500,
-                                "hashAggregate": {
-                                  "aggregate": {
-                                    "input": {
-                                      "rowType": {
-                                        "fields": [
-                                          {
-                                            "name": "high",
-                                            "type": {
-                                              "kind": "TYPE_KIND_FP64"
-                                            }
-                                          },
-                                          {
-                                            "name": "low",
-                                            "type": {
-                                              "kind": "TYPE_KIND_FP64"
-                                            }
-                                          }
-                                        ]
-                                      },
-                                      "estRowCount": 5000,
-                                      "read": {
-                                        "table": {
-                                          "sourceId": "mem",
-                                          "schema": "main",
-                                          "table": "bars_small"
-                                        },
-                                        "projection": [
-                                          3,
-                                          4
-                                        ]
-                                      }
-                                    },
-                                    "groupings": [
-                                      {
-                                        "keys": [
-                                          0,
-                                          1
-                                        ]
-                                      }
-                                    ]
-                                  }
-                                }
-                              },
-                              "condition": {
-                                "type": {
-                                  "kind": "TYPE_KIND_BOOL"
-                                },
-                                "call": {
-                                  "function": "FUNCTION_ID_GT",
-                                  "args": [
-                                    {
-                                      "type": {
-                                        "kind": "TYPE_KIND_FP64"
-                                      },
-                                      "call": {
-                                        "function": "FUNCTION_ID_SUBTRACT",
-                                        "args": [
-                                          {
-                                            "type": {
-                                              "kind": "TYPE_KIND_FP64"
-                                            },
-                                            "fieldRef": {}
-                                          },
-                                          {
-                                            "type": {
-                                              "kind": "TYPE_KIND_FP64"
-                                            },
-                                            "fieldRef": {
-                                              "index": 1
-                                            }
-                                          }
-                                        ]
-                                      }
-                                    },
-                                    {
-                                      "type": {
-                                        "kind": "TYPE_KIND_FP64"
-                                      },
-                                      "literal": {
-                                        "fp64Value": 1
-                                      }
+                                  },
+                                  {
+                                    "name": "low",
+                                    "type": {
+                                      "kind": "TYPE_KIND_FP64"
                                     }
-                                  ]
-                                }
-                              }
-                            }
-                          },
-                          "exprs": [
-                            {
-                              "type": {
-                                "kind": "TYPE_KIND_FP64"
+                                  }
+                                ]
                               },
-                              "fieldRef": {}
-                            },
-                            {
-                              "type": {
-                                "kind": "TYPE_KIND_FP64"
-                              },
-                              "fieldRef": {
-                                "index": 1
+                              "estRowCount": 5000,
+                              "read": {
+                                "table": {
+                                  "sourceId": "mem",
+                                  "schema": "main",
+                                  "table": "bars_small"
+                                },
+                                "projection": [
+                                  3,
+                                  4
+                                ]
                               }
                             },
+                            "groupings": [
+                              {
+                                "keys": [
+                                  0,
+                                  1
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "condition": {
+                        "type": {
+                          "kind": "TYPE_KIND_BOOL"
+                        },
+                        "call": {
+                          "function": "FUNCTION_ID_GT",
+                          "args": [
                             {
                               "type": {
                                 "kind": "TYPE_KIND_FP64"
@@ -490,55 +382,18 @@
                                   }
                                 ]
                               }
-                            }
-                          ]
-                        }
-                      },
-                      "right": {
-                        "rowType": {
-                          "fields": [
+                            },
                             {
-                              "name": "ZERO",
                               "type": {
-                                "kind": "TYPE_KIND_I32"
+                                "kind": "TYPE_KIND_FP64"
+                              },
+                              "literal": {
+                                "fp64Value": 1
                               }
-                            }
-                          ]
-                        },
-                        "estRowCount": 1,
-                        "collations": [
-                          {
-                            "fields": [
-                              {
-                                "expr": {
-                                  "type": {
-                                    "kind": "TYPE_KIND_I32"
-                                  },
-                                  "fieldRef": {}
-                                },
-                                "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
-                              }
-                            ]
-                          }
-                        ],
-                        "virtualTable": {
-                          "rows": [
-                            {
-                              "values": [
-                                {
-                                  "type": {
-                                    "kind": "TYPE_KIND_I32"
-                                  },
-                                  "literal": {
-                                    "i32Value": 0
-                                  }
-                                }
-                              ]
                             }
                           ]
                         }
-                      },
-                      "type": "JOIN_TYPE_INNER"
+                      }
                     }
                   },
                   "exprs": [
@@ -546,8 +401,24 @@
                       "type": {
                         "kind": "TYPE_KIND_FP64"
                       },
-                      "fieldRef": {
-                        "index": 2
+                      "call": {
+                        "function": "FUNCTION_ID_SUBTRACT",
+                        "args": [
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_FP64"
+                            },
+                            "fieldRef": {}
+                          },
+                          {
+                            "type": {
+                              "kind": "TYPE_KIND_FP64"
+                            },
+                            "fieldRef": {
+                              "index": 1
+                            }
+                          }
+                        ]
                       }
                     },
                     {

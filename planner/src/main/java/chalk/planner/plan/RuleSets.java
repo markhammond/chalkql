@@ -9,6 +9,7 @@ import chalk.planner.plan.rules.ChalkIndexOrderedScanRule;
 import chalk.planner.plan.rules.ChalkMergeJoinRule;
 import chalk.planner.plan.rules.ChalkNestedLoopJoinRule;
 import chalk.planner.plan.rules.LimitCopyRules;
+import chalk.planner.plan.rules.OneRowJoinRules;
 import chalk.planner.plan.rules.PartitionRules;
 import chalk.planner.plan.rules.PushdownRules;
 import chalk.planner.plan.rules.ChalkProjectRule;
@@ -119,6 +120,14 @@ public final class RuleSets {
         CoreRules.PROJECT_JOIN_REMOVE,
         CoreRules.AGGREGATE_JOIN_REMOVE,
 
+        // 4b. D348: a join with a one-row constant table is a projection of its other side, the
+        //     row's values its literals. Strictly smaller, so it belongs here too; held off ASOF
+        //     joins and the join types one row does not answer exactly (see OneRowJoinRules).
+        OneRowJoinRules.LEFT,
+        OneRowJoinRules.RIGHT,
+        OneRowJoinRules.LEFT_PROJECT,
+        OneRowJoinRules.RIGHT_PROJECT,
+
         // 5. WHERE 1 = 0 becomes an empty Values rather than a scan nobody will read.
         PruneEmptyRules.FILTER_INSTANCE,
         PruneEmptyRules.PROJECT_INSTANCE,
@@ -202,6 +211,11 @@ public final class RuleSets {
         // joins that did not exist before this pass.
         CoreRules.PROJECT_JOIN_REMOVE,
         CoreRules.AGGREGATE_JOIN_REMOVE,
+        // D348 again, for a one-row table decorrelation joined in, and a semi join against one.
+        OneRowJoinRules.LEFT,
+        OneRowJoinRules.RIGHT,
+        OneRowJoinRules.LEFT_PROJECT,
+        OneRowJoinRules.RIGHT_PROJECT,
         CoreRules.FILTER_INTO_JOIN,
         CoreRules.JOIN_CONDITION_PUSH,
         CoreRules.FILTER_MERGE,

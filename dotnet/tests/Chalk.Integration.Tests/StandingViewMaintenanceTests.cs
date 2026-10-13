@@ -208,17 +208,20 @@ public sealed class StandingViewMaintenanceTests(SharedSidecar sidecar)
     /// <summary>
     /// A view whose as-of join has a constant key on its right side, which the planner reads for many
     /// left rows through an index lookup of that key, is maintained (design 68 §19): after appends, a
-    /// second rate at one time and a compaction of the rates, it is the statement.
+    /// second rate at one time and a compaction of the rates, it is the statement. The constant may be
+    /// written in the join, or as a one-row table crossed in, which the planner makes a column of
+    /// literals (D348) rather than a semi join against one row.
     /// </summary>
-    [Fact]
-    public async Task A_view_over_an_as_of_join_with_a_constant_key_is_maintained()
+    [Theory]
+    [InlineData("FROM fills f ASOF JOIN rates r MATCH_CONDITION r.ts <= f.ts ON r.symbol = 'EUR'", true)]
+    [InlineData(
+        "FROM fills f CROSS JOIN (SELECT CAST('EUR' AS VARCHAR(32)) AS symbol) x "
+        + "ASOF JOIN rates r MATCH_CONDITION r.ts <= f.ts ON r.symbol = x.symbol",
+        false)]
+    public async Task A_view_over_an_as_of_join_with_a_constant_key_is_maintained(string from, bool overALookup)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
-        const string Converted = """
-            SELECT f.book, SUM(CAST(f.qty * r.usd * 1000 AS BIGINT)) AS qty
-            FROM fills f ASOF JOIN rates r MATCH_CONDITION r.ts <= f.ts ON r.symbol = 'EUR'
-            GROUP BY f.book
-            """;
+        var converted = $"SELECT f.book, SUM(CAST(f.qty * r.usd * 1000 AS BIGINT)) AS qty {from} GROUP BY f.book";
         string[] symbols = ["EUR", "GBP", "USD"];
         var fills = Enumerable.Range(1, 1_500).Select(i => new Fill(i, 1 + (i % 3), i % 7, Open.AddSeconds(i))).ToList();
         var rates = Enumerable.Range(0, 600)
@@ -240,14 +243,16 @@ public sealed class StandingViewMaintenanceTests(SharedSidecar sidecar)
             Clock = "now",
         }, Ct);
         await engine.RefreshAsync(r => r.AdvanceClock(new DateTimeOffset(Open, TimeSpan.Zero)), Ct);
-        var prepared = await engine.PrepareAsync(Converted, ct: Ct);
-        Assert.True(ReadsRatesThroughALookup(prepared.Plan.Root), $"the as-of join is not planned over a lookup: {prepared.Plan.Root}");
+        var prepared = await engine.PrepareAsync(converted, ct: Ct);
+        Assert.True(
+            ReadsRatesThroughALookup(prepared.Plan.Root) == overALookup,
+            $"the as-of join is {(overALookup ? "not " : string.Empty)}planned over a lookup: {prepared.Plan.Root}");
 
-        await using var view = await engine.MaterializeAsync(Converted, Options(ViewMaintenance.Incremental), Ct);
+        await using var view = await engine.MaterializeAsync(converted, Options(ViewMaintenance.Incremental), Ct);
         var replica = new Replica();
         var cursor = ViewCursor.Start;
         view.Drain(ref cursor, replica);
-        await AssertIsTheStatementAsync(engine, replica, Converted);
+        await AssertIsTheStatementAsync(engine, replica, converted);
 
         // Fills after every rate, and new rates with a second EUR rate at their time, which ties.
         var at = Open.AddSeconds(1_800);
@@ -261,7 +266,7 @@ public sealed class StandingViewMaintenanceTests(SharedSidecar sidecar)
         }, Ct);
         await view.UpdateAsync(Ct);
         view.Drain(ref cursor, replica);
-        await AssertIsTheStatementAsync(engine, replica, Converted);
+        await AssertIsTheStatementAsync(engine, replica, converted);
 
         // A compaction: every other rate of the older half gone, the rest the same objects in their order.
         var half = rates.Count / 2;
@@ -270,7 +275,7 @@ public sealed class StandingViewMaintenanceTests(SharedSidecar sidecar)
         await engine.RefreshAsync(r => r.Replace(source, "rates", (IReadOnlyList<Rate>)kept), Ct);
         await view.UpdateAsync(Ct);
         view.Drain(ref cursor, replica);
-        await AssertIsTheStatementAsync(engine, replica, Converted);
+        await AssertIsTheStatementAsync(engine, replica, converted);
     }
 
     /// <summary>Whether the plan has an as-of join whose right input is an index lookup, through filters and projections.</summary>
