@@ -2809,6 +2809,59 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
     }
 
     /// <summary>
+    /// The positions of a window's ordinals, in index order or from its end: a built-in index walks its
+    /// leaves (F202), and any other is asked ordinal by ordinal.
+    /// </summary>
+    private static IEnumerable<int> Walk(IPositionalPocoIndex<T> index, int from, int to, bool reverse)
+    {
+        var keys = index switch
+        {
+            PermutationIndex<T> permutation => permutation,
+            ClusteredIndex<T> clustered => clustered.Keys,
+            _ => null,
+        };
+
+        if (keys is not null)
+        {
+            return keys.PositionsBetween(from, to, reverse);
+        }
+
+        return Ordinals(index, from, to, reverse);
+
+        static IEnumerable<int> Ordinals(IPositionalPocoIndex<T> index, int from, int to, bool reverse)
+        {
+            if (reverse)
+            {
+                for (var ordinal = to - 1; ordinal >= from; ordinal--)
+                {
+                    yield return index.GetPosition(ordinal);
+                }
+
+                yield break;
+            }
+
+            for (var ordinal = from; ordinal < to; ordinal++)
+            {
+                yield return index.GetPosition(ordinal);
+            }
+        }
+    }
+
+    /// <summary>Marks a position in the bitmap, and says whether it was not marked yet.</summary>
+    private static bool Mark(ulong[] seen, int position)
+    {
+        ref var word = ref seen[position >> 6];
+        var bit = 1UL << (position & 63);
+        if ((word & bit) != 0)
+        {
+            return false;
+        }
+
+        word |= bit;
+        return true;
+    }
+
+    /// <summary>
     /// The positions the ranges cover, each once: range by range, each in index order, or from its end
     /// for a reversed lookup (D283); only the first <paramref name="perRange"/> of each range's where a
     /// number is given (D338). The planner emits non-overlapping ranges; more than one is de-duplicated
@@ -2829,18 +2882,17 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
             {
                 // The last rows of the window, from its end (D283).
                 var stop = perRange is { } count ? Math.Max(from, to - Math.Max(count, 0)) : from;
-                for (var ordinal = to - 1; ordinal >= stop; ordinal--)
+                foreach (var position in Walk(index, stop, to, reverse: true))
                 {
-                    yield return index.GetPosition(ordinal);
+                    yield return position;
                 }
 
                 yield break;
             }
 
-            to = Limited(from, to, perRange);
-            for (var ordinal = from; ordinal < to; ordinal++)
+            foreach (var position in Walk(index, from, Limited(from, to, perRange), reverse: false))
             {
-                yield return index.GetPosition(ordinal);
+                yield return position;
             }
 
             yield break;
@@ -2855,25 +2907,14 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
             for (var r = 0; r < ranges.Count; r++)
             {
                 index.GetWindow(ranges[r], out var from, out var to);
-                int first, last, step;
-                if (reverse)
-                {
-                    var stop = perRange is { } count ? Math.Max(from, to - Math.Max(count, 0)) : from;
-                    (first, last, step) = (to - 1, stop - 1, -1);
-                }
-                else
-                {
-                    (first, last, step) = (from, Limited(from, to, perRange), 1);
-                }
+                var (first, last) = reverse
+                    ? (perRange is { } count ? Math.Max(from, to - Math.Max(count, 0)) : from, to)
+                    : (from, Limited(from, to, perRange));
 
-                for (var ordinal = first; ordinal != last; ordinal += step)
+                foreach (var position in Walk(index, first, last, reverse))
                 {
-                    var position = index.GetPosition(ordinal);
-                    ref var word = ref seen[position >> 6];
-                    var bit = 1UL << (position & 63);
-                    if ((word & bit) == 0)
+                    if (Mark(seen, position))
                     {
-                        word |= bit;
                         yield return position;
                     }
                 }
