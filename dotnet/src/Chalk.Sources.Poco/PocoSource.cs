@@ -455,16 +455,42 @@ public sealed class PocoSource
     /// refresh moves them. Statistics are computed once per snapshot, so calling this repeatedly
     /// costs nothing.
     /// </remarks>
-    public SchemaDescriptor DescribeSchema() => new()
+    /// <remarks>
+    /// A schema whose tables all describe as the very descriptors they did is the schema described
+    /// last, the same object, which is how the engine sees that nothing here moved (F205).
+    /// </remarks>
+    public SchemaDescriptor DescribeSchema()
     {
-        SourceId = SourceId,
-        Name = SchemaName,
-        Zone = _zone,
-        Kind = SourceKind.Local,
-        Capabilities = SourceCapabilities.None,
-        Tables = Array.ConvertAll(_tables, t => t.Describe()),
-        Functions = _functions,
-    };
+        var last = Volatile.Read(ref _described);
+        var tables = new TableDescriptor[_tables.Length];
+        var same = last is not null;
+        for (var i = 0; i < _tables.Length; i++)
+        {
+            tables[i] = _tables[i].Describe();
+            same = same && ReferenceEquals(tables[i], last!.Tables[i]);
+        }
+
+        if (same)
+        {
+            return last!;
+        }
+
+        var described = new SchemaDescriptor
+        {
+            SourceId = SourceId,
+            Name = SchemaName,
+            Zone = _zone,
+            Kind = SourceKind.Local,
+            Capabilities = SourceCapabilities.None,
+            Tables = tables,
+            Functions = _functions,
+        };
+        Volatile.Write(ref _described, described);
+        return described;
+    }
+
+    /// <summary>The schema <see cref="DescribeSchema"/> last gave.</summary>
+    private SchemaDescriptor? _described;
 
     /// <summary>
     /// A declared index by name, for a host that wants to inspect one or run
@@ -1695,7 +1721,15 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         var snapshot = Acquire();
         try
         {
-            return Describe(snapshot, snapshot.Statistics(_columns, _collations, _statisticsPlan));
+            var statistics = snapshot.Statistics(_columns, _collations, _statisticsPlan);
+            var last = Volatile.Read(ref _described);
+            var described = Describe(snapshot, statistics, last);
+            if (!ReferenceEquals(described, last?.Descriptor))
+            {
+                Volatile.Write(ref _described, new Described(described, statistics));
+            }
+
+            return described;
         }
         finally
         {
@@ -1703,23 +1737,75 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         }
     }
 
-    private TableDescriptor Describe(PocoTableSnapshot<T> snapshot, ColumnStatistics[] statistics) => new()
+    /// <summary>
+    /// The table as <paramref name="snapshot"/> serves it with <paramref name="statistics"/>, sharing
+    /// what it can of <paramref name="last"/> (F205): its columns when the statistics are the ones it
+    /// was given, its indexes when they are the same descriptors, and the whole descriptor when the
+    /// row count is the same too. A table a refresh appended to then describes as a new row count over
+    /// the parts it had, and one no refresh touched as the descriptor it was.
+    /// </summary>
+    private TableDescriptor Describe(PocoTableSnapshot<T> snapshot, ColumnStatistics[] statistics, Described? last)
     {
-        Name = Name,
-        Columns = [.. _columns.Select((c, i) => new ColumnDescriptor
+        var columns = last is not null && ReferenceEquals(last.Statistics, statistics)
+            ? last.Descriptor.Columns
+            : [.. _columns.Select((c, i) => new ColumnDescriptor
+            {
+                Name = c.Name,
+                Type = c.Type,
+                Statistics = statistics[i],
+            })];
+        var indexes = last is not null && SameIndexes(last.Descriptor.Indexes, snapshot.Indexes)
+            ? last.Descriptor.Indexes
+            : [.. snapshot.Indexes.Select(i => i.Descriptor)];
+        if (last is not null
+            && ReferenceEquals(columns, last.Descriptor.Columns)
+            && ReferenceEquals(indexes, last.Descriptor.Indexes)
+            && last.Descriptor.RowCount == snapshot.RowCount)
         {
-            Name = c.Name,
-            Type = c.Type,
-            Statistics = statistics[i],
-        })],
-        RowCount = snapshot.RowCount,
-        RowCountKind = RowCountKind.Exact,
-        UniqueKeys = _uniqueKeys,
-        Collations = _collations,
-        Indexes = [.. snapshot.Indexes.Select(i => i.Descriptor)],
-        ForeignKeys = _foreignKeys,
-        Entitlement = _entitlement,
-    };
+            return last.Descriptor;
+        }
+
+        return new TableDescriptor
+        {
+            Name = Name,
+            Columns = columns,
+            RowCount = snapshot.RowCount,
+            RowCountKind = RowCountKind.Exact,
+            UniqueKeys = _uniqueKeys,
+            Collations = _collations,
+            Indexes = indexes,
+            ForeignKeys = _foreignKeys,
+            Entitlement = _entitlement,
+        };
+    }
+
+    /// <summary>Whether a snapshot's indexes are described by the very descriptors a list holds.</summary>
+    private static bool SameIndexes(IReadOnlyList<IndexDescriptor> described, IPocoIndex<T>[] indexes)
+    {
+        if (described.Count != indexes.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < indexes.Length; i++)
+        {
+            if (!ReferenceEquals(described[i], indexes[i].Descriptor))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The descriptor <see cref="Describe()"/> last gave, and the statistics it was given with: what
+    /// the next shares where it can (F205). One object, so a reader never pairs one call's descriptor
+    /// with another's statistics.
+    /// </summary>
+    private Described? _described;
+
+    private sealed record Described(TableDescriptor Descriptor, ColumnStatistics[] Statistics);
 
     /// <inheritdoc />
     public override DeferredStatistics? ComputeDeferredStatistics()
@@ -1736,7 +1822,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             return new DeferredStatistics
             {
                 Table = Name,
-                Descriptor = Describe(snapshot, statistics),
+                Descriptor = Describe(snapshot, statistics, Volatile.Read(ref _described)),
                 Statistics = new ComputedStatistics(snapshot.Sequence, snapshot.Changes, statistics),
                 RowCount = snapshot.RowCount,
             };

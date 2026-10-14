@@ -223,6 +223,71 @@ public sealed class CatalogRegistrationTests(SharedSidecar sidecar, ITestOutputH
         Assert.Equal(0, counter.StatisticsRegistrations);
     }
 
+    /// <summary>
+    /// A refresh that changes rows publishes the shape a whole reading of its catalog would (F205),
+    /// though it reads only the tables it changed: appended to, deferred, upserted, replaced, and
+    /// given statistics computed in the background. A table no refresh touched is the descriptor it
+    /// was, and so is its schema when none of its tables moved.
+    /// </summary>
+    [Fact]
+    public async Task A_refresh_of_rows_publishes_the_shape_a_whole_reading_would()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var ct = TestContext.Current.CancellationToken;
+
+        var source = new PocoSourceBuilder("mem", "m")
+            .AddTable("orders", TenancyFixture.Orders, out var orders)
+            .AddTable("notes", TenancyFixture.Notes)
+            .Build();
+        var marks = new PocoSourceBuilder("marks", "k")
+            .AddTable("prices", (IReadOnlyList<Price>)[.. Enumerable.Range(1, 50).Select(i => new Price(i, i))], out var prices, t => t.Keyed(x => x.Id))
+            .Build();
+
+        await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+        {
+            ContextId = $"f205-{Guid.NewGuid():n}",
+            Sources = [source, marks],
+            Planner = sidecar.Sidecar.CreatePlanner(),
+        }, ct);
+        AssertWhole(engine);
+
+        var notes = engine.Catalog.FindTable("m", "notes")!.Value.Table;
+        await engine.RefreshAsync(r => r.Append(orders, [Micro()]), ct);
+        AssertWhole(engine);
+        Assert.Same(notes, engine.Catalog.FindTable("m", "notes")!.Value.Table);
+
+        var schema = engine.Catalog.Schemas.Single(s => s.SourceId == "mem");
+        await engine.RefreshAsync(r => r.Upsert(prices, [new Price(3, 300)]).DeferPlanning(), ct);
+        AssertWhole(engine);
+        Assert.Same(schema, engine.Catalog.Schemas.Single(s => s.SourceId == "mem"));
+
+        await engine.BackgroundPlanningSettledAsync();
+        await engine.RefreshAsync(r => r.DeferPlanning(), ct);
+        AssertWhole(engine);
+
+        await engine.RefreshAsync(r => r.Replace(prices, [new Price(1, 1)]), ct);
+        AssertWhole(engine);
+        Assert.Equal(1, engine.Catalog.FindTable("k", "prices")!.Value.Table.RowCount);
+    }
+
+    private sealed record Price(int Id, long Cents);
+
+    /// <summary>The engine's shape of its catalog, table by table, against the shape taken whole.</summary>
+    private static void AssertWhole(ChalkEngine engine)
+    {
+        var held = engine.PublishedShape;
+        var whole = CatalogShape.Of(engine.Catalog);
+        Assert.Equal(whole.Tables.Count, held.Tables.Count);
+        foreach (var (key, shape) in whole.Tables)
+        {
+            Assert.Equal(shape, held.Tables[key]);
+            Assert.Equal(whole.Statistics[key].RowCount, held.Statistics[key].RowCount);
+            Assert.Equal(whole.Statistics[key].Rest, held.Statistics[key].Rest);
+        }
+
+        Assert.Equal(whole.Policies, held.Policies);
+    }
+
     // ------------------------------------------------------------------ §8, figure 3
 
     /// <summary>
