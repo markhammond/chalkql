@@ -2706,7 +2706,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         public static int Compare(
             string left,
             string right) =>
-            string.CompareOrdinal(
+            TextOrder.Compare(
                 left,
                 right);
     }
@@ -3005,7 +3005,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
             return right switch
             {
                 string other =>
-                    string.CompareOrdinal(
+                    TextOrder.Compare(
                         text,
                         other),
 

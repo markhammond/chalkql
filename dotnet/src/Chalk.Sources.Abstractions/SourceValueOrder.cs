@@ -83,7 +83,7 @@ public static class SourceValueOrder
         {
             return right is Utf8String other8
                 ? -other8.CompareTo(Utf8String.FromString(text))
-                : string.CompareOrdinal(text, (string)right);
+                : TextOrder.Compare(text, (string)right);
         }
 
         if (left is double d)
@@ -348,7 +348,7 @@ public static class SourceValueOrder
         : ComparerBase(nullsFirst, descending)
     {
         protected override int CompareNonNull(object left, object right) =>
-            string.CompareOrdinal((string)left, (string)right);
+            TextOrder.Compare((string)left, (string)right);
     }
 
     private sealed class Utf8Comparer(bool nullsFirst, bool descending)

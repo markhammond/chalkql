@@ -117,7 +117,7 @@ internal static class PocoVerification
         // D145: a Utf8String column is binary-collated, so its declared collation is verified in
         // byte order — the same order the scan emits and the planner assumes.
         Utf8String text8 => text8.CompareTo((Utf8String)right),
-        string text => string.CompareOrdinal(text, (string)right),
+        string text => TextOrder.Compare(text, (string)right),
         double d => CompareDouble(d, (double)right),
         float f => CompareDouble(f, (float)right),
         ReadOnlyMemory<byte> bytes => bytes.Span.SequenceCompareTo(((ReadOnlyMemory<byte>)right).Span),

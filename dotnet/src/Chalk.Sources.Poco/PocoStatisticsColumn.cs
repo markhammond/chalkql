@@ -283,15 +283,16 @@ internal sealed class PocoBoxedStatisticsColumn<T>(Func<T, object?> read, bool o
 
 /// <summary>
 /// Statistics' order and equality for each storage type, as <see cref="SourceValueOrder"/> orders the
-/// same values boxed: ordinal text, binary by content, NaN after every number, and every other type
-/// its own order. Min, max and the histogram must come out as they did when the values were boxed.
+/// same values boxed: text by code point, binary by content, NaN after every number, and every other
+/// type its own order. Min, max and the histogram must come out as they did when the values were
+/// boxed.
 /// </summary>
 internal static class PocoStatisticsOrder
 {
     public static IComparer<TValue> Order<TValue>() =>
         typeof(TValue) == typeof(double) ? (IComparer<TValue>)(object)Real.Instance
         : typeof(TValue) == typeof(float) ? (IComparer<TValue>)(object)RealSingle.Instance
-        : typeof(TValue) == typeof(string) ? (IComparer<TValue>)(object)StringComparer.Ordinal
+        : typeof(TValue) == typeof(string) ? (IComparer<TValue>)(object)TextOrder.Comparer
         : typeof(TValue) == typeof(ReadOnlyMemory<byte>) ? (IComparer<TValue>)(object)Bytes.Instance
         : typeof(TValue) == typeof(Utf8String) ? (IComparer<TValue>)(object)Utf8.Instance
         : Comparer<TValue>.Default;
