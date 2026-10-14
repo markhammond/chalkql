@@ -14,7 +14,8 @@ namespace Chalk.Integration.Tests;
 /// The host's say on the plans a view takes, and the tracker of its updates (design 70 §1, §3). A
 /// host's RefreshQueryPlan that says no leaves the statement on its plan, with nothing requested of the
 /// planner, until a later refresh finds it saying yes; one that throws says no; a drift that makes the
-/// statement stale asks it too, and a change of shape does not. The planner holds back a plan that saves
+/// statement stale is planned again in the background, which asks it too, and a change of shape does
+/// not ask. The planner holds back a plan that saves
 /// less than the view's PlanImprovementMargin, sends one that saves more, and sends any it cannot price
 /// against a plan it no longer keeps. A statement carries one view's say; and the tracker is told of
 /// every update that moves the view.
@@ -112,12 +113,13 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
     }
 
     /// <summary>
-    /// Planning left in the refresh, a tenfold drift makes the statement stale, and the view asks the
-    /// host before it prepares the statement again: no keeps the statement it runs, which still answers
-    /// correctly, and yes, at a later update, prepares it again.
+    /// Planning left in the refresh, a tenfold drift makes the statement stale, and the view has it
+    /// planned again in the background, in place (design 70 §2): that run asks the host, as any run
+    /// does. No keeps the statement and its plan, which still answer correctly; yes, at a later update,
+    /// plans it again, and the statement is no longer stale. The view never prepares it anew.
     /// </summary>
     [Fact]
-    public async Task A_drift_that_makes_the_statement_stale_asks_the_host_first()
+    public async Task A_drift_that_makes_the_statement_stale_is_planned_again_after_asking_the_host()
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         var host = new Host { Willing = false };
@@ -127,10 +129,57 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
         await using var view = await desk.Engine.MaterializeAsync(
             ByDesk, Options(ViewMaintenance.Incremental, refresh: host.Refresh), Ct);
         var before = view.Statement;
+        var planned = before.PlanDigest;
 
         await desk.Engine.RefreshAsync(
             r => r.Replace(desk.Source, "fills", Fills(3_000, books: 3)).Replace(desk.Source, "books", Books(3)), Ct);
         Assert.True(before.IsStale);
+        Assert.False(before.ChangedShape);
+        await view.UpdateAsync(Ct);
+        await desk.Engine.BackgroundPlanningSettledAsync();
+
+        Assert.Same(before, view.Statement);
+        Assert.Equal(planned, before.PlanDigest);
+        Assert.True(before.IsStale);
+        Assert.Equal(Counts(drifted: 1, vetoed: 1), desk.Engine.LastBackgroundPlans);
+        Assert.Equal(await RowsAsync(desk.Engine, view.Statement), await ViewRowsAsync(view));
+
+        host.Willing = true;
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", [new Fill(3_001, 1, 5)]), Ct);
+        await view.UpdateAsync(Ct);
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", [new Fill(3_002, 2, 7)]), Ct);
+        await view.UpdateAsync(Ct);
+
+        var counts = desk.Engine.LastBackgroundPlans!;
+        Assert.Equal(1, counts.New + counts.Unchanged);
+        Assert.Same(before, view.Statement);
+        Assert.False(before.IsStale);
+        Assert.Equal(await RowsAsync(desk.Engine, view.Statement), await ViewRowsAsync(view));
+    }
+
+    /// <summary>
+    /// A statement the background cannot plan again — one an extension decorated without a check on
+    /// later plans — is prepared anew for a tenfold drift on the update's thread, as before, and asks
+    /// the host first there: no keeps it, yes prepares it again.
+    /// </summary>
+    [Fact]
+    public async Task A_statement_the_background_cannot_plan_again_is_prepared_anew_after_asking()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var host = new Host { Willing = false };
+        await using var desk = await DeskAsync();
+        await desk.Engine.RefreshAsync(
+            r => r.Replace(desk.Source, "fills", Fills(30, books: 3)).Replace(desk.Source, "books", Books(3)), Ct);
+        var before = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        before.Decorate(schema => schema, (_, _) => { });
+        await using var view = await desk.Engine.MaterializeAsync(
+            before, Options(ViewMaintenance.Recompute, refresh: host.Refresh), Ct);
+
+        await desk.Engine.RefreshAsync(
+            r => r.Replace(desk.Source, "fills", Fills(3_000, books: 3)).Replace(desk.Source, "books", Books(3)), Ct);
+        Assert.True(before.IsStale);
+        Assert.False(before.MayPlanAgain);
         await view.UpdateAsync(Ct);
 
         Assert.Same(before, view.Statement);
@@ -156,20 +205,7 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
         await using var engine = await ChalkEngine.CreateAsync(
             new ChalkEngineOptions { Sources = [source], Planner = sidecar.CreatePlanner() }, Ct);
         await using var view = await engine.MaterializeAsync(
-            "SELECT id, name FROM db.widget",
-            new ViewOptions<One, One>
-            {
-                Key = ["id"],
-                LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
-                DatabaseReads = ViewDatabaseReads.WhenRefreshed,
-                Map = static (in ViewRow row, out One key, out One value) =>
-                {
-                    key = new One { Value = row.GetInt64(0) };
-                    value = key;
-                },
-                RefreshQueryPlan = host.Refresh,
-            },
-            Ct);
+            "SELECT id, name FROM db.widget", WidgetOptions(refresh: host.Refresh), Ct);
         var before = view.Statement;
 
         Execute(connection, "ALTER TABLE widget ADD COLUMN price REAL");
@@ -326,6 +362,41 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
         var refused = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
             await desk.Engine.MaterializeAsync(ByDesk, Options(ViewMaintenance.Incremental, margin: margin), Ct));
         Assert.Contains("PlanImprovementMargin", refused.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A host that made a view of its own statement follows the statement the view runs, rather than
+    /// prepare its own: its own is the view's until a table it reads changes shape, and then the view's
+    /// is the one it prepared in its place, which is current and gives the view's rows.
+    /// </summary>
+    [Fact]
+    public async Task A_host_follows_the_statement_the_view_runs_after_a_change_of_shape()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var (source, connection) = Database();
+        await using var engine = await ChalkEngine.CreateAsync(
+            new ChalkEngineOptions { Sources = [source], Planner = sidecar.CreatePlanner() }, Ct);
+        var held = await engine.PrepareAsync(
+            "SELECT id, name FROM db.widget",
+            new PrepareOptions
+            {
+                JoinPolicy = new CrossSourceJoinPolicy { LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows },
+            },
+            Ct);
+        await using var view = await engine.MaterializeAsync(held, WidgetOptions(), Ct);
+        Assert.Same(held, view.Statement);
+
+        Execute(connection, "ALTER TABLE widget ADD COLUMN price REAL");
+        Execute(connection, "INSERT INTO widget (id, name) VALUES (4, 'four')");
+        await engine.RefreshAsync(Ct);
+        await view.UpdateAsync(Ct);
+
+        Assert.True(held.IsStale);
+        Assert.True(held.ChangedShape);
+        var follows = view.Statement;
+        Assert.NotSame(held, follows);
+        Assert.False(follows.IsStale);
+        Assert.Equal(await IdsAsync(engine, follows), [.. (await ViewRowsAsync(view)).Keys]);
     }
 
     /// <summary>
@@ -501,6 +572,38 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
         Tracker = tracker,
         PlanImprovementMargin = margin,
     };
+
+    /// <summary>A view of the widget table's ids, read from its database when the engine refreshes.</summary>
+    private static ViewOptions<One, One> WidgetOptions(Func<bool>? refresh = null) => new()
+    {
+        Key = ["id"],
+        LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
+        DatabaseReads = ViewDatabaseReads.WhenRefreshed,
+        Map = static (in ViewRow row, out One key, out One value) =>
+        {
+            key = new One { Value = row.GetInt64(0) };
+            value = key;
+        },
+        RefreshQueryPlan = refresh,
+    };
+
+    private static async Task<HashSet<long>> IdsAsync(ChalkEngine engine, PreparedQuery query)
+    {
+        var ids = new HashSet<long>();
+        await using var execution = await engine.ExecuteAsync(query, (IReadOnlyList<object?>?)null, ct: Ct);
+        await foreach (var batch in execution.Batches)
+        {
+            using (batch)
+            {
+                for (var i = 0; i < batch.Length; i++)
+                {
+                    ids.Add(Convert.ToInt64(Chalk.Arrow.RecordBatchExtensions.ValueAt(batch.Column(0), i)));
+                }
+            }
+        }
+
+        return ids;
+    }
 
     private static IReadOnlyList<Fill> Fills(int count, int books) =>
         [.. Enumerable.Range(1, count).Select(i => new Fill(i, i % books, (i % 7) + 1))];

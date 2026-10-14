@@ -490,7 +490,9 @@ public sealed class PreparedQuery
     /// — one made on empty tables scans and loops where one made on loaded tables seeks and hashes —
     /// so this is also true once a table the query reads has drifted tenfold, either way, since it was
     /// planned (D342). A table whose row count is unknown is not judged. The query still runs, and runs
-    /// correctly; preparing it again finds the plan for the numbers there are now.
+    /// correctly; preparing it again finds the plan for the numbers there are now. Under
+    /// <c>DeferPlanning()</c> a background run plans it again in place instead, and
+    /// <see cref="ChangedShape"/> tells the two halves apart.
     /// </para>
     /// <para>
     /// So does a shape change in a table this query does not read: since D271 (d) the comparison is
@@ -573,6 +575,13 @@ public sealed class PreparedQuery
     /// </summary>
     internal bool DriftedFrom(Chalk.Catalog.CatalogContext catalog) =>
         Drifted(Volatile.Read(ref _state), catalog, PlanAgainDrift);
+
+    /// <summary>
+    /// The same, judged from the numbers <paramref name="waiting"/> was made on: a plan a background
+    /// run made for this statement, which no refresh has swapped in yet.
+    /// </summary>
+    internal static bool DriftedFrom(PlanState waiting, Chalk.Catalog.CatalogContext catalog) =>
+        Drifted(waiting, catalog, PlanAgainDrift);
 
     /// <summary>
     /// This statement planned and compiled again, on the numbers the planner holds now (design 69
@@ -745,9 +754,16 @@ public sealed class PreparedQuery
 
     /// <summary>
     /// Whether a table this statement reads has changed shape since it was planned: the half of
-    /// <see cref="IsStale"/> no host may veto, since the plan no longer fits the catalog.
+    /// <see cref="IsStale"/> after which the statement no longer runs, throwing
+    /// <see cref="Chalk.Sources.StalePlanException"/>, and must be prepared again.
     /// </summary>
-    internal bool ChangedShape
+    /// <remarks>
+    /// The other half, a tenfold drift, leaves the statement running correctly on a plan made for other
+    /// numbers. Under <c>DeferPlanning()</c> a background run plans such a statement again in place, so
+    /// a host prepares it again only when this is true. Without deferred planning nothing plans it
+    /// again, and a host prepares it again on <see cref="IsStale"/>, as before.
+    /// </remarks>
+    public bool ChangedShape
     {
         get
         {
@@ -766,6 +782,15 @@ public sealed class PreparedQuery
     {
         if (!_engine.IsCurrent(next.Plan, next.TablesRead))
         {
+            return false;
+        }
+
+        // The plan this statement runs, planned again on newer numbers: nothing to swap in, so a view
+        // kept from it keeps on, and drift is judged from the newer numbers.
+        var current = Volatile.Read(ref _state);
+        if (current.Plan.PlanDigest == next.Plan.PlanDigest)
+        {
+            current.Rebase(next.PlannedRows);
             return false;
         }
 

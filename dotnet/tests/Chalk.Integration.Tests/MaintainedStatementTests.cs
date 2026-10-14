@@ -514,8 +514,14 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
                 }
             }
 
+            var whole = random.Next(10) == 0;
             var update = await maintained.UpdateAsync(
-                Values(prepared, now), new DateTimeOffset(now, TimeSpan.Zero), whole: random.Next(10) == 0, Ct);
+                Values(prepared, now), new DateTimeOffset(now, TimeSpan.Zero), whole, Ct);
+
+            // Computed from nothing the first time only: a whole result asked for later is caught up, and
+            // written whole.
+            Assert.Equal(epoch == 0, update.Restarted);
+            Assert.Equal(epoch == 0 || whole, update.Whole);
             Apply(update, held, key);
             Compare(held, await StatementAsync(engine, prepared, now, key), seed, epoch);
         }

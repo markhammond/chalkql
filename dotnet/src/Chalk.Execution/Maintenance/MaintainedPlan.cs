@@ -123,7 +123,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
                     _result.Add(batch!);
                 }
 
-                var changes = _result.End(_restart || whole, tree.Output);
+                var changes = _result.End(_restart || whole, _restart, tree.Output);
                 _restart = false;
                 completed = true;
                 return changes;
@@ -190,6 +190,12 @@ internal sealed class MaintainedChanges
 {
     /// <summary>True when <see cref="Now"/> is the whole result, as after the first update or a restart.</summary>
     public required bool Whole { get; init; }
+
+    /// <summary>
+    /// True when the update computed the result from nothing: the first, and the first after one that
+    /// failed. An update asked for the whole result otherwise catches up, and only writes it whole.
+    /// </summary>
+    public required bool Restarted { get; init; }
 
     /// <summary>The rows keys hold now: those that changed, or every row when <see cref="Whole"/>.</summary>
     public required RecordBatch Now { get; init; }
@@ -330,8 +336,9 @@ internal sealed class ResultState
     /// <summary>
     /// Ends the update: checks each changed key holds at most one row, once, and writes the changes —
     /// or, when <paramref name="whole"/>, every row — as Arrow batches of the output's layout.
+    /// <paramref name="restarted"/> says whether the update computed the result from nothing.
     /// </summary>
-    public MaintainedChanges End(bool whole, OutputMaterialiser output)
+    public MaintainedChanges End(bool whole, bool restarted, OutputMaterialiser output)
     {
         // The writers are kept from update to update: the batches the last one gave were copied out.
         var now = _now ??= new ChangeWriter(_types, int.MaxValue);
@@ -385,6 +392,7 @@ internal sealed class ResultState
         return new MaintainedChanges
         {
             Whole = whole,
+            Restarted = restarted,
             Now = Arrow(now, _nowColumns ??= new ColumnarBatch(_types), output),
             Before = Arrow(before, _wasColumns ??= new ColumnarBatch(_types), output),
         };

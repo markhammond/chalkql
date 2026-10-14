@@ -1659,3 +1659,4 @@ Chalk.Client.Rpc.PlanResponse.PlanHeld.get -> bool
 Chalk.Client.Rpc.PlanResponse.PlanHeld.set -> void
 const Chalk.Client.Rpc.PlanRequest.CheaperByFieldNumber = 19 -> int
 const Chalk.Client.Rpc.PlanResponse.PlanHeldFieldNumber = 13 -> int
+Chalk.Client.PreparedQuery.ChangedShape.get -> bool

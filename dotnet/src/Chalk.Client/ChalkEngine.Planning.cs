@@ -201,6 +201,27 @@ public sealed partial class ChalkEngine
     }
 
     /// <summary>
+    /// Asks for a background run that plans <paramref name="statement"/> again (design 70 §2): what a
+    /// view does with a statement a drift has made stale, rather than prepare it anew on its update's
+    /// thread. The run judges it as it judges any statement whose numbers drifted, its view's host
+    /// asked and its margin applied, and a refresh swaps a new plan in. Nothing is asked while a run is
+    /// in flight, or a plan for it waits to be swapped in.
+    /// </summary>
+    internal void PlanAgainInBackground(PreparedQuery statement)
+    {
+        lock (_planningGate)
+        {
+            // A run in flight judges it, or a refresh that deferred meanwhile has asked for the next.
+            if (_planning is not null || _planned?.Plans.ContainsKey(statement) == true)
+            {
+                return;
+            }
+        }
+
+        RequestBackgroundPlanning();
+    }
+
+    /// <summary>
     /// Asks for a background run after a refresh that deferred its planning: one starts now when none
     /// is running, and otherwise the one running is followed by one more, over whatever is published
     /// when it starts.
@@ -308,7 +329,18 @@ public sealed partial class ChalkEngine
         foreach (var statement in HeldStatements())
         {
             ct.ThrowIfCancellationRequested();
-            if (!statement.MayPlanAgain || !statement.DriftedFrom(catalog))
+
+            // A statement whose plan from an earlier run waits for a refresh to swap it in is judged
+            // from that plan's numbers: planning it again on numbers that have not moved twofold since
+            // would only plan the waiting plan a second time.
+            PreparedQuery.PlanState? waiting;
+            lock (_planningGate)
+            {
+                waiting = _planned?.Plans.GetValueOrDefault(statement);
+            }
+
+            if (!statement.MayPlanAgain
+                || !(waiting is null ? statement.DriftedFrom(catalog) : PreparedQuery.DriftedFrom(waiting, catalog)))
             {
                 continue;
             }

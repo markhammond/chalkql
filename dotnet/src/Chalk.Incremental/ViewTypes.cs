@@ -93,6 +93,27 @@ public enum ViewMaintenance
 }
 
 /// <summary>
+/// How an incremental view moves to a plan its statement takes after the view is made (design 70 §2).
+/// </summary>
+public enum ViewPlanSwap
+{
+    /// <summary>
+    /// The view's next update computes the new plan's state from nothing, as its first update did: the
+    /// slowest update the view has.
+    /// </summary>
+    AtNextUpdate = 0,
+
+    /// <summary>
+    /// A second instance of the view is built on the new plan in the background, while the view keeps
+    /// updating the one it has. The first update after the build swaps the new instance in: it catches
+    /// up to that update's epoch, and readers keep their place, sent only the keys whose rows differ.
+    /// Until then the view holds both instances' state. Refused for a view that recomputes, which takes
+    /// a new plan at no extra cost.
+    /// </summary>
+    BlueGreen = 1,
+}
+
+/// <summary>
 /// Whether a view may read a source over a database, whose rows change outside the engine's
 /// refreshes (D340, design 65).
 /// </summary>
@@ -222,13 +243,14 @@ public sealed class ViewOptions<TKey, TRow>
     /// <summary>
     /// Asked before a new plan is requested for the view's statement because the numbers it was planned
     /// on have drifted (design 70 §1): true requests one; false leaves the statement on its plan for now,
-    /// and the next refresh that defers its planning asks again. So a host vetoes a new plan while it
-    /// cannot afford the view's move to one, and refreshes when it can. Null, the default, requests a
-    /// plan whenever the numbers drift.
+    /// and a later run asks again. So a host vetoes a new plan while it cannot afford the view's move to
+    /// one, and refreshes when it can. Null, the default, requests a plan whenever the numbers drift.
     /// </summary>
     /// <remarks>
-    /// Asked on a background thread under <c>DeferPlanning()</c>, and on the update's thread once a
-    /// drift has made the statement stale, so it must be quick, safe on any thread, and leave the view
+    /// Asked by the background run that would plan the statement again: one a refresh that defers its
+    /// planning starts, and one the view asks for while a tenfold drift leaves its statement stale
+    /// (§2). A statement the background cannot plan again is prepared anew for such a drift on the
+    /// update's thread, and asks there. So it must be quick, safe on any thread, and leave the view
     /// alone. One that throws says not now, and is logged. A change in the shape of a table the
     /// statement reads requests a plan without asking: the plan the view runs no longer fits. A
     /// statement keeps one view's: a second view with one over a statement the host prepared is
@@ -249,6 +271,14 @@ public sealed class ViewOptions<TKey, TRow>
     /// eviction or a restart, cannot be priced, and the new plan is taken.
     /// </remarks>
     public double? PlanImprovementMargin { get; init; }
+
+    /// <summary>
+    /// How an incremental view moves to a plan its statement takes (design 70 §2):
+    /// <see cref="ViewPlanSwap.AtNextUpdate"/>, the default, computes it at the next update;
+    /// <see cref="ViewPlanSwap.BlueGreen"/> builds it beside the plan the view runs, and swaps it in once
+    /// built. <see cref="ViewPlanSwap.BlueGreen"/> is refused for a view that recomputes.
+    /// </summary>
+    public ViewPlanSwap PlanSwap { get; init; } = ViewPlanSwap.AtNextUpdate;
 
     /// <summary>
     /// Admit only a host function registered with <c>Immutable()</c>, rather than any function

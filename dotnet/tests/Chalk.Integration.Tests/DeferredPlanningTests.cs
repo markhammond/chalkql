@@ -176,6 +176,35 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
     }
 
     /// <summary>
+    /// A run that starts while an earlier run's plan for a statement waits for a refresh to swap it in
+    /// judges the statement from that plan's numbers: on numbers that have not moved twofold since, it
+    /// plans nothing again, and the refresh swaps the one plan in.
+    /// </summary>
+    [Fact]
+    public async Task A_run_after_another_judges_a_waiting_plan_from_its_numbers()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var gate = new GatedPlanner(sidecar.CreatePlanner());
+        await using var desk = await DeskAsync(gate, [], []);
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var planned = statement.PlanDigest;
+
+        // The first run waits on its statistics while a second refresh asks for another.
+        gate.Hold();
+        await desk.LoadAsync(Fills(3_000, books: 3), Books(3), deferred: true);
+        await gate.Arrived;
+        await desk.LoadAsync(Fills(3_300, books: 3), Books(3), deferred: true);
+        gate.Release();
+        await desk.Engine.BackgroundPlanningSettledAsync();
+
+        Assert.Equal(0, desk.Engine.LastBackgroundPlans!.Drifted);
+        Assert.Equal(planned, statement.PlanDigest);
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        Assert.NotEqual(planned, statement.PlanDigest);
+        Assert.False(statement.IsStale);
+    }
+
+    /// <summary>
     /// A run that fails leaves the plans as they were and nothing to take in; the next refresh that
     /// defers runs again, and that run's work takes effect.
     /// </summary>

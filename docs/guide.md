@@ -391,7 +391,16 @@ soon as the load lands, and runs its empty-table plan until it is prepared again
 
 A host whose refreshes [defer their planning](#leaving-statistics-and-plans-to-the-background)
 need not do this itself: Chalk plans the statements it holds again in the background, once a
-table they read has moved twofold, and swaps the new plans in at a refresh.
+table they read has moved twofold, and swaps the new plans in at a refresh. Such a host prepares
+again only when `ChangedShape` is true, the half of `IsStale` after which the statement no
+longer runs:
+
+```csharp
+if (cached.ChangedShape)
+{
+    cached = await engine.PrepareAsync(sql, options, ct);
+}
+```
 
 Two digests name a statement:
 
@@ -1622,12 +1631,19 @@ var outcome = view.Drain(ref cursor, sink, 4096); // copies what changed since t
   prepared statement that reads a database needs the statement planned with the view's
   `LocalJoinMaxRows`. Two plans of one statement can sum `DOUBLE`s in different orders, and so
   differ in the last bits; one plan, run twice over the same rows, does not.
-- **A statement prepared again.** Once its statement is stale (see
-  [Preparing again](#preparing-again)), a view prepares it again at its next update. If the
-  result keeps its columns and key, the readers keep their place, and the next drain sends only
-  what changed; if not, they are reset. After a view of a prepared statement does this, the
-  host's statement is stale too, and one prepared in its place on the same catalog runs the
-  view's new plan.
+- **A statement prepared again.** Once a table its statement reads has changed shape (see
+  [Preparing again](#preparing-again)), a view prepares the statement again at its next update. If
+  the result keeps its columns and key, the readers keep their place, and the next drain sends only
+  what changed; if not, they are reset. After a view of a prepared statement does this, the host's
+  statement is stale too: the host takes the view's from `view.Statement`, which runs the view's plan
+  exactly, rather than prepare its own.
+- **A statement planned again.** A statement a tenfold drift has made stale still runs correctly, so
+  a view does not prepare it anew on its update's thread. It asks for a background run that plans
+  the statement again in place, and keeps running it meanwhile. A plan that comes back the same is
+  kept, and nothing is rebuilt; another is swapped in at the next refresh, and the view moves to it
+  as to any new plan (see [Plans a view takes](#plans-a-view-takes)). Only a statement the background
+  cannot plan again, one an extension decorated without a check on later plans, is prepared anew for
+  a drift.
 - **The local-join cap** is required of every view: `LocalJoinMaxRows`, the most rows a
   cross-source join may fetch to join locally, by the planner's estimate. A statement whose plan
   would fetch more is refused when the view is made, and zero or less is refused outright.
@@ -1759,7 +1775,8 @@ var options = new ViewOptions<Key, Row>
   - True requests one.
   - False leaves the statement on its plan, and asks the planner for nothing. The next refresh that
     defers its planning asks again, so a host can say no while it is busy, and refresh when it is not.
-  - It is also asked, on the update's thread, when a tenfold drift has made the statement stale.
+  - A tenfold drift that makes the statement stale asks it too: the view has the statement planned
+    again by a background run, which asks as any run does.
   - A change in a table's shape requests a plan without asking: the old plan no longer fits.
   - It runs on a background thread, so keep it quick and leave the view alone. One that throws says
     no, and is logged.
@@ -1785,6 +1802,43 @@ var options = new ViewOptions<Key, Row>
 - **A view over a statement you prepared** is asked about that statement's plans. A statement carries
   one view's `RefreshQueryPlan` and margin, so a second view with either over it is refused while the
   first exists.
+
+### Swapping plans without a stall
+
+An incremental view can build a new plan beside the one it runs, so that no update pays for building
+it:
+
+```csharp
+var options = new ViewOptions<Key, Row>
+{
+    // …
+    Maintenance = ViewMaintenance.Incremental,
+    PlanSwap = ViewPlanSwap.BlueGreen,
+};
+```
+
+- **Blue** is the instance the view runs. It keeps serving readers, and its updates go on as usual.
+- **Green** is a second instance, on the new plan. Its first update computes its state from nothing,
+  which is the slow part. It runs in the background, over the tables as they were when it began.
+- **The first update after green is built swaps it in.** Green catches up to that update's tables, and
+  the view compares green's whole result with its rows. Readers keep their place, and are sent only
+  the keys whose rows differ. Blue is let go.
+- **Until the swap, the view holds both instances' state.** `StateBytes` counts green once it is
+  built. `StateBudget` is checked against the instance that serves, since the swap lets one go.
+- **A newer plan while green builds** stops the build, and starts one on the newest plan.
+- **A build that fails** is logged, and the view keeps blue on its plan, as it does with a plan it
+  cannot maintain.
+- **A tenfold drift** does not prepare the statement anew: it is planned again in the background, in
+  place, and the view moves to the new plan blue/green, or keeps its plan, nothing rebuilt, when the
+  plan comes back the same.
+- **A statement prepared again**, after a change of shape, lets green go. The view computes the new
+  statement whole, as before.
+- **The tracker** hears the swap as an update that is not whole, and that ran the new plan. Until the
+  swap, the updates it hears of ran blue's plan.
+- **A view that recomputes refuses the option**: it takes a new plan at its next update at no extra
+  cost.
+
+The build uses the host's spare time. Where updates run back to back, it competes with them.
 
 ### What a view refuses
 

@@ -127,12 +127,13 @@ public sealed class PlanStatisticsTests(SharedSidecar sidecar) : IDisposable
     }
 
     /// <summary>
-    /// A view whose statement drifts prepares it again. Its result has the columns and key it had,
-    /// so its readers keep their place: the next drain sends what changed, and no reset. The reset
-    /// threshold is set out of reach, so that a reset could only come from the new plan.
+    /// A view whose statement drifts tenfold has it planned again in the background, in place, rather
+    /// than prepared anew (design 70 §2), and its readers keep their place: the next drain sends what
+    /// changed, and no reset. The reset threshold is set out of reach, so that a reset could only come
+    /// from the new plan.
     /// </summary>
     [Fact]
-    public async Task A_view_prepared_again_for_drift_keeps_its_readers()
+    public async Task A_view_whose_statement_drifts_has_it_planned_again_and_keeps_its_readers()
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         await using var desk = await DeskAsync(Fills(30, books: 3), Books(3));
@@ -147,10 +148,12 @@ public sealed class PlanStatisticsTests(SharedSidecar sidecar) : IDisposable
         await desk.LoadAsync(Fills(3_000, books: 3), Books(3));
         Assert.True(before.IsStale);
         await view.UpdateAsync(Ct);
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        await desk.Engine.RefreshAsync(Ct);
+        await view.UpdateAsync(Ct);
 
-        Assert.NotSame(before, view.Statement);
+        Assert.Same(before, view.Statement);
         Assert.False(view.Statement.IsStale);
-        Assert.Equal(before.LogicalDigest, view.Statement.LogicalDigest);
         Assert.Equal(DrainOutcome.Complete, view.Drain(ref cursor, sink));
         Assert.DoesNotContain("reset", sink.Calls);
         Assert.Equal(await RowsAsync(desk.Engine, view.Statement), sink.Rows);

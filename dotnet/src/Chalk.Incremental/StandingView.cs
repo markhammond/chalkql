@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Apache.Arrow;
 using Chalk.Catalog;
 using Chalk.Client;
+using Microsoft.Extensions.Logging;
 
 namespace Chalk.Incremental;
 
@@ -79,6 +80,15 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     private bool _lastWhole;
     private long _lastChanges;
 
+    /// <summary>
+    /// The instance a blue/green swap builds on the statement's new plan, beside the one the view updates
+    /// (design 70 §2); null when none is building or waiting to be swapped in.
+    /// </summary>
+    private Green? _green;
+
+    /// <summary>Instances let go while their builds ran, each disposed once its build has stopped.</summary>
+    private readonly List<Task> _lettingGo = [];
+
     private StandingView(
         ChalkEngine engine,
         string sql,
@@ -112,8 +122,14 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// <summary>The result's columns, as a <see cref="ViewRow"/> reads them.</summary>
     public Schema Columns => Volatile.Read(ref _prepared).OutputSchema;
 
-    /// <summary>The statement the view runs now; for tests that watch it prepared again.</summary>
-    internal PreparedQuery Statement => Volatile.Read(ref _prepared);
+    /// <summary>
+    /// The statement the view runs now: the host's, for a view made from a prepared statement, until a
+    /// table it reads changes shape; then the one the view prepared in its place, with the same text
+    /// and options (D341). A drift does not replace it: the view has it planned again in place (design
+    /// 70 §2). A host that keeps the statement, to run it in full, show its plan or hand it on, takes
+    /// this one after an update rather than prepare its own: it runs the view's plan exactly.
+    /// </summary>
+    public PreparedQuery Statement => Volatile.Read(ref _prepared);
 
     /// <summary>The version of the epoch the view was last updated to.</summary>
     public long Version
@@ -141,7 +157,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
     /// <summary>
     /// What the view holds, in bytes, against <see cref="ViewOptions{TKey, TRow}.StateBudget"/>: its
-    /// rows, and what it keeps of its reads of databases (D340).
+    /// rows, what it keeps of its reads of databases (D340), what its incremental maintenance keeps, and
+    /// a blue/green instance built beside it and waiting to be swapped in (design 70 §2), which the budget
+    /// does not count, since the swap lets one of the two go.
     /// </summary>
     public long StateBytes
     {
@@ -149,7 +167,10 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         {
             lock (_gate)
             {
-                return _table.Bytes + (_reads?.Bytes ?? 0) + (_maintained?.StateBytes ?? 0);
+                return _table.Bytes
+                    + (_reads?.Bytes ?? 0)
+                    + (_maintained?.StateBytes ?? 0)
+                    + (_green is { Build.IsCompletedSuccessfully: true } built ? built.Build.Result.StateBytes : 0);
             }
         }
     }
@@ -279,6 +300,23 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 + "including, 1: 1 or more would never take a plan, and less than 0 would take one that costs more.");
         }
 
+        if (!Enum.IsDefined(options.PlanSwap))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.PlanSwap,
+                "a view's PlanSwap is AtNextUpdate or BlueGreen.");
+        }
+
+        if (options.PlanSwap == ViewPlanSwap.BlueGreen && options.Maintenance == ViewMaintenance.Recompute)
+        {
+            throw new ArgumentException(
+                "a view that recomputes takes a new plan at its next update at no extra cost, so PlanSwap = "
+                + "BlueGreen would do nothing: make the view with ViewMaintenance.Incremental, or leave PlanSwap "
+                + "at AtNextUpdate.",
+                nameof(options));
+        }
+
         if (options.LocalJoinMaxRows <= 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -360,10 +398,11 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                     GC.GetTotalAllocatedBytes() - allocated,
                     _lastWhole,
                     _lastChanges,
-                    Volatile.Read(ref _prepared).PlanDigest);
+                    _maintained?.PlanDigest ?? Volatile.Read(ref _prepared).PlanDigest);
                 tracker.Updated(in update);
             }
 
+            BuildBeside();
             return version;
         }
         catch
@@ -611,6 +650,14 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 _maintained = null;
                 await maintained.DisposeAsync().ConfigureAwait(false);
             }
+
+            if (_green is { } green)
+            {
+                LetGo(green);
+            }
+
+            await Task.WhenAll(_lettingGo).ConfigureAwait(false);
+            _lettingGo.Clear();
         }
         finally
         {
@@ -651,7 +698,6 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             // Until it is applied, this update leaves the view behind the statement (D343).
             var whole = _resync;
             _resync = true;
-            _lastWhole = whole;
             MaintainedUpdate update;
             try
             {
@@ -669,6 +715,8 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 throw fault;
             }
 
+            // Whole for the tracker only when computed from nothing: a blue/green swap catches up.
+            _lastWhole = update.Restarted;
             return Changes(update, stamp);
         }
 
@@ -903,19 +951,39 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     }
 
     /// <summary>
-    /// Prepares the statement anew when it is stale: a table it reads changed shape, or drifted tenfold
-    /// in its row count (D342), unless the host's <see cref="ViewOptions{TKey, TRow}.RefreshQueryPlan"/>
-    /// vetoes a new plan for that drift now. The view's readers reset only when the result's columns or
-    /// key changed; otherwise they keep their place. A statement that no longer prepares faults the view.
+    /// Prepares the statement anew when a table it reads changed shape, which its plan no longer fits.
+    /// A statement a tenfold drift has made stale (D342) is planned again in the background instead,
+    /// in place (design 70 §2): the view keeps running it meanwhile, and moves to a new plan as it moves
+    /// to any. Only one the background cannot plan again is prepared anew for drift, and only when the
+    /// host's <see cref="ViewOptions{TKey, TRow}.RefreshQueryPlan"/> allows it. The view's readers reset
+    /// only when the result's columns or key changed; otherwise they keep their place. A statement that
+    /// no longer prepares faults the view.
     /// </summary>
     private async ValueTask PreparedCurrentAsync(CancellationToken ct)
     {
-        // A statement stale for drift alone runs correctly on the plan it has, and its view's host may
-        // veto a new one for now (design 70 §1); one whose tables changed shape no longer fits them.
-        if (!_prepared.IsStale || (!_prepared.ChangedShape && !_prepared.MayRefreshPlan()))
+        if (!_prepared.IsStale)
         {
             await MaintainedCurrentAsync(ct).ConfigureAwait(false);
             return;
+        }
+
+        // A statement stale for drift alone runs correctly on the plan it has. It is planned again in
+        // place, off this thread, as one whose numbers moved twofold is: the run asks the host, the
+        // planner applies the margin, and a plan that comes back the same is kept with nothing rebuilt.
+        if (!_prepared.ChangedShape)
+        {
+            if (_prepared.MayPlanAgain)
+            {
+                _engine.PlanAgainInBackground(_prepared);
+                await MaintainedCurrentAsync(ct).ConfigureAwait(false);
+                return;
+            }
+
+            if (!_prepared.MayRefreshPlan())
+            {
+                await MaintainedCurrentAsync(ct).ConfigureAwait(false);
+                return;
+            }
         }
 
         try
@@ -926,6 +994,12 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             if (_maintained is { } kept)
             {
                 // The plan is a new one: it is maintained from the start, and its first update is whole.
+                // An instance built beside the old one is of a statement that is no more.
+                if (_green is { } green)
+                {
+                    LetGo(green);
+                }
+
                 _maintained = null;
                 await kept.DisposeAsync().ConfigureAwait(false);
                 _maintained = await MaintainAsync(prepared, key, ct).ConfigureAwait(false);
@@ -964,12 +1038,25 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// the view is maintained from it from the start, and its next update is whole, as after the
     /// statement is prepared again; readers keep their place, as the result's columns and key are the
     /// same. A new plan that cannot be maintained is declined: the plan the view keeps answers the same
-    /// rows.
+    /// rows. Under <see cref="ViewPlanSwap.BlueGreen"/>, the new plan is built beside the one the view
+    /// keeps instead (design 70 §2).
     /// </summary>
     private async ValueTask MaintainedCurrentAsync(CancellationToken ct)
     {
         if (_maintained is not { IsCurrent: false } kept)
         {
+            // An instance built for a plan the view no longer moves to waits for nothing.
+            if (_green is { } stale)
+            {
+                LetGo(stale);
+            }
+
+            return;
+        }
+
+        if (_options.PlanSwap == ViewPlanSwap.BlueGreen)
+        {
+            await BlueGreenAsync(kept).ConfigureAwait(false);
             return;
         }
 
@@ -988,6 +1075,160 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         await kept.DisposeAsync().ConfigureAwait(false);
         _resync = true;
     }
+
+    /// <summary>
+    /// Moves the view to the plan its statement swapped in, without computing it from nothing at an
+    /// update (design 70 §2). An instance on the new plan is built in the background, from the end of
+    /// an update, while the view keeps updating <paramref name="blue"/> (<see cref="BuildBeside"/>). The
+    /// first update after the build swaps the new instance in: it catches up to that update's epoch and
+    /// gives its whole result, which the view compares with its rows, so readers keep their place. A
+    /// newer plan meanwhile abandons the build, and the update's end starts one on that plan; a plan that
+    /// cannot be maintained, or a build that fails, keeps <paramref name="blue"/> on its plan, as a plan
+    /// the view cannot maintain is declined.
+    /// </summary>
+    private async ValueTask BlueGreenAsync(MaintainedQuery blue)
+    {
+        if (_green is not { } green)
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(green.PlannedFor, _prepared.Plans))
+        {
+            // A newer plan swapped in while this one was built.
+            LetGo(green);
+            return;
+        }
+
+        if (!green.Build.IsCompleted)
+        {
+            return;
+        }
+
+        if (green.Build.IsCompletedSuccessfully)
+        {
+            // Built: it takes blue's place at this update, caught up and compared whole.
+            _green = null;
+            green.Cancel.Dispose();
+            _maintained = green.Build.Result;
+            await blue.DisposeAsync().ConfigureAwait(false);
+            _resync = true;
+            return;
+        }
+
+        if (green.Build.Exception?.GetBaseException() is not StandingViewException { Code: var code }
+            || code != ChalkErrorCodes.UnsupportedInView)
+        {
+            _engine.Log.LogWarning(
+                green.Build.Exception?.GetBaseException(),
+                "a view's build of a new plan beside plan {Kept:x16} failed; it keeps that plan",
+                blue.PlanDigest);
+        }
+
+        LetGo(green);
+        blue.PlannedWith = green.PlannedFor;
+    }
+
+    /// <summary>
+    /// Starts building the plan the statement runs beside the one the view runs (design 70 §2), when
+    /// the view moves to new plans blue/green, runs another plan, and builds nothing yet. Called at the
+    /// end of an update, so that the build runs in the time before the next: the instance is made and
+    /// computed from nothing off the update's thread, over the epoch current when the build begins.
+    /// </summary>
+    private void BuildBeside()
+    {
+        if (_options.PlanSwap != ViewPlanSwap.BlueGreen
+            || _green is not null
+            || _maintained is not { IsCurrent: false })
+        {
+            return;
+        }
+
+        var prepared = _prepared;
+        var key = _key;
+        var clocked = _readsTime || ViewBinding.NamesClock(prepared, _engine.ClockName);
+        var plannedFor = prepared.Plans;
+        var hold = HoldGreenBuild;
+        var cancel = new CancellationTokenSource();
+        var stop = cancel.Token;
+        var build = Task.Run(
+            async () =>
+            {
+                if (hold is not null)
+                {
+                    await hold(stop).ConfigureAwait(false);
+                }
+
+                var next = await MaintainAsync(prepared, key, stop).ConfigureAwait(false);
+                try
+                {
+                    var stamp = _engine.Stamp;
+                    if (clocked && stamp.Clock is null)
+                    {
+                        throw new InvalidOperationException(
+                            "the engine's clock has not been set, and the statement reads it.");
+                    }
+
+                    // Its rows are not read: the update that swaps it in gives them whole.
+                    var values = _binding.Values(prepared, _engine.ClockName, stamp.Clock);
+                    await next.UpdateAsync(values, stamp.Clock ?? default, whole: false, stop).ConfigureAwait(false);
+                    return next;
+                }
+                catch
+                {
+                    await next.DisposeAsync().ConfigureAwait(false);
+                    throw;
+                }
+            },
+            CancellationToken.None);
+        _green = new Green(plannedFor, build, cancel);
+    }
+
+    /// <summary>
+    /// Lets a blue/green instance go: its build is stopped, and what it built disposed once the build
+    /// has stopped, off the update's thread.
+    /// </summary>
+    private void LetGo(Green green)
+    {
+        if (ReferenceEquals(_green, green))
+        {
+            _green = null;
+        }
+
+        green.Cancel.Cancel();
+        _lettingGo.RemoveAll(static release => release.IsCompleted);
+        _lettingGo.Add(ReleaseAsync(green));
+    }
+
+    private static async Task ReleaseAsync(Green green)
+    {
+        // Stopped, failed or done, the build is over: what it threw is the view's to log, not to throw.
+        // A build that failed disposed what it made itself.
+        await ((Task)green.Build).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        _ = green.Build.Exception;
+        if (green.Build.IsCompletedSuccessfully)
+        {
+            await green.Build.Result.DisposeAsync().ConfigureAwait(false);
+        }
+
+        green.Cancel.Dispose();
+    }
+
+    /// <summary>A blue/green instance's build, for tests that wait for it; null when none is building or built.</summary>
+    internal Task? GreenBuild => _green?.Build;
+
+    /// <summary>For tests: awaited by a blue/green build before it begins, with the token that stops it.</summary>
+    internal Func<CancellationToken, Task>? HoldGreenBuild { get; set; }
+
+    /// <summary>
+    /// An instance of the view on a new plan, built in the background (design 70 §2): made, and its
+    /// first update, which computes from nothing, run off the update's thread over the epoch current
+    /// when the build began.
+    /// </summary>
+    /// <param name="PlannedFor">The statement's plans the instance is built on (<see cref="PreparedQuery.Plans"/>).</param>
+    /// <param name="Build">The instance, once built.</param>
+    /// <param name="Cancel">Stops the build when the view lets the instance go.</param>
+    private sealed record Green(object PlannedFor, Task<MaintainedQuery> Build, CancellationTokenSource Cancel);
 
     /// <summary>Whether the view is maintained from the plans its statement runs now; true for a view that recomputes.</summary>
     internal bool MaintainsCurrentPlan => _maintained?.IsCurrent ?? true;

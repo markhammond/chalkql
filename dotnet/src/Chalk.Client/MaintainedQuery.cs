@@ -25,14 +25,18 @@ internal sealed class MaintainedQuery : IAsyncDisposable
         MaintainedPlan plan,
         IReadOnlyList<PlaceholderSlot> slots,
         IReadOnlyList<ChalkType> parameterTypes,
-        object plans)
+        PreparedQuery.PlanState plans)
     {
         _query = query;
         _plan = plan;
         _slots = slots;
         _parameterTypes = parameterTypes;
         PlannedWith = plans;
+        PlanDigest = plans.Plan.PlanDigest;
     }
+
+    /// <summary>The digest of the plan this query was made from: the plan its updates run.</summary>
+    internal ulong PlanDigest { get; }
 
     /// <summary>
     /// The statement's plans this query was made from (<see cref="PreparedQuery.Plans"/>), or the ones
@@ -73,7 +77,13 @@ internal sealed class MaintainedQuery : IAsyncDisposable
             throw new MaintainedKeyFault(duplicate.Key);
         }
 
-        return new MaintainedUpdate { Whole = changes.Whole, Now = changes.Now, Before = changes.Before };
+        return new MaintainedUpdate
+        {
+            Whole = changes.Whole,
+            Restarted = changes.Restarted,
+            Now = changes.Now,
+            Before = changes.Before,
+        };
     }
 
     public async ValueTask DisposeAsync()
@@ -88,6 +98,9 @@ internal sealed class MaintainedUpdate
 {
     /// <summary>True when <see cref="Now"/> is the whole result: the first update, or one after a failure.</summary>
     public required bool Whole { get; init; }
+
+    /// <summary>True when the update computed the result from nothing, rather than catching up.</summary>
+    public required bool Restarted { get; init; }
 
     /// <summary>The rows the changed keys hold now; every row when <see cref="Whole"/>.</summary>
     public required RecordBatch Now { get; init; }
