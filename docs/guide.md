@@ -463,7 +463,10 @@ becomes, and how to change a published set safely.
 Some indexes answer prefixes rather than ranges; a trie is one example. Such an index
 declares `IndexKind.Prefix`, and `WHERE name LIKE 'p%'` then becomes a lookup on it
 rather than a filter. An ordered string index serves the same query as the plain range
-`[p, next(p))`, with no change to the adapter at all.
+`[p, next(p))`, with no change to the adapter at all. The planner estimates the rows
+such a lookup reads from the column's statistics: the share of its texts that start with
+the prefix, read from the histogram where there is one, and never less than one value's
+share or the frequent values that start with it.
 
 An index that can also be walked backwards, from its last matching row to its first,
 implements `IReversiblePocoIndex<T>`. That lets `ORDER BY ts DESC LIMIT 1` be one walk

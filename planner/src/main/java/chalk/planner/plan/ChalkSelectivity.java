@@ -36,6 +36,9 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  *       {@code null_count} that would refine that is a second-order correction on an estimate.
  *   <li><b>Range</b> — the histogram by bucket interpolation, else uniform between {@code min} and
  *       {@code max} for the numeric and temporal kinds, else Calcite's default.
+ *   <li><b>A {@code LIKE} prefix</b> — the share of texts from the prefix to its successor, by the
+ *       histogram, else uniformly between {@code min} and {@code max}, and never below an
+ *       equality's share or the frequent values the prefix starts.
  *   <li><b>IS NULL</b> — {@code null_count / rows}; {@code IS NOT NULL} its complement.
  *   <li><b>Anything else, and any unknown statistic</b> — {@code RelMdUtil.guessSelectivity}, and
  *       the estimate is reported as a guess so nobody mistakes it for a measurement.
@@ -306,6 +309,13 @@ public final class ChalkSelectivity {
       return guess(conjunct);
     }
 
+    // `col LIKE 'p%'`: the share of the column's texts that start with the prefix, from its
+    // statistics, rather than Calcite's quarter (ADR 0072 §3).
+    if (conjunct instanceof RexCall like && like.getKind() == SqlKind.LIKE) {
+      Estimate prefix = prefix(like, table, fields, rows, hints);
+      return prefix == null ? guess(conjunct) : prefix;
+    }
+
     if (!(conjunct instanceof RexCall call) || call.getOperands().size() != 2) {
       return guess(conjunct);
     }
@@ -446,6 +456,146 @@ public final class ChalkSelectivity {
     return share == null
         ? guess(conjunct)
         : new Estimate(clamp(below ? share : 1.0 - share), false);
+  }
+
+  /**
+   * {@code col LIKE p} on a STRING column where {@code p} is a bare prefix — its literal start and
+   * one {@code %} — or a parameter whose hint is one: the share of rows from the prefix up to the
+   * first text above every text that starts with it (ADR 0072 §3.3). The histogram answers it by
+   * interpolation within its buckets, and without one the column's {@code min} and {@code max}
+   * answer it uniformly. A prefix is never less likely than one of the column's values, so the
+   * share is never below an equality's {@code 1 / distinct_count}, nor below the frequent values
+   * that start with it: PostgreSQL's floor, for statistics too coarse to tell. Null for anything
+   * else — a case-insensitive {@code LIKE}, a pattern that is not a bare prefix, a column with no
+   * statistic that places a text — which the general path then guesses.
+   */
+  private static @Nullable Estimate prefix(
+      RexCall like,
+      ChalkTable table,
+      List<Integer> fields,
+      @Nullable Double rows,
+      ParameterHints hints) {
+    if (!"LIKE".equals(like.getOperator().getName())
+        || like.getOperands().size() < 2
+        || like.getOperands().size() > 3) {
+      return null;
+    }
+
+    int tableColumn = columnOf(like.getOperands().get(0), fields);
+    if (tableColumn < 0
+        || table.column(tableColumn).getType().getKind() != chalk.ir.v1.TypeKind.TYPE_KIND_STRING) {
+      return null;
+    }
+
+    ColumnStatistics statistics = table.statistics(tableColumn);
+    if (statistics.getLevel() == StatisticsLevel.STATISTICS_LEVEL_UNKNOWN) {
+      return null;
+    }
+
+    String escape = null;
+    if (like.getOperands().size() == 3) {
+      escape = LikePatterns.characterLiteral(like.getOperands().get(2));
+      if (escape == null || LikePatterns.escapeDefect(escape) != null) {
+        return null;
+      }
+    }
+
+    RexNode operand = like.getOperands().get(1);
+    String pattern = LikePatterns.characterLiteral(operand);
+    boolean hinted = false;
+    if (pattern == null) {
+      ParameterHints.Hint hint = hintFor(operand, hints);
+      if (hint == null
+          || hint.isNull()
+          || !(LiteralValues.of(hint.literal()) instanceof String text)) {
+        return null;
+      }
+
+      pattern = text;
+      hinted = true;
+    }
+
+    if (LikePatterns.patternDefect(pattern, escape) != null) {
+      return null;
+    }
+
+    LikePatterns.Prefix prefix = LikePatterns.prefix(pattern, escape);
+    if (!prefix.bare()) {
+      return null;
+    }
+
+    Double share = prefixShare(statistics, prefix.text(), rows);
+    return share == null ? null : new Estimate(clamp(share), false, hinted);
+  }
+
+  /** The share of rows whose text starts with {@code prefix}, or null when nothing places it. */
+  private static @Nullable Double prefixShare(
+      ColumnStatistics statistics, String prefix, @Nullable Double rows) {
+    // `LIKE '%'` is every text: the rows that are not NULL.
+    if (prefix.isEmpty()) {
+      return rows != null && rows > 0 && statistics.getNullCount() >= 0
+          ? 1.0 - Math.min(statistics.getNullCount() / rows, 1.0)
+          : null;
+    }
+
+    double floor = statistics.getDistinctCount() > 0 ? 1.0 / statistics.getDistinctCount() : 0;
+    if (rows != null && rows > 0) {
+      double frequent = 0;
+      for (FrequentValue value : statistics.getFrequentValuesList()) {
+        if (LiteralValues.of(value.getValue()) instanceof String text && text.startsWith(prefix)) {
+          frequent += value.getCount();
+        }
+      }
+
+      floor = Math.max(floor, frequent / rows);
+    }
+
+    Double from = textShareBelow(statistics, prefix, rows);
+    String successor = TextLine.successor(prefix);
+    Double to = successor == null ? Double.valueOf(1.0) : textShareBelow(statistics, successor, rows);
+    if (from == null || to == null) {
+      return floor > 0 ? floor : null;
+    }
+
+    return Math.max(to - from, floor);
+  }
+
+  /**
+   * The share of rows below the text {@code wanted}, by code point: from the histogram's buckets
+   * when there are any, interpolating within the one it falls in, and uniformly between {@code
+   * min} and {@code max} otherwise. Null when neither places a text.
+   */
+  private static @Nullable Double textShareBelow(
+      ColumnStatistics statistics, String wanted, @Nullable Double rows) {
+    String min = LiteralValues.of(statistics.getMin()) instanceof String text ? text : null;
+    List<HistogramBucket> buckets = statistics.getHistogram().getBucketsList();
+    if (!buckets.isEmpty() && rows != null && rows > 0) {
+      double below = 0;
+      String previous = min;
+      for (HistogramBucket bucket : buckets) {
+        if (!(LiteralValues.of(bucket.getUpper()) instanceof String upper)) {
+          return null;
+        }
+
+        if (TextLine.compare(wanted, upper) > 0) {
+          below += bucket.getCount();
+          previous = upper;
+          continue;
+        }
+
+        double within = previous == null ? 0.5 : TextLine.fraction(previous, upper, wanted);
+        return Math.min(1.0, (below + bucket.getCount() * within) / rows);
+      }
+
+      return Math.min(1.0, below / rows);
+    }
+
+    String max = LiteralValues.of(statistics.getMax()) instanceof String text ? text : null;
+    if (min == null || max == null || TextLine.compare(max, min) <= 0) {
+      return null;
+    }
+
+    return TextLine.fraction(min, max, wanted);
   }
 
   /**
@@ -609,6 +759,111 @@ public final class ChalkSelectivity {
 
   private static double clamp(double value) {
     return Math.max(1e-9, Math.min(1.0, value));
+  }
+
+  /**
+   * Text placed on a line, for interpolation: by code point, which is how the sources order text.
+   * PostgreSQL's {@code convert_string_to_scalar} in spirit: past the start the bounds share, each
+   * text's next code points are read as the digits of a fraction, in a base just wide enough for
+   * the code points the three texts hold there.
+   */
+  static final class TextLine {
+    /** How many code points past the shared start a text is read to: a double holds no more. */
+    private static final int DIGITS = 6;
+
+    private TextLine() {}
+
+    /** Negative, zero or positive as {@code left} sorts before, with or after {@code right}. */
+    static int compare(String left, String right) {
+      int i = 0;
+      int j = 0;
+      while (i < left.length() && j < right.length()) {
+        int a = left.codePointAt(i);
+        int b = right.codePointAt(j);
+        if (a != b) {
+          return a < b ? -1 : 1;
+        }
+
+        i += Character.charCount(a);
+        j += Character.charCount(b);
+      }
+
+      return i < left.length() ? 1 : j < right.length() ? -1 : 0;
+    }
+
+    /** Where {@code value} falls from {@code low}, at 0, to {@code high}, at 1. */
+    static double fraction(String low, String high, String value) {
+      if (compare(value, low) <= 0) {
+        return 0;
+      }
+
+      if (compare(value, high) >= 0) {
+        return 1;
+      }
+
+      int[] lowPoints = low.codePoints().toArray();
+      int[] highPoints = high.codePoints().toArray();
+      int[] valuePoints = value.codePoints().toArray();
+
+      // A text between two others starts with what they share, so only what follows is read.
+      int shared = 0;
+      while (shared < lowPoints.length
+          && shared < highPoints.length
+          && lowPoints[shared] == highPoints[shared]) {
+        shared++;
+      }
+
+      int least = Integer.MAX_VALUE;
+      int most = Integer.MIN_VALUE;
+      for (int[] points : new int[][] {lowPoints, highPoints, valuePoints}) {
+        for (int k = shared; k < Math.min(points.length, shared + DIGITS); k++) {
+          least = Math.min(least, points[k]);
+          most = Math.max(most, points[k]);
+        }
+      }
+
+      if (least > most) {
+        return 0.5;
+      }
+
+      // Zero is a text that has ended, which sorts before every code point.
+      double base = (double) most - least + 2;
+      double from = scalar(lowPoints, shared, least, base);
+      double to = scalar(highPoints, shared, least, base);
+      double at = scalar(valuePoints, shared, least, base);
+      return to <= from ? 0.5 : Math.max(0, Math.min(1, (at - from) / (to - from)));
+    }
+
+    /**
+     * The first text above every text that starts with {@code prefix}: its last code point
+     * incremented, carrying past the last code point there is and stepping over the surrogates. Null
+     * when the prefix is made only of that last code point, above which no text sorts (ADR 0072
+     * §3.3).
+     */
+    static @Nullable String successor(String prefix) {
+      int[] points = prefix.codePoints().toArray();
+      for (int k = points.length - 1; k >= 0; k--) {
+        int next =
+            points[k] + 1 == Character.MIN_SURROGATE ? Character.MAX_SURROGATE + 1 : points[k] + 1;
+        if (next <= Character.MAX_CODE_POINT) {
+          points[k] = next;
+          return new String(points, 0, k + 1);
+        }
+      }
+
+      return null;
+    }
+
+    private static double scalar(int[] points, int from, int least, double base) {
+      double value = 0;
+      double scale = 1;
+      for (int k = from; k < from + DIGITS; k++) {
+        scale /= base;
+        value += (k < points.length ? points[k] - least + 1 : 0) * scale;
+      }
+
+      return value;
+    }
   }
 
   /** Reads IR literals as values the estimator can compare and place on a line. */

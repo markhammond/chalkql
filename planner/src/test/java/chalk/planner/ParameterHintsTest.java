@@ -66,6 +66,18 @@ class ParameterHintsTest {
   }
 
   /**
+   * {@code symbol LIKE ?}: a guess without a hint; with a hint that is a bare prefix, the share of
+   * texts that start with it, as the literal would be — here one of the five symbols.
+   */
+  @Test
+  void a_hinted_like_prefix_is_estimated_as_its_literal_would_be() {
+    String like = "SELECT symbol, ts FROM bars WHERE symbol LIKE ? LIMIT ?";
+
+    assertThat(text(like, List.of())).contains("guess(");
+    assertThat(text(like, List.of(str(0, "BTC%"), i32(1, 1)))).contains("sel=[hint(0.2000)]");
+  }
+
+  /**
    * D337, F178: a bound computed from a hinted parameter is computed with the hint and read off the
    * statistics, as the hint itself would be; without a hint it is still a guess.
    */
