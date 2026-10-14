@@ -104,7 +104,7 @@ public sealed class TenancySplitPolicyTests(SharedSidecar sidecar)
         var data = new TheoryData<string>();
         foreach (var query in CorpusQueries.LoadM7Tenancy())
         {
-            if (!TenancyCorpusTests.KnownLeaks.ContainsKey(query.Name)
+            if (!TenancyCorpusTests.KnownDefects.ContainsKey(query.Name)
                 && !TenancyCorpusTests.NotPlanned.ContainsKey(query.Name))
             {
                 data.Add(query.Name);

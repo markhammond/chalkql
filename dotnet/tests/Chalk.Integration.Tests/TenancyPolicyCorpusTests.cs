@@ -55,7 +55,7 @@ public sealed class TenancyPolicyCorpusTests(SharedSidecar sidecar)
 
     /// <summary>
     /// Every statement layer A holds to the oracle. A statement layer A only <em>records</em> —
-    /// <see cref="TenancyCorpusTests.KnownLeaks"/>, a registered defect — has no answer for the two
+    /// <see cref="TenancyCorpusTests.KnownDefects"/>, a registered defect — has no answer for the two
     /// paths to agree on, and one it does not plan at all
     /// (<see cref="TenancyCorpusTests.NotPlanned"/>) has none either; both stay in the corpus, and
     /// the register and the family README say why.
@@ -65,7 +65,7 @@ public sealed class TenancyPolicyCorpusTests(SharedSidecar sidecar)
         var data = new TheoryData<string>();
         foreach (var query in CorpusQueries.LoadM7Tenancy())
         {
-            if (!TenancyCorpusTests.KnownLeaks.ContainsKey(query.Name)
+            if (!TenancyCorpusTests.KnownDefects.ContainsKey(query.Name)
                 && !TenancyCorpusTests.NotPlanned.ContainsKey(query.Name))
             {
                 data.Add(query.Name);
