@@ -178,7 +178,26 @@ internal sealed class AsOfSeekOperator : OperatorBase
 
         var rows = _left.Rows;
         var seen = new HashSet<object?[]>(SeekComparer.Instance);
-        var ranges = new List<IndexKeyRange>();
+        var ranges = new List<IndexKeyRange>(rows.Count);
+
+        // Each key and the time, boxed once for a run of rows that repeat it, as a leg's rows repeat
+        // the time they are priced at.
+        var lastRow = new int[held + 1];
+        var lastBoxed = new object?[held + 1];
+        Array.Fill(lastRow, -1);
+        object? Boxed(int slot, int field, int row)
+        {
+            var column = rows.Column(field);
+            var type = _leftTypes[field];
+            if (lastRow[slot] >= 0 && SameLane(column, lastRow[slot], row, type))
+            {
+                return lastBoxed[slot];
+            }
+
+            lastRow[slot] = row;
+            return lastBoxed[slot] = ScalarValue.ClrAt(column, row, type);
+        }
+
         for (var row = 0; row < rows.Count; row++)
         {
             var values = new object?[held + 1];
@@ -186,13 +205,11 @@ internal sealed class AsOfSeekOperator : OperatorBase
             for (var k = 0; k < held && !missing; k++)
             {
                 var key = _keys[k];
-                values[k] = key.Fixed is null
-                    ? ScalarValue.FromLane(rows.Column(key.LeftField), row, _leftTypes[key.LeftField]).ToClr()
-                    : fixedValues[k];
+                values[k] = key.Fixed is null ? Boxed(k, key.LeftField, row) : fixedValues[k];
                 missing = values[k] is null;
             }
 
-            values[held] = ScalarValue.FromLane(rows.Column(_leftTime), row, _leftTypes[_leftTime]).ToClr();
+            values[held] = Boxed(held, _leftTime, row);
             if (missing || values[held] is null || !seen.Add(values))
             {
                 continue;
@@ -273,6 +290,36 @@ internal sealed class AsOfSeekOperator : OperatorBase
                 batch.Dispose();
             }
         }
+    }
+
+    /// <summary>Whether two rows of a column hold the same lane: both NULL, or the same bytes.</summary>
+    private static bool SameLane(in ColumnView column, int a, int b, ChalkType type)
+    {
+        var valid = column.IsValid(a);
+        if (valid != column.IsValid(b))
+        {
+            return false;
+        }
+
+        if (!valid)
+        {
+            return true;
+        }
+
+        var kind = ColumnKinds.Of(type);
+        if (ColumnKinds.IsVariableLength(kind))
+        {
+            return column.VarValue(a).SequenceEqual(column.VarValue(b));
+        }
+
+        if (kind == ColumnKind.Boolean)
+        {
+            return column.BoolAt(a) == column.BoolAt(b);
+        }
+
+        var width = ColumnKinds.Width(kind);
+        var lanes = column.RawLanes(width);
+        return lanes.Slice(a * width, width).SequenceEqual(lanes.Slice(b * width, width));
     }
 
     /// <summary>A seek's key and time, compared value by value.</summary>

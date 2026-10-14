@@ -80,6 +80,32 @@ internal sealed class ScalarValue
         };
     }
 
+    /// <summary>
+    /// The lane's value as <see cref="ToClr"/> gives it, read without a <see cref="ScalarValue"/> on the
+    /// way: what an as-of seek's bounds are made of, once for each left row.
+    /// </summary>
+    public static object? ClrAt(in ColumnView column, int row, ChalkType type)
+    {
+        if (!column.IsValid(row))
+        {
+            return null;
+        }
+
+        return type.Kind switch
+        {
+            TypeKind.Bool => (byte)(column.BoolAt(row) ? 1 : 0),
+            TypeKind.I8 => column.Lanes<sbyte>()[row],
+            TypeKind.I16 => column.Lanes<short>()[row],
+            TypeKind.I32 or TypeKind.Date or TypeKind.IntervalYear => column.Lanes<int>()[row],
+            TypeKind.I64 or TypeKind.Time or TypeKind.Timestamp or TypeKind.TimestampTz
+                or TypeKind.IntervalDay => column.Lanes<long>()[row],
+            TypeKind.Fp32 => column.Lanes<float>()[row],
+            TypeKind.Fp64 => column.Lanes<double>()[row],
+            TypeKind.String => System.Text.Encoding.UTF8.GetString(column.VarValue(row)),
+            _ => FromLane(column, row, type).ToClr(),
+        };
+    }
+
     private static byte[] BytesOf(in ColumnView column, int row, ChalkType type) =>
         type.Kind == TypeKind.Binary
             ? column.VarValue(row).ToArray()
