@@ -182,10 +182,21 @@ internal sealed class ByteMap
         return entry;
     }
 
-    /// <summary>A table of <paramref name="size"/> slots over the live entries, dropping the removed marks.</summary>
+    /// <summary>
+    /// A table of <paramref name="size"/> slots over the live entries, dropping the removed marks: the one
+    /// it has, swept, when it stays that size, so that churn allocates nothing.
+    /// </summary>
     private void Rehash(int size)
     {
-        _table = Fresh(size);
+        if (size == _table.Length)
+        {
+            Array.Fill(_table, Empty);
+        }
+        else
+        {
+            _table = Fresh(size);
+        }
+
         _mask = size - 1;
         _occupied = 0;
         for (var entry = 0; entry < _entries; entry++)

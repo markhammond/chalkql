@@ -38,7 +38,17 @@ internal sealed class Buckets
         {
             if (_free.TryPop(out var reused))
             {
-                _keys[reused] = key.ToArray();
+                // A freed bucket keeps its key's array, which a key of the same length is copied into:
+                // under churn a key leaves and comes back in one update, and allocates nothing.
+                var held = _keys[reused];
+                if (held.Length == key.Length)
+                {
+                    key.CopyTo(held);
+                }
+                else
+                {
+                    _keys[reused] = key.ToArray();
+                }
             }
             else
             {
@@ -77,7 +87,6 @@ internal sealed class Buckets
         if (members.Count == 0)
         {
             _ids.Remove(_keys[bucket], out _);
-            _keys[bucket] = [];
             _free.Push(bucket);
         }
     }

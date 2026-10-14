@@ -217,6 +217,10 @@ internal sealed class ResultState
     private int[] _key = [];
     private KeyColumns _keyColumns;
     private int[] _stored = [];
+    private ChangeWriter? _now;
+    private ChangeWriter? _was;
+    private ColumnarBatch? _nowColumns;
+    private ColumnarBatch? _wasColumns;
 
     public ResultState(IReadOnlyList<ChalkType> types)
     {
@@ -329,8 +333,11 @@ internal sealed class ResultState
     /// </summary>
     public MaintainedChanges End(bool whole, OutputMaterialiser output)
     {
-        var now = new ChangeWriter(_types, int.MaxValue);
-        var before = new ChangeWriter(_types, int.MaxValue);
+        // The writers are kept from update to update: the batches the last one gave were copied out.
+        var now = _now ??= new ChangeWriter(_types, int.MaxValue);
+        var before = _was ??= new ChangeWriter(_types, int.MaxValue);
+        now.Clear();
+        before.Clear();
         if (whole)
         {
             foreach (var (_, slots) in _byKey)
@@ -378,8 +385,8 @@ internal sealed class ResultState
         return new MaintainedChanges
         {
             Whole = whole,
-            Now = Arrow(now, output),
-            Before = Arrow(before, output),
+            Now = Arrow(now, _nowColumns ??= new ColumnarBatch(_types), output),
+            Before = Arrow(before, _wasColumns ??= new ColumnarBatch(_types), output),
         };
     }
 
@@ -429,9 +436,8 @@ internal sealed class ResultState
         BeforeOf(_keyEncoder.Span);
     }
 
-    private static RecordBatch Arrow(ChangeWriter rows, OutputMaterialiser output)
+    private static RecordBatch Arrow(ChangeWriter rows, ColumnarBatch columns, OutputMaterialiser output)
     {
-        var columns = new ColumnarBatch(rows.Types);
         if (rows.Rows == 0)
         {
             columns.Begin(0);

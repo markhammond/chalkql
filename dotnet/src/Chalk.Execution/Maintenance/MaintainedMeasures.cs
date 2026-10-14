@@ -462,15 +462,12 @@ internal sealed class MaintainedExtremum : MaintainedMeasure
 
     public override void Merge(int group, MaintainedMeasure other, int from)
     {
-        if (((MaintainedExtremum)other)._values[from] is not { } changes)
+        if (((MaintainedExtremum)other)._values[from] is not { Count: > 0 } changes)
         {
             return;
         }
 
-        foreach (var (value, count) in changes.Counted())
-        {
-            Add(group, value, valid: true, count);
-        }
+        changes.MergeInto(_values[group] ??= new Values(_order, _signed));
     }
 
     public override MaintainedMeasure Twin() => new MaintainedExtremum(ResultType, _max, signed: true);
@@ -494,31 +491,39 @@ internal sealed class MaintainedExtremum : MaintainedMeasure
         }
     }
 
-    /// <summary>One group's values, ordered, with how many times each is held.</summary>
+    /// <summary>
+    /// One group's values, with how many times each is held. A group's own values are kept in order, for
+    /// its MIN or MAX, each value's bytes held once; an update's changes are only counted, and merge
+    /// into the group a value at a time, so an update allocates nothing for a value it already holds.
+    /// </summary>
     private sealed class Values(LaneOrder order, bool signed)
     {
-        private readonly SortedSet<byte[]> _ordered = new(order);
+        private readonly SortedSet<byte[]>? _ordered = signed ? null : new(order);
         private readonly ByteMap _ids = new();
         private long[] _counts = new long[4];
+        private byte[]?[] _bytes = signed ? [] : new byte[]?[4];
         private int[] _free = new int[4];
         private int _freeCount;
         private int _used;
 
-        public int Count => _ordered.Count;
+        public int Count => _ids.Count;
 
-        public byte[] Min => _ordered.Min!;
+        public byte[] Min => _ordered!.Min!;
 
-        public byte[] Max => _ordered.Max!;
+        public byte[] Max => _ordered!.Max!;
 
-        public long Bytes => _ids.Bytes + (_counts.Length * sizeof(long)) + (_ordered.Count * 48L);
+        public long Bytes =>
+            _ids.Bytes + (_counts.Length * sizeof(long)) + ((long)_bytes.Length * IntPtr.Size) + ((_ordered?.Count ?? 0) * 48L);
 
-        /// <summary>Each value held, with its count: for a merge, so the order is the set's.</summary>
-        public IEnumerable<(byte[] Value, long Count)> Counted()
+        /// <summary>Adds each value these changes hold, with its count, to a group's values: in any order, as each comes once.</summary>
+        public void MergeInto(Values group)
         {
-            foreach (var value in _ordered)
+            for (var entry = 0; entry < _ids.Entries; entry++)
             {
-                _ids.TryGet(value, out var id);
-                yield return (value, _counts[id]);
+                if (_ids.IsLive(entry))
+                {
+                    group.Add(_ids.Key(entry), _counts[_ids.Value(entry)]);
+                }
             }
         }
 
@@ -536,7 +541,12 @@ internal sealed class MaintainedExtremum : MaintainedMeasure
 
                 // Gone: out of the order, and its id free for another value.
                 _ids.Remove(lane, out _);
-                _ordered.Remove(lane.ToArray());
+                if (_ordered is not null)
+                {
+                    _ordered.Remove(_bytes[held]!);
+                    _bytes[held] = null;
+                }
+
                 if (_freeCount == _free.Length)
                 {
                     Array.Resize(ref _free, _free.Length * 2);
@@ -560,12 +570,23 @@ internal sealed class MaintainedExtremum : MaintainedMeasure
 
             id = fresh;
             _counts[fresh] = weight;
-            _ordered.Add(lane.ToArray());
+            if (_ordered is not null)
+            {
+                if (fresh >= _bytes.Length)
+                {
+                    Array.Resize(ref _bytes, _bytes.Length * 2);
+                }
+
+                var bytes = lane.ToArray();
+                _bytes[fresh] = bytes;
+                _ordered.Add(bytes);
+            }
         }
 
         public void Clear()
         {
-            _ordered.Clear();
+            _ordered?.Clear();
+            Array.Clear(_bytes);
             _ids.Clear();
             _freeCount = 0;
             _used = 0;
