@@ -1848,7 +1848,11 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
                 }
             }
 
-            return new PocoIndexRowScan<T>(this, snapshot, ordinal, request, context, ct);
+            // A window walked from its end costs what it does from its start (D283), so an index that
+            // answers in positions is read backwards by position, and nothing is allocated per range.
+            return index is IPositionalPocoIndex<T> && snapshot.RandomAccess
+                ? new PocoIndexScan<T>(this, snapshot, ordinal, request, context, ct)
+                : new PocoIndexRowScan<T>(this, snapshot, ordinal, request, context, ct);
         }
 
         if (index is IPositionalPocoIndex<T> && snapshot.RandomAccess)
@@ -2493,7 +2497,12 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
             _batchSize = request.BatchSize;
             _rowGoal = request.RowGoal;
             _positions = Positions(
-                    (IPositionalPocoIndex<T>)_snapshot.Indexes[ordinal], request.Ranges, request.RowsPerRange)
+                    (IPositionalPocoIndex<T>)_snapshot.Indexes[ordinal],
+                    request.Ranges,
+                    request.Reverse,
+                    request.RowsPerRange,
+                    _rows.Count,
+                    context.Arena)
                 .GetEnumerator();
             _buffer = context.Arena.Rent<int>(Math.Max(1, request.BatchSize));
             try
@@ -2618,26 +2627,35 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
     }
 
     /// <summary>
-    /// The positions the ranges match, de-duplicated once there is more than one range. The planner
-    /// emits sorted, non-overlapping ranges; the bitmap is the cheap insurance §3 asks for, and it
-    /// keeps the union in index order.
-    /// </summary>
-    /// <summary>
-    /// The positions the ranges cover, in index order and each once; only the first
-    /// <paramref name="perRange"/> of each range's where a number is given (D338).
+    /// The positions the ranges cover, each once: range by range, each in index order, or from its end
+    /// for a reversed lookup (D283); only the first <paramref name="perRange"/> of each range's where a
+    /// number is given (D338). The planner emits non-overlapping ranges; more than one is de-duplicated
+    /// by a bitmap rented from the execution's arena, the cheap insurance §3 asks for.
     /// </summary>
     private static IEnumerable<int> Positions(
         IPositionalPocoIndex<T> index,
         IReadOnlyList<IndexKeyRange> ranges,
-        int? perRange)
+        bool reverse,
+        int? perRange,
+        int rows,
+        ExecutionArena arena)
     {
         if (ranges.Count == 1)
         {
-            var range = ranges[0];
+            index.GetWindow(ranges[0], out var from, out var to);
+            if (reverse)
+            {
+                // The last rows of the window, from its end (D283).
+                var stop = perRange is { } count ? Math.Max(from, to - Math.Max(count, 0)) : from;
+                for (var ordinal = to - 1; ordinal >= stop; ordinal--)
+                {
+                    yield return index.GetPosition(ordinal);
+                }
 
-            index.GetWindow(range, out var from, out var to);
+                yield break;
+            }
+
             to = Limited(from, to, perRange);
-
             for (var ordinal = from; ordinal < to; ordinal++)
             {
                 yield return index.GetPosition(ordinal);
@@ -2646,22 +2664,42 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
             yield break;
         }
 
-        var seen = new HashSet<int>();
-
-        for (var r = 0; r < ranges.Count; r++)
+        // Each position once, marked in a bitmap rented for the lookup rather than a set grown for it.
+        var words = (rows + 63) / 64;
+        var seen = arena.Rent<ulong>(Math.Max(1, words));
+        try
         {
-            index.GetWindow(ranges[r], out var from, out var to);
-            to = Limited(from, to, perRange);
-
-            for (var ordinal = from; ordinal < to; ordinal++)
+            Array.Clear(seen, 0, Math.Max(1, words));
+            for (var r = 0; r < ranges.Count; r++)
             {
-                var position = index.GetPosition(ordinal);
-
-                if (seen.Add(position))
+                index.GetWindow(ranges[r], out var from, out var to);
+                int first, last, step;
+                if (reverse)
                 {
-                    yield return position;
+                    var stop = perRange is { } count ? Math.Max(from, to - Math.Max(count, 0)) : from;
+                    (first, last, step) = (to - 1, stop - 1, -1);
+                }
+                else
+                {
+                    (first, last, step) = (from, Limited(from, to, perRange), 1);
+                }
+
+                for (var ordinal = first; ordinal != last; ordinal += step)
+                {
+                    var position = index.GetPosition(ordinal);
+                    ref var word = ref seen[position >> 6];
+                    var bit = 1UL << (position & 63);
+                    if ((word & bit) == 0)
+                    {
+                        word |= bit;
+                        yield return position;
+                    }
                 }
             }
+        }
+        finally
+        {
+            arena.Return(seen);
         }
     }
 

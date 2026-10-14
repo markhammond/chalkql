@@ -56,6 +56,40 @@ public sealed class PocoRowsPerRangeTests
         Assert.Equal(3, scanned);
     }
 
+    /// <summary>
+    /// Backwards, each range from its end, and a row two ranges reach once: the first range gives 50 down
+    /// to 0, and the second, which overlaps it, nothing more.
+    /// </summary>
+    [Theory]
+    [InlineData("permutation")]
+    [InlineData("clustered")]
+    public async Task Every_row_backwards_once_each(string path)
+    {
+        IndexKeyRange[] overlapping =
+        [
+            new() { Lower = [], Upper = [50] },
+            new() { Lower = [], Upper = [30] },
+        ];
+
+        var (keys, scanned) = await LookupAsync(Source(path), overlapping, reverse: true, rowsPerRange: null);
+
+        Assert.Equal(Enumerable.Range(0, 51).Reverse().ToArray(), keys.ToArray());
+        Assert.Equal(51, scanned);
+    }
+
+    /// <summary>A number above one, backwards: the last rows of the range, from its end.</summary>
+    [Theory]
+    [InlineData("permutation")]
+    [InlineData("clustered")]
+    public async Task Three_rows_backwards(string path)
+    {
+        IndexKeyRange[] one = [new() { Lower = [], Upper = [50] }];
+
+        var (keys, _) = await LookupAsync(Source(path), one, reverse: true, rowsPerRange: 3);
+
+        Assert.Equal([50, 49, 48], keys.ToArray());
+    }
+
     /// <summary>Without a number, every row of every range, once each.</summary>
     [Fact]
     public async Task No_number_is_every_row()

@@ -1165,6 +1165,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     TLogicalOrder>
                 .Create(
                     accessor,
+                    typed,
                     direction);
 
         return CreateEncodedKey(
@@ -1899,6 +1900,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     TOrder>
                 .Create(
                     accessor,
+                    typed,
                     direction);
 
         if (!symbolCandidate)
@@ -2123,6 +2125,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     TOrder>
                 .Create(
                     accessor,
+                    typed,
                     direction);
 
         return KeyColumnFactory<
@@ -2874,16 +2877,23 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
     {
         public static ISearchKey Create(
             Func<T, object?> accessor,
+            PocoValueReader<T, TValue>? typed,
             SortDirection direction) =>
             new SearchKey<
                 TValue,
                 TOrder>(
                 accessor,
+                typed,
                 direction);
     }
 
+    /// <summary>
+    /// One key column compared with a bound. A column with a typed reader is read through it, as the
+    /// index's keys were built (design 69 §5), so a search boxes nothing; any other is read boxed.
+    /// </summary>
     private sealed class SearchKey<TValue, TOrder>(
         Func<T, object?> accessor,
+        PocoValueReader<T, TValue>? typed,
         SortDirection direction)
         : ISearchKey
         where TOrder :
@@ -2907,6 +2917,13 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
             T row,
             object? bound)
         {
+            if (typed is not null)
+            {
+                return CompareTyped(
+                    row,
+                    bound);
+            }
+
             var boxed =
                 accessor(row);
 
@@ -2951,6 +2968,37 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                 boxed,
                 bound,
                 _direction);
+        }
+
+        private int CompareTyped(
+            T row,
+            object? bound)
+        {
+            if (!typed!(row, out var value))
+            {
+                if (bound is null)
+                    return 0;
+
+                return _nullsFirst
+                    ? -1
+                    : 1;
+            }
+
+            if (bound is null)
+            {
+                return _nullsFirst
+                    ? 1
+                    : -1;
+            }
+
+            var comparison =
+                CompareBound<TValue, TOrder>(
+                    value,
+                    bound);
+
+            return _descending
+                ? -comparison
+                : comparison;
         }
     }
 
