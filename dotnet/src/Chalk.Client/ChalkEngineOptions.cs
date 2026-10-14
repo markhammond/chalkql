@@ -215,6 +215,19 @@ public sealed class ChalkEngineOptions
     public ILoggerFactory? LoggerFactory { get; init; }
 
     /// <summary>
+    /// Told of the engine's planning as it happens: each drifted statement a background run judges,
+    /// each run, each refresh that takes a run's work in, and each prepare. Null, the default, tells
+    /// nothing and costs nothing. Its methods are called on the engine's threads, so they must be
+    /// quick, safe on any thread, and leave the engine alone; one that throws is logged once and
+    /// otherwise ignored.
+    /// </summary>
+    /// <remarks>
+    /// The engine logs its planning under its own category, <c>Chalk.Client.Planning</c>, apart from
+    /// the rest; this is for a host that would rather decide what to log, count or show of it.
+    /// </remarks>
+    public IPlanningObserver? PlanningObserver { get; init; }
+
+    /// <summary>
     /// The client-bodied function implementations this engine serves (D79,
     /// <c>docs/design/17-user-defined-functions.md</c> §3). Called once during
     /// <c>ChalkEngine.CreateAsync</c> with a registry to fill in; every client-bodied function the

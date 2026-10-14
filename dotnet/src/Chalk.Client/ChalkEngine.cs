@@ -34,6 +34,10 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     private readonly ArenaPool _arenas;
     private readonly ILogger _log;
 
+
+    /// <summary>The host's observer of its planning; null when it bound none.</summary>
+    private readonly IPlanningObserver? _observer;
+
     /// <summary>Stable identity handed to every source claim for this engine instance.</summary>
     private readonly object _identity;
 
@@ -133,7 +137,10 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         _plannerCatalog = catalog;
         _judgedStatisticsVersion = versions.StatisticsVersion;
         PlannerInfo = plannerInfo;
-        _log = (options.LoggerFactory ?? NullLoggerFactory.Instance).CreateLogger<ChalkEngine>();
+        var loggers = options.LoggerFactory ?? NullLoggerFactory.Instance;
+        _log = loggers.CreateLogger<ChalkEngine>();
+        PlanningLog = loggers.CreateLogger("Chalk.Client.Planning");
+        _observer = options.PlanningObserver;
         _engineClock = options.Clock is null ? null : new EngineClock();
         _settings = new ExecutionSettings
         {
@@ -811,7 +818,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         object? parameterValueHints,
         PrepareOptions? options = null,
         CancellationToken ct = default) =>
-        PrepareAsync(sql, context: null, options, parameterValueHints, ct);
+        PrepareAsync(sql, context: null, options, parameterValueHints, PrepareReason.Host, ct);
 
     /// <summary>
     /// Plans and compiles a statement with an execution context, which is the primary binding mode:
@@ -839,7 +846,15 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         RequestContext? context,
         PrepareOptions? options = null,
         CancellationToken ct = default) =>
-        PrepareAsync(sql, context, options, parameterValueHints: null, ct);
+        PrepareAsync(sql, context, options, parameterValueHints: null, PrepareReason.Host, ct);
+
+    /// <summary>
+    /// A statement a view prepares again in place of its own, as the host would, for
+    /// <paramref name="reason"/>: so a host observing the engine's planning hears why.
+    /// </summary>
+    internal ValueTask<PreparedQuery> PrepareAgainAsync(
+        string sql, PrepareOptions options, PrepareReason reason, CancellationToken ct) =>
+        PrepareAsync(sql, context: null, options, parameterValueHints: null, reason, ct);
 
     /// <summary>
     /// The one prepare underneath all of them. <paramref name="parameterValueHints"/> is what the
@@ -850,9 +865,11 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         RequestContext? context,
         PrepareOptions? options,
         object? parameterValueHints,
+        PrepareReason reason,
         CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         options ??= new PrepareOptions();
         if (context is not null && context.FoldMaxRows < 0)
         {
@@ -881,12 +898,18 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
         var prepared = new PreparedQuery(
             this, sql, rewriter, options, result, compiled, shape, rendered, context, hints);
-        _log.LogDebug(
+        _log.LogTrace(
             "prepared {Digest:x16} ({Pushdown}) in {Micros}us: {Sql}",
             result.PlanDigest,
             options.Pushdown,
             result.Stats.TotalMicros,
             sql);
+        if (_observer is not null)
+        {
+            Observe(new StatementPrepared(
+                prepared.LogicalDigest, result.PlanDigest, reason, System.Diagnostics.Stopwatch.GetElapsedTime(started)));
+        }
+
         return prepared;
     }
 
@@ -1162,42 +1185,52 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     {
         await _refreshing.WaitAsync(ct).ConfigureAwait(false);
         BeginChanges();
+        TakenIn? taken;
+        long published;
+        long version;
         try
         {
             // Exclusive-only engines take exactly the pre-sharing path: the engine semaphore and
             // source refreshes, with no process-wide source coordination.
             if (_orderedSharedSourceStates.Length == 0)
             {
-                AdmitBackgroundPlanning();
+                taken = AdmitBackgroundPlanning();
                 foreach (var registration in _sourceRegistrations)
                 {
                     await registration.Source.RefreshAsync(ct).ConfigureAwait(false);
                 }
 
-                var only = await PublishAsync(ct).ConfigureAwait(false);
-                NamedEvery(only);
-                return only;
+                published = await PublishAsync(ct).ConfigureAwait(false);
+                version = Version;
+                NamedEvery(published);
             }
-
-            using var shared = await AcquireSharedSourcesAsync(ct).ConfigureAwait(false);
-            AdmitBackgroundPlanning();
-
-            foreach (var registration in _sourceRegistrations)
+            else
             {
-                await registration.Source.RefreshAsync(ct).ConfigureAwait(false);
-                registration.Shared?.Changed(shapeMayHaveChanged: true);
-            }
+                using var shared = await AcquireSharedSourcesAsync(ct).ConfigureAwait(false);
+                taken = AdmitBackgroundPlanning();
 
-            var epoch = await PublishAsync(ct).ConfigureAwait(false);
-            NamedEvery(epoch);
-            CaptureSharedRevisions();
-            return epoch;
+                foreach (var registration in _sourceRegistrations)
+                {
+                    await registration.Source.RefreshAsync(ct).ConfigureAwait(false);
+                    registration.Shared?.Changed(shapeMayHaveChanged: true);
+                }
+
+                published = await PublishAsync(ct).ConfigureAwait(false);
+                version = Version;
+                NamedEvery(published);
+                CaptureSharedRevisions();
+            }
         }
         finally
         {
             EndChanges();
             _refreshing.Release();
         }
+
+        // After the lock: what the refresh took in of the background's work, for the host's observer,
+        // with the version it published, read under the lock.
+        ObserveTakenIn(taken, published, version);
+        return published;
     }
 
     /// <summary>
@@ -1329,7 +1362,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         // anyone can read, so a view does not wait for it.
         var changing = false;
         var numbersBehind = false;
+        TakenIn? taken = null;
         long published;
+        long version;
         try
         {
             SharedSourceLease? sharedLease = null;
@@ -1342,7 +1377,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             {
                 // What background runs produced since the last refresh takes effect here, first, so
                 // that the snapshots this refresh builds carry the statistics they computed.
-                AdmitBackgroundPlanning();
+                taken = AdmitBackgroundPlanning();
 
                 // The scopes first: a re-introspection is the source going to look again, and a
                 // replacement in the same transaction is the host saying what the rows are. The host's
@@ -1427,6 +1462,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 Named(scopes, epoch);
                 CaptureSharedRevisions();
                 published = epoch;
+                version = Version;
             }
         }
         finally
@@ -1446,6 +1482,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             RequestBackgroundPlanning();
         }
 
+        ObserveTakenIn(taken, published, version);
         return published;
     }
 
@@ -2081,6 +2118,12 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     public ArenaPool Arenas => _arenas;
 
     internal ILogger Log => _log;
+
+    /// <summary>
+    /// The engine's planning log, under its own category so that a host can keep it alone: background
+    /// runs, the plans they take in, the planner's word on a margin.
+    /// </summary>
+    internal ILogger PlanningLog { get; }
 
     /// <summary>Plans one rendered statement against the version the engine currently holds.</summary>
     internal ValueTask<PlanResult> PlanAsync(string sql, PrepareOptions options, CancellationToken ct) =>

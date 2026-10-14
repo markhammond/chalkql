@@ -264,7 +264,7 @@ public sealed partial class ChalkEngine
             catch (Exception failure)
             {
                 // The plans stay as they were; the next refresh that defers its planning tries again.
-                _log.LogWarning(failure, "planning in the background failed; the plans stay as they were");
+                PlanningLog.LogWarning(failure, "planning in the background failed; the plans stay as they were");
             }
         }
     }
@@ -277,6 +277,7 @@ public sealed partial class ChalkEngine
     private async Task PlanInBackgroundAsync(CancellationToken ct)
     {
         Interlocked.Increment(ref _planningRuns);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
 
         var computed = new List<(IDeferredStatisticsSource Source, string SourceId, IReadOnlyList<DeferredStatistics> Tables)>();
         foreach (var registration in _sourceRegistrations)
@@ -346,41 +347,65 @@ public sealed partial class ChalkEngine
             }
 
             drifted++;
+            var running = statement.PlanDigest;
+            var stale = _observer is not null && statement.IsStale;
             if (!statement.MayRefreshPlan())
             {
                 // Its view's host vetoed a new plan for now (design 70 §1): nothing is requested, and
                 // the next refresh that defers asks for a run that asks the host again.
                 vetoed++;
                 owed = true;
+                if (_observer is not null)
+                {
+                    Observe(new StatementJudged(statement.LogicalDigest, running, 0, PlanVerdict.Vetoed, null, null, stale));
+                }
+
                 continue;
             }
 
             try
             {
-                var (plan, outcome) = await statement.PlanAgainAsync(ct).ConfigureAwait(false);
-                switch (outcome)
+                var again = await statement.PlanAgainAsync(ct).ConfigureAwait(false);
+                var verdict = again.Outcome switch
                 {
-                    case PreparedQuery.PlanAgainOutcome.New:
-                        plans.Add((statement, plan!));
+                    PreparedQuery.PlanAgainOutcome.New => PlanVerdict.PlannedAnew,
+                    PreparedQuery.PlanAgainOutcome.Unchanged => PlanVerdict.Unchanged,
+                    PreparedQuery.PlanAgainOutcome.Held => PlanVerdict.HeldByMargin,
+                    _ => PlanVerdict.NotTheSame,
+                };
+                switch (verdict)
+                {
+                    case PlanVerdict.PlannedAnew:
+                        plans.Add((statement, again.Next!));
                         break;
-                    case PreparedQuery.PlanAgainOutcome.Unchanged:
+                    case PlanVerdict.Unchanged:
                         unchanged++;
                         break;
-                    case PreparedQuery.PlanAgainOutcome.Held:
+                    case PlanVerdict.HeldByMargin:
                         held++;
                         break;
-                    case PreparedQuery.PlanAgainOutcome.NotTheSame:
+                    default:
                         notTheSame++;
                         break;
+                }
+
+                if (_observer is not null)
+                {
+                    Observe(new StatementJudged(
+                        statement.LogicalDigest, running, again.NewPlan, verdict, again.NewCost, again.RunningCost, stale));
                 }
             }
             catch (Exception failure) when (failure is not OperationCanceledException)
             {
                 // A statement that cannot be planned now keeps the plan it has, and the next refresh
                 // that defers asks for a run that tries again.
-                _log.LogDebug(failure, "planning {Digest:x16} again in the background failed", statement.LogicalDigest);
+                PlanningLog.LogDebug(failure, "planning {Digest:x16} again in the background failed", statement.LogicalDigest);
                 failed++;
                 owed = true;
+                if (_observer is not null)
+                {
+                    Observe(new StatementJudged(statement.LogicalDigest, running, 0, PlanVerdict.Failed, null, null, stale));
+                }
             }
         }
 
@@ -395,7 +420,21 @@ public sealed partial class ChalkEngine
         // that planned none anew still says whether any drifted.
         var counts = new BackgroundPlans(drifted, plans.Count, unchanged, held, vetoed, notTheSame, failed);
         Volatile.Write(ref _lastBackgroundPlans, counts);
-        _log.LogDebug(
+        if (_observer is not null)
+        {
+            Observe(new PlanningRun(
+                sent,
+                drifted,
+                plans.Count,
+                unchanged,
+                held,
+                vetoed,
+                notTheSame,
+                failed,
+                System.Diagnostics.Stopwatch.GetElapsedTime(started)));
+        }
+
+        PlanningLog.LogDebug(
             "planned in the background: statistics of {Tables} tables sent; {Drifted} statements drifted: "
             + "{New} planned anew, {Unchanged} unchanged, {Held} held back by a margin, {Vetoed} vetoed by "
             + "a host, {NotTheSame} not the same statement, {Failed} failed",
@@ -514,7 +553,7 @@ public sealed partial class ChalkEngine
     /// Takes in what background runs produced (design 69 §4): the statistics enter their tables and
     /// the plans swap in. Called under the refresh lock, as a refresh begins, deferred or not.
     /// </summary>
-    private void AdmitBackgroundPlanning()
+    private TakenIn? AdmitBackgroundPlanning()
     {
         BackgroundPlanning? staged;
         lock (_planningGate)
@@ -525,7 +564,7 @@ public sealed partial class ChalkEngine
 
         if (staged is null)
         {
-            return;
+            return null;
         }
 
         foreach (var group in staged.Statistics.GroupBy(entry => entry.Key.Source, entry => entry.Value))
@@ -542,11 +581,95 @@ public sealed partial class ChalkEngine
             }
         }
 
-        _log.LogDebug(
+        PlanningLog.LogDebug(
             "background planning taken in: statistics of {Tables} tables, {Statements} plans swapped in",
             staged.Statistics.Count,
             swapped);
+        return new TakenIn(swapped, staged.Plans.Count - swapped, staged.Statistics.Count);
     }
+
+    /// <summary>What a refresh took in of the background's work, told to the host's observer once it publishes.</summary>
+    private readonly record struct TakenIn(int Swapped, int Unchanged, int Statistics);
+
+    /// <summary>
+    /// Tells the host's observer what the refresh that published <paramref name="epoch"/> and
+    /// <paramref name="version"/> took in, after its lock.
+    /// </summary>
+    private void ObserveTakenIn(TakenIn? taken, long epoch, long version)
+    {
+        if (taken is { } t && _observer is not null)
+        {
+            Observe(new PlansTakenIn(epoch, version, t.Swapped, t.Unchanged, t.Statistics));
+        }
+    }
+
+    /// <summary>Tells the host's observer of a drifted statement a run judged; one that throws is logged once.</summary>
+    private void Observe(in StatementJudged judged)
+    {
+        try
+        {
+            _observer?.Judged(in judged);
+        }
+        catch (Exception failure)
+        {
+            // Whatever a host's observer throws, a cancellation of its own included, is its own.
+            ObserverThrew(failure);
+        }
+    }
+
+    /// <summary>Tells the host's observer of a run, over.</summary>
+    private void Observe(in PlanningRun run)
+    {
+        try
+        {
+            _observer?.Ran(in run);
+        }
+        catch (Exception failure)
+        {
+            // Whatever a host's observer throws, a cancellation of its own included, is its own.
+            ObserverThrew(failure);
+        }
+    }
+
+    /// <summary>Tells the host's observer of a refresh that took a run's work in.</summary>
+    private void Observe(in PlansTakenIn takenIn)
+    {
+        try
+        {
+            _observer?.TookIn(in takenIn);
+        }
+        catch (Exception failure)
+        {
+            // Whatever a host's observer throws, a cancellation of its own included, is its own.
+            ObserverThrew(failure);
+        }
+    }
+
+    /// <summary>Tells the host's observer of a statement prepared.</summary>
+    private void Observe(in StatementPrepared prepared)
+    {
+        try
+        {
+            _observer?.Prepared(in prepared);
+        }
+        catch (Exception failure)
+        {
+            // Whatever a host's observer throws, a cancellation of its own included, is its own.
+            ObserverThrew(failure);
+        }
+    }
+
+    /// <summary>An observer that throws is told on, and logged the first time only.</summary>
+    private void ObserverThrew(Exception failure)
+    {
+        if (Interlocked.Exchange(ref _observerThrew, 1) == 0)
+        {
+            PlanningLog.LogWarning(
+                failure, "the host's planning observer threw; it is told on, and what it throws again is not logged");
+        }
+    }
+
+    private int _observerThrew;
 
     /// <summary>Stops background planning, for disposal: a run in flight is cancelled and awaited.</summary>
     private async ValueTask StopBackgroundPlanningAsync()

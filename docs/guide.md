@@ -619,6 +619,53 @@ await engine.RefreshAsync(refresh => refresh.Append(mem, "ticks", batch).DeferPl
 Compacting with a prepared replacement, in a refresh that defers its planning, holds the lock
 for about as long as an append does.
 
+#### Watching planning
+
+The engine logs its planning under its own category, `Chalk.Client.Planning`: each background
+run, what came of each statement whose numbers drifted, and the plans a refresh takes in. Keep that
+category at `Debug` and the rest higher. The line for each execution, and each prepare's SQL, are
+at `Trace`.
+
+A host that would rather decide what to log, count or show binds an observer:
+
+```csharp
+await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+{
+    // …
+    PlanningObserver = new Planning(),
+});
+
+sealed class Planning : IPlanningObserver
+{
+    public void Judged(in StatementJudged judged)
+    {
+        if (judged.Verdict is not PlanVerdict.Unchanged)
+        {
+            // …
+        }
+    }
+}
+```
+
+- **`Judged`** tells of each statement a background run found drifted:
+  - the plan it runs, and the plan the run came to;
+  - the verdict: planned anew, unchanged, held back by a margin, vetoed by a host, not the same
+    statement, or failed;
+  - both plans' costs, under a margin;
+  - whether a tenfold drift had made it stale.
+- **`Ran`** tells of each run's totals: the tables whose numbers it sent, the drifted statements
+  and their verdicts, and how long it took.
+- **`TookIn`** tells of each refresh that took a run's work in, once it has published: its epoch
+  and version, the plans it swapped in, and the tables whose statistics entered. A view numbers
+  its updates by version (`ViewUpdate.Version`), so match a view's update to its take-in by
+  version: the epoch counts apart.
+- **`Prepared`** tells of each prepare, and why: the host's own, or a view's in place of its
+  statement, after a change of shape or a drift the background cannot plan.
+- **Each method does nothing** unless you override it, so implement only the ones you want.
+- **They are called on the engine's threads:** a background run's, a prepare's, and a refresh's
+  once it has let go of its lock. Keep them quick and leave the engine alone. One that throws is
+  logged once, and changes nothing the engine does.
+
 ### ADO.NET — a real database
 
 `Chalk.Sources.Ado` works with any `DbProviderFactory`. Give it a connection, pick a

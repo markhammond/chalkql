@@ -591,7 +591,7 @@ public sealed class PreparedQuery
     /// plan of a statement answers the same rows, so the one that comes back differs only in what it
     /// costs.
     /// </summary>
-    internal async ValueTask<(PlanState? Next, PlanAgainOutcome Outcome)> PlanAgainAsync(CancellationToken ct)
+    internal async ValueTask<PlanAgain> PlanAgainAsync(CancellationToken ct)
     {
         var current = Volatile.Read(ref _state);
         var margin = Choice?.ImprovementMargin;
@@ -614,7 +614,7 @@ public sealed class PreparedQuery
             // from now on.
             if (result.Held)
             {
-                _engine.Log.LogDebug(
+                _engine.PlanningLog.LogDebug(
                     "the planner held back a plan of {Digest:x16} that costs {Next} against {Held} for the plan it runs",
                     LogicalDigest,
                     result.PlanCost,
@@ -622,14 +622,16 @@ public sealed class PreparedQuery
             }
 
             current.Rebase(PlannedRows(result.PlannedOn ?? _engine.Catalog, current.TablesRead));
-            return (null, result.Held ? PlanAgainOutcome.Held : PlanAgainOutcome.Unchanged);
+            return result.Held
+                ? new PlanAgain(null, PlanAgainOutcome.Held, 0, result.PlanCost, result.KnownPlanCost)
+                : new PlanAgain(null, PlanAgainOutcome.Unchanged, current.Plan.PlanDigest, result.PlanCost, result.KnownPlanCost);
         }
 
         if (result.LogicalDigest != LogicalDigest
             || !RequiredNames(result.Plan, Context).SequenceEqual(RequiredContext, StringComparer.Ordinal))
         {
             _notTheSame = true;
-            return (null, PlanAgainOutcome.NotTheSame);
+            return new PlanAgain(null, PlanAgainOutcome.NotTheSame, result.Plan.PlanDigest, result.PlanCost, result.KnownPlanCost);
         }
 
         // The extension's check, as at prepare; a refusal keeps the plan this statement has, and a
@@ -640,7 +642,7 @@ public sealed class PreparedQuery
         if (!compiled.ParameterTypes.SequenceEqual(current.Compiled.ParameterTypes))
         {
             _notTheSame = true;
-            return (null, PlanAgainOutcome.NotTheSame);
+            return new PlanAgain(null, PlanAgainOutcome.NotTheSame, result.Plan.PlanDigest, result.PlanCost, result.KnownPlanCost);
         }
 
         if (_decorateSchema is { } decorate)
@@ -658,7 +660,7 @@ public sealed class PreparedQuery
         {
             if (result.KnownPlanCost is { } held)
             {
-                _engine.Log.LogDebug(
+                _engine.PlanningLog.LogDebug(
                     "the planner sent a plan of {Digest:x16} that costs {Next} against {Held} for the plan it runs",
                     LogicalDigest,
                     result.PlanCost,
@@ -666,7 +668,7 @@ public sealed class PreparedQuery
             }
             else
             {
-                _engine.Log.LogDebug(
+                _engine.PlanningLog.LogDebug(
                     "the planner sent a plan of {Digest:x16} that costs {Next}; it no longer keeps the plan it runs, so no margin applied",
                     LogicalDigest,
                     result.PlanCost);
@@ -674,8 +676,17 @@ public sealed class PreparedQuery
         }
 
         var names = result.RedactedSql is null ? null : _rewriter.SlotNames(_prepared);
-        return (PlanState.Of(_engine, result, compiled, Key(_prepareShape), _prepared, names), PlanAgainOutcome.New);
+        var next = PlanState.Of(_engine, result, compiled, Key(_prepareShape), _prepared, names);
+        return new PlanAgain(next, PlanAgainOutcome.New, result.Plan.PlanDigest, result.PlanCost, result.KnownPlanCost);
     }
+
+    /// <summary>
+    /// What planning a statement again came to: the new plan, when there is one; the planner's word;
+    /// the digest of the plan it came to, zero when none came back; and both plans' costs where a
+    /// margin had them priced.
+    /// </summary>
+    internal readonly record struct PlanAgain(
+        PlanState? Next, PlanAgainOutcome Outcome, ulong NewPlan, double? NewCost, double? RunningCost);
 
     /// <summary>What planning a statement again came to (design 69 §4, design 70 §3).</summary>
     internal enum PlanAgainOutcome
@@ -744,7 +755,7 @@ public sealed class PreparedQuery
         }
         catch (Exception failure) when (failure is not OperationCanceledException)
         {
-            _engine.Log.LogWarning(
+            _engine.PlanningLog.LogWarning(
                 failure,
                 "a view's RefreshQueryPlan threw for statement {Digest:x16}; no plan is requested for it now",
                 LogicalDigest);
@@ -1427,9 +1438,11 @@ public sealed class QueryExecution : IAsyncDisposable
 
             Stats.Elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started);
 
-            // One structured event per execution (04-client.md §11). The counters come first
-            // because they are the ones that stay comparable when the hardware changes.
-            Microsoft.Extensions.Logging.LoggerExtensions.LogDebug(
+            // One structured event per execution (04-client.md §11), at Trace: dozens a second under
+            // load, it would bury the planning a host reads at Debug, and the result carries its
+            // ExecutionStats for a host that wants them. The counters come first because they are
+            // the ones that stay comparable when the hardware changes.
+            Microsoft.Extensions.Logging.LoggerExtensions.LogTrace(
                 _log,
                 "executed {Digest:x16}: {RowsProduced} rows produced, {RowsScanned} scanned, "
                 + "{BatchesProduced} batches, {PeakPooledBytes} peak pooled bytes, {ElapsedMs}ms",

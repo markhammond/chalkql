@@ -1660,3 +1660,54 @@ Chalk.Client.Rpc.PlanResponse.PlanHeld.set -> void
 const Chalk.Client.Rpc.PlanRequest.CheaperByFieldNumber = 19 -> int
 const Chalk.Client.Rpc.PlanResponse.PlanHeldFieldNumber = 13 -> int
 Chalk.Client.PreparedQuery.ChangedShape.get -> bool
+Chalk.Client.ChalkEngineOptions.PlanningObserver.get -> Chalk.Client.IPlanningObserver?
+Chalk.Client.ChalkEngineOptions.PlanningObserver.init -> void
+Chalk.Client.IPlanningObserver
+Chalk.Client.IPlanningObserver.Judged(in Chalk.Client.StatementJudged judged) -> void
+Chalk.Client.IPlanningObserver.Prepared(in Chalk.Client.StatementPrepared prepared) -> void
+Chalk.Client.IPlanningObserver.Ran(in Chalk.Client.PlanningRun run) -> void
+Chalk.Client.IPlanningObserver.TookIn(in Chalk.Client.PlansTakenIn takenIn) -> void
+Chalk.Client.PlanVerdict
+Chalk.Client.PlanVerdict.Failed = 5 -> Chalk.Client.PlanVerdict
+Chalk.Client.PlanVerdict.HeldByMargin = 2 -> Chalk.Client.PlanVerdict
+Chalk.Client.PlanVerdict.NotTheSame = 4 -> Chalk.Client.PlanVerdict
+Chalk.Client.PlanVerdict.PlannedAnew = 0 -> Chalk.Client.PlanVerdict
+Chalk.Client.PlanVerdict.Unchanged = 1 -> Chalk.Client.PlanVerdict
+Chalk.Client.PlanVerdict.Vetoed = 3 -> Chalk.Client.PlanVerdict
+Chalk.Client.PlanningRun
+Chalk.Client.PlanningRun.Drifted.get -> int
+Chalk.Client.PlanningRun.Elapsed.get -> System.TimeSpan
+Chalk.Client.PlanningRun.Failed.get -> int
+Chalk.Client.PlanningRun.HeldByMargin.get -> int
+Chalk.Client.PlanningRun.NotTheSame.get -> int
+Chalk.Client.PlanningRun.PlannedAnew.get -> int
+Chalk.Client.PlanningRun.PlanningRun() -> void
+Chalk.Client.PlanningRun.TablesSent.get -> int
+Chalk.Client.PlanningRun.Unchanged.get -> int
+Chalk.Client.PlanningRun.Vetoed.get -> int
+Chalk.Client.PlansTakenIn
+Chalk.Client.PlansTakenIn.Epoch.get -> long
+Chalk.Client.PlansTakenIn.PlansSwappedIn.get -> int
+Chalk.Client.PlansTakenIn.PlansTakenIn() -> void
+Chalk.Client.PlansTakenIn.PlansUnchanged.get -> int
+Chalk.Client.PlansTakenIn.StatisticsTables.get -> int
+Chalk.Client.PlansTakenIn.Version.get -> long
+Chalk.Client.PrepareReason
+Chalk.Client.PrepareReason.ChangedShape = 1 -> Chalk.Client.PrepareReason
+Chalk.Client.PrepareReason.Drift = 2 -> Chalk.Client.PrepareReason
+Chalk.Client.PrepareReason.Host = 0 -> Chalk.Client.PrepareReason
+Chalk.Client.StatementJudged
+Chalk.Client.StatementJudged.LogicalDigest.get -> ulong
+Chalk.Client.StatementJudged.NewCost.get -> double?
+Chalk.Client.StatementJudged.NewPlan.get -> ulong
+Chalk.Client.StatementJudged.RunningCost.get -> double?
+Chalk.Client.StatementJudged.RunningPlan.get -> ulong
+Chalk.Client.StatementJudged.Stale.get -> bool
+Chalk.Client.StatementJudged.StatementJudged() -> void
+Chalk.Client.StatementJudged.Verdict.get -> Chalk.Client.PlanVerdict
+Chalk.Client.StatementPrepared
+Chalk.Client.StatementPrepared.Elapsed.get -> System.TimeSpan
+Chalk.Client.StatementPrepared.LogicalDigest.get -> ulong
+Chalk.Client.StatementPrepared.PlanDigest.get -> ulong
+Chalk.Client.StatementPrepared.Reason.get -> Chalk.Client.PrepareReason
+Chalk.Client.StatementPrepared.StatementPrepared() -> void

@@ -988,7 +988,8 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
         try
         {
-            var prepared = await _engine.PrepareAsync(_sql, _prepare, ct).ConfigureAwait(false);
+            var reason = _prepared.ChangedShape ? PrepareReason.ChangedShape : PrepareReason.Drift;
+            var prepared = await _engine.PrepareAgainAsync(_sql, _prepare, reason, ct).ConfigureAwait(false);
             var key = KeyOf(prepared, _options.Key);
             ViewChecks.Check(_engine, prepared, key, _options);
             if (_maintained is { } kept)
