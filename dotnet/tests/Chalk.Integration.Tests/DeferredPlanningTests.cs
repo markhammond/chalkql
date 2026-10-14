@@ -323,6 +323,61 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         Assert.Equal(await RowsAsync(desk.Engine, statement), sink.Rows);
     }
 
+    /// <summary>
+    /// A deferred refresh that leaves every table within a tenth of the numbers the planner holds asks
+    /// for no background run (D351): the catalog's row count is exact and its statistics stand. The
+    /// refresh that takes a table past the tenth asks for one, and its statistics follow.
+    /// </summary>
+    [Fact]
+    public async Task A_deferred_refresh_within_a_tenth_asks_for_no_run()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var planner = new GatedPlanner(sidecar.CreatePlanner());
+        await using var desk = await DeskAsync(planner, Fills(100, books: 10), Books(10));
+
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", Fills(9, books: 10, qty: 50_000)).DeferPlanning(), Ct);
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(0, desk.Engine.BackgroundPlanningRuns);
+        Assert.Equal(109, RowCount(desk.Engine, "fills"));
+        Assert.Equal(7L, QtyMax(desk.Engine));
+
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", Fills(1, books: 10, qty: 99_999)).DeferPlanning(), Ct);
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(1, desk.Engine.BackgroundPlanningRuns);
+
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(99_999L, QtyMax(desk.Engine));
+        Assert.Equal(1, desk.Engine.BackgroundPlanningRuns);
+    }
+
+    /// <summary>
+    /// Numbers a refresh that does not defer sent are new to the held statements: the next deferred
+    /// refresh asks for a run, though it moved nothing itself, and the statements whose tables moved
+    /// are planned again on them.
+    /// </summary>
+    [Fact]
+    public async Task Numbers_sent_by_a_refresh_that_did_not_defer_are_judged_at_the_next_run()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync(new GatedPlanner(sidecar.CreatePlanner()), [], []);
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var planned = statement.PlanDigest;
+
+        await desk.LoadAsync(Fills(5_000, books: 50), Books(50), deferred: false);
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(0, desk.Engine.BackgroundPlanningRuns);
+
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(1, desk.Engine.BackgroundPlanningRuns);
+
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.NotEqual(planned, statement.PlanDigest);
+        Assert.Equal(1, desk.Engine.BackgroundPlanningRuns);
+    }
+
     // ---- the parts ----
 
     private static IReadOnlyList<Fill> Fills(int count, int books, long? qty = null) =>

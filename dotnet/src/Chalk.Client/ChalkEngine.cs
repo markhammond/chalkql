@@ -131,6 +131,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         _registeredStatisticsVersion = versions.StatisticsVersion;
         _plannedNumbers = versions.Shape.Statistics;
         _plannerCatalog = catalog;
+        _judgedStatisticsVersion = versions.StatisticsVersion;
         PlannerInfo = plannerInfo;
         _log = (options.LoggerFactory ?? NullLoggerFactory.Instance).CreateLogger<ChalkEngine>();
         _engineClock = options.Clock is null ? null : new EngineClock();
@@ -1327,6 +1328,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         // which publish as they read, or else the commits. Building the new state changes nothing
         // anyone can read, so a view does not wait for it.
         var changing = false;
+        var numbersBehind = false;
         long published;
         try
         {
@@ -1419,8 +1421,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                     replaced?.Unpin();
                 }
 
-                var epoch = await PublishAsync(builder.VersionGiven, builder.ClockGiven, deferred, ct)
+                var (epoch, behind) = await PublishAsync(builder.VersionGiven, builder.ClockGiven, deferred, ct)
                     .ConfigureAwait(false);
+                numbersBehind = behind;
                 Named(scopes, epoch);
                 CaptureSharedRevisions();
                 published = epoch;
@@ -1437,8 +1440,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         }
 
         // After the lock: the statistics and plans this refresh left behind are worked out beside the
-        // next refreshes, not in front of them.
-        if (deferred)
+        // next refreshes, not in front of them — when it left any (D351).
+        if (deferred && BackgroundPlanningDue(numbersBehind))
         {
             RequestBackgroundPlanning();
         }
@@ -1752,16 +1755,17 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// it one epoch on. The caller holds the engine refresh lock and, when shared sources exist, all
     /// of this engine's shared-source refresh gates.
     /// </summary>
-    private ValueTask<long> PublishAsync(CancellationToken ct) =>
-        PublishAsync(version: null, clock: null, deferStatistics: false, ct);
+    private async ValueTask<long> PublishAsync(CancellationToken ct) =>
+        (await PublishAsync(version: null, clock: null, deferStatistics: false, ct).ConfigureAwait(false)).Epoch;
 
     /// <summary>
     /// The same, numbering the epoch with the host's <paramref name="version"/> and moving the clock
     /// to <paramref name="clock"/> when given (D339): one past the last version and the clock where
     /// it was otherwise. With <paramref name="deferStatistics"/>, no table's numbers are sent to the
-    /// planner: a background run sends them (design 69 §4).
+    /// planner: a background run sends them (design 69 §4), and <c>Behind</c> says whether some
+    /// table's are now ahead of the planner's.
     /// </summary>
-    private async ValueTask<long> PublishAsync(
+    private async ValueTask<(long Epoch, bool Behind)> PublishAsync(
         long? version, DateTimeOffset? clock, bool deferStatistics, CancellationToken ct)
     {
         var schemas = new List<SchemaDescriptor>(_sourceRegistrations.Length);
@@ -1867,7 +1871,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             ShapeEpoch,
             sent,
             behind ? ", the rest deferred" : string.Empty);
-        return next.Epoch;
+        return (next.Epoch, behind);
     }
 
     /// <summary>

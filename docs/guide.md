@@ -564,8 +564,15 @@ await engine.RefreshAsync(refresh => refresh.Commit(prepared), ct);
 
 #### Leaving statistics and plans to the background
 
-A refresh computes the statistics of the tables it changed, and sends them to the planner,
-before it returns. `DeferPlanning()` leaves both to the background:
+A refresh computes the statistics of the tables it changed, and sends the planner the
+numbers that moved, before it returns. A POCO table keeps its statistics until a tenth of its
+rows have moved since they were computed: each row appended, upserted or deleted counts, and
+a replacement counts every row it replaced and every row it brought.
+`Statistics(level, refreshWhenGrownBy: …)` sets another fraction, and zero recomputes at
+every refresh. The planner is sent a row count once it is a tenth away from the one it holds,
+and any other number as soon as it moves. The catalog you read always has exact row counts.
+
+`DeferPlanning()` leaves both to the background:
 
 ```csharp
 await engine.RefreshAsync(refresh => refresh.Append(mem, "ticks", batch).DeferPlanning(), ct);
@@ -573,11 +580,15 @@ await engine.RefreshAsync(refresh => refresh.Append(mem, "ticks", batch).DeferPl
 
 - **Under the refresh lock**, nothing is computed and nothing is sent. The tables keep the
   statistics they had, and their row counts are exact, so `IsStale` still sees a drift.
-- **After it, one run in the background** computes the statistics over the rows just
-  published, and sends them to the planner. Then it plans again every statement whose tables'
-  rows have moved twofold since it was planned: a standing view's, and every prepared
-  statement you still hold. A refresh that defers while a run is busy asks for one more run,
-  over whatever is published when it starts.
+- **After it, one run in the background** computes the statistics that are due over the rows
+  just published, and sends the planner the numbers that moved. Then it plans again every
+  statement whose tables' rows have moved twofold since it was planned: a standing view's,
+  and every prepared statement you still hold. A refresh that defers while a run is busy asks
+  for one more run, over whatever is published when it starts.
+- **A refresh that leaves nothing new asks for no run.** It asks for one when some table's
+  numbers have moved past what the planner holds, when a POCO table's statistics are due,
+  when a refresh that did not defer has sent numbers since the last run, or when the last run
+  could not plan a statement again.
 - **At the next refresh**, deferred or not, the run's statistics enter the catalog and its
   plans swap in. So a plan changes only at a refresh you make, never underneath one. A
   statement then runs its new plan, and an execution already running keeps the one it began

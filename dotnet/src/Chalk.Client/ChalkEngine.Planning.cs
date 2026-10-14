@@ -11,24 +11,40 @@ namespace Chalk.Client;
 public sealed partial class ChalkEngine
 {
     /// <summary>
-    /// Guards <see cref="_plannedNumbers"/>, <see cref="_plannerCatalog"/> and the statistics version
-    /// together. Held only to read or replace them, never across a call to the planner.
+    /// Guards <see cref="_plannedNumbers"/>, <see cref="_plannerCatalog"/>, the statistics version,
+    /// <see cref="_judgedStatisticsVersion"/> and <see cref="_planningFailed"/> together. Held only to
+    /// read or replace them, never across a call to the planner.
     /// </summary>
     private readonly Lock _plannedGate = new();
 
     /// <summary>
     /// Every table's numbers as the planner holds them: what the last registration of each sent. A
     /// refresh that defers its planning sends nothing, so the catalog's numbers can run ahead of these
-    /// until a background run, or a refresh that does not defer, sends the difference.
+    /// until a background run, or a refresh that does not defer, sends the difference. A row count
+    /// that has drifted by less than a tenth is not a difference (D351).
     /// </summary>
-    private IReadOnlyDictionary<TableKey, byte[]> _plannedNumbers;
+    private IReadOnlyDictionary<TableKey, TableNumbers> _plannedNumbers;
 
     /// <summary>
-    /// A catalog whose numbers are the planner's: what a plan is made on, and so what a prepared
-    /// statement judges drift against (D342). The published catalog itself whenever planning is not
-    /// deferred.
+    /// A catalog whose numbers are the planner's, row counts within the tenth they may drift by
+    /// (D351): what a plan is made on, and so what a prepared statement judges drift against (D342).
+    /// The published catalog itself whenever planning is not deferred.
     /// </summary>
     private CatalogContext _plannerCatalog;
+
+    /// <summary>
+    /// The statistics version the last background run judged the held statements against (D351):
+    /// numbers sent since — by a refresh that did not defer — are a reason for a run of their own,
+    /// because a statement may now plan differently on them.
+    /// </summary>
+    private string _judgedStatisticsVersion;
+
+    /// <summary>
+    /// The last background run could not plan some drifted statement again — the planner failed, or
+    /// an extension refused what it brought — so the next refresh that defers its planning asks for
+    /// another, as every such refresh did before D351, until one succeeds.
+    /// </summary>
+    private bool _planningFailed;
 
     /// <summary>The prepared statements this engine made, held weakly: what a background run plans again.</summary>
     private readonly Lock _statementsGate = new();
@@ -149,6 +165,41 @@ public sealed partial class ChalkEngine
     }
 
     /// <summary>
+    /// Whether a refresh that deferred its planning left a background run anything to do (D351): some
+    /// table's numbers ahead of the planner's (<paramref name="behind"/>), numbers sent since the
+    /// last run that no run has judged the statements against, a source's deferred statistics past
+    /// its own policy, or a statement the last run failed to plan again. A refresh that moved none of
+    /// them asks for no run, where each used to ask for one; a statement is planned again only on
+    /// numbers the planner did not have, so a run without any would plan nothing new.
+    /// </summary>
+    private bool BackgroundPlanningDue(bool behind)
+    {
+        if (behind)
+        {
+            return true;
+        }
+
+        lock (_plannedGate)
+        {
+            if (_planningFailed
+                || !string.Equals(_judgedStatisticsVersion, _statisticsVersion, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        foreach (var registration in _sourceRegistrations)
+        {
+            if (registration.Source is IDeferredStatisticsSource { StatisticsDue: true })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Asks for a background run after a refresh that deferred its planning: one starts now when none
     /// is running, and otherwise the one running is followed by one more, over whatever is published
     /// when it starts.
@@ -241,7 +292,14 @@ public sealed partial class ChalkEngine
             _registering.Release();
         }
 
+        string judged;
+        lock (_plannedGate)
+        {
+            judged = _statisticsVersion;
+        }
+
         var plans = new List<(PreparedQuery Statement, PreparedQuery.PlanState Plan)>();
+        var failed = false;
         foreach (var statement in HeldStatements())
         {
             ct.ThrowIfCancellationRequested();
@@ -259,12 +317,20 @@ public sealed partial class ChalkEngine
             }
             catch (Exception failure) when (failure is not OperationCanceledException)
             {
-                // A statement that cannot be planned now keeps the plan it has.
+                // A statement that cannot be planned now keeps the plan it has, and the next refresh
+                // that defers asks for a run that tries again.
                 _log.LogDebug(failure, "planning {Digest:x16} again in the background failed", statement.LogicalDigest);
+                failed = true;
             }
         }
 
         Stage(computed.Select(c => (c.Source, c.Tables)), plans);
+        lock (_plannedGate)
+        {
+            _judgedStatisticsVersion = judged;
+            _planningFailed = failed;
+        }
+
         _log.LogDebug(
             "planned in the background: statistics of {Tables} tables sent, {Statements} statements planned again",
             sent,

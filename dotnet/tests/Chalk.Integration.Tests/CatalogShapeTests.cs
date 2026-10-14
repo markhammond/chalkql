@@ -56,6 +56,72 @@ public sealed class CatalogShapeTests
         Assert.Empty(CatalogShape.Of(Wire(s => s.CostProfile = new Chalk.Ir.CostProfile { ScanRowCost = 2 })).ShapeChangesSince(before));
     }
 
+    /// <summary>
+    /// A row count moves the numbers once it has drifted a tenth from the count held, either way,
+    /// and not before (D351): the planner is not sent every append's count.
+    /// </summary>
+    [Fact]
+    public void A_row_count_moves_the_numbers_once_it_has_drifted_a_tenth()
+    {
+        var held = Numbers(1_000).Statistics;
+
+        Assert.Empty(Numbers(1_099).StatisticsChangesSince(held));
+        Assert.Equal([Orders], Numbers(1_100).StatisticsChangesSince(held));
+        Assert.Empty(Numbers(901).StatisticsChangesSince(held));
+        Assert.Equal([Orders], Numbers(900).StatisticsChangesSince(held));
+    }
+
+    /// <summary>
+    /// The drift is counted from the count the planner holds, so small moves add up to a send, and a
+    /// send moves where it is counted from.
+    /// </summary>
+    [Fact]
+    public void Drift_is_counted_from_the_count_held()
+    {
+        var held = Numbers(1_000).Statistics;
+        Assert.Empty(Numbers(1_050).StatisticsChangesSince(held));
+        Assert.Empty(Numbers(1_099).StatisticsChangesSince(held));
+
+        var moved = Numbers(1_100);
+        Assert.Equal([Orders], moved.StatisticsChangesSince(held));
+        held = moved.NumbersSent(held, [Orders]);
+
+        Assert.Empty(Numbers(1_200).StatisticsChangesSince(held));
+        Assert.Equal([Orders], Numbers(1_210).StatisticsChangesSince(held));
+    }
+
+    /// <summary>A count that is or was unknown, or was zero, has moved by any change.</summary>
+    [Fact]
+    public void An_unknown_or_empty_count_moves_by_any_change()
+    {
+        Assert.Equal([Orders], Numbers(5).StatisticsChangesSince(Numbers(-1).Statistics));
+        Assert.Equal([Orders], Numbers(-1).StatisticsChangesSince(Numbers(5).Statistics));
+        Assert.Equal([Orders], Numbers(1).StatisticsChangesSince(Numbers(0).Statistics));
+        Assert.Empty(Numbers(-1).StatisticsChangesSince(Numbers(-1).Statistics));
+    }
+
+    /// <summary>Every number but the count moves the numbers however little it moved.</summary>
+    [Fact]
+    public void Every_other_number_moves_however_little()
+    {
+        var held = Numbers(1_000).Statistics;
+
+        Assert.Equal(
+            [Orders],
+            Numbers(1_000, t => t.RowCountKind = Chalk.Ir.RowCountKind.Estimate).StatisticsChangesSince(held));
+        Assert.Equal(
+            [Orders],
+            Numbers(1_001, t => t.Columns[0].Statistics = new Chalk.Ir.ColumnStatistics { NullCount = 1 })
+                .StatisticsChangesSince(held));
+    }
+
+    private static CatalogShape Numbers(long rows, Action<Chalk.Ir.Table>? change = null) =>
+        CatalogShape.Of(Wire(s =>
+        {
+            s.Tables[0].RowCount = rows;
+            change?.Invoke(s.Tables[0]);
+        }));
+
     private static Chalk.Ir.CatalogContext Wire(Action<Chalk.Ir.Schema>? change = null)
     {
         var schema = new Chalk.Ir.Schema

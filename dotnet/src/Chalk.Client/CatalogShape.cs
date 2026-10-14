@@ -77,7 +77,7 @@ internal sealed class CatalogShape
     private CatalogShape(
         byte[] catalog,
         IReadOnlyDictionary<TableKey, byte[]> tables,
-        IReadOnlyDictionary<TableKey, byte[]> statistics,
+        IReadOnlyDictionary<TableKey, TableNumbers> statistics,
         byte[] policies)
     {
         Catalog = catalog;
@@ -93,10 +93,10 @@ internal sealed class CatalogShape
     public IReadOnlyDictionary<TableKey, byte[]> Tables { get; }
 
     /// <summary>
-    /// Every table's <em>numbers</em> — the row count, its kind and the columns' statistics — as the
-    /// bytes that say whether a refresh moved them. What the shape strikes out, this keeps.
+    /// Every table's <em>numbers</em> — the row count, its kind and the columns' statistics — as what
+    /// says whether a refresh moved them. What the shape strikes out, this keeps.
     /// </summary>
-    public IReadOnlyDictionary<TableKey, byte[]> Statistics { get; }
+    public IReadOnlyDictionary<TableKey, TableNumbers> Statistics { get; }
 
     /// <summary>
     /// The bytes of what decides how the <em>next</em> plan is built and nothing about whether this
@@ -138,14 +138,14 @@ internal sealed class CatalogShape
         message.JoinPolicy = null;
 
         var tables = new Dictionary<TableKey, byte[]>();
-        var statistics = new Dictionary<TableKey, byte[]>();
+        var statistics = new Dictionary<TableKey, TableNumbers>();
         foreach (var schema in message.Schemas)
         {
             var structural = StructuralOf(schema);
             foreach (var table in schema.Tables)
             {
                 var key = new TableKey(schema.SourceId, schema.Name, table.Name);
-                statistics[key] = StatisticsOf(table);
+                statistics[key] = NumbersOf(table);
                 table.RowCount = 0;
                 table.RowCountKind = RowCountKind.Unspecified;
                 foreach (var column in table.Columns)
@@ -191,15 +191,15 @@ internal sealed class CatalogShape
     }
 
     /// <summary>
-    /// The bytes a table's numbers are equal when they share: the row count, its kind, and each
-    /// column's statistics in column order. A table whose statistics are all absent hashes to the
-    /// same bytes as another such table, which is what "nothing moved" has to mean.
+    /// A table's numbers: its row count, and the bytes the rest are equal when they share — the
+    /// count's kind and each column's statistics in column order. A table whose statistics are all
+    /// absent hashes to the same bytes as another such table, which is what "nothing moved" has to
+    /// mean.
     /// </summary>
-    private static byte[] StatisticsOf(Chalk.Ir.Table table)
+    private static TableNumbers NumbersOf(Chalk.Ir.Table table)
     {
         var numbers = new Chalk.Ir.Table
         {
-            RowCount = table.RowCount,
             RowCountKind = table.RowCountKind,
         };
 
@@ -212,7 +212,7 @@ internal sealed class CatalogShape
             });
         }
 
-        return numbers.ToByteArray();
+        return new TableNumbers(table.RowCount, numbers.ToByteArray());
     }
 
     /// <summary>
@@ -254,9 +254,9 @@ internal sealed class CatalogShape
     }
 
     /// <summary>
-    /// Every table whose numbers moved. A table whose shape changed is in here too when its numbers
-    /// moved with it, which is the ordinary case: the shape travels in the delta and the numbers in
-    /// the statistics message, and the planner joins them.
+    /// Every table whose numbers moved (<see cref="TableNumbers.MovedFrom"/>). A table whose shape
+    /// changed is in here too when its numbers moved with it, which is the ordinary case: the shape
+    /// travels in the delta and the numbers in the statistics message, and the planner joins them.
     /// </summary>
     public IReadOnlyList<TableKey> StatisticsChangesSince(CatalogShape previous) =>
         StatisticsChangesSince(previous.Statistics);
@@ -265,13 +265,12 @@ internal sealed class CatalogShape
     /// The same against numbers kept on their own: the ones the planner holds, which a refresh that
     /// deferred its planning has not sent (design 69 §4).
     /// </summary>
-    public IReadOnlyList<TableKey> StatisticsChangesSince(IReadOnlyDictionary<TableKey, byte[]> previous)
+    public IReadOnlyList<TableKey> StatisticsChangesSince(IReadOnlyDictionary<TableKey, TableNumbers> previous)
     {
         var moved = new List<TableKey>();
         foreach (var (key, numbers) in Statistics)
         {
-            if (!previous.TryGetValue(key, out var before)
-                || !numbers.AsSpan().SequenceEqual(before))
+            if (!previous.TryGetValue(key, out var before) || numbers.MovedFrom(before))
             {
                 moved.Add(key);
             }
@@ -284,10 +283,10 @@ internal sealed class CatalogShape
     /// <paramref name="held"/> with the numbers of <paramref name="tables"/> taken from this shape:
     /// what the planner holds once those tables' numbers have been sent to it.
     /// </summary>
-    public IReadOnlyDictionary<TableKey, byte[]> NumbersSent(
-        IReadOnlyDictionary<TableKey, byte[]> held, IReadOnlyCollection<TableKey> tables)
+    public IReadOnlyDictionary<TableKey, TableNumbers> NumbersSent(
+        IReadOnlyDictionary<TableKey, TableNumbers> held, IReadOnlyCollection<TableKey> tables)
     {
-        var merged = new Dictionary<TableKey, byte[]>(held);
+        var merged = new Dictionary<TableKey, TableNumbers>(held);
         foreach (var table in tables)
         {
             if (Statistics.TryGetValue(table, out var numbers))
@@ -297,5 +296,57 @@ internal sealed class CatalogShape
         }
 
         return merged;
+    }
+}
+
+/// <summary>
+/// A table's numbers as the planner is sent them (D351): the row count on its own, and the rest —
+/// the count's kind and each column's statistics — as the bytes they are equal when they share.
+/// </summary>
+/// <remarks>
+/// The row count is apart because it moves with every append and the rest do not: a source that keeps
+/// its column statistics until a tenth of a table's rows have moved, as a POCO table does unless told
+/// otherwise, moves only the count in between. Sending the planner every such count would send a
+/// statistics message, and plan again in the background, at every refresh, for a number a plan's
+/// cost hardly turns on. So a count is sent once it has drifted by <see cref="RowCountDrift"/> from
+/// the one the planner holds, and the catalog the host reads keeps it exact at every refresh.
+/// </remarks>
+internal sealed class TableNumbers(long rowCount, byte[] rest)
+{
+    /// <summary>
+    /// How far a row count may drift, either way, from the one the planner holds before it is sent
+    /// again: a tenth of the count held, the same tenth a POCO table's statistics are kept for.
+    /// </summary>
+    public const double RowCountDrift = 0.1;
+
+    /// <summary>Rows in the table; -1 when unknown.</summary>
+    public long RowCount { get; } = rowCount;
+
+    /// <summary>The count's kind and the columns' statistics, as bytes.</summary>
+    public byte[] Rest { get; } = rest;
+
+    /// <summary>
+    /// Whether these numbers have moved from <paramref name="held"/>: any of the rest by any amount,
+    /// or the row count by <see cref="RowCountDrift"/> of the count held or more. A count that is or
+    /// was unknown, or was zero, has moved by any change.
+    /// </summary>
+    public bool MovedFrom(TableNumbers held)
+    {
+        if (!Rest.AsSpan().SequenceEqual(held.Rest))
+        {
+            return true;
+        }
+
+        if (RowCount == held.RowCount)
+        {
+            return false;
+        }
+
+        if (RowCount < 0 || held.RowCount <= 0)
+        {
+            return true;
+        }
+
+        return Math.Abs(RowCount - held.RowCount) >= held.RowCount * RowCountDrift;
     }
 }
