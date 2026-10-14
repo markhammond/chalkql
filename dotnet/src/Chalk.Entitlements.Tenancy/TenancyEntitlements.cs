@@ -1555,9 +1555,9 @@ public sealed class TenancyEntitlements
     }
 
     /// <summary>
-    /// How the <b>routes</b> of a table entitled along declared paths reach this principal (D269 (a),
-    /// <c>docs/design/38-existential-visibility.md</c> §4): how many of them reach it at all, and
-    /// whether any of them reaches rows of more than one tenancy.
+    /// How the <b>routes</b> of a table entitled along declared paths or through a parent reach this
+    /// principal (D269 (a), <c>docs/design/38-existential-visibility.md</c> §4, ADR 0061 §6): how
+    /// many of them reach it at all, and whether any of them reaches rows of more than one tenancy.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -1598,6 +1598,40 @@ public sealed class TenancyEntitlements
                     declaredPath))
                 {
                     tenancies.Add(Tenancy(grant));
+                }
+            }
+
+            if (tenancies.Count == 0)
+            {
+                continue;
+            }
+
+            count++;
+            severalTenancies |= tenancies.Count > 1;
+        }
+
+        // A `Through` parent is read back the same way (ADR 0061 §6): the child's verdicts are
+        // decided on the parent's side and arrive through the very same ordinal, so a parent this
+        // principal reaches in two tenancies makes it a column on the child as well.
+        foreach (var parent in model.Through)
+        {
+            var tenancies = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var grant in principal.Grants)
+            {
+                if (grant.IsGlobal
+                    || !Admits(grant, principal)
+                    || !model.AdmittedRoles.Contains(grant.Role, StringComparer.Ordinal))
+                {
+                    continue;
+                }
+
+                foreach (var dimension in parent.ParentDimensions)
+                {
+                    if (Reaches(grant, model, dimension, parent.ParentDimensions))
+                    {
+                        tenancies.Add(Tenancy(grant));
+                        break;
+                    }
                 }
             }
 
@@ -1827,7 +1861,9 @@ public sealed class TenancyEntitlements
     /// <para>
     /// Where the table is entitled along <b>declared paths</b> the same sentence is said of the
     /// routes (D269 (a), F87): the verdict is decided at each route's endpoint and read back as an
-    /// ordinal, and it is a constant only where one route reaches the table in one tenancy.
+    /// ordinal, and it is a constant only where one route reaches the table in one tenancy. A
+    /// <c>Through</c> parent is such a route too: the child's verdicts are decided on the parent's
+    /// side and read back through the same ordinal (ADR 0061 §6).
     /// </para>
     /// </remarks>
     private Chalk.Ir.DisclosureOutcome Outcome(
