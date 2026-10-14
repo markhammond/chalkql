@@ -160,7 +160,9 @@ public sealed class CatalogRegistrationTests(SharedSidecar sidecar, ITestOutputH
 
     /// <summary>
     /// A micro-batch append publishes one statistics message naming one table and nothing else: no
-    /// catalog registration, because no shape moved, and no other table's numbers.
+    /// catalog registration, because no shape moved, and no other table's numbers. Seven orders and
+    /// one more is past the tenth a table's numbers may move by unsent (D351); the next test appends
+    /// within it.
     /// </summary>
     [Fact]
     public async Task A_micro_batch_append_publishes_one_statistics_message_naming_one_table()
@@ -188,6 +190,44 @@ public sealed class CatalogRegistrationTests(SharedSidecar sidecar, ITestOutputH
         Assert.Equal(1, counter.StatisticsRegistrations);
         Assert.Equal(["m.orders"], counter.StatisticsTables);
     }
+
+    /// <summary>
+    /// An append within a tenth of the table publishes nothing (D351): its statistics stand and its
+    /// row count is within the tenth the planner's may trail by, though the catalog's is exact. The
+    /// append that takes it past the tenth publishes one message.
+    /// </summary>
+    [Fact]
+    public async Task An_append_within_a_tenth_publishes_nothing()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+
+        var source = new PocoSourceBuilder("mem", "m")
+            .AddTable("ticks", (IReadOnlyList<Tick>)[.. Enumerable.Range(1, 100).Select(i => new Tick(i))], out var ticks)
+            .Build();
+
+        var counter = new CountingPlanner(sidecar.Sidecar.CreatePlanner());
+        await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+        {
+            ContextId = $"d351-tenth-{Guid.NewGuid():n}",
+            Sources = [source],
+            Planner = counter,
+        });
+        counter.Reset();
+
+        await engine.RefreshAsync(r => r.Append(ticks, [new Tick(101)]), TestContext.Current.CancellationToken);
+        Assert.Equal(0, counter.CatalogRegistrations);
+        Assert.Equal(0, counter.StatisticsRegistrations);
+        Assert.Equal(101, engine.Catalog.FindTable("m", "ticks")!.Value.Table.RowCount);
+
+        await engine.RefreshAsync(
+            r => r.Append(ticks, [.. Enumerable.Range(102, 9).Select(i => new Tick(i))]),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(0, counter.CatalogRegistrations);
+        Assert.Equal(1, counter.StatisticsRegistrations);
+        Assert.Equal(["m.ticks"], counter.StatisticsTables);
+    }
+
+    private sealed record Tick(int Seq);
 
     /// <summary>And nothing at all under <c>Defer</c>: the row count moved, so a message goes.</summary>
     /// <remarks>
