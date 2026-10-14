@@ -1,4 +1,5 @@
 using Google.Protobuf;
+using CatalogChange = Chalk.Catalog.CatalogChange;
 using CatalogContext = Chalk.Catalog.CatalogContext;
 using RowCountKind = Chalk.Ir.RowCountKind;
 
@@ -74,20 +75,30 @@ internal readonly struct TableKey(string sourceId, string schema, string table)
 /// </remarks>
 internal sealed class CatalogShape
 {
+    /// <summary>What <see cref="Policies"/> is the bytes of, kept to build the next when only the join policy moves.</summary>
+    private readonly Chalk.Ir.CatalogContext _policies;
+
+    /// <summary>Each schema's structural properties, in the catalog's order, as the bytes a table's shape starts with.</summary>
+    private readonly byte[][] _structurals;
+
+    /// <summary>The catalog this shape was taken of, when it was taken of one rather than of a wire message.</summary>
+    private readonly CatalogContext? _described;
+
     private CatalogShape(
-        byte[] catalog,
         IReadOnlyDictionary<TableKey, byte[]> tables,
         IReadOnlyDictionary<TableKey, TableNumbers> statistics,
-        byte[] policies)
+        Chalk.Ir.CatalogContext policies,
+        byte[] policyBytes,
+        byte[][] structurals,
+        CatalogContext? described)
     {
-        Catalog = catalog;
         Tables = tables;
         Statistics = statistics;
-        Policies = policies;
+        _policies = policies;
+        Policies = policyBytes;
+        _structurals = structurals;
+        _described = described;
     }
-
-    /// <summary>The bytes two catalogs are shape-equal when they share, as D260 §2 defined them.</summary>
-    public byte[] Catalog { get; }
 
     /// <summary>Every table's own shape, keyed by the triple that addresses it.</summary>
     public IReadOnlyDictionary<TableKey, byte[]> Tables { get; }
@@ -107,19 +118,110 @@ internal sealed class CatalogShape
     public byte[] Policies { get; }
 
     public static CatalogShape Of(CatalogContext catalog) =>
-        Of(Chalk.Catalog.CatalogSerialization.ToProto(catalog));
+        Of(Chalk.Catalog.CatalogSerialization.ToProto(catalog), owned: true, catalog);
 
     /// <summary>The same from the wire message, which is what the engine already has in hand.</summary>
-    public static CatalogShape Of(Chalk.Ir.CatalogContext wire)
+    public static CatalogShape Of(Chalk.Ir.CatalogContext wire) => Of(wire, owned: false, described: null);
+
+    /// <summary>
+    /// The shape of <paramref name="wire"/>. Numbers are struck out of its tables in place, so a
+    /// message the caller holds — one it may be about to register — is cloned first, and one converted
+    /// here for the purpose (<paramref name="owned"/>) is struck as it is.
+    /// </summary>
+    private static CatalogShape Of(Chalk.Ir.CatalogContext wire, bool owned, CatalogContext? described)
     {
-        // A clone, because striking fields out must not touch the message the caller is about to
-        // register.
-        var message = wire.Clone();
-        message.Epoch = 0;
+        var message = owned ? wire : wire.Clone();
+        var policies = PoliciesOf(message);
+        var structurals = new byte[message.Schemas.Count][];
+        var tables = new Dictionary<TableKey, byte[]>();
+        var statistics = new Dictionary<TableKey, TableNumbers>();
+        for (var s = 0; s < message.Schemas.Count; s++)
+        {
+            var schema = message.Schemas[s];
+            var structural = StructuralOf(schema).ToByteArray();
+            structurals[s] = structural;
+            foreach (var table in schema.Tables)
+            {
+                var key = new TableKey(schema.SourceId, schema.Name, table.Name);
+                statistics[key] = NumbersOf(table);
+                tables[key] = ShapeOf(structural, Struck(table));
+            }
+        }
+
+        return new CatalogShape(tables, statistics, policies, policies.ToByteArray(), structurals, described);
+    }
+
+    /// <summary>
+    /// The shape of <paramref name="next"/>, taken from this one where next shares the parts of
+    /// <paramref name="previous"/>, the catalog this shape was taken of (F205): a table that is the
+    /// descriptor it was keeps its shape and numbers, one whose row count alone moved keeps its shape
+    /// and the rest of its numbers, and one whose columns moved is converted alone. Null — the shape
+    /// then to be taken whole — when this shape was not taken of <paramref name="previous"/>, when
+    /// more than tables moved, or when a table converted alone turns out to have changed its shape.
+    /// </summary>
+    public CatalogShape? Next(CatalogContext previous, CatalogContext next) =>
+        Next(previous, next, CatalogChange.Between(previous, next));
+
+    /// <summary>The same, with what moved already read.</summary>
+    public CatalogShape? Next(CatalogContext previous, CatalogContext next, CatalogChange change)
+    {
+        if (change.Structural || _described is null || !ReferenceEquals(_described, previous))
+        {
+            return null;
+        }
+
+        Dictionary<TableKey, TableNumbers>? statistics = null;
+        foreach (var table in change.Tables)
+        {
+            var schema = next.Schemas[table.Schema];
+            var key = new TableKey(schema.SourceId, schema.Name, table.After.Name);
+            if (!Statistics.TryGetValue(key, out var held) || !Tables.TryGetValue(key, out var shape))
+            {
+                return null;
+            }
+
+            TableNumbers numbers;
+            if (table.CountOnly)
+            {
+                numbers = held.WithRowCount(table.After.RowCount);
+            }
+            else
+            {
+                var wire = Chalk.Catalog.CatalogProtoMapping.ToProto(table.After);
+                numbers = NumbersOf(wire);
+                if (!ShapeOf(_structurals[table.Schema], Struck(wire)).AsSpan().SequenceEqual(shape))
+                {
+                    return null;
+                }
+            }
+
+            (statistics ??= new Dictionary<TableKey, TableNumbers>(Statistics))[key] = numbers;
+        }
+
+        var policies = _policies;
+        var policyBytes = Policies;
+        if (change.JoinPolicyMoved)
+        {
+            policies = _policies.Clone();
+            policies.JoinPolicy = next.JoinPolicy is { } policy
+                ? Chalk.Catalog.CatalogProtoMapping.ToProto(policy)
+                : null;
+            policyBytes = policies.ToByteArray();
+        }
+
+        return new CatalogShape(Tables, statistics ?? Statistics, policies, policyBytes, _structurals, next);
+    }
+
+    /// <summary>
+    /// The join policy and each schema's cost profile: what <see cref="Policies"/> holds. Shares the
+    /// message's parts, which this shape owns from here on.
+    /// </summary>
+    private static Chalk.Ir.CatalogContext PoliciesOf(Chalk.Ir.CatalogContext message)
+    {
         var policies = new Chalk.Ir.CatalogContext();
         if (message.JoinPolicy is not null)
         {
-            policies.JoinPolicy = message.JoinPolicy.Clone();
+            policies.JoinPolicy = message.JoinPolicy;
         }
 
         foreach (var schema in message.Schemas)
@@ -130,36 +232,12 @@ internal sealed class CatalogShape
                 {
                     SourceId = schema.SourceId,
                     Name = schema.Name,
-                    CostProfile = schema.CostProfile.Clone(),
+                    CostProfile = schema.CostProfile,
                 });
             }
         }
 
-        message.JoinPolicy = null;
-
-        var tables = new Dictionary<TableKey, byte[]>();
-        var statistics = new Dictionary<TableKey, TableNumbers>();
-        foreach (var schema in message.Schemas)
-        {
-            var structural = StructuralOf(schema);
-            foreach (var table in schema.Tables)
-            {
-                var key = new TableKey(schema.SourceId, schema.Name, table.Name);
-                statistics[key] = NumbersOf(table);
-                table.RowCount = 0;
-                table.RowCountKind = RowCountKind.Unspecified;
-                foreach (var column in table.Columns)
-                {
-                    column.Statistics = null;
-                }
-
-                var shaped = structural.Clone();
-                shaped.Tables.Add(table);
-                tables[key] = shaped.ToByteArray();
-            }
-        }
-
-        return new CatalogShape(message.ToByteArray(), tables, statistics, policies.ToByteArray());
+        return policies;
     }
 
     /// <summary>
@@ -179,12 +257,12 @@ internal sealed class CatalogShape
         };
         if (schema.Capabilities is not null)
         {
-            structural.Capabilities = schema.Capabilities.Clone();
+            structural.Capabilities = schema.Capabilities;
         }
 
         if (schema.DialectProfile is not null)
         {
-            structural.DialectProfile = schema.DialectProfile.Clone();
+            structural.DialectProfile = schema.DialectProfile;
         }
 
         return structural;
@@ -194,7 +272,7 @@ internal sealed class CatalogShape
     /// A table's numbers: its row count, and the bytes the rest are equal when they share — the
     /// count's kind and each column's statistics in column order. A table whose statistics are all
     /// absent hashes to the same bytes as another such table, which is what "nothing moved" has to
-    /// mean.
+    /// mean. Read before the table is struck, and shares its statistics rather than copying them.
     /// </summary>
     private static TableNumbers NumbersOf(Chalk.Ir.Table table)
     {
@@ -208,11 +286,39 @@ internal sealed class CatalogShape
             numbers.Columns.Add(new Chalk.Ir.Column
             {
                 Name = column.Name,
-                Statistics = column.Statistics?.Clone(),
+                Statistics = column.Statistics,
             });
         }
 
         return new TableNumbers(table.RowCount, numbers.ToByteArray());
+    }
+
+    /// <summary>The table with its numbers struck out, in place: what is left is its shape.</summary>
+    private static Chalk.Ir.Table Struck(Chalk.Ir.Table table)
+    {
+        table.RowCount = 0;
+        table.RowCountKind = RowCountKind.Unspecified;
+        foreach (var column in table.Columns)
+        {
+            column.Statistics = null;
+        }
+
+        return table;
+    }
+
+    /// <summary>
+    /// The bytes of a schema holding this table alone: the schema's structural properties, then the
+    /// table as the schema's <c>tables</c> field. That is the order the message would not write its
+    /// fields in, and it parses to the same schema; these bytes are compared only with each other.
+    /// </summary>
+    private static byte[] ShapeOf(byte[] structural, Chalk.Ir.Table table)
+    {
+        var holder = new Chalk.Ir.Schema();
+        holder.Tables.Add(table);
+        var bytes = new byte[structural.Length + holder.CalculateSize()];
+        structural.CopyTo(bytes, 0);
+        holder.WriteTo(bytes.AsSpan(structural.Length));
+        return bytes;
     }
 
     /// <summary>
@@ -222,11 +328,16 @@ internal sealed class CatalogShape
     /// </summary>
     public IReadOnlyList<TableKey> ShapeChangesSince(CatalogShape previous)
     {
+        if (ReferenceEquals(Tables, previous.Tables))
+        {
+            return [];
+        }
+
         var changed = new List<TableKey>();
         foreach (var (key, shape) in Tables)
         {
             if (!previous.Tables.TryGetValue(key, out var before)
-                || !shape.AsSpan().SequenceEqual(before))
+                || (!ReferenceEquals(shape, before) && !shape.AsSpan().SequenceEqual(before)))
             {
                 changed.Add(key);
             }
@@ -237,10 +348,16 @@ internal sealed class CatalogShape
 
     /// <summary>Every table <paramref name="previous"/> had that this one does not.</summary>
     /// <summary>Whether the join policy or a cost profile differs from <paramref name="previous"/>'s.</summary>
-    public bool PoliciesChangedSince(CatalogShape previous) => !Policies.AsSpan().SequenceEqual(previous.Policies);
+    public bool PoliciesChangedSince(CatalogShape previous) =>
+        !ReferenceEquals(Policies, previous.Policies) && !Policies.AsSpan().SequenceEqual(previous.Policies);
 
     public IReadOnlyList<TableKey> RemovedSince(CatalogShape previous)
     {
+        if (ReferenceEquals(Tables, previous.Tables))
+        {
+            return [];
+        }
+
         var removed = new List<TableKey>();
         foreach (var key in previous.Tables.Keys)
         {
@@ -324,6 +441,9 @@ internal sealed class TableNumbers(long rowCount, byte[] rest)
 
     /// <summary>The count's kind and the columns' statistics, as bytes.</summary>
     public byte[] Rest { get; } = rest;
+
+    /// <summary>These numbers with another row count: a table whose columns are the ones they were.</summary>
+    public TableNumbers WithRowCount(long rowCount) => rowCount == RowCount ? this : new TableNumbers(rowCount, Rest);
 
     /// <summary>
     /// Whether these numbers have moved from <paramref name="held"/>: any of the rest by any amount,

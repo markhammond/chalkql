@@ -115,6 +115,147 @@ public sealed class CatalogShapeTests
                 .StatisticsChangesSince(held));
     }
 
+    /// <summary>
+    /// A shape taken from the last one, reading only what moved (F205), is the shape taken whole: a
+    /// row count moved over the same parts, statistics moved in new columns, and a join policy moved.
+    /// </summary>
+    [Fact]
+    public void A_shape_taken_by_part_is_the_shape_taken_whole()
+    {
+        var bars = Model("bars", 1_000, Statistics(7));
+        var quotes = Model("quotes", 50, Statistics(3));
+        var steps = new[]
+        {
+            Catalog(bars, quotes),
+            Catalog(bars, Model("quotes", 55, quotes.Columns)),
+            Catalog(bars, Model("quotes", 70, Statistics(9))),
+        };
+        steps = [.. steps, Catalog(bars, steps[2].Schemas[0].Tables[1], new Chalk.Catalog.CrossSourceJoinPolicy { LocalJoinMaxRows = 5 })];
+
+        var shape = CatalogShape.Of(steps[0]);
+        for (var i = 1; i < steps.Length; i++)
+        {
+            var byPart = shape.Next(steps[i - 1], steps[i]);
+            Assert.NotNull(byPart);
+            AssertSameShape(CatalogShape.Of(steps[i]), byPart);
+            shape = byPart;
+        }
+    }
+
+    /// <summary>A table read alone whose shape moved is not taken by part: the whole shape is.</summary>
+    [Fact]
+    public void A_table_read_alone_whose_shape_moved_is_taken_whole()
+    {
+        var bars = Model("bars", 1_000, Statistics(7));
+        var before = Catalog(bars);
+        Chalk.Catalog.ColumnDescriptor[] retyped =
+        [
+            new() { Name = "symbol", Type = Chalk.Catalog.ChalkType.String(), Statistics = bars.Columns[0].Statistics },
+            new() { Name = "close", Type = Chalk.Catalog.ChalkType.Float32(), Statistics = bars.Columns[1].Statistics },
+        ];
+        var after = Catalog(Model("bars", 1_000, retyped, bars));
+
+        Assert.Null(CatalogShape.Of(before).Next(before, after));
+        Assert.Equal(
+            [new TableKey("mem", "main", "bars")],
+            CatalogShape.Of(after).ShapeChangesSince(CatalogShape.Of(before)));
+    }
+
+    /// <summary>A shape steps only from the catalog it was taken of.</summary>
+    [Fact]
+    public void A_shape_steps_only_from_the_catalog_it_was_taken_of()
+    {
+        var bars = Model("bars", 1_000, Statistics(7));
+        var taken = Catalog(bars);
+        var other = Catalog(bars);
+        var next = Catalog(Model("bars", 1_001, bars.Columns, bars));
+
+        Assert.Null(CatalogShape.Of(taken).Next(other, next));
+        Assert.Null(CatalogShape.Of(Wire()).Next(taken, next));
+    }
+
+    private static void AssertSameShape(CatalogShape whole, CatalogShape byPart)
+    {
+        Assert.Equal(whole.Tables.Count, byPart.Tables.Count);
+        Assert.Equal(whole.Statistics.Count, byPart.Statistics.Count);
+        foreach (var (key, shape) in whole.Tables)
+        {
+            Assert.Equal(shape, byPart.Tables[key]);
+            Assert.Equal(whole.Statistics[key].RowCount, byPart.Statistics[key].RowCount);
+            Assert.Equal(whole.Statistics[key].Rest, byPart.Statistics[key].Rest);
+        }
+
+        Assert.Equal(whole.Policies, byPart.Policies);
+    }
+
+    private static readonly IReadOnlyList<Chalk.Catalog.IndexDescriptor> Indexes =
+        [new Chalk.Catalog.IndexDescriptor { Name = "ix_symbol", Kind = Chalk.Ir.IndexKind.Hash, Columns = [0] }];
+
+    private static Chalk.Catalog.ColumnDescriptor[] Statistics(long distinct) =>
+    [
+        new()
+        {
+            Name = "symbol",
+            Type = Chalk.Catalog.ChalkType.String(),
+            Statistics = new Chalk.Catalog.ColumnStatistics
+            {
+                Level = Chalk.Ir.StatisticsLevel.Basic, DistinctCount = distinct, NullCount = 0, Min = "A", Max = "Z",
+            },
+        },
+        new()
+        {
+            Name = "close",
+            Type = Chalk.Catalog.ChalkType.Float64(),
+            Statistics = new Chalk.Catalog.ColumnStatistics
+            {
+                Level = Chalk.Ir.StatisticsLevel.Basic, DistinctCount = distinct * 10, NullCount = 0, Min = 1.5, Max = 99.5,
+            },
+        },
+    ];
+
+    /// <summary>A table over <paramref name="columns"/>, sharing every other part with <paramref name="like"/> when given.</summary>
+    private static Chalk.Catalog.TableDescriptor Model(
+        string name,
+        long rows,
+        IReadOnlyList<Chalk.Catalog.ColumnDescriptor> columns,
+        Chalk.Catalog.TableDescriptor? like = null) => new()
+    {
+        Name = name,
+        RowCount = rows,
+        RowCountKind = Chalk.Ir.RowCountKind.Exact,
+        Columns = columns,
+        Indexes = like?.Indexes ?? Indexes,
+        UniqueKeys = like?.UniqueKeys ?? [],
+        Collations = like?.Collations ?? [],
+        ForeignKeys = like?.ForeignKeys ?? [],
+    };
+
+    private static readonly IReadOnlyList<Chalk.Catalog.FunctionDescriptor> NoFunctions = [];
+
+    private static readonly IReadOnlyList<Chalk.Catalog.AssociationDescriptor> NoAssociations = [];
+
+    private static Chalk.Catalog.CatalogContext Catalog(
+        Chalk.Catalog.TableDescriptor first,
+        Chalk.Catalog.TableDescriptor? second = null,
+        Chalk.Catalog.CrossSourceJoinPolicy? policy = null) => new()
+    {
+        ContextId = "shape",
+        Epoch = 1,
+        Schemas =
+        [
+            new Chalk.Catalog.SchemaDescriptor
+            {
+                SourceId = "mem",
+                Name = "main",
+                Kind = Chalk.Ir.SourceKind.Local,
+                Functions = NoFunctions,
+                Tables = second is null ? [first] : [first, second],
+            },
+        ],
+        JoinPolicy = policy ?? Chalk.Catalog.CrossSourceJoinPolicy.Default,
+        Associations = NoAssociations,
+    };
+
     private static CatalogShape Numbers(long rows, Action<Chalk.Ir.Table>? change = null) =>
         CatalogShape.Of(Wire(s =>
         {

@@ -269,8 +269,11 @@ public sealed partial class ChalkEngine
             }
         }
 
-        var catalog = WithStatistics(Catalog, computed);
-        var shape = CatalogShape.Of(catalog);
+        // The shape taken from the published one, reading only the tables whose statistics were
+        // computed (F205); whole, when a refresh published another catalog meanwhile.
+        var published = Catalog;
+        var catalog = WithStatistics(published, computed);
+        var shape = Volatile.Read(ref _shape).Next(published, catalog) ?? CatalogShape.Of(catalog);
         var sent = 0;
         await _registering.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -480,6 +483,9 @@ public sealed partial class ChalkEngine
 
     /// <summary>How many background runs have started: for a test of their coalescing.</summary>
     internal int BackgroundPlanningRuns => Volatile.Read(ref _planningRuns);
+
+    /// <summary>The shape of the published catalog, as publishes took it: for a test that it is the whole one's.</summary>
+    internal CatalogShape PublishedShape => Volatile.Read(ref _shape);
 
     /// <summary>Whether a background run's work waits for the next refresh to take it in.</summary>
     internal bool BackgroundPlanningStaged

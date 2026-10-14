@@ -129,6 +129,43 @@ public static class CatalogValidator
     }
 
     /// <summary>
+    /// Validates what <paramref name="change"/> moved since a catalog that passed
+    /// <see cref="Validate(CatalogContext, CatalogOptions)"/>, and nothing else (F205): the row count
+    /// of every table where nothing else moved, and the join policy where it moved. Every other part
+    /// is the object that passed, so it passes still. A change that moved more is validated whole.
+    /// </summary>
+    internal static void ValidateChange(CatalogContext catalog, CatalogChange change)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(change);
+        if (!change.CountsOnly)
+        {
+            throw new ArgumentException(
+                "only a change that moved nothing but row counts and the join policy is validated by part; "
+                + "validate any other whole.",
+                nameof(change));
+        }
+
+        if (catalog.Epoch < 0)
+        {
+            throw new CatalogValidationException(
+                ChalkErrorCodes.ValueOutOfRange, "epoch", $"the epoch is {catalog.Epoch}; it must be >= 0");
+        }
+
+        foreach (var table in change.Tables)
+        {
+            var schema = catalog.Schemas[table.Schema];
+            ValidateRowCount(
+                table.After, $"schemas[{table.Schema}] ({schema.Name}).tables[{table.Table}] ({table.After.Name})");
+        }
+
+        if (change.JoinPolicyMoved)
+        {
+            ValidateJoinPolicy(catalog.JoinPolicy, "join_policy");
+        }
+    }
+
+    /// <summary>
     /// A partitioned table is a claim about where rows live (D106): every partition names a table
     /// this catalog has, with the logical table's row type, and a value partition carries a value.
     /// </summary>
@@ -205,6 +242,17 @@ public static class CatalogValidator
                         + $"partitioned table's '{table.Columns[c].Name}' is {table.Columns[c].Type.Kind}");
                 }
             }
+        }
+    }
+
+    /// <summary>A row count is a count, or -1 for unknown.</summary>
+    private static void ValidateRowCount(TableDescriptor table, string path)
+    {
+        if (table.RowCount < -1)
+        {
+            throw new CatalogValidationException(
+                ChalkErrorCodes.ValueOutOfRange,
+                path, $"row_count is {table.RowCount}; it must be >= -1 (-1 means unknown)");
         }
     }
 
@@ -1445,13 +1493,7 @@ public static class CatalogValidator
                 ChalkErrorCodes.IncompleteDeclaration, path, "a table needs at least one column");
         }
 
-        if (table.RowCount < -1)
-        {
-            throw new CatalogValidationException(
-                ChalkErrorCodes.ValueOutOfRange,
-                path, $"row_count is {table.RowCount}; it must be >= -1 (-1 means unknown)");
-        }
-
+        ValidateRowCount(table, path);
         ValidateCostProfile(table.CostProfile, path);
 
         var columnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

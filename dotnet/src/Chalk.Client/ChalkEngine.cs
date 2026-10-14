@@ -1784,14 +1784,29 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 Associations = _options.Associations,
             },
             _options.JoinPolicy);
-        CatalogValidator.Validate(next);
-        HostFunctions.CheckCatalog(next, _functions);
+        // What moved since the published catalog, read by reference (F205). A refresh that changed
+        // rows and nothing else leaves every other part of the catalog the object it was: only the row
+        // counts and the join policy it moved are validated, and the shape is taken from the last one
+        // with only the moved tables read. Anything more is validated and taken whole, as before.
+        var change = CatalogChange.Between(current, next);
+        if (change.CountsOnly)
+        {
+            CatalogValidator.ValidateChange(next, change);
+        }
+        else
+        {
+            CatalogValidator.Validate(next);
+            if (change.Structural)
+            {
+                HostFunctions.CheckCatalog(next, _functions);
+            }
+        }
 
         // Per table since D271 (d): which tables changed shape, which changed only in their numbers,
         // and which did not change at all. A shape change registers a delta naming the changed
         // tables; a data-only change publishes statistics alone; a refresh that moved nothing sends
         // nothing at all.
-        var shape = CatalogShape.Of(next);
+        var shape = _shape.Next(current, next, change) ?? CatalogShape.Of(next);
         var changed = shape.ShapeChangesSince(_shape);
         var removed = shape.RemovedSince(_shape);
         var schemaChange = changed.Count > 0 || removed.Count > 0;
@@ -1839,7 +1854,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 epochs.Remove(table);
             }
 
-            _shape = shape;
+            Volatile.Write(ref _shape, shape);
             _shapeVersion = nextShapeVersion;
             Volatile.Write(ref _tableShapeEpochs, epochs);
             Volatile.Write(ref _shapeEpoch, next.Epoch);
@@ -1849,7 +1864,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             // The numbers or the policies moved and the shape did not, so the per-table shapes and
             // their epochs are the ones already held; what is replaced is what the next comparison
             // reads, and the version the planner now holds where a policy moved.
-            _shape = shape;
+            Volatile.Write(ref _shape, shape);
             if (policiesMoved)
             {
                 _shapeVersion = nextShapeVersion;
