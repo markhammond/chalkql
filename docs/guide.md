@@ -1738,6 +1738,43 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   outside the engine's epochs; a `LIST`, composite or `BINARY` value in what an operator keeps; and
   the reference executor. A view that recomputes takes all of them.
 
+### Plans a view takes
+
+Under `DeferPlanning()`, a view's statement is planned again in the background once a table it reads
+has moved twofold, and the new plan is taken at a refresh. An incremental view then builds its state
+again on the new plan, which makes that update its slowest. A host can say when that may happen, and
+be told what each update cost:
+
+```csharp
+var options = new ViewOptions<Key, Row>
+{
+    // …
+    RefreshQueryPlan = () => !market.Busy,
+    Tracker = tracker,
+};
+```
+
+- **`RefreshQueryPlan`** is asked before a new plan is requested because the numbers have drifted.
+  - True requests one.
+  - False leaves the statement on its plan, and asks the planner for nothing. The next refresh that
+    defers its planning asks again, so a host can say no while it is busy, and refresh when it is not.
+  - It is also asked, on the update's thread, when a tenfold drift has made the statement stale.
+  - A change in a table's shape requests a plan without asking: the old plan no longer fits.
+  - It runs on a background thread, so keep it quick and leave the view alone. One that throws says
+    no, and is logged.
+- **The tracker** (`IViewCostTracker`) is told of each update that moves the view, on the update's
+  thread. It hears:
+  - the update's time;
+  - the bytes allocated in the process meanwhile;
+  - whether the update was whole;
+  - the keys it changed;
+  - the plan it ran.
+
+  Something that reads it on another thread, such as `RefreshQueryPlan`, needs its figures kept where
+  both can read them.
+- **A view over a statement you prepared** is asked about that statement's plans. A statement carries
+  one view's `RefreshQueryPlan`, so a second view with one over it is refused while the first exists.
+
 ### What a view refuses
 
 A view's rows are exactly what its statement returns at each epoch, so it refuses, when it is made,

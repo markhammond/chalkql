@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Apache.Arrow;
 using Chalk.Catalog;
 using Chalk.Client;
@@ -68,6 +69,16 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     private Exception? _fault;
     private bool _disposed;
 
+    /// <summary>
+    /// The host's say on the view's plans, as the view puts it on its statement (design 70 §1); null
+    /// when it set none.
+    /// </summary>
+    private readonly PreparedQuery.PlanChoice? _choice;
+
+    /// <summary>Whether the last update computed the view's rows from nothing, and how many keys it changed.</summary>
+    private bool _lastWhole;
+    private long _lastChanges;
+
     private StandingView(
         ChalkEngine engine,
         string sql,
@@ -86,6 +97,10 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         _key = key;
         _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
         _reads = options.DatabaseReads == ViewDatabaseReads.WhenRefreshed ? new ViewReads(engine) : null;
+        if (options.RefreshQueryPlan is { } refresh)
+        {
+            _choice = new PreparedQuery.PlanChoice(refresh);
+        }
     }
 
     /// <summary>The result's key columns.</summary>
@@ -280,7 +295,16 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     {
         var key = KeyOf(prepared, options.Key);
         ViewChecks.Check(engine, prepared, key, options);
+        if (options.RefreshQueryPlan is not null && prepared.Choice is not null)
+        {
+            throw new ArgumentException(
+                "the statement carries another view's RefreshQueryPlan already, and a statement keeps one: "
+                + "make this view from the statement's text, or without one.",
+                nameof(prepared));
+        }
+
         var view = new StandingView<TKey, TRow>(engine, sql, prepare, options, binding, prepared, key);
+        view.Attach(prepared);
         try
         {
             if (options.Maintenance == ViewMaintenance.Incremental)
@@ -311,50 +335,26 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     {
         Usable();
         await _updating.WaitAsync(ct).ConfigureAwait(false);
+        var tracker = _options.Tracker;
+        var started = tracker is null ? 0L : Stopwatch.GetTimestamp();
+        var allocated = tracker is null ? 0L : GC.GetTotalAllocatedBytes();
+        var taken = _updates;
         try
         {
-            Usable();
-            for (var attempt = 0; ; attempt++)
+            var version = await CatchUpAsync(ct).ConfigureAwait(false);
+            if (tracker is not null && _updates != taken)
             {
-                var changes = _engine.Changes;
-                if ((changes & 1) == 1)
-                {
-                    await _engine.WhenQuietAsync(ct).ConfigureAwait(false);
-                    continue;
-                }
-
-                if (_engine.Stamp.Epoch == _epoch)
-                {
-                    _reads?.Abandon();
-                    return _version;
-                }
-
-                if (attempt >= 2)
-                {
-                    return await _engine.WithoutRefreshAsync(
-                        async () =>
-                        {
-                            var stamp = _engine.Stamp;
-                            if (stamp.Epoch != _epoch)
-                            {
-                                Apply(await StageAsync(stamp, ct).ConfigureAwait(false), stamp);
-                            }
-
-                            return _version;
-                        },
-                        ct).ConfigureAwait(false);
-                }
-
-                var at = _engine.Stamp;
-                var staged = await StageAsync(at, ct).ConfigureAwait(false);
-                if (_engine.Changes != changes)
-                {
-                    continue;
-                }
-
-                Apply(staged, at);
-                return _version;
+                var update = new ViewUpdate(
+                    version,
+                    Stopwatch.GetElapsedTime(started),
+                    GC.GetTotalAllocatedBytes() - allocated,
+                    _lastWhole,
+                    _lastChanges,
+                    Volatile.Read(ref _prepared).PlanDigest);
+                tracker.Updated(in update);
             }
+
+            return version;
         }
         catch
         {
@@ -365,6 +365,83 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         finally
         {
             _updating.Release();
+        }
+    }
+
+    /// <summary>The body of <see cref="UpdateAsync"/>, under its lock: the view brought to the latest epoch.</summary>
+    private async ValueTask<long> CatchUpAsync(CancellationToken ct)
+    {
+        Usable();
+        for (var attempt = 0; ; attempt++)
+        {
+            var changes = _engine.Changes;
+            if ((changes & 1) == 1)
+            {
+                await _engine.WhenQuietAsync(ct).ConfigureAwait(false);
+                continue;
+            }
+
+            if (_engine.Stamp.Epoch == _epoch)
+            {
+                _reads?.Abandon();
+                return _version;
+            }
+
+            if (attempt >= 2)
+            {
+                return await _engine.WithoutRefreshAsync(
+                    async () =>
+                    {
+                        var stamp = _engine.Stamp;
+                        if (stamp.Epoch != _epoch)
+                        {
+                            Take(await StageAsync(stamp, ct).ConfigureAwait(false), stamp);
+                        }
+
+                        return _version;
+                    },
+                    ct).ConfigureAwait(false);
+            }
+
+            var at = _engine.Stamp;
+            var staged = await StageAsync(at, ct).ConfigureAwait(false);
+            if (_engine.Changes != changes)
+            {
+                continue;
+            }
+
+            Take(staged, at);
+            return _version;
+        }
+    }
+
+    /// <summary>Applies <paramref name="staged"/>, counting the keys it changes for the tracker.</summary>
+    private void Take(Staged staged, EpochStamp stamp)
+    {
+        var before = _table.Position;
+        Apply(staged, stamp);
+        _lastChanges = _table.Position - before;
+    }
+
+    /// <summary>
+    /// Puts the host's say on the view's plans on <paramref name="prepared"/> (design 70 §1), where a
+    /// background run asks it. A statement keeps one view's: <c>MakeAsync</c> refuses a host's statement
+    /// that carries another view's.
+    /// </summary>
+    private void Attach(PreparedQuery prepared)
+    {
+        if (_choice is not null)
+        {
+            prepared.Choice = _choice;
+        }
+    }
+
+    /// <summary>Takes the host's say off <paramref name="prepared"/>, when it is the view's.</summary>
+    private void Detach(PreparedQuery prepared)
+    {
+        if (_choice is not null && ReferenceEquals(prepared.Choice, _choice))
+        {
+            prepared.Choice = null;
         }
     }
 
@@ -512,6 +589,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         try
         {
             _disposed = true;
+            Detach(_prepared);
             _reads?.Dispose();
             if (_maintained is { } maintained)
             {
@@ -558,6 +636,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             // Until it is applied, this update leaves the view behind the statement (D343).
             var whole = _resync;
             _resync = true;
+            _lastWhole = whole;
             MaintainedUpdate update;
             try
             {
@@ -578,6 +657,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             return Changes(update, stamp);
         }
 
+        _lastWhole = true;
         await using var execution = await prepared.ExecuteAsync(values, context: null, arena: null, ct).ConfigureAwait(false);
         if (_readsTime)
         {
@@ -809,12 +889,15 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
     /// <summary>
     /// Prepares the statement anew when it is stale: a table it reads changed shape, or drifted tenfold
-    /// in its row count (D342). The view's readers reset only when the result's columns or key changed;
-    /// otherwise they keep their place. A statement that no longer prepares faults the view.
+    /// in its row count (D342), unless the host's <see cref="ViewOptions{TKey, TRow}.RefreshQueryPlan"/>
+    /// vetoes a new plan for that drift now. The view's readers reset only when the result's columns or
+    /// key changed; otherwise they keep their place. A statement that no longer prepares faults the view.
     /// </summary>
     private async ValueTask PreparedCurrentAsync(CancellationToken ct)
     {
-        if (!_prepared.IsStale)
+        // A statement stale for drift alone runs correctly on the plan it has, and its view's host may
+        // veto a new one for now (design 70 §1); one whose tables changed shape no longer fits them.
+        if (!_prepared.IsStale || (!_prepared.ChangedShape && !_prepared.MayRefreshPlan()))
         {
             await MaintainedCurrentAsync(ct).ConfigureAwait(false);
             return;
@@ -844,6 +927,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                     _generation++;
                 }
 
+                Detach(_prepared);
                 Volatile.Write(ref _prepared, prepared);
                 _key = key;
                 _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
@@ -851,6 +935,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
             // The plan is a new one, and its reads are in new places: read them all again.
             _reads?.Clear();
+            Attach(prepared);
         }
         catch (Exception failure) when (failure is ChalkException or ArgumentException)
         {

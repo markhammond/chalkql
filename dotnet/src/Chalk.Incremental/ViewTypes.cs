@@ -213,6 +213,30 @@ public sealed class ViewOptions<TKey, TRow>
     public ViewMaintenance Maintenance { get; init; } = ViewMaintenance.Recompute;
 
     /// <summary>
+    /// Told of each update that moves the view (design 70 §1): how long it took, the bytes allocated in
+    /// the process meanwhile, whether it computed the view's rows from nothing, the keys it changed,
+    /// and the plan it ran. Null, the default, tells nothing.
+    /// </summary>
+    public IViewCostTracker? Tracker { get; init; }
+
+    /// <summary>
+    /// Asked before a new plan is requested for the view's statement because the numbers it was planned
+    /// on have drifted (design 70 §1): true requests one; false leaves the statement on its plan for now,
+    /// and the next refresh that defers its planning asks again. So a host vetoes a new plan while it
+    /// cannot afford the view's move to one, and refreshes when it can. Null, the default, requests a
+    /// plan whenever the numbers drift.
+    /// </summary>
+    /// <remarks>
+    /// Asked on a background thread under <c>DeferPlanning()</c>, and on the update's thread once a
+    /// drift has made the statement stale, so it must be quick, safe on any thread, and leave the view
+    /// alone. One that throws says not now, and is logged. A change in the shape of a table the
+    /// statement reads requests a plan without asking: the plan the view runs no longer fits. A
+    /// statement keeps one view's: a second view with one over a statement the host prepared is
+    /// refused while the first exists.
+    /// </remarks>
+    public Func<bool>? RefreshQueryPlan { get; init; }
+
+    /// <summary>
     /// Admit only a host function registered with <c>Immutable()</c>, rather than any function
     /// whose volatility is <c>IMMUTABLE</c>, today's default included.
     /// </summary>

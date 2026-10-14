@@ -12,7 +12,7 @@ public sealed partial class ChalkEngine
 {
     /// <summary>
     /// Guards <see cref="_plannedNumbers"/>, <see cref="_plannerCatalog"/>, the statistics version,
-    /// <see cref="_judgedStatisticsVersion"/> and <see cref="_planningFailed"/> together. Held only to
+    /// <see cref="_judgedStatisticsVersion"/> and <see cref="_planningOwed"/> together. Held only to
     /// read or replace them, never across a call to the planner.
     /// </summary>
     private readonly Lock _plannedGate = new();
@@ -40,11 +40,12 @@ public sealed partial class ChalkEngine
     private string _judgedStatisticsVersion;
 
     /// <summary>
-    /// The last background run could not plan some drifted statement again — the planner failed, or
-    /// an extension refused what it brought — so the next refresh that defers its planning asks for
-    /// another, as every such refresh did before D351, until one succeeds.
+    /// The last background run left some drifted statement on its plan — the planner failed, an
+    /// extension refused what it brought, or its view's host vetoed a new plan for now (design 70 §1)
+    /// — so the next refresh that defers its planning asks for another, as every such refresh did
+    /// before D351, until one plans it.
     /// </summary>
-    private bool _planningFailed;
+    private bool _planningOwed;
 
     /// <summary>The prepared statements this engine made, held weakly: what a background run plans again.</summary>
     private readonly Lock _statementsGate = new();
@@ -168,7 +169,7 @@ public sealed partial class ChalkEngine
     /// Whether a refresh that deferred its planning left a background run anything to do (D351): some
     /// table's numbers ahead of the planner's (<paramref name="behind"/>), numbers sent since the
     /// last run that no run has judged the statements against, a source's deferred statistics past
-    /// its own policy, or a statement the last run failed to plan again. A refresh that moved none of
+    /// its own policy, or a statement the last run left on its plan. A refresh that moved none of
     /// them asks for no run, where each used to ask for one; a statement is planned again only on
     /// numbers the planner did not have, so a run without any would plan nothing new.
     /// </summary>
@@ -181,7 +182,7 @@ public sealed partial class ChalkEngine
 
         lock (_plannedGate)
         {
-            if (_planningFailed
+            if (_planningOwed
                 || !string.Equals(_judgedStatisticsVersion, _statisticsVersion, StringComparison.Ordinal))
             {
                 return true;
@@ -302,12 +303,20 @@ public sealed partial class ChalkEngine
         }
 
         var plans = new List<(PreparedQuery Statement, PreparedQuery.PlanState Plan)>();
-        var failed = false;
+        var owed = false;
         foreach (var statement in HeldStatements())
         {
             ct.ThrowIfCancellationRequested();
             if (!statement.MayPlanAgain || !statement.DriftedFrom(catalog))
             {
+                continue;
+            }
+
+            if (!statement.MayRefreshPlan())
+            {
+                // Its view's host vetoed a new plan for now (design 70 §1): nothing is requested, and
+                // the next refresh that defers asks for a run that asks the host again.
+                owed = true;
                 continue;
             }
 
@@ -323,7 +332,7 @@ public sealed partial class ChalkEngine
                 // A statement that cannot be planned now keeps the plan it has, and the next refresh
                 // that defers asks for a run that tries again.
                 _log.LogDebug(failure, "planning {Digest:x16} again in the background failed", statement.LogicalDigest);
-                failed = true;
+                owed = true;
             }
         }
 
@@ -331,7 +340,7 @@ public sealed partial class ChalkEngine
         lock (_plannedGate)
         {
             _judgedStatisticsVersion = judged;
-            _planningFailed = failed;
+            _planningOwed = owed;
         }
 
         _log.LogDebug(

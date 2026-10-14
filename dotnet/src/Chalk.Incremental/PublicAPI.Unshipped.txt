@@ -99,3 +99,17 @@ Chalk.Incremental.ViewMaintenance
 Chalk.Incremental.ViewMaintenance.Recompute = 0 -> Chalk.Incremental.ViewMaintenance
 Chalk.Incremental.ViewOptions<TKey, TRow>.Maintenance.get -> Chalk.Incremental.ViewMaintenance
 Chalk.Incremental.ViewOptions<TKey, TRow>.Maintenance.init -> void
+Chalk.Incremental.IViewCostTracker
+Chalk.Incremental.IViewCostTracker.Updated(in Chalk.Incremental.ViewUpdate update) -> void
+Chalk.Incremental.ViewUpdate
+Chalk.Incremental.ViewUpdate.AllocatedBytes.get -> long
+Chalk.Incremental.ViewUpdate.Changes.get -> long
+Chalk.Incremental.ViewUpdate.Elapsed.get -> System.TimeSpan
+Chalk.Incremental.ViewUpdate.PlanDigest.get -> ulong
+Chalk.Incremental.ViewUpdate.Version.get -> long
+Chalk.Incremental.ViewUpdate.ViewUpdate() -> void
+Chalk.Incremental.ViewUpdate.Whole.get -> bool
+Chalk.Incremental.ViewOptions<TKey, TRow>.Tracker.get -> Chalk.Incremental.IViewCostTracker?
+Chalk.Incremental.ViewOptions<TKey, TRow>.Tracker.init -> void
+Chalk.Incremental.ViewOptions<TKey, TRow>.RefreshQueryPlan.get -> System.Func<bool>?
+Chalk.Incremental.ViewOptions<TKey, TRow>.RefreshQueryPlan.init -> void

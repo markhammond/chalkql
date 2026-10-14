@@ -5,6 +5,7 @@ using Chalk.Client.Rpc;
 using Chalk.Execution;
 using Chalk.Ir;
 using Chalk.Sources;
+using Microsoft.Extensions.Logging;
 using ArrowSchema = Apache.Arrow.Schema;
 
 namespace Chalk.Client;
@@ -623,6 +624,58 @@ public sealed class PreparedQuery
 
         var names = result.RedactedSql is null ? null : _rewriter.SlotNames(_prepared);
         return PlanState.Of(_engine, result, compiled, Key(_prepareShape), _prepared, names);
+    }
+
+    /// <summary>
+    /// What a standing view asks of the plans its statement takes after the view is made (design 70).
+    /// Null — every statement but a view's whose host set it — requests a plan whenever the numbers
+    /// drift.
+    /// </summary>
+    internal PlanChoice? Choice { get; set; }
+
+    /// <summary>A view's say on its statement's plans (design 70).</summary>
+    /// <param name="RefreshQueryPlan">
+    /// The host's veto on requesting a new plan for drift (§1): asked before one is requested, and
+    /// false leaves the statement on its plan for now. Null requests one whenever the numbers drift.
+    /// </param>
+    internal sealed record PlanChoice(Func<bool>? RefreshQueryPlan);
+
+    /// <summary>
+    /// Whether a new plan may be requested for this statement now, for drift (design 70 §1): its view's
+    /// host says, and a host's callback that throws says not now, logged. True when no host says.
+    /// </summary>
+    internal bool MayRefreshPlan()
+    {
+        if (Choice?.RefreshQueryPlan is not { } refresh)
+        {
+            return true;
+        }
+
+        try
+        {
+            return refresh();
+        }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            _engine.Log.LogWarning(
+                failure,
+                "a view's RefreshQueryPlan threw for statement {Digest:x16}; no plan is requested for it now",
+                LogicalDigest);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether a table this statement reads has changed shape since it was planned: the half of
+    /// <see cref="IsStale"/> no host may veto, since the plan no longer fits the catalog.
+    /// </summary>
+    internal bool ChangedShape
+    {
+        get
+        {
+            var state = Volatile.Read(ref _state);
+            return !_engine.IsCurrent(state.Plan, state.TablesRead);
+        }
     }
 
     /// <summary>

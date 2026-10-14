@@ -119,6 +119,9 @@ await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKe
 - A plan the background made under `DeferPlanning()` is taken at the view's next update, maintained
   from the start; a plan the view cannot maintain is declined, as the one it keeps answers the same
   rows.
+- A view may be built with a tracker of what its updates cost (`ViewOptions.Tracker`), and with a
+  host callback that may veto requesting a new plan for drift (`ViewOptions.RefreshQueryPlan`): the
+  statement keeps its plan, and the next refresh that defers its planning asks again.
 - Joins (inner and left), as-of joins, aggregates with grouping sets, filters, projections,
   `UNION ALL`, `VALUES` and `WITH` subtrees are maintained, the clock in a filter or a projection,
   and an index lookup pinned to keys, as a constant key or an `IN` list makes, which is read as its
