@@ -85,3 +85,27 @@ report mid:Full, last_name:PerRow, oid:Full, note:PerRow, members:Some, orders:S
 2|Ito CANARY-LAST-02|3|n3 CANARY-NOTE-03
 2|Ito CANARY-LAST-02|4|n4 CANARY-NOTE-04
 
+-- u16-a-manager-in-two-orgs
+report mid:Full, last_name:PerRow, oid:Full, note:PerRow, members:Some, orders:Some
+1|Ng CANARY-LAST-01|1|n1 CANARY-NOTE-01
+1|Ng CANARY-LAST-01|2|n2 CANARY-NOTE-02
+2|Ito CANARY-LAST-02|3|n3 CANARY-NOTE-03
+2|Ito CANARY-LAST-02|4|n4 CANARY-NOTE-04
+3|Ek CANARY-LAST-03|5|n5 CANARY-NOTE-05
+4|Roy CANARY-LAST-04|6|n6 CANARY-NOTE-06
+
+-- u17-an-agent-in-two-orgs
+report mid:Full, last_name:PerRow, oid:Full, note:PerRow, members:Some, orders:Some
+1|N|1|********
+1|N|2|********
+2|I|3|********
+2|I|4|********
+3|E|5|********
+4|R|6|********
+
+-- u18-a-keeper
+report mid:Full, last_name:Redacted, oid:Full, note:PerRow, members:Some, orders:Some
+
+-- u19-a-vendor-in-a-region
+report mid:Full, last_name:Redacted, oid:Full, note:PerRow, members:Some, orders:Some
+

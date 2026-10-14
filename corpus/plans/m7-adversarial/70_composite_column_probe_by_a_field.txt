@@ -47,3 +47,16 @@ report id:Full, org_id:Full, profiles:None
 report id:Full, org_id:Full, profiles:Some
 1|1
 
+-- u16-a-manager-in-two-orgs
+report id:Full, org_id:Full, profiles:Some
+1|1
+
+-- u17-an-agent-in-two-orgs
+report id:Full, org_id:Full, profiles:Some
+
+-- u18-a-keeper
+report id:Full, org_id:Full, profiles:None
+
+-- u19-a-vendor-in-a-region
+report id:Full, org_id:Full, profiles:None
+

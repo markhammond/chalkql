@@ -74,6 +74,18 @@ principals whose grants confine nothing are unchanged. Query 03's star refuses f
 reason it already refused for u6: `amount` is population-only for the auditor role, whichever region
 it is confined to. The adversarial family's 50–52 are the other side of the same subject.
 
+**Four principals for shapes the fixture could not state (F98, F100).** `u16-a-manager-in-two-orgs`
+and `u17-an-agent-in-two-orgs` hold one role in both organisations, so a message's thread is reached
+in two tenancies whose rules answer alike: the plan decides `content` per row for them, and so does
+the package's prediction, which reads a `Through` parent as the route it is (ADR 0061 §6).
+`u18-a-keeper` holds a role every table admits but `orders`, whose visibility rule names the other
+seven: it sees O1's members, threads and messages with nothing protected disclosed, since no rule
+names it, and no order — but it does see the lines of O1's orders, with the price withheld. A line
+takes its order's organisation as a marking and admits the keeper itself, and the order's rule does
+not reach along the path (F208). `u19-a-vendor-in-a-region` holds V1's grant confined to region 1, a vendor's
+home region being on `vendors`: it reaches V1's own row and nothing a path carries, because an item
+holds no region and confining a perspective that reaches an order along a `Related` path is refused.
+
 **What is not here.** §8's queries 16 and 21 need a real database and live in
 `Chalk.Integration.Tests.EntitlementsAdoTests`; 17, 18 and 23 are about a prepare option or a
 registration refusal rather than about rows, and live in `EntitlementsTests`. The numbering in each

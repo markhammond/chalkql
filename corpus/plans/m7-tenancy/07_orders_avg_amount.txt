@@ -58,3 +58,19 @@ report a:PerRow, orders:Some
 report a:PerRow, orders:Some
 <null>
 
+-- u16-a-manager-in-two-orgs
+report a:PerRow, orders:Some
+<null>
+
+-- u17-an-agent-in-two-orgs
+report a:PerRow, orders:Some
+<null>
+
+-- u18-a-keeper
+report a:Full, orders:Some
+<null>
+
+-- u19-a-vendor-in-a-region
+report a:Full, orders:Some
+<null>
+

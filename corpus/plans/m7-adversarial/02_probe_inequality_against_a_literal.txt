@@ -63,3 +63,22 @@ report id:Full, members:Some
 1
 2
 
+-- u16-a-manager-in-two-orgs
+report id:Full, members:Some
+1
+2
+3
+4
+7
+
+-- u17-an-agent-in-two-orgs
+report id:Full, members:Some
+2
+4
+
+-- u18-a-keeper
+report id:Full, members:Some
+
+-- u19-a-vendor-in-a-region
+report id:Full, members:None
+

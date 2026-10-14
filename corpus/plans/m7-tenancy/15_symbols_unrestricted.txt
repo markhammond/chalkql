@@ -73,3 +73,23 @@ report name:Full, base:Full
 EURUSD|EUR
 GBPUSD|GBP
 
+-- u16-a-manager-in-two-orgs
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u17-an-agent-in-two-orgs
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u18-a-keeper
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+
+-- u19-a-vendor-in-a-region
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+

@@ -57,3 +57,20 @@ report org_id:Full, n:Redacted, members:Some
 report org_id:Full, n:Redacted, members:Some
 1|0
 
+-- u16-a-manager-in-two-orgs
+report org_id:Full, n:Redacted, members:Some
+1|0
+2|0
+
+-- u17-an-agent-in-two-orgs
+report org_id:Full, n:Redacted, members:Some
+1|0
+2|0
+
+-- u18-a-keeper
+report org_id:Full, n:Redacted, members:Some
+1|0
+
+-- u19-a-vendor-in-a-region
+report org_id:Full, n:Redacted, members:Some
+

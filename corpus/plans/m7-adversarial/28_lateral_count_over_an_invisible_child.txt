@@ -65,3 +65,23 @@ report id:Full, n:Full, threads:Some, messages:Some
 1|2
 2|1
 
+-- u16-a-manager-in-two-orgs
+report id:Full, n:Full, threads:Some, messages:Some
+1|2
+2|1
+3|1
+
+-- u17-an-agent-in-two-orgs
+report id:Full, n:Full, threads:Some, messages:Some
+1|2
+2|1
+3|1
+
+-- u18-a-keeper
+report id:Full, n:Full, threads:Some, messages:Some
+1|2
+2|1
+
+-- u19-a-vendor-in-a-region
+report id:Full, n:Full, threads:None, messages:None
+

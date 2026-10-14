@@ -74,3 +74,27 @@ report id:Full, n:Full, members:Some, orders:Some
 1|2
 2|2
 
+-- u16-a-manager-in-two-orgs
+report id:Full, n:Full, members:Some, orders:Some
+1|2
+2|2
+3|1
+4|1
+7|0
+
+-- u17-an-agent-in-two-orgs
+report id:Full, n:Full, members:Some, orders:Some
+1|2
+2|2
+3|1
+4|1
+7|0
+
+-- u18-a-keeper
+report id:Full, n:Full, members:Some, orders:Some
+1|0
+2|0
+
+-- u19-a-vendor-in-a-region
+report id:Full, n:Full, members:None, orders:Some
+

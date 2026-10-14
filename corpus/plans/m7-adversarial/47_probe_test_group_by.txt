@@ -51,3 +51,18 @@ report national_id:Redacted, n:Full, members:None
 report national_id:Redacted, n:Full, members:Some
 <null>|2
 
+-- u16-a-manager-in-two-orgs
+report national_id:Redacted, n:Full, members:Some
+<null>|5
+
+-- u17-an-agent-in-two-orgs
+report national_id:Redacted, n:Full, members:Some
+<null>|5
+
+-- u18-a-keeper
+report national_id:Redacted, n:Full, members:Some
+<null>|2
+
+-- u19-a-vendor-in-a-region
+report national_id:Redacted, n:Full, members:None
+

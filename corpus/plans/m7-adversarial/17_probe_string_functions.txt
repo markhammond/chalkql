@@ -74,3 +74,27 @@ report id:Full, part:Full, len:Full, upper_last:Full, members:Some
 1|Tar|20|NG CANARY-LAST-01
 2|Bo |18|ITO CANARY-LAST-02
 
+-- u16-a-manager-in-two-orgs
+report id:Full, part:Full, len:Full, upper_last:Full, members:Some
+1|Tar|20|NG CANARY-LAST-01
+2|Bo |18|ITO CANARY-LAST-02
+3|Tom|21|EK CANARY-LAST-03
+4|Ada|19|ROY CANARY-LAST-04
+7|Tar|20|VO CANARY-LAST-07
+
+-- u17-an-agent-in-two-orgs
+report id:Full, part:Masked, len:Masked, upper_last:Masked, members:Some
+1|T|1|N
+2|B|1|I
+3|T|1|E
+4|A|1|R
+7|T|1|V
+
+-- u18-a-keeper
+report id:Full, part:Redacted, len:Redacted, upper_last:Redacted, members:Some
+1|<null>|<null>|<null>
+2|<null>|<null>|<null>
+
+-- u19-a-vendor-in-a-region
+report id:Full, part:Redacted, len:Redacted, upper_last:Redacted, members:None
+

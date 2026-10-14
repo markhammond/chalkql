@@ -64,3 +64,23 @@ report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, thr
 1|1|northwind-a
 2|3|northwind-b
 
+-- u16-a-manager-in-two-orgs
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+1|1|northwind-a
+2|3|northwind-b
+3|4|southerly-a
+
+-- u17-an-agent-in-two-orgs
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+1|1|northwind-a
+2|3|northwind-b
+3|4|southerly-a
+
+-- u18-a-keeper
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+1|1|northwind-a
+2|3|northwind-b
+
+-- u19-a-vendor-in-a-region
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+

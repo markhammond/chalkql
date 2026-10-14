@@ -43,3 +43,15 @@ id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:u
 -- u15-a-vendor-and-an-org
 id:int32, org_id:int32, first_name:utf8view, last_name:utf8view, national_id:utf8view?, postcode:utf8view
 
+-- u16-a-manager-in-two-orgs
+id:int32, org_id:int32, first_name:utf8view, last_name:utf8view, national_id:utf8view?, postcode:utf8view
+
+-- u17-an-agent-in-two-orgs
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
+-- u18-a-keeper
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
+-- u19-a-vendor-in-a-region
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+
