@@ -260,6 +260,8 @@ Chalk.Client.PlannerOptions.Conformance.get -> Chalk.Catalog.SqlConformance
 Chalk.Client.PlannerOptions.Libraries.get -> System.Collections.Generic.IReadOnlyList<Chalk.Catalog.SqlLibrary>!
 Chalk.Client.PlanRequest.ParameterHints.get -> System.Collections.Generic.IReadOnlyList<Chalk.Client.ParameterValueHint!>!
 Chalk.Client.PlanRequest.ParameterHints.init -> void
+Chalk.Client.PlanRequest.KnownPlanDigest.get -> ulong
+Chalk.Client.PlanRequest.KnownPlanDigest.init -> void
 Chalk.Client.PlannerArtifact
 Chalk.Client.PlannerProcessOptions.ArtifactCacheDirectory.get -> string?
 Chalk.Client.PlannerProcessOptions.ArtifactCacheDirectory.init -> void
@@ -711,6 +713,8 @@ Chalk.Client.Rpc.PlanRequest.ClientIrVersion.get -> uint
 Chalk.Client.Rpc.PlanRequest.ClientIrVersion.set -> void
 Chalk.Client.Rpc.PlanRequest.NarrowFrom.get -> ulong
 Chalk.Client.Rpc.PlanRequest.NarrowFrom.set -> void
+Chalk.Client.Rpc.PlanRequest.KnownPlanDigest.get -> ulong
+Chalk.Client.Rpc.PlanRequest.KnownPlanDigest.set -> void
 Chalk.Client.Rpc.PlanRequest.PlanRequest() -> void
 Chalk.Client.Rpc.PlanRequest.StatsEpoch.get -> long
 Chalk.Client.Rpc.PlanRequest.StatsEpoch.set -> void
@@ -993,6 +997,7 @@ const Chalk.Client.Rpc.PlanRequest.ContextIdFieldNumber = 2 -> int
 const Chalk.Client.Rpc.PlanRequest.ExtensionsFieldNumber = 9 -> int
 const Chalk.Client.Rpc.PlanRequest.InstanceIdFieldNumber = 13 -> int
 const Chalk.Client.Rpc.PlanRequest.NarrowFromFieldNumber = 10 -> int
+const Chalk.Client.Rpc.PlanRequest.KnownPlanDigestFieldNumber = 17 -> int
 const Chalk.Client.Rpc.PlanRequest.OptionsFieldNumber = 7 -> int
 const Chalk.Client.Rpc.PlanRequest.ParameterTypesFieldNumber = 6 -> int
 const Chalk.Client.Rpc.PlanRequest.PlanningOptionsFieldNumber = 11 -> int
@@ -1602,10 +1607,15 @@ Chalk.Client.ClockRequiredException.Clock.get -> string!
 Chalk.Client.ClockRequiredException.ClockRequiredException(string! clock) -> void
 Chalk.Client.PlanResult.LogicalDigest.get -> ulong
 Chalk.Client.PlanResult.LogicalDigest.init -> void
+Chalk.Client.PlanResult.Unchanged.get -> bool
+Chalk.Client.PlanResult.Unchanged.init -> void
 Chalk.Client.PreparedQuery.LogicalDigest.get -> ulong
 Chalk.Client.Rpc.PlanResponse.LogicalDigest.get -> ulong
 Chalk.Client.Rpc.PlanResponse.LogicalDigest.set -> void
 const Chalk.Client.Rpc.PlanResponse.LogicalDigestFieldNumber = 9 -> int
+Chalk.Client.Rpc.PlanResponse.PlanUnchanged.get -> bool
+Chalk.Client.Rpc.PlanResponse.PlanUnchanged.set -> void
+const Chalk.Client.Rpc.PlanResponse.PlanUnchangedFieldNumber = 10 -> int
 Chalk.Client.ChalkEngine.PrepareReplaceAsync<T>(Chalk.Sources.ISourceRuntime! source, string! table, System.Collections.Generic.IReadOnlyList<T>! rows, int through, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PreparedReplacement!>
 Chalk.Client.ChalkEngine.PrepareReplaceAsync<T>(Chalk.Sources.ITableTarget<T>! table, System.Collections.Generic.IReadOnlyList<T>! rows, int through, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PreparedReplacement!>
 Chalk.Client.PreparedReplacement

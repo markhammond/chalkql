@@ -285,6 +285,44 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         Assert.Equal(await RowsAsync(desk.Engine, view.Statement), sink.Rows);
     }
 
+    /// <summary>
+    /// A statement whose tables moved twofold is planned again in the background, naming the plan it
+    /// runs; when the planner comes to the same plan it says so and sends none. The statement keeps the
+    /// plan it has, judges drift from the numbers it was planned on again, and a view maintained from
+    /// it keeps on with no new start.
+    /// </summary>
+    [Fact]
+    public async Task A_plan_the_background_comes_to_again_is_kept()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        const string ByBook = "SELECT f.book AS desk, SUM(f.qty) AS qty FROM fills AS f GROUP BY f.book";
+        var planner = new GatedPlanner(sidecar.CreatePlanner());
+        await using var desk = await DeskAsync(planner, Fills(100, books: 10), Books(10));
+        await using var view = await desk.Engine.MaterializeAsync(ByBook, DeskOptions(ViewMaintenance.Incremental), Ct);
+        var sink = new Recorder();
+        var cursor = ViewCursor.Start;
+        Assert.Equal(DrainOutcome.Complete, view.Drain(ref cursor, sink));
+        sink.Calls.Clear();
+        var statement = view.Statement;
+        var plans = statement.Plans;
+        var planned = statement.PlanDigest;
+
+        await desk.LoadAsync(Fills(5_000, books: 10), Books(10), deferred: true);
+        Assert.True(statement.DriftedFrom(desk.Engine.Catalog));
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+
+        Assert.True(planner.Unchanged >= 1, $"the planner answered {planner.Unchanged} plans unchanged");
+        Assert.Same(plans, statement.Plans);
+        Assert.Equal(planned, statement.PlanDigest);
+        Assert.False(statement.DriftedFrom(desk.Engine.Catalog));
+        Assert.True(view.MaintainsCurrentPlan);
+        await view.UpdateAsync(Ct);
+        Assert.Equal(DrainOutcome.Complete, view.Drain(ref cursor, sink));
+        Assert.DoesNotContain("reset", sink.Calls);
+        Assert.Equal(await RowsAsync(desk.Engine, statement), sink.Rows);
+    }
+
     // ---- the parts ----
 
     private static IReadOnlyList<Fill> Fills(int count, int books, long? qty = null) =>
@@ -422,8 +460,12 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         private TaskCompletionSource _arrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private Exception? _failNext;
         private int _plans;
+        private int _unchanged;
 
         public int Plans => Volatile.Read(ref _plans);
+
+        /// <summary>Plans the planner answered unchanged, as the caller held them already.</summary>
+        public int Unchanged => Volatile.Read(ref _unchanged);
 
         /// <summary>Completes when a statistics message reaches the gate while it is held.</summary>
         public Task Arrived => Volatile.Read(ref _arrived).Task;
@@ -461,10 +503,16 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
             await inner.RegisterStatisticsAsync(statistics, ct).ConfigureAwait(false);
         }
 
-        public ValueTask<PlanResult> PlanAsync(PlanRequest request, CancellationToken ct = default)
+        public async ValueTask<PlanResult> PlanAsync(PlanRequest request, CancellationToken ct = default)
         {
             Interlocked.Increment(ref _plans);
-            return inner.PlanAsync(request, ct);
+            var result = await inner.PlanAsync(request, ct).ConfigureAwait(false);
+            if (result.Unchanged)
+            {
+                Interlocked.Increment(ref _unchanged);
+            }
+
+            return result;
         }
 
         public ValueTask<RedactedSql> RedactSqlAsync(RedactSqlRequest request, CancellationToken ct = default) =>

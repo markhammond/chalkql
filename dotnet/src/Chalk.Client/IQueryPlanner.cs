@@ -250,6 +250,13 @@ public sealed class PlanRequest
     /// default — sends no bytes and estimates every parameter exactly as it always did.
     /// </summary>
     public IReadOnlyList<ParameterValueHint> ParameterHints { get; init; } = [];
+
+    /// <summary>
+    /// The digest of a plan the caller holds for this statement, or zero, the default, which sends no
+    /// bytes. A planner that comes to a plan with this digest answers <see cref="PlanResult.Unchanged"/>
+    /// and leaves the plan out; one that ignores it returns the plan, as any planner may.
+    /// </summary>
+    public ulong KnownPlanDigest { get; init; }
 }
 
 /// <summary>
@@ -332,6 +339,12 @@ public sealed class PlanResult
     internal Chalk.Catalog.CatalogContext? PlannedOn { get; set; }
 
     public ulong PlanDigest => Plan.PlanDigest;
+
+    /// <summary>
+    /// The plan came out with the request's <see cref="PlanRequest.KnownPlanDigest"/>, so
+    /// <see cref="Plan"/> is empty: the caller runs the plan it holds.
+    /// </summary>
+    public bool Unchanged { get; init; }
 
     /// <summary>
     /// The statement's identity, which statistics do not move (D342): a digest of its logical plan,

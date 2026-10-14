@@ -440,9 +440,14 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
             }
             stats.addAllStages(result.stages());
 
+            // A caller that holds this plan already is told so, and sent no plan to parse, check
+            // or compile: a statement planned again on numbers that did not change its operators.
+            boolean unchanged =
+                request.getKnownPlanDigest() != 0L
+                    && plan.getPlanDigest() == request.getKnownPlanDigest();
             PlanResponse.Builder response =
                 PlanResponse.newBuilder()
-                    .setPlan(plan)
+                    .setPlanUnchanged(unchanged)
                     .setLogicalDigest(result.logicalDigest())
                     .setStats(stats)
                     // How this planning ended, always (D237). A request that carried no option gets
@@ -460,7 +465,10 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
               // expanded and whose star is gone; ADR 0043 §3 records why that means one more parse.
               response.setRedactedSql(redacted.redactedSql());
             }
-            if (options.getIncludePlanText()) {
+            if (!unchanged) {
+              response.setPlan(plan);
+            }
+            if (options.getIncludePlanText() && !unchanged) {
               // The stats block, and only for a request that asked for a governed search (D237): a
               // plan text that nothing could have cut short says nothing about it, so every plan
               // text recorded before this option existed is byte-identical to the one it was.

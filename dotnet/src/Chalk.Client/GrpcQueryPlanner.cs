@@ -346,6 +346,7 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
             StatisticsVersion = request.StatisticsVersion,
             ClientIrVersion = request.ClientIrVersion,
             NarrowFrom = request.NarrowFrom,
+            KnownPlanDigest = request.KnownPlanDigest,
             Options = new Rpc.PlannerOptions
             {
                 Pushdown = (Rpc.PushdownLevel)request.Options.Pushdown,
@@ -477,7 +478,8 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
 
         return new PlanResult
         {
-            Plan = response.Plan,
+            Plan = response.Plan ?? new Chalk.Ir.Plan(),
+            Unchanged = response.PlanUnchanged,
             LogicalDigest = response.LogicalDigest,
             PlanText = response.PlanText.Length == 0 ? null : response.PlanText,
             RedactedSql = response.RedactedSql.Length == 0 ? null : response.RedactedSql,

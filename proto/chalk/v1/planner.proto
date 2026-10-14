@@ -223,6 +223,11 @@ message PlanRequest {
   // parameter with no hint is estimated as it always was — and additive, so a request that carries
   // none sends no bytes at all.
   repeated ParameterHint parameter_hints = 16;
+  // The digest of a plan the caller already holds for this statement, or zero. A planner that comes
+  // to a plan with this digest answers `plan_unchanged` and leaves the plan out: a statement planned
+  // again in the background, on numbers that moved, then costs its caller nothing to parse, check or
+  // compile when the numbers did not change its plan. Zero — every other request — sends no bytes.
+  uint64 known_plan_digest = 17;
 }
 
 // One parameter's expected value, for estimation.
@@ -534,6 +539,9 @@ message PlanResponse {
   // conversion and the entitlement rewrite left it, before any rule. `plan.plan_digest` is the
   // identity of the plan that runs, and moves when statistics change its operators.
   uint64 logical_digest = 9;
+  // The plan came out with the request's `known_plan_digest`, so `plan` and `plan_text` are left out.
+  // False for a request that named no digest, or whose plan differs from it.
+  bool plan_unchanged = 10;
   // Moved into `PlanResponse.extensions` as `chalk.v1.EntitlementsReport` and
   // `chalk.v1.EntitlementsExplain`.
   reserved 4, 5;

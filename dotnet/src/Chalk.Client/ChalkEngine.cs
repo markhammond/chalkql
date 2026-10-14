@@ -2094,15 +2094,39 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         RequestContext? context,
         ulong narrowFrom,
         CancellationToken ct) =>
-        PlanAsync(sql, options, context, narrowFrom, [], ct);
+        PlanAsync(sql, options, context, narrowFrom, [], knownPlanDigest: 0, ct);
 
     /// <summary>The same, with this request's parameter value hints (D284).</summary>
-    internal async ValueTask<PlanResult> PlanAsync(
+    internal ValueTask<PlanResult> PlanAsync(
         string sql,
         PrepareOptions options,
         RequestContext? context,
         ulong narrowFrom,
         IReadOnlyList<ParameterValueHint> hints,
+        CancellationToken ct) =>
+        PlanAsync(sql, options, context, narrowFrom, hints, knownPlanDigest: 0, ct);
+
+    /// <summary>
+    /// A statement planned again in the background, naming the plan it runs: a planner that comes to
+    /// that plan says so and sends none, which the statement then keeps.
+    /// </summary>
+    internal ValueTask<PlanResult> PlanAgainAsync(
+        string sql,
+        PrepareOptions options,
+        RequestContext? context,
+        IReadOnlyList<ParameterValueHint> hints,
+        ulong knownPlanDigest,
+        CancellationToken ct) =>
+        PlanAsync(sql, options, context, narrowFrom: 0, hints, knownPlanDigest, ct);
+
+    /// <summary>The same, naming a plan the caller holds, whose digest the planner may answer with.</summary>
+    private async ValueTask<PlanResult> PlanAsync(
+        string sql,
+        PrepareOptions options,
+        RequestContext? context,
+        ulong narrowFrom,
+        IReadOnlyList<ParameterValueHint> hints,
+        ulong knownPlanDigest,
         CancellationToken ct)
     {
         CheckVocabulary(options);
@@ -2148,6 +2172,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             PlanningRequestId = requestId,
             Redaction = RedactionFor(options),
             ParameterHints = hints,
+            KnownPlanDigest = knownPlanDigest,
             Options = new Chalk.Client.PlannerOptions
             {
                 Pushdown = options.Pushdown,
@@ -2230,6 +2255,13 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 refused.Position,
                 refused.Refusals));
             throw;
+        }
+
+        // No plan came back, as the caller holds this one: nothing to check.
+        if (result.Unchanged)
+        {
+            result.PlannedOn = plannedOn;
+            return result;
         }
 
         //The entitlement invariant, re-established from *this* catalog and never from the planner's claim,

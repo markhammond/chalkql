@@ -583,8 +583,17 @@ public sealed class PreparedQuery
     {
         var current = Volatile.Read(ref _state);
         var result = await _engine
-            .PlanAsync(_prepared.Sql, _options, Context, _hints, ct)
+            .PlanAgainAsync(_prepared.Sql, _options, Context, _hints, current.Plan.PlanDigest, ct)
             .ConfigureAwait(false);
+        if (result.Unchanged || result.Plan.PlanDigest == current.Plan.PlanDigest)
+        {
+            // The planner came to the plan this statement runs, on the numbers it holds now: nothing
+            // to compile or swap in, so a view kept from the plan keeps on, and drift is judged from
+            // these numbers from now on.
+            current.Rebase(PlannedRows(result.PlannedOn ?? _engine.Catalog, current.TablesRead));
+            return null;
+        }
+
         if (result.LogicalDigest != LogicalDigest
             || !RequiredNames(result.Plan, Context).SequenceEqual(RequiredContext, StringComparer.Ordinal))
         {
@@ -1062,7 +1071,7 @@ public sealed class PreparedQuery
             Compiled = compiled;
             Shapes = shapes;
             TablesRead = tablesRead;
-            PlannedRows = plannedRows;
+            _plannedRows = plannedRows;
         }
 
         public Plan Plan { get; }
@@ -1089,7 +1098,15 @@ public sealed class PreparedQuery
         /// The row count of each table this plan reads, as the numbers it was made on gave it, for the
         /// tables whose count was known (D342): what drift is judged against.
         /// </summary>
-        public (TableKey Table, long Rows)[] PlannedRows { get; }
+        public (TableKey Table, long Rows)[] PlannedRows => Volatile.Read(ref _plannedRows);
+
+        private (TableKey Table, long Rows)[] _plannedRows;
+
+        /// <summary>
+        /// Judges drift from <paramref name="rows"/> from now on: the planner came to this same plan on
+        /// them, so the plan is as current as one made on them would be.
+        /// </summary>
+        public void Rebase((TableKey Table, long Rows)[] rows) => Volatile.Write(ref _plannedRows, rows);
 
         /// <summary>
         /// The state of a plan the engine returned: <paramref name="names"/>, when the prepare asked
