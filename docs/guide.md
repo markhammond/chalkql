@@ -1742,14 +1742,15 @@ left rows and its right rows by key, an aggregate its groups — so an update re
 
 Under `DeferPlanning()`, a view's statement is planned again in the background once a table it reads
 has moved twofold, and the new plan is taken at a refresh. An incremental view then builds its state
-again on the new plan, which makes that update its slowest. A host can say when that may happen, and
-be told what each update cost:
+again on the new plan, which makes that update its slowest. A host can say when that may happen and
+how much better a new plan must be, and be told what each update cost:
 
 ```csharp
 var options = new ViewOptions<Key, Row>
 {
     // …
     RefreshQueryPlan = () => !market.Busy,
+    PlanImprovementMargin = 0.25,
     Tracker = tracker,
 };
 ```
@@ -1762,6 +1763,15 @@ var options = new ViewOptions<Key, Row>
   - A change in a table's shape requests a plan without asking: the old plan no longer fits.
   - It runs on a background thread, so keep it quick and leave the view alone. One that throws says
     no, and is logged.
+- **`PlanImprovementMargin`** takes a new plan only when it costs at least that fraction less than the
+  plan the view runs. The planner prices both plans on the new numbers. 0.25 takes a plan that costs
+  at most three quarters of the one the view runs; zero takes any plan that costs less.
+  - The planner applies the margin. A plan that saves less is never sent, so there is nothing to
+    compile. The statement then measures drift from the new numbers, so it is planned again only
+    once they move twofold more.
+  - To price the plan the view runs, the planner keeps it. After an eviction or a restart, the
+    planner no longer has it, so the margin cannot apply, and the new plan is taken.
+  - A fraction below 0, or of 1 or more, is refused when the view is made.
 - **The tracker** (`IViewCostTracker`) is told of each update that moves the view, on the update's
   thread. It hears:
   - the update's time;
@@ -1773,7 +1783,8 @@ var options = new ViewOptions<Key, Row>
   Something that reads it on another thread, such as `RefreshQueryPlan`, needs its figures kept where
   both can read them.
 - **A view over a statement you prepared** is asked about that statement's plans. A statement carries
-  one view's `RefreshQueryPlan`, so a second view with one over it is refused while the first exists.
+  one view's `RefreshQueryPlan` and margin, so a second view with either over it is refused while the
+  first exists.
 
 ### What a view refuses
 

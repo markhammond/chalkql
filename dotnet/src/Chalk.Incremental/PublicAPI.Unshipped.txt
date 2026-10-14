@@ -113,3 +113,5 @@ Chalk.Incremental.ViewOptions<TKey, TRow>.Tracker.get -> Chalk.Incremental.IView
 Chalk.Incremental.ViewOptions<TKey, TRow>.Tracker.init -> void
 Chalk.Incremental.ViewOptions<TKey, TRow>.RefreshQueryPlan.get -> System.Func<bool>?
 Chalk.Incremental.ViewOptions<TKey, TRow>.RefreshQueryPlan.init -> void
+Chalk.Incremental.ViewOptions<TKey, TRow>.PlanImprovementMargin.get -> double?
+Chalk.Incremental.ViewOptions<TKey, TRow>.PlanImprovementMargin.init -> void

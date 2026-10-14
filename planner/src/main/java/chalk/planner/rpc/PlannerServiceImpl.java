@@ -49,6 +49,12 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
   private final chalk.planner.plan.NarrowCache narrowing = new chalk.planner.plan.NarrowCache();
 
   /**
+   * Plans kept to be priced again on newer numbers, for the standing views whose host checks the
+   * plans they take (design 70 §3).
+   */
+  private final chalk.planner.plan.KeptPlans keptPlans = new chalk.planner.plan.KeptPlans();
+
+  /**
    * The plannings a {@code StopPlanning} call can address (D236). Empty for every request that names
    * no {@code request_id}, which is every request that cannot be stopped.
    */
@@ -310,6 +316,25 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
     // message means no visitor runs, no seed is derived and no extra byte travels back.
     chalk.planner.redact.@Nullable RedactionPolicy redaction =
         chalk.planner.redact.RedactionPolicy.of(request.getRedaction(), request.hasRedaction());
+    // The margin a plan must save on the known one to be sent (design 70 §3), refused before anything
+    // is planned when it could never send a plan, or could send one that costs more, and when nothing
+    // is priced to apply it to.
+    if (request.hasCheaperBy()) {
+      double cheaperBy = request.getCheaperBy();
+      if (!(cheaperBy >= 0 && cheaperBy < 1)) {
+        throw new InvalidArgumentException(
+            ErrorCode.INVALID_REQUEST,
+            "PlanRequest.cheaper_by is "
+                + cheaperBy
+                + "; it is a fraction of the known plan's cost, from 0 up to, not including, 1.");
+      }
+      if (!request.getPricePlans()) {
+        throw new InvalidArgumentException(
+            ErrorCode.INVALID_REQUEST,
+            "PlanRequest.cheaper_by needs price_plans: a plan is held back only on the costs the"
+                + " planner prices.");
+      }
+    }
 
     // The named values this statement is planned with (step 26, D152; step 26c, D212) — a core
     // field, read here and put on the extension slate for whichever handler wants it. Absent means
@@ -458,6 +483,47 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
                             (System.nanoTime() - start) / 1_000L,
                             result.optimizeMicros(),
                             planning.getSessionName()));
+            // The costs a standing view's plan check compares (design 70 §3): this plan's, and the
+            // kept one's the request names, both on this request's numbers. A plan that does not
+            // save the request's margin on the kept one is held back, and the caller keeps the plan
+            // it runs; any other is kept in turn, for the request that names it next.
+            boolean held = false;
+            if (request.getPricePlans()) {
+              Double cost =
+                  chalk.planner.plan.KeptPlans.cost(result.physical(), RelMetadataQuery.instance());
+              if (cost != null) {
+                response.setPlanCost(cost);
+              }
+
+              Double known = null;
+              if (request.getKnownPlanDigest() != 0L) {
+                var provider = result.physical().getCluster().getMetadataProvider();
+                try {
+                  known =
+                      keptPlans.price(
+                          request.getKnownPlanDigest(),
+                          result.logicalDigest(),
+                          catalog.descriptor());
+                  if (known != null) {
+                    response.setKnownPlanCost(known);
+                  }
+                } finally {
+                  // The handlers this request was planned under, on this thread, for what follows.
+                  result.physical().getCluster().setMetadataProvider(provider);
+                }
+              }
+
+              held =
+                  !unchanged
+                      && request.hasCheaperBy()
+                      && chalk.planner.plan.KeptPlans.savesTooLittle(
+                          cost, known, request.getCheaperBy());
+              if (held) {
+                response.setPlanHeld(true);
+              } else {
+                keptPlans.keep(plan.getPlanDigest(), result.logicalDigest(), result.physical());
+              }
+            }
             if (redacted != null) {
               // The statement's literals as keyed pseudonyms, for a host that logs statement text
               // (D262). The request's own SQL is redacted — the text the host wrote, after the
@@ -465,10 +531,10 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
               // expanded and whose star is gone; ADR 0043 §3 records why that means one more parse.
               response.setRedactedSql(redacted.redactedSql());
             }
-            if (!unchanged) {
+            if (!unchanged && !held) {
               response.setPlan(plan);
             }
-            if (options.getIncludePlanText() && !unchanged) {
+            if (options.getIncludePlanText() && !unchanged && !held) {
               // The stats block, and only for a request that asked for a governed search (D237): a
               // plan text that nothing could have cut short says nothing about it, so every plan
               // text recorded before this option existed is byte-identical to the one it was.
@@ -505,6 +571,11 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
                 // to a narrowing.
                 pipeline.releaseSearchSpace(front);
               }
+            }
+            if (request.getPricePlans()) {
+              // A kept plan holds its tree and the cluster that owns it, never the optimiser's
+              // search space, which is the largest thing in a pipeline.
+              pipeline.releaseSearchSpace(front);
             }
             return response.build();
           });

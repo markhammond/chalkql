@@ -147,7 +147,7 @@ public final class ChalkTableScan extends TableScan implements ChalkRel {
    */
   @Override
   public double estimateRowCount(RelMetadataQuery mq) {
-    double rows = table.getRowCount();
+    double rows = ChalkTable.rowsOf(table);
     return rowGoal > 0 ? Math.min(rows, rowGoal) : rows;
   }
 

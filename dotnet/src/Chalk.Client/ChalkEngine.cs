@@ -2113,7 +2113,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         RequestContext? context,
         ulong narrowFrom,
         CancellationToken ct) =>
-        PlanAsync(sql, options, context, narrowFrom, [], knownPlanDigest: 0, ct);
+        PlanAsync(sql, options, context, narrowFrom, [], knownPlanDigest: 0, pricePlans: false, cheaperBy: null, ct);
 
     /// <summary>The same, with this request's parameter value hints (D284).</summary>
     internal ValueTask<PlanResult> PlanAsync(
@@ -2123,11 +2123,14 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         ulong narrowFrom,
         IReadOnlyList<ParameterValueHint> hints,
         CancellationToken ct) =>
-        PlanAsync(sql, options, context, narrowFrom, hints, knownPlanDigest: 0, ct);
+        PlanAsync(sql, options, context, narrowFrom, hints, knownPlanDigest: 0, pricePlans: false, cheaperBy: null, ct);
 
     /// <summary>
     /// A statement planned again in the background, naming the plan it runs: a planner that comes to
-    /// that plan says so and sends none, which the statement then keeps.
+    /// that plan says so and sends none, which the statement then keeps. With
+    /// <paramref name="pricePlans"/>, the planner keeps the plan it answers with, and prices the one
+    /// named when it keeps it (design 70 §3); with <paramref name="cheaperBy"/> too, it holds back a
+    /// plan that does not save that fraction of the named plan's cost, and sends none.
     /// </summary>
     internal ValueTask<PlanResult> PlanAgainAsync(
         string sql,
@@ -2135,8 +2138,10 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         RequestContext? context,
         IReadOnlyList<ParameterValueHint> hints,
         ulong knownPlanDigest,
+        bool pricePlans,
+        double? cheaperBy,
         CancellationToken ct) =>
-        PlanAsync(sql, options, context, narrowFrom: 0, hints, knownPlanDigest, ct);
+        PlanAsync(sql, options, context, narrowFrom: 0, hints, knownPlanDigest, pricePlans, cheaperBy, ct);
 
     /// <summary>The same, naming a plan the caller holds, whose digest the planner may answer with.</summary>
     private async ValueTask<PlanResult> PlanAsync(
@@ -2146,6 +2151,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         ulong narrowFrom,
         IReadOnlyList<ParameterValueHint> hints,
         ulong knownPlanDigest,
+        bool pricePlans,
+        double? cheaperBy,
         CancellationToken ct)
     {
         CheckVocabulary(options);
@@ -2192,6 +2199,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             Redaction = RedactionFor(options),
             ParameterHints = hints,
             KnownPlanDigest = knownPlanDigest,
+            PricePlans = pricePlans,
+            CheaperBy = cheaperBy,
             Options = new Chalk.Client.PlannerOptions
             {
                 Pushdown = options.Pushdown,
@@ -2276,8 +2285,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             throw;
         }
 
-        // No plan came back, as the caller holds this one: nothing to check.
-        if (result.Unchanged)
+        // No plan came back, as the caller holds this one, or keeps it for the margin it set: nothing
+        // to check.
+        if (result.Unchanged || result.Held)
         {
             result.PlannedOn = plannedOn;
             return result;

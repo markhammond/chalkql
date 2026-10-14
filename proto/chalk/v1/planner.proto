@@ -228,6 +228,19 @@ message PlanRequest {
   // again in the background, on numbers that moved, then costs its caller nothing to parse, check or
   // compile when the numbers did not change its plan. Zero — every other request — sends no bytes.
   uint64 known_plan_digest = 17;
+  // Keep the plan this request is answered with, and price the one `known_plan_digest` names when
+  // this planner keeps it (design 70 §3): the costs a standing view's plan check compares. False —
+  // every other request — keeps nothing and prices nothing.
+  bool price_plans = 18;
+  // With `price_plans`: how much less than the known plan another plan must cost to be sent, as a
+  // fraction of the known plan's cost, both on this request's numbers (design 70 §3). A plan that
+  // saves less is held back and the response says `plan_held`, so the caller keeps the plan it runs
+  // and has nothing to parse, check or compile. 0.25 sends a plan that costs at most three quarters
+  // of the known one; zero sends any that costs less. From zero up to, not including, one; refused
+  // otherwise, and without `price_plans`. Applies only while this planner keeps the known plan: one
+  // it no longer keeps cannot be priced, and the new plan is sent. Absent — every other request —
+  // sends the plan the planner came to.
+  optional double cheaper_by = 19;
 }
 
 // One parameter's expected value, for estimation.
@@ -542,6 +555,17 @@ message PlanResponse {
   // The plan came out with the request's `known_plan_digest`, so `plan` and `plan_text` are left out.
   // False for a request that named no digest, or whose plan differs from it.
   bool plan_unchanged = 10;
+  // For a request that set `price_plans`: this plan's cumulative cost, the row work the optimiser
+  // compares plans by, on the request's numbers.
+  optional double plan_cost = 11;
+  // For a request that set `price_plans` and named a `known_plan_digest` this planner keeps: that
+  // plan's cost on the request's numbers, so the two compare like with like. Absent when the planner
+  // no longer keeps it.
+  optional double known_plan_cost = 12;
+  // The planner came to another plan than the request's `known_plan_digest`, but it does not cost
+  // less than the known plan by the request's `cheaper_by`, so the known plan stands: `plan` and
+  // `plan_text` are left out, as for `plan_unchanged`, and the two costs say why. False otherwise.
+  bool plan_held = 13;
   // Moved into `PlanResponse.extensions` as `chalk.v1.EntitlementsReport` and
   // `chalk.v1.EntitlementsExplain`.
   reserved 4, 5;

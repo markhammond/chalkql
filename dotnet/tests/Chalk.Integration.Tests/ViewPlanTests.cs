@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Data.Common;
 using Chalk.Catalog;
 using Chalk.Client;
@@ -10,11 +11,13 @@ using Microsoft.Data.Sqlite;
 namespace Chalk.Integration.Tests;
 
 /// <summary>
-/// The host's say on the plans a view takes, and the tracker of its updates (design 70 §1). A host's
-/// RefreshQueryPlan that says no leaves the statement on its plan, with nothing requested of the
+/// The host's say on the plans a view takes, and the tracker of its updates (design 70 §1, §3). A
+/// host's RefreshQueryPlan that says no leaves the statement on its plan, with nothing requested of the
 /// planner, until a later refresh finds it saying yes; one that throws says no; a drift that makes the
-/// statement stale asks it too, and a change of shape does not; a statement carries one view's; and the
-/// tracker is told of every update that moves the view.
+/// statement stale asks it too, and a change of shape does not. The planner holds back a plan that saves
+/// less than the view's PlanImprovementMargin, sends one that saves more, and sends any it cannot price
+/// against a plan it no longer keeps. A statement carries one view's say; and the tracker is told of
+/// every update that moves the view.
 /// </summary>
 [Collection(SidecarCollection.Name)]
 public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
@@ -61,6 +64,7 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
 
         await desk.LoadAsync(Fills(3_000, books: 3), Books(3));
         await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(Counts(drifted: 1, vetoed: 1), desk.Engine.LastBackgroundPlans);
         await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
         await view.UpdateAsync(Ct);
 
@@ -74,6 +78,7 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
         host.Willing = true;
         await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
         await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(Counts(drifted: 1, planned: 1), desk.Engine.LastBackgroundPlans);
         await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
         await view.UpdateAsync(Ct);
 
@@ -176,6 +181,154 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
     }
 
     /// <summary>
+    /// A statement planned again to the plan it runs is counted, as unchanged, beside the ones planned
+    /// anew: a run that took no new plan still says whether anything drifted.
+    /// </summary>
+    [Fact]
+    public async Task A_statement_planned_again_to_its_own_plan_is_counted_unchanged()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync();
+        await using var view = await desk.Engine.MaterializeAsync(ByDesk, Options(ViewMaintenance.Incremental), Ct);
+        await desk.LoadAsync(Fills(3_000, books: 3), Books(3));
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        await view.UpdateAsync(Ct);
+        var planned = view.Statement.PlanDigest;
+
+        await desk.LoadAsync(Fills(6_000, books: 3), Books(3));
+        await desk.Engine.BackgroundPlanningSettledAsync();
+
+        Assert.Equal(Counts(drifted: 1, unchanged: 1), desk.Engine.LastBackgroundPlans);
+        Assert.Equal(planned, view.Statement.PlanDigest);
+        Assert.False(view.Statement.DriftedFrom(desk.Engine.Catalog));
+    }
+
+    /// <summary>
+    /// A plan that does not save the margin is held back by the planner: nothing is sent or compiled,
+    /// the view keeps its plan, and drift is judged from the new numbers.
+    /// </summary>
+    [Theory]
+    [InlineData(ViewMaintenance.Incremental)]
+    [InlineData(ViewMaintenance.Recompute)]
+    public async Task A_plan_that_saves_less_than_the_margin_is_held_back(ViewMaintenance maintenance)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var watch = new PlannerWatch(sidecar.CreatePlanner());
+        await using var desk = await DeskAsync(watch);
+        await using var view = await desk.Engine.MaterializeAsync(ByDesk, Options(maintenance, margin: 0.95), Ct);
+        var planned = view.Statement.PlanDigest;
+
+        await desk.LoadAsync(Fills(3_000, books: 3), Books(3));
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(Counts(drifted: 1, held: 1), desk.Engine.LastBackgroundPlans);
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        await view.UpdateAsync(Ct);
+
+        Assert.Equal(planned, view.Statement.PlanDigest);
+        Assert.True(view.MaintainsCurrentPlan);
+        var held = Assert.Single(watch.Answers, a => a.Held);
+        Assert.Equal(0UL, held.Plan.PlanDigest);
+        Assert.True(
+            held.PlanCost < held.KnownPlanCost && held.PlanCost >= held.KnownPlanCost * 0.05,
+            $"the new plan costs {held.PlanCost}, the held one {held.KnownPlanCost}");
+        Assert.False(view.Statement.DriftedFrom(desk.Engine.Catalog));
+        Assert.Equal(await RowsAsync(desk.Engine, view.Statement), await ViewRowsAsync(view));
+    }
+
+    /// <summary>A plan that saves the margin is sent and taken, priced beside the plan it replaces.</summary>
+    [Fact]
+    public async Task A_plan_that_saves_the_margin_is_taken()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var watch = new PlannerWatch(sidecar.CreatePlanner());
+        await using var desk = await DeskAsync(watch);
+        await using var view = await desk.Engine.MaterializeAsync(
+            ByDesk, Options(ViewMaintenance.Incremental, margin: 0.05), Ct);
+        var planned = view.Statement.PlanDigest;
+
+        await desk.LoadAsync(Fills(3_000, books: 3), Books(3));
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(Counts(drifted: 1, planned: 1), desk.Engine.LastBackgroundPlans);
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        await view.UpdateAsync(Ct);
+
+        Assert.NotEqual(planned, view.Statement.PlanDigest);
+        Assert.True(view.MaintainsCurrentPlan);
+        var sent = Assert.Single(watch.Answers, a => a.Plan.PlanDigest == view.Statement.PlanDigest);
+        Assert.True(sent.PlanCost < sent.KnownPlanCost * 0.95, $"the new plan costs {sent.PlanCost}, the held one {sent.KnownPlanCost}");
+        Assert.Equal(await RowsAsync(desk.Engine, view.Statement), await ViewRowsAsync(view));
+    }
+
+    /// <summary>
+    /// A planner that does not keep the plan held, as one that has restarted since, cannot price it: no
+    /// margin holds the new plan back, and it is taken. The tables are a source no other test reads: a
+    /// plan's digest names no engine, so the sidecar these tests share would otherwise keep the same
+    /// plan for another test's view.
+    /// </summary>
+    [Fact]
+    public async Task A_margin_against_a_plan_the_planner_does_not_keep_takes_the_new_plan()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var watch = new PlannerWatch(sidecar.CreatePlanner()) { Forgetting = true };
+        await using var desk = await DeskAsync(watch, name: "unkept");
+        await using var view = await desk.Engine.MaterializeAsync(
+            ByDesk, Options(ViewMaintenance.Incremental, margin: 0.95), Ct);
+        watch.Forgetting = false;
+        var planned = view.Statement.PlanDigest;
+
+        await desk.LoadAsync(Fills(3_000, books: 3), Books(3));
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        await view.UpdateAsync(Ct);
+
+        Assert.NotEqual(planned, view.Statement.PlanDigest);
+        Assert.DoesNotContain(watch.Answers, a => a.Held);
+        var sent = Assert.Single(watch.Answers, a => a.Plan.PlanDigest == view.Statement.PlanDigest);
+        Assert.NotNull(sent.PlanCost);
+        Assert.Null(sent.KnownPlanCost);
+    }
+
+    /// <summary>A host's veto comes before the margin: a plan it vetoes is not requested, so not priced.</summary>
+    [Fact]
+    public async Task A_veto_comes_before_the_margin()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var host = new Host { Willing = false };
+        var watch = new PlannerWatch(sidecar.CreatePlanner());
+        await using var desk = await DeskAsync(watch);
+        await using var view = await desk.Engine.MaterializeAsync(
+            ByDesk, Options(ViewMaintenance.Incremental, refresh: host.Refresh, margin: 0.05), Ct);
+        var planned = view.Statement.PlanDigest;
+
+        await desk.LoadAsync(Fills(3_000, books: 3), Books(3));
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        await view.UpdateAsync(Ct);
+
+        Assert.Equal(planned, view.Statement.PlanDigest);
+        Assert.True(host.Asked > 0);
+        Assert.Equal(0, watch.Replans);
+    }
+
+    /// <summary>A margin is a fraction of the held plan's cost, from none up to all of it; anything else is refused when the view is made.</summary>
+    [Theory]
+    [InlineData(1d)]
+    [InlineData(1.5d)]
+    [InlineData(-0.01d)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public async Task A_margin_that_is_not_a_fraction_below_one_is_refused(double margin)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync();
+
+        var refused = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await desk.Engine.MaterializeAsync(ByDesk, Options(ViewMaintenance.Incremental, margin: margin), Ct));
+        Assert.Contains("PlanImprovementMargin", refused.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The tracker hears of every update that moves the view, and of none that does not: the version it
     /// brought, whether it was whole — every update of a recomputing view, an incremental view's first —
     /// the keys it changed, and the plan it ran.
@@ -224,6 +377,10 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
             await desk.Engine.MaterializeAsync(statement, Options(ViewMaintenance.Recompute, refresh: new Host().Refresh), Ct));
         Assert.Contains("carries another view's RefreshQueryPlan", refused.Message, StringComparison.Ordinal);
 
+        refused = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await desk.Engine.MaterializeAsync(statement, Options(ViewMaintenance.Recompute, margin: 0.1), Ct));
+        Assert.Contains("carries another view's RefreshQueryPlan or PlanImprovementMargin", refused.Message, StringComparison.Ordinal);
+
         await using (var without = await desk.Engine.MaterializeAsync(statement, Options(ViewMaintenance.Recompute), Ct))
         {
         }
@@ -234,6 +391,11 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
     }
 
     // ---- the parts ----
+
+    /// <summary>What a background run should have done with the statements it found drifted.</summary>
+    private static ChalkEngine.BackgroundPlans Counts(
+        int drifted, int planned = 0, int unchanged = 0, int held = 0, int vetoed = 0) =>
+        new(drifted, planned, unchanged, held, vetoed, NotTheSame: 0, Failed: 0);
 
     /// <summary>A host's RefreshQueryPlan: whether it is willing, how often it was asked, and whether it throws.</summary>
     private sealed class Host
@@ -266,10 +428,26 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
         public void Updated(in ViewUpdate update) => Updates.Add(update);
     }
 
-    /// <summary>The sidecar's planner, counting the requests that plan a statement again: those naming the plan it runs.</summary>
+    /// <summary>
+    /// The sidecar's planner, watched: every answer it gives, and the requests that plan a statement
+    /// again, naming the plan it runs, apart from a view's request to keep that plan. While
+    /// <see cref="Forgetting"/>, a request that asks for prices is answered as though the plan it names
+    /// were the one the planner came to, and never reaches the planner, which so keeps nothing: a
+    /// planner that has restarted since.
+    /// </summary>
     private sealed class PlannerWatch(IQueryPlanner inner) : IQueryPlanner
     {
+        private readonly ConcurrentQueue<PlanResult> _answers = new();
         private int _replans;
+        private volatile bool _forgetting;
+
+        public bool Forgetting
+        {
+            get => _forgetting;
+            set => _forgetting = value;
+        }
+
+        public IReadOnlyList<PlanResult> Answers => [.. _answers];
 
         public int Replans => Volatile.Read(ref _replans);
 
@@ -283,14 +461,22 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
         public ValueTask RegisterStatisticsAsync(StatisticsRegistration statistics, CancellationToken ct = default) =>
             inner.RegisterStatisticsAsync(statistics, ct);
 
-        public ValueTask<PlanResult> PlanAsync(PlanRequest request, CancellationToken ct = default)
+        public async ValueTask<PlanResult> PlanAsync(PlanRequest request, CancellationToken ct = default)
         {
-            if (request.KnownPlanDigest != 0)
+            var keep = request.PricePlans && request.CheaperBy is null;
+            if (request.KnownPlanDigest != 0 && !keep)
             {
                 Interlocked.Increment(ref _replans);
             }
 
-            return inner.PlanAsync(request, ct);
+            if (Forgetting && request.PricePlans)
+            {
+                return new PlanResult { Plan = new Chalk.Ir.Plan(), Unchanged = true };
+            }
+
+            var result = await inner.PlanAsync(request, ct).ConfigureAwait(false);
+            _answers.Enqueue(result);
+            return result;
         }
 
         public ValueTask<RedactedSql> RedactSqlAsync(RedactSqlRequest request, CancellationToken ct = default) =>
@@ -300,7 +486,7 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
     }
 
     private static ViewOptions<One, One> Options(
-        ViewMaintenance maintenance, Func<bool>? refresh = null, IViewCostTracker? tracker = null) => new()
+        ViewMaintenance maintenance, Func<bool>? refresh = null, IViewCostTracker? tracker = null, double? margin = null) => new()
     {
         Key = ["desk"],
         Maintenance = maintenance,
@@ -313,6 +499,7 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
         ResetWhen = double.PositiveInfinity,
         RefreshQueryPlan = refresh,
         Tracker = tracker,
+        PlanImprovementMargin = margin,
     };
 
     private static IReadOnlyList<Fill> Fills(int count, int books) =>
@@ -364,9 +551,9 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
         public ValueTask DisposeAsync() => Engine.DisposeAsync();
     }
 
-    private async Task<Desk> DeskAsync(IQueryPlanner? planner = null)
+    private async Task<Desk> DeskAsync(IQueryPlanner? planner = null, string name = "trading")
     {
-        var source = new PocoSourceBuilder("trading")
+        var source = new PocoSourceBuilder(name)
             .NamingPolicy(PocoNamingPolicy.SnakeCase)
             .AddTable("fills", (IReadOnlyList<Fill>)[])
             .AddTable("books", (IReadOnlyList<Book>)[])

@@ -70,8 +70,8 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     private bool _disposed;
 
     /// <summary>
-    /// The host's say on the view's plans, as the view puts it on its statement (design 70 §1); null
-    /// when it set none.
+    /// The host's say on the view's plans — its veto on new plans and its margin — as the view puts it
+    /// on its statement (design 70 §1, §3); null when it set neither.
     /// </summary>
     private readonly PreparedQuery.PlanChoice? _choice;
 
@@ -97,9 +97,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         _key = key;
         _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
         _reads = options.DatabaseReads == ViewDatabaseReads.WhenRefreshed ? new ViewReads(engine) : null;
-        if (options.RefreshQueryPlan is { } refresh)
+        if (options.RefreshQueryPlan is not null || options.PlanImprovementMargin is not null)
         {
-            _choice = new PreparedQuery.PlanChoice(refresh);
+            _choice = new PreparedQuery.PlanChoice(options.RefreshQueryPlan, options.PlanImprovementMargin);
         }
     }
 
@@ -270,6 +270,15 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 "a view's Maintenance is Recompute or Incremental.");
         }
 
+        if (options.PlanImprovementMargin is { } margin && !(margin >= 0 && margin < 1))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                margin,
+                "a view's PlanImprovementMargin is a fraction of the cost of the plan it runs, from 0 up to, not "
+                + "including, 1: 1 or more would never take a plan, and less than 0 would take one that costs more.");
+        }
+
         if (options.LocalJoinMaxRows <= 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -295,18 +304,19 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     {
         var key = KeyOf(prepared, options.Key);
         ViewChecks.Check(engine, prepared, key, options);
-        if (options.RefreshQueryPlan is not null && prepared.Choice is not null)
+        if ((options.RefreshQueryPlan is not null || options.PlanImprovementMargin is not null)
+            && prepared.Choice is not null)
         {
             throw new ArgumentException(
-                "the statement carries another view's RefreshQueryPlan already, and a statement keeps one: "
-                + "make this view from the statement's text, or without one.",
+                "the statement carries another view's RefreshQueryPlan or PlanImprovementMargin already, and a "
+                + "statement keeps one view's: make this view from the statement's text, or without either.",
                 nameof(prepared));
         }
 
         var view = new StandingView<TKey, TRow>(engine, sql, prepare, options, binding, prepared, key);
-        view.Attach(prepared);
         try
         {
+            await view.AttachAsync(prepared, ct).ConfigureAwait(false);
             if (options.Maintenance == ViewMaintenance.Incremental)
             {
                 view._maintained = await view.MaintainAsync(prepared, key, ct).ConfigureAwait(false);
@@ -424,15 +434,20 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     }
 
     /// <summary>
-    /// Puts the host's say on the view's plans on <paramref name="prepared"/> (design 70 §1), where a
-    /// background run asks it. A statement keeps one view's: <c>MakeAsync</c> refuses a host's statement
-    /// that carries another view's.
+    /// Puts the host's say on the view's plans on <paramref name="prepared"/> (design 70 §1, §3), where a
+    /// background run asks it; with a margin, asks the planner too to keep the plan the statement runs,
+    /// so the first plan a background run makes can be priced against it. A statement keeps one view's:
+    /// <c>MakeAsync</c> refuses a host's statement that carries another view's.
     /// </summary>
-    private void Attach(PreparedQuery prepared)
+    private async ValueTask AttachAsync(PreparedQuery prepared, CancellationToken ct)
     {
         if (_choice is not null)
         {
             prepared.Choice = _choice;
+            if (_choice.ImprovementMargin is not null)
+            {
+                await prepared.KeepPlanAsync(ct).ConfigureAwait(false);
+            }
         }
     }
 
@@ -935,7 +950,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
             // The plan is a new one, and its reads are in new places: read them all again.
             _reads?.Clear();
-            Attach(prepared);
+            await AttachAsync(prepared, ct).ConfigureAwait(false);
         }
         catch (Exception failure) when (failure is ChalkException or ArgumentException)
         {

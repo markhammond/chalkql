@@ -304,6 +304,7 @@ public sealed partial class ChalkEngine
 
         var plans = new List<(PreparedQuery Statement, PreparedQuery.PlanState Plan)>();
         var owed = false;
+        int drifted = 0, unchanged = 0, held = 0, vetoed = 0, notTheSame = 0, failed = 0;
         foreach (var statement in HeldStatements())
         {
             ct.ThrowIfCancellationRequested();
@@ -312,19 +313,33 @@ public sealed partial class ChalkEngine
                 continue;
             }
 
+            drifted++;
             if (!statement.MayRefreshPlan())
             {
                 // Its view's host vetoed a new plan for now (design 70 §1): nothing is requested, and
                 // the next refresh that defers asks for a run that asks the host again.
+                vetoed++;
                 owed = true;
                 continue;
             }
 
             try
             {
-                if (await statement.PlanAgainAsync(ct).ConfigureAwait(false) is { } plan)
+                var (plan, outcome) = await statement.PlanAgainAsync(ct).ConfigureAwait(false);
+                switch (outcome)
                 {
-                    plans.Add((statement, plan));
+                    case PreparedQuery.PlanAgainOutcome.New:
+                        plans.Add((statement, plan!));
+                        break;
+                    case PreparedQuery.PlanAgainOutcome.Unchanged:
+                        unchanged++;
+                        break;
+                    case PreparedQuery.PlanAgainOutcome.Held:
+                        held++;
+                        break;
+                    case PreparedQuery.PlanAgainOutcome.NotTheSame:
+                        notTheSame++;
+                        break;
                 }
             }
             catch (Exception failure) when (failure is not OperationCanceledException)
@@ -332,6 +347,7 @@ public sealed partial class ChalkEngine
                 // A statement that cannot be planned now keeps the plan it has, and the next refresh
                 // that defers asks for a run that tries again.
                 _log.LogDebug(failure, "planning {Digest:x16} again in the background failed", statement.LogicalDigest);
+                failed++;
                 owed = true;
             }
         }
@@ -343,11 +359,39 @@ public sealed partial class ChalkEngine
             _planningOwed = owed;
         }
 
+        // What became of every statement whose numbers drifted, so that none passes unseen: a run
+        // that planned none anew still says whether any drifted.
+        var counts = new BackgroundPlans(drifted, plans.Count, unchanged, held, vetoed, notTheSame, failed);
+        Volatile.Write(ref _lastBackgroundPlans, counts);
         _log.LogDebug(
-            "planned in the background: statistics of {Tables} tables sent, {Statements} statements planned again",
+            "planned in the background: statistics of {Tables} tables sent; {Drifted} statements drifted: "
+            + "{New} planned anew, {Unchanged} unchanged, {Held} held back by a margin, {Vetoed} vetoed by "
+            + "a host, {NotTheSame} not the same statement, {Failed} failed",
             sent,
-            plans.Count);
+            counts.Drifted,
+            counts.New,
+            counts.Unchanged,
+            counts.Held,
+            counts.Vetoed,
+            counts.NotTheSame,
+            counts.Failed);
     }
+
+    /// <summary>What became of the statements a background run found drifted (design 70): for its log, and tests.</summary>
+    /// <param name="Drifted">Statements whose numbers drifted twofold since their plans were made.</param>
+    /// <param name="New">Planned anew, and staged for the next refresh to swap in.</param>
+    /// <param name="Unchanged">Planned to the plans they run.</param>
+    /// <param name="Held">Planned to plans that save less than their views' margins, which the planner held back.</param>
+    /// <param name="Vetoed">Not planned: their views' hosts said not now.</param>
+    /// <param name="NotTheSame">Planned to another statement, so neither swapped nor planned again.</param>
+    /// <param name="Failed">Not planned: the planner failed, or an extension refused what it brought.</param>
+    internal sealed record BackgroundPlans(
+        int Drifted, int New, int Unchanged, int Held, int Vetoed, int NotTheSame, int Failed);
+
+    private BackgroundPlans? _lastBackgroundPlans;
+
+    /// <summary>What the last background run did with the statements it found drifted, if one ran: for tests.</summary>
+    internal BackgroundPlans? LastBackgroundPlans => Volatile.Read(ref _lastBackgroundPlans);
 
     /// <summary>
     /// <paramref name="catalog"/> with the tables background statistics were computed for described

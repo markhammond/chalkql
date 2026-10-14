@@ -61,7 +61,7 @@ public final class ChalkContextScan extends TableScan implements ChalkRel {
 
   @Override
   public @Nullable RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {
-    double rows = table.getRowCount();
+    double rows = chalk.planner.catalog.ChalkTable.rowsOf(table);
     return planner.getCostFactory().makeCost(rows, rows, 0);
   }
 }

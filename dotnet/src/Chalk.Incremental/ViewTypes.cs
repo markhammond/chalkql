@@ -237,6 +237,20 @@ public sealed class ViewOptions<TKey, TRow>
     public Func<bool>? RefreshQueryPlan { get; init; }
 
     /// <summary>
+    /// The fraction of the cost of the plan the view runs that a new plan must save to be taken, both
+    /// priced by the planner on the new plan's numbers (design 70 §3). The planner applies it: a plan
+    /// that saves less is held back, never sent, and the statement keeps the plan it runs. 0.25 takes a
+    /// plan that costs at most three quarters of the one the view runs; zero takes any that costs less.
+    /// Null, the default, takes every plan.
+    /// </summary>
+    /// <remarks>
+    /// From zero up to, not including, one; anything else is refused when the view is made. The
+    /// planner keeps the plan the view runs in order to price it; one it no longer keeps, after an
+    /// eviction or a restart, cannot be priced, and the new plan is taken.
+    /// </remarks>
+    public double? PlanImprovementMargin { get; init; }
+
+    /// <summary>
     /// Admit only a host function registered with <c>Immutable()</c>, rather than any function
     /// whose volatility is <c>IMMUTABLE</c>, today's default included.
     /// </summary>

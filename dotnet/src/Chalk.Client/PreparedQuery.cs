@@ -576,30 +576,51 @@ public sealed class PreparedQuery
 
     /// <summary>
     /// This statement planned and compiled again, on the numbers the planner holds now (design 69
-    /// §4), ready to swap in; null when what came back is not the same statement: another logical
-    /// plan, or other parameters or context to bind. Every plan of a statement answers the same rows,
-    /// so the one that comes back differs only in what it costs.
+    /// §4), ready to swap in, and what the planning came to: no plan when the planner came to the one
+    /// the statement runs, held back one that saves less than its view's margin (design 70 §3), or
+    /// sent another statement — another logical plan, or other parameters or context to bind. Every
+    /// plan of a statement answers the same rows, so the one that comes back differs only in what it
+    /// costs.
     /// </summary>
-    internal async ValueTask<PlanState?> PlanAgainAsync(CancellationToken ct)
+    internal async ValueTask<(PlanState? Next, PlanAgainOutcome Outcome)> PlanAgainAsync(CancellationToken ct)
     {
         var current = Volatile.Read(ref _state);
+        var margin = Choice?.ImprovementMargin;
         var result = await _engine
-            .PlanAgainAsync(_prepared.Sql, _options, Context, _hints, current.Plan.PlanDigest, ct)
+            .PlanAgainAsync(
+                _prepared.Sql,
+                _options,
+                Context,
+                _hints,
+                current.Plan.PlanDigest,
+                pricePlans: margin is not null,
+                cheaperBy: margin,
+                ct)
             .ConfigureAwait(false);
-        if (result.Unchanged || result.Plan.PlanDigest == current.Plan.PlanDigest)
+        if (result.Unchanged || result.Held || result.Plan.PlanDigest == current.Plan.PlanDigest)
         {
-            // The planner came to the plan this statement runs, on the numbers it holds now: nothing
-            // to compile or swap in, so a view kept from the plan keeps on, and drift is judged from
-            // these numbers from now on.
+            // The planner came to the plan this statement runs, on the numbers it holds now, or to one
+            // that does not save the margin a view set on it (design 70 §3): nothing to compile or
+            // swap in, so a view kept from the plan keeps on, and drift is judged from these numbers
+            // from now on.
+            if (result.Held)
+            {
+                _engine.Log.LogDebug(
+                    "the planner held back a plan of {Digest:x16} that costs {Next} against {Held} for the plan it runs",
+                    LogicalDigest,
+                    result.PlanCost,
+                    result.KnownPlanCost);
+            }
+
             current.Rebase(PlannedRows(result.PlannedOn ?? _engine.Catalog, current.TablesRead));
-            return null;
+            return (null, result.Held ? PlanAgainOutcome.Held : PlanAgainOutcome.Unchanged);
         }
 
         if (result.LogicalDigest != LogicalDigest
             || !RequiredNames(result.Plan, Context).SequenceEqual(RequiredContext, StringComparer.Ordinal))
         {
             _notTheSame = true;
-            return null;
+            return (null, PlanAgainOutcome.NotTheSame);
         }
 
         // The extension's check, as at prepare; a refusal keeps the plan this statement has, and a
@@ -610,7 +631,7 @@ public sealed class PreparedQuery
         if (!compiled.ParameterTypes.SequenceEqual(current.Compiled.ParameterTypes))
         {
             _notTheSame = true;
-            return null;
+            return (null, PlanAgainOutcome.NotTheSame);
         }
 
         if (_decorateSchema is { } decorate)
@@ -622,14 +643,51 @@ public sealed class PreparedQuery
             }
         }
 
+        // Under a margin, what the planner priced the plan it sent at, beside the plan it replaces: or
+        // that it no longer kept that plan, so no margin applied.
+        if (margin is not null)
+        {
+            if (result.KnownPlanCost is { } held)
+            {
+                _engine.Log.LogDebug(
+                    "the planner sent a plan of {Digest:x16} that costs {Next} against {Held} for the plan it runs",
+                    LogicalDigest,
+                    result.PlanCost,
+                    held);
+            }
+            else
+            {
+                _engine.Log.LogDebug(
+                    "the planner sent a plan of {Digest:x16} that costs {Next}; it no longer keeps the plan it runs, so no margin applied",
+                    LogicalDigest,
+                    result.PlanCost);
+            }
+        }
+
         var names = result.RedactedSql is null ? null : _rewriter.SlotNames(_prepared);
-        return PlanState.Of(_engine, result, compiled, Key(_prepareShape), _prepared, names);
+        return (PlanState.Of(_engine, result, compiled, Key(_prepareShape), _prepared, names), PlanAgainOutcome.New);
+    }
+
+    /// <summary>What planning a statement again came to (design 69 §4, design 70 §3).</summary>
+    internal enum PlanAgainOutcome
+    {
+        /// <summary>Another plan, ready to swap in.</summary>
+        New,
+
+        /// <summary>The plan the statement runs: drift is judged from the new numbers from now on.</summary>
+        Unchanged,
+
+        /// <summary>Another plan that does not save its view's margin, which the planner held back.</summary>
+        Held,
+
+        /// <summary>Another statement, neither swapped in nor planned again.</summary>
+        NotTheSame,
     }
 
     /// <summary>
     /// What a standing view asks of the plans its statement takes after the view is made (design 70).
     /// Null — every statement but a view's whose host set it — requests a plan whenever the numbers
-    /// drift.
+    /// drift, takes every plan, and asks for no prices.
     /// </summary>
     internal PlanChoice? Choice { get; set; }
 
@@ -638,7 +696,27 @@ public sealed class PreparedQuery
     /// The host's veto on requesting a new plan for drift (§1): asked before one is requested, and
     /// false leaves the statement on its plan for now. Null requests one whenever the numbers drift.
     /// </param>
-    internal sealed record PlanChoice(Func<bool>? RefreshQueryPlan);
+    /// <param name="ImprovementMargin">
+    /// The fraction of the held plan's cost a new plan must save, both on the new plan's numbers (§3):
+    /// the planner holds back one that saves less, and sends none. Null takes every plan.
+    /// </param>
+    internal sealed record PlanChoice(Func<bool>? RefreshQueryPlan, double? ImprovementMargin);
+
+    /// <summary>
+    /// Asks the planner to keep the plan this statement runs, so that the next background run can price
+    /// it on newer numbers (design 70 §3): what a view with a margin does when it puts its say on the
+    /// statement. A plan that comes back other than the one held, on numbers that moved since it was
+    /// made, is not taken here: the next background run plans it again, as it would have, and since the
+    /// plan held was not kept, no margin holds that run's plan back.
+    /// </summary>
+    internal async ValueTask KeepPlanAsync(CancellationToken ct)
+    {
+        var current = Volatile.Read(ref _state);
+        await _engine
+            .PlanAgainAsync(
+                _prepared.Sql, _options, Context, _hints, current.Plan.PlanDigest, pricePlans: true, cheaperBy: null, ct)
+            .ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Whether a new plan may be requested for this statement now, for drift (design 70 §1): its view's

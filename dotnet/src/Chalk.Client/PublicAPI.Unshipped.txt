@@ -1628,3 +1628,34 @@ Chalk.Client.PreparedReplacement.Through.get -> int
 Chalk.Client.RefreshBuilder.Commit(Chalk.Client.PreparedReplacement! prepared) -> Chalk.Client.RefreshBuilder!
 override Chalk.Client.PreparedReplacement.ToString() -> string!
 Chalk.Client.RefreshBuilder.DeferPlanning() -> Chalk.Client.RefreshBuilder!
+Chalk.Client.PlanRequest.PricePlans.get -> bool
+Chalk.Client.PlanRequest.PricePlans.init -> void
+Chalk.Client.PlanResult.KnownPlanCost.get -> double?
+Chalk.Client.PlanResult.KnownPlanCost.init -> void
+Chalk.Client.PlanResult.PlanCost.get -> double?
+Chalk.Client.PlanResult.PlanCost.init -> void
+Chalk.Client.Rpc.PlanRequest.PricePlans.get -> bool
+Chalk.Client.Rpc.PlanRequest.PricePlans.set -> void
+Chalk.Client.Rpc.PlanResponse.ClearKnownPlanCost() -> void
+Chalk.Client.Rpc.PlanResponse.ClearPlanCost() -> void
+Chalk.Client.Rpc.PlanResponse.HasKnownPlanCost.get -> bool
+Chalk.Client.Rpc.PlanResponse.HasPlanCost.get -> bool
+Chalk.Client.Rpc.PlanResponse.KnownPlanCost.get -> double
+Chalk.Client.Rpc.PlanResponse.KnownPlanCost.set -> void
+Chalk.Client.Rpc.PlanResponse.PlanCost.get -> double
+Chalk.Client.Rpc.PlanResponse.PlanCost.set -> void
+const Chalk.Client.Rpc.PlanRequest.PricePlansFieldNumber = 18 -> int
+const Chalk.Client.Rpc.PlanResponse.KnownPlanCostFieldNumber = 12 -> int
+const Chalk.Client.Rpc.PlanResponse.PlanCostFieldNumber = 11 -> int
+Chalk.Client.PlanRequest.CheaperBy.get -> double?
+Chalk.Client.PlanRequest.CheaperBy.init -> void
+Chalk.Client.PlanResult.Held.get -> bool
+Chalk.Client.PlanResult.Held.init -> void
+Chalk.Client.Rpc.PlanRequest.CheaperBy.get -> double
+Chalk.Client.Rpc.PlanRequest.CheaperBy.set -> void
+Chalk.Client.Rpc.PlanRequest.ClearCheaperBy() -> void
+Chalk.Client.Rpc.PlanRequest.HasCheaperBy.get -> bool
+Chalk.Client.Rpc.PlanResponse.PlanHeld.get -> bool
+Chalk.Client.Rpc.PlanResponse.PlanHeld.set -> void
+const Chalk.Client.Rpc.PlanRequest.CheaperByFieldNumber = 19 -> int
+const Chalk.Client.Rpc.PlanResponse.PlanHeldFieldNumber = 13 -> int
