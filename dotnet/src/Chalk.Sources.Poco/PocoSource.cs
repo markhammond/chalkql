@@ -402,6 +402,23 @@ public sealed class PocoSource
     }
 
     /// <inheritdoc />
+    bool IDeferredStatisticsSource.StatisticsDue
+    {
+        get
+        {
+            foreach (var table in _tables)
+            {
+                if (table.StatisticsDue)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
     void IDeferredStatisticsSource.AdmitStatistics(IReadOnlyList<DeferredStatistics> statistics)
     {
         ArgumentNullException.ThrowIfNull(statistics);
@@ -661,6 +678,12 @@ internal abstract class PocoTableRuntime
     /// </summary>
     public abstract DeferredStatistics? ComputeDeferredStatistics();
 
+    /// <summary>
+    /// Whether <see cref="ComputeDeferredStatistics"/> would compute statistics now: a refresh deferred
+    /// them and the table's rows have since moved past its growth policy (D351).
+    /// </summary>
+    public abstract bool StatisticsDue { get; }
+
     /// <summary>Takes statistics computed in the background, when this table still awaits them.</summary>
     public abstract void AdmitStatistics(DeferredStatistics statistics);
 
@@ -816,7 +839,8 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             return;
         }
 
-        var next = Carry(_factory.From(collection), StatisticsRefresh.Now);
+        var reread = _factory.From(collection);
+        var next = Carry(reread, StatisticsRefresh.Now, Replacing(reread));
         var frontier = _changes is { HasTime: true } timed ? Latest(timed, Values(next)) : null;
         Publish(next, rewrites: true);
         if (_changes is not null)
@@ -1126,13 +1150,15 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
                 frontier = Latest(timed, given);
             }
 
-            next = Carry(_factory.From(given), rows.Statistics);
+            var replacement = _factory.From(given);
+            next = Carry(replacement, rows.Statistics, Replacing(replacement));
             replaces = true;
         }
         else if (rows is { Kind: SourceRefreshKind.Commit })
         {
             committing = (PocoPreparedReplacement<T>)rows.Rows;
-            next = Carry(Rebase(sourceId, committing), rows.Statistics);
+            var rebased = Rebase(sourceId, committing);
+            next = Carry(rebased, rows.Statistics, Replacing(rebased));
             replaces = true;
 
             // The rows since the cut were admitted against the frontier as it stands, so a commit
@@ -1150,20 +1176,17 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
                 (given, frontier) = Admit(timed, given, before);
             }
 
-            next = Carry(_factory.Appended(Current, given), rows.Statistics);
+            next = Carry(_factory.Appended(Current, given), rows.Statistics, given.Count);
         }
         else if (upsert is not null || delete is not null)
         {
-            var changed = ByKey(
-                sourceId,
-                _changes!,
-                Current.Rows!,
-                (IReadOnlyList<T>?)upsert?.Rows ?? [],
-                (IReadOnlyList<T>?)delete?.Rows ?? []);
+            var upserts = (IReadOnlyList<T>?)upsert?.Rows ?? [];
+            var deletes = (IReadOnlyList<T>?)delete?.Rows ?? [];
+            var changed = ByKey(sourceId, _changes!, Current.Rows!, upserts, deletes);
             var statistics = upsert?.Statistics == StatisticsRefresh.Now || delete?.Statistics == StatisticsRefresh.Now
                 ? StatisticsRefresh.Now
                 : StatisticsRefresh.Defer;
-            next = Carry(_factory.Owned(changed), statistics);
+            next = Carry(_factory.Owned(changed), statistics, upserts.Count + deletes.Count);
             replaces = true;
         }
 
@@ -1413,16 +1436,19 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
 
     /// <summary>
     /// Hands the next snapshot whatever statistics the current one has in force, and says whether
-    /// this operation deferred them (D271 (g), §7). A snapshot that carries nothing computes its own,
-    /// which is what a table with no freshness policy and no deferred operation behind it always
-    /// does.
+    /// this operation deferred them (D271 (g), §7), and counts the <paramref name="changed"/> rows
+    /// the operation moved onto the table's changes (D351). A snapshot that carries nothing computes
+    /// its own, which is what a table with no freshness policy and no deferred operation behind it
+    /// always does.
     /// </summary>
-    private PocoTableSnapshot<T> Carry(PocoTableSnapshot<T> next, StatisticsRefresh statistics)
+    private PocoTableSnapshot<T> Carry(PocoTableSnapshot<T> next, StatisticsRefresh statistics, long changed)
     {
-        var (carried, computedOver, computedOn, wasDeferred) = Current.Carryable;
+        var current = Current;
+        next.Changes = current.Changes + changed;
+        var (carried, computedOver, computedOn, computedChanges, wasDeferred) = current.Carryable;
         if (statistics == StatisticsRefresh.Defer)
         {
-            next.Carry(carried, computedOver, computedOn, deferred: true);
+            next.Carry(carried, computedOver, computedOn, computedChanges, deferred: true);
             return next;
         }
 
@@ -1435,9 +1461,15 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             return next;
         }
 
-        next.Carry(carried, computedOver, computedOn, deferred: false);
+        next.Carry(carried, computedOver, computedOn, computedChanges, deferred: false);
         return next;
     }
+
+    /// <summary>
+    /// The rows a replacement moves (D351): every row the table had and every row
+    /// <paramref name="next"/> brings, since none of either is known to be the other.
+    /// </summary>
+    private long Replacing(PocoTableSnapshot<T> next) => (long)Current.RowCount + next.RowCount;
 
     /// <summary>
     /// What a transaction built for this table, waiting for the engine to say when: a snapshot, a
@@ -1695,7 +1727,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         var snapshot = Acquire();
         try
         {
-            if (!snapshot.AwaitsStatistics)
+            if (!snapshot.StatisticsDue(_statisticsPlan))
             {
                 return null;
             }
@@ -1705,7 +1737,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             {
                 Table = Name,
                 Descriptor = Describe(snapshot, statistics),
-                Statistics = new ComputedStatistics(snapshot.Sequence, statistics),
+                Statistics = new ComputedStatistics(snapshot.Sequence, snapshot.Changes, statistics),
                 RowCount = snapshot.RowCount,
             };
         }
@@ -1716,16 +1748,22 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     }
 
     /// <inheritdoc />
+    public override bool StatisticsDue => Current.StatisticsDue(_statisticsPlan);
+
+    /// <inheritdoc />
     public override void AdmitStatistics(DeferredStatistics statistics)
     {
         if (statistics.Statistics is ComputedStatistics computed)
         {
-            Current.Admit(computed.Columns, statistics.RowCount, computed.Snapshot);
+            Current.Admit(computed.Columns, statistics.RowCount, computed.Snapshot, computed.Changes);
         }
     }
 
-    /// <summary>Statistics a background run computed, and the snapshot they were computed over.</summary>
-    private sealed record ComputedStatistics(long Snapshot, ColumnStatistics[] Columns);
+    /// <summary>
+    /// Statistics a background run computed, and the snapshot they were computed over with its
+    /// <see cref="PocoTableSnapshot{T}.Changes"/>.
+    /// </summary>
+    private sealed record ComputedStatistics(long Snapshot, long Changes, ColumnStatistics[] Columns);
 
     public override IEnumerable<(string Index, long BytesPerRow)> IndexSizes() =>
         Current.Indexes.Select(i => (i.Descriptor.Name, i.BytesPerRow));

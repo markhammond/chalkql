@@ -46,7 +46,7 @@ public sealed class PocoTableBuilder<T>
     private bool _verify = true;
     private PocoChangeDeclaration<T>? _change;
     private StatisticsLevel _statisticsLevel = StatisticsLevel.Basic;
-    private double _refreshWhenGrownBy;
+    private double _refreshWhenGrownBy = PocoStatisticsPlan.DefaultRefreshWhenGrownBy;
     private int _histogramBuckets = 64;
     private Func<TableStatistics>? _statistics;
     
@@ -756,14 +756,16 @@ public sealed class PocoTableBuilder<T>
     /// How much this table tells the planner about its values (D36). <see cref="StatisticsLevel.Basic"/>
     /// is the default and is computed for free in the pass <c>Build()</c> already makes;
     /// <see cref="StatisticsLevel.Histogram"/> adds equi-height histograms and a most-common-value
-    /// list per comparable column; <see cref="StatisticsLevel.Unknown"/> turns it all off.
+    /// list per comparable column; <see cref="StatisticsLevel.Unknown"/> turns it all off. The
+    /// freshness policy is left as it is: a tenth unless one was given (D351), and
+    /// <see cref="Statistics(StatisticsLevel, double)"/> with zero recomputes at every refresh.
     /// </summary>
     public PocoTableBuilder<T> Statistics(StatisticsLevel level) => Statistics(level, buckets: 64);
 
     /// <summary>
     /// The same, with the freshness policy this table's column statistics follow (D271 (g),
-    /// <c>docs/design/44-catalog-registration.md</c> §7): recompute them only once the table has
-    /// grown by <paramref name="refreshWhenGrownBy"/> of its size when they were last taken.
+    /// <c>docs/design/44-catalog-registration.md</c> §7): recompute them only once rows amounting to
+    /// <paramref name="refreshWhenGrownBy"/> of its size when they were last taken have moved since.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -772,14 +774,18 @@ public sealed class PocoTableBuilder<T>
     /// over the whole table on every batch, which is the cost this turns down.
     /// </para>
     /// <para>
-    /// The row count is untouched by this and stays exact and O(1), so a plan's cardinality is always
-    /// right; what ages is the distribution of values. Zero — the default — recomputes every time,
-    /// which is what every table did before D271.
+    /// The row count is untouched by this and stays exact and O(1) in the catalog; what ages is the
+    /// distribution of values. A tenth is the default (D351): a table appended to a little at a time
+    /// computes its statistics again each time it is a tenth larger, rather than at every refresh. A
+    /// row upserted or deleted counts as one appended does, and a replacement counts every row it
+    /// replaced and every row it brought, so a table replaced whole is described by its new rows.
+    /// Zero recomputes every time, which is what every table did before D271.
     /// </para>
     /// </remarks>
     /// <param name="refreshWhenGrownBy">
-    /// A fraction of the row count the statistics were last computed over: <c>0.1</c> is "when the
-    /// table is a tenth larger". Zero recomputes always; the value must not be negative.
+    /// A fraction of the row count the statistics were last computed over: <c>0.1</c> is "when a
+    /// tenth of its rows have moved", for a table only appended to "when it is a tenth larger". Zero
+    /// recomputes always; the value must not be negative.
     /// </param>
     /// <param name="level"></param>
     public PocoTableBuilder<T> Statistics(StatisticsLevel level, double refreshWhenGrownBy) =>
@@ -790,7 +796,7 @@ public sealed class PocoTableBuilder<T>
     /// </summary>
     /// <param name="buckets">Histogram buckets per column. Ignored below <c>Histogram</c>.</param>
     public PocoTableBuilder<T> Statistics(StatisticsLevel level, int buckets) =>
-        Statistics(level, buckets, refreshWhenGrownBy: 0);
+        Statistics(level, buckets, _refreshWhenGrownBy);
 
     /// <inheritdoc cref="Statistics(StatisticsLevel, double)"/>
     /// <param name="buckets">Histogram buckets per column. Ignored below <c>Histogram</c>.</param>

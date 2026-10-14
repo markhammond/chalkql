@@ -46,6 +46,9 @@ internal sealed class PocoTableSnapshot<T>
     /// <summary>The <see cref="Sequence"/> of the snapshot the carried statistics were computed over.</summary>
     private long _carriedOn;
 
+    /// <summary>The <see cref="Changes"/> of the snapshot the carried statistics were computed over.</summary>
+    private long _carriedChanges;
+
     /// <summary>
     /// The operation that built this snapshot said <see cref="StatisticsRefresh.Defer"/>, so the
     /// carried statistics stand until the next plain refresh recomputes them — whatever the table's
@@ -115,6 +118,16 @@ internal sealed class PocoTableSnapshot<T>
     public long Rewrites { get; set; }
 
     /// <summary>
+    /// How many rows the table had changed when this snapshot was published, counted from its first:
+    /// each row appended, upserted or deleted, and for a replacement — a <c>Replace</c>, a prepared
+    /// replacement or a re-read of the registration — every row it had and every row it took. The
+    /// difference between two snapshots' counts is how far the rows moved between them, which is what
+    /// a growth policy judges (D351). Set by the table as it publishes, before any reader can see the
+    /// snapshot.
+    /// </summary>
+    public long Changes { get; set; }
+
+    /// <summary>
     /// The collection the host handed over, which is what a release reports. Null for a snapshot an
     /// append built over arrays of Chalk's own: nobody outside gave those, so nobody is waiting to
     /// have them back.
@@ -166,34 +179,37 @@ internal sealed class PocoTableSnapshot<T>
     public void Retire() => Release();
 
     /// <summary>
-    /// Takes the statistics the previous snapshot had in force, the row count they describe and the
-    /// snapshot they were computed over (D271 (g)). Called before the snapshot is published, so
-    /// nothing can read half of it.
+    /// Takes the statistics the previous snapshot had in force, the row count they describe, and the
+    /// snapshot they were computed over with its <see cref="Changes"/> (D271 (g), D351). Called before
+    /// the snapshot is published, so nothing can read half of it.
     /// </summary>
-    public void Carry(ColumnStatistics[]? statistics, int computedOver, long computedOn, bool deferred)
+    public void Carry(
+        ColumnStatistics[]? statistics, int computedOver, long computedOn, long computedChanges, bool deferred)
     {
         _carried = statistics;
         _carriedAt = computedOver;
         _carriedOn = computedOn;
+        _carriedChanges = computedChanges;
         _deferred = deferred;
     }
 
     /// <summary>
     /// What the next snapshot may carry: the statistics in force here, the row count they were
-    /// computed over and the snapshot they were computed on — this one when it computed them, and the
-    /// inherited ones when it carried them. Null when nothing has been computed yet, in which case the
-    /// next snapshot computes rather than carrying nothing forward. Read under the gate a describe
-    /// takes, since computing statistics here replaces what this snapshot hands on.
+    /// computed over, and the snapshot they were computed on with its <see cref="Changes"/> — this
+    /// one when it computed them, and the inherited ones when it carried them. Null when nothing has
+    /// been computed yet, in which case the next snapshot computes rather than carrying nothing
+    /// forward. Read under the gate a describe takes, since computing statistics here replaces what
+    /// this snapshot hands on.
     /// </summary>
-    public (ColumnStatistics[]? Statistics, int ComputedOver, long ComputedOn, bool Deferred) Carryable
+    public (ColumnStatistics[]? Statistics, int ComputedOver, long ComputedOn, long ComputedChanges, bool Deferred) Carryable
     {
         get
         {
             lock (_statisticsGate)
             {
                 return _carried is not null
-                    ? (_carried, _carriedAt, _carriedOn, _deferred)
-                    : (_statistics, RowCount, Sequence, _deferred);
+                    ? (_carried, _carriedAt, _carriedOn, _carriedChanges, _deferred)
+                    : (_statistics, RowCount, Sequence, Changes, _deferred);
             }
         }
     }
@@ -224,17 +240,22 @@ internal sealed class PocoTableSnapshot<T>
     }
 
     /// <summary>
-    /// Whether this snapshot's statistics were deferred and nothing has computed statistics over its
-    /// rows since (design 69 §4): what a background run computes statistics for.
+    /// Whether a background run has statistics to compute here (design 69 §4, D351): this snapshot's
+    /// were deferred, nothing has computed any over its rows since, and the table's growth policy no
+    /// longer covers the ones it carries, because its rows have moved by the policy's fraction since
+    /// they were computed. A table still within its policy is left as a refresh that did not defer
+    /// would leave it, and under a policy of zero every deferral is due.
     /// </summary>
-    public bool AwaitsStatistics
+    public bool StatisticsDue(PocoStatisticsPlan plan)
     {
-        get
+        lock (_statisticsGate)
         {
-            lock (_statisticsGate)
+            if (!_deferred || _settled || _carried is null)
             {
-                return _deferred && !_settled && _carried is not null;
+                return false;
             }
+
+            return plan.Supplier is not null || plan.RefreshWhenGrownBy <= 0 || Moved(plan);
         }
     }
 
@@ -252,11 +273,12 @@ internal sealed class PocoTableSnapshot<T>
     /// <summary>
     /// Takes statistics computed in the background as this snapshot's (design 69 §4): over these very
     /// rows, or over the earlier snapshot <paramref name="computedOn"/> names, of
-    /// <paramref name="computedOver"/> rows. They stand as deferred ones do, so the next snapshot
-    /// carries them on, and a snapshot whose own rows they were computed over awaits nothing more.
-    /// Statistics computed over a snapshot older than the ones this one carries are not taken.
+    /// <paramref name="computedOver"/> rows and <paramref name="computedChanges"/> changes. They stand
+    /// as deferred ones do, so the next snapshot carries them on, and a snapshot whose own rows they
+    /// were computed over awaits nothing more. Statistics computed over a snapshot older than the ones
+    /// this one carries are not taken.
     /// </summary>
-    public void Admit(ColumnStatistics[] statistics, int computedOver, long computedOn)
+    public void Admit(ColumnStatistics[] statistics, int computedOver, long computedOn, long computedChanges)
     {
         lock (_statisticsGate)
         {
@@ -269,6 +291,7 @@ internal sealed class PocoTableSnapshot<T>
             _carried = statistics;
             _carriedAt = computedOver;
             _carriedOn = computedOn;
+            _carriedChanges = computedChanges;
             _settled = computedOn == Sequence;
             Volatile.Write(ref _statistics, null);
         }
@@ -323,8 +346,8 @@ internal sealed class PocoTableSnapshot<T>
 
     /// <summary>
     /// Whether the carried statistics still stand: always under a deferral, and under a growth
-    /// policy until the table has grown by the stated fraction of what they were computed over. A
-    /// policy of zero — the default — carries nothing and recomputes every time.
+    /// policy until the rows have moved by the stated fraction of what they were computed over. A
+    /// policy of zero carries nothing and recomputes every time.
     /// </summary>
     private bool Carries(PocoStatisticsPlan plan)
     {
@@ -338,9 +361,16 @@ internal sealed class PocoTableSnapshot<T>
             return false;
         }
 
-        // Growth against the count the statistics describe. A table that has shrunk has not grown by
-        // the fraction, so the carried statistics stand — which is the conservative reading and the
-        // one that keeps an append-then-replace cycle from recomputing on the way down.
-        return RowCount < _carriedAt + (_carriedAt * plan.RefreshWhenGrownBy);
+        return !Moved(plan);
     }
+
+    /// <summary>
+    /// Whether the rows have moved by the policy's fraction of the rows the carried statistics were
+    /// computed over (D351): the rows changed since, counted by <see cref="Changes"/>. For a table
+    /// only appended to that is its growth, which is what the policy was first written for; a row
+    /// upserted or deleted counts as one appended does, and a replacement counts every row it
+    /// replaced and every row it brought, so statistics never stand over rows that are gone.
+    /// </summary>
+    private bool Moved(PocoStatisticsPlan plan) =>
+        Changes - _carriedChanges >= _carriedAt * plan.RefreshWhenGrownBy;
 }

@@ -34,11 +34,18 @@ internal sealed class PocoStatisticsPlan
     public Func<TableStatistics>? Supplier { get; init; }
 
     /// <summary>
-    /// How much the table must have grown since its column statistics were last computed before they
-    /// are computed again (D271 (g)): a fraction of the row count they were taken over. Zero — the
-    /// default — recomputes every time, which is what every table did before D271.
+    /// How far the table's rows must have moved since its column statistics were last computed
+    /// before they are computed again (D271 (g), D351): a fraction of the row count they were taken
+    /// over, counting each row appended, upserted or deleted, and for a replacement every row it
+    /// replaced and brought. Zero recomputes every time, which is what every table did before D271.
     /// </summary>
     public double RefreshWhenGrownBy { get; init; }
+
+    /// <summary>
+    /// The policy a table that names none follows (D351): computed again once a tenth of its rows
+    /// have moved, the drift the engine also lets the planner's row counts fall behind by.
+    /// </summary>
+    public const double DefaultRefreshWhenGrownBy = 0.1;
 }
 
 /// <summary>
