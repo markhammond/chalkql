@@ -525,18 +525,81 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
             return;
         }
 
-        var lower =
-            new BoundView(range.Lower);
+        Window(
+            new BoundView(range.Lower),
+            range.LowerInclusive,
+            new BoundView(range.Upper),
+            range.UpperInclusive,
+            bounded,
+            out from,
+            out to);
+    }
 
-        var upper =
-            new BoundView(range.Upper);
+    /// <summary>
+    /// Whether an as-of seek's bounds — the leading key columns' then the time's — can be compared with
+    /// this index's keys straight from their columns, which every key with a typed reader can.
+    /// </summary>
+    internal bool CanSeek(
+        SeekBound[] bounds)
+    {
+        if (bounds.Length == 0 || bounds.Length > _searchKeys.Length)
+            return false;
 
-        var lowerInclusive =
-            range.LowerInclusive;
+        for (var k = 0; k < bounds.Length; k++)
+        {
+            if (!_searchKeys[k].CanSeek(in bounds[k]))
+                return false;
+        }
 
-        var upperInclusive =
-            range.UpperInclusive;
+        return true;
+    }
 
+    /// <summary>
+    /// The one row an as-of seek finds for the left row <paramref name="row"/>, or -1: the range its keys
+    /// and time bound, as an <see cref="IndexKeyRange"/> of them would, read from its closest end.
+    /// </summary>
+    internal int Seek(
+        SeekBound[] bounds,
+        int row,
+        bool backwards,
+        bool inclusive)
+    {
+        var keys =
+            new BoundView(bounds, row, bounds.Length - 1);
+
+        var withTime =
+            new BoundView(bounds, row, bounds.Length);
+
+        // Backwards: from the keys, inclusive, to the keys and time; forwards: from the keys and time to
+        // the keys, inclusive. The time's own end is inclusive as the match is.
+        Window(
+            backwards ? keys : withTime,
+            backwards || inclusive,
+            backwards ? withTime : keys,
+            !backwards || inclusive,
+            bounds.Length,
+            out var from,
+            out var to);
+
+        if (from >= to)
+            return -1;
+
+        return GetPosition(
+            backwards
+                ? to - 1
+                : from);
+    }
+
+    /// <summary>The ordinals between two bounds over the first <paramref name="bounded"/> key columns.</summary>
+    private void Window(
+        BoundView lower,
+        bool lowerInclusive,
+        BoundView upper,
+        bool upperInclusive,
+        int bounded,
+        out int from,
+        out int to)
+    {
         var direction =
             _directions[bounded - 1];
 
@@ -545,12 +608,14 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                 SortDirection.AscNullsLast or
                 SortDirection.DescNullsLast;
 
+        var prefix =
+            (lower.Count >= upper.Count ? lower : upper)
+                .Prefix(bounded - 1);
+
         if (lower.Count < bounded)
         {
             lower =
-                Prefix(
-                    range,
-                    bounded - 1);
+                prefix;
 
             if (nullsLast)
             {
@@ -568,9 +633,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         if (upper.Count < bounded)
         {
             upper =
-                Prefix(
-                    range,
-                    bounded - 1);
+                prefix;
 
             if (nullsLast)
             {
@@ -600,24 +663,6 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
             from = 0;
             to = 0;
         }
-    }
-
-    private static BoundView Prefix(
-        IndexKeyRange range,
-        int count)
-    {
-        if (count == 0)
-            return default;
-
-        IReadOnlyList<object?> source =
-            range.Lower.Count >= count
-                ? range.Lower
-                : range.Upper;
-
-        return new BoundView(
-            source,
-            count,
-            appendNull: false);
     }
 
     private int Search(
@@ -666,9 +711,14 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         for (var k = 0; k < count; k++)
         {
             var comparison =
-                _searchKeys[k].Compare(
-                    row,
-                    bound[k]);
+                bound.IsTypedAt(k)
+                    ? _searchKeys[k].Compare(
+                        row,
+                        in bound.Seek(k),
+                        bound.Row)
+                    : _searchKeys[k].Compare(
+                        row,
+                        bound[k]);
 
             if (comparison != 0)
                 return comparison;
@@ -2866,6 +2916,22 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         int Compare(
             T row,
             object? bound);
+
+        /// <summary>Whether a seek's bound is compared without boxing: a fixed value always is, as it was boxed once.</summary>
+        bool CanSeek(in SeekBound bound) =>
+            bound.IsFixed;
+
+        /// <summary>The row's key compared with a seek's bound for the left row <paramref name="laneRow"/>.</summary>
+        int Compare(
+            T row,
+            in SeekBound bound,
+            int laneRow) =>
+            bound.IsFixed
+                ? Compare(
+                    row,
+                    bound.Value)
+                : throw new InvalidOperationException(
+                    "a key with no typed reader was asked to compare a column's value.");
     }
 
     private static class SearchKeyFactory<
@@ -3000,6 +3066,54 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                 ? -comparison
                 : comparison;
         }
+
+        public bool CanSeek(in SeekBound bound) =>
+            bound.IsFixed ||
+            (typed is not null &&
+             LaneHolds<TValue>(bound.Type));
+
+        public int Compare(
+            T row,
+            in SeekBound bound,
+            int laneRow)
+        {
+            if (bound.IsFixed)
+            {
+                return Compare(
+                    row,
+                    bound.Value);
+            }
+
+            var given =
+                bound.Column.IsValid(laneRow);
+
+            if (!typed!(row, out var value))
+            {
+                if (!given)
+                    return 0;
+
+                return _nullsFirst
+                    ? -1
+                    : 1;
+            }
+
+            if (!given)
+            {
+                return _nullsFirst
+                    ? 1
+                    : -1;
+            }
+
+            var comparison =
+                CompareLane<TValue, TOrder>(
+                    value,
+                    bound.Column,
+                    laneRow);
+
+            return _descending
+                ? -comparison
+                : comparison;
+        }
     }
 
     private sealed class AllNullSearchKey(
@@ -3034,6 +3148,132 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                 ? -1
                 : 1;
         }
+    }
+
+    /// <summary>
+    /// Whether a column of <paramref name="type"/> holds <typeparamref name="TValue"/> as its lanes, as a
+    /// range bound read from it would: the types a seek compares straight from the column.
+    /// </summary>
+    private static bool LaneHolds<TValue>(
+        ChalkType type) =>
+        type.Kind switch
+        {
+            Chalk.Ir.TypeKind.I64 or Chalk.Ir.TypeKind.Time or Chalk.Ir.TypeKind.Timestamp
+                or Chalk.Ir.TypeKind.TimestampTz or Chalk.Ir.TypeKind.IntervalDay =>
+                typeof(TValue) == typeof(long),
+            Chalk.Ir.TypeKind.I32 or Chalk.Ir.TypeKind.Date or Chalk.Ir.TypeKind.IntervalYear =>
+                typeof(TValue) == typeof(int),
+            Chalk.Ir.TypeKind.I16 => typeof(TValue) == typeof(short),
+            Chalk.Ir.TypeKind.I8 => typeof(TValue) == typeof(sbyte),
+            Chalk.Ir.TypeKind.Fp64 => typeof(TValue) == typeof(double),
+            Chalk.Ir.TypeKind.Fp32 => typeof(TValue) == typeof(float),
+            Chalk.Ir.TypeKind.String => typeof(TValue) == typeof(string),
+            _ => false,
+        };
+
+    /// <summary>
+    /// A key compared with a column's lane as <see cref="CompareBound{TValue,TOrder}"/> compares it with
+    /// the value read from the lane, for the types <see cref="LaneHolds{TValue}"/> accepts.
+    /// </summary>
+    private static int CompareLane<
+        TValue,
+        TOrder>(
+        TValue left,
+        in ColumnView lane,
+        int row)
+        where TOrder :
+        struct,
+        IValueOrder<TValue>
+    {
+        if (typeof(TValue) == typeof(string))
+        {
+            return CompareOrdinal(
+                (string)(object)left!,
+                lane.VarValue(row));
+        }
+
+        if (typeof(TValue) == typeof(double))
+        {
+            return CompareReal(
+                (double)(object)left!,
+                lane.Lanes<double>()[row]);
+        }
+
+        if (typeof(TValue) == typeof(float))
+        {
+            return CompareReal(
+                (float)(object)left!,
+                lane.Lanes<float>()[row]);
+        }
+
+        if (typeof(TValue) == typeof(long))
+        {
+            var other = lane.Lanes<long>()[row];
+            return TOrder.Compare(left, Unsafe.As<long, TValue>(ref other));
+        }
+
+        if (typeof(TValue) == typeof(int))
+        {
+            var other = lane.Lanes<int>()[row];
+            return TOrder.Compare(left, Unsafe.As<int, TValue>(ref other));
+        }
+
+        if (typeof(TValue) == typeof(short))
+        {
+            var other = lane.Lanes<short>()[row];
+            return TOrder.Compare(left, Unsafe.As<short, TValue>(ref other));
+        }
+
+        if (typeof(TValue) == typeof(sbyte))
+        {
+            var other = lane.Lanes<sbyte>()[row];
+            return TOrder.Compare(left, Unsafe.As<sbyte, TValue>(ref other));
+        }
+
+        throw new InvalidOperationException(
+            $"a {typeof(TValue).Name} key was asked to compare a column's lane.");
+    }
+
+    /// <summary>
+    /// <see cref="string.CompareOrdinal(string, string)"/> of a string and the text whose UTF-8 bytes are
+    /// given, by sign, without making a string of them: the bytes are read as UTF-16 code units.
+    /// </summary>
+    private static int CompareOrdinal(
+        string text,
+        ReadOnlySpan<byte> utf8)
+    {
+        Span<char> units = stackalloc char[2];
+        var at = 0;
+        while (!utf8.IsEmpty)
+        {
+            System.Text.Rune.DecodeFromUtf8(
+                utf8,
+                out var rune,
+                out var consumed);
+
+            var count =
+                rune.EncodeToUtf16(units);
+
+            for (var u = 0; u < count; u++)
+            {
+                if (at == text.Length)
+                    return -1;
+
+                var difference =
+                    text[at] - units[u];
+
+                if (difference != 0)
+                    return difference;
+
+                at++;
+            }
+
+            utf8 = utf8[consumed..];
+        }
+
+        return at == text.Length
+            ? 0
+            : 1;
     }
 
     private static int CompareBound<
@@ -3365,9 +3605,14 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
     // Allocation-free range-bound view
     // ------------------------------------------------------------------
 
+    /// <summary>
+    /// A range's bound over the first <see cref="Count"/> key columns: values a range holds, or a seek's
+    /// bounds read from their columns at one left row; with a NULL after them, where a prefix needs one.
+    /// </summary>
     private readonly struct BoundView
     {
         private readonly IReadOnlyList<object?>? _source;
+        private readonly SeekBound[]? _seek;
         private readonly int _sourceCount;
         private readonly bool _appendNull;
 
@@ -3375,17 +3620,36 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
             IReadOnlyList<object?> source)
             : this(
                 source,
+                null,
+                0,
                 source.Count,
                 appendNull: false)
         {
         }
 
         public BoundView(
+            SeekBound[] seek,
+            int row,
+            int count)
+            : this(
+                null,
+                seek,
+                row,
+                count,
+                appendNull: false)
+        {
+        }
+
+        private BoundView(
             IReadOnlyList<object?>? source,
+            SeekBound[]? seek,
+            int row,
             int sourceCount,
             bool appendNull)
         {
             _source = source;
+            _seek = seek;
+            Row = row;
             _sourceCount = sourceCount;
             _appendNull = appendNull;
         }
@@ -3394,20 +3658,45 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
             _sourceCount +
             (_appendNull ? 1 : 0);
 
+        /// <summary>The left row a seek's bounds are read at.</summary>
+        public int Row { get; }
+
         public object? this[int index]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get =>
-                index < _sourceCount
-                    ? _source![index]
+                index < _sourceCount && _source is not null
+                    ? _source[index]
                     : null;
         }
+
+        /// <summary>Whether key column <paramref name="index"/> is bounded by a seek's bound rather than a value.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool IsTypedAt(int index) =>
+            _seek is not null &&
+            index < _sourceCount;
+
+        public ref readonly SeekBound Seek(int index) =>
+            ref _seek![index];
 
         public BoundView AppendNull() =>
             new(
                 _source,
+                _seek,
+                Row,
                 _sourceCount,
                 appendNull: true);
+
+        /// <summary>The bound over its first <paramref name="count"/> columns only.</summary>
+        public BoundView Prefix(int count) =>
+            count == 0
+                ? default
+                : new(
+                    _source,
+                    _seek,
+                    Row,
+                    count,
+                    appendNull: false);
     }
 
     private static string Render(

@@ -18,7 +18,7 @@ namespace Chalk.Sources.Poco;
 /// </summary>
 public sealed class PocoSource
     : ISourceRuntime, IColumnarBatchSource, IRefreshableSource, IPinnableSource, IPreparableSource,
-        IDeferredStatisticsSource, ITrackedSource
+        IDeferredStatisticsSource, ITrackedSource, IColumnarSeekSource
 {
     private readonly PocoTableRuntime[] _tables;
     private readonly string _zone;
@@ -541,6 +541,15 @@ public sealed class PocoSource
         return Require(request.Table).ColumnarLookup(SourceId, request, context);
     }
 
+    /// <inheritdoc />
+    IColumnarScan? IColumnarSeekSource.ColumnarSeek(ColumnarSeekRequest request, ScanContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+        RequireBatchSize(request.BatchSize);
+        return Require(request.Table).ColumnarSeek(SourceId, request, context);
+    }
+
     private PocoTableRuntime Require(string name) =>
         _tables.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))
         ?? throw new SourceContractException(
@@ -673,6 +682,10 @@ internal abstract class PocoTableRuntime
     /// <summary>The index lookup as a slot-filling one.</summary>
     public abstract IColumnarScan ColumnarLookup(
         string sourceId, IndexLookupRequest request, ScanContext context);
+
+    /// <summary>An as-of seek's lookups read from the left rows' columns, or null when this index cannot answer them so.</summary>
+    public abstract IColumnarScan? ColumnarSeek(
+        string sourceId, ColumnarSeekRequest request, ScanContext context);
 
     /// <summary>The foreign keys as declared, before the parent's columns have been resolved (F14).</summary>
     public abstract IReadOnlyList<PocoForeignKey> DeclaredForeignKeys { get; }
@@ -1746,6 +1759,44 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             var rows => ((PocoIndexRowScan<T>)rows).Columnar(),
         };
 
+    /// <summary>
+    /// An as-of seek over a permutation index this table built, its bounds compared straight from the
+    /// left rows' columns: a position a seek, each once, and nothing allocated for any of them. Any other
+    /// index, or a bound of a type its key reads boxed, is asked as ranges instead.
+    /// </summary>
+    public override IColumnarScan? ColumnarSeek(
+        string sourceId, ColumnarSeekRequest request, ScanContext context)
+    {
+        CheckProjection(sourceId, request.Projection, request.OutputSchema);
+        var snapshot = Serving(sourceId, context);
+        var indexes = snapshot.Indexes;
+        for (var ordinal = 0; ordinal < indexes.Length; ordinal++)
+        {
+            if (!string.Equals(indexes[ordinal].Descriptor.Name, request.Index, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (indexes[ordinal] is not PermutationIndex<T> index || !snapshot.RandomAccess || !index.CanSeek(request.Bounds))
+            {
+                return null;
+            }
+
+            var shape = new IndexLookupRequest
+            {
+                Table = request.Table,
+                Index = request.Index,
+                Ranges = [],
+                Projection = request.Projection,
+                OutputSchema = request.OutputSchema,
+                BatchSize = request.BatchSize,
+            };
+            return new PocoIndexScan<T>(this, snapshot, ordinal, shape, context, CancellationToken.None, request).Columnar();
+        }
+
+        return null;
+    }
+
     public override IAsyncEnumerable<RecordBatch> Lookup(
         string sourceId, IndexLookupRequest request, ScanContext context, CancellationToken ct) =>
         LookupScan(sourceId, request, context, ct);
@@ -2438,14 +2489,17 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
     private readonly IndexLookupRequest _request;
     private readonly ScanContext _context;
     private readonly CancellationToken _ct;
+    private readonly ColumnarSeekRequest? _seek;
 
+    /// <param name="seek">An as-of seek's lookups, read by position in place of the ranges, or null.</param>
     public PocoIndexScan(
         PocoTableRuntime<T> table,
         PocoTableSnapshot<T> snapshot,
         int ordinal,
         IndexLookupRequest request,
         ScanContext context,
-        CancellationToken ct)
+        CancellationToken ct,
+        ColumnarSeekRequest? seek = null)
     {
         _table = table;
         _snapshot = snapshot;
@@ -2453,14 +2507,15 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
         _request = request;
         _context = context;
         _ct = ct;
+        _seek = seek;
     }
 
     public IAsyncEnumerator<RecordBatch> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
-        new Enumerator(_table, _snapshot, _ordinal, _request, _context, _ct, cancellationToken);
+        new Enumerator(_table, _snapshot, _ordinal, _request, _seek, _context, _ct, cancellationToken);
 
     /// <summary>The same lookup as an <see cref="IColumnarScan"/>, which fills the caller's slot (§1).</summary>
     public IColumnarScan Columnar() =>
-        new Enumerator(_table, _snapshot, _ordinal, _request, _context, _ct, CancellationToken.None);
+        new Enumerator(_table, _snapshot, _ordinal, _request, _seek, _context, _ct, CancellationToken.None);
 
     private sealed class Enumerator : IAsyncEnumerator<RecordBatch>, IColumnarScan
     {
@@ -2484,6 +2539,7 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
             PocoTableSnapshot<T> captured,
             int ordinal,
             IndexLookupRequest request,
+            ColumnarSeekRequest? seek,
             ScanContext context,
             CancellationToken scanToken,
             CancellationToken enumerationToken)
@@ -2496,13 +2552,15 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
             _arena = context.Arena;
             _batchSize = request.BatchSize;
             _rowGoal = request.RowGoal;
-            _positions = Positions(
-                    (IPositionalPocoIndex<T>)_snapshot.Indexes[ordinal],
-                    request.Ranges,
-                    request.Reverse,
-                    request.RowsPerRange,
-                    _rows.Count,
-                    context.Arena)
+            _positions = (seek is null
+                    ? Positions(
+                        (IPositionalPocoIndex<T>)_snapshot.Indexes[ordinal],
+                        request.Ranges,
+                        request.Reverse,
+                        request.RowsPerRange,
+                        _rows.Count,
+                        context.Arena)
+                    : Seeks((PermutationIndex<T>)_snapshot.Indexes[ordinal], seek, _rows.Count, context.Arena))
                 .GetEnumerator();
             _buffer = context.Arena.Rent<int>(Math.Max(1, request.BatchSize));
             try
@@ -2694,6 +2752,44 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
                         word |= bit;
                         yield return position;
                     }
+                }
+            }
+        }
+        finally
+        {
+            arena.Return(seen);
+        }
+    }
+
+    /// <summary>
+    /// The rows an as-of seek's lookups find: a position for each seek that finds one, each once, in the
+    /// order the seeks first reach them, as the ranges they stand for would give them.
+    /// </summary>
+    private static IEnumerable<int> Seeks(
+        PermutationIndex<T> index,
+        ColumnarSeekRequest seek,
+        int rows,
+        ExecutionArena arena)
+    {
+        var words = Math.Max(1, (rows + 63) / 64);
+        var seen = arena.Rent<ulong>(words);
+        try
+        {
+            Array.Clear(seen, 0, words);
+            for (var i = 0; i < seek.RowCount; i++)
+            {
+                var position = index.Seek(seek.Bounds, seek.Rows[i], seek.Backwards, seek.Inclusive);
+                if (position < 0)
+                {
+                    continue;
+                }
+
+                ref var word = ref seen[position >> 6];
+                var bit = 1UL << (position & 63);
+                if ((word & bit) == 0)
+                {
+                    word |= bit;
+                    yield return position;
                 }
             }
         }

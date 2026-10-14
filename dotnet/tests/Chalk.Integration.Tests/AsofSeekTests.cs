@@ -45,6 +45,31 @@ public sealed class AsofSeekTests(SharedSidecar sidecar) : IClassFixture<SharedS
     }
 
     /// <summary>
+    /// Keys beyond ASCII, sought straight from the left rows' columns. The index orders text as UTF-16,
+    /// in which U+E000 sorts after 😀 where as UTF-8 it sorts before it, and each seek finds its own key's
+    /// row: six symbols that have marks, and two near them that have none.
+    /// </summary>
+    [Theory]
+    [InlineData(">=")]
+    [InlineData("<")]
+    public async Task A_seek_on_text_beyond_ascii_gives_the_plain_joins_rows(string comparison)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var engine = await CreateEngineAsync(ExecutionEngine.Vectorised);
+
+        var sql = $"SELECT p.id, m.price FROM text_positions p LEFT ASOF JOIN {{0}} m "
+            + $"MATCH_CONDITION p.as_of {comparison} m.ts ON p.symbol = m.symbol ORDER BY p.id";
+        var seek = await engine.PrepareAsync(string.Format(CultureInfo.InvariantCulture, sql, "text"));
+        var plain = await engine.PrepareAsync(string.Format(CultureInfo.InvariantCulture, sql, "text_plain"));
+
+        Assert.True(PlanWalker.Has(seek.Plan, Rel.KindOneofCase.AsOfLookupJoin), "the indexed table is sought");
+        var expected = (await RowsAsync(engine, plain)).Rows;
+        Assert.Equal(expected, (await RowsAsync(engine, seek)).Rows);
+        Assert.Equal(8, expected.Count);
+        Assert.Equal(6, expected.Count(row => !row.EndsWith("|∅", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
     /// The rows read follow the seeks: of seven positions, five have a key and a time and seek a
     /// range, and two of those find a mark, one row each, of a log of 20 000. The plain join reads
     /// the whole log.
@@ -154,6 +179,23 @@ public sealed class AsofSeekTests(SharedSidecar sidecar) : IClassFixture<SharedS
         .. Enumerable.Range(0, 5_000).Select(i => new Mark("USD", Day.AddMinutes(i), 3m)),
     ];
 
+    private static readonly string[] Texts = ["A", "Z", "é", "Ω", "\uE000", "\U0001F600"];
+
+    /// <summary>A mark a minute under each of <see cref="Texts"/>.</summary>
+    private static readonly Mark[] TextMarks =
+    [
+        .. Enumerable.Range(0, 1_000).SelectMany(i =>
+            Texts.Select((symbol, s) => new Mark(symbol, Day.AddMinutes(i), s + (i * 0.0001m)))),
+    ];
+
+    /// <summary>A position under each of <see cref="Texts"/>, and two under symbols beside them that have no mark.</summary>
+    private static readonly Position[] TextPositions =
+    [
+        .. Texts.Select((symbol, i) => new Position(10 + i, symbol, Day.AddHours(5))),
+        new(30, "\uE001", Day.AddHours(5)),
+        new(31, "\U0001F601", Day.AddHours(5)),
+    ];
+
     private async Task<ChalkEngine> CreateEngineAsync(ExecutionEngine executor) =>
         await ChalkEngine.CreateAsync(new ChalkEngineOptions
         {
@@ -167,6 +209,9 @@ public sealed class AsofSeekTests(SharedSidecar sidecar) : IClassFixture<SharedS
                     .AddTable("marks_plain", Marks)
                     .AddTable("ties", Ties, t => t.Index(m => m.Symbol, m => m.Ts))
                     .AddTable("ties_plain", Ties)
+                    .AddTable("text_positions", TextPositions)
+                    .AddTable("text", TextMarks, t => t.Index(m => m.Symbol, m => m.Ts))
+                    .AddTable("text_plain", TextMarks)
                     .Build(),
             ],
             Planner = sidecar.CreatePlanner(),

@@ -177,6 +177,48 @@ internal sealed class AsOfSeekOperator : OperatorBase
         }
 
         var rows = _left.Rows;
+
+        // An index the source seeks straight from the left rows' columns: no bound made for any row.
+        int[]? sought = null;
+        IColumnarScan? typed = null;
+        try
+        {
+            if (_source is IColumnarSeekSource seeker)
+            {
+                (typed, sought) = SeekTyped(seeker, rows, fixedValues, held);
+            }
+
+            if (typed is not null)
+            {
+                await using (typed.ConfigureAwait(false))
+                {
+                    while (true)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        if (typed.TryNext(_output))
+                        {
+                            yield return _output;
+                            continue;
+                        }
+
+                        if (!await typed.WaitAsync(_output, ct).ConfigureAwait(false))
+                        {
+                            yield break;
+                        }
+
+                        yield return _output;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            if (sought is not null)
+            {
+                Context.Arena.Return(sought);
+            }
+        }
+
         var seen = new HashSet<object?[]>(SeekComparer.Instance);
         var ranges = new List<IndexKeyRange>(rows.Count);
 
@@ -290,6 +332,89 @@ internal sealed class AsOfSeekOperator : OperatorBase
                 batch.Dispose();
             }
         }
+    }
+
+    /// <summary>
+    /// The seeks asked of a source that reads them from the left rows' columns, and the rows they are
+    /// for, rented from the arena until the scan ends; no scan when the source cannot seek this index so.
+    /// A row whose key or time is NULL seeks nothing, as it matches nothing, and a row that repeats the
+    /// one before it is not sought again.
+    /// </summary>
+    private (IColumnarScan? Scan, int[]? Rows) SeekTyped(
+        IColumnarSeekSource seeker, JoinRows rows, object?[] fixedValues, int held)
+    {
+        var bounds = new SeekBound[held + 1];
+        for (var k = 0; k < held; k++)
+        {
+            var key = _keys[k];
+            bounds[k] = key.Fixed is null
+                ? SeekBound.Of(rows.Column(key.LeftField), _leftTypes[key.LeftField])
+                : SeekBound.Fixed(fixedValues[k]!);
+        }
+
+        bounds[held] = SeekBound.Of(rows.Column(_leftTime), _leftTypes[_leftTime]);
+        var selected = Context.Arena.Rent<int>(Math.Max(1, rows.Count));
+        var count = 0;
+        for (var row = 0; row < rows.Count; row++)
+        {
+            if (!Bounded(bounds, row) || (count > 0 && Repeats(bounds, selected[count - 1], row)))
+            {
+                continue;
+            }
+
+            selected[count++] = row;
+        }
+
+        var scan = seeker.ColumnarSeek(
+            new ColumnarSeekRequest
+            {
+                Table = _table,
+                Index = _index,
+                Projection = _projection,
+                OutputSchema = Schema,
+                BatchSize = Context.Settings.BatchSize,
+                Bounds = bounds,
+                Rows = selected,
+                RowCount = count,
+                Backwards = _backwards,
+                Inclusive = _inclusive,
+            },
+            ScanContextFor(Context));
+        if (scan is null)
+        {
+            Context.Arena.Return(selected);
+            return (null, null);
+        }
+
+        return (scan, selected);
+    }
+
+    /// <summary>Whether every bound a left row reads holds a value: a NULL key or time matches nothing.</summary>
+    private static bool Bounded(SeekBound[] bounds, int row)
+    {
+        foreach (var bound in bounds)
+        {
+            if (!bound.IsFixed && !bound.Column.IsValid(row))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Whether a left row seeks what the row before it did.</summary>
+    private static bool Repeats(SeekBound[] bounds, int previous, int row)
+    {
+        foreach (var bound in bounds)
+        {
+            if (!bound.IsFixed && !SameLane(bound.Column, previous, row, bound.Type))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>Whether two rows of a column hold the same lane: both NULL, or the same bytes.</summary>
