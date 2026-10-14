@@ -182,12 +182,21 @@ internal sealed class PocoTableSnapshot<T>
     /// What the next snapshot may carry: the statistics in force here, the row count they were
     /// computed over and the snapshot they were computed on — this one when it computed them, and the
     /// inherited ones when it carried them. Null when nothing has been computed yet, in which case the
-    /// next snapshot computes rather than carrying nothing forward.
+    /// next snapshot computes rather than carrying nothing forward. Read under the gate a describe
+    /// takes, since computing statistics here replaces what this snapshot hands on.
     /// </summary>
-    public (ColumnStatistics[]? Statistics, int ComputedOver, long ComputedOn, bool Deferred) Carryable =>
-        _carried is not null
-            ? (_carried, _carriedAt, _carriedOn, _deferred)
-            : (_statistics, RowCount, Sequence, _deferred);
+    public (ColumnStatistics[]? Statistics, int ComputedOver, long ComputedOn, bool Deferred) Carryable
+    {
+        get
+        {
+            lock (_statisticsGate)
+            {
+                return _carried is not null
+                    ? (_carried, _carriedAt, _carriedOn, _deferred)
+                    : (_statistics, RowCount, Sequence, _deferred);
+            }
+        }
+    }
 
     /// <summary>
     /// Ends a deferral (D271 (g)): the next <see cref="Statistics"/> computes rather than carrying.
@@ -301,7 +310,12 @@ internal sealed class PocoTableSnapshot<T>
                 return carried;
             }
 
+            // Computed here, so these are the ones in force and the ones the next snapshot carries
+            // (F206): handing on what this snapshot inherited would report statistics older than
+            // these, and judge the policy from them, so that every later snapshot computed again.
             var computed = PocoStatistics.Compute(columns, Values, collations, Indexes, plan);
+            _carried = null;
+            _carriedAt = 0;
             Volatile.Write(ref _statistics, computed);
             return computed;
         }

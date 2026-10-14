@@ -119,6 +119,31 @@ public sealed class PocoStatisticsPolicyTests
     }
 
     /// <summary>
+    /// Statistics a table computes under its growth policy are the ones it carries on (F206): the
+    /// fraction is counted from them, not from the ones before, and a deferral after them keeps them.
+    /// </summary>
+    [Fact]
+    public async Task Statistics_a_table_computes_are_the_ones_it_carries_on()
+    {
+        var source = new PocoSourceBuilder("mem")
+            .AddTable(
+                "lines",
+                Rows(1, 100, "north"),
+                out var lines,
+                t => t.Statistics(StatisticsLevel.Basic, refreshWhenGrownBy: 0.1))
+            .Build();
+
+        await Append(lines, Rows(101, 10, "south"));
+        Assert.Equal(110, LargestId(source));
+
+        await Append(lines, Rows(111, 1, "south"));
+        Assert.Equal(110, LargestId(source));
+
+        await Append(lines, Rows(112, 1, "south"), StatisticsRefresh.Defer);
+        Assert.Equal(110, LargestId(source));
+    }
+
+    /// <summary>
     /// A growth policy is not a deferral: the plain refresh does not end it, because "fresh enough
     /// until the table has grown that much" is unaffected by the catalog being reassembled.
     /// </summary>
