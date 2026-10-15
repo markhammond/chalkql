@@ -133,10 +133,22 @@ final class VerdictColumns {
       RexSimplify simplify,
       List<RexSimplify> underParent) {
     List<@Nullable Projection> none = new ArrayList<>(blocks.size());
+    List<@Nullable RexNode> reach = new ArrayList<>(blocks.size());
     for (int k = 0; k < blocks.size(); k++) {
       none.add(null);
+      reach.add(
+          offsets.get(k) < 0
+              ? null
+              : rexBuilder.makeCall(
+                  SqlStdOperatorTable.IS_NOT_NULL,
+                  rexBuilder.makeInputRef(
+                      nullable(
+                          rexBuilder,
+                          rexBuilder.getTypeFactory().createSqlType(SqlTypeName.BOOLEAN)),
+                      offsets.get(k) + 1)));
     }
-    return of(descriptor, childWidth, blocks, offsets, rexBuilder, simplify, underParent, none, 0);
+    return of(
+        descriptor, childWidth, blocks, offsets, rexBuilder, simplify, underParent, none, 0, reach);
   }
 
   /**
@@ -146,6 +158,12 @@ final class VerdictColumns {
    *     nothing beyond the key, the marker and the verdicts
    * @param verdictWidth how many verdict columns every emitted side carries, which is where a
    *     side's projected endpoint columns begin
+   * @param reach per side, what it is for that side to reach a row — its marker, and a path's
+   *     decider — where a row may be visible though no emitted side reached it: by the table's own
+   *     restriction, a direct dimension or a resource owner, or by a side elided as TRUE. A verdict
+   *     that folds to a constant on the one emitted side then holds only where that side reached
+   *     the row (F219). Null where the emitted sides are the only way to a row, so that every row
+   *     was reached by them.
    */
   static Plan of(
       DescriptorExpressions descriptor,
@@ -156,7 +174,8 @@ final class VerdictColumns {
       RexSimplify simplify,
       List<RexSimplify> underParent,
       List<@Nullable Projection> projections,
-      int verdictWidth) {
+      int verdictWidth,
+      @Nullable List<@Nullable RexNode> reach) {
     int sides = blocks.size();
     int live = 0;
     for (int offset : offsets) {
@@ -198,8 +217,8 @@ final class VerdictColumns {
 
       List<RexNode> rewritten =
           everyRuleOnTheParent
-              ? ordinal(splits, verdicts, offsets, live, rexBuilder, simplify)
-              : booleans(splits, verdicts, offsets, live, rexBuilder, simplify);
+              ? ordinal(splits, verdicts, offsets, live, reach, rexBuilder, simplify)
+              : booleans(splits, verdicts, offsets, live, reach, rexBuilder, simplify);
       for (DescriptorExpressions.Column column : group) {
         for (int i = 0; i < rewritten.size(); i++) {
           conditions.put(key(column.tableColumn(), i), rewritten.get(i));
@@ -231,6 +250,7 @@ final class VerdictColumns {
       List<List<RexNode>> verdicts,
       List<Integer> offsets,
       int live,
+      @Nullable List<@Nullable RexNode> reach,
       RexBuilder rexBuilder,
       RexSimplify simplify) {
     RelDataType type = rexBuilder.getTypeFactory().createSqlType(SqlTypeName.INTEGER);
@@ -272,10 +292,14 @@ final class VerdictColumns {
       perSide.add(folded);
     }
 
-    // Uniform across the emitted sides: a literal where it folded and one route reaches the row, so
-    // the child reads one position whatever each route's own rules came to. Where **several**
-    // routes reach it, every one of them projects — a constant that is the verdict of the rows the
-    // route reached says nothing about a row it did not reach, and the NULL is what says so.
+    // Uniform across the emitted sides, so the child reads one position whatever each route's own
+    // rules came to. Where one route is emitted and its ordinal folded, no side projects one: the
+    // literal is the verdict of the rows that route reached. Where the route is the only way to the
+    // row, that is every row; where another restriction can make a row visible, the literal holds
+    // where the route reached the row, and such a row takes the sentinel (F219). Where
+    // **several** routes reach it, every one of them projects — a constant that is the verdict of
+    // the rows the route reached says nothing about a row it did not reach, and the NULL is what
+    // says so.
     List<RexNode> refs = new ArrayList<>(verdicts.size());
     boolean project = anyVaries || live > 1;
     for (int k = 0; k < verdicts.size(); k++) {
@@ -284,7 +308,12 @@ final class VerdictColumns {
         continue;
       }
       if (!project) {
-        refs.add(perSide.get(k));
+        RexNode folded = perSide.get(k);
+        refs.add(
+            reach == null || folded.equals(sentinel)
+                ? folded
+                : rexBuilder.makeCall(
+                    SqlStdOperatorTable.CASE, reachOf(reach, k), folded, sentinel));
         continue;
       }
       int slot = verdicts.get(k).size();
@@ -318,13 +347,19 @@ final class VerdictColumns {
    *
    * <p>A side the leaf does not emit contributes nothing, which is exactly FALSE under the OR the
    * halves compose to; and where several routes reach the row every one of them projects, so a
-   * route that matched nothing reads NULL and {@code IS TRUE} makes it the FALSE it is.
+   * route that matched nothing reads NULL and {@code IS TRUE} makes it the FALSE it is. Where one
+   * route is emitted and a role half folds to a constant there, it is no column either: TRUE is the
+   * role half of the rows that route reached. Where the route is the only way to the row, that is
+   * every row; where another restriction, a direct dimension or a resource owner, can make a row
+   * visible, TRUE holds where the route reached the row, as its marker and a path's decider say,
+   * and such a row reads the FALSE it is there (F219).
    */
   private static List<RexNode> booleans(
       List<Split> splits,
       List<List<RexNode>> verdicts,
       List<Integer> offsets,
       int live,
+      @Nullable List<@Nullable RexNode> reach,
       RexBuilder rexBuilder,
       RexSimplify simplify) {
     List<RexNode> conditions = new ArrayList<>(splits.size());
@@ -351,7 +386,7 @@ final class VerdictColumns {
         }
         RexNode role = split.roleHalf().get(k);
         if (!project) {
-          held.add(role);
+          held.add(reach != null && role.isAlwaysTrue() ? reachOf(reach, k) : role);
           continue;
         }
         int slot = verdicts.get(k).size();
@@ -387,6 +422,15 @@ final class VerdictColumns {
       conditions.add(simplify.simplifyUnknownAsFalse(whole));
     }
     return conditions;
+  }
+
+  /** What it is for emitted side {@code k} to reach a row, as {@code Filter_R} reads it. */
+  private static RexNode reachOf(List<@Nullable RexNode> reach, int k) {
+    RexNode reached = reach.get(k);
+    if (reached == null) {
+      throw new IllegalStateException("side " + k + " is emitted and says nothing of what reaches it");
+    }
+    return reached;
   }
 
   /**
@@ -542,6 +586,7 @@ final class VerdictColumns {
               });
       // Under that parent's own Filter_R (§3.3 applied to the parent): a manager whose threads are
       // all in one organisation gets a constant verdict, and a constant verdict is no column at all.
+      // It is the verdict of the rows the route reached, which `ordinal` and `booleans` keep to them.
       roleHalf.add(underParent.get(k).simplifyUnknownAsFalse(local));
     }
 

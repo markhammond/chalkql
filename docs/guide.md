@@ -2570,7 +2570,9 @@ because the join cannot hold it. To make a child narrower than its parent, take 
 parent's kinds along `Inherited` paths, where the parent's rule and the child's own both
 hold. A reader holds on a child row the roles it holds on the parent row, so what the
 child's columns disclose is decided once per parent row, on the parent's side of the
-join, not once per child row. Where the parent's whole chain is visible, over a NOT NULL
+join, not once per child row. A rule for a role held along a declared path decides only
+the rows the path reaches: a row reached by a direct dimension beside it takes the rule
+that holds there. Where the parent's whole chain is visible, over a NOT NULL
 declared key, the join is left out altogether, and the visibility is ALL. Tutorial
 chapter 11 shows three principals running one statement over such a table.
 

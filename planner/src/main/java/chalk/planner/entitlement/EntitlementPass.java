@@ -1257,13 +1257,17 @@ public final class EntitlementPass {
               : new VerdictColumns.Projection(entry.block(), path.projected()));
     }
 
+    // Whether this table makes a row visible by itself, a direct dimension or a resource owner, so
+    // that a row may be read though no side reached it (F219).
+    boolean ownRoute = own != null && !own.isAlwaysFalse();
+
     // First pass, to learn how wide a parent side is: the expressions it builds are thrown away and
     // only the shape survives, because a verdict's position depends on that width and the width
     // depends on the verdicts.
     int verdicts =
         VerdictColumns.of(
                 descriptor, childWidth, blocks, zero, rexBuilder, simplify, underParent,
-                projections, -1)
+                projections, -1, null)
             .width();
 
     if (verdicts == 0) {
@@ -1295,22 +1299,16 @@ public final class EntitlementPass {
       }
     }
 
-    VerdictColumns.Plan plan =
-        VerdictColumns.of(
-            descriptor, childWidth, blocks, offsets, rexBuilder, simplify, underParent,
-            projections, verdicts);
-
-    // Filter_R: any path grants (D226). An elided entry contributes TRUE, so the OR folds away and
-    // the leaf is unfiltered; a kept one contributes its marker.
-    List<RexNode> terms = new ArrayList<>(layout.entries().size() + 1);
+    // What it is for each emitted side to reach a row: its marker, and the decider of a path that
+    // carries one (D279 §4). The decider of a cross-row confinement says whether the target's own
+    // row is the one a confined grant was confined to, the chain having reached an endpoint row it
+    // could admit; the target's columns are read plain and the endpoint's off the chain's
+    // projection.
+    List<@Nullable RexNode> reach = new ArrayList<>(layout.entries().size());
     boolean anyDecider = false;
     for (int k = 0; k < layout.entries().size(); k++) {
-      if (dropped[k]) {
-        terms.add(rexBuilder.makeLiteral(false));
-        continue;
-      }
-      if (elided[k]) {
-        terms.add(rexBuilder.makeLiteral(true));
+      if (dropped[k] || elided[k]) {
+        reach.add(null);
         continue;
       }
       RexNode matched =
@@ -1321,23 +1319,39 @@ public final class EntitlementPass {
                       typeFactory.createSqlType(org.apache.calcite.sql.type.SqlTypeName.BOOLEAN),
                       true),
                   offsets.get(k) + 1));
-
-      // The decider of a cross-row confinement (D279 §4): the chain reached an endpoint row a
-      // confined grant could admit, and this says whether the target's own row is the one it was
-      // confined to. The target's columns are read plain and the endpoint's off the chain's
-      // projection.
       PathPlan path = layout.entries().get(k).path();
       if (path == null || path.pathPredicate() == null) {
-        terms.add(matched);
+        reach.add(matched);
         continue;
       }
       anyDecider = true;
-      terms.add(
+      reach.add(
           rexBuilder.makeCall(
               SqlStdOperatorTable.AND,
               matched,
               overTheJoinedRow(
                   path, offsets.get(k) + VerdictColumns.FIXED + verdicts, childWidth)));
+    }
+
+    // Where a row may be visible though no emitted side reached it — by this table's own route, or
+    // by a side elided as TRUE — a verdict that folds to a constant on the one emitted side holds
+    // where that side reached the row, and not on every row (F219).
+    boolean reachedOtherwise = ownRoute;
+    for (boolean gone : elided) {
+      reachedOtherwise |= gone;
+    }
+
+    VerdictColumns.Plan plan =
+        VerdictColumns.of(
+            descriptor, childWidth, blocks, offsets, rexBuilder, simplify, underParent,
+            projections, verdicts, reachedOtherwise ? reach : null);
+
+    // Filter_R: any path grants (D226). An elided entry contributes TRUE, so the OR folds away and
+    // the leaf is unfiltered; a kept one contributes what it is for it to reach the row.
+    List<RexNode> terms = new ArrayList<>(layout.entries().size() + 1);
+    for (int k = 0; k < layout.entries().size(); k++) {
+      RexNode reached = reach.get(k);
+      terms.add(reached != null ? reached : rexBuilder.makeLiteral(elided[k]));
     }
     if (descriptor.rowPredicate() != null) {
       terms.add(simplify.simplifyUnknownAsFalse(descriptor.rowPredicate()));
