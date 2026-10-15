@@ -251,8 +251,8 @@ visibility, wherever the path does not name the role.
 
 **What to do:** If the role should read the table by the parent's value of the kind, as a marking,
 declare `.ExemptFromParentVisibility(role)` on the path. If the parent's rule should keep it out,
-take the role off the table, or, where the policy requires it, declare
-`.BoundByParentVisibility(role)` on the path.
+remove the role from the table's visibility rule (giving the table a rule of its own if it has
+none), or, where the policy requires it, declare `.BoundByParentVisibility(role)` on the path.
 
 ## Principals and grants
 
