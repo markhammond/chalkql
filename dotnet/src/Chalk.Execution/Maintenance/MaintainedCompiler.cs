@@ -600,6 +600,14 @@ internal sealed class MaintainedCompiler
             RefuseClock(condition, "a join's condition");
         }
 
+        // A nested-loop join the planner chose for a small side is still a join on keys where its
+        // condition equates a column of each side: kept so, a change meets only its key's rows rather
+        // than every row the other side holds.
+        if (!leftKeys.Any() && condition is not null)
+        {
+            (leftKeys, rightKeys, condition) = EquiKeys(condition, left.RowType, right.RowType);
+        }
+
         var leftTypes = Types(left.RowType);
         var rightTypes = Types(right.RowType);
         var state = new JoinState(
@@ -631,6 +639,58 @@ internal sealed class MaintainedCompiler
             leftFactory(context),
             rightFactory(context),
             condition is null ? null : _compilation.ExpressionsAt(path).Compile(condition)));
+    }
+
+    /// <summary>
+    /// The conjuncts of a join's condition that equate a column of the left with a column of the right,
+    /// of one type, as the join's keys, and the rest of the condition, or null where nothing is left.
+    /// An equality is NULL for a NULL on either side, which is how a key meets nothing.
+    /// </summary>
+    private static (uint[] Left, uint[] Right, Expr? Remaining) EquiKeys(Expr condition, RowType left, RowType right)
+    {
+        var width = left.Fields.Count;
+        var leftKeys = new List<uint>();
+        var rightKeys = new List<uint>();
+        var rest = new List<Expr>();
+        var pending = new Stack<Expr>();
+        pending.Push(condition);
+        while (pending.Count > 0)
+        {
+            var conjunct = pending.Pop();
+            if (conjunct is { KindCase: Expr.KindOneofCase.Call, Call.Function: FunctionId.And })
+            {
+                for (var i = conjunct.Call.Args.Count - 1; i >= 0; i--)
+                {
+                    pending.Push(conjunct.Call.Args[i]);
+                }
+
+                continue;
+            }
+
+            if (conjunct is { KindCase: Expr.KindOneofCase.Call, Call.Function: FunctionId.Eq, Call.Args.Count: 2 }
+                && conjunct.Call.Args[0].KindCase == Expr.KindOneofCase.FieldRef
+                && conjunct.Call.Args[1].KindCase == Expr.KindOneofCase.FieldRef)
+            {
+                var (a, b) = ((int)conjunct.Call.Args[0].FieldRef.Index, (int)conjunct.Call.Args[1].FieldRef.Index);
+                if (a >= width && b < width)
+                {
+                    (a, b) = (b, a);
+                }
+
+                if (a < width && b >= width && b - width < right.Fields.Count
+                    && ChalkType.FromProto(left.Fields[a].Type).WithNullable(false)
+                        == ChalkType.FromProto(right.Fields[b - width].Type).WithNullable(false))
+                {
+                    leftKeys.Add((uint)a);
+                    rightKeys.Add((uint)(b - width));
+                    continue;
+                }
+            }
+
+            rest.Add(conjunct);
+        }
+
+        return ([.. leftKeys], [.. rightKeys], rest.Count == 0 ? null : AllOf([.. rest]));
     }
 
     private Rel AsOfJoin(Rel rel, string path)
