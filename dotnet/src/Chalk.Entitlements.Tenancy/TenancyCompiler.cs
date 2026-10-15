@@ -771,7 +771,7 @@ internal static class TenancyCompiler
         var lists = new List<BoundList>();
         foreach (var role in admitted)
         {
-            RefuseUnanswered(rules, role, declared.Name);
+            RefuseUnanswered(rules, role, declared);
 
             foreach (var dimension in dimensions)
             {
@@ -891,8 +891,9 @@ internal static class TenancyCompiler
     /// (D358). Where every route the combination has is one of those, the refusal says so, and names
     /// the path and the parent: the combination resolves, and the role is what the path keeps out.
     /// </remarks>
-    private static void RefuseUnanswered(GroupRules rules, string role, string table)
+    private static void RefuseUnanswered(GroupRules rules, string role, TenancyTable declared)
     {
+        var table = declared.Name;
         if (rules.Combinations is null)
         {
             return;
@@ -921,7 +922,7 @@ internal static class TenancyCompiler
                     $"'{table}' admits '{role}', which holds the combination {combination} there only "
                     + $"through {Listed(parents)}, whose visibility "
                     + $"{(parents.Count == 1 ? "rule leaves" : "rules leave")} it out. Declare "
-                    + $".ExemptFromParentVisibility({role}) on the path, or take the role off '{table}'.");
+                    + $".ExemptFromParentVisibility({role}) on the path, or {Unadmitted(declared, role)}.");
             }
 
             throw new CatalogValidationException(
@@ -980,8 +981,8 @@ internal static class TenancyCompiler
                         ChalkErrorCodes.InvalidPolicy,
                         where,
                         $"{verb}({role}) on {named} names a role '{declared.Name}' does not admit, so "
-                        + $"it changes nothing: no principal reads '{declared.Name}' in that role. Take "
-                        + $"the role off the path, or admit it on '{declared.Name}'.");
+                        + $"it changes nothing: no principal reads '{declared.Name}' in that role. Remove "
+                        + $"'{role}' from that {verb}, or admit it on '{declared.Name}'.");
                 }
 
                 if (declaredPath.LeftOutBy(role) is null)
@@ -989,9 +990,9 @@ internal static class TenancyCompiler
                     throw new CatalogValidationException(
                         ChalkErrorCodes.InvalidPolicy,
                         where,
-                        $"{verb}({role}) on {named} names a role that no table the path steps down to "
-                        + "leaves out, so it changes nothing: the path reaches "
-                        + $"'{role}' as it reaches any role its parents admit. Take the role off the path.");
+                        $"{verb}({role}) on {named} names a role that no table the path reads leaves "
+                        + "out, so it changes nothing: the path reaches "
+                        + $"'{role}' as it reaches any role its parents admit. Remove '{role}' from that {verb}.");
                 }
             }
 
@@ -1041,13 +1042,19 @@ internal static class TenancyCompiler
                 $"'{declared.Name}' admits '{role}', which reaches it only through {Listed(parents)}, "
                 + $"whose visibility {(parents.Count == 1 ? "rule leaves" : "rules leave")} it out. "
                 + $"Declare .ExemptFromParentVisibility({role}) on "
-                + $"{(paths.Count == 1 ? "the path" : "a path it should read along")}, or take the role "
-                + $"off '{declared.Name}'."
-                + (declared.Visibility.Count == 0
-                    ? $" With no visibility rule of its own, '{declared.Name}' admits every role."
-                    : ""));
+                + $"{(paths.Count == 1 ? "the path" : "a path it should read along")}, or "
+                + $"{Unadmitted(declared, role)}.");
         }
     }
+
+    /// <summary>
+    /// The other way out of a refusal about a role the table admits: leave the role out of the
+    /// table's visibility rule, or, where the table has none and so admits every role, give it one.
+    /// </summary>
+    private static string Unadmitted(TenancyTable declared, string role) =>
+        declared.Visibility.Count == 0
+            ? $"give '{declared.Name}' a visibility rule without '{role}': with none of its own, it admits every role"
+            : $"remove '{role}' from the visibility rule of '{declared.Name}'";
 
     /// <summary>Table names as a refusal lists them: <c>'a'</c>, <c>'a' and 'b'</c>.</summary>
     private static string Listed(IReadOnlyList<string> tables) =>

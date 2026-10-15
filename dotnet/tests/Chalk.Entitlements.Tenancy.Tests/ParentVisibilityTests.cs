@@ -228,8 +228,8 @@ public sealed class ParentVisibilityTests
         Assert.Equal(ChalkErrorCodes.ParentVisibilityLeavesRoleOut, refused.Code);
         Assert.Contains(
             "'lines' admits 'keeper', which reaches it only through 'orders', whose visibility rule "
-            + "leaves it out. Declare .ExemptFromParentVisibility(keeper) on the path, or take the "
-            + "role off 'lines'. With no visibility rule of its own, 'lines' admits every role.",
+            + "leaves it out. Declare .ExemptFromParentVisibility(keeper) on the path, or give "
+            + "'lines' a visibility rule without 'keeper': with none of its own, it admits every role.",
             refused.Message,
             StringComparison.Ordinal);
     }
@@ -305,7 +305,9 @@ public sealed class ParentVisibilityTests
         Assert.Equal(ChalkErrorCodes.InvalidPolicy, notLeftOut.Code);
         Assert.Contains(
             "ExemptFromParentVisibility(manager) on Inherited(\"org\") to 'orders' on 'lines' names a "
-            + "role that no table the path steps down to leaves out, so it changes nothing",
+            + "role that no table the path reads leaves out, so it changes nothing: the path reaches "
+            + "'manager' as it reaches any role its parents admit. Remove 'manager' from that "
+            + "ExemptFromParentVisibility.",
             notLeftOut.Message,
             StringComparison.Ordinal);
 
@@ -557,8 +559,8 @@ public sealed class ParentVisibilityTests
         Assert.Contains(
             "'taskings' admits 'tasking_reader', which holds the combination {classification, "
             + "releasability, mission} there only through 'assets', whose visibility rule leaves it out. "
-            + "Declare .ExemptFromParentVisibility(tasking_reader) on the path, or take the role off "
-            + "'taskings'.",
+            + "Declare .ExemptFromParentVisibility(tasking_reader) on the path, or remove "
+            + "'tasking_reader' from the visibility rule of 'taskings'.",
             refused.Message,
             StringComparison.Ordinal);
 

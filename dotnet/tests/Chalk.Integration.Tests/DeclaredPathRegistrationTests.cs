@@ -109,8 +109,8 @@ public sealed class DeclaredPathRegistrationTests(SharedSidecar sidecar) : IDisp
         Assert.Contains(
             "'tasking' admits 'tasking_reader', which holds the combination {classification, "
             + "releasability, mission} there only through 'assets', whose visibility rule leaves it out. "
-            + "Declare .ExemptFromParentVisibility(tasking_reader) on the path, or take the role off "
-            + "'tasking'.",
+            + "Declare .ExemptFromParentVisibility(tasking_reader) on the path, or remove "
+            + "'tasking_reader' from the visibility rule of 'tasking'.",
             refused.Message,
             StringComparison.Ordinal);
     }
