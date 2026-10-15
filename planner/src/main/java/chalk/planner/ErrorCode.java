@@ -78,6 +78,8 @@ public enum ErrorCode {
   UNANSWERED_COMBINATION("UnansweredCombination"),
   /** A dimension the table cannot be confined by. */
   CONFINEMENT_UNAVAILABLE("ConfinementUnavailable"),
+  /** A parent's visibility rule leaves out a role the table admits, where the policy must say so. */
+  PARENT_VISIBILITY_LEAVES_ROLE_OUT("ParentVisibilityLeavesRoleOut"),
 
   // Principals and grants.
 

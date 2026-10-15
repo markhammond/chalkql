@@ -242,6 +242,18 @@ table's own row or along the same path.
 
 **What to do:** Declare the kind on the table, or hold the grant unconfined.
 
+### ParentVisibilityLeavesRoleOut
+
+A path takes a kind from a parent, and the parent's visibility rule leaves out a role the table
+admits. By default the role then reads nothing along that path. The policy is refused where that
+leaves the role with no way into the table at all, and, in a policy that requires explicit parent
+visibility, wherever the path does not name the role.
+
+**What to do:** If the role should read the table by the parent's value of the kind, as a marking,
+declare `.ExemptFromParentVisibility(role)` on the path. If the parent's rule should keep it out,
+take the role off the table, or, where the policy requires it, declare
+`.BoundByParentVisibility(role)` on the path.
+
 ## Principals and grants
 
 Raised when a principal's grants are bound to a policy, before the statement is planned.

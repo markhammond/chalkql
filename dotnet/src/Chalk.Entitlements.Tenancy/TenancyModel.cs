@@ -84,6 +84,20 @@ internal sealed class Restriction
     /// </summary>
     public IReadOnlyList<VisibilityStep> Steps { get; init; } = [];
 
+    /// <summary>
+    /// The roles a path names <b>exempt</b> from the visibility rules of the tables it steps down to
+    /// (D358): along it they take the kind's value as a marking, and read none of those rules. Any
+    /// other role the table admits reaches along a path only where every one of those tables admits
+    /// it too, in a scope their rules allow.
+    /// </summary>
+    public IReadOnlyList<string> Exempt { get; init; } = [];
+
+    /// <summary>
+    /// The roles a path names <b>bound</b> by those rules (D358): the default, said aloud, which a
+    /// policy that requires explicit parent visibility asks of every role a parent leaves out.
+    /// </summary>
+    public IReadOnlyList<string> Bound { get; init; } = [];
+
     /// <summary>A dimension the builder resolved from a kind handle.</summary>
     public static Restriction Of(GrantDimension dimension)
     {
