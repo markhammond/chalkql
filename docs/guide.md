@@ -2243,18 +2243,33 @@ policy anywhere in sight.
 
 **A table with no tenancy column of its own.** A chat message belongs to a thread, a
 line item to an order, a comment to a post — and the row itself says nothing about who
-may read it. `Restriction.Through("thread_id")` declares the relationship once, and
-reads the parent table and its key from the declared foreign key. The planner compiles
-it into one join with the parent's own entitled scan, so the child is exactly as visible
-as its parent, by every way into it: its grants, its creator, its host predicates. A
-visibility rule of the child's own that would admit fewer roles, or hold in fewer
-scopes, than the parent's is refused, because the join cannot hold it. To make a child
-narrower than its parent, take the parent's kinds along `Inherited` paths, which read
-both rules. What the child's columns disclose
-is decided on the *parent's* side of that join: once per parent row, not once per child
-row. Where the parent's whole chain is visible, over a NOT NULL declared key, the join
-is left out altogether, and the visibility is ALL. Tutorial chapter 11 shows three
-principals running one statement over such a table.
+may read it. `messages.Tenancy(t => t.Through(messages.Column("thread_id")))` declares
+the relationship once, and reads the parent table and its key from the declared foreign
+key. The planner compiles it into one join with the parent's own entitled scan, so the
+child is exactly as visible as its parent, by every way into the parent: its tenancy
+grants, its resource owner, its host predicates. A visibility rule of the child's own
+that would admit fewer roles, or hold in fewer scopes, than the parent's is refused,
+because the join cannot hold it. To make a child narrower than its parent, take the
+parent's kinds along `Inherited` paths, where the parent's rule and the child's own both
+hold. A reader holds on a child row the roles it holds on the parent row, so what the
+child's columns disclose is decided once per parent row, on the parent's side of the
+join, not once per child row. Where the parent's whole chain is visible, over a NOT NULL
+declared key, the join is left out altogether, and the visibility is ALL. Tutorial
+chapter 11 shows three principals running one statement over such a table.
+
+**`Through` or paths.** Take orders visible to managers, agents and suppliers, each
+placed by a customer (its `ResourceOwner`) and related to the vendors of the items its
+lines carry. Order 1 has line 1, an item of vendor 1's, and line 2, one of vendor 2's.
+
+- **Entitled `Through` its order,** a line is read by every way into the order. The
+  customer who placed order 1 reads both its lines. Vendor 2's supplier reads order 1
+  because line 2 carries its item, and so reads line 1 too.
+- **Along paths,** `Inherited(org).Through(orders)` and `Inherited(vendor).Through(items)`,
+  each kind is its own route. The supplier reads line 2 alone, and the customer, whom no
+  kind names, reads neither line.
+
+So use `Through` for a child that is part of its parent, like a message in its thread,
+and paths for a child whose readers differ from its parent's.
 
 **A column that says what each row disclosed.** The per-column report is one label for
 the whole result. That is all a caller needs — until a principal is a manager in one
