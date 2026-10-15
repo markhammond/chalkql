@@ -754,6 +754,7 @@ internal static class TenancyCompiler
         }
 
         RefuseParentVisibility(policy, declared, dimensions, through, paths, admitted, path);
+        RefuseNarrowerThanItsParent(policy, declared, through, admitted, ruleScopes, path);
 
         var rules = new GroupRules
         {
@@ -1049,12 +1050,100 @@ internal static class TenancyCompiler
         }
     }
 
-    /// <summary>Table names as a refusal lists them: <c>'a'</c>, <c>'a' and 'b'</c>.</summary>
-    private static string Listed(IReadOnlyList<string> tables) =>
-        tables.Count == 1
-            ? $"'{tables[0]}'"
-            : string.Join(", ", tables.Take(tables.Count - 1).Select(t => $"'{t}'"))
-                + $" and '{tables[^1]}'";
+    /// <summary>
+    /// Refuses a table entitled through a parent whose own visibility rule would narrow what the
+    /// parent admits (D359). A <c>Through</c> route joins the parent's own entitled scan and reads
+    /// nothing of the child's rule, so a row is visible whenever its parent row is: a rule that leaves
+    /// out a role the parent admits, or holds in fewer scopes than the parent's, could not keep either
+    /// out, and is refused rather than left to read as a restriction it is not.
+    /// </summary>
+    /// <remarks>
+    /// A table with no rule admits every role in every scope, and narrows nothing. Nor does a rule
+    /// naming roles the parent leaves out: such a role reads nothing through the parent, and may read
+    /// the table along its other routes. A child meant to be narrower than its parent takes the
+    /// parent's kinds along <c>Inherited</c> paths instead, which read both rules (D358).
+    /// </remarks>
+    private static void RefuseNarrowerThanItsParent(
+        TenancyPolicy policy,
+        TenancyTable declared,
+        IReadOnlyList<ResolvedThrough> through,
+        IReadOnlyList<string> admitted,
+        IReadOnlyList<string> scopes,
+        string path)
+    {
+        if (declared.Visibility.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var parent in through)
+        {
+            if (policy.TableOf(parent.ParentSchema, parent.ParentTable) is not { } declaredParent)
+            {
+                continue;
+            }
+
+            IReadOnlyList<string> parentRoles = policy.Roles;
+            if (declaredParent.Visibility.Count > 0)
+            {
+                parentRoles = declaredParent.Visibility
+                    .SelectMany(rule => rule.Roles)
+                    .Select(role => role.Name)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+            }
+
+            var leftOut = parentRoles.Where(role => !admitted.Contains(role, StringComparer.Ordinal)).ToList();
+            if (leftOut.Count > 0)
+            {
+                var named = Listed(leftOut);
+                var them = leftOut.Count == 1 ? named : "them";
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidPolicy,
+                    $"{path}.visibility",
+                    $"'{declared.Name}' is entitled through '{parent.ParentTable}', and its visibility rule "
+                    + $"leaves out {named}, which '{parent.ParentTable}' admits. A row entitled through its "
+                    + $"parent is visible whenever the parent row is, so the rule cannot keep {them} from it. "
+                    + $"Admit {them} on '{declared.Name}', or entitle '{declared.Name}' with Inherited paths, "
+                    + "which read both rules.");
+            }
+
+            if (scopes.Count == 0)
+            {
+                continue;
+            }
+
+            var parentScopes = declaredParent.Visibility
+                .SelectMany(rule => rule.ScopeNames)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var beyond = parentScopes.Where(scope => !scopes.Contains(scope, StringComparer.Ordinal)).ToList();
+            if (parentScopes.Count > 0 && beyond.Count == 0)
+            {
+                continue;
+            }
+
+            throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidPolicy,
+                $"{path}.visibility",
+                $"'{declared.Name}' is entitled through '{parent.ParentTable}', and its visibility rule holds "
+                + $"in {Listed(scopes)} alone, where '{parent.ParentTable}' holds "
+                + (parentScopes.Count == 0 ? "in every scope" : $"in {Listed(beyond)} as well")
+                + ". A row entitled through its parent is visible whenever the parent row is, so the rule "
+                + $"cannot keep it to {Listed(scopes)}. "
+                + (parentScopes.Count == 0
+                    ? $"Take the scopes off the rule of '{declared.Name}'"
+                    : $"Name {Listed(beyond)} on '{declared.Name}' too")
+                + $", or entitle '{declared.Name}' with Inherited paths, which read both rules.");
+        }
+    }
+
+    /// <summary>Names as a refusal lists them: <c>'a'</c>, <c>'a' and 'b'</c>.</summary>
+    private static string Listed(IReadOnlyList<string> names) =>
+        names.Count == 1
+            ? $"'{names[0]}'"
+            : string.Join(", ", names.Take(names.Count - 1).Select(name => $"'{name}'"))
+                + $" and '{names[^1]}'";
 
     /// <summary>
     /// The most confining kinds one dimension may carry on one table. Each is a factor of two in the

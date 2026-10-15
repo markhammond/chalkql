@@ -2245,7 +2245,12 @@ policy anywhere in sight.
 line item to an order, a comment to a post — and the row itself says nothing about who
 may read it. `Restriction.Through("thread_id")` declares the relationship once, and
 reads the parent table and its key from the declared foreign key. The planner compiles
-it into one join with the parent's own entitled scan. What the child's columns disclose
+it into one join with the parent's own entitled scan, so the child is exactly as visible
+as its parent, by every way into it: its grants, its creator, its host predicates. A
+visibility rule of the child's own that would admit fewer roles, or hold in fewer
+scopes, than the parent's is refused, because the join cannot hold it. To make a child
+narrower than its parent, take the parent's kinds along `Inherited` paths, which read
+both rules. What the child's columns disclose
 is decided on the *parent's* side of that join: once per parent row, not once per child
 row. Where the parent's whole chain is visible, over a NOT NULL declared key, the join
 is left out altogether, and the visibility is ALL. Tutorial chapter 11 shows three
