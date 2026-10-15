@@ -55,3 +55,6 @@ id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:u
 -- u19-a-vendor-in-a-region
 id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
 
+-- u20-a-picker
+id:int32, org_id:int32, first_name:utf8view?, last_name:utf8view?, national_id:utf8view?, postcode:utf8view
+

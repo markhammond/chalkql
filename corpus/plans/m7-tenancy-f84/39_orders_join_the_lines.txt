@@ -96,8 +96,11 @@ report id:Full, id0:Full, quantity:Full, unit_price:PerRow, orders:Some, order_i
 5|4|3|70
 
 -- u18-a-keeper
-report id:Full, id0:Full, quantity:Full, unit_price:Redacted, orders:Some, order_items:Some
+report id:Full, id0:Full, quantity:Full, unit_price:Redacted, orders:Some, order_items:None
 
 -- u19-a-vendor-in-a-region
 report id:Full, id0:Full, quantity:Full, unit_price:Redacted, orders:Some, order_items:None
+
+-- u20-a-picker
+report id:Full, id0:Full, quantity:Full, unit_price:Redacted, orders:Some, order_items:Some
 

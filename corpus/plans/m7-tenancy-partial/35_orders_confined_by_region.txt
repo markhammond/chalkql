@@ -121,3 +121,6 @@ report id:Full, member_id:Full, org_id:Full, region_id:Full, note:PerRow, orders
 -- u19-a-vendor-in-a-region
 report id:Full, member_id:Full, org_id:Full, region_id:Full, note:PerRow, orders:Some
 
+-- u20-a-picker
+report id:Full, member_id:Full, org_id:Full, region_id:Full, note:PerRow, orders:Some
+

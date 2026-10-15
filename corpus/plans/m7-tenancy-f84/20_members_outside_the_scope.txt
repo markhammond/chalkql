@@ -57,3 +57,6 @@ report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_i
 -- u19-a-vendor-in-a-region
 report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:None
 
+-- u20-a-picker
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:Some
+

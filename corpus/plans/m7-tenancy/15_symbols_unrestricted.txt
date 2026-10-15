@@ -93,3 +93,8 @@ report name:Full, base:Full
 EURUSD|EUR
 GBPUSD|GBP
 
+-- u20-a-picker
+report name:Full, base:Full
+EURUSD|EUR
+GBPUSD|GBP
+

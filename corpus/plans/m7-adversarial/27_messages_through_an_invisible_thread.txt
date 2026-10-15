@@ -56,3 +56,6 @@ F63 EntitlementException: Refused by the entitlements: the visibility of main.me
 -- u19-a-vendor-in-a-region
 report id:Full, content:Redacted, messages:None, threads:None
 
+-- u20-a-picker
+F63 EntitlementException: Refused by the entitlements: the visibility of main.messages derives through main.threads, and the join that establishes it — on column 1 against the parent's column 0 — is not in the finished plan, so rows whose parent this principal cannot see could reach the result.
+

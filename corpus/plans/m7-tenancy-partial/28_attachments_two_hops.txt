@@ -84,3 +84,8 @@ report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, thr
 -- u19-a-vendor-in-a-region
 report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
 
+-- u20-a-picker
+report id:Full, message_id:Full, name:Full, attachments:Some, messages:Some, threads:Some
+1|1|northwind-a
+2|3|northwind-b
+

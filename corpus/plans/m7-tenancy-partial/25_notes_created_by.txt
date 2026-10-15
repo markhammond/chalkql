@@ -73,3 +73,6 @@ report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
 -- u19-a-vendor-in-a-region
 report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
 
+-- u20-a-picker
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+

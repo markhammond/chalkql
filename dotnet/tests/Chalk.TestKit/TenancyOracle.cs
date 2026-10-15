@@ -49,7 +49,8 @@ public static class TenancyOracle
         IReadOnlySet<(int Subject, int Org, int Region)> SubjectOrgRegions,
         IReadOnlySet<int> Vendors,
         IReadOnlySet<int> KeeperOrgs,
-        IReadOnlySet<(int Vendor, int Region)> VendorRegions);
+        IReadOnlySet<(int Vendor, int Region)> VendorRegions,
+        IReadOnlySet<int> PickerOrgs);
 
     /// <summary>Members, as this principal may see them.</summary>
     public sealed record Member(
@@ -275,8 +276,9 @@ public static class TenancyOracle
                 || grants.SupportOrgs.Contains(member.OrgId)
                 || grants.CounterOrgs.Contains(member.OrgId)
                 // F100: the keeper sees the rows of its organisation and nothing protected on them,
-                // since no rule names it.
+                // since no rule names it — and so does the picker, its twin (D358).
                 || grants.KeeperOrgs.Contains(member.OrgId)
+                || grants.PickerOrgs.Contains(member.OrgId)
                 || grants.SubjectPairs.Contains((member.Id, member.OrgId));
             if (!visible)
             {
@@ -449,6 +451,7 @@ public static class TenancyOracle
         || grants.SupportOrgs.Contains(thread.OrgId)
         || grants.CounterOrgs.Contains(thread.OrgId)
         || grants.KeeperOrgs.Contains(thread.OrgId)
+        || grants.PickerOrgs.Contains(thread.OrgId)
         || grants.SubjectPairs.Contains((thread.MemberId, thread.OrgId));
 
     /// <summary>
@@ -536,8 +539,8 @@ public static class TenancyOracle
     /// admits, on its parent's row</b> (design 38 §8), stated naively: its order's for the
     /// organisation and for the member, and its <em>item's</em> for the vendor. The kind-scoped
     /// inheritance is the whole of the difference from §3.13's kind-less <c>Through</c>, which would
-    /// have given a vendor every line of an order it can see. The parent's value is taken as a
-    /// marking: its own visibility rule is not read along the path (F208).
+    /// have given a vendor every line of an order it can see. The parent's visibility rule holds
+    /// along the path: a role it leaves out holds nothing there (D358).
     /// </summary>
     /// <remarks>
     /// <c>unit_price</c> follows the route: the value to a principal that reached the line through
@@ -551,12 +554,13 @@ public static class TenancyOracle
         {
             var order = TenancyFixture.Orders.Single(o => o.Id == line.OrderId);
             var item = TenancyFixture.Items.Single(i => i.Id == line.ItemId);
+            // Not the keeper (F100): the line admits it, but takes its order's organisation along a
+            // path, and the order's visibility rule, which leaves the keeper out, holds along it
+            // (D358) — a keeper in that organisation reads neither the order nor its lines. The
+            // picker, which the path names exempt, takes the organisation as a marking instead: it
+            // reads the line, and no rule on the line names it, so not the price.
             var throughItsOrder = ReachesTheOrder(grants, order);
-            // The keeper too (F100): a line admits it, and takes its order's organisation as a
-            // marking, so a keeper in that organisation sees the line though not the order. The
-            // order's own rule is not read along the path (F208), and no rule on the line names
-            // the keeper, so the price is withheld from it.
-            var byItsOrganisation = throughItsOrder || grants.KeeperOrgs.Contains(order.OrgId);
+            var byItsOrganisation = throughItsOrder || grants.PickerOrgs.Contains(order.OrgId);
             var throughItsItem = grants.Global || grants.Vendors.Contains(item.VendorId);
             if (!byItsOrganisation && !throughItsItem)
             {
@@ -588,8 +592,9 @@ public static class TenancyOracle
     /// layers are held to each other on it.
     /// </para>
     /// <para>
-    /// So is the keeper (F100), whose roles name no rule of the line: it reaches a line by the order's
-    /// organisation, and <see cref="OrderItems"/> says so beside this, but reads no price there.
+    /// So is the keeper (F100): the line admits it and the order does not, so it holds nothing along
+    /// the order's path (D358) — no line by the order's organisation, which <see cref="OrderItems"/>
+    /// says beside this.
     /// </para>
     /// </remarks>
     private static bool ReachesTheOrder(Grants grants, TenancyFixture.Order order) =>
@@ -709,6 +714,7 @@ public static class TenancyOracle
                 || grants.SupportOrgs.Contains(member.OrgId)
                 || grants.CounterOrgs.Contains(member.OrgId)
                 || grants.KeeperOrgs.Contains(member.OrgId)
+                || grants.PickerOrgs.Contains(member.OrgId)
                 || grants.SubjectPairs.Contains((member.Id, member.OrgId)))
             {
                 rows.Add(member);
@@ -773,7 +779,9 @@ public static class TenancyOracle
         Ids(context, "vendor_vendor"),
         // F100: a role `orders` does not admit, and a vendor grant confined to a region.
         Ids(context, "keeper_orgs"),
-        Pairs(context, "vendor_vendor_regions"));
+        Pairs(context, "vendor_vendor_regions"),
+        // D358: the keeper's twin, which the line's path to its order names exempt.
+        Ids(context, "picker_orgs"));
 
     private static object? Scalar(RequestContext context, string name) =>
         context.Scalars.TryGetValue(name, out var value) ? value : null;

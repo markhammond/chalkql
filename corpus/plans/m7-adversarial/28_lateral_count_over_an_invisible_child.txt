@@ -85,3 +85,8 @@ report id:Full, n:Full, threads:Some, messages:Some
 -- u19-a-vendor-in-a-region
 report id:Full, n:Full, threads:None, messages:None
 
+-- u20-a-picker
+report id:Full, n:Full, threads:Some, messages:Some
+1|2
+2|1
+

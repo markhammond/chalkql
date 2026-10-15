@@ -80,11 +80,14 @@ in two tenancies whose rules answer alike: the plan decides `content` per row fo
 the package's prediction, which reads a `Through` parent as the route it is (ADR 0061 §6).
 `u18-a-keeper` holds a role every table admits but `orders`, whose visibility rule names the other
 seven: it sees O1's members, threads and messages with nothing protected disclosed, since no rule
-names it, and no order — but it does see the lines of O1's orders, with the price withheld. A line
-takes its order's organisation as a marking and admits the keeper itself, and the order's rule does
-not reach along the path (F208). `u19-a-vendor-in-a-region` holds V1's grant confined to region 1, a vendor's
+names it, and no order — and so none of the lines of O1's orders either. A line takes its order's
+organisation along a path, and the order's rule holds along it for a role it leaves out (D358); the
+line still admits the keeper, which would reach it through its item. `u19-a-vendor-in-a-region` holds V1's grant confined to region 1, a vendor's
 home region being on `vendors`: it reaches V1's own row and nothing a path carries, because an item
 holds no region and confining a perspective that reaches an order along a `Related` path is refused.
+`u20-a-picker` is the keeper's twin, which the line's path to its order names exempt from the order's
+rule (D358): it sees what the keeper sees, and the lines of O1's orders too, with the price withheld,
+since a line takes its order's organisation as a marking for it and no rule on the line names it.
 
 **What is not here.** §8's queries 16 and 21 need a real database and live in
 `Chalk.Integration.Tests.EntitlementsAdoTests`; 17, 18 and 23 are about a prepare option or a

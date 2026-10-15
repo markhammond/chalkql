@@ -74,3 +74,7 @@ report lo:Redacted, hi:Redacted, members:Some
 report lo:Redacted, hi:Redacted, members:None
 <null>|<null>
 
+-- u20-a-picker
+report lo:Redacted, hi:Redacted, members:Some
+<null>|<null>
+

@@ -102,3 +102,6 @@ report a:Full, b:Full, members:Some
 -- u19-a-vendor-in-a-region
 report a:Full, b:Full, members:Some
 
+-- u20-a-picker
+report a:Full, b:Full, members:Some
+

@@ -74,3 +74,7 @@ report total:Full, without_o2:Full, orders:Some
 report total:Full, without_o2:Full, orders:Some
 <null>|<null>
 
+-- u20-a-picker
+report total:Full, without_o2:Full, orders:Some
+<null>|<null>
+

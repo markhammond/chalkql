@@ -74,3 +74,7 @@ report a:PerRow, orders:Some
 report a:PerRow, orders:Some
 <null>
 
+-- u20-a-picker
+report a:PerRow, orders:Some
+<null>
+

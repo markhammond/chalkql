@@ -74,3 +74,7 @@ report org_id:Full, n:Redacted, members:Some
 -- u19-a-vendor-in-a-region
 report org_id:Full, n:Redacted, members:None
 
+-- u20-a-picker
+report org_id:Full, n:Redacted, members:Some
+1|0
+

@@ -378,6 +378,7 @@ public sealed class TenancyFixture
         "org_id IN (@ctx.manager_orgs) OR org_id IN (@ctx.agent_orgs) "
         + "OR org_id IN (@ctx.auditor_orgs) OR org_id IN (@ctx.support_orgs) "
         + "OR org_id IN (@ctx.counter_orgs) OR org_id IN (@ctx.keeper_orgs) "
+        + "OR org_id IN (@ctx.picker_orgs) "
         + "OR (id, org_id) IN (@ctx.subject_pairs) OR @ctx.global";
 
     /// <summary>
@@ -396,9 +397,10 @@ public sealed class TenancyFixture
 
     /// <summary>
     /// The <b>organisation kind's</b> reach over an order's rows: one membership per role the line
-    /// admits, the region-confined auditor's group among them, and the global grant — the keeper's
-    /// too, though <c>orders</c> itself does not admit the keeper, because a path takes the kind's
-    /// value from its parent and not the parent's visibility (F208). It is the endpoint
+    /// admits that the order admits too, the region-confined auditor's group among them, and the
+    /// global grant — not the keeper's, which the line admits and the order's visibility rule leaves
+    /// out, so the path reaches nothing in that role, and the picker's, which the path names exempt
+    /// from that rule and so takes the order's organisation as a marking (D358). It is the endpoint
     /// predicate of the line's <c>Inherited("org")</c> path, and §2 is exact about what that is —
     /// "in §2's vocabulary over the endpoint table's columns … the same shape a <c>Direct</c>
     /// dimension compiles to", which is the <em>kind's</em> membership and nothing else.
@@ -413,7 +415,7 @@ public sealed class TenancyFixture
     private const string OrderOrgRows =
         "org_id IN (@ctx.manager_orgs) OR org_id IN (@ctx.agent_orgs) "
         + "OR org_id IN (@ctx.auditor_orgs) OR org_id IN (@ctx.support_orgs) "
-        + "OR org_id IN (@ctx.counter_orgs) OR org_id IN (@ctx.keeper_orgs) "
+        + "OR org_id IN (@ctx.counter_orgs) OR org_id IN (@ctx.picker_orgs) "
         + "OR (org_id, region_id) IN (@ctx.auditor_org_regions) "
         + "OR @ctx.global";
 
@@ -828,6 +830,7 @@ public sealed class TenancyFixture
             "org_id IN (@ctx.manager_orgs) OR org_id IN (@ctx.agent_orgs) "
             + "OR org_id IN (@ctx.auditor_orgs) OR org_id IN (@ctx.support_orgs) "
             + "OR org_id IN (@ctx.counter_orgs) OR org_id IN (@ctx.keeper_orgs) "
+            + "OR org_id IN (@ctx.picker_orgs) "
             + "OR (member_id, org_id) IN (@ctx.subject_pairs) OR @ctx.global",
     };
 
@@ -1445,12 +1448,22 @@ public sealed class TenancyFixture
     /// <summary>
     /// A keeper in O1 (F100): a role every table admits but <c>orders</c>, which names the seven
     /// others. It sees O1's members and threads and their messages, with nothing protected disclosed
-    /// — no rule names it — and no order. It does see the lines of O1's orders, with the price
-    /// withheld: a line takes its order's organisation as a marking and admits the keeper itself,
-    /// and the order's rule does not reach along the path (F208).
+    /// — no rule names it — and no order, and so none of the lines of O1's orders either: a line
+    /// takes its order's organisation along a path, and the order's visibility rule holds along it
+    /// for a role it leaves out (D358). The line admits the keeper still, which reaches it through
+    /// its item, as a vendor would, where the keeper holds the item's vendor.
     /// </summary>
     public static RequestContext U18 { get; } = Principal(
         user: 18, managerOrgs: [], agentOrgs: [], auditorOrgs: [], subjectPairs: [], keeperOrgs: [1]);
+
+    /// <summary>
+    /// A picker in O1 (D358): the keeper's twin, which the line's path to its order names exempt from
+    /// the order's visibility rule. It sees what the keeper sees, and the lines of O1's orders too,
+    /// with the price withheld: a line takes its order's organisation as a marking for it, and no
+    /// rule on the line names it. Still no order.
+    /// </summary>
+    public static RequestContext U20 { get; } = Principal(
+        user: 20, managerOrgs: [], agentOrgs: [], auditorOrgs: [], subjectPairs: [], pickerOrgs: [1]);
 
     /// <summary>
     /// V1's grant confined to region 1 (F100): it reaches V1's row, whose home region is R1, and
@@ -1497,6 +1510,8 @@ public sealed class TenancyFixture
         ("u17-an-agent-in-two-orgs", U17),
         ("u18-a-keeper", U18),
         ("u19-a-vendor-in-a-region", U19),
+        // D358's: the keeper's twin, exempt from the order's rule along the line's path.
+        ("u20-a-picker", U20),
     ];
 
     /// <summary>One principal's bindings, as a host's own compiler would produce them.</summary>
@@ -1514,6 +1529,7 @@ public sealed class TenancyFixture
         int[][]? subjectOrgRegions = null,
         int[]? vendors = null,
         int[]? keeperOrgs = null,
+        int[]? pickerOrgs = null,
         int[][]? vendorRegions = null,
         string purpose = "",
         string actor = "")
@@ -1536,6 +1552,7 @@ public sealed class TenancyFixture
             // F100: a role `orders` does not admit, and a vendor grant confined to a region. Empty
             // for every principal that holds neither, which folds both terms to FALSE.
             ["keeper_orgs"] = Ids(keeperOrgs ?? []),
+            ["picker_orgs"] = Ids(pickerOrgs ?? []),
             ["vendor_vendor_regions"] = new ContextRelation
             {
                 Columns = ["vendor", "region"],

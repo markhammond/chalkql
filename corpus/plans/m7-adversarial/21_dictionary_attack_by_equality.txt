@@ -65,3 +65,6 @@ report id:Full, guess:Full, members:Some
 -- u19-a-vendor-in-a-region
 report id:Full, guess:Full, members:None
 
+-- u20-a-picker
+report id:Full, guess:Full, members:Some
+

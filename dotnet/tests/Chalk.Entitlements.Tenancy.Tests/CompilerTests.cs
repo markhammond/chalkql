@@ -69,10 +69,12 @@ public sealed class CompilerTests
             // cost nothing to a table that has nothing to do with it.
             + "OR (org_id IN (@ctx.org_vendor) OR (id, org_id) IN (@ctx.member_vendor_pairs) "
             + "OR id IN (@ctx.member_vendor_ids) OR @ctx.global_vendor) "
-            // And the keeper, which `orders` alone does not admit (F100): on a table that does not
-            // restrict it, it is a role like any other.
+            // And the keeper, which `orders` alone does not admit (F100), and its twin the picker
+            // (D358): on a table that does not restrict them, they are roles like any other.
             + "OR (org_id IN (@ctx.org_keeper) OR (id, org_id) IN (@ctx.member_keeper_pairs) "
-            + "OR id IN (@ctx.member_keeper_ids) OR @ctx.global_keeper)) "
+            + "OR id IN (@ctx.member_keeper_ids) OR @ctx.global_keeper) "
+            + "OR (org_id IN (@ctx.org_picker) OR (id, org_id) IN (@ctx.member_picker_pairs) "
+            + "OR id IN (@ctx.member_picker_ids) OR @ctx.global_picker)) "
             + "OR @ctx.global",
             Members.RowPredicate);
     }

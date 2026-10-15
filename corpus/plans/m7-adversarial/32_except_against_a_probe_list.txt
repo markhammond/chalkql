@@ -81,3 +81,7 @@ report n:PerRow, members:Some
 -- u19-a-vendor-in-a-region
 report n:PerRow, members:None
 
+-- u20-a-picker
+report n:PerRow, members:Some
+<null>
+

@@ -76,3 +76,6 @@ report id:Full, org_id:Full, region_id:Full, orders:Some
 -- u19-a-vendor-in-a-region
 report id:Full, org_id:Full, region_id:Full, orders:Some
 
+-- u20-a-picker
+report id:Full, org_id:Full, region_id:Full, orders:Some
+

@@ -109,3 +109,6 @@ report mid:Full, last_name:Redacted, oid:Full, note:Full, members:Some, orders:S
 -- u19-a-vendor-in-a-region
 report mid:Full, last_name:Redacted, oid:Full, note:Full, members:None, orders:Some
 
+-- u20-a-picker
+report mid:Full, last_name:Redacted, oid:Full, note:Full, members:Some, orders:Some
+

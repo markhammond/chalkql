@@ -136,3 +136,10 @@ report n:PerRow, members:None
 B
 T
 
+-- u20-a-picker
+report n:PerRow, members:Some
+B
+T
+<null>
+<null>
+

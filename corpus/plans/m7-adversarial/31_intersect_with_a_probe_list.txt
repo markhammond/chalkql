@@ -55,3 +55,6 @@ F64 InvalidPlanException: Invalid plan at root/Sort/SetOp.inputs[0]: every SetOp
 -- u19-a-vendor-in-a-region
 report n:PerRow, members:None
 
+-- u20-a-picker
+F64 InvalidPlanException: Invalid plan at root/Sort/SetOp.inputs[0]: every SetOp input has the output row type up to nullability, but field 0 is STRING? against an output field of STRING (invariant I-IR-4).
+

@@ -15,7 +15,7 @@ principal the statement is a `POLICY` refusal for, and one header this family ad
 ## What runs them
 
 - **In process, against the oracle and a golden** — `TenancyCorpusTests`, theory
-  `Every_subversion_is_held_to_the_oracle_and_the_golden`, as every one of the nineteen principals
+  `Every_subversion_is_held_to_the_oracle_and_the_golden`, as every one of the twenty principals
   `TenancyFixture` names. The rows must be the rows `TenancyOracle` — §8's model stated naively in
   C#, with no descriptor, no planner and no pass — discloses to that principal, and they must be
   what `corpus/plans/m7-adversarial/` records.

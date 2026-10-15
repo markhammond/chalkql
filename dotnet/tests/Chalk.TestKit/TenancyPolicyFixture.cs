@@ -172,10 +172,13 @@ public sealed class TenancyPolicyFixture
         var counter = p.Role("counter");
         var vendorRole = p.Role("vendor");
         // A role `orders` does not admit (F100): admitted on every other table, so the corpus holds
-        // per-table admission to the oracle — and a line, which admits it, to reaching the lines of
-        // orders it cannot see, since a path takes its parent's value of a kind as a marking and not
-        // the parent's visibility (F208).
+        // per-table admission to the oracle — and a line, which admits it, to reaching none of the
+        // lines of orders it cannot see, since the order's visibility rule holds along the line's
+        // path to it (D358). Its route through the item stays open.
         p.Role("keeper");
+        // The keeper's twin, which the line's path to its order names exempt from the order's rule
+        // (D358): it reads a line by its order's organisation, as a marking, and no order.
+        var picker = p.Role("picker");
 
         p.Scope("interactive");
         p.Scope("batch");
@@ -393,7 +396,7 @@ public sealed class TenancyPolicyFixture
         items.Tenancy(t => t.Direct(vendor, items.Column("vendor_id")));
         orderItems
             .Tenancy(t => t
-                .Inherited(org).Through(orders)
+                .Inherited(org).Through(orders).ExemptFromParentVisibility(picker)
                 .Inherited(member).Through(orders)
                 .Inherited(vendor).Through(items))
             .Access(new AccessRule
@@ -662,7 +665,7 @@ public sealed class TenancyPolicyFixture
         PrincipalsOf(Handles);
 
     /// <summary>
-    /// The same nineteen principals, in the same order, as the handles of <paramref name="handles"/>
+    /// The same twenty principals, in the same order, as the handles of <paramref name="handles"/>
     /// — a grant carries the kind and the role it was declared as, and a handle of another policy is
     /// refused by identity rather than matched by spelling (D270 §1). A second layout of the same
     /// model is a second policy, so it declares its principals from its own handles and the two
@@ -684,6 +687,7 @@ public sealed class TenancyPolicyFixture
         var counter = handles.Role("counter");
         var vendorRole = handles.Role("vendor");
         var keeper = handles.Role("keeper");
+        var picker = handles.Role("picker");
 
         return
         [
@@ -724,6 +728,8 @@ public sealed class TenancyPolicyFixture
             ("u18-a-keeper", Principal(18, Grant.ForTenancy(org, 1, keeper))),
             ("u19-a-vendor-in-a-region", Principal(
                 19, Grant.ForTenancy(vendor, 1, vendorRole).Within(region, 1))),
+            // D358: the keeper's twin, exempt from the order's rule along the line's path.
+            ("u20-a-picker", Principal(20, Grant.ForTenancy(org, 1, picker))),
         ];
     }
 

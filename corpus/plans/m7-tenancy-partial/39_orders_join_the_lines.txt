@@ -101,3 +101,6 @@ report id:Full, id0:Full, quantity:Full, unit_price:PerRow, orders:Some, order_i
 -- u19-a-vendor-in-a-region
 report id:Full, id0:Full, quantity:Full, unit_price:PerRow, orders:Some, order_items:Some
 
+-- u20-a-picker
+report id:Full, id0:Full, quantity:Full, unit_price:PerRow, orders:Some, order_items:Some
+

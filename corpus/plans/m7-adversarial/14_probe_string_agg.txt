@@ -68,3 +68,7 @@ report names:Redacted, members:Some
 -- u19-a-vendor-in-a-region
 F59 UnsupportedFeatureException: Unsupported in this build: LISTAGG with a non-constant separator.
 
+-- u20-a-picker
+report names:Redacted, members:Some
+<null>
+

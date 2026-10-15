@@ -96,3 +96,9 @@ report id:Full, content:Redacted, org_id:Full, messages:Some, threads:Some
 -- u19-a-vendor-in-a-region
 report id:Full, content:Redacted, org_id:Full, messages:None, threads:None
 
+-- u20-a-picker
+report id:Full, content:Redacted, org_id:Full, messages:Some, threads:Some
+1|<null>|1
+2|<null>|1
+3|<null>|1
+

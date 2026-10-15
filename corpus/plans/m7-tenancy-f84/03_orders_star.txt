@@ -109,3 +109,6 @@ report id:Full, member_id:Full, org_id:Full, amount:Full, note:Full, created_by:
 -- u19-a-vendor-in-a-region
 report id:Full, member_id:Full, org_id:Full, amount:Full, note:Full, created_by:Full, region_id:Full, orders:Some
 
+-- u20-a-picker
+report id:Full, member_id:Full, org_id:Full, amount:Full, note:Full, created_by:Full, region_id:Full, orders:Some
+
