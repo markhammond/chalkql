@@ -1947,7 +1947,9 @@ await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions
   it runs, whether the view recomputes or is maintained. The event carries the purpose and actor of
   the context the statement was prepared with, the digest of the plan the update runs, and the
   `Version` the update brings the view to, which says which grants a table of grants held. An update
-  with nothing new to read runs nothing and raises nothing, and an execution's event has no version.
+  at the epoch the view already holds runs nothing and raises nothing. Any refresh moves the epoch,
+  though, even one that touches no table the view reads: the next update then runs, and is audited.
+  An execution's event has no version.
 - **A change of shape keeps the policy.** When a table the statement reads changes shape, the view
   prepares the statement again through the policy, with the same context, and its updates go on
   being audited.

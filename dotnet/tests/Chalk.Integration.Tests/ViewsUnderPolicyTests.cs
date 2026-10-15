@@ -266,8 +266,8 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
     /// <summary>
     /// Every update that runs is audited, recomputed or maintained (D361): one event each, before it
     /// runs, with the purpose and actor of the context the statement was prepared with, the version the
-    /// update brings the view to, and the digest of the plan it ran. An update with nothing new to read
-    /// runs nothing and raises nothing.
+    /// update brings the view to, and the digest of the plan it ran. An update at the epoch the view
+    /// already holds runs nothing and raises nothing.
     /// </summary>
     [Theory]
     [InlineData(ViewMaintenance.Recompute)]
