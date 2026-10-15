@@ -1809,6 +1809,11 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   semi join, is maintained. A left row is given while at least one right row matches it, so a right
   row's change moves it in or out only when the count of its matches crosses zero. An anti join gives
   a left row while none does.
+- **Joins that seek a table under a policy.** A join whose left side is a table under an access
+  policy, read through filters and projections, holds its right side alone when the join has no
+  condition but its keys and an index of the table begins with them: a right row that arrives or
+  leaves finds the left rows of its key through the index. So a view under a policy holds its
+  reader's share, not the table ([A view under an access policy](#a-view-under-an-access-policy)).
 - **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's
   `StateBudget`: a budget tuned for a recompute may need raising. The first update computes
   everything, and takes longer than a recompute. The buffers its rows passed through are let go when
@@ -1945,6 +1950,13 @@ await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions
   refresh, and withdrawing a row deleted: the view gives or drops the rows they govern at its next
   update. Grants folded into the statement when it was prepared stand for the view's life: to revoke
   one, dispose of the view and make another.
+- **An index on the table keeps a view to its reader's share.** A path joins the table to the keys
+  its grants name, and a maintained join holds both its sides, so without an index every view holds
+  a copy of the table. Where an index of the table begins with the column the path joins on — for
+  grants that name rows, the table's key — the join holds the reader's keys alone. A grant that
+  arrives or is withdrawn finds the rows of its key through the index, at the update's epoch, and a
+  row that changes is matched against the keys held. `Keyed(…)` on an in-process table says how its
+  rows change and does not index them: declare the index too, as `t.UniqueIndex(x => x.Seq)`.
 - **Lists too long to fold** stay relations, as they do for an execution, and every update binds
   them from the context the statement was prepared with. The statement reads them through a
   membership test, or splits its rows over them with a semi and an anti join; both are maintained.
