@@ -1,4 +1,5 @@
 using Chalk.Client;
+using Chalk.Ir;
 using Chalk.Sources.Poco;
 using Chalk.TestKit;
 
@@ -147,7 +148,96 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
             """,
             [0]
         },
+        {
+            // A group whose rows all fail a filter stays, its sum NULL and its count 0; the asset is NULL
+            // on some rows, so `asset = 2` is NULL there and the row is not counted.
+            "aggregate filters, NULL in what they test",
+            """
+            SELECT book, SUM(qty) FILTER (WHERE qty > 0) AS bought,
+                   COUNT(*) FILTER (WHERE asset IS NULL) AS unassigned,
+                   MIN(price) FILTER (WHERE asset = 2) AS lo2, MAX(price) FILTER (WHERE asset = 2) AS hi2
+            FROM trades
+            GROUP BY book
+            """,
+            [0]
+        },
+        {
+            "a CASE inside an aggregate, which the planner makes its filter",
+            """
+            SELECT asset, SUM(CASE WHEN qty > 0 THEN qty END) AS bought,
+                   MIN(CASE WHEN book = 1 THEN ts END) AS first_alpha, COUNT(*) AS n
+            FROM trades
+            GROUP BY asset
+            """,
+            [0]
+        },
+        {
+            // A book upserted between a region and none moves its trades in and out of both filters.
+            "filters on a joined row an upsert flips",
+            """
+            SELECT t.asset, COUNT(*) FILTER (WHERE b.region IS NULL) AS unplaced,
+                   SUM(t.qty) FILTER (WHERE b.region = 'apac') AS apac
+            FROM trades t JOIN books b ON b.id = t.book
+            GROUP BY t.asset
+            """,
+            [0]
+        },
+        {
+            "a rollup with filters",
+            """
+            SELECT CASE WHEN GROUPING(book) = 1 THEN -1 ELSE book END AS b,
+                   COUNT(*) FILTER (WHERE price > 500) AS dear, SUM(qty) FILTER (WHERE price > 500) AS dear_qty
+            FROM trades
+            GROUP BY ROLLUP(book)
+            """,
+            [0]
+        },
     };
+
+    /// <summary>
+    /// The planner writes a <c>CASE</c> inside an aggregate as the aggregate's <c>FILTER</c>, <c>IS
+    /// TRUE</c> of a column it projects, as it writes one written as a <c>FILTER</c>: so whether a
+    /// statement is maintained cannot depend on which of the two it was written as, or on where a
+    /// <c>CASE</c> lands once the planner has merged its projections.
+    /// </summary>
+    [Fact]
+    public async Task A_case_inside_an_aggregate_is_planned_as_its_filter_and_maintained()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var random = new Random(7);
+        var trades = Enumerable.Range(1, 12).Select(i => NewTrade(random, i, Open.AddSeconds(i))).ToList();
+        var desk = new PocoSourceBuilder("desk")
+            .NamingPolicy(PocoNamingPolicy.SnakeCase)
+            .AddTable("trades", (IReadOnlyList<Trade>)trades, t => t.OrderedBy(x => x.Ts))
+            .Build();
+        await using var engine = await ChalkEngine.CreateAsync(
+            new ChalkEngineOptions { Sources = [desk], Planner = sidecar.CreatePlanner() }, Ct);
+
+        var prepared = await engine.PrepareAsync(
+            "SELECT asset, SUM(CASE WHEN qty > 0 THEN qty END) AS bought FROM trades GROUP BY asset", ct: Ct);
+
+        // The sum of a CASE becomes a filtered SUM0 and a filtered COUNT, which say whether it is NULL.
+        var filters = PlanWalker.Rels(prepared.Plan)
+            .Select(rel => rel.KindCase switch
+            {
+                Rel.KindOneofCase.Aggregate => rel.Aggregate,
+                Rel.KindOneofCase.HashAggregate => rel.HashAggregate.Aggregate,
+                Rel.KindOneofCase.StreamAggregate => rel.StreamAggregate.Aggregate,
+                _ => null,
+            })
+            .OfType<Aggregate>()
+            .SelectMany(aggregate => aggregate.Measures)
+            .Where(measure => measure.Filter is not null)
+            .Select(measure => measure.Filter)
+            .ToList();
+        Assert.NotEmpty(filters);
+        Assert.All(filters, filter =>
+        {
+            Assert.Equal(FunctionId.IsTrue, filter.Call.Function);
+            Assert.Equal(Expr.KindOneofCase.FieldRef, Assert.Single(filter.Call.Args).KindCase);
+        });
+        await using var maintained = await prepared.MaintainAsync([], -1, [0], Ct);
+    }
 
     [Theory]
     [MemberData(nameof(Statements))]
