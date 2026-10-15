@@ -2575,7 +2575,7 @@ parents' rules too. A row that takes a kind from another along `Inherited` or `R
 reaches a role only where every table the path steps down to admits it, in a scope
 their rules allow. A role a parent's rule leaves out reads nothing along the path, and
 has no say in the child's column rules there either. A table's own rule, scopes
-included, holds over every route into it.
+included, holds along its paths as it does on its own row.
 
 Sometimes a child should be read by its parent's *value* of a kind, as a marking, by
 roles that may not read the parent: a tasking carries its asset's classification, and

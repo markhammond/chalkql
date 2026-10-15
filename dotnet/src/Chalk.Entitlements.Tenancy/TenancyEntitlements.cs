@@ -1313,7 +1313,7 @@ public sealed class TenancyEntitlements
     /// </remarks>
     private TableVisibility Paths(TenancyCompiler.TableModel model, TenancyPrincipal principal)
     {
-        // The table's own scope test holds over every route into it, its paths included (F209).
+        // The table's own scope test holds along its paths as on its own row (F209).
         if (!InItsScope(model, principal))
         {
             return TableVisibility.None;

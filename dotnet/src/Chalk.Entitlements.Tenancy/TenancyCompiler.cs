@@ -2542,7 +2542,7 @@ internal static class TenancyCompiler
     /// One perspective's membership across the roles a path reaches (D358): each role the table
     /// admits that the path reaches, with its groups and its global grant, under the scope tests of
     /// the parents whose rules it is read under; and the whole under the table's own scope test,
-    /// which holds over every route into the table (F209). <c>FALSE</c> where the path reaches no
+    /// which holds along its paths as on its own row (F209). <c>FALSE</c> where the path reaches no
     /// role at all.
     /// </summary>
     /// <remarks>
