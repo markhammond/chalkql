@@ -1130,7 +1130,7 @@ internal static class TenancyCompiler
                 + ". A row entitled through its parent is visible whenever the parent row is, so the rule "
                 + $"cannot keep it to {Listed(scopes)}. "
                 + (parentScopes.Count == 0
-                    ? $"Take the scopes off the rule of '{declared.Name}'"
+                    ? $"Remove the scopes from the visibility rule of '{declared.Name}'"
                     : $"Name {Listed(beyond)} on '{declared.Name}' too")
                 + $", or entitle '{declared.Name}' with Inherited paths, which read both rules.");
         }
