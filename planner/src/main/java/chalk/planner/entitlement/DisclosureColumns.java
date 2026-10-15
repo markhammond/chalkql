@@ -19,11 +19,13 @@ import org.apache.calcite.rel.core.Join;
 import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.core.Project;
 import org.apache.calcite.rel.core.Sort;
+import org.apache.calcite.rel.core.Union;
 import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalJoin;
 import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.rel.logical.LogicalSort;
+import org.apache.calcite.rel.logical.LogicalUnion;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rex.RexBuilder;
@@ -44,11 +46,11 @@ import org.apache.calcite.util.mapping.Mappings;
  * conditions the sanitiser chooses a value by. So the leaf computes it, as an integer of the report's
  * own order, and this class carries it to the root through whatever the statement's shape is.
  *
- * <p>The carry is deliberately narrow. A projection, a filter, a sort and a join all keep a row a
- * row, so a carried column travels through them and the answer stays exact; an aggregate, a set
- * operation or a window makes a row out of several and the leaf's per-row answer means nothing there,
- * so the carry stops and the sibling falls back to the report's own constant label for the column,
- * which is the most that position can honestly say. What a sibling never is, is absent: it is emitted
+ * <p>The carry is deliberately narrow. A projection, a filter, a sort, a join and a {@code UNION ALL}
+ * all keep a row a row, so a carried column travels through them and the answer stays exact; an
+ * aggregate, a set operation that merges rows or a window makes a row out of several and the leaf's
+ * per-row answer means nothing there, so the carry stops and the sibling falls back to the report's
+ * own constant label for the column, which is the most that position can honestly say. What a sibling never is, is absent: it is emitted
  * for every column with an entitled origin whether the disclosure varies or not, so a consumer has
  * one code path.
  *
@@ -102,8 +104,13 @@ public final class DisclosureColumns {
    * The tree with every leaf's carried columns pulled up as far as the statement's shape allows.
    *
    * @param carriers the narrowing projection each leaf handed back, and the wide one under it
+   * @param emitted what each emitted leaf's columns disclose, for an input's constant labels
    */
-  static Carried pullUp(RelNode rel, Map<RelNode, RelNode> carriers, RexBuilder rexBuilder) {
+  static Carried pullUp(
+      RelNode rel,
+      Map<RelNode, RelNode> carriers,
+      Map<RelNode, Disclosed[]> emitted,
+      RexBuilder rexBuilder) {
     RelNode wide = carriers.get(rel);
     if (wide != null) {
       int width = rel.getRowType().getFieldCount();
@@ -118,28 +125,28 @@ public final class DisclosureColumns {
       // A sub-query reads the outer row by index, and a correlation variable names a node's row as
       // it stands. Widening under one of those would move what they point at, so the carry stops
       // here and everything below it goes back to the arity it had.
-      return barrier(rel, carriers, rexBuilder);
+      return barrier(rel, carriers, emitted, rexBuilder);
     }
 
     if (rel instanceof Project project) {
-      Carried in = pullUp(project.getInput(), carriers, rexBuilder);
+      Carried in = pullUp(project.getInput(), carriers, emitted, rexBuilder);
       if (isCarrying(in)) {
         return project(project, in, rexBuilder);
       }
-      return barrier(rel, carriers, rexBuilder);
+      return barrier(rel, carriers, emitted, rexBuilder);
     }
     if (rel instanceof Filter filter) {
-      Carried in = pullUp(filter.getInput(), carriers, rexBuilder);
+      Carried in = pullUp(filter.getInput(), carriers, emitted, rexBuilder);
       if (isCarrying(in)) {
         return new Carried(
             LogicalFilter.create(in.rel(), permute(filter.getCondition(), in.originals(), rexBuilder)),
             in.originals(),
             in.sources());
       }
-      return barrier(rel, carriers, rexBuilder);
+      return barrier(rel, carriers, emitted, rexBuilder);
     }
     if (rel instanceof Sort sort) {
-      Carried in = pullUp(sort.getInput(), carriers, rexBuilder);
+      Carried in = pullUp(sort.getInput(), carriers, emitted, rexBuilder);
       if (isCarrying(in)) {
         return new Carried(
             LogicalSort.create(
@@ -153,12 +160,15 @@ public final class DisclosureColumns {
             in.originals(),
             in.sources());
       }
-      return barrier(rel, carriers, rexBuilder);
+      return barrier(rel, carriers, emitted, rexBuilder);
     }
     if (rel instanceof Join join && join.getJoinType().projectsRight()) {
-      return join(join, carriers, rexBuilder);
+      return join(join, carriers, emitted, rexBuilder);
     }
-    return barrier(rel, carriers, rexBuilder);
+    if (rel instanceof Union union && union.all) {
+      return union(union, carriers, emitted, rexBuilder);
+    }
+    return barrier(rel, carriers, emitted, rexBuilder);
   }
 
   private static boolean isCarrying(Carried carried) {
@@ -203,11 +213,15 @@ public final class DisclosureColumns {
   }
 
   /** The join, with both sides carrying and the right's columns moved along by what the left added. */
-  private static Carried join(Join join, Map<RelNode, RelNode> carriers, RexBuilder rexBuilder) {
-    Carried left = pullUp(join.getLeft(), carriers, rexBuilder);
-    Carried right = pullUp(join.getRight(), carriers, rexBuilder);
+  private static Carried join(
+      Join join,
+      Map<RelNode, RelNode> carriers,
+      Map<RelNode, Disclosed[]> emitted,
+      RexBuilder rexBuilder) {
+    Carried left = pullUp(join.getLeft(), carriers, emitted, rexBuilder);
+    Carried right = pullUp(join.getRight(), carriers, emitted, rexBuilder);
     if (!isCarrying(left) && !isCarrying(right)) {
-      return barrier(join, carriers, rexBuilder);
+      return barrier(join, carriers, emitted, rexBuilder);
     }
 
     int oldLeft = join.getLeft().getRowType().getFieldCount();
@@ -253,14 +267,74 @@ public final class DisclosureColumns {
   }
 
   /**
+   * A {@code UNION ALL}: every row is one input's row, so each input appends, for every column, what
+   * that row disclosed — the meet of what it carried there or, where it carried nothing, its own
+   * constant label for the column — and the union carries one column for each. A leaf split over a
+   * membership into a semi-join branch and an anti-join branch is one of these (F36).
+   */
+  private static Carried union(
+      Union union,
+      Map<RelNode, RelNode> carriers,
+      Map<RelNode, Disclosed[]> emitted,
+      RexBuilder rexBuilder) {
+    List<Carried> carried = new ArrayList<>(union.getInputs().size());
+    boolean carrying = false;
+    for (RelNode input : union.getInputs()) {
+      Carried in = pullUp(input, carriers, emitted, rexBuilder);
+      carried.add(in);
+      carrying |= isCarrying(in);
+    }
+    if (!carrying) {
+      return barrier(union, carriers, emitted, rexBuilder);
+    }
+
+    int width = union.getRowType().getFieldCount();
+    RelDataType ordinal = rexBuilder.getTypeFactory().createSqlType(SqlTypeName.INTEGER);
+    List<RelNode> inputs = new ArrayList<>(carried.size());
+    for (int i = 0; i < carried.size(); i++) {
+      Carried in = carried.get(i);
+      Disclosed[] own = DisclosureFlow.of(union.getInputs().get(i), emitted);
+      List<RexNode> exprs = new ArrayList<>(width * 2);
+      List<String> names = new ArrayList<>(width * 2);
+      List<String> produced = in.rel().getRowType().getFieldNames();
+      for (int f = 0; f < width; f++) {
+        exprs.add(rexBuilder.makeInputRef(in.rel(), in.originals()[f]));
+        names.add(produced.get(in.originals()[f]));
+      }
+      for (int f = 0; f < width; f++) {
+        List<Integer> sources = new ArrayList<>(in.sources().get(f));
+        RexNode disclosed =
+            sources.isEmpty()
+                ? rexBuilder.makeExactLiteral(BigDecimal.valueOf(ordinalOf(own[f])), ordinal)
+                : meet(in, sources, rexBuilder);
+        exprs.add(rexBuilder.ensureType(ordinal, disclosed, true));
+        names.add(CARRIED_PREFIX + (width + f));
+      }
+      inputs.add(
+          LogicalProject.create(
+              in.rel(), ImmutableList.<RelHint>of(), exprs, names, Set.<CorrelationId>of()));
+    }
+
+    List<Set<Integer>> sources = new ArrayList<>(width);
+    for (int f = 0; f < width; f++) {
+      sources.add(Set.of(width + f));
+    }
+    return new Carried(LogicalUnion.create(inputs, true), identity(width), sources);
+  }
+
+  /**
    * A node the carry cannot pass: its inputs go back to the arity they had, and it is rebuilt over
    * them unchanged. Everything above it falls back to the report's constant label.
    */
-  private static Carried barrier(RelNode rel, Map<RelNode, RelNode> carriers, RexBuilder rexBuilder) {
+  private static Carried barrier(
+      RelNode rel,
+      Map<RelNode, RelNode> carriers,
+      Map<RelNode, Disclosed[]> emitted,
+      RexBuilder rexBuilder) {
     List<RelNode> inputs = new ArrayList<>(rel.getInputs().size());
     boolean changed = false;
     for (RelNode input : rel.getInputs()) {
-      Carried in = pullUp(input, carriers, rexBuilder);
+      Carried in = pullUp(input, carriers, emitted, rexBuilder);
       RelNode narrowed = narrow(input, in, rexBuilder);
       changed |= narrowed != input;
       inputs.add(narrowed);
@@ -328,16 +402,7 @@ public final class DisclosureColumns {
       return rexBuilder.makeLiteral(NAMES[ordinalOf(flow[column])], stringType);
     }
 
-    RexNode meet = rexBuilder.makeInputRef(carried.rel(), sources.get(0));
-    for (int i = 1; i < sources.size(); i++) {
-      RexNode next = rexBuilder.makeInputRef(carried.rel(), sources.get(i));
-      meet =
-          rexBuilder.makeCall(
-              SqlStdOperatorTable.CASE,
-              rexBuilder.makeCall(SqlStdOperatorTable.GREATER_THAN_OR_EQUAL, meet, next),
-              meet,
-              next);
-    }
+    RexNode meet = meet(carried, sources, rexBuilder);
 
     List<RexNode> operands = new ArrayList<>();
     for (int name = 1; name < NAMES.length; name++) {
@@ -352,6 +417,21 @@ public final class DisclosureColumns {
     }
     operands.add(rexBuilder.makeLiteral(NAMES[1], stringType));
     return rexBuilder.makeCall(SqlStdOperatorTable.CASE, operands);
+  }
+
+  /** The meet of carried columns {@code sources}: the greatest ordinal, the least disclosure. */
+  private static RexNode meet(Carried carried, List<Integer> sources, RexBuilder rexBuilder) {
+    RexNode meet = rexBuilder.makeInputRef(carried.rel(), sources.get(0));
+    for (int i = 1; i < sources.size(); i++) {
+      RexNode next = rexBuilder.makeInputRef(carried.rel(), sources.get(i));
+      meet =
+          rexBuilder.makeCall(
+              SqlStdOperatorTable.CASE,
+              rexBuilder.makeCall(SqlStdOperatorTable.GREATER_THAN_OR_EQUAL, meet, next),
+              meet,
+              next);
+    }
+    return meet;
   }
 
   /**

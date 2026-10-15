@@ -158,6 +158,62 @@ public sealed class DisclosureColumnTests(SharedSidecar sidecar)
         Assert.Equal(folded, shared);
     }
 
+    /// <summary>
+    /// A list past the fold ceiling stays a relation, and inside the row predicate's OR the leaf is
+    /// split over it into a semi-join branch and an anti-join branch under a <c>UNION ALL</c>. Each
+    /// row keeps the siblings it has with the list folded: the row's own disclosure, and one for
+    /// every column with an entitled origin.
+    /// </summary>
+    [Fact]
+    public async Task A_list_past_the_fold_ceiling_gives_the_siblings_it_gives_folded()
+    {
+        var folded = TenancyFixture.Principal(
+            user: 1, managerOrgs: [1], agentOrgs: [2, 3], auditorOrgs: [], subjectPairs: []);
+        var unfolded = new RequestContext
+        {
+            Scalars = folded.Scalars,
+            ScalarTypes = folded.ScalarTypes,
+            Lists = folded.Lists,
+            Relations = folded.Relations,
+            FoldMaxRows = 1,
+        };
+        const string sql = "SELECT id, first_name FROM members ORDER BY id";
+
+        var rows = await RowsAsync(sql, folded, Siblings);
+        Assert.Equal(rows, await RowsAsync(sql, unfolded, Siblings));
+        Assert.DoesNotContain(rows, row => row.Contains("PER_ROW", StringComparison.Ordinal));
+    }
+
+    /// <summary>Every row of a <c>UNION ALL</c> is one input's row, and keeps the siblings it had there.</summary>
+    [Fact]
+    public async Task A_union_all_keeps_each_rows_siblings()
+    {
+        var whole = await RowsAsync(
+            "SELECT id, first_name FROM members ORDER BY id", TenancyFixture.U1, Siblings);
+        var halves = await RowsAsync(
+            "SELECT id, first_name FROM members WHERE id <= 2 "
+            + "UNION ALL SELECT id, first_name FROM members WHERE id > 2 ORDER BY id",
+            TenancyFixture.U1,
+            Siblings);
+
+        Assert.Equal(whole, halves);
+    }
+
+    /// <summary>
+    /// The carry stops at an aggregate, so a grouped key's sibling is its column's constant label; a
+    /// count of rows reads no entitled column and has none.
+    /// </summary>
+    [Fact]
+    public async Task A_grouped_key_keeps_its_sibling_and_a_count_of_rows_has_none()
+    {
+        await using var engine = await EngineAsync();
+        var prepared = await engine.WithEntitlements(Siblings).PrepareAsync(
+            "SELECT org_id, COUNT(*) AS n FROM members GROUP BY org_id ORDER BY org_id", TenancyFixture.U1);
+
+        Assert.Equal(["org_id", "org_id__disclosure", "n"], prepared.OutputSchema.FieldsList.Select(f => f.Name));
+        Assert.Equal(["1|FULL|2", "2|FULL|3"], await ReadAsync(engine, prepared.Query, executeWith: null));
+    }
+
     // ---------------------------------------------------------------- the harness
 
     /// <summary>A member's row, so a protected value is read off the fixture and never restated.</summary>
