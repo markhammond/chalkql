@@ -114,7 +114,7 @@ public sealed class MaintainedPivotTests(SharedSidecar sidecar, ITestOutputHelpe
         await using var maintained = await prepared.MaintainAsync([now], 0, [0, 1], Ct);
         var held = new Dictionary<string, object?[]>(StringComparer.Ordinal);
         var watch = Stopwatch.StartNew();
-        Apply(await maintained.UpdateAsync([now], new DateTimeOffset(now, TimeSpan.Zero), whole: false, Ct), held);
+        Apply(await maintained.UpdateAsync([now], new DateTimeOffset(now, TimeSpan.Zero), engine.Version, whole: false, Ct), held);
         output.WriteLine($"first update: {watch.Elapsed.TotalMilliseconds:F1} ms; holds {maintained.StateBytes / 1024} KB");
         Compare(held, await StatementAsync(engine, prepared, now), 0);
 
@@ -161,7 +161,7 @@ public sealed class MaintainedPivotTests(SharedSidecar sidecar, ITestOutputHelpe
             }, Ct);
 
             watch.Restart();
-            var update = await maintained.UpdateAsync([at], new DateTimeOffset(at, TimeSpan.Zero), whole: false, Ct);
+            var update = await maintained.UpdateAsync([at], new DateTimeOffset(at, TimeSpan.Zero), engine.Version, whole: false, Ct);
             updates.Add(watch.Elapsed.TotalMilliseconds);
             Apply(update, held);
             watch.Restart();

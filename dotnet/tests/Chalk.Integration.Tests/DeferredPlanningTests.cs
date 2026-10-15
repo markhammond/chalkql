@@ -162,7 +162,7 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         await using var desk = await DeskAsync(new GatedPlanner(sidecar.CreatePlanner()), [], []);
         var checkedOne = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
-        checkedOne.Decorate(schema => schema, (_, _) => { });
+        checkedOne.Decorate(schema => schema, _ => { });
         var plain = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
         var planned = plain.PlanDigest;
 

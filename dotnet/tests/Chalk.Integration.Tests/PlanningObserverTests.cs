@@ -228,7 +228,7 @@ public sealed class PlanningObserverTests(SharedSidecar sidecar) : IDisposable
         await desk.Engine.RefreshAsync(
             r => r.Replace(desk.Source, "fills", Fills(30, books: 3)).Replace(desk.Source, "books", Books(3)), Ct);
         var held = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
-        held.Decorate(schema => schema, (_, _) => { });
+        held.Decorate(schema => schema, _ => { });
         await using var view = await desk.Engine.MaterializeAsync(held, Options(maintenance: ViewMaintenance.Recompute), Ct);
 
         await desk.Engine.RefreshAsync(

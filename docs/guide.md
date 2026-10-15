@@ -1915,6 +1915,45 @@ var options = new ViewOptions<Key, Row>
 
 The build uses the host's spare time. Where updates run back to back, it competes with them.
 
+### A view under an access policy
+
+A statement prepared through `EntitledEngine` makes a view as any other does, recomputed or
+incremental. The view's rows are what the statement returns, at each epoch, to the principal it
+was prepared for:
+
+```csharp
+var entitled = engine.WithEntitlements(new EntitlementsOptions(), audit);
+var feed = await entitled.PrepareAsync(sql, entitlements.Bind(principal));
+await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions<Key, Row>
+{
+    // …
+    Maintenance = ViewMaintenance.Incremental,
+});
+```
+
+- **The policy's steps are kept as the statement's.** A row filter is a filter; a mask, a
+  placeholder or a group-size floor is a projection; a path is a join to the keys its grants name.
+  Incremental maintenance runs them on the changes as it runs them on rows. When the view is made,
+  its maintained plan is checked to keep every filter and projection over a table under the policy
+  exactly as the statement's plan has it, and refused if it would not.
+- **Grants that change belong in a table**, reached along a path. Sharing is then a row added in a
+  refresh, and withdrawing a row deleted: the view gives or drops the rows they govern at its next
+  update. Grants folded into the statement when it was prepared stand for the view's life: to revoke
+  one, dispose of the view and make another.
+- **Lists too long to fold** stay relations, as they do for an execution, and every update binds
+  them from the context the statement was prepared with. The statement reads them through a
+  membership test, or splits its rows over them with a semi and an anti join; both are maintained.
+- **Every update is audited.** An `IEntitlementsAudit` hears one event per update that runs, before
+  it runs, whether the view recomputes or is maintained. The event carries the purpose and actor of
+  the context the statement was prepared with, the digest of the plan the update runs, and the
+  `Version` the update brings the view to, which says which grants a table of grants held. An update
+  with nothing new to read runs nothing and raises nothing, and an execution's event has no version.
+- **A change of shape keeps the policy.** When a table the statement reads changes shape, the view
+  prepares the statement again through the policy, with the same context, and its updates go on
+  being audited.
+- **The context is the statement's.** A statement prepared with `context.Shape()` binds its values at
+  each execution, and a view binds none: incremental maintenance refuses it when the view is made.
+
 ### What a view refuses
 
 A view's rows are exactly what its statement returns at each epoch, so it refuses, when it is made,
@@ -1942,8 +1981,8 @@ view is disposed. A view's rows, with what it keeps of its databases or by incre
 maintenance, past its `StateBudget` fail the update with `MemoryBudgetExceeded`, and the view keeps
 the epoch it held.
 
-Not in this release: a view through `EntitledEngine`, reading a view as of an earlier epoch, and a
-source that another engine also refreshes, whose changes a view sees only at its next update.
+Not in this release: reading a view as of an earlier epoch, and a source that another engine also
+refreshes, whose changes a view sees only at its next update.
 
 ## Logging a statement safely
 
@@ -2675,7 +2714,9 @@ source for.
     sees the digest, the hashes, and, from the context that execution runs with, the row
     counts of its lists and its `Purpose` and `Actor` — and no value. For a plan prepared
     with `context.Shape()`, that is the context bound at execution, so one plan run for
-    many principals is audited as each of them in turn.
+    many principals is audited as each of them in turn. Each update of a standing view of
+    the statement is audited too, with the `Version` it reads: see
+    [A view under an access policy](#a-view-under-an-access-policy).
   - A statement that is refused is told what was refused and what its result would have
     been: see [When a statement is refused](#when-a-statement-is-refused).
 - **Fail closed, twice.** Chalk proves the model for every plan, rather than assuming

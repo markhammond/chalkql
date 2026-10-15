@@ -162,16 +162,16 @@ public sealed class PreparedQuery
 
     /// <summary>
     /// Lets one extension decorate the schema every batch of this query carries, hear about each
-    /// execution before it runs (step 26c, D213), and check each plan the query takes after its
+    /// run before it starts (step 26c, D213), and check each plan the query takes after its
     /// prepare. The one seam the core keeps for a feature it does not itself know: today the
     /// entitlement wrapper puts <c>chalk.disclosure</c> on the fields, raises its audit event and
     /// checks plans against its report through it, and nothing in this package names any of them.
     /// </summary>
     /// <param name="decorateSchema">What every batch's schema becomes.</param>
-    /// <param name="beforeExecute">
-    /// Heard before each execution, with the context that execution runs with: the one it binds, for
-    /// a query prepared with shapes, or the one it was prepared with, for a query that folded its
-    /// values (F166). Never the prepare's shape, which holds no values and belongs to no request.
+    /// <param name="beforeRun">
+    /// Heard before each execution, and before each update of a standing view of the query,
+    /// recomputed or maintained (D361), with what the run binds and the epoch it reads
+    /// (<see cref="StatementRun"/>).
     /// </param>
     /// <param name="checkPlan">
     /// Shown each plan the query takes after its prepare, before it is used: one for another length of
@@ -179,14 +179,21 @@ public sealed class PreparedQuery
     /// throws to refuse one: the execution is then refused, or the background plan is not taken. A
     /// query decorated without one is never planned again in the background.
     /// </param>
+    /// <param name="prepareAgain">
+    /// Prepares the query again in a view's place, decorated as this one is (D361): a table it reads
+    /// changed shape, or its plan drifted past what the background plans again. Without one, the
+    /// query is prepared again with its context, undecorated.
+    /// </param>
     internal void Decorate(
         Func<ArrowSchema, ArrowSchema>? decorateSchema,
-        Action<PreparedQuery, RequestContext?>? beforeExecute,
-        Action<PlanResult>? checkPlan = null)
+        Action<StatementRun>? beforeRun,
+        Action<PlanResult>? checkPlan = null,
+        Func<PrepareReason, CancellationToken, ValueTask<PreparedQuery>>? prepareAgain = null)
     {
         _decorateSchema = decorateSchema;
-        _beforeExecute = beforeExecute;
+        _beforeRun = beforeRun;
         _checkPlan = checkPlan;
+        _prepareAgain = prepareAgain;
         if (decorateSchema is null)
         {
             return;
@@ -205,8 +212,9 @@ public sealed class PreparedQuery
     }
 
     private Func<ArrowSchema, ArrowSchema>? _decorateSchema;
-    private Action<PreparedQuery, RequestContext?>? _beforeExecute;
+    private Action<StatementRun>? _beforeRun;
     private Action<PlanResult>? _checkPlan;
+    private Func<PrepareReason, CancellationToken, ValueTask<PreparedQuery>>? _prepareAgain;
     private readonly IReadOnlyList<int> _prepareShape;
 
     /// <summary>The output columns, named. A column discloses nothing beyond its name to this package.</summary>
@@ -558,7 +566,7 @@ public sealed class PreparedQuery
     internal bool MayPlanAgain =>
         LogicalDigest != 0
         && (_checkPlan is not null
-            || (_options.Extensions.Count == 0 && _decorateSchema is null && _beforeExecute is null))
+            || (_options.Extensions.Count == 0 && _decorateSchema is null && _beforeRun is null))
         && !_notTheSame
         && _engine.IsCurrent(Volatile.Read(ref _state).Plan, Volatile.Read(ref _state).TablesRead);
 
@@ -878,13 +886,18 @@ public sealed class PreparedQuery
     /// <summary>
     /// The same, with the values a query prepared under execute-time binding still needs (D209).
     /// </summary>
+    /// <param name="version">
+    /// For an update of a standing view, the version of the epoch it reads, which the run is heard
+    /// with (D361); null for any other execution.
+    /// </param>
     internal async ValueTask<QueryExecution> ExecuteAsync(
         object?[] values,
         RequestContext? context,
         ExecutionArena? arena,
         CancellationToken ct,
         ArenaPool? pool = null,
-        int clockParameter = -1)
+        int clockParameter = -1,
+        long? version = null)
     {
         // An execution's own context is checked as a prepare's is, once, here (D317, D323).
         var bindings = Bindings(context?.Bound(_engine.Binding));
@@ -893,7 +906,7 @@ public sealed class PreparedQuery
             throw new ContextRequiredException(RequiredContext);
         }
         
-        _beforeExecute?.Invoke(this, bindings);
+        _beforeRun?.Invoke(new StatementRun(bindings, PlanDigest, version));
 
         // One read: this execution runs the plan it finds here, whatever swaps in while it runs.
         var state = Volatile.Read(ref _state);
@@ -972,7 +985,9 @@ public sealed class PreparedQuery
     internal async ValueTask<MaintainedQuery> MaintainAsync(
         object?[] values, int clockParameter, int[] key, CancellationToken ct)
     {
-        if (RequiredContext.Count > 0)
+        // A statement prepared with values carries them, and each update binds them as an execution
+        // does; one prepared with a shape has none to bind (D361).
+        if (RequiredContext.Count > 0 || Context is { ShapeNames.Count: > 0 })
         {
             throw new NotMaintainableException(
                 "the statement reads a request's context, which a maintained view does not bind.", "root");
@@ -992,8 +1007,21 @@ public sealed class PreparedQuery
         }
 
         maintained.Key = key;
-        return new MaintainedQuery(this, maintained, plan.Rendered.Slots, plan.Compiled.ParameterTypes, state);
+        return new MaintainedQuery(
+            this, maintained, plan.Rendered.Slots, plan.Compiled.ParameterTypes, plan.Compiled.BoundScalars, state);
     }
+
+    /// <summary>
+    /// This statement prepared again in a view's place, for <paramref name="reason"/>: by the extension
+    /// that decorated it, which decorates the new one as it did this one, or else from
+    /// <paramref name="sql"/> and <paramref name="options"/> with the context this one was prepared
+    /// with (D361).
+    /// </summary>
+    internal ValueTask<PreparedQuery> PrepareAgainAsync(
+        string sql, PrepareOptions options, PrepareReason reason, CancellationToken ct) =>
+        _prepareAgain is { } again
+            ? again(reason, ct)
+            : _engine.PrepareAgainAsync(sql, Context, options, reason, ct);
 
     /// <summary>
     /// The plans this statement runs, as an object that is another once plans the background made
@@ -1001,9 +1029,31 @@ public sealed class PreparedQuery
     /// </summary>
     internal object Plans => Volatile.Read(ref _state);
 
-    /// <summary>The values a maintained update binds, flattened as an execution's are.</summary>
-    internal object?[] Flatten(object?[] values, IReadOnlyList<PlaceholderSlot> slots, IReadOnlyList<ChalkType> types) =>
-        ParameterBinder.Flatten(Parameters, values, slots, types, _engine.Binding);
+    /// <summary>
+    /// What an update of a maintained view of this statement binds, as an execution binds it, and the
+    /// update heard first, as an execution is (D361). The context is the one the statement was
+    /// prepared with, which a view runs with: its scalars the plan reads as parameters go after the
+    /// view's values, and its relations, such as a list too long to fold, are bound by name.
+    /// </summary>
+    /// <param name="values">The view's parameter values.</param>
+    /// <param name="slots">The placeholders of the plan the update runs.</param>
+    /// <param name="types">Their types.</param>
+    /// <param name="boundScalars">The context's scalars that plan reads as parameters.</param>
+    /// <param name="planDigest">The digest of that plan.</param>
+    /// <param name="version">The version of the epoch the update brings the view to.</param>
+    internal (object?[] Values, IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>>? Relations) BindUpdate(
+        object?[] values,
+        IReadOnlyList<PlaceholderSlot> slots,
+        IReadOnlyList<ChalkType> types,
+        IReadOnlyList<BoundScalar> boundScalars,
+        ulong planDigest,
+        long version)
+    {
+        var bindings = Bindings(null);
+        _beforeRun?.Invoke(new StatementRun(bindings, planDigest, version));
+        var flat = ParameterBinder.Flatten(Parameters, values, slots, types, _engine.Binding);
+        return (WithBoundScalars(flat, boundScalars, bindings), BoundRelations(bindings));
+    }
 
     /// <summary>The placeholders the parameter at <paramref name="parameter"/> fills: one for each time the text names it.</summary>
     private static int[] ClockSlots(IReadOnlyList<PlaceholderSlot> slots, int parameter)

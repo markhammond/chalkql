@@ -53,6 +53,8 @@ Chalk.Entitlements.EntitlementsAuditEvent.Purpose.get -> string!
 Chalk.Entitlements.EntitlementsAuditEvent.Purpose.init -> void
 Chalk.Entitlements.EntitlementsAuditEvent.Tables.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.EntitledTableReport!>!
 Chalk.Entitlements.EntitlementsAuditEvent.Tables.init -> void
+Chalk.Entitlements.EntitlementsAuditEvent.Version.get -> long?
+Chalk.Entitlements.EntitlementsAuditEvent.Version.init -> void
 Chalk.Entitlements.EntitlementsExplanation
 Chalk.Entitlements.EntitlementsExplanation.EntitlementsExplanation() -> void
 Chalk.Entitlements.EntitlementsExplanation.Tables.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.ExplainedTable!>!

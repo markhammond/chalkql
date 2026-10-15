@@ -74,23 +74,29 @@ internal sealed class MaintainedPlan : IAsyncDisposable
     /// bound and <paramref name="now"/> as the current time, and returns which keys' rows changed — or,
     /// when <paramref name="whole"/> or after a restart, every row the result holds.
     /// </summary>
+    /// <param name="relations">
+    /// The relations the statement's context binds by name, as an execution binds them: a list too
+    /// long to fold into the plan, read where the plan reads it (D361). Null for a statement that binds
+    /// none.
+    /// </param>
     public async ValueTask<MaintainedChanges> UpdateAsync(
         IReadOnlyList<object?> parameters,
         DateTimeOffset now,
         bool whole,
         ExecutionArena arena,
         ExecutionStats stats,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>>? relations = null)
     {
         try
         {
-            return await AttemptAsync(parameters, now, whole, arena, stats, ct).ConfigureAwait(false);
+            return await AttemptAsync(parameters, now, whole, arena, stats, relations, ct).ConfigureAwait(false);
         }
         catch (TopNRefillException)
         {
             // A bounded LIMIT ran short of rows it no longer holds (D360). The failed attempt discarded
             // every state, so this one computes from nothing, as a restart does.
-            return await AttemptAsync(parameters, now, whole, arena, stats, ct).ConfigureAwait(false);
+            return await AttemptAsync(parameters, now, whole, arena, stats, relations, ct).ConfigureAwait(false);
         }
     }
 
@@ -104,11 +110,12 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         bool whole,
         ExecutionArena arena,
         ExecutionStats stats,
+        IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>>? relations,
         CancellationToken ct)
     {
         try
         {
-            return await UpdateOnceAsync(parameters, now, whole, arena, stats, ct).ConfigureAwait(false);
+            return await UpdateOnceAsync(parameters, now, whole, arena, stats, relations, ct).ConfigureAwait(false);
         }
         catch (ExecutionException wrapped) when (wrapped.InnerException is MaintainedKeyException or TopNRefillException)
         {
@@ -123,6 +130,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         bool whole,
         ExecutionArena arena,
         ExecutionStats stats,
+        IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>>? relations,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(parameters);
@@ -135,7 +143,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         {
             tree.Context.ReadSet ??= _compiled.NewReadSet();
             CompiledPlan.Pin(tree.Context.ReadSet, arena);
-            tree.Context.Begin(stats, arena, bound, now);
+            tree.Context.Begin(stats, arena, bound, now, relations);
             _ = tree.Root.ExecuteAsync(ct);
             try
             {
