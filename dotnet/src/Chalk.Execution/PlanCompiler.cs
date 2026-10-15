@@ -1097,6 +1097,19 @@ internal static class PlanCompiler
                 context, path, schema, types, input(context), ordering, offset, count);
         }
 
+        public (RowBound Offset, RowBound? Count) Bounds(Rel rel, string path) => rel.KindCase switch
+        {
+            Rel.KindOneofCase.TopN => (
+                Bound(rel.TopN.OffsetParam, rel.TopN.OffsetParam is not null, rel.TopN.Offset, rel.TopN.Offset != 0, "OFFSET", path),
+                Bound(rel.TopN.CountParam, rel.TopN.CountParam is not null, rel.TopN.Count, rel.TopN.Count != 0, "LIMIT", path)),
+            Rel.KindOneofCase.Fetch => (
+                Bound(rel.Fetch.OffsetParam, rel.Fetch.OffsetParam is not null, rel.Fetch.Offset, rel.Fetch.Offset != 0, "OFFSET", path),
+                rel.Fetch.CountParam is not null || rel.Fetch.HasCount
+                    ? Bound(rel.Fetch.CountParam, rel.Fetch.CountParam is not null, rel.Fetch.Count, rel.Fetch.HasCount, "LIMIT", path)
+                    : null),
+            _ => throw new InvalidPlanException("I-IR-5", path, $"{rel.KindCase} has no LIMIT bounds"),
+        };
+
         /// <summary>
         /// A <c>LIMIT</c> or <c>OFFSET</c> bound: the parameter when the plan carries one, else the
         /// number it wrote down (D285). The two are alternatives, so a plan that sets both is
@@ -2023,4 +2036,10 @@ internal interface IPlanCompilation
 
     /// <summary>The expression compiler of the operator at <paramref name="path"/>.</summary>
     ExpressionCompiler ExpressionsAt(string path);
+
+    /// <summary>
+    /// A <c>TOPN</c>'s or a <c>FETCH</c>'s bounds as an execution reads them (D285): the offset, and
+    /// the count or null for none, each the parameter the plan carries or the number it wrote down.
+    /// </summary>
+    (RowBound Offset, RowBound? Count) Bounds(Rel rel, string path);
 }

@@ -74,12 +74,63 @@ internal sealed class MaintainedPlan : IAsyncDisposable
     /// bound and <paramref name="now"/> as the current time, and returns which keys' rows changed — or,
     /// when <paramref name="whole"/> or after a restart, every row the result holds.
     /// </summary>
+    /// <param name="relations">
+    /// The relations the statement's context binds by name, as an execution binds them: a list too
+    /// long to fold into the plan, read where the plan reads it (D361). Null for a statement that binds
+    /// none.
+    /// </param>
     public async ValueTask<MaintainedChanges> UpdateAsync(
         IReadOnlyList<object?> parameters,
         DateTimeOffset now,
         bool whole,
         ExecutionArena arena,
         ExecutionStats stats,
+        CancellationToken ct,
+        IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>>? relations = null)
+    {
+        try
+        {
+            return await AttemptAsync(parameters, now, whole, arena, stats, relations, ct).ConfigureAwait(false);
+        }
+        catch (TopNRefillException)
+        {
+            // A bounded LIMIT ran short of rows it no longer holds (D360). The failed attempt discarded
+            // every state, so this one computes from nothing, as a restart does.
+            return await AttemptAsync(parameters, now, whole, arena, stats, relations, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// One attempt, with what an operator raises for the plan as a whole taken out of the execution's
+    /// own failure: a key the rows before a LIMIT give twice, or a LIMIT that must read again (D360).
+    /// </summary>
+    private async ValueTask<MaintainedChanges> AttemptAsync(
+        IReadOnlyList<object?> parameters,
+        DateTimeOffset now,
+        bool whole,
+        ExecutionArena arena,
+        ExecutionStats stats,
+        IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>>? relations,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await UpdateOnceAsync(parameters, now, whole, arena, stats, relations, ct).ConfigureAwait(false);
+        }
+        catch (ExecutionException wrapped) when (wrapped.InnerException is MaintainedKeyException or TopNRefillException)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(wrapped.InnerException);
+            throw;
+        }
+    }
+
+    private async ValueTask<MaintainedChanges> UpdateOnceAsync(
+        IReadOnlyList<object?> parameters,
+        DateTimeOffset now,
+        bool whole,
+        ExecutionArena arena,
+        ExecutionStats stats,
+        IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>>? relations,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(parameters);
@@ -92,7 +143,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         {
             tree.Context.ReadSet ??= _compiled.NewReadSet();
             CompiledPlan.Pin(tree.Context.ReadSet, arena);
-            tree.Context.Begin(stats, arena, bound, now);
+            tree.Context.Begin(stats, arena, bound, now, relations);
             _ = tree.Root.ExecuteAsync(ct);
             try
             {
@@ -469,9 +520,14 @@ internal sealed class ResultState
     }
 }
 
-/// <summary>A maintained result whose key holds two rows (design 64 §6 a): the key, rendered.</summary>
-internal sealed class MaintainedKeyException(string key)
-    : InvalidOperationException($"the key ({key}) holds two rows of the result.")
+/// <summary>
+/// A maintained result whose key holds two rows (design 64 §6 a): the key, rendered, and where the two
+/// rows were — of the result, or before the statement's <c>LIMIT</c>, whose order they tie under (D360).
+/// </summary>
+internal sealed class MaintainedKeyException(string key, string where = "of the result")
+    : InvalidOperationException($"the key ({key}) holds two rows {where}.")
 {
     public string Key { get; } = key;
+
+    public string Where { get; } = where;
 }

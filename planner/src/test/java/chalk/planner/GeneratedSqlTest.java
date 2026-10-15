@@ -615,6 +615,20 @@ class GeneratedSqlTest {
     assertThat(fetch.hasCount()).isFalse();
   }
 
+  /** A pushed {@code ORDER BY … LIMIT} records the order its limit keeps, as a local one does. */
+  @Test
+  void a_pushed_order_by_and_limit_records_its_order() {
+    RemoteQuery ordered =
+        remoteQuery(
+            TestCatalogs.duckDbProfile(),
+            "SELECT l_orderkey FROM db.lineitem ORDER BY l_orderkey LIMIT 5");
+    RemoteQuery unordered =
+        remoteQuery(TestCatalogs.duckDbProfile(), "SELECT l_orderkey FROM db.lineitem LIMIT 5");
+
+    assertThat(onlyFetch(ordered.getPushedPlan()).getOrderCount()).isEqualTo(1);
+    assertThat(onlyFetch(unordered.getPushedPlan()).getOrderCount()).isZero();
+  }
+
   private static chalk.ir.v1.Fetch onlyFetch(Rel rel) {
     if (rel.getKindCase() == Rel.KindCase.FETCH) {
       return rel.getFetch();

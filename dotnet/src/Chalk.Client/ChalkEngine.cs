@@ -849,12 +849,13 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         PrepareAsync(sql, context, options, parameterValueHints: null, PrepareReason.Host, ct);
 
     /// <summary>
-    /// A statement a view prepares again in place of its own, as the host would, for
-    /// <paramref name="reason"/>: so a host observing the engine's planning hears why.
+    /// A statement a view prepares again in place of its own, as the host would, with the context its
+    /// own was prepared with, for <paramref name="reason"/>: so a host observing the engine's planning
+    /// hears why.
     /// </summary>
     internal ValueTask<PreparedQuery> PrepareAgainAsync(
-        string sql, PrepareOptions options, PrepareReason reason, CancellationToken ct) =>
-        PrepareAsync(sql, context: null, options, parameterValueHints: null, reason, ct);
+        string sql, RequestContext? context, PrepareOptions options, PrepareReason reason, CancellationToken ct) =>
+        PrepareAsync(sql, context, options, parameterValueHints: null, reason, ct);
 
     /// <summary>
     /// The one prepare underneath all of them. <paramref name="parameterValueHints"/> is what the

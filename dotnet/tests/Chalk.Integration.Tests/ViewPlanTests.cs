@@ -172,7 +172,7 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
         await desk.Engine.RefreshAsync(
             r => r.Replace(desk.Source, "fills", Fills(30, books: 3)).Replace(desk.Source, "books", Books(3)), Ct);
         var before = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
-        before.Decorate(schema => schema, (_, _) => { });
+        before.Decorate(schema => schema, _ => { });
         await using var view = await desk.Engine.MaterializeAsync(
             before, Options(ViewMaintenance.Recompute, refresh: host.Refresh), Ct);
 

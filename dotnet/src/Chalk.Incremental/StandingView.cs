@@ -701,14 +701,14 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             MaintainedUpdate update;
             try
             {
-                update = await maintained.UpdateAsync(values, stamp.Clock ?? default, whole, ct).ConfigureAwait(false);
+                update = await maintained.UpdateAsync(values, stamp.Clock ?? default, stamp.Version, whole, ct).ConfigureAwait(false);
             }
             catch (MaintainedKeyFault duplicate)
             {
                 var fault = new StandingViewException(
                     ChalkErrorCodes.DeclarationNotHeld,
                     $"The view's key ({string.Join(", ", _options.Key)}) = ({duplicate.Key}) is given by two rows "
-                    + $"of the result at version {stamp.Version}. A view keeps one row per key: correct the "
+                    + $"{duplicate.Where} at version {stamp.Version}. A view keeps one row per key: correct the "
                     + "statement's key, or the Map that builds the host's key from it. The view keeps this fault "
                     + "until it is disposed.");
                 _fault = fault;
@@ -721,7 +721,8 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         }
 
         _lastWhole = true;
-        await using var execution = await prepared.ExecuteAsync(values, context: null, arena: null, ct).ConfigureAwait(false);
+        await using var execution = await prepared.ExecuteAsync(
+            values, context: null, arena: null, ct, version: stamp.Version).ConfigureAwait(false);
         if (_readsTime)
         {
             _clock.Now = stamp.Clock!.Value;
@@ -989,7 +990,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         try
         {
             var reason = _prepared.ChangedShape ? PrepareReason.ChangedShape : PrepareReason.Drift;
-            var prepared = await _engine.PrepareAgainAsync(_sql, _prepare, reason, ct).ConfigureAwait(false);
+            var prepared = await _prepared.PrepareAgainAsync(_sql, _prepare, reason, ct).ConfigureAwait(false);
             var key = KeyOf(prepared, _options.Key);
             ViewChecks.Check(_engine, prepared, key, _options);
             if (_maintained is { } kept)
@@ -1172,7 +1173,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
                     // Its rows are not read: the update that swaps it in gives them whole.
                     var values = _binding.Values(prepared, _engine.ClockName, stamp.Clock);
-                    await next.UpdateAsync(values, stamp.Clock ?? default, whole: false, stop).ConfigureAwait(false);
+                    await next.UpdateAsync(values, stamp.Clock ?? default, stamp.Version, whole: false, stop).ConfigureAwait(false);
                     return next;
                 }
                 catch

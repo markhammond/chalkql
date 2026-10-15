@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "3899536246032730905",
+  "planDigest": "7370798212939381219",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -272,7 +272,21 @@
         }
       },
       "offset": "100",
-      "count": "50"
+      "count": "50",
+      "order": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_TIMESTAMP",
+              "precision": 9
+            },
+            "fieldRef": {
+              "index": 1
+            }
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
     }
   }
 }

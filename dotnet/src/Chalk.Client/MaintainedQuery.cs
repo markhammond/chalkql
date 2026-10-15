@@ -18,6 +18,7 @@ internal sealed class MaintainedQuery : IAsyncDisposable
     private readonly MaintainedPlan _plan;
     private readonly IReadOnlyList<PlaceholderSlot> _slots;
     private readonly IReadOnlyList<ChalkType> _parameterTypes;
+    private readonly IReadOnlyList<Chalk.Ir.BoundScalar> _boundScalars;
     private readonly ExecutionArena _arena = new();
 
     internal MaintainedQuery(
@@ -25,12 +26,14 @@ internal sealed class MaintainedQuery : IAsyncDisposable
         MaintainedPlan plan,
         IReadOnlyList<PlaceholderSlot> slots,
         IReadOnlyList<ChalkType> parameterTypes,
+        IReadOnlyList<Chalk.Ir.BoundScalar> boundScalars,
         PreparedQuery.PlanState plans)
     {
         _query = query;
         _plan = plan;
         _slots = slots;
         _parameterTypes = parameterTypes;
+        _boundScalars = boundScalars;
         PlannedWith = plans;
         PlanDigest = plans.Plan.PlanDigest;
     }
@@ -61,20 +64,24 @@ internal sealed class MaintainedQuery : IAsyncDisposable
     /// </summary>
     /// <param name="values">The view's parameter values, the clock's among them.</param>
     /// <param name="now">The epoch's time, which the statement reads as the current one.</param>
+    /// <param name="version">
+    /// The epoch's version, which the statement's decoration hears the update with: under an access
+    /// policy, its audit event (D361).
+    /// </param>
     /// <param name="whole">Give every row the result holds, for a view whose rows lag the statement's.</param>
     /// <param name="ct">Cancels the update, which leaves the statement to start again at the next.</param>
     public async ValueTask<MaintainedUpdate> UpdateAsync(
-        object?[] values, DateTimeOffset now, bool whole, CancellationToken ct)
+        object?[] values, DateTimeOffset now, long version, bool whole, CancellationToken ct)
     {
-        var flat = _query.Flatten(values, _slots, _parameterTypes);
+        var (flat, relations) = _query.BindUpdate(values, _slots, _parameterTypes, _boundScalars, PlanDigest, version);
         MaintainedChanges changes;
         try
         {
-            changes = await _plan.UpdateAsync(flat, now, whole, _arena, new ExecutionStats(), ct).ConfigureAwait(false);
+            changes = await _plan.UpdateAsync(flat, now, whole, _arena, new ExecutionStats(), ct, relations).ConfigureAwait(false);
         }
         catch (MaintainedKeyException duplicate)
         {
-            throw new MaintainedKeyFault(duplicate.Key);
+            throw new MaintainedKeyFault(duplicate.Key, duplicate.Where);
         }
 
         return new MaintainedUpdate
@@ -117,7 +124,11 @@ internal sealed class NotMaintainableException(string reason, string path) : Exc
 }
 
 /// <summary>A maintained result whose key came to hold two rows: the key, rendered.</summary>
-internal sealed class MaintainedKeyFault(string key) : Exception($"the key ({key}) holds two rows.")
+internal sealed class MaintainedKeyFault(string key, string where = "of the result")
+    : Exception($"the key ({key}) holds two rows {where}.")
 {
     public string Key { get; } = key;
+
+    /// <summary>Where the two rows were: of the result, or before the statement's <c>LIMIT</c> (D360).</summary>
+    public string Where { get; } = where;
 }

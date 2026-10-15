@@ -1792,6 +1792,22 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   the table builds whose later columns are the join's keys or its time: that index keeps rows with
   one key and time in their order in the table, so the ties are the table's. Otherwise key the join
   on both sides. Which the planner chooses, a seek or a lookup, depends on the tables' sizes.
+- **`ORDER BY … LIMIT`** at the statement's end is maintained, in whichever form the planner wrote
+  it, and so is an `OFFSET`. The step holds rows in the `LIMIT`'s order, compared as the executor's
+  sort compares them, and sends readers only the rows that crossed into or out of the window.
+  - Over an aggregate, a join or an as-of join it holds every row its input gives: over an aggregate,
+    one per group.
+  - Over a table read through filters and projections it holds the first `offset + count` rows and
+    a margin of as many again. When removals leave the window short of rows it no longer holds, it
+    reads the table again in the same update. So a feed of a table's newest rows holds a few hundred
+    rows, never the table, and an append-only table never makes it read again.
+  - A `LIMIT ?` binds once, when the view is made, as every parameter of a view does.
+  - Two rows that tie under the whole order have one key, so the key does not hold before the
+    `LIMIT`: the view is faulted with `DeclarationNotHeld`, saying so.
+- **Semi and anti joins.** An `EXISTS` or an `IN` over a subquery, which the planner writes as a
+  semi join, is maintained. A left row is given while at least one right row matches it, so a right
+  row's change moves it in or out only when the count of its matches crosses zero. An anti join gives
+  a left row while none does.
 - **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's
   `StateBudget`: a budget tuned for a recompute may need raising. The first update computes
   everything, and takes longer than a recompute.
@@ -1799,14 +1815,22 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   The next computes the statement from nothing, and a reader is sent only the keys that differ from
   what it holds.
 - **What is not maintained.** A statement with any of these is refused when the view is made, with
-  `UnsupportedInView`, naming the operator and where it is in the plan: window functions; `LIMIT` and
-  `FETCH`; set operations but `UNION ALL`; right, full, semi and anti joins; `DISTINCT`, ordered,
-  holistic and host aggregates; an as-of join whose right input is not a table read, or a lookup
-  of one key in the table's order, through filters and projections; an as-of seek whose key has one
-  type in its table and another on its left; an index lookup over a range of keys; the clock in a
-  join's condition; a source
-  outside the engine's epochs; a `LIST`, composite or `BINARY` value in what an operator keeps; and
-  the reference executor. A view that recomputes takes all of them.
+  `UnsupportedInView`, naming the operator and where it is in the plan:
+  - window functions;
+  - a `LIMIT` before the statement's last step;
+  - set operations but `UNION ALL`;
+  - right and full joins;
+  - `DISTINCT`, ordered, holistic and host aggregates;
+  - an as-of join whose right input is not a table read, or a lookup of one key in the table's
+    order, through filters and projections;
+  - an as-of seek whose key has one type in its table and another on its left;
+  - an index lookup over a range of keys;
+  - the clock in a join's condition;
+  - a source outside the engine's epochs;
+  - a `LIST`, composite or `BINARY` value in what an operator keeps;
+  - the reference executor.
+
+  A view that recomputes takes all of them.
 
 ### Plans a view takes
 
@@ -1894,6 +1918,45 @@ var options = new ViewOptions<Key, Row>
 
 The build uses the host's spare time. Where updates run back to back, it competes with them.
 
+### A view under an access policy
+
+A statement prepared through `EntitledEngine` makes a view as any other does, recomputed or
+incremental. The view's rows are what the statement returns, at each epoch, to the principal it
+was prepared for:
+
+```csharp
+var entitled = engine.WithEntitlements(new EntitlementsOptions(), audit);
+var feed = await entitled.PrepareAsync(sql, entitlements.Bind(principal));
+await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions<Key, Row>
+{
+    // …
+    Maintenance = ViewMaintenance.Incremental,
+});
+```
+
+- **The policy's steps are kept as the statement's.** A row filter is a filter; a mask, a
+  placeholder or a group-size floor is a projection; a path is a join to the keys its grants name.
+  Incremental maintenance runs them on the changes as it runs them on rows. When the view is made,
+  its maintained plan is checked to keep every filter and projection over a table under the policy
+  exactly as the statement's plan has it, and refused if it would not.
+- **Grants that change belong in a table**, reached along a path. Sharing is then a row added in a
+  refresh, and withdrawing a row deleted: the view gives or drops the rows they govern at its next
+  update. Grants folded into the statement when it was prepared stand for the view's life: to revoke
+  one, dispose of the view and make another.
+- **Lists too long to fold** stay relations, as they do for an execution, and every update binds
+  them from the context the statement was prepared with. The statement reads them through a
+  membership test, or splits its rows over them with a semi and an anti join; both are maintained.
+- **Every update is audited.** An `IEntitlementsAudit` hears one event per update that runs, before
+  it runs, whether the view recomputes or is maintained. The event carries the purpose and actor of
+  the context the statement was prepared with, the digest of the plan the update runs, and the
+  `Version` the update brings the view to, which says which grants a table of grants held. An update
+  with nothing new to read runs nothing and raises nothing, and an execution's event has no version.
+- **A change of shape keeps the policy.** When a table the statement reads changes shape, the view
+  prepares the statement again through the policy, with the same context, and its updates go on
+  being audited.
+- **The context is the statement's.** A statement prepared with `context.Shape()` binds its values at
+  each execution, and a view binds none: incremental maintenance refuses it when the view is made.
+
 ### What a view refuses
 
 A view's rows are exactly what its statement returns at each epoch, so it refuses, when it is made,
@@ -1905,18 +1968,24 @@ what would make that untrue or unstable:
 | a host function declared `Stable()` or `Volatile()` | `NondeterministicFunction` | declare `Immutable()`, or join what it reads |
 | one that does not say `Immutable()`, under `RequireExplicitImmutable` | `NondeterministicFunction` | declare `Immutable()` |
 | the current time on an engine without a clock | `ClockRequired` | name `ChalkEngineOptions.Clock` |
-| `ORDER BY` without `LIMIT`; a `LIMIT` not ordered by the key | `UnsupportedInView` | drop it, or order by every key column |
+| `ORDER BY` without `LIMIT`; a `LIMIT` not ordered by the key, or before the statement's last step | `UnsupportedInView` | drop it, order by every key column, or move it to the end |
 | a source over a database, without the opt-in | `SourceOutsideEpochs` | `DatabaseReads = WhenRefreshed`, or load it into an in-process table |
 | with it, a database read the rest of the statement binds: a lookup, broadcast or adaptive join | `UnsupportedInView` | let the join be local |
 | under `Maintenance = Incremental`, what incremental maintenance does not keep | `UnsupportedInView` | `ViewMaintenance.Recompute` |
+
+An `ORDER BY … LIMIT` is kept as the statement's last step, in whichever form the planner writes it:
+a `TOPN`, or a `FETCH` over a read already in that order or over a sort. Each records the order whose
+first rows it keeps. The `ORDER BY` must include every key column, so that no two rows tie and the
+input's order never chooses between them. The statement may still filter or order by a column it
+does not select.
 
 A key the result gives twice faults the view with `DeclarationNotHeld`, naming the key, until the
 view is disposed. A view's rows, with what it keeps of its databases or by incremental
 maintenance, past its `StateBudget` fail the update with `MemoryBudgetExceeded`, and the view keeps
 the epoch it held.
 
-Not in this release: a view through `EntitledEngine`, reading a view as of an earlier epoch, and a
-source that another engine also refreshes, whose changes a view sees only at its next update.
+Not in this release: reading a view as of an earlier epoch, and a source that another engine also
+refreshes, whose changes a view sees only at its next update.
 
 ## Logging a statement safely
 
@@ -2668,7 +2737,9 @@ source for.
     sees the digest, the hashes, and, from the context that execution runs with, the row
     counts of its lists and its `Purpose` and `Actor` — and no value. For a plan prepared
     with `context.Shape()`, that is the context bound at execution, so one plan run for
-    many principals is audited as each of them in turn.
+    many principals is audited as each of them in turn. Each update of a standing view of
+    the statement is audited too, with the `Version` it reads: see
+    [A view under an access policy](#a-view-under-an-access-policy).
   - A statement that is refused is told what was refused and what its result would have
     been: see [When a statement is refused](#when-a-statement-is-refused).
 - **Fail closed, twice.** Chalk proves the model for every plan, rather than assuming

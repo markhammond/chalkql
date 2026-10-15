@@ -1,5 +1,6 @@
 using Chalk.Catalog;
 using Chalk.Execution.Expressions;
+using Chalk.Execution.Operators;
 using Chalk.Ir;
 using Chalk.Sources;
 using CatalogContext = Chalk.Catalog.CatalogContext;
@@ -21,6 +22,11 @@ namespace Chalk.Execution.Maintenance;
 /// <para>
 /// The states are made here, once for the plan, and every operator tree built over it shares them.
 /// </para>
+/// <para>
+/// A plan under an access policy is kept as any other (D361): its row filters and sanitisers are
+/// filters and projections, and its paths joins. The compiled plan is then held to keep every filter
+/// and projection over a governed read (<see cref="PolicyNodes"/>).
+/// </para>
 /// </remarks>
 internal sealed class MaintainedCompiler
 {
@@ -36,6 +42,12 @@ internal sealed class MaintainedCompiler
     private readonly Dictionary<uint, Rel> _sharedPlans = [];
     private readonly Dictionary<uint, (SharedState State, Rel Rewritten)> _shared = [];
     private readonly Dictionary<Rel, ReadState> _reads = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>Every tree the maintained plan compiles, which the policy's nodes are checked against.</summary>
+    private readonly List<Rel> _compiled = [];
+
+    /// <summary>The statement's last step: the first beneath its projections, where a LIMIT is kept (D360).</summary>
+    private readonly Rel _end;
 
     public MaintainedCompiler(
         Plan plan,
@@ -59,6 +71,12 @@ internal sealed class MaintainedCompiler
         foreach (var shared in plan.Shared)
         {
             _sharedPlans[shared.Id] = shared.Rel;
+        }
+
+        _end = plan.Root;
+        while (_end.KindCase == Rel.KindOneofCase.Project)
+        {
+            _end = _end.Project.Input;
         }
     }
 
@@ -84,8 +102,32 @@ internal sealed class MaintainedCompiler
         }
 
         var rewritten = Rewrite(_plan.Root, "root");
-        return _compilation.Node(rewritten, string.Empty);
+        var root = Node(rewritten, string.Empty);
+        PolicyNodes.Check(_plan, Governed, _compiled);
+        return root;
     }
+
+    /// <summary>A tree compiled into the maintained plan: its operators, and a record of it for the policy's check.</summary>
+    private OperatorFactory Node(Rel rel, string parentPath)
+    {
+        _compiled.Add(rel);
+        return _compilation.Node(rel, parentPath);
+    }
+
+    /// <summary>
+    /// The table a read or a lookup reads under an access policy, or as the policy's own read along a
+    /// path; null for any other node.
+    /// </summary>
+    private string? Governed(Rel rel) => rel.KindCase switch
+    {
+        Rel.KindOneofCase.Read when rel.PolicyInjected || rel.Read.Correlation || Entitled(rel.Read.Table) =>
+            rel.Read.Table.Table,
+        Rel.KindOneofCase.IndexLookup when rel.PolicyInjected || Entitled(rel.IndexLookup.Table) =>
+            rel.IndexLookup.Table.Table,
+        _ => null,
+    };
+
+    private bool Entitled(TableRef table) => _catalog.FindTable(table.Schema, table.Table)?.Table.Entitlement is not null;
 
     private Rel Rewrite(Rel rel, string parent)
     {
@@ -104,6 +146,9 @@ internal sealed class MaintainedCompiler
                 Rel.KindOneofCase.Filter => Filter(rel, path),
                 Rel.KindOneofCase.Project => Project(rel, path),
                 Rel.KindOneofCase.Sort => Rewrite(rel.Sort.Input, path),
+                Rel.KindOneofCase.TopN when ReferenceEquals(rel, _end) => Limit(rel, path, rel.TopN.Input, rel.TopN.Fields),
+                Rel.KindOneofCase.Fetch when ReferenceEquals(rel, _end) && rel.Fetch.Order.Count > 0 =>
+                    Limit(rel, path, rel.Fetch.Input, rel.Fetch.Order),
                 Rel.KindOneofCase.SetOp => SetOp(rel, path),
                 Rel.KindOneofCase.HashJoin => Join(
                     rel, path, rel.HashJoin.Left, rel.HashJoin.Right, rel.HashJoin.LeftKeys, rel.HashJoin.RightKeys,
@@ -134,7 +179,8 @@ internal sealed class MaintainedCompiler
     private static string Unmaintained(Rel rel) => rel.KindCase switch
     {
         Rel.KindOneofCase.Fetch or Rel.KindOneofCase.TopN =>
-            "a LIMIT or FETCH over a table is not maintained: its rows depend on an order.",
+            "a LIMIT is maintained only as the statement's last step, ordered by its ORDER BY; here its rows "
+            + "would depend on the input's order.",
         Rel.KindOneofCase.Window => "a window function over a table is not maintained.",
         Rel.KindOneofCase.Hop or Rel.KindOneofCase.Session => "a hopping or session window is not maintained.",
         Rel.KindOneofCase.Unnest => "UNNEST over a table is not maintained.",
@@ -148,7 +194,7 @@ internal sealed class MaintainedCompiler
     private Rel Island(Rel rel, string path)
     {
         var types = Types(rel.RowType);
-        var body = _compilation.Node(rel, path);
+        var body = Node(rel, path);
         var state = new IslandState(body, types, ReadsClock(rel), _settings.BatchSize);
         States.Add(state);
         var weighted = Weighted(rel.RowType);
@@ -280,13 +326,10 @@ internal sealed class MaintainedCompiler
                 + "maintained view reads in-process tables refreshed in epochs.");
         }
 
+        // A table under an access policy is read as any other: the policy's filters and projections over
+        // the read are the statement's, kept by the rewrite and held to it by PolicyNodes (D361).
         var descriptor = _catalog.FindTable(table.Schema, table.Table)
             ?? throw new InvalidPlanException("I-IR-6", "root", $"the catalog has no table {table.Schema}.{table.Table}");
-        if (descriptor.Table.Entitlement is not null)
-        {
-            throw new NotMaintainedException($"the table '{table.Table}' carries an access policy, which a maintained view does not read under.");
-        }
-
         var state = new ReadState(
             tracked,
             table.SourceId,
@@ -338,12 +381,12 @@ internal sealed class MaintainedCompiler
         var inputTypes = Types(input.RowType);
         var state = new ClockedState(inputTypes, Types(rel.RowType), _settings.BatchSize);
         States.Add(state);
-        var inputFactory = _compilation.Node(Rewrite(input, path), path);
+        var inputFactory = Node(Rewrite(input, path), path);
         var replayRow = Weighted(input.RowType);
         var replaySchema = ArrowTypeMapping.ToArrowSchema(replayRow);
         var replayTypes = Types(replayRow);
         var replay = Substituted(replayRow, context => new ReplayChanges(context, path, replaySchema, replayTypes, state));
-        var body = _compilation.Node(over(replay), path);
+        var body = Node(over(replay), path);
         var weighted = Weighted(rel.RowType);
         var schema = ArrowTypeMapping.ToArrowSchema(weighted);
         var types = Types(weighted);
@@ -385,9 +428,10 @@ internal sealed class MaintainedCompiler
         Expr? condition,
         JoinType type)
     {
-        if (type is not (JoinType.Inner or JoinType.Left))
+        if (type is not (JoinType.Inner or JoinType.Left or JoinType.Semi or JoinType.Anti))
         {
-            throw new NotMaintainedException($"a {type.ToString().ToUpperInvariant()} join is not maintained; inner and left joins are.");
+            throw new NotMaintainedException(
+                $"a {type.ToString().ToUpperInvariant()} join is not maintained; inner, left, semi and anti joins are.");
         }
 
         if (condition is not null)
@@ -403,11 +447,17 @@ internal sealed class MaintainedCompiler
             Types(rel.RowType),
             [.. leftKeys.Select(k => (int)k)],
             [.. rightKeys.Select(k => (int)k)],
-            type == JoinType.Left,
+            type switch
+            {
+                JoinType.Left => JoinMode.Left,
+                JoinType.Semi => JoinMode.Semi,
+                JoinType.Anti => JoinMode.Anti,
+                _ => JoinMode.Inner,
+            },
             _settings.BatchSize);
         States.Add(state);
-        var leftFactory = _compilation.Node(Rewrite(left, path), path);
-        var rightFactory = _compilation.Node(Rewrite(right, path), path);
+        var leftFactory = Node(Rewrite(left, path), path);
+        var rightFactory = Node(Rewrite(right, path), path);
         var weighted = Weighted(rel.RowType);
         var schema = ArrowTypeMapping.ToArrowSchema(weighted);
         var types = Types(weighted);
@@ -436,7 +486,7 @@ internal sealed class MaintainedCompiler
                 + "maintained: its ties would break by an order the view cannot keep.");
         var leftTypes = Types(join.Left.RowType);
         var rightTypes = Types(join.Right.RowType);
-        var leftFactory = _compilation.Node(Rewrite(join.Left, path), path);
+        var leftFactory = Node(Rewrite(join.Left, path), path);
         var rightRewritten = Rewrite(join.Right, path);
         if (rightRead.KindCase == Rel.KindOneofCase.IndexLookup && !InTableOrder(join, rightRead.IndexLookup))
         {
@@ -447,7 +497,7 @@ internal sealed class MaintainedCompiler
                 + "join's keys or its time, is maintained; or key the join on both sides.");
         }
 
-        var rightFactory = _compilation.Node(rightRewritten, path);
+        var rightFactory = Node(rightRewritten, path);
 
         // Its right rows are placed by their order in the table, so a replacement is read whole.
         _reads[rightRead].WholeOnRewrite = true;
@@ -523,7 +573,7 @@ internal sealed class MaintainedCompiler
         }
 
         var keys = ReadOf(seek.Table, read, keyRow);
-        var leftFactory = _compilation.Node(Rewrite(seek.Left, path), path);
+        var leftFactory = Node(Rewrite(seek.Left, path), path);
         var state = new SeekState(
             leftTypes,
             output[leftWidth..],
@@ -567,7 +617,7 @@ internal sealed class MaintainedCompiler
             matcher.RowType.Fields.Add(right);
         }
 
-        var seekFactory = _compilation.Node(matcher, path);
+        var seekFactory = Node(matcher, path);
         var keysPath = $"{path}/Read";
         var keysWeighted = Weighted(keyRow);
         var keysSchema = ArrowTypeMapping.ToArrowSchema(keysWeighted);
@@ -591,7 +641,7 @@ internal sealed class MaintainedCompiler
     {
         var state = new AggregateState(Types(aggregate.Input.RowType), Types(rel.RowType), aggregate, _settings.BatchSize);
         States.Add(state);
-        var input = _compilation.Node(Rewrite(aggregate.Input, path), path);
+        var input = Node(Rewrite(aggregate.Input, path), path);
 
         // Over a table read through filters and projections that do not read the clock, a rewrite of
         // the table gives the aggregate the new rows only, and it builds its groups again from them
@@ -607,6 +657,31 @@ internal sealed class MaintainedCompiler
         return Substituted(weighted, context => new AggregateChanges(context, path, schema, types, state, input(context), rebuildsOn));
     }
 
+    /// <summary>
+    /// The LIMIT the statement ends in (D360, design 73 §4): a maintained top-N step over its input's
+    /// changes. Over a table read through filters and projections it holds the window and a margin;
+    /// over anything else, every row its input gives.
+    /// </summary>
+    private Rel Limit(Rel rel, string path, Rel input, IReadOnlyList<SortField> order)
+    {
+        var (offset, count) = _compilation.Bounds(rel, path);
+        var ordering = new SortOrdering(order, input.RowType);
+        var beneath = input;
+        while (beneath.KindCase == Rel.KindOneofCase.Sort)
+        {
+            beneath = beneath.Sort.Input;
+        }
+
+        var state = new TopNState(
+            Types(input.RowType), ordering, offset, count, TableUnder(beneath) is not null, _settings.BatchSize);
+        States.Add(state);
+        var inputFactory = Node(Rewrite(input, path), path);
+        var weighted = Weighted(rel.RowType);
+        var schema = ArrowTypeMapping.ToArrowSchema(weighted);
+        var types = Types(weighted);
+        return Substituted(weighted, context => new TopNChanges(context, path, schema, types, state, inputFactory(context)));
+    }
+
     private Rel Shared(Rel rel, string path)
     {
         var id = rel.SharedRef.Id;
@@ -616,7 +691,7 @@ internal sealed class MaintainedCompiler
                 ? plan
                 : throw new InvalidPlanException("I-IR-4", path, $"the plan lists no shared plan {id}");
             var rewritten = Rewrite(body, $"shared#{id}");
-            var state = new SharedState(_compilation.Node(rewritten, $"shared#{id}"), Types(body.RowType), _settings.BatchSize);
+            var state = new SharedState(Node(rewritten, $"shared#{id}"), Types(body.RowType), _settings.BatchSize);
             States.Add(state);
             shared = (state, rewritten);
             _shared[id] = shared;
