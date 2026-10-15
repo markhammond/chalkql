@@ -365,8 +365,8 @@ public sealed class ThroughTests
         Assert.Contains(
             "its visibility rule holds in 'batch' alone, where 'threads' holds in every scope. A row "
             + "entitled through its parent is visible whenever the parent row is, so the rule cannot keep "
-            + "it to 'batch'. Take the scopes off the rule of 'messages', or entitle 'messages' with "
-            + "Inherited paths, which read both rules.",
+            + "it to 'batch'. Remove the scopes from the visibility rule of 'messages', or entitle "
+            + "'messages' with Inherited paths, which read both rules.",
             everywhere.Message,
             StringComparison.Ordinal);
 

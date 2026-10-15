@@ -2485,18 +2485,33 @@ policy anywhere in sight.
 
 **A table with no tenancy column of its own.** A chat message belongs to a thread, a
 line item to an order, a comment to a post — and the row itself says nothing about who
-may read it. `Restriction.Through("thread_id")` declares the relationship once, and
-reads the parent table and its key from the declared foreign key. The planner compiles
-it into one join with the parent's own entitled scan, so the child is exactly as visible
-as its parent, by every way into it: its grants, its creator, its host predicates. A
-visibility rule of the child's own that would admit fewer roles, or hold in fewer
-scopes, than the parent's is refused, because the join cannot hold it. To make a child
-narrower than its parent, take the parent's kinds along `Inherited` paths, which read
-both rules. What the child's columns disclose
-is decided on the *parent's* side of that join: once per parent row, not once per child
-row. Where the parent's whole chain is visible, over a NOT NULL declared key, the join
-is left out altogether, and the visibility is ALL. Tutorial chapter 11 shows three
-principals running one statement over such a table.
+may read it. `messages.Tenancy(t => t.Through(messages.Column("thread_id")))` declares
+the relationship once, and reads the parent table and its key from the declared foreign
+key. The planner compiles it into one join with the parent's own entitled scan, so the
+child is exactly as visible as its parent, by every way into the parent: its tenancy
+grants, its resource owner, its host predicates. A visibility rule of the child's own
+that would admit fewer roles, or hold in fewer scopes, than the parent's is refused,
+because the join cannot hold it. To make a child narrower than its parent, take the
+parent's kinds along `Inherited` paths, where the parent's rule and the child's own both
+hold. A reader holds on a child row the roles it holds on the parent row, so what the
+child's columns disclose is decided once per parent row, on the parent's side of the
+join, not once per child row. Where the parent's whole chain is visible, over a NOT NULL
+declared key, the join is left out altogether, and the visibility is ALL. Tutorial
+chapter 11 shows three principals running one statement over such a table.
+
+**`Through` or paths.** Take orders visible to managers, agents and suppliers, each
+placed by a customer (its `ResourceOwner`) and related to the vendors of the items its
+lines carry. Order 1 has line 1, an item of vendor 1's, and line 2, one of vendor 2's.
+
+- **Entitled `Through` its order,** a line is read by every way into the order. The
+  customer who placed order 1 reads both its lines. Vendor 2's supplier reads order 1
+  because line 2 carries its item, and so reads line 1 too.
+- **Along paths,** `Inherited(org).Through(orders)` and `Inherited(vendor).Through(items)`,
+  each kind is its own route. The supplier reads line 2 alone, and the customer, whom no
+  kind names, reads neither line.
+
+So use `Through` for a child that is part of its parent, like a message in its thread,
+and paths for a child whose readers differ from its parent's.
 
 **A column that says what each row disclosed.** The per-column report is one label for
 the whole result. That is all a caller needs — until a principal is a manager in one
@@ -2819,10 +2834,11 @@ table with one sensitive column belongs here too.
 A visibility rule, `Visible(new VisibilityRule { Roles = […] })`, names the roles that
 may see a table's rows; a table without one admits every role. A path holds its
 parents' rules too. A row that takes a kind from another along `Inherited` or `Related`
-reaches a role only where every table the path steps down to admits it, in a scope
-their rules allow. A role a parent's rule leaves out reads nothing along the path, and
-has no say in the child's column rules there either. A table's own rule, scopes
-included, holds along its paths as it does on its own row.
+reaches a role only where every table along the path admits it, in a scope their rules
+allow; a `Related` path's bridge is the exception, since the path only passes through
+it. A role a parent's rule leaves out reads nothing along the path, and its grants
+along the path do not count in the child's column rules either. The child's own rule,
+scopes included, also holds on every row a path admits.
 
 Sometimes a child should be read by its parent's *value* of a kind, as a marking, by
 roles that may not read the parent: a tasking carries its asset's classification, and
@@ -2838,13 +2854,16 @@ tasking.Tenancy(t => t
 An exemption covers the whole path, and `TenancyEntitlements.Exemptions` lists every
 one a policy makes, for a review to read. One that would change nothing is refused.
 
-A policy is refused when it compiles where a parent's rule would leave a role the child
-admits with no way into it at all, and the message names the role, the parent and the
-clause to add. Where the compiler cannot see that — the role keeps another route, and
-the policy declares no combinations — a grant that would reach nothing is refused when
+A policy is refused when it compiles if a parent's rule would leave a role the child
+admits with no way into the child at all; the message names the role, the parent and
+the clause to add. The compiler cannot always see that. If the role keeps another way
+in, and the policy declares no combinations, the compiler cannot know which kinds the
+role's grants will hold together; then a grant that would reach nothing is refused when
 it is bound. To ask the question at every path instead, call
-`RequireExplicitParentVisibility()` on the policy: then each role a parent leaves out
-must be named on the path, `ExemptFromParentVisibility` or `BoundByParentVisibility`.
+`RequireExplicitParentVisibility()` on the policy. Each role a parent leaves out must
+then be named on the path, either `ExemptFromParentVisibility` or
+`BoundByParentVisibility`, which states the default out loud: the parent's rule holds
+for that role.
 
 Sometimes a path has to leave its source. `Column.References(Column)` declares a link
 that a foreign key cannot state, because a foreign key is one source's claim about a
