@@ -2569,6 +2569,14 @@ takes one or more *restrictions*, OR-ed together:
 Unrestricted means every row is visible. The column rules still apply, so a reference
 table with one sensitive column belongs here too.
 
+A visibility rule, `Visible(new VisibilityRule { Roles = […] })`, names the roles that
+may see a table's rows; a table without one admits every role. It speaks for its own
+rows only. A row that takes a kind from another along `Inherited` or `Related` takes
+the value, as a marking, and its own rule decides who sees it. So a tasking can carry
+its asset's classification and be read by roles that may not read the asset. To keep
+a role from a child as well, give the child a rule of its own, or entitle it with
+`Through`, which makes a row visible only when its parent is.
+
 Sometimes a path has to leave its source. `Column.References(Column)` declares a link
 that a foreign key cannot state, because a foreign key is one source's claim about a
 table in *its own* schema. The link travels on the catalog, and a path step follows it
