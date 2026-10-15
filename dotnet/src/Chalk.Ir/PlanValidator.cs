@@ -405,6 +405,9 @@ public static class PlanValidator
                         throw Invalid("I-IR-5", kindPath, $"Fetch.count is {rel.Fetch.Count}; it must be >= 0 when set");
                     }
 
+                    // The order a limit keeps the first rows of (design 73): empty, or fields as a sort's.
+                    SortFields(rel.Fetch.Order, input, $"{kindPath}.order");
+
                     OneBound(rel.Fetch.CountParam is not null, rel.Fetch.HasCount, kindPath, "Fetch", "count");
                     OneBound(rel.Fetch.OffsetParam is not null, rel.Fetch.Offset != 0, kindPath, "Fetch", "offset");
                     RequireSameRow(output, input, kindPath, "Fetch output equals its input");

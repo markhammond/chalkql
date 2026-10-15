@@ -1902,10 +1902,16 @@ what would make that untrue or unstable:
 | a host function declared `Stable()` or `Volatile()` | `NondeterministicFunction` | declare `Immutable()`, or join what it reads |
 | one that does not say `Immutable()`, under `RequireExplicitImmutable` | `NondeterministicFunction` | declare `Immutable()` |
 | the current time on an engine without a clock | `ClockRequired` | name `ChalkEngineOptions.Clock` |
-| `ORDER BY` without `LIMIT`; a `LIMIT` not ordered by the key | `UnsupportedInView` | drop it, or order by every key column |
+| `ORDER BY` without `LIMIT`; a `LIMIT` not ordered by the key, or before the statement's last step | `UnsupportedInView` | drop it, order by every key column, or move it to the end |
 | a source over a database, without the opt-in | `SourceOutsideEpochs` | `DatabaseReads = WhenRefreshed`, or load it into an in-process table |
 | with it, a database read the rest of the statement binds: a lookup, broadcast or adaptive join | `UnsupportedInView` | let the join be local |
 | under `Maintenance = Incremental`, what incremental maintenance does not keep | `UnsupportedInView` | `ViewMaintenance.Recompute` |
+
+An `ORDER BY … LIMIT` is kept as the statement's last step, in whichever form the planner writes it:
+a `TOPN`, or a `FETCH` over a read already in that order or over a sort. Each records the order whose
+first rows it keeps. The `ORDER BY` must include every key column, so that no two rows tie and the
+input's order never chooses between them. The statement may still filter or order by a column it
+does not select.
 
 A key the result gives twice faults the view with `DeclarationNotHeld`, naming the key, until the
 view is disposed. A view's rows, with what it keeps of its databases or by incremental

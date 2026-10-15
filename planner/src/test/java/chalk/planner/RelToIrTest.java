@@ -356,6 +356,30 @@ class RelToIrTest {
   }
 
   @Test
+  void query_13s_fetch_records_the_order_by_whose_rows_it_keeps() {
+    // The scan already gives the ORDER BY's order, so no sort is planned; the order the limit keeps
+    // the first rows of is the statement's, written on the Fetch for a reader that must know it.
+    Plan plan = planner.plan(sql("13_fetch_offset_collated"));
+
+    Rel fetch = find(plan, Rel.KindCase.FETCH);
+
+    assertThat(fetch.getFetch().getOrderCount()).isEqualTo(1);
+    assertThat(fetch.getFetch().getOrder(0).getExpr().getFieldRef().getIndex())
+        .isEqualTo(fetch.getFetch().getInput().getRowType().getFieldsList().stream()
+            .map(chalk.ir.v1.Field::getName)
+            .toList()
+            .indexOf("ts"));
+  }
+
+  @Test
+  void a_limit_with_no_order_by_records_no_order() {
+    // Whatever order the scan happens to deliver, the statement asked for none.
+    Plan plan = planner.plan(sql("44_limit_offset_unordered"));
+
+    assertThat(find(plan, Rel.KindCase.FETCH).getFetch().getOrderCount()).isZero();
+  }
+
+  @Test
   void the_root_row_type_carries_the_select_list_names() {
     Plan plan = planner.plan(sql("07_group_by_basic"));
 

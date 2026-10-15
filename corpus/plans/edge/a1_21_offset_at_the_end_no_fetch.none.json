@@ -1,6 +1,6 @@
 {
   "irVersion": 1,
-  "planDigest": "17696903920647966601",
+  "planDigest": "379874395106755219",
   "contextId": "corpus",
   "catalogEpoch": "1",
   "outputType": {
@@ -178,7 +178,29 @@
           ]
         }
       },
-      "offset": "4"
+      "offset": "4",
+      "order": [
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_I32"
+            },
+            "fieldRef": {}
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        },
+        {
+          "expr": {
+            "type": {
+              "kind": "TYPE_KIND_STRING"
+            },
+            "fieldRef": {
+              "index": 1
+            }
+          },
+          "direction": "SORT_DIRECTION_ASC_NULLS_LAST"
+        }
+      ]
     }
   }
 }

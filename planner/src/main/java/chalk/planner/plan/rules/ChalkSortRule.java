@@ -51,7 +51,8 @@ public final class ChalkSortRule extends RelRule<ChalkRuleConfig> {
     boolean bounded = sort.offset != null || sort.fetch != null;
 
     RelNode ordered = convertInput(sort, collation);
-    call.transformTo(bounded ? ChalkLimit.create(ordered, sort.offset, sort.fetch) : ordered);
+    call.transformTo(
+        bounded ? ChalkLimit.create(ordered, collation, sort.offset, sort.fetch) : ordered);
 
     if (collation.getFieldCollations().isEmpty()) {
       // Pure LIMIT / OFFSET: there is nothing to sort, so there is no second alternative.
@@ -64,7 +65,9 @@ public final class ChalkSortRule extends RelRule<ChalkRuleConfig> {
     } else {
       RelNode explicitSort = ChalkSort.create(unordered, collation);
       call.transformTo(
-          sort.offset == null ? explicitSort : ChalkLimit.create(explicitSort, sort.offset, null));
+          sort.offset == null
+              ? explicitSort
+              : ChalkLimit.create(explicitSort, collation, sort.offset, null));
     }
   }
 

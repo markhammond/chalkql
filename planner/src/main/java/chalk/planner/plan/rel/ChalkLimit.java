@@ -25,11 +25,17 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 /**
  * Skip {@code offset} rows then emit at most {@code fetch}. Maps to the IR's {@code Fetch}.
  *
+ * <p>{@code order} is the {@code ORDER BY} whose first rows it keeps, which its input already
+ * delivers, and empty for a {@code LIMIT} the statement gave no order (design 73). It is written onto
+ * the IR's {@code Fetch} for a reader that must know the rows were chosen by an order — a view — and
+ * is the statement's, never the input's: a goaled scan's declared order is not an {@code ORDER BY}.
+ *
  * <p>A {@link SingleRel} rather than a {@code Sort} with an empty collation, so that the input's
  * ordering survives in the trait set — the IR says {@code Fetch} preserves input order and
  * collations, and a {@code Sort} node would advertise "no ordering" instead.
  */
 public final class ChalkLimit extends SingleRel implements ChalkRel {
+  private final RelCollation order;
   private final @Nullable RexNode offset;
   private final @Nullable RexNode fetch;
 
@@ -37,21 +43,29 @@ public final class ChalkLimit extends SingleRel implements ChalkRel {
       RelOptCluster cluster,
       RelTraitSet traitSet,
       RelNode input,
+      RelCollation order,
       @Nullable RexNode offset,
       @Nullable RexNode fetch) {
     super(cluster, traitSet, input);
+    this.order = order;
     this.offset = offset;
     this.fetch = fetch;
   }
 
-  public static ChalkLimit create(RelNode input, @Nullable RexNode offset, @Nullable RexNode fetch) {
+  public static ChalkLimit create(
+      RelNode input, RelCollation order, @Nullable RexNode offset, @Nullable RexNode fetch) {
     RelOptCluster cluster = input.getCluster();
     RelMetadataQuery mq = cluster.getMetadataQuery();
     RelTraitSet traits =
         cluster
             .traitSetOf(ChalkConvention.LOCAL)
             .replaceIfs(RelCollationTraitDef.INSTANCE, () -> RelMdCollation.limit(mq, input));
-    return new ChalkLimit(cluster, traits, input, offset, fetch);
+    return new ChalkLimit(cluster, traits, input, order, offset, fetch);
+  }
+
+  /** The {@code ORDER BY} whose first rows this keeps; empty for a {@code LIMIT} with none. */
+  public RelCollation order() {
+    return order;
   }
 
   public @Nullable RexNode offset() {
@@ -105,12 +119,15 @@ public final class ChalkLimit extends SingleRel implements ChalkRel {
 
   @Override
   public RelNode copy(RelTraitSet traitSet, List<RelNode> inputs) {
-    return new ChalkLimit(getCluster(), traitSet, onlyInput(inputs), offset, fetch);
+    return new ChalkLimit(getCluster(), traitSet, onlyInput(inputs), order, offset, fetch);
   }
 
   @Override
   public RelWriter explainTerms(RelWriter pw) {
-    return super.explainTerms(pw).itemIf("offset", offset, offset != null).itemIf("fetch", fetch, fetch != null);
+    return super.explainTerms(pw)
+        .itemIf("order", order, !order.getFieldCollations().isEmpty())
+        .itemIf("offset", offset, offset != null)
+        .itemIf("fetch", fetch, fetch != null);
   }
 
   /**

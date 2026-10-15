@@ -206,7 +206,10 @@ public final class RelToIr {
       }
       builder.setTopN(ir);
     } else if (node instanceof ChalkLimit limit) {
-      Fetch.Builder fetch = Fetch.newBuilder().setInput(toRel(limit.getInput()));
+      Fetch.Builder fetch =
+          Fetch.newBuilder()
+              .setInput(toRel(limit.getInput()))
+              .addAllOrder(sortFields(limit.order(), limit.getInput().getRowType()));
       DynamicParam offsetParam = boundParam(limit.offset());
       if (offsetParam == null) {
         fetch.setOffset(literalBound(limit.offset()));
@@ -646,6 +649,10 @@ public final class RelToIr {
     }
 
     Fetch.Builder fetch = Fetch.newBuilder().setInput(input);
+    if (orders) {
+      // The order the pushed sort gives, which is what this limit keeps the first rows of.
+      fetch.addAllOrder(sortFields(sort.getCollation(), sort.getInput().getRowType()));
+    }
     // A pushed bound is a literal or one of the statement's own parameters (D288). A parameter is
     // written into the pushed plan as the parameter it is, the same way a local `Fetch` writes one,
     // so the algebra the query text came from says what the text's placeholder stands for; the

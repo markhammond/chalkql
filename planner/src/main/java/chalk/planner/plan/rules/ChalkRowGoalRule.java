@@ -190,7 +190,7 @@ public final class ChalkRowGoalRule extends RelRule<ChalkRuleConfig> {
       goaled = ChalkProject.create(goaled, project.getProjects(), project.getRowType());
     }
 
-    call.transformTo(ChalkLimit.create(goaled, limit.offset(), limit.fetch()));
+    call.transformTo(ChalkLimit.create(goaled, limit.order(), limit.offset(), limit.fetch()));
   }
 
   /** {@code ceil(goal / selectivity)}, saturating: a tiny selectivity must not wrap the goal. */

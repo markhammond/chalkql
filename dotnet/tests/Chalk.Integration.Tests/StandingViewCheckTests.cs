@@ -2,6 +2,7 @@ using System.Data.Common;
 using Chalk.Catalog;
 using Chalk.Client;
 using Chalk.Incremental;
+using Chalk.Ir;
 using Chalk.Sources;
 using Chalk.Sources.Ado;
 using Chalk.Sources.Poco;
@@ -18,6 +19,8 @@ namespace Chalk.Integration.Tests;
 public sealed class StandingViewCheckTests(SharedSidecar sidecar) : IDisposable
 {
     private sealed record Trade(int Seq, int Book, double Price, decimal Qty, DateTime Ts);
+
+    private sealed record Tick(int Seq, int Book);
 
     private struct Key
     {
@@ -160,6 +163,9 @@ public sealed class StandingViewCheckTests(SharedSidecar sidecar) : IDisposable
     [InlineData("SELECT book, COUNT(*) AS n FROM trades GROUP BY book ORDER BY book", "with no LIMIT")]
     [InlineData("SELECT book, COUNT(*) AS n FROM trades GROUP BY book LIMIT 1", "with no ORDER BY")]
     [InlineData("SELECT book, COUNT(*) AS n FROM trades GROUP BY book ORDER BY n LIMIT 1", "does not order by the view's key")]
+    [InlineData(
+        "SELECT book, n FROM (SELECT book, COUNT(*) AS n FROM trades GROUP BY book ORDER BY book LIMIT 1) WHERE n > 0",
+        "a LIMIT before its last step")]
     public async Task An_order_a_keyed_result_cannot_keep_is_refused(string sql, string says)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
@@ -180,6 +186,65 @@ public sealed class StandingViewCheckTests(SharedSidecar sidecar) : IDisposable
         await using var view = await engine.MaterializeAsync(
             "SELECT book, COUNT(*) AS n FROM trades GROUP BY book ORDER BY book LIMIT 1", Options());
 
+        Assert.Equal(1, view.Count);
+    }
+
+    /// <summary>
+    /// A LIMIT whose ORDER BY the table's declared order already gives is planned as a FETCH over the
+    /// ordered read, with no sort. The FETCH records the order it keeps, so the LIMIT is admitted.
+    /// </summary>
+    [Fact]
+    public async Task A_limit_the_tables_own_order_serves_is_admitted()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var engine = await EngineAsync();
+
+        await using var view = await engine.MaterializeAsync(
+            "SELECT seq, book FROM ticks ORDER BY seq LIMIT 2", Options(key: "seq"), TestContext.Current.CancellationToken);
+
+        var limit = Last(view.Statement.Plan.Root);
+        Assert.Equal(Rel.KindOneofCase.Fetch, limit.KindCase);
+        Assert.Single(limit.Fetch.Order);
+        Assert.Equal(2, view.Count);
+    }
+
+    /// <summary>
+    /// The newest rows of a table ordered the other way need a sort, and with few rows the planner
+    /// prices a SORT under a FETCH below a TOPN. The FETCH records the order, so it is admitted too.
+    /// </summary>
+    [Fact]
+    public async Task A_limit_over_a_sort_is_admitted()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var engine = await EngineAsync();
+
+        await using var view = await engine.MaterializeAsync(
+            "SELECT seq, book FROM ticks ORDER BY seq DESC LIMIT 100", Options(key: "seq"), TestContext.Current.CancellationToken);
+
+        var limit = Last(view.Statement.Plan.Root);
+        Assert.Equal(Rel.KindOneofCase.Fetch, limit.KindCase);
+        Assert.Equal(Rel.KindOneofCase.Sort, Last(limit.Fetch.Input).KindCase);
+        Assert.Equal(4, view.Count);
+    }
+
+    /// <summary>
+    /// A statement that orders by a column it does not select is planned with a projection above its
+    /// TOPN. The check looks through it, carrying the key, and admits a LIMIT that orders by the key.
+    /// </summary>
+    [Fact]
+    public async Task A_limit_under_a_projection_is_admitted()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var engine = await EngineAsync();
+
+        await using var view = await engine.MaterializeAsync(
+            "SELECT book, n FROM (SELECT book, COUNT(*) AS n, MAX(price) AS hi FROM trades GROUP BY book) "
+            + "ORDER BY hi DESC, book LIMIT 1",
+            Options(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(Rel.KindOneofCase.Project, view.Statement.Plan.Root.KindCase);
+        Assert.Equal(Rel.KindOneofCase.TopN, Last(view.Statement.Plan.Root).KindCase);
         Assert.Equal(1, view.Count);
     }
 
@@ -210,9 +275,9 @@ public sealed class StandingViewCheckTests(SharedSidecar sidecar) : IDisposable
     // ---- the scaffolding ----
 
     private static ViewOptions<Key, Row> Options(
-        ViewExactness exactness = ViewExactness.Exact, bool requireExplicitImmutable = false) => new()
+        ViewExactness exactness = ViewExactness.Exact, bool requireExplicitImmutable = false, string key = "book") => new()
     {
-        Key = ["book"],
+        Key = [key],
         LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
         Map = static (in ViewRow row, out Key key, out Row value) =>
         {
@@ -222,6 +287,17 @@ public sealed class StandingViewCheckTests(SharedSidecar sidecar) : IDisposable
         Exactness = exactness,
         RequireExplicitImmutable = requireExplicitImmutable,
     };
+
+    /// <summary>The step beneath a plan's projections: where a LIMIT the view keeps stands.</summary>
+    private static Rel Last(Rel rel)
+    {
+        while (rel.KindCase == Rel.KindOneofCase.Project)
+        {
+            rel = rel.Project.Input;
+        }
+
+        return rel;
+    }
 
     private static async Task<StandingViewException> RefusedAsync(
         ChalkEngine engine, string sql, ViewOptions<Key, Row>? options = null) =>
@@ -241,6 +317,10 @@ public sealed class StandingViewCheckTests(SharedSidecar sidecar) : IDisposable
                     new(3, 1, 3.5, 4m, Open.AddSeconds(2)),
                 ],
                 t => t.AppendOnly(x => x.Ts))
+            .AddTable(
+                "ticks",
+                (IReadOnlyList<Tick>) [new(1, 1), new(2, 2), new(3, 1), new(4, 2)],
+                t => t.OrderedBy(x => x.Seq).UniqueKey(x => x.Seq))
             .AddFunction("default_lots", f => f.Scalar<int, long>("seq").Strict().Client())
             .AddFunction("pure_lots", f => f.Scalar<int, long>("seq").Strict().Immutable().Client())
             .AddFunction("stable_lots", f => f.Scalar<int, long>("seq").Strict().Stable().Client())
