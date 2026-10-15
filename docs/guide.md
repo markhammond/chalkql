@@ -2562,7 +2562,9 @@ may read it. `messages.Tenancy(t => t.Through(messages.Column("thread_id")))` de
 the relationship once, and reads the parent table and its key from the declared foreign
 key. The planner compiles it into one join with the parent's own entitled scan, so the
 child is exactly as visible as its parent, by every way into the parent: its tenancy
-grants, its resource owner, its host predicates. A visibility rule of the child's own
+grants, its resource owner, its host predicates. The parent must restrict its rows, by a
+row predicate, a `Through` of its own or a path: through an unrestricted parent restricts
+nothing, and is refused with `InvalidTenancyPath`. A visibility rule of the child's own
 that would admit fewer roles, or hold in fewer scopes, than the parent's is refused,
 because the join cannot hold it. To make a child narrower than its parent, take the
 parent's kinds along `Inherited` paths, where the parent's rule and the child's own both
