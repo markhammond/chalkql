@@ -2244,9 +2244,12 @@ may read it. `Restriction.Through("thread_id")` declares the relationship once, 
 reads the parent table and its key from the declared foreign key. The planner compiles
 it into one join with the parent's own entitled scan. What the child's columns disclose
 is decided on the *parent's* side of that join: once per parent row, not once per child
-row. Where the parent's whole chain is visible, over a NOT NULL declared key, the join
-is left out altogether, and the visibility is ALL. Tutorial chapter 11 shows three
-principals running one statement over such a table.
+row. A rule for a role held on the parent decides only the rows that reach it through the
+parent. A row the reader reads another way, as its owner say, takes the rule that holds
+there, and so does a row reached by a direct dimension beside a declared path. Where the
+parent's whole chain is visible, over a NOT NULL declared key, the join is left out
+altogether, and the visibility is ALL. Tutorial chapter 11 shows three principals running
+one statement over such a table.
 
 **A column that says what each row disclosed.** The per-column report is one label for
 the whole result. That is all a caller needs — until a principal is a manager in one
