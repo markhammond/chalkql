@@ -197,7 +197,7 @@ internal sealed class AggregateState : IMaintainedState
                 throw new NotMaintainedException("an aggregate's argument is an expression, which is not maintained.");
             }
 
-            if (measure.Filter is { } filter && filter.KindCase != Expr.KindOneofCase.FieldRef)
+            if (measure.Filter is { } filter && FilterColumn(filter) < 0)
             {
                 throw new NotMaintainedException("an aggregate's FILTER is an expression, which is not maintained.");
             }
@@ -212,10 +212,31 @@ internal sealed class AggregateState : IMaintainedState
         MeasureTypes = measureTypes;
         Arguments = [.. Measures.Select(m => m.Args.Count > 0 ? (int)m.Args[0].FieldRef.Index : -1)];
         ArgumentKinds = [.. Arguments.Select(a => a < 0 ? ColumnKind.Int64 : ColumnKinds.Of(inputTypes[a]))];
-        Filters = [.. Measures.Select(m => m.Filter is { } filter ? (int)filter.FieldRef.Index : -1)];
+        Filters = [.. Measures.Select(m => m.Filter is { } filter ? FilterColumn(filter) : -1)];
         Changes = new ChangeSet(inputTypes);
         Output = new ChangeWriter(outputTypes, batchSize);
     }
+
+    /// <summary>
+    /// The input column a measure's <c>FILTER</c> reads, or -1 where the filter is any other expression:
+    /// a bare boolean column, or <c>IS TRUE</c> of one, which is how the planner writes every filter —
+    /// one written as <c>FILTER (WHERE …)</c>, and one it made of a <c>CASE</c> inside the aggregate.
+    /// </summary>
+    /// <remarks>
+    /// The fold keeps a row for the measure only where the column is valid and true, which is
+    /// <c>IS TRUE</c> of it: so the two forms are maintained alike, and as the executors evaluate them.
+    /// </remarks>
+    private static int FilterColumn(Expr filter) =>
+        filter.KindCase switch
+        {
+            Expr.KindOneofCase.FieldRef => (int)filter.FieldRef.Index,
+            Expr.KindOneofCase.Call when filter.Call.Function == FunctionId.IsTrue
+                && filter.Call.UserFunction.Length == 0
+                && filter.Call.Args.Count == 1
+                && filter.Call.Args[0].KindCase == Expr.KindOneofCase.FieldRef =>
+                (int)filter.Call.Args[0].FieldRef.Index,
+            _ => -1,
+        };
 
     public int[] OutputKeys { get; }
 

@@ -1767,6 +1767,10 @@ left rows and its right rows by key, an aggregate its groups — so an update re
 - **The clock.** A filter or a projection that reads the clock runs on its changes while the clock
   stands, and on every row it holds when the clock moves. A part of the statement that reads no table
   at all, such as the days a report is computed for, is computed whole when the clock moves.
+- **Aggregate filters.** An aggregate's `FILTER (WHERE …)` is maintained, and so is a `CASE` inside
+  an aggregate, such as `SUM(CASE WHEN keep THEN x END)`, which the planner writes as one. A row the
+  filter does not keep counts towards its group and towards no measure, so a group whose rows all
+  fail the filter stays, with its sum NULL and its count 0, as a recompute gives it.
 - **Exact sums.** A `DOUBLE` or `REAL` sum is kept exactly and rounded once when read: it is the
   correctly rounded sum of the group's rows, whatever order they arrived and left in, so it never
   drifts. A recompute adds in input order, so the two may differ in the last bits, which is what
