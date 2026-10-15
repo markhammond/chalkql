@@ -104,6 +104,50 @@ class DisclosureColumnsTest {
   }
 
   @Test
+  void a_union_all_keeps_each_rows_disclosure() throws Exception {
+    // Every row of a UNION ALL is one input's row, so its sibling is what that row disclosed, not the
+    // column's label for the whole result.
+    PlannerPipeline.Result result =
+        plan(
+            "SELECT id, first_name FROM members UNION ALL SELECT id, first_name FROM members",
+            TenancyCatalogs.managerAndAgent(1, 2));
+    assertThat(names(result))
+        .containsExactly("id", "id__disclosure", "first_name", "first_name__disclosure");
+    assertThat(result.physicalPlanText())
+        .contains("'FULL'")
+        .contains("'MASKED'")
+        // A carried sibling maps the row's ordinal to its name; the fallback is a constant label.
+        .doesNotContain("['PER_ROW'");
+  }
+
+  @Test
+  void a_list_past_the_fold_ceiling_keeps_each_rows_disclosure() throws Exception {
+    // Past fold_max_rows the manager's list stays a relation, and inside the row predicate's OR the
+    // leaf is split over it into a semi-join branch and an anti-join branch under a UNION ALL (F36).
+    RequestContext context =
+        TenancyCatalogs.managerAndAgentLists(new int[] {1, 2}, new int[] {3}).toBuilder()
+            .setFoldMaxRows(1)
+            .build();
+    PlannerPipeline.Result result = plan("SELECT id, first_name FROM members", context);
+    assertThat(names(result))
+        .containsExactly("id", "id__disclosure", "first_name", "first_name__disclosure");
+    assertThat(result.physicalPlanText())
+        .contains("'FULL'")
+        .contains("'MASKED'")
+        // A carried sibling maps the row's ordinal to its name; the fallback is a constant label.
+        .doesNotContain("['PER_ROW'");
+  }
+
+  @Test
+  void a_column_behind_an_aggregate_keeps_its_sibling_as_a_constant() throws Exception {
+    // The carry cannot pass an aggregate, so the key's sibling is its report's constant label; a
+    // count of rows reads no entitled column and has none.
+    PlannerPipeline.Result result =
+        plan("SELECT id, COUNT(*) AS n FROM members GROUP BY id", TenancyCatalogs.agent(1));
+    assertThat(names(result)).containsExactly("id", "id__disclosure", "n");
+  }
+
+  @Test
   void a_column_of_an_unentitled_table_has_no_sibling() throws Exception {
     PlannerPipeline.Result result = plan("SELECT symbol FROM symbols", TenancyCatalogs.agent(1));
     assertThat(names(result)).containsExactly("symbol");

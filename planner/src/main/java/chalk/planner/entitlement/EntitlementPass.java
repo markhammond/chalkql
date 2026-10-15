@@ -198,15 +198,21 @@ public final class EntitlementPass {
     // The sibling disclosure columns (§3.12, D207): the leaves computed what each row disclosed, and
     // this is where it reaches the root — exactly as far as the statement's shape allows it to.
     DisclosureColumns.Carried carried =
-        DisclosureColumns.pullUp(rewritten, pass.carriers, pass.rexBuilder);
+        DisclosureColumns.pullUp(rewritten, pass.carriers, pass.emitted, pass.rexBuilder);
     Disclosed[] wide = DisclosureFlow.of(carried.rel(), pass.emitted);
+    // Every column an entitled column reaches has a sibling, carried or not: behind a node the carry
+    // cannot pass, it is the column's constant label, and never absent (§3.12).
+    boolean[] entitled = DisclosureFlow.fromLeaves(carried.rel(), pass.emitted);
     int width = rewritten.getRowType().getFieldCount();
     Disclosed[] flow = new Disclosed[width * 2];
     boolean[] present = new boolean[width];
     for (int f = 0; f < width; f++) {
       flow[f] = wide[carried.originals()[f]];
       flow[width + f] = Disclosed.FULL;
-      present[f] = !carried.sources().get(f).isEmpty() || flow[f] != Disclosed.FULL;
+      present[f] =
+          !carried.sources().get(f).isEmpty()
+              || flow[f] != Disclosed.FULL
+              || entitled[carried.originals()[f]];
     }
     return new Result(
         DisclosureColumns.siblings(
