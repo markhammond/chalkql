@@ -230,6 +230,14 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
             """,
             [0]
         },
+        {
+            // Planned as a left join to a distinct key set, the row kept where it met nothing.
+            "books with no trade bought",
+            """
+            SELECT b.id, b.name FROM books b WHERE NOT EXISTS (SELECT 1 FROM trades t WHERE t.book = b.id AND t.qty > 0)
+            """,
+            [0]
+        },
     };
 
     /// <summary>
@@ -286,6 +294,31 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
         foreach (var seed in new[] { 3, 17 })
         {
             await RunAsync(sql, key, seed);
+        }
+    }
+
+    /// <summary>
+    /// Semi joins (D361): a left row is given while it meets at least one right row, as its right rows
+    /// come and go; each plan is checked to be the join it means to test. The planner writes a
+    /// <c>NOT EXISTS</c> as a left join to a distinct key set, so an anti join comes only from an
+    /// access policy's split of a list (F36), where its views are tested.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        "books with a trade bought",
+        "SELECT b.id, b.name FROM books b WHERE EXISTS (SELECT 1 FROM trades t WHERE t.book = b.id AND t.qty > 0)",
+        "Semi")]
+    [InlineData(
+        "trades of the books placed in a region",
+        "SELECT seq, book, qty FROM trades WHERE book IN (SELECT id FROM books WHERE region = 'apac')",
+        "Semi")]
+    public async Task Every_epoch_a_semi_or_an_anti_join_is_the_statement(string name, string sql, string planned)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        _ = name;
+        foreach (var seed in new[] { 7, 31 })
+        {
+            await RunAsync(sql, [0], seed, planned: planned);
         }
     }
 
@@ -656,6 +689,15 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
     }
 
     /// <summary>Whether the plan has the node a test means to cover.</summary>
+    private static Chalk.Ir.JoinType? JoinTypeOf(Chalk.Ir.Rel rel) => rel.KindCase switch
+    {
+        Chalk.Ir.Rel.KindOneofCase.HashJoin => rel.HashJoin.Type,
+        Chalk.Ir.Rel.KindOneofCase.MergeJoin => rel.MergeJoin.Type,
+        Chalk.Ir.Rel.KindOneofCase.NestedLoopJoin => rel.NestedLoopJoin.Type,
+        Chalk.Ir.Rel.KindOneofCase.Join => rel.Join.Type,
+        _ => null,
+    };
+
     private static bool Plans(Chalk.Ir.Plan plan, string planned)
     {
         var found = false;
@@ -673,6 +715,7 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
                     "AsOfJoin over IndexLookup" => rel.KindCase == Chalk.Ir.Rel.KindOneofCase.AsOfJoin
                         && Under(rel.AsOfJoin.Right).KindCase == Chalk.Ir.Rel.KindOneofCase.IndexLookup,
                     "IndexLookup" => rel.KindCase == Chalk.Ir.Rel.KindOneofCase.IndexLookup,
+                    "Semi" or "Anti" => JoinTypeOf(rel) == (planned == "Semi" ? Chalk.Ir.JoinType.Semi : Chalk.Ir.JoinType.Anti),
                     _ => false,
                 };
             }

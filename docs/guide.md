@@ -1801,6 +1801,10 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   - A `LIMIT ?` binds once, when the view is made, as every parameter of a view does.
   - Two rows that tie under the whole order have one key, so the key does not hold before the
     `LIMIT`: the view is faulted with `DeclarationNotHeld`, saying so.
+- **Semi and anti joins.** An `EXISTS` or an `IN` over a subquery, which the planner writes as a
+  semi join, is maintained. A left row is given while at least one right row matches it, so a right
+  row's change moves it in or out only when the count of its matches crosses zero. An anti join gives
+  a left row while none does.
 - **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's
   `StateBudget`: a budget tuned for a recompute may need raising. The first update computes
   everything, and takes longer than a recompute.
@@ -1808,14 +1812,22 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   The next computes the statement from nothing, and a reader is sent only the keys that differ from
   what it holds.
 - **What is not maintained.** A statement with any of these is refused when the view is made, with
-  `UnsupportedInView`, naming the operator and where it is in the plan: window functions; a `LIMIT`
-  before the statement's last step; set operations but `UNION ALL`; right, full, semi and anti joins; `DISTINCT`, ordered,
-  holistic and host aggregates; an as-of join whose right input is not a table read, or a lookup
-  of one key in the table's order, through filters and projections; an as-of seek whose key has one
-  type in its table and another on its left; an index lookup over a range of keys; the clock in a
-  join's condition; a source
-  outside the engine's epochs; a `LIST`, composite or `BINARY` value in what an operator keeps; and
-  the reference executor. A view that recomputes takes all of them.
+  `UnsupportedInView`, naming the operator and where it is in the plan:
+  - window functions;
+  - a `LIMIT` before the statement's last step;
+  - set operations but `UNION ALL`;
+  - right and full joins;
+  - `DISTINCT`, ordered, holistic and host aggregates;
+  - an as-of join whose right input is not a table read, or a lookup of one key in the table's
+    order, through filters and projections;
+  - an as-of seek whose key has one type in its table and another on its left;
+  - an index lookup over a range of keys;
+  - the clock in a join's condition;
+  - a source outside the engine's epochs;
+  - a `LIST`, composite or `BINARY` value in what an operator keeps;
+  - the reference executor.
+
+  A view that recomputes takes all of them.
 
 ### Plans a view takes
 

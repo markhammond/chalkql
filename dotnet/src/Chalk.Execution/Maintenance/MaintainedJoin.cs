@@ -106,6 +106,22 @@ internal sealed class JoinSide
 /// before it, which together are the join's change. A left join counts each left row's matches, and
 /// pads the row with NULLs while the count is zero.
 /// </summary>
+/// <summary>What a maintained join gives (D343; D361 for the last two).</summary>
+internal enum JoinMode
+{
+    /// <summary>Every pair that matches.</summary>
+    Inner,
+
+    /// <summary>Every pair, and each left row that meets nothing with its right columns NULL.</summary>
+    Left,
+
+    /// <summary>Each left row that meets at least one right row, once, its left columns alone.</summary>
+    Semi,
+
+    /// <summary>Each left row that meets no right row, its left columns alone.</summary>
+    Anti,
+}
+
 internal sealed class JoinState : IMaintainedState
 {
     public JoinState(
@@ -114,25 +130,35 @@ internal sealed class JoinState : IMaintainedState
         IReadOnlyList<ChalkType> outputTypes,
         int[] leftKeys,
         int[] rightKeys,
-        bool leftJoin,
+        JoinMode mode,
         int batchSize)
     {
         LeftWidth = leftTypes.Count;
         RightWidth = rightTypes.Count;
-        LeftJoin = leftJoin;
+        Mode = mode;
         Left = new JoinSide(leftTypes, leftKeys);
         Right = new JoinSide(rightTypes, rightKeys);
         LeftChanges = new ChangeSet(leftTypes);
         RightChanges = new ChangeSet(rightTypes);
         Output = new ChangeWriter(outputTypes, batchSize);
-        Candidates = new ChangeWriter(outputTypes, batchSize);
+
+        // A pair a condition has still to be judged on carries both sides, whatever the join gives.
+        Candidates = new ChangeWriter([.. leftTypes, .. rightTypes], batchSize);
     }
 
     public int LeftWidth { get; }
 
     public int RightWidth { get; }
 
-    public bool LeftJoin { get; }
+    public JoinMode Mode { get; }
+
+    public bool LeftJoin => Mode == JoinMode.Left;
+
+    /// <summary>Whether the join gives pairs: an inner or a left join. A semi or an anti join gives left rows.</summary>
+    public bool Pairs => Mode is JoinMode.Inner or JoinMode.Left;
+
+    /// <summary>Whether each left row's matches are counted: every join but an inner one turns on them.</summary>
+    public bool Counted => Mode != JoinMode.Inner;
 
     public JoinSide Left { get; }
 
@@ -244,19 +270,25 @@ internal sealed class JoinChanges : MaintainedOperator
 
         FlushCandidates(countInto: CountA);
 
-        // The left join's rows that stopped or started meeting the right side, as they were held.
-        if (state.LeftJoin)
+        // The left rows that stopped or started meeting the right side, as they were held: a left join
+        // pads or unpads them, a semi join gives or takes them back, an anti join the other way round.
+        if (state.Counted)
         {
             foreach (var (slot, before) in _touched)
             {
                 var after = left.Matches[slot];
-                if (before == 0 && after > 0)
+                var sign = before == 0 && after > 0 ? 1 : before > 0 && after == 0 ? -1 : 0;
+                switch (state.Mode)
                 {
-                    WritePadded(slot, -1, -left.Counts[slot]);
-                }
-                else if (before > 0 && after == 0)
-                {
-                    WritePadded(slot, -1, left.Counts[slot]);
+                    case JoinMode.Left when sign != 0:
+                        WritePadded(slot, -1, -sign * left.Counts[slot]);
+                        break;
+                    case JoinMode.Semi when sign != 0:
+                        WriteLeft(slot, -1, sign * left.Counts[slot]);
+                        break;
+                    case JoinMode.Anti when sign != 0:
+                        WriteLeft(slot, -1, -sign * left.Counts[slot]);
+                        break;
                 }
             }
         }
@@ -288,10 +320,15 @@ internal sealed class JoinChanges : MaintainedOperator
 
             if (!left.Keys.Encode(encoder, leftChanges.Columns, l, normalise: true))
             {
-                // A NULL key meets nothing: a left join pads the row, an inner join drops it.
-                if (state.LeftJoin)
+                // A NULL key meets nothing: a left join pads the row, an anti join gives it, and an inner
+                // or a semi join drops it.
+                if (state.Mode == JoinMode.Left)
                 {
                     WritePadded(-1, l, weight);
+                }
+                else if (state.Mode == JoinMode.Anti)
+                {
+                    WriteLeft(-1, l, weight);
                 }
 
                 continue;
@@ -320,9 +357,15 @@ internal sealed class JoinChanges : MaintainedOperator
                 continue;
             }
 
-            if (state.LeftJoin && _changeMatches[l] == 0)
+            switch (state.Mode)
             {
-                WritePadded(-1, l, weight);
+                case JoinMode.Left when _changeMatches[l] == 0:
+                    WritePadded(-1, l, weight);
+                    break;
+                case JoinMode.Semi when _changeMatches[l] > 0:
+                case JoinMode.Anti when _changeMatches[l] == 0:
+                    WriteLeft(-1, l, weight);
+                    break;
             }
 
             left.Apply(leftChanges, l, weight, _changeMatches[l], encoder);
@@ -356,7 +399,25 @@ internal sealed class JoinChanges : MaintainedOperator
     /// </summary>
     private void AddCandidate(int leftSlot, int leftChange, int rightSlot, int rightChange, long weight, long units)
     {
-        var into = _condition is null ? _state.Output : _state.Candidates;
+        var state = _state;
+        if (_condition is not null || state.Pairs)
+        {
+            WritePair(_condition is null ? state.Output : state.Candidates, leftSlot, leftChange, rightSlot, rightChange, weight);
+        }
+
+        if (_candidates == _candidateLeft.Length)
+        {
+            Array.Resize(ref _candidateLeft, _candidates * 2);
+            Array.Resize(ref _candidateUnits, _candidates * 2);
+        }
+
+        _candidateLeft[_candidates] = leftSlot >= 0 ? leftSlot : ~leftChange;
+        _candidateUnits[_candidates] = units;
+        _candidates++;
+    }
+
+    private void WritePair(ChangeWriter into, int leftSlot, int leftChange, int rightSlot, int rightChange, long weight)
+    {
         into.Begin();
         var state = _state;
         for (var c = 0; c < state.LeftWidth; c++)
@@ -384,15 +445,6 @@ internal sealed class JoinChanges : MaintainedOperator
         }
 
         into.End(weight);
-        if (_candidates == _candidateLeft.Length)
-        {
-            Array.Resize(ref _candidateLeft, _candidates * 2);
-            Array.Resize(ref _candidateUnits, _candidates * 2);
-        }
-
-        _candidateLeft[_candidates] = leftSlot >= 0 ? leftSlot : ~leftChange;
-        _candidateUnits[_candidates] = units;
-        _candidates++;
     }
 
     /// <summary>
@@ -403,7 +455,7 @@ internal sealed class JoinChanges : MaintainedOperator
     {
         if (_condition is null)
         {
-            if (_state.LeftJoin)
+            if (_state.Counted)
             {
                 for (var i = 0; i < _candidates; i++)
                 {
@@ -433,13 +485,38 @@ internal sealed class JoinChanges : MaintainedOperator
                     continue;
                 }
 
-                _state.Output.Write(columns, row, Weights.Of(batch, row));
-                if (_state.LeftJoin)
+                if (_state.Pairs)
+                {
+                    _state.Output.Write(columns, row, Weights.Of(batch, row));
+                }
+
+                if (_state.Counted)
                 {
                     countInto(index);
                 }
             }
         }
+    }
+
+    /// <summary>A left row alone, as a semi or an anti join gives it: a held slot, or a row of the left changes.</summary>
+    private void WriteLeft(int leftSlot, int leftChange, long weight)
+    {
+        var state = _state;
+        var into = state.Output;
+        into.Begin();
+        for (var c = 0; c < state.LeftWidth; c++)
+        {
+            if (leftSlot >= 0)
+            {
+                into.Column(c).Append(state.Left.Rows.Column(c), leftSlot);
+            }
+            else
+            {
+                into.Column(c).Append(state.LeftChanges.Columns[c], leftChange);
+            }
+        }
+
+        into.End(weight);
     }
 
     /// <summary>A left row with every right column NULL: a held slot, or a row of the left changes.</summary>

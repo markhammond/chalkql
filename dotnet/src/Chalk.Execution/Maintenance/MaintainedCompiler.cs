@@ -399,9 +399,10 @@ internal sealed class MaintainedCompiler
         Expr? condition,
         JoinType type)
     {
-        if (type is not (JoinType.Inner or JoinType.Left))
+        if (type is not (JoinType.Inner or JoinType.Left or JoinType.Semi or JoinType.Anti))
         {
-            throw new NotMaintainedException($"a {type.ToString().ToUpperInvariant()} join is not maintained; inner and left joins are.");
+            throw new NotMaintainedException(
+                $"a {type.ToString().ToUpperInvariant()} join is not maintained; inner, left, semi and anti joins are.");
         }
 
         if (condition is not null)
@@ -417,7 +418,13 @@ internal sealed class MaintainedCompiler
             Types(rel.RowType),
             [.. leftKeys.Select(k => (int)k)],
             [.. rightKeys.Select(k => (int)k)],
-            type == JoinType.Left,
+            type switch
+            {
+                JoinType.Left => JoinMode.Left,
+                JoinType.Semi => JoinMode.Semi,
+                JoinType.Anti => JoinMode.Anti,
+                _ => JoinMode.Inner,
+            },
             _settings.BatchSize);
         States.Add(state);
         var leftFactory = _compilation.Node(Rewrite(left, path), path);
