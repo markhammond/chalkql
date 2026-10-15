@@ -75,6 +75,12 @@ internal sealed class HeldRows
 
     public RowStore Rows { get; }
 
+    /// <summary>
+    /// Told of each slot as it comes to hold a row, after it is filled, and as it lets one go, before
+    /// it is emptied: what keeps an index over the rows in step with them.
+    /// </summary>
+    public Action<int, bool>? Changed { get; set; }
+
     public long Bytes => Rows.Bytes + (_counts.Length * sizeof(long)) + _slots.Bytes;
 
     public long Count(int slot) => _counts[slot];
@@ -120,6 +126,7 @@ internal sealed class HeldRows
 
             if (_counts[at] == 0)
             {
+                Changed?.Invoke(at, false);
                 _slots.Remove(_encoder.Span, out _);
                 Rows.Remove(at);
             }
@@ -140,6 +147,7 @@ internal sealed class HeldRows
         }
 
         _counts[slot] = weight;
+        Changed?.Invoke(slot, true);
     }
 
     public void Clear()

@@ -1765,8 +1765,12 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   whole result once; readers keep their place, sent only the keys that differ. A new plan the view
   cannot maintain is declined: the plan it keeps answers the same rows.
 - **The clock.** A filter or a projection that reads the clock runs on its changes while the clock
-  stands, and on every row it holds when the clock moves. A part of the statement that reads no table
-  at all, such as the days a report is computed for, is computed whole when the clock moves.
+  stands, and on every row it holds when the clock moves. A filter whose every read of the clock is a
+  cut-off a column is compared with, such as `ts > CURRENT_TIMESTAMP - INTERVAL '2' HOUR`, reads again
+  only the rows between its old cut-off and its new one. That holds under `AND`, `OR` and `NOT`, for a
+  column of a whole-number type: a number, a date, a time or a timestamp. A part of the statement
+  that reads no table at all, such as the days a report is computed for, is computed whole when the
+  clock moves.
 - **Aggregate filters.** An aggregate's `FILTER (WHERE …)` is maintained, and so is a `CASE` inside
   an aggregate, such as `SUM(CASE WHEN keep THEN x END)`, which the planner writes as one. A row the
   filter does not keep counts towards its group and towards no measure, so a group whose rows all
@@ -1950,7 +1954,9 @@ await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions
   it runs, whether the view recomputes or is maintained. The event carries the purpose and actor of
   the context the statement was prepared with, the digest of the plan the update runs, and the
   `Version` the update brings the view to, which says which grants a table of grants held. An update
-  with nothing new to read runs nothing and raises nothing, and an execution's event has no version.
+  at the epoch the view already holds runs nothing and raises nothing. Any refresh moves the epoch,
+  though, even one that touches no table the view reads: the next update then runs, and is audited.
+  An execution's event has no version.
 - **A change of shape keeps the policy.** When a table the statement reads changes shape, the view
   prepares the statement again through the policy, with the same context, and its updates go on
   being audited.
