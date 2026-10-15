@@ -117,6 +117,13 @@ internal sealed class IslandState : IMaintainedState
         Output.Clear();
         ComputedAt = null;
     }
+
+    /// <summary>What the subtree gave is held; the rows of a computation and the changes are not.</summary>
+    public void Trim()
+    {
+        Now.Trim();
+        Output.Trim();
+    }
 }
 
 internal sealed class IslandChanges : MaintainedOperator
@@ -238,6 +245,8 @@ internal sealed class SharedState : IMaintainedState
         Changes.Clear();
         ComputedFor = -1;
     }
+
+    public void Trim() => Changes.Trim();
 }
 
 internal sealed class SharedChanges : MaintainedOperator

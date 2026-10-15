@@ -288,6 +288,17 @@ internal sealed class AggregateState : IMaintainedState
         Output.Clear();
         Started = false;
     }
+
+    public void Trim()
+    {
+        Changes.Trim();
+        Output.Trim();
+        FinestGroups.Trim();
+        FinestRows.Clear();
+        FinestRows.TrimExcess();
+        FinestCounts.Clear();
+        FinestCounts.TrimExcess();
+    }
 }
 
 internal sealed class AggregateChanges : MaintainedOperator

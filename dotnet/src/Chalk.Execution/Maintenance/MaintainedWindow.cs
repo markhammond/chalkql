@@ -101,6 +101,13 @@ internal sealed class WindowState : IMaintainedState
         Read = 0;
     }
 
+    public void Trim()
+    {
+        InputChanges.Trim();
+        Replay.Trim();
+        Output.Trim();
+    }
+
     /// <summary>Keeps each order in step with the rows held: a slot filled is entered, one emptied taken out.</summary>
     private void Changed(int slot, bool filled)
     {

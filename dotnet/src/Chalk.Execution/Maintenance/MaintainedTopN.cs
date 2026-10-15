@@ -109,6 +109,12 @@ internal sealed class TopNState : IMaintainedState
         Changes.Clear();
         Output.Clear();
     }
+
+    public void Trim()
+    {
+        Changes.Trim();
+        Output.Trim();
+    }
 }
 
 /// <summary>A bounded top-N short of rows it no longer holds: the plan computes again from nothing (D360).</summary>

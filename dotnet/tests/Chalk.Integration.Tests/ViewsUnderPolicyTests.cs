@@ -3,6 +3,7 @@ using Chalk.Catalog;
 using Chalk.Client;
 using Chalk.Entitlements;
 using Chalk.Entitlements.Tenancy;
+using Chalk.Execution.Maintenance;
 using Chalk.Incremental;
 using Chalk.Ir;
 using Chalk.Sources.Ado;
@@ -136,56 +137,67 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
     };
 
     /// <summary>
-    /// The statements, each with its principal and what its plan must have: the joins it means to
-    /// test, or a membership over a list bound at each run.
+    /// The statements, each with its principal, what its plan must have — the joins it means to test,
+    /// or a membership over a list bound at each run — and how many of its joins seek a governed table
+    /// when the tables have indexes on their keys (design 74 §6).
     /// </summary>
-    public static TheoryData<string, string, string, string?> Statements() => new()
+    public static TheoryData<string, string, string, string?, int> Statements() => new()
     {
         {
             "a direct restriction, an owner, a path, masks and placeholders",
             "SELECT seq, team_id, title, body, phone FROM desk.notes",
             nameof(Seven),
-            "Left"
+            "Left",
+            1
         },
         {
+            // The anti join's left side reads the team as the constant the policy folded it to: held.
             "a list too long to fold, split into a semi and an anti join",
             "SELECT seq, team_id, patient_id, name FROM desk.visits",
             nameof(Carer),
-            "Semi,Anti"
+            "Semi,Anti",
+            1
         },
         {
             "a child through its parent",
             "SELECT seq, note_seq, text FROM desk.replies",
             nameof(Seven),
-            null
+            null,
+            2
         },
         {
             "a join of two tables under the policy",
             "SELECT r.seq, n.title, n.body, r.text FROM desk.replies r JOIN desk.notes n ON n.seq = r.note_seq",
             nameof(Seven),
-            null
+            null,
+            3
         },
         {
             "lists too long to fold, read as memberships",
             "SELECT seq, team_id, patient_id, title, body, phone FROM desk.notes",
             nameof(Eight),
-            "@ctx"
+            "@ctx",
+            1
         },
         {
             "a group-size floor",
             "SELECT team_id, COUNT(score) AS n, SUM(score) AS total FROM desk.notes GROUP BY team_id",
             nameof(Counter),
-            null
+            null,
+            0
         },
     };
 
     /// <summary>
     /// Each statement under the policy, kept by maintenance over 30 random epochs under two seeds, is
     /// what the statement returns after every one; each plan is checked to have what it means to test.
+    /// Each is kept twice: over tables with no index, every join holding both its sides, and over
+    /// tables with indexes on their keys, the joins that read a governed table seeking it.
     /// </summary>
     [Theory]
     [MemberData(nameof(Statements))]
-    public async Task Every_epoch_a_statement_under_a_policy_is_kept(string name, string sql, string principal, string? planned)
+    public async Task Every_epoch_a_statement_under_a_policy_is_kept(
+        string name, string sql, string principal, string? planned, int seeking)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         _ = name;
@@ -197,9 +209,9 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
             _ => Counter,
         };
 
-        foreach (var seed in new[] { 11, 23 })
+        foreach (var (indexed, seed) in new[] { (false, 11), (false, 23), (true, 11), (true, 23) })
         {
-            var epochs = await RunAsync(sql, who, seed, planned);
+            var epochs = await RunAsync(sql, who, seed, planned, indexed ? seeking : 0, indexed);
             if (principal == nameof(Counter))
             {
                 // Team 1's group is pushed over the floor, under it and over it again: its total is
@@ -261,6 +273,47 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
         view.Drain(ref cursor, replica);
         Assert.Equal(new Dictionary<long, byte> { [3] = Full }, replica.Rows);
         await AssertIsTheStatementAsync(engine, feed, replica);
+    }
+
+    /// <summary>
+    /// A reader's view of two thousand notes, ten of them shared with it along the path. Over notes with
+    /// an index on their key, maintenance holds the reader's shares and the rows it sees, and not the
+    /// notes; without one, every note (design 74 §6). A share added later is one key sought, one note
+    /// read.
+    /// </summary>
+    [Fact]
+    public async Task A_view_under_a_policy_holds_its_readers_share_of_an_indexed_table()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var notes = Enumerable.Range(1, 2_000)
+            .Select(i => new Note(i, 3, 104, 5, $"title-{i}", $"body-{i}", $"555-{i:0000}", i % 10))
+            .ToList();
+        var grants = Enumerable.Range(1, 10).Select(i => new NoteGrant(i, i * 100, 7)).ToList();
+        var bytes = new Dictionary<bool, long>();
+        foreach (var indexed in new[] { true, false })
+        {
+            var source = Desk(Policy, notes, grants, [], indexed: indexed);
+            await using var engine = await EngineAsync(source);
+            var entitled = engine.WithEntitlements(new EntitlementsOptions());
+            var feed = await entitled.PrepareAsync("SELECT seq, body FROM desk.notes", Policy.Bind(Sharer), ct: Ct);
+            await using var maintained = await feed.Query.MaintainAsync([], -1, [0], Ct);
+            var first = await maintained.UpdateAsync([], default, engine.Version, whole: false, Ct);
+            Assert.Equal(10, first.Now.Length);
+            bytes[indexed] = maintained.StateBytes;
+            if (!indexed)
+            {
+                Assert.Empty(maintained.States.OfType<JoinSeekState>());
+                continue;
+            }
+
+            var join = Assert.Single(maintained.States.OfType<JoinSeekState>());
+            await engine.RefreshAsync(r => r.Upsert(source, "note_grants", Shares(new NoteGrant(11, 1_500, 7))), Ct);
+            var shared = await maintained.UpdateAsync([], default, engine.Version, whole: false, Ct);
+            Assert.Equal(1, shared.Now.Length);
+            Assert.Equal((1, 1L), (join.Sought, join.Read));
+        }
+
+        Assert.True(bytes[true] * 20 < bytes[false], $"seeking, the view holds {bytes[true]} bytes; holding, {bytes[false]}");
     }
 
     /// <summary>
@@ -397,7 +450,8 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
     // ------------------------------------------------------------------ the random epochs
 
     /// <summary>Keeps the statement through 30 epochs, comparing it after each; returns what it gave at each.</summary>
-    private async Task<List<Dictionary<string, object?[]>>> RunAsync(string sql, TenancyPrincipal who, int seed, string? planned)
+    private async Task<List<Dictionary<string, object?[]>>> RunAsync(
+        string sql, TenancyPrincipal who, int seed, string? planned, int seeking, bool indexed)
     {
         var epochs = new List<Dictionary<string, object?[]>>();
         var random = new Random(seed);
@@ -433,7 +487,7 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
             visits[visit.Seq] = visit;
         }
 
-        var source = Desk(Policy, [.. notes.Values], [.. grants.Values], [.. replies.Values], [.. visits.Values]);
+        var source = Desk(Policy, [.. notes.Values], [.. grants.Values], [.. replies.Values], [.. visits.Values], indexed);
         await using var engine = await EngineAsync(source);
         var entitled = engine.WithEntitlements(new EntitlementsOptions());
         var statement = await entitled.PrepareAsync(sql, Policy.Bind(who), ct: Ct);
@@ -447,6 +501,7 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
         }
 
         await using var maintained = await statement.Query.MaintainAsync([], -1, [0], Ct);
+        Assert.Equal(seeking, maintained.States.OfType<JoinSeekState>().Count());
         var held = new Dictionary<string, object?[]>(StringComparer.Ordinal);
         for (var epoch = 0; epoch < 30; epoch++)
         {
@@ -888,7 +943,8 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
         IReadOnlyList<Note> notes,
         IReadOnlyList<NoteGrant> grants,
         IReadOnlyList<Reply> replies,
-        IReadOnlyList<Visit>? visits = null)
+        IReadOnlyList<Visit>? visits = null,
+        bool indexed = false)
     {
         var builder = new PocoSourceBuilder("mem", "desk").NamingPolicy(PocoNamingPolicy.SnakeCase);
         builder.AddTable("teams", Teams, t =>
@@ -904,6 +960,11 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
         builder.AddTable("notes", notes, t =>
         {
             t.Keyed(x => x.Seq);
+            if (indexed)
+            {
+                t.UniqueIndex(x => x.Seq);
+            }
+
             t.ForeignKey(x => x.TeamId).References<Team>(x => x.Id, verify: true);
             Entitle(t, entitlements, "notes");
         });
@@ -917,12 +978,22 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
         builder.AddTable("replies", replies, t =>
         {
             t.Keyed(x => x.Seq);
+            if (indexed)
+            {
+                t.Index(x => x.NoteSeq);
+            }
+
             t.ForeignKey(x => x.NoteSeq).References<Note>(x => x.Seq, verify: true);
             Entitle(t, entitlements, "replies");
         });
         builder.AddTable("visits", visits ?? [], t =>
         {
             t.Keyed(x => x.Seq);
+            if (indexed)
+            {
+                t.Index(x => x.PatientId, x => x.TeamId);
+            }
+
             t.ForeignKey(x => x.TeamId).References<Team>(x => x.Id, verify: true);
             Entitle(t, entitlements, "visits");
         });

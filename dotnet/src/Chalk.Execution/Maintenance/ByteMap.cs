@@ -51,6 +51,23 @@ internal sealed class ByteMap
         Count = 0;
     }
 
+    /// <summary>Forgets every key and lets the buffers go, as a map made afresh.</summary>
+    public void Trim()
+    {
+        _keys = new byte[256];
+        _starts = new int[16];
+        _lengths = new int[16];
+        _hashes = new int[16];
+        _values = new int[16];
+        _table = Fresh(32);
+        _mask = 31;
+        _keyBytes = 0;
+        _garbage = 0;
+        _entries = 0;
+        _occupied = 0;
+        Count = 0;
+    }
+
     public bool TryGet(ReadOnlySpan<byte> key, out int value)
     {
         var entry = Find(key, Hash(key));

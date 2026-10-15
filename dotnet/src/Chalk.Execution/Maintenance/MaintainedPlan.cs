@@ -178,6 +178,17 @@ internal sealed class MaintainedPlan : IAsyncDisposable
                 }
 
                 var changes = _result.End(_restart || whole, _restart, tree.Output);
+                if (_restart)
+                {
+                    // An update from nothing read every row of its tables, and the buffers its changes
+                    // passed through grew to hold them. Later updates read what changed: the buffers are
+                    // let go now rather than held for the life of the view.
+                    foreach (var state in _states)
+                    {
+                        state.Trim();
+                    }
+                }
+
                 _restart = false;
                 completed = true;
                 return changes;

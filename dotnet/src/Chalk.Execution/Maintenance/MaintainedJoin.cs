@@ -187,6 +187,14 @@ internal sealed class JoinState : IMaintainedState
         Output.Clear();
         Candidates.Clear();
     }
+
+    public void Trim()
+    {
+        LeftChanges.Trim();
+        RightChanges.Trim();
+        Output.Trim();
+        Candidates.Trim();
+    }
 }
 
 internal sealed class JoinChanges : MaintainedOperator

@@ -600,22 +600,32 @@ internal sealed class MaintainedCompiler
             RefuseClock(condition, "a join's condition");
         }
 
+        // A nested-loop join the planner chose for a small side is still a join on keys where its
+        // condition equates a column of each side: kept so, a change meets only its key's rows rather
+        // than every row the other side holds.
+        if (!leftKeys.Any() && condition is not null)
+        {
+            (leftKeys, rightKeys, condition) = EquiKeys(condition, left.RowType, right.RowType);
+        }
+
         var leftTypes = Types(left.RowType);
         var rightTypes = Types(right.RowType);
+        int[] leftColumns = [.. leftKeys.Select(k => (int)k)];
+        int[] rightColumns = [.. rightKeys.Select(k => (int)k)];
+        var mode = type switch
+        {
+            JoinType.Left => JoinMode.Left,
+            JoinType.Semi => JoinMode.Semi,
+            JoinType.Anti => JoinMode.Anti,
+            _ => JoinMode.Inner,
+        };
+        if (condition is null && Seekable(left, leftColumns, leftTypes, rightColumns, rightTypes) is { } seek)
+        {
+            return SeekJoin(rel, path, left, right, leftColumns, rightColumns, mode, seek);
+        }
+
         var state = new JoinState(
-            leftTypes,
-            rightTypes,
-            Types(rel.RowType),
-            [.. leftKeys.Select(k => (int)k)],
-            [.. rightKeys.Select(k => (int)k)],
-            type switch
-            {
-                JoinType.Left => JoinMode.Left,
-                JoinType.Semi => JoinMode.Semi,
-                JoinType.Anti => JoinMode.Anti,
-                _ => JoinMode.Inner,
-            },
-            _settings.BatchSize);
+            leftTypes, rightTypes, Types(rel.RowType), leftColumns, rightColumns, mode, _settings.BatchSize);
         States.Add(state);
         var leftFactory = Node(Rewrite(left, path), path);
         var rightFactory = Node(Rewrite(right, path), path);
@@ -631,6 +641,178 @@ internal sealed class MaintainedCompiler
             leftFactory(context),
             rightFactory(context),
             condition is null ? null : _compilation.ExpressionsAt(path).Compile(condition)));
+    }
+
+    /// <summary>
+    /// How a join's left side can be sought rather than held (design 74 §6): where it is a read of a
+    /// table under an access policy through filters and projections that do not read the clock, and an
+    /// index of the table begins with the columns the left keys hand over, the read, the index, and for
+    /// each of the index's leading columns the key that holds its value. Null for any other join.
+    /// </summary>
+    private (Rel Read, IndexDescriptor Index, int[] Order)? Seekable(
+        Rel left, int[] leftKeys, ChalkType[] leftTypes, int[] rightKeys, ChalkType[] rightTypes)
+    {
+        if (leftKeys.Length == 0
+            || TableUnder(left) is not { KindCase: Rel.KindOneofCase.Read } read
+            || read.Read.Filter is not null
+            || Governed(read) is null
+            || ReadsClock(left)
+            || _catalog.FindTable(read.Read.Table.Schema, read.Read.Table.Table)?.Table is not { } table)
+        {
+            return null;
+        }
+
+        var columns = new int[leftKeys.Length];
+        for (var k = 0; k < leftKeys.Length; k++)
+        {
+            // A key the index compares as the join does: one type on both sides, and not floating point,
+            // whose -0.0 and 0.0 are one key to a join.
+            var type = leftTypes[leftKeys[k]];
+            if (TableColumn(left, leftKeys[k]) is not { } column
+                || type.Kind is TypeKind.Fp32 or TypeKind.Fp64
+                || type.WithNullable(false) != rightTypes[rightKeys[k]].WithNullable(false)
+                || columns.AsSpan(0, k).Contains(column))
+            {
+                return null;
+            }
+
+            columns[k] = column;
+        }
+
+        foreach (var index in table.Indexes)
+        {
+            var fits = index.Kind switch
+            {
+                IndexKind.Ordered or IndexKind.Clustered => index.Columns.Count >= columns.Length,
+                IndexKind.Hash => index.Columns.Count == columns.Length,
+                _ => false,
+            };
+            if (fits && index.Columns.Take(columns.Length).All(columns.Contains))
+            {
+                return (read, index, [.. index.Columns.Take(columns.Length).Select(c => Array.IndexOf(columns, c))]);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// A join that seeks its left side through an index rather than holding it (design 74 §6): the right
+    /// side and the left changes as any join reads them, and a lookup of the left side, compiled as the
+    /// statement's own filters and projections over the rows of the keys the right changes name.
+    /// </summary>
+    private Rel SeekJoin(
+        Rel rel,
+        string path,
+        Rel left,
+        Rel right,
+        int[] leftKeys,
+        int[] rightKeys,
+        JoinMode mode,
+        (Rel Read, IndexDescriptor Index, int[] Order) seek)
+    {
+        var state = new JoinSeekState(
+            Types(left.RowType), Types(right.RowType), Types(rel.RowType), leftKeys, rightKeys, seek.Order, mode, _settings.BatchSize);
+        States.Add(state);
+        var leftFactory = Node(Rewrite(left, path), path);
+        var rightFactory = Node(Rewrite(right, path), path);
+
+        var read = seek.Read;
+        var table = _catalog.FindTable(read.Read.Table.Schema, read.Read.Table.Table)!.Value.Table;
+        var source = _sources[read.Read.Table.SourceId];
+        int[] projection = [.. read.Read.Projection.Select(c => (int)c)];
+        var lookupPath = $"{path}/Seek";
+        var readSchema = ArrowTypeMapping.ToArrowSchema(read.RowType);
+        var readTypes = Types(read.RowType);
+        var keyed = Substituted(read.RowType, context => new KeyLookup(
+            context, $"{lookupPath}/Read", readSchema, readTypes, state, source, table.Name, seek.Index.Name, projection));
+        var lookupFactory = Node(Replaced(left, read, keyed), lookupPath);
+
+        var weighted = Weighted(rel.RowType);
+        var schema = ArrowTypeMapping.ToArrowSchema(weighted);
+        var types = Types(weighted);
+        return Substituted(weighted, context => new JoinSeekChanges(
+            context, path, schema, types, state, leftFactory(context), rightFactory(context), lookupFactory(context)));
+    }
+
+    /// <summary>
+    /// A table read through filters and projections, with its read replaced: the same conditions and
+    /// expressions, carried rather than copied, so the policy's check finds them.
+    /// </summary>
+    private static Rel Replaced(Rel rel, Rel read, Rel by)
+    {
+        if (ReferenceEquals(rel, read))
+        {
+            return by;
+        }
+
+        switch (rel.KindCase)
+        {
+            case Rel.KindOneofCase.Filter:
+                return new Rel
+                {
+                    RowType = rel.RowType,
+                    Filter = new Ir.Filter { Input = Replaced(rel.Filter.Input, read, by), Condition = rel.Filter.Condition },
+                };
+            case Rel.KindOneofCase.Project:
+                var project = new Ir.Project { Input = Replaced(rel.Project.Input, read, by) };
+                project.Exprs.AddRange(rel.Project.Exprs);
+                return new Rel { RowType = rel.RowType, Project = project };
+            default:
+                throw new InvalidOperationException($"a sought join's left side holds a {rel.KindCase}, not a filter or a projection.");
+        }
+    }
+
+    /// <summary>
+    /// The conjuncts of a join's condition that equate a column of the left with a column of the right,
+    /// of one type, as the join's keys, and the rest of the condition, or null where nothing is left.
+    /// An equality is NULL for a NULL on either side, which is how a key meets nothing.
+    /// </summary>
+    private static (uint[] Left, uint[] Right, Expr? Remaining) EquiKeys(Expr condition, RowType left, RowType right)
+    {
+        var width = left.Fields.Count;
+        var leftKeys = new List<uint>();
+        var rightKeys = new List<uint>();
+        var rest = new List<Expr>();
+        var pending = new Stack<Expr>();
+        pending.Push(condition);
+        while (pending.Count > 0)
+        {
+            var conjunct = pending.Pop();
+            if (conjunct is { KindCase: Expr.KindOneofCase.Call, Call.Function: FunctionId.And })
+            {
+                for (var i = conjunct.Call.Args.Count - 1; i >= 0; i--)
+                {
+                    pending.Push(conjunct.Call.Args[i]);
+                }
+
+                continue;
+            }
+
+            if (conjunct is { KindCase: Expr.KindOneofCase.Call, Call.Function: FunctionId.Eq, Call.Args.Count: 2 }
+                && conjunct.Call.Args[0].KindCase == Expr.KindOneofCase.FieldRef
+                && conjunct.Call.Args[1].KindCase == Expr.KindOneofCase.FieldRef)
+            {
+                var (a, b) = ((int)conjunct.Call.Args[0].FieldRef.Index, (int)conjunct.Call.Args[1].FieldRef.Index);
+                if (a >= width && b < width)
+                {
+                    (a, b) = (b, a);
+                }
+
+                if (a < width && b >= width && b - width < right.Fields.Count
+                    && ChalkType.FromProto(left.Fields[a].Type).WithNullable(false)
+                        == ChalkType.FromProto(right.Fields[b - width].Type).WithNullable(false))
+                {
+                    leftKeys.Add((uint)a);
+                    rightKeys.Add((uint)(b - width));
+                    continue;
+                }
+            }
+
+            rest.Add(conjunct);
+        }
+
+        return ([.. leftKeys], [.. rightKeys], rest.Count == 0 ? null : AllOf([.. rest]));
     }
 
     private Rel AsOfJoin(Rel rel, string path)

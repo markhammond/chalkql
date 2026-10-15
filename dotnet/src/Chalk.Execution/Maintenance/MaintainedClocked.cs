@@ -57,6 +57,14 @@ internal sealed class ClockedState : IMaintainedState
         Output.Clear();
         RanAt = null;
     }
+
+    public void Trim()
+    {
+        InputChanges.Trim();
+        Replay.Trim();
+        Now.Trim();
+        Output.Trim();
+    }
 }
 
 /// <summary>Distinct rows with how many times each is held: a multiset kept between updates.</summary>

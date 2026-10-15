@@ -68,6 +68,14 @@ internal sealed class ChangeWriter
         Rows = 0;
     }
 
+    /// <summary>Forgets the rows and lets every batch's buffers go.</summary>
+    public void Trim()
+    {
+        _chunks.Clear();
+        _current = -1;
+        Rows = 0;
+    }
+
     /// <summary>Starts a row, in a fresh batch when the current one is full.</summary>
     public void Begin()
     {

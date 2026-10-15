@@ -85,6 +85,11 @@ internal sealed class ReadState : IMaintainedState
 
         Rewritten = false;
     }
+
+    /// <summary>A read keeps no buffer of its own: its changes are the source's batches.</summary>
+    public void Trim()
+    {
+    }
 }
 
 /// <summary>
@@ -305,4 +310,10 @@ internal interface IMaintainedState
 
     /// <summary>Forgets everything: after an update that failed part way, the next starts from nothing (§7).</summary>
     void Discard();
+
+    /// <summary>
+    /// Lets go of the buffers an update's changes passed through, keeping all that is held between
+    /// updates: after an update from nothing, whose changes were every row it read.
+    /// </summary>
+    void Trim();
 }

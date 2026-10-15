@@ -178,6 +178,13 @@ internal sealed class SeekState : IMaintainedState
         LeftBuckets.Clear();
     }
 
+    public void Trim()
+    {
+        LeftChanges.Trim();
+        Pending.Trim();
+        Output.Trim();
+    }
+
     /// <summary>The largest value of an integer layout, as its lane; null for any other layout.</summary>
     private static byte[]? Largest(ColumnKind kind) => kind switch
     {
