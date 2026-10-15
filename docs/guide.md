@@ -1789,6 +1789,18 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   the table builds whose later columns are the join's keys or its time: that index keeps rows with
   one key and time in their order in the table, so the ties are the table's. Otherwise key the join
   on both sides. Which the planner chooses, a seek or a lookup, depends on the tables' sizes.
+- **`ORDER BY … LIMIT`** at the statement's end is maintained, in whichever form the planner wrote
+  it, and so is an `OFFSET`. The step holds rows in the `LIMIT`'s order, compared as the executor's
+  sort compares them, and sends readers only the rows that crossed into or out of the window.
+  - Over an aggregate, a join or an as-of join it holds every row its input gives: over an aggregate,
+    one per group.
+  - Over a table read through filters and projections it holds the first `offset + count` rows and
+    a margin of as many again. When removals leave the window short of rows it no longer holds, it
+    reads the table again in the same update. So a feed of a table's newest rows holds a few hundred
+    rows, never the table, and an append-only table never makes it read again.
+  - A `LIMIT ?` binds once, when the view is made, as every parameter of a view does.
+  - Two rows that tie under the whole order have one key, so the key does not hold before the
+    `LIMIT`: the view is faulted with `DeclarationNotHeld`, saying so.
 - **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's
   `StateBudget`: a budget tuned for a recompute may need raising. The first update computes
   everything, and takes longer than a recompute.
@@ -1796,8 +1808,8 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   The next computes the statement from nothing, and a reader is sent only the keys that differ from
   what it holds.
 - **What is not maintained.** A statement with any of these is refused when the view is made, with
-  `UnsupportedInView`, naming the operator and where it is in the plan: window functions; `LIMIT` and
-  `FETCH`; set operations but `UNION ALL`; right, full, semi and anti joins; `DISTINCT`, ordered,
+  `UnsupportedInView`, naming the operator and where it is in the plan: window functions; a `LIMIT`
+  before the statement's last step; set operations but `UNION ALL`; right, full, semi and anti joins; `DISTINCT`, ordered,
   holistic and host aggregates; an as-of join whose right input is not a table read, or a lookup
   of one key in the table's order, through filters and projections; an as-of seek whose key has one
   type in its table and another on its left; an index lookup over a range of keys; the clock in a

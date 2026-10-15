@@ -1,5 +1,6 @@
 using Chalk.Catalog;
 using Chalk.Execution.Expressions;
+using Chalk.Execution.Operators;
 using Chalk.Ir;
 using Chalk.Sources;
 using CatalogContext = Chalk.Catalog.CatalogContext;
@@ -37,6 +38,9 @@ internal sealed class MaintainedCompiler
     private readonly Dictionary<uint, (SharedState State, Rel Rewritten)> _shared = [];
     private readonly Dictionary<Rel, ReadState> _reads = new(ReferenceEqualityComparer.Instance);
 
+    /// <summary>The statement's last step: the first beneath its projections, where a LIMIT is kept (D360).</summary>
+    private readonly Rel _end;
+
     public MaintainedCompiler(
         Plan plan,
         CatalogContext catalog,
@@ -59,6 +63,12 @@ internal sealed class MaintainedCompiler
         foreach (var shared in plan.Shared)
         {
             _sharedPlans[shared.Id] = shared.Rel;
+        }
+
+        _end = plan.Root;
+        while (_end.KindCase == Rel.KindOneofCase.Project)
+        {
+            _end = _end.Project.Input;
         }
     }
 
@@ -104,6 +114,9 @@ internal sealed class MaintainedCompiler
                 Rel.KindOneofCase.Filter => Filter(rel, path),
                 Rel.KindOneofCase.Project => Project(rel, path),
                 Rel.KindOneofCase.Sort => Rewrite(rel.Sort.Input, path),
+                Rel.KindOneofCase.TopN when ReferenceEquals(rel, _end) => Limit(rel, path, rel.TopN.Input, rel.TopN.Fields),
+                Rel.KindOneofCase.Fetch when ReferenceEquals(rel, _end) && rel.Fetch.Order.Count > 0 =>
+                    Limit(rel, path, rel.Fetch.Input, rel.Fetch.Order),
                 Rel.KindOneofCase.SetOp => SetOp(rel, path),
                 Rel.KindOneofCase.HashJoin => Join(
                     rel, path, rel.HashJoin.Left, rel.HashJoin.Right, rel.HashJoin.LeftKeys, rel.HashJoin.RightKeys,
@@ -134,7 +147,8 @@ internal sealed class MaintainedCompiler
     private static string Unmaintained(Rel rel) => rel.KindCase switch
     {
         Rel.KindOneofCase.Fetch or Rel.KindOneofCase.TopN =>
-            "a LIMIT or FETCH over a table is not maintained: its rows depend on an order.",
+            "a LIMIT is maintained only as the statement's last step, ordered by its ORDER BY; here its rows "
+            + "would depend on the input's order.",
         Rel.KindOneofCase.Window => "a window function over a table is not maintained.",
         Rel.KindOneofCase.Hop or Rel.KindOneofCase.Session => "a hopping or session window is not maintained.",
         Rel.KindOneofCase.Unnest => "UNNEST over a table is not maintained.",
@@ -605,6 +619,31 @@ internal sealed class MaintainedCompiler
         var schema = ArrowTypeMapping.ToArrowSchema(weighted);
         var types = Types(weighted);
         return Substituted(weighted, context => new AggregateChanges(context, path, schema, types, state, input(context), rebuildsOn));
+    }
+
+    /// <summary>
+    /// The LIMIT the statement ends in (D360, design 73 §4): a maintained top-N step over its input's
+    /// changes. Over a table read through filters and projections it holds the window and a margin;
+    /// over anything else, every row its input gives.
+    /// </summary>
+    private Rel Limit(Rel rel, string path, Rel input, IReadOnlyList<SortField> order)
+    {
+        var (offset, count) = _compilation.Bounds(rel, path);
+        var ordering = new SortOrdering(order, input.RowType);
+        var beneath = input;
+        while (beneath.KindCase == Rel.KindOneofCase.Sort)
+        {
+            beneath = beneath.Sort.Input;
+        }
+
+        var state = new TopNState(
+            Types(input.RowType), ordering, offset, count, TableUnder(beneath) is not null, _settings.BatchSize);
+        States.Add(state);
+        var inputFactory = _compilation.Node(Rewrite(input, path), path);
+        var weighted = Weighted(rel.RowType);
+        var schema = ArrowTypeMapping.ToArrowSchema(weighted);
+        var types = Types(weighted);
+        return Substituted(weighted, context => new TopNChanges(context, path, schema, types, state, inputFactory(context)));
     }
 
     private Rel Shared(Rel rel, string path)

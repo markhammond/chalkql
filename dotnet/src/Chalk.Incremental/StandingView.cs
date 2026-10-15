@@ -708,7 +708,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 var fault = new StandingViewException(
                     ChalkErrorCodes.DeclarationNotHeld,
                     $"The view's key ({string.Join(", ", _options.Key)}) = ({duplicate.Key}) is given by two rows "
-                    + $"of the result at version {stamp.Version}. A view keeps one row per key: correct the "
+                    + $"{duplicate.Where} at version {stamp.Version}. A view keeps one row per key: correct the "
                     + "statement's key, or the Map that builds the host's key from it. The view keeps this fault "
                     + "until it is disposed.");
                 _fault = fault;

@@ -192,6 +192,44 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
             """,
             [0]
         },
+        {
+            // A LIMIT the statement ends in (D360): every group held, the window's changes given.
+            "the top groups of an aggregate",
+            """
+            SELECT book, SUM(qty) AS q FROM trades GROUP BY book ORDER BY q DESC, book LIMIT 2
+            """,
+            [0]
+        },
+        {
+            "the top groups past an offset",
+            """
+            SELECT book, COUNT(*) AS n FROM trades GROUP BY book ORDER BY n DESC, book LIMIT 2 OFFSET 1
+            """,
+            [0]
+        },
+        {
+            "the dearest trades of a join",
+            """
+            SELECT t.seq, b.name, t.price FROM trades t JOIN books b ON b.id = t.book ORDER BY t.price DESC, t.seq LIMIT 4
+            """,
+            [0]
+        },
+        {
+            // Over a table read: the window and a margin held, the input read again when they run short.
+            "the newest trades",
+            """
+            SELECT seq, book, qty FROM trades ORDER BY ts DESC, seq DESC LIMIT 3
+            """,
+            [0]
+        },
+        {
+            // Over a read already in the LIMIT's order: a FETCH with no sort, upserts inside its window.
+            "the first books by key",
+            """
+            SELECT id, name, region FROM books ORDER BY id LIMIT 2
+            """,
+            [0]
+        },
     };
 
     /// <summary>

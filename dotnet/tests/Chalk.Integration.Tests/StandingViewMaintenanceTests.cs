@@ -317,13 +317,89 @@ public sealed class StandingViewMaintenanceTests(SharedSidecar sidecar)
         return false;
     }
 
+    private const string Newest = "SELECT seq, qty FROM fills ORDER BY ts DESC, seq DESC LIMIT 2";
+
+    /// <summary>
+    /// A maintained LIMIT over a table read holds its window and a margin of as many again (D360).
+    /// Removals that use up the margin leave it short of rows it no longer holds, so it reads the table
+    /// again in the same update, and the view is still exactly the statement.
+    /// </summary>
+    [Fact]
+    public async Task A_maintained_limit_is_right_after_removals_use_up_its_margin()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync();
+        var later = Enumerable.Range(4, 7).Select(seq => new Fill(seq, seq % 3, seq * 10, Open.AddSeconds(seq))).ToArray();
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", later), Ct);
+        await using var view = await desk.Engine.MaterializeAsync(Newest, Options(ViewMaintenance.Incremental, key: "seq"), Ct);
+        var replica = new Replica();
+        var cursor = ViewCursor.Start;
+        view.Drain(ref cursor, replica);
+        await AssertIsTheStatementAsync(desk.Engine, replica, Newest);
+
+        // The four newest gone: the window and its margin, all at once.
+        IReadOnlyList<Fill> kept = [.. FirstFills, .. later.Where(f => f.Seq <= 6)];
+        await desk.Engine.RefreshAsync(r => r.Replace(desk.Source, "fills", kept), Ct);
+        await view.UpdateAsync(Ct);
+        view.Drain(ref cursor, replica);
+        await AssertIsTheStatementAsync(desk.Engine, replica, Newest);
+        Assert.Equal([5L, 6L], replica.Rows.Keys.Order());
+
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", Fills(new Fill(11, 1, 110, Open.AddSeconds(11)))), Ct);
+        await view.UpdateAsync(Ct);
+        view.Drain(ref cursor, replica);
+        await AssertIsTheStatementAsync(desk.Engine, replica, Newest);
+        Assert.Equal([6L, 11L], replica.Rows.Keys.Order());
+    }
+
+    /// <summary>
+    /// A LIMIT's order includes every key column, so two rows that tie under it have one key: the key
+    /// does not hold before the LIMIT, and a maintained view is faulted, saying where the two rows were.
+    /// </summary>
+    [Fact]
+    public async Task A_key_that_does_not_hold_before_a_maintained_limit_faults_the_view()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync();
+        await using var view = await desk.Engine.MaterializeAsync(
+            "SELECT book, qty FROM fills ORDER BY book LIMIT 2", Options(ViewMaintenance.Incremental), Ct);
+
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", Fills(new Fill(4, 1, 5, Open.AddSeconds(3)))), Ct);
+        var fault = await Assert.ThrowsAsync<StandingViewException>(async () => await view.UpdateAsync(Ct));
+
+        Assert.Equal(ChalkErrorCodes.DeclarationNotHeld, fault.Code);
+        Assert.Contains("is given by two rows before the statement's LIMIT", fault.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>A maintained LIMIT given as a parameter binds once, when the view is made, as every parameter of a view does.</summary>
+    [Fact]
+    public async Task A_maintained_limit_given_as_a_parameter_binds_once()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync();
+        const string sql = "SELECT seq, qty FROM fills ORDER BY ts DESC, seq DESC LIMIT ?";
+        await using var view = await desk.Engine.MaterializeAsync(
+            sql, Options(ViewMaintenance.Incremental, key: "seq", parameters: new object[] { 2 }), Ct);
+        var replica = new Replica();
+        var cursor = ViewCursor.Start;
+        view.Drain(ref cursor, replica);
+        Assert.Equal([2L, 3L], replica.Rows.Keys.Order());
+
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", Fills(new Fill(4, 2, 5, Open.AddSeconds(3)))), Ct);
+        await view.UpdateAsync(Ct);
+        view.Drain(ref cursor, replica);
+        Assert.Equal([3L, 4L], replica.Rows.Keys.Order());
+    }
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private static IReadOnlyList<Fill> Fills(params Fill[] fills) => fills;
 
-    private static ViewOptions<BookKey, BookRow> Options(ViewMaintenance maintenance, long budget = 64L << 20) => new()
+    private static ViewOptions<BookKey, BookRow> Options(
+        ViewMaintenance maintenance, long budget = 64L << 20, string key = "book", object? parameters = null) => new()
     {
-        Key = ["book"],
+        Key = [key],
+        Parameters = parameters,
         LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
         Maintenance = maintenance,
         StateBudget = budget,

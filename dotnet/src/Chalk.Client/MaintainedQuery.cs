@@ -74,7 +74,7 @@ internal sealed class MaintainedQuery : IAsyncDisposable
         }
         catch (MaintainedKeyException duplicate)
         {
-            throw new MaintainedKeyFault(duplicate.Key);
+            throw new MaintainedKeyFault(duplicate.Key, duplicate.Where);
         }
 
         return new MaintainedUpdate
@@ -117,7 +117,11 @@ internal sealed class NotMaintainableException(string reason, string path) : Exc
 }
 
 /// <summary>A maintained result whose key came to hold two rows: the key, rendered.</summary>
-internal sealed class MaintainedKeyFault(string key) : Exception($"the key ({key}) holds two rows.")
+internal sealed class MaintainedKeyFault(string key, string where = "of the result")
+    : Exception($"the key ({key}) holds two rows {where}.")
 {
     public string Key { get; } = key;
+
+    /// <summary>Where the two rows were: of the result, or before the statement's <c>LIMIT</c> (D360).</summary>
+    public string Where { get; } = where;
 }
