@@ -3351,7 +3351,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
     {
         if (typeof(TValue) == typeof(string))
         {
-            return CompareOrdinal(
+            return CompareText(
                 (string)(object)left!,
                 lane.VarValue(row));
         }
@@ -3399,10 +3399,12 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
     }
 
     /// <summary>
-    /// <see cref="string.CompareOrdinal(string, string)"/> of a string and the text whose UTF-8 bytes are
-    /// given, by sign, without making a string of them: the bytes are read as UTF-16 code units.
+    /// <see cref="TextOrder.Compare(string, string)"/> of a string and the text whose UTF-8 bytes are
+    /// given, by sign, without making a string of them: the bytes are read as UTF-16 code units, and
+    /// the first two that differ are ranked as the index ranks them, by code point. Comparing the units
+    /// as they are would put a supplementary code point below U+E000, out of the index's order.
     /// </summary>
-    private static int CompareOrdinal(
+    private static int CompareText(
         string text,
         ReadOnlySpan<byte> utf8)
     {
@@ -3424,7 +3426,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     return -1;
 
                 var difference =
-                    text[at] - units[u];
+                    TextOrder.Rank(text[at]) - TextOrder.Rank(units[u]);
 
                 if (difference != 0)
                     return difference;

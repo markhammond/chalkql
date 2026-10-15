@@ -33,8 +33,11 @@ internal static class TextOrder
     /// <summary>The same order as a comparer, for a sort or a sorted collection.</summary>
     public static IComparer<string> Comparer { get; } = new TextComparer();
 
-    /// <summary>A unit's place in code-point order: the surrogates above U+E000..U+FFFF.</summary>
-    private static int Rank(char unit) =>
+    /// <summary>
+    /// A unit's place in code-point order: the surrogates above U+E000..U+FFFF. Comparing two texts
+    /// unit by unit by this rank, up to the first that differs, is <see cref="Compare(string, string)"/>.
+    /// </summary>
+    internal static int Rank(char unit) =>
         unit < '\uD800' ? unit : unit < '\uE000' ? unit + 0x2000 : unit - 0x800;
 
     /// <summary>A null string before any text, as an ordinal comparer puts it.</summary>

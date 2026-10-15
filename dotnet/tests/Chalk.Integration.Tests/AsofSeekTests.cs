@@ -45,9 +45,10 @@ public sealed class AsofSeekTests(SharedSidecar sidecar) : IClassFixture<SharedS
     }
 
     /// <summary>
-    /// Keys beyond ASCII, sought straight from the left rows' columns. The index orders text as UTF-16,
-    /// in which U+E000 sorts after 😀 where as UTF-8 it sorts before it, and each seek finds its own key's
-    /// row: six symbols that have marks, and two near them that have none.
+    /// Keys beyond ASCII, sought straight from the left rows' columns. The index orders text by code
+    /// point, as UTF-8 does, in which U+E000 sorts before 😀 where UTF-16 code units put it after, and
+    /// each seek ranks its keys the same way and finds its own key's row: six symbols that have marks,
+    /// and two near them that have none.
     /// </summary>
     [Theory]
     [InlineData(">=")]
