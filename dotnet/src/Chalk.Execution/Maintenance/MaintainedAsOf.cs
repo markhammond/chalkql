@@ -134,6 +134,12 @@ internal sealed class AsOfState : IMaintainedState
         NextArrival = 0;
     }
 
+    public void Trim()
+    {
+        LeftChanges.Trim();
+        Output.Trim();
+    }
+
     /// <summary>One key's right rows, ordered by time and then by arrival.</summary>
     internal sealed class Run(byte[] key)
     {

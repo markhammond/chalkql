@@ -74,6 +74,30 @@ public sealed class StandingViewMaintenanceTests(SharedSidecar sidecar)
             $"maintained {maintained.StateBytes} bytes, recomputed {recomputed.StateBytes}");
     }
 
+    /// <summary>
+    /// The first update reads every row, and the buffers its changes pass through grow to hold them;
+    /// they are let go when it ends. A view of fifty thousand fills in four books then holds its four
+    /// groups and not the fills, and an update after it holds no more than what it read.
+    /// </summary>
+    [Fact]
+    public async Task After_its_first_update_a_view_holds_its_state_and_not_the_rows_it_read()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync();
+        var fills = Enumerable.Range(4, 50_000).Select(i => new Fill(i, i % 4, i % 7, Open.AddSeconds(3).AddMilliseconds(i))).ToList();
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", fills), Ct);
+        await using var view = await desk.Engine.MaterializeAsync(Totals, Options(ViewMaintenance.Incremental), Ct);
+        Assert.True(view.StateBytes < 50_000, $"the view holds {view.StateBytes} bytes after reading 50,003 rows");
+
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", Fills(new Fill(50_004, 1, 5, Open.AddSeconds(100)))), Ct);
+        await view.UpdateAsync(Ct);
+        Assert.True(view.StateBytes < 50_000, $"the view holds {view.StateBytes} bytes after reading one row");
+        var replica = new Replica();
+        var cursor = ViewCursor.Start;
+        view.Drain(ref cursor, replica);
+        await AssertIsTheStatementAsync(desk.Engine, replica);
+    }
+
     /// <summary>A budget the maintained state does not fit is refused as a recompute's rows past it are.</summary>
     [Fact]
     public async Task A_budget_the_maintained_state_exceeds_is_refused()

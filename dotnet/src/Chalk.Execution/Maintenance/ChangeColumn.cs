@@ -58,6 +58,15 @@ internal sealed class ChangeColumn
         _bitmap = false;
     }
 
+    /// <summary>Forgets the rows and lets the buffers go, as an update far larger than the next grew them.</summary>
+    public void Trim()
+    {
+        Clear();
+        _values = [];
+        _offsets = new byte[4];
+        _validity = [];
+    }
+
     /// <summary>Copies row <paramref name="row"/> of <paramref name="source"/>, a column of this type.</summary>
     public void Append(in ColumnView source, int row)
     {

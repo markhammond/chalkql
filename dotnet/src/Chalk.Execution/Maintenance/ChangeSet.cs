@@ -67,6 +67,20 @@ internal sealed class ChangeSet
         Count = 0;
     }
 
+    /// <summary>Forgets the rows and lets the buffers go, the published columns with them.</summary>
+    public void Trim()
+    {
+        foreach (var column in _columns)
+        {
+            column.Trim();
+        }
+
+        _index.Trim();
+        _weights = new long[16];
+        Count = 0;
+        Seal();
+    }
+
     /// <summary>Adds a change batch, whose last column is the weight, honouring its selection.</summary>
     public void Add(ColumnarBatch batch)
     {
