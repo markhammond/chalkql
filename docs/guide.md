@@ -2242,11 +2242,13 @@ policy anywhere in sight.
 line item to an order, a comment to a post — and the row itself says nothing about who
 may read it. `Restriction.Through("thread_id")` declares the relationship once, and
 reads the parent table and its key from the declared foreign key. The planner compiles
-it into one join with the parent's own entitled scan. What the child's columns disclose
-is decided on the *parent's* side of that join: once per parent row, not once per child
-row. Where the parent's whole chain is visible, over a NOT NULL declared key, the join
-is left out altogether, and the visibility is ALL. Tutorial chapter 11 shows three
-principals running one statement over such a table.
+it into one join with the parent's own entitled scan. The parent must restrict its rows,
+by a row predicate, a `Through` of its own or a path: through an unrestricted parent
+restricts nothing, and is refused with `InvalidTenancyPath`. What the child's columns
+disclose is decided on the *parent's* side of that join: once per parent row, not once
+per child row. Where the parent's whole chain is visible, over a NOT NULL declared key,
+the join is left out altogether, and the visibility is ALL. Tutorial chapter 11 shows
+three principals running one statement over such a table.
 
 **A column that says what each row disclosed.** The per-column report is one label for
 the whole result. That is all a caller needs — until a principal is a manager in one

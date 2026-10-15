@@ -382,14 +382,18 @@ public static class CatalogValidator
                     + "unrestricted or restrict the parent.");
             }
 
-            if (parentEntitlement.RowPredicate.Length == 0 && parentEntitlement.Through.Count == 0)
+            // A path restricts the parent's rows as a predicate does: the planner joins it into the
+            // parent's own entitled scan, which is what a child's Through joins.
+            if (parentEntitlement.RowPredicate.Length == 0
+                && parentEntitlement.Through.Count == 0
+                && parentEntitlement.Inherited.Count == 0)
             {
                 throw new CatalogValidationException(
                     ChalkErrorCodes.InvalidTenancyPath,
                     parentPath,
                     $"'{table.Name}' derives its visibility through "
                     + $"'{parentSchema!.Name}.{parentTable.Name}', whose entitlement restricts no "
-                    + "row — it has neither a row predicate nor a Through of its own. Through an "
+                    + "row — it has no row predicate, no Through and no path of its own. Through an "
                     + "unrestricted parent restricts nothing; declare the child unrestricted or "
                     + "restrict the parent.");
             }

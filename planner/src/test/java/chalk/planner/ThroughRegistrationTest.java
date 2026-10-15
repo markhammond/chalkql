@@ -10,16 +10,19 @@ import chalk.ir.v1.ColumnEntitlement;
 import chalk.ir.v1.Disclosure;
 import chalk.ir.v1.DisclosureRule;
 import chalk.ir.v1.ForeignKey;
+import chalk.ir.v1.InheritedVisibility;
 import chalk.ir.v1.ParentVisibility;
 import chalk.ir.v1.QueryLanguage;
 import chalk.ir.v1.RowCountKind;
 import chalk.ir.v1.Schema;
 import chalk.ir.v1.SourceCapabilities;
 import chalk.ir.v1.SourceKind;
+import chalk.ir.v1.StepDirection;
 import chalk.ir.v1.Table;
 import chalk.ir.v1.TableEntitlement;
 import chalk.ir.v1.TypeKind;
 import chalk.ir.v1.UniqueKey;
+import chalk.ir.v1.VisibilityStep;
 import chalk.planner.catalog.CatalogRegistry;
 import chalk.planner.catalog.InvalidCatalogException;
 import java.util.function.UnaryOperator;
@@ -198,6 +201,40 @@ class ThroughRegistrationTest {
         .isInstanceOf(InvalidCatalogException.class)
         .hasMessageContaining("restricts no row")
         .hasMessageContaining("declare the child unrestricted or restrict the parent");
+  }
+
+  /**
+   * A parent whose rows a path restricts, and nothing else, is restricted: the path is joined into
+   * its entitled scan, which is what the child's join reads.
+   */
+  @Test
+  void a_parent_restricted_only_along_a_path_registers() {
+    Table.Builder threads = threads().toBuilder();
+    Table alongAPath =
+        threads
+            .addForeignKeys(
+                ForeignKey.newBuilder()
+                    .setName("threads_org")
+                    .addColumns(1)
+                    .setParentTable("orgs")
+                    .addParentColumns(0))
+            .setEntitlement(
+                threads.getEntitlement().toBuilder()
+                    .clearRowPredicate()
+                    .addInherited(
+                        InheritedVisibility.newBuilder()
+                            .setKind("org")
+                            .addSteps(
+                                VisibilityStep.newBuilder()
+                                    .setTable("orgs")
+                                    .setFromColumn(1)
+                                    .setToColumn(0)
+                                    .setDirection(StepDirection.STEP_DIRECTION_TO_PARENT))
+                            .setEndpointPredicate("id IN (@ctx.manager_orgs)")
+                            .setEndpointTable("orgs")))
+            .build();
+
+    register(catalog(alongAPath, messages()));
   }
 
   @Test
