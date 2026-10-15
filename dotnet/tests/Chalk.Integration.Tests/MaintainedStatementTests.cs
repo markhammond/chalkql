@@ -102,6 +102,33 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
             [0]
         },
         {
+            // Windows over the clock (design 68 §6): when it moves, only the rows between the old cut-offs
+            // and the new are read again.
+            "a window over the clock",
+            "SELECT seq, asset, qty FROM trades WHERE ts > CAST(@now AS TIMESTAMP(9)) - INTERVAL '3' SECOND",
+            [0]
+        },
+        {
+            "a window over the clock and a condition",
+            "SELECT seq, qty FROM trades WHERE ts > CAST(@now AS TIMESTAMP(9)) - INTERVAL '3' SECOND AND qty > 0",
+            [0]
+        },
+        {
+            "a window between two cut-offs",
+            "SELECT seq, ts FROM trades WHERE ts BETWEEN CAST(@now AS TIMESTAMP(9)) - INTERVAL '4' SECOND AND CAST(@now AS TIMESTAMP(9))",
+            [0]
+        },
+        {
+            "a window over the clock or a condition",
+            "SELECT seq, qty FROM trades WHERE ts > CAST(@now AS TIMESTAMP(9)) - INTERVAL '3' SECOND OR qty < 0",
+            [0]
+        },
+        {
+            "a window over the current time, grouped",
+            "SELECT asset, COUNT(*) AS n, SUM(qty) AS q FROM trades WHERE ts > CURRENT_TIMESTAMP - INTERVAL '5' SECOND GROUP BY asset",
+            [0]
+        },
+        {
             "having over string extremes",
             """
             SELECT t.asset, MIN(b.name) AS first_book, MAX(b.name) AS last_book, COUNT(*) AS n

@@ -64,6 +64,21 @@ public sealed class PolicyNodesTests
         Assert.Equal("root/Project/Filter", refused.Path);
     }
 
+    /// <summary>
+    /// A filter a maintained operator evaluates itself, as a window over the clock does, is kept by its
+    /// very condition, as a compiled one is; an equal copy is not it.
+    /// </summary>
+    [Fact]
+    public void A_filter_an_operator_evaluates_itself_is_kept_by_its_condition()
+    {
+        var plan = Statement(Project(Filter(Read("notes", governed: true), Condition), Columns));
+
+        PolicyNodes.Check(plan, Governed, [Project(Placeholder(), Columns)], [Condition]);
+        var refused = Assert.Throws<NotMaintainedException>(
+            () => PolicyNodes.Check(plan, Governed, [Project(Placeholder(), Columns)], [Condition.Clone()]));
+        Assert.Equal("root/Project/Filter", refused.Path);
+    }
+
     /// <summary>A node over a join is over both its sides: one governed side is enough to hold it.</summary>
     [Fact]
     public void A_filter_over_a_join_with_one_governed_side_is_held()

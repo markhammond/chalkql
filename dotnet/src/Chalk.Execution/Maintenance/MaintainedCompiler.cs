@@ -46,6 +46,9 @@ internal sealed class MaintainedCompiler
     /// <summary>Every tree the maintained plan compiles, which the policy's nodes are checked against.</summary>
     private readonly List<Rel> _compiled = [];
 
+    /// <summary>The conditions of filters a maintained operator evaluates itself, rather than a compiled tree.</summary>
+    private readonly List<Expr> _evaluated = [];
+
     /// <summary>The statement's last step: the first beneath its projections, where a LIMIT is kept (D360).</summary>
     private readonly Rel _end;
 
@@ -103,7 +106,7 @@ internal sealed class MaintainedCompiler
 
         var rewritten = Rewrite(_plan.Root, "root");
         var root = Node(rewritten, string.Empty);
-        PolicyNodes.Check(_plan, Governed, _compiled);
+        PolicyNodes.Check(_plan, Governed, _compiled, _evaluated);
         return root;
     }
 
@@ -350,10 +353,168 @@ internal sealed class MaintainedCompiler
     {
         if (ReadsClock(rel.Filter.Condition))
         {
-            return Clocked(rel, rel.Filter.Input, path, input => Filter(rel, input));
+            return Window(rel, path) ?? Clocked(rel, rel.Filter.Input, path, input => Filter(rel, input));
         }
 
         return Filter(rel, Rewrite(rel.Filter.Input, path));
+    }
+
+    /// <summary>
+    /// A filter whose every read of the clock is a cut-off an input column is compared with: one that,
+    /// when the clock moves, reads again only the rows between the old cut-offs and the new (design 68
+    /// §6). Null for a filter that reads the clock any other way, which reads every row it holds.
+    /// </summary>
+    private Rel? Window(Rel rel, string path)
+    {
+        var input = rel.Filter.Input;
+        var cuts = new List<(int Column, Expr Cut)>();
+        if (!Cuts(rel.Filter.Condition, input.RowType, cuts) || cuts.Count == 0)
+        {
+            return null;
+        }
+
+        var state = new WindowState(Types(input.RowType), [.. cuts.Select(c => c.Column)], _settings.BatchSize);
+        States.Add(state);
+        var inputFactory = Node(Rewrite(input, path), path);
+        var expressions = _compilation.ExpressionsAt(path);
+        var condition = expressions.Compile(rel.Filter.Condition);
+        IVectorExpr[] thresholds = [.. cuts.Select(c => expressions.Compile(c.Cut))];
+        _evaluated.Add(rel.Filter.Condition);
+        var weighted = Weighted(rel.RowType);
+        var schema = ArrowTypeMapping.ToArrowSchema(weighted);
+        var types = Types(weighted);
+        return Substituted(weighted, context => new WindowChanges(
+            context, path, schema, types, state, inputFactory(context), condition, thresholds));
+    }
+
+    /// <summary>
+    /// Collects the comparisons of an input column with a cut-off that reads the clock, and says whether
+    /// every read of the clock in <paramref name="expr"/> is the cut-off of one.
+    /// </summary>
+    private bool Cuts(Expr expr, RowType input, List<(int Column, Expr Cut)> cuts)
+    {
+        if (!ReadsClock(expr))
+        {
+            return true;
+        }
+
+        if (expr is { KindCase: Expr.KindOneofCase.Call, Call.Args.Count: 2 }
+            && expr.Call.Function is FunctionId.Eq or FunctionId.Ne or FunctionId.Lt or FunctionId.Le
+                or FunctionId.Gt or FunctionId.Ge)
+        {
+            if (Cut(expr.Call.Args[0], expr.Call.Args[1], input) is { } cut)
+            {
+                cuts.Add(cut);
+                return true;
+            }
+
+            if (Cut(expr.Call.Args[1], expr.Call.Args[0], input) is { } reversed)
+            {
+                cuts.Add(reversed);
+                return true;
+            }
+        }
+
+        if (expr is { KindCase: Expr.KindOneofCase.Call, Call.Function: FunctionId.CurrentTimestamp or FunctionId.CurrentDate }
+            || (expr.KindCase == Expr.KindOneofCase.Param && _clockSlots.Contains(expr.Param.Index)))
+        {
+            return false;
+        }
+
+        foreach (var child in Children(expr))
+        {
+            if (!Cuts(child, input, cuts))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// <paramref name="column"/> compared with <paramref name="cut"/>: an input column of a whole-number
+    /// type — a number, a date, a time or a timestamp — and an expression of that same type that reads
+    /// no input column. Null for anything else.
+    /// </summary>
+    private static (int Column, Expr Cut)? Cut(Expr column, Expr cut, RowType input)
+    {
+        if (column.KindCase != Expr.KindOneofCase.FieldRef || column.FieldRef.Index >= input.Fields.Count)
+        {
+            return null;
+        }
+
+        var reads = false;
+        foreach (var node in Descendants(cut))
+        {
+            reads |= node.KindCase == Expr.KindOneofCase.FieldRef;
+        }
+
+        var type = ChalkType.FromProto(input.Fields[(int)column.FieldRef.Index].Type).WithNullable(false);
+        return reads
+            || type.Kind is not (TypeKind.I8 or TypeKind.I16 or TypeKind.I32 or TypeKind.I64 or TypeKind.Date
+                or TypeKind.Time or TypeKind.Timestamp or TypeKind.TimestampTz)
+            || type != ChalkType.FromProto(cut.Type).WithNullable(false)
+                ? null
+                : ((int)column.FieldRef.Index, cut);
+    }
+
+    /// <summary>The expressions directly within <paramref name="expr"/>, however its fields hold them.</summary>
+    private static IEnumerable<Expr> Children(Expr expr)
+    {
+        var pending = new Stack<Google.Protobuf.IMessage>();
+        foreach (var field in Expr.Descriptor.Fields.InDeclarationOrder())
+        {
+            Push(pending, field.FieldType == Google.Protobuf.Reflection.FieldType.Message ? field.Accessor.GetValue(expr) : null);
+        }
+
+        while (pending.Count > 0)
+        {
+            var next = pending.Pop();
+            if (next is Expr child)
+            {
+                yield return child;
+                continue;
+            }
+
+            foreach (var field in next.Descriptor.Fields.InDeclarationOrder())
+            {
+                Push(pending, field.FieldType == Google.Protobuf.Reflection.FieldType.Message ? field.Accessor.GetValue(next) : null);
+            }
+        }
+
+        static void Push(Stack<Google.Protobuf.IMessage> pending, object? value)
+        {
+            switch (value)
+            {
+                case Google.Protobuf.IMessage message:
+                    pending.Push(message);
+                    break;
+                case System.Collections.IList list:
+                    foreach (var item in list)
+                    {
+                        if (item is Google.Protobuf.IMessage element)
+                        {
+                            pending.Push(element);
+                        }
+                    }
+
+                    break;
+            }
+        }
+    }
+
+    /// <summary><paramref name="expr"/> and every expression within it.</summary>
+    private static IEnumerable<Expr> Descendants(Expr expr)
+    {
+        yield return expr;
+        foreach (var child in Children(expr))
+        {
+            foreach (var descendant in Descendants(child))
+            {
+                yield return descendant;
+            }
+        }
     }
 
     private static Rel Filter(Rel rel, Rel input) => new()

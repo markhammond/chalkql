@@ -56,6 +56,9 @@ internal sealed class MaintainedQuery : IAsyncDisposable
     /// <summary>Bytes the statement's operators and its result hold, against the view's state budget.</summary>
     public long StateBytes => _plan.StateBytes;
 
+    /// <summary>Every state the statement's operators keep, for a test to look into.</summary>
+    internal IReadOnlyList<IMaintainedState> States => _plan.States;
+
     /// <summary>
     /// Brings the statement to the epoch its tables are pinned at now, with <paramref name="values"/>
     /// bound as an execution binds them and <paramref name="now"/> its current time. A key that comes to

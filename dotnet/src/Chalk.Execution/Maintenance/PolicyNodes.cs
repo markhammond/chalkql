@@ -33,7 +33,12 @@ internal static class PolicyNodes
     /// other node.
     /// </param>
     /// <param name="compiled">Every tree the maintained plan compiled.</param>
-    public static void Check(Plan plan, Func<Rel, string?> governed, IEnumerable<Rel> compiled)
+    /// <param name="evaluated">
+    /// The conditions of filters a maintained operator evaluates itself rather than as a node of a
+    /// compiled tree, as a window over the clock does.
+    /// </param>
+    public static void Check(
+        Plan plan, Func<Rel, string?> governed, IEnumerable<Rel> compiled, IEnumerable<Expr>? evaluated = null)
     {
         var held = Held(plan, governed);
         if (held.Count == 0)
@@ -43,6 +48,7 @@ internal static class PolicyNodes
 
         var conditions = new HashSet<Expr>(ReferenceEqualityComparer.Instance);
         var expressions = new HashSet<Expr>(ReferenceEqualityComparer.Instance);
+        conditions.UnionWith(evaluated ?? []);
         foreach (var rel in compiled.SelectMany(PlanWalker.Rels))
         {
             switch (rel.KindCase)

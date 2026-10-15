@@ -62,6 +62,9 @@ internal sealed class MaintainedPlan : IAsyncDisposable
     /// <summary>Bytes the operators and the result hold, against the view's state budget.</summary>
     public long StateBytes => _states.Sum(s => s.Bytes) + _result.Bytes;
 
+    /// <summary>Every state the plan's operators keep, for a test to look into.</summary>
+    internal IReadOnlyList<IMaintainedState> States => _states;
+
     /// <summary>The result's key columns: positions in the output.</summary>
     public int[] Key
     {
