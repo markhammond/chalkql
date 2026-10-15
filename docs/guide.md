@@ -2572,10 +2572,11 @@ table with one sensitive column belongs here too.
 A visibility rule, `Visible(new VisibilityRule { Roles = […] })`, names the roles that
 may see a table's rows; a table without one admits every role. A path holds its
 parents' rules too. A row that takes a kind from another along `Inherited` or `Related`
-reaches a role only where every table the path steps down to admits it, in a scope
-their rules allow. A role a parent's rule leaves out reads nothing along the path, and
-has no say in the child's column rules there either. A table's own rule, scopes
-included, holds along its paths as it does on its own row.
+reaches a role only where every table along the path admits it, in a scope their rules
+allow; a `Related` path's bridge is the exception, since the path only passes through
+it. A role a parent's rule leaves out reads nothing along the path, and its grants
+along the path do not count in the child's column rules either. The child's own rule,
+scopes included, also holds on every row a path admits.
 
 Sometimes a child should be read by its parent's *value* of a kind, as a marking, by
 roles that may not read the parent: a tasking carries its asset's classification, and
@@ -2591,13 +2592,16 @@ tasking.Tenancy(t => t
 An exemption covers the whole path, and `TenancyEntitlements.Exemptions` lists every
 one a policy makes, for a review to read. One that would change nothing is refused.
 
-A policy is refused when it compiles where a parent's rule would leave a role the child
-admits with no way into it at all, and the message names the role, the parent and the
-clause to add. Where the compiler cannot see that — the role keeps another route, and
-the policy declares no combinations — a grant that would reach nothing is refused when
+A policy is refused when it compiles if a parent's rule would leave a role the child
+admits with no way into the child at all; the message names the role, the parent and
+the clause to add. The compiler cannot always see that. If the role keeps another way
+in, and the policy declares no combinations, the compiler cannot know which kinds the
+role's grants will hold together; then a grant that would reach nothing is refused when
 it is bound. To ask the question at every path instead, call
-`RequireExplicitParentVisibility()` on the policy: then each role a parent leaves out
-must be named on the path, `ExemptFromParentVisibility` or `BoundByParentVisibility`.
+`RequireExplicitParentVisibility()` on the policy. Each role a parent leaves out must
+then be named on the path, either `ExemptFromParentVisibility` or
+`BoundByParentVisibility`, which states the default out loud: the parent's rule holds
+for that role.
 
 Sometimes a path has to leave its source. `Column.References(Column)` declares a link
 that a foreign key cannot state, because a foreign key is one source's claim about a
