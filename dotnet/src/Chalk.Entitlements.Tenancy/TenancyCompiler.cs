@@ -520,6 +520,90 @@ internal static class TenancyCompiler
         /// on the bridge says every bridge row has a target row, not the other way about.
         /// </summary>
         internal required bool Total { get; init; }
+
+        /// <summary>The roles the path names exempt from its parents' visibility rules (D358).</summary>
+        internal required IReadOnlyList<string> Exempt { get; init; }
+
+        /// <summary>The roles the path names bound by them: the default, said aloud (D358).</summary>
+        internal required IReadOnlyList<string> Bound { get; init; }
+
+        /// <summary>What the parents' visibility rules make of each role the policy declares (D358).</summary>
+        internal required IReadOnlyDictionary<string, Passage> Passages { get; init; }
+
+        /// <summary>
+        /// Whether the path reaches a principal in <paramref name="role"/> (D358): the path names the
+        /// role exempt, or every table it steps down to admits it — where the path runs on through a
+        /// parent's own path, as that path says. A role it does not reach holds nothing along it,
+        /// for the table's visibility or for its rules.
+        /// </summary>
+        internal bool Admits(string role) =>
+            !Passages.TryGetValue(role, out var passage) || passage.Passes;
+
+        /// <summary>The scope tests a term of <paramref name="role"/> along this path carries.</summary>
+        internal IReadOnlyList<string> ScopesFor(string role) =>
+            Passages.TryGetValue(role, out var passage) && passage.Passes
+                ? [.. passage.Scopes.Select(ScopeTest)]
+                : [];
+
+        /// <summary>
+        /// Whether the parents' scope tests a term of <paramref name="role"/> carries hold in the
+        /// request scope <paramref name="scope"/> — what the prediction reads where the compiler
+        /// writes <see cref="ScopesFor"/>.
+        /// </summary>
+        internal bool InScope(string role, string scope) =>
+            !Passages.TryGetValue(role, out var passage)
+            || passage.Scopes.All(named => named.Contains(scope, StringComparer.Ordinal));
+
+        /// <summary>
+        /// The table whose visibility rule leaves <paramref name="role"/> out along this path had the
+        /// path named it nothing, or null where none does.
+        /// </summary>
+        internal string? LeftOutBy(string role) =>
+            Passages.TryGetValue(role, out var passage) ? passage.LeftOutBy : null;
+
+        /// <summary>The path as a refusal names it.</summary>
+        internal string Named =>
+            $"{(IsRelated ? "Related" : "Inherited")}(\"{Kind}\") to '{EndpointTable}'";
+    }
+
+    /// <summary>
+    /// What the visibility rules of the tables a path steps down to make of one role (D358).
+    /// </summary>
+    /// <remarks>
+    /// The rules are read as the path runs: its own steps under its own exemptions, and where it runs
+    /// on through a parent's own path to a table further out, those steps under that path's — so a
+    /// child is visible along a path exactly when its parent is along its own, and a path that names
+    /// a role exempt is exempt for the whole of itself.
+    /// </remarks>
+    internal sealed class Passage
+    {
+        /// <summary>Whether the path reaches a principal in this role.</summary>
+        internal required bool Passes { get; init; }
+
+        /// <summary>
+        /// The scopes each parent whose rules the role is read under holds in, one set per parent
+        /// that names any, in path order — empty where the path exempts the role, or no such rule
+        /// holds in a scope.
+        /// </summary>
+        internal required IReadOnlyList<IReadOnlyList<string>> Scopes { get; init; }
+
+        /// <summary>
+        /// The table whose rule leaves the role out, read as though the path named the role nothing;
+        /// null where every table admits it, or a parent's own path exempts it first.
+        /// </summary>
+        internal required string? LeftOutBy { get; init; }
+    }
+
+    /// <summary>
+    /// One stretch of a path declared by one table: the tables it steps down to and the roles that
+    /// table's path exempts (D358). A path's own steps are its first; each later one is where it runs
+    /// on through a parent's own path.
+    /// </summary>
+    private sealed class PathSegment
+    {
+        internal required IReadOnlyList<(string Schema, string Table)> Parents { get; init; }
+
+        internal required IReadOnlyList<string> Exempt { get; init; }
     }
 
     /// <summary>One step of a path, resolved: the two columns and the direction (§2).</summary>
@@ -669,6 +753,9 @@ internal static class TenancyCompiler
             admitted.AddRange(roles);
         }
 
+        RefuseParentVisibility(policy, declared, dimensions, through, paths, admitted, path);
+        RefuseNarrowerThanItsParent(policy, declared, through, admitted, ruleScopes, path);
+
         var rules = new GroupRules
         {
             Confinable = confinable,
@@ -723,19 +810,7 @@ internal static class TenancyCompiler
             }
         }
 
-        var scopeTest = new StringBuilder();
-        if (ruleScopes.Count > 0)
-        {
-            scopeTest.Append('(');
-            for (var i = 0; i < ruleScopes.Count; i++)
-            {
-                scopeTest.Append(i == 0 ? "" : " OR ")
-                    .Append("@ctx.scope = ")
-                    .Append(Quote(ruleScopes[i]));
-            }
-
-            scopeTest.Append(')');
-        }
+        var scopeTest = ScopeTest(ruleScopes);
 
         if (declared.ResourceOwnerColumn.Length > 0
             && Column(table, declared.ResourceOwnerColumn) is null)
@@ -797,7 +872,7 @@ internal static class TenancyCompiler
             Paths = paths,
             AdmittedRoles = admitted,
             Lists = lists,
-            ScopeTest = scopeTest.ToString(),
+            ScopeTest = scopeTest,
             Scopes = ruleScopes,
             Confinable = confinable,
             Rules = rules,
@@ -812,6 +887,11 @@ internal static class TenancyCompiler
     /// kind it names is the table's. A combination with a kind the table does not declare is not
     /// this table's, and is passed over.
     /// </summary>
+    /// <remarks>
+    /// A route along a path whose parents' visibility leaves the role out answers nothing in that role
+    /// (D358). Where every route the combination has is one of those, the refusal says so, and names
+    /// the path and the parent: the combination resolves, and the role is what the path keeps out.
+    /// </remarks>
     private static void RefuseUnanswered(GroupRules rules, string role, string table)
     {
         if (rules.Combinations is null)
@@ -821,7 +901,8 @@ internal static class TenancyCompiler
 
         foreach (var combination in rules.Combinations)
         {
-            if (!combination.Holds(role) || rules.RoutesOf(combination).Count > 0)
+            var routes = combination.Holds(role) ? rules.RoutesOf(combination) : [];
+            if (!combination.Holds(role) || routes.Any(route => route.Via is null || route.Via.Admits(role)))
             {
                 continue;
             }
@@ -830,6 +911,18 @@ internal static class TenancyCompiler
             if (where.Any(w => w is null))
             {
                 continue;
+            }
+
+            if (routes.Count > 0)
+            {
+                var parents = routes.Select(route => route.Via!.LeftOutBy(role)!).Distinct().ToList();
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.ParentVisibilityLeavesRoleOut,
+                    rules.Path,
+                    $"'{table}' admits '{role}', which holds the combination {combination} there only "
+                    + $"through {Listed(parents)}, whose visibility "
+                    + $"{(parents.Count == 1 ? "rule leaves" : "rules leave")} it out. Declare "
+                    + $".ExemptFromParentVisibility({role}) on the path, or take the role off '{table}'.");
             }
 
             throw new CatalogValidationException(
@@ -843,6 +936,214 @@ internal static class TenancyCompiler
                 + $"not admit '{role}' on '{table}'.");
         }
     }
+
+    /// <summary>
+    /// What a table's paths say about the roles their parents' visibility rules leave out (D358),
+    /// checked as the table is compiled.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Each role a path names exempt or bound has to mean something: a role the table admits, and
+    /// one a table the path steps down to leaves out. Otherwise the name changes nothing, and is
+    /// refused rather than kept as a silent no-op — so a parent that comes to admit the role later
+    /// makes the policy say so again.
+    /// </para>
+    /// <para>
+    /// A policy that requires explicit parent visibility has every such role named on every path.
+    /// In any policy, a role the table admits that every route leaves out — a table entitled along
+    /// paths alone, each through a parent that leaves the role out — would read nothing of it ever:
+    /// a terminal configuration, refused with the clause that would let it in. A table with a host
+    /// predicate is not judged here, since the host's text may admit any principal at all.
+    /// </para>
+    /// </remarks>
+    private static void RefuseParentVisibility(
+        TenancyPolicy policy,
+        TenancyTable declared,
+        IReadOnlyList<ResolvedDimension> dimensions,
+        IReadOnlyList<ResolvedThrough> through,
+        IReadOnlyList<ResolvedPath> paths,
+        IReadOnlyList<string> admitted,
+        string path)
+    {
+        foreach (var declaredPath in paths)
+        {
+            var where = $"{path}.{(declaredPath.IsRelated ? "related" : "inherited")}";
+            var named = $"{declaredPath.Named} on '{declared.Name}'";
+
+            foreach (var role in declaredPath.Exempt.Concat(declaredPath.Bound))
+            {
+                var verb = declaredPath.Exempt.Contains(role, StringComparer.Ordinal)
+                    ? "ExemptFromParentVisibility"
+                    : "BoundByParentVisibility";
+                if (!admitted.Contains(role, StringComparer.Ordinal))
+                {
+                    throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidPolicy,
+                        where,
+                        $"{verb}({role}) on {named} names a role '{declared.Name}' does not admit, so "
+                        + $"it changes nothing: no principal reads '{declared.Name}' in that role. Take "
+                        + $"the role off the path, or admit it on '{declared.Name}'.");
+                }
+
+                if (declaredPath.LeftOutBy(role) is null)
+                {
+                    throw new CatalogValidationException(
+                        ChalkErrorCodes.InvalidPolicy,
+                        where,
+                        $"{verb}({role}) on {named} names a role that no table the path steps down to "
+                        + "leaves out, so it changes nothing: the path reaches "
+                        + $"'{role}' as it reaches any role its parents admit. Take the role off the path.");
+                }
+            }
+
+            if (!policy.RequiresExplicitParentVisibility)
+            {
+                continue;
+            }
+
+            foreach (var role in admitted)
+            {
+                if (declaredPath.LeftOutBy(role) is not { } leftOutBy
+                    || declaredPath.Exempt.Contains(role, StringComparer.Ordinal)
+                    || declaredPath.Bound.Contains(role, StringComparer.Ordinal))
+                {
+                    continue;
+                }
+
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.ParentVisibilityLeavesRoleOut,
+                    where,
+                    $"'{declared.Name}' admits '{role}', which '{leftOutBy}' leaves out. This policy "
+                    + "requires explicit parent visibility: declare "
+                    + $".ExemptFromParentVisibility({role}) or .BoundByParentVisibility({role}) on "
+                    + $"{named}, the path through '{leftOutBy}'.");
+            }
+        }
+
+        if (paths.Count == 0
+            || dimensions.Count > 0
+            || through.Count > 0
+            || declared.Restrictions.Any(restriction => restriction.Kind == RestrictionKind.Predicate))
+        {
+            return;
+        }
+
+        foreach (var role in admitted)
+        {
+            if (paths.Any(declaredPath => declaredPath.Admits(role)))
+            {
+                continue;
+            }
+
+            var parents = paths.Select(declaredPath => declaredPath.LeftOutBy(role)!).Distinct().ToList();
+            throw new CatalogValidationException(
+                ChalkErrorCodes.ParentVisibilityLeavesRoleOut,
+                path,
+                $"'{declared.Name}' admits '{role}', which reaches it only through {Listed(parents)}, "
+                + $"whose visibility {(parents.Count == 1 ? "rule leaves" : "rules leave")} it out. "
+                + $"Declare .ExemptFromParentVisibility({role}) on "
+                + $"{(paths.Count == 1 ? "the path" : "a path it should read along")}, or take the role "
+                + $"off '{declared.Name}'."
+                + (declared.Visibility.Count == 0
+                    ? $" With no visibility rule of its own, '{declared.Name}' admits every role."
+                    : ""));
+        }
+    }
+
+    /// <summary>
+    /// Refuses a table entitled through a parent whose own visibility rule would narrow what the
+    /// parent admits (D359). A <c>Through</c> route joins the parent's own entitled scan and reads
+    /// nothing of the child's rule, so a row is visible whenever its parent row is: a rule that leaves
+    /// out a role the parent admits, or holds in fewer scopes than the parent's, could not keep either
+    /// out, and is refused rather than left to read as a restriction it is not.
+    /// </summary>
+    /// <remarks>
+    /// A table with no rule admits every role in every scope, and narrows nothing. Nor does a rule
+    /// naming roles the parent leaves out: such a role reads nothing through the parent, and may read
+    /// the table along its other routes. A child meant to be narrower than its parent takes the
+    /// parent's kinds along <c>Inherited</c> paths instead, which read both rules (D358).
+    /// </remarks>
+    private static void RefuseNarrowerThanItsParent(
+        TenancyPolicy policy,
+        TenancyTable declared,
+        IReadOnlyList<ResolvedThrough> through,
+        IReadOnlyList<string> admitted,
+        IReadOnlyList<string> scopes,
+        string path)
+    {
+        if (declared.Visibility.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var parent in through)
+        {
+            if (policy.TableOf(parent.ParentSchema, parent.ParentTable) is not { } declaredParent)
+            {
+                continue;
+            }
+
+            IReadOnlyList<string> parentRoles = policy.Roles;
+            if (declaredParent.Visibility.Count > 0)
+            {
+                parentRoles = declaredParent.Visibility
+                    .SelectMany(rule => rule.Roles)
+                    .Select(role => role.Name)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+            }
+
+            var leftOut = parentRoles.Where(role => !admitted.Contains(role, StringComparer.Ordinal)).ToList();
+            if (leftOut.Count > 0)
+            {
+                var named = Listed(leftOut);
+                var them = leftOut.Count == 1 ? named : "them";
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidPolicy,
+                    $"{path}.visibility",
+                    $"'{declared.Name}' is entitled through '{parent.ParentTable}', and its visibility rule "
+                    + $"leaves out {named}, which '{parent.ParentTable}' admits. A row entitled through its "
+                    + $"parent is visible whenever the parent row is, so the rule cannot keep {them} from it. "
+                    + $"Admit {them} on '{declared.Name}', or entitle '{declared.Name}' with Inherited paths, "
+                    + "which read both rules.");
+            }
+
+            if (scopes.Count == 0)
+            {
+                continue;
+            }
+
+            var parentScopes = declaredParent.Visibility
+                .SelectMany(rule => rule.ScopeNames)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var beyond = parentScopes.Where(scope => !scopes.Contains(scope, StringComparer.Ordinal)).ToList();
+            if (parentScopes.Count > 0 && beyond.Count == 0)
+            {
+                continue;
+            }
+
+            throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidPolicy,
+                $"{path}.visibility",
+                $"'{declared.Name}' is entitled through '{parent.ParentTable}', and its visibility rule holds "
+                + $"in {Listed(scopes)} alone, where '{parent.ParentTable}' holds "
+                + (parentScopes.Count == 0 ? "in every scope" : $"in {Listed(beyond)} as well")
+                + ". A row entitled through its parent is visible whenever the parent row is, so the rule "
+                + $"cannot keep it to {Listed(scopes)}. "
+                + (parentScopes.Count == 0
+                    ? $"Take the scopes off the rule of '{declared.Name}'"
+                    : $"Name {Listed(beyond)} on '{declared.Name}' too")
+                + $", or entitle '{declared.Name}' with Inherited paths, which read both rules.");
+        }
+    }
+
+    /// <summary>Names as a refusal lists them: <c>'a'</c>, <c>'a' and 'b'</c>.</summary>
+    private static string Listed(IReadOnlyList<string> names) =>
+        names.Count == 1
+            ? $"'{names[0]}'"
+            : string.Join(", ", names.Take(names.Count - 1).Select(name => $"'{name}'"))
+                + $" and '{names[^1]}'";
 
     /// <summary>
     /// The most confining kinds one dimension may carry on one table. Each is a factor of two in the
@@ -879,6 +1180,15 @@ internal static class TenancyCompiler
         IReadOnlyList<ResolvedDimension>? crossRow = null,
         ResolvedPath? via = null)
     {
+        // A role a parent's visibility rule leaves out holds nothing along the path (D358): no row
+        // of the table through it, and no say in the table's rules through it either. So it has no
+        // group here — no term, and no list to bind — and every reader of the groups, the prediction
+        // among them, sees the same.
+        if (via is not null && !via.Admits(role))
+        {
+            return [];
+        }
+
         // A declaring policy binds its combinations and nothing else (D320): one group per route of
         // each combination anchored here. A subject dimension keeps its `within:` subsets.
         if (rules.Combinations is not null && !dimension.Declared.IsSubject)
@@ -913,7 +1223,7 @@ internal static class TenancyCompiler
         {
             var confining = Subset(available, mask);
             if (dimension.Declared.IsSubject
-                || AnchorsSet(dimension, confining, siblings, rules, crossRow, via))
+                || AnchorsSet(dimension, role, confining, siblings, rules, crossRow, via))
             {
                 groups.Add(Group(dimension, role, confining));
             }
@@ -943,6 +1253,7 @@ internal static class TenancyCompiler
     /// </remarks>
     private static bool AnchorsSet(
         ResolvedDimension dimension,
+        string role,
         IReadOnlyList<ConfiningDimension> confining,
         IReadOnlyList<ResolvedDimension> siblings,
         GroupRules rules,
@@ -994,10 +1305,13 @@ internal static class TenancyCompiler
             return true;
         }
 
+        // Only a path that reaches the role can anchor its set (D358): two paths down the same steps
+        // may name different roles exempt.
         ResolvedPath? chosen = null;
         foreach (var path in rules.Paths)
         {
             if (!path.IsRelated
+                && path.Admits(role)
                 && SameSteps(path, via)
                 && Answers(path.EndpointDimension, path.EndpointDimensions, path)
                 && (chosen is null || Place(path.EndpointDimension) < Place(chosen.EndpointDimension)))
@@ -1394,6 +1708,11 @@ internal static class TenancyCompiler
         var at = table;
         var atSchema = schema;
         var total = restriction.Kind == RestrictionKind.Inherited;
+
+        // The tables each stretch of the path steps down to, for their visibility rules (D358). A
+        // Related path's bridge is not among them: it contributes existence and nothing else.
+        var parents = new List<(string Schema, string Table)>(restriction.Steps.Count);
+        var segments = new List<PathSegment> { new() { Parents = parents, Exempt = restriction.Exempt } };
         for (var i = 0; i < restriction.Steps.Count; i++)
         {
             var step = restriction.Steps[i];
@@ -1424,6 +1743,11 @@ internal static class TenancyCompiler
                     policy, sources, atSchema, at, toSchema, to, step, restriction, verb, where, i,
                     fromIsBridge: restriction.Kind == RestrictionKind.Related && i == 1);
             steps.Add(resolved);
+            if (!up)
+            {
+                parents.Add((toSchema.Name, to.Name));
+            }
+
             total = total && !Column(at, at.Columns[resolved.FromOrdinal].Name)!.Type.Nullable;
             at = to;
             atSchema = toSchema;
@@ -1462,6 +1786,9 @@ internal static class TenancyCompiler
                         Resolve(policy, atSchema, at, declaredEndpoint, held, path),
                     EndpointDimensions = endpointDimensions,
                     Total = total,
+                    Exempt = restriction.Exempt,
+                    Bound = restriction.Bound,
+                    Passages = Passages(policy, segments),
                 };
             }
 
@@ -1478,6 +1805,9 @@ internal static class TenancyCompiler
                     + "with another step.");
             }
 
+            // The parent's own path runs on from here, under its own exemptions (D358).
+            var onwardParents = new List<(string Schema, string Table)>(onward.Steps.Count);
+            segments.Add(new PathSegment { Parents = onwardParents, Exempt = onward.Exempt });
             for (var i = 0; i < onward.Steps.Count; i++)
             {
                 var step = onward.Steps[i];
@@ -1493,11 +1823,98 @@ internal static class TenancyCompiler
                     policy, sources, atSchema, at, toSchema, to, step, onward, "Inherited", where, i,
                     fromIsBridge: false);
                 steps.Add(resolved);
+                onwardParents.Add((toSchema.Name, to.Name));
                 total = total && !at.Columns[resolved.FromOrdinal].Type.Nullable;
                 at = to;
                 atSchema = toSchema;
             }
         }
+    }
+
+    /// <summary>
+    /// What the visibility rules of the tables a path steps down to make of each role the policy
+    /// declares (D358): read stretch by stretch, the path's own steps first and each parent's own
+    /// path after, a parent with no visibility rule admitting every role in every scope.
+    /// </summary>
+    /// <remarks>
+    /// A role passes a parent whose rules name it, and is then read under that parent's scope test,
+    /// as the parent's own row predicate is. Where a parent's own path names the role exempt, the
+    /// rules further out are not read for it, since the parent's rows are visible to it along that
+    /// path without them. The path's own exemptions are read last: <see cref="Passage.LeftOutBy"/>
+    /// says what the rules would do without them, which is what an exemption has to be about.
+    /// </remarks>
+    private static Dictionary<string, Passage> Passages(
+        TenancyPolicy policy, IReadOnlyList<PathSegment> segments)
+    {
+        var passages = new Dictionary<string, Passage>(StringComparer.Ordinal);
+        foreach (var role in policy.Roles)
+        {
+            string? leftOutBy = null;
+            var scopes = new List<IReadOnlyList<string>>();
+            for (var i = 0; i < segments.Count && leftOutBy is null; i++)
+            {
+                var segment = segments[i];
+                if (i > 0 && segment.Exempt.Contains(role, StringComparer.Ordinal))
+                {
+                    break;
+                }
+
+                foreach (var (schema, name) in segment.Parents)
+                {
+                    if (policy.TableOf(schema, name) is not { } parent || parent.Visibility.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    if (!parent.Visibility.Any(rule => rule.Roles.Any(
+                            admitted => string.Equals(admitted.Name, role, StringComparison.Ordinal))))
+                    {
+                        leftOutBy = parent.Name;
+                        break;
+                    }
+
+                    var named = parent.Visibility
+                        .SelectMany(rule => rule.ScopeNames)
+                        .Distinct(StringComparer.Ordinal)
+                        .ToList();
+                    if (named.Count > 0
+                        && !scopes.Any(seen => seen.SequenceEqual(named, StringComparer.Ordinal)))
+                    {
+                        scopes.Add(named);
+                    }
+                }
+            }
+
+            var exempt = segments[0].Exempt.Contains(role, StringComparer.Ordinal);
+            passages[role] = new Passage
+            {
+                Passes = exempt || leftOutBy is null,
+                Scopes = exempt || leftOutBy is not null ? [] : scopes,
+                LeftOutBy = leftOutBy,
+            };
+        }
+
+        return passages;
+    }
+
+    /// <summary>
+    /// The test a table's visibility rules make of the request scope: one of the scopes they name,
+    /// or empty where they name none.
+    /// </summary>
+    private static string ScopeTest(IEnumerable<string> scopes)
+    {
+        var named = new List<string>();
+        foreach (var scope in scopes)
+        {
+            if (!named.Contains(scope, StringComparer.Ordinal))
+            {
+                named.Add(scope);
+            }
+        }
+
+        return named.Count == 0
+            ? ""
+            : "(" + string.Join(" OR ", named.Select(scope => "@ctx.scope = " + Quote(scope))) + ")";
     }
 
     /// <summary>
@@ -2205,35 +2622,71 @@ internal static class TenancyCompiler
     /// <summary>
     /// Which of the endpoint's rows this principal holds the kind in (D265 §2): the same membership
     /// test a <c>Direct</c> dimension compiles to, over the endpoint's own row, OR-ed across the
-    /// roles this table admits — so the far end of the chain folds to one boolean the pass can read.
+    /// roles the path reaches — so the far end of the chain folds to one boolean the pass can read.
     /// </summary>
-    private static string EndpointPredicate(TableModel model, ResolvedPath declaredPath)
+    private static string EndpointPredicate(TableModel model, ResolvedPath declaredPath) =>
+        AcrossRoles(model, declaredPath, "", CrossRow(model, declaredPath), admission: true);
+
+    /// <summary>
+    /// One perspective's membership across the roles a path reaches (D358): each role the table
+    /// admits that the path reaches, with its groups and its global grant, under the scope tests of
+    /// the parents whose rules it is read under; and the whole under the table's own scope test,
+    /// which holds along its paths as on its own row (F209). <c>FALSE</c> where the path reaches no
+    /// role at all.
+    /// </summary>
+    /// <remarks>
+    /// A role the path does not reach has no term here, its global grant's included: a parent's
+    /// visibility rule that leaves the role out keeps it from the parent's children along the path
+    /// as it keeps it from the parent. With no exemption, no scope test and every role reached, the
+    /// text is what it was before any of these existed.
+    /// </remarks>
+    private static string AcrossRoles(
+        TableModel model,
+        ResolvedPath declaredPath,
+        string qualifier,
+        IReadOnlyList<ResolvedDimension>? crossRow,
+        bool admission)
     {
-        var scopes = new List<string>();
+        var terms = new List<string>();
         foreach (var role in model.AdmittedRoles)
         {
+            if (!declaredPath.Admits(role))
+            {
+                continue;
+            }
+
             var parts = new List<string>();
             Membership(
                 parts,
                 declaredPath.EndpointDimension,
                 role,
-                "",
+                qualifier,
                 declaredPath.EndpointDimensions,
                 model.Rules,
-                CrossRow(model, declaredPath),
+                crossRow,
                 declaredPath,
-                admission: true);
+                admission);
             parts.Add($"@ctx.global_{role}");
-            scopes.Add(parts.Count == 1 ? parts[0] : "(" + string.Join(" OR ", parts) + ")");
+            terms.Add(UnderScopes(
+                parts.Count == 1 ? parts[0] : "(" + string.Join(" OR ", parts) + ")",
+                declaredPath.ScopesFor(role)));
         }
 
-        return scopes.Count switch
+        var across = terms.Count switch
         {
             0 => "FALSE",
-            1 => scopes[0],
-            _ => "(" + string.Join(" OR ", scopes) + ")",
+            1 => terms[0],
+            _ => "(" + string.Join(" OR ", terms) + ")",
         };
+
+        return terms.Count == 0 || model.ScopeTest.Length == 0
+            ? across
+            : "(" + across + " AND " + model.ScopeTest + ")";
     }
+
+    /// <summary>A term conjoined with the scope tests it is read under, or the term where there are none.</summary>
+    private static string UnderScopes(string term, IReadOnlyList<string> scopes) =>
+        scopes.Count == 0 ? term : "(" + term + " AND " + string.Join(" AND ", scopes) + ")";
 
     /// <summary>
     /// The target's own dimensions a path's endpoint dimension may be confined by across the two
@@ -2269,29 +2722,7 @@ internal static class TenancyCompiler
             return "";
         }
 
-        var scopes = new List<string>();
-        foreach (var role in model.AdmittedRoles)
-        {
-            var parts = new List<string>();
-            Membership(
-                parts,
-                declaredPath.EndpointDimension,
-                role,
-                declaredPath.EndpointTable + ".",
-                declaredPath.EndpointDimensions,
-                model.Rules,
-                crossRow,
-                declaredPath);
-            parts.Add($"@ctx.global_{role}");
-            scopes.Add(parts.Count == 1 ? parts[0] : "(" + string.Join(" OR ", parts) + ")");
-        }
-
-        return scopes.Count switch
-        {
-            0 => "FALSE",
-            1 => scopes[0],
-            _ => "(" + string.Join(" OR ", scopes) + ")",
-        };
+        return AcrossRoles(model, declaredPath, declaredPath.EndpointTable + ".", crossRow, admission: false);
     }
 
     /// <summary>Whether any role's groups for this path's dimension read both rows (D279 §2).</summary>
@@ -2675,10 +3106,14 @@ internal static class TenancyCompiler
         // A cross-row group is spelled here exactly as the path predicate spells it (D279 §2): the
         // endpoint's column qualified, the target's own plain — both already in scope of the
         // target's column rules.
+        // A role a parent's visibility leaves out along a path has no group there and so no term
+        // (D358), and one read under a parent's scope test is read under it here too: what gives a
+        // role no row along a path gives it no say in the table's rules along it either.
         foreach (var declaredPath in model.Paths)
         {
+            var along = new List<string>();
             Membership(
-                parts,
+                along,
                 declaredPath.EndpointDimension,
                 role,
                 declaredPath.EndpointTable + ".",
@@ -2686,6 +3121,15 @@ internal static class TenancyCompiler
                 model.Rules,
                 CrossRow(model, declaredPath),
                 declaredPath);
+            var scopes = declaredPath.ScopesFor(role);
+            if (along.Count == 0 || scopes.Count == 0)
+            {
+                parts.AddRange(along);
+                continue;
+            }
+
+            parts.Add(UnderScopes(
+                along.Count == 1 ? along[0] : "(" + string.Join(" OR ", along) + ")", scopes));
         }
 
         parts.Add($"@ctx.global_{role}");

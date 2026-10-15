@@ -122,7 +122,7 @@ public sealed class SanitiserBoundaryTests(SharedSidecar sidecar)
                 continue;
             }
             catch (Exception error)
-                when (TenancyCorpusTests.KnownLeaks.ContainsKey(query.Name)
+                when (TenancyCorpusTests.KnownDefects.ContainsKey(query.Name)
                     && TenancyCorpusTests.IsRegistered(error))
             {
                 // A registered defect (D251) plans no further; the measurement says so and moves on.

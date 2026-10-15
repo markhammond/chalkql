@@ -36,7 +36,7 @@
         }
       ]
     },
-    "estRowCount": 501.75,
+    "estRowCount": 1,
     "indexLookup": {
       "table": {
         "sourceId": "mem",

@@ -313,15 +313,10 @@ internal static class AkadeKeyOrder
 
     private static readonly Utf8String LargestUtf8 = Utf8String.FromString(LargestString);
 
-    /// <summary>Chalk's code-point order over a CLR string, without allocating.</summary>
-    /// <remarks>
-    /// UTF-16 stores a code point above U+FFFF as a surrogate pair whose units sit at U+D800..U+DFFF,
-    /// <em>below</em> the private-use and specials blocks at U+E000..U+FFFF. Comparing code units
-    /// therefore puts a supplementary code point below U+E000, where code-point order — and UTF-8
-    /// byte order, and <see cref="Utf8String.CompareTo"/> — put it above. Ranking a unit by
-    /// <c>c &lt; 0xD800 ? c : c &lt; 0xE000 ? c + 0x2000 : c - 0x800</c> restores the three blocks to
-    /// code-point order without touching the bytes.
-    /// </remarks>
+    /// <summary>
+    /// Chalk's code-point order over a CLR string, without allocating: <see cref="TextOrder"/>'s, the
+    /// order <see cref="Utf8String.CompareTo"/> keeps by byte.
+    /// </summary>
     internal sealed class StringOrder : IComparer<string>
     {
         public static readonly StringOrder Instance = new();
@@ -333,22 +328,8 @@ internal static class AkadeKeyOrder
                 return x is null && y is null ? 0 : x is null ? -1 : 1;
             }
 
-            var shared = Math.Min(x.Length, y.Length);
-            for (var i = 0; i < shared; i++)
-            {
-                var left = Rank(x[i]);
-                var right = Rank(y[i]);
-                if (left != right)
-                {
-                    return left < right ? -1 : 1;
-                }
-            }
-
-            return x.Length.CompareTo(y.Length);
+            return TextOrder.Compare(x, y);
         }
-
-        private static int Rank(char value) =>
-            value < '\uD800' ? value : value < '\uE000' ? value + 0x2000 : value - 0x800;
     }
 
     private sealed class SingleOrder : IComparer<float>

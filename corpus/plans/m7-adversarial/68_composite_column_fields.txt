@@ -63,3 +63,26 @@ report id:Full, email:Full, phone:Full, tier:Full, profiles:Some
 1|tara@o1 CANARY-EMAIL-01|+64 1 CANARY-PHONE-01|1
 2|bo@o1 CANARY-EMAIL-02|+64 2 CANARY-PHONE-02|3
 
+-- u16-a-manager-in-two-orgs
+report id:Full, email:Full, phone:Full, tier:Full, profiles:Some
+1|tara@o1 CANARY-EMAIL-01|+64 1 CANARY-PHONE-01|1
+2|bo@o1 CANARY-EMAIL-02|+64 2 CANARY-PHONE-02|3
+3|tomas@o2 CANARY-EMAIL-03|<null>|2
+4|<null>|<null>|<null>
+
+-- u17-an-agent-in-two-orgs
+report id:Full, email:PerRow, phone:PerRow, tier:PerRow, profiles:Some
+1|<null>|<null>|<null>
+2|bo@o1 CANARY-EMAIL-02|+64 2 CANARY-PHONE-02|3
+3|tomas@o2 CANARY-EMAIL-03|<null>|2
+4|<null>|<null>|<null>
+
+-- u18-a-keeper
+report id:Full, email:Redacted, phone:Redacted, tier:Redacted, profiles:None
+
+-- u19-a-vendor-in-a-region
+report id:Full, email:Redacted, phone:Redacted, tier:Redacted, profiles:None
+
+-- u20-a-picker
+report id:Full, email:Redacted, phone:Redacted, tier:Redacted, profiles:None
+

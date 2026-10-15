@@ -94,7 +94,7 @@ public sealed class TenancySplitCorpusTests(SharedSidecar sidecar)
             string[] rows;
             string report;
             string[] columns;
-            if (TenancyCorpusTests.KnownLeaks.TryGetValue(name, out var registered))
+            if (TenancyCorpusTests.KnownDefects.TryGetValue(name, out var registered))
             {
                 try
                 {
@@ -133,7 +133,7 @@ public sealed class TenancySplitCorpusTests(SharedSidecar sidecar)
 
             recorded.AppendLine();
 
-            if (!guarded && !TenancyCorpusTests.KnownLeaks.ContainsKey(name))
+            if (!guarded && !TenancyCorpusTests.KnownDefects.ContainsKey(name))
             {
                 Assert.Equal(await OracleRowsAsync(query, sql, context), rows);
             }
@@ -160,7 +160,7 @@ public sealed class TenancySplitCorpusTests(SharedSidecar sidecar)
     [MemberData(nameof(Queries))]
     public async Task Every_principal_sees_the_same_under_execute_time_binding(string name)
     {
-        if (TenancyCorpusTests.KnownLeaks.ContainsKey(name))
+        if (TenancyCorpusTests.KnownDefects.ContainsKey(name))
         {
             return;
         }

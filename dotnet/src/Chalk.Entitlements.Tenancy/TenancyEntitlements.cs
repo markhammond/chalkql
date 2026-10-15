@@ -90,6 +90,49 @@ public sealed class TenancyEntitlements
     public IReadOnlyDictionary<string, TableEntitlementDescriptor> Tables => _descriptors;
 
     /// <summary>
+    /// Every exemption from a parent's visibility this policy makes (D358): each path that names
+    /// roles exempt, with the table it entitles, in the order the tables were declared.
+    /// </summary>
+    /// <remarks>
+    /// What a review reads to see every place a role takes a kind's value along a path without the
+    /// visibility rules of the tables it steps down to — the one thing a path does that its parents'
+    /// rules alone do not say.
+    /// </remarks>
+    public IReadOnlyList<TenancyExemption> Exemptions
+    {
+        get
+        {
+            var exemptions = new List<TenancyExemption>();
+            foreach (var table in _policy.Tables)
+            {
+                if (!_models.TryGetValue(TenancyCompiler.Qualified(table.Schema, table.Name), out var model))
+                {
+                    continue;
+                }
+
+                foreach (var path in model.Paths)
+                {
+                    if (path.Exempt.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    exemptions.Add(new TenancyExemption
+                    {
+                        Source = table.Schema,
+                        Table = table.Name,
+                        Kind = path.Kind,
+                        Endpoint = path.EndpointTable,
+                        Roles = path.Exempt,
+                    });
+                }
+            }
+
+            return exemptions;
+        }
+    }
+
+    /// <summary>
     /// The descriptor for one table, or null when the policy leaves it unrestricted. The handle
     /// carries the source it came from, so this is the form that cannot name the wrong table (§1,
     /// D270).
@@ -665,8 +708,10 @@ public sealed class TenancyEntitlements
                 + $"'{grant.Kind}' names role '{grant.Role}', and no table that resolves "
                 + $"'{grant.Kind}' admits that role — so there is no membership the grant could fill "
                 + "and it would reach nothing. The roles this policy holds a membership of "
-                + $"'{grant.Kind}' for are {AnswerableRoles(grant)}. Name one of those, or admit "
-                + $"'{grant.Role}' on a table that resolves '{grant.Kind}'.");
+                + $"'{grant.Kind}' for are {AnswerableRoles(grant)}. "
+                + LeftOutAlongAPath(grant.Role, [grant.Kind])
+                + $"Name one of those, or admit '{grant.Role}' on a table that resolves "
+                + $"'{grant.Kind}'.");
         }
 
         // And the group the grant would fill has to exist. The clause above asks what the *policy*
@@ -687,6 +732,7 @@ public sealed class TenancyEntitlements
                 + $"'{grant.Kind}' can be confined along here for role '{grant.Role}' is: "
                 + $"{AnswerableConfinements(grant)}. "
                 + AlongAPath(grant, named)
+                + LeftOutAlongAPath(grant.Role, [grant.Kind, .. named])
                 + "A confined grant applies to a table where its own kind and every confining kind "
                 + "resolve on that table: hold the grant unconfined, or declare the dimension on a "
                 + "table that has both.");
@@ -737,6 +783,7 @@ public sealed class TenancyEntitlements
                     $"the grant holds {{{string.Join(", ", kinds)}}} in role '{grant.Role}', a "
                     + "combination this policy declares, and no table of the policy admits "
                     + $"'{grant.Role}' where that combination has a route — so it would reach nothing. "
+                    + LeftOutAlongAPath(grant.Role, kinds)
                     + $"Admit '{grant.Role}' on a table that holds those kinds on one row, or on one "
                     + "path's endpoint read beside the row.");
             }
@@ -756,6 +803,7 @@ public sealed class TenancyEntitlements
                     + $"table that resolves '{grant.Kind}' admits that role — so there is no "
                     + "membership the grant could fill and it would reach nothing. The roles this "
                     + $"policy holds a membership of '{grant.Kind}' for are {AnswerableRoles(grant)}. "
+                    + LeftOutAlongAPath(grant.Role, kinds)
                     + $"Name one of those, or admit '{grant.Role}' on a table that resolves "
                     + $"'{grant.Kind}'.");
             }
@@ -776,8 +824,44 @@ public sealed class TenancyEntitlements
                 + $"answers for '{grant.Role}' with '{grant.Kind}' among them is: "
                 + $"{AnswerableSets(grant.Role, grant.Kind)}. "
                 + AlongAPath(grant, named)
+                + LeftOutAlongAPath(grant.Role, kinds)
                 + "Declare the kinds together on one row, or hold the grant confined along fewer.");
         }
+    }
+
+    /// <summary>
+    /// Where a parent's visibility rule is why no table answers a grant (D358): the first table,
+    /// in name order, that admits the role and takes one of the grant's kinds along a path whose
+    /// parents leave the role out, with the clause that would let it read the table by the parent's
+    /// value — or an empty string. The refusal itself is the binding's: the compiler wrote no group
+    /// for the role along that path, so no list answers it.
+    /// </summary>
+    private string LeftOutAlongAPath(string role, IReadOnlyCollection<string> kinds)
+    {
+        foreach (var key in _models.Keys.Order(StringComparer.Ordinal))
+        {
+            var model = _models[key];
+            if (!model.AdmittedRoles.Contains(role, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            foreach (var path in model.Paths)
+            {
+                if (path.Admits(role) || !kinds.Contains(path.Kind, StringComparer.Ordinal))
+                {
+                    continue;
+                }
+
+                return $"'{model.Declared.Name}' takes '{path.Kind}' only through "
+                    + $"'{path.LeftOutBy(role)}', whose visibility rule leaves '{role}' out, so it "
+                    + "answers nothing there in that role: declare "
+                    + $".ExemptFromParentVisibility({role}) on that path if '{role}' should read "
+                    + $"'{model.Declared.Name}' by the parent's value of '{path.Kind}'. ";
+            }
+        }
+
+        return string.Empty;
     }
 
     /// <summary>
@@ -1229,6 +1313,12 @@ public sealed class TenancyEntitlements
     /// </remarks>
     private TableVisibility Paths(TenancyCompiler.TableModel model, TenancyPrincipal principal)
     {
+        // The table's own scope test holds along its paths as on its own row (F209).
+        if (!InItsScope(model, principal))
+        {
+            return TableVisibility.None;
+        }
+
         var any = false;
         var all = false;
         foreach (var declaredPath in model.Paths)
@@ -1237,8 +1327,11 @@ public sealed class TenancyEntitlements
             var everywhere = false;
             foreach (var grant in principal.Grants)
             {
+                // A role the path does not reach holds nothing along it, its global grant included,
+                // and one it reaches holds only in a scope its parents' rules allow (D358).
                 if (!Admits(grant, principal)
-                    || !model.AdmittedRoles.Contains(grant.Role, StringComparer.Ordinal))
+                    || !model.AdmittedRoles.Contains(grant.Role, StringComparer.Ordinal)
+                    || !Along(declaredPath, grant.Role, principal))
                 {
                     continue;
                 }
@@ -1276,8 +1369,7 @@ public sealed class TenancyEntitlements
     private TableVisibility Dimensions(
         TenancyCompiler.TableModel model, TenancyPrincipal principal)
     {
-        if (model.Scopes.Count > 0
-            && !model.Scopes.Contains(principal.ScopeName, StringComparer.Ordinal))
+        if (!InItsScope(model, principal))
         {
             return TableVisibility.None;
         }
@@ -1302,6 +1394,19 @@ public sealed class TenancyEntitlements
 
         return TableVisibility.None;
     }
+
+    /// <summary>Whether the table's own visibility rules hold in this principal's request scope.</summary>
+    private static bool InItsScope(TenancyCompiler.TableModel model, TenancyPrincipal principal) =>
+        model.Scopes.Count == 0 || model.Scopes.Contains(principal.ScopeName, StringComparer.Ordinal);
+
+    /// <summary>
+    /// Whether a path reaches a principal in <paramref name="role"/> in its request scope (D358): the
+    /// parents' rules admit the role or the path exempts it, and the scope tests it is then read under
+    /// hold — the prediction's side of what the compiler writes along the path.
+    /// </summary>
+    private static bool Along(
+        TenancyCompiler.ResolvedPath path, string role, TenancyPrincipal principal) =>
+        path.Admits(role) && path.InScope(role, principal.ScopeName);
 
     /// <summary>
     /// Whether one grant reaches one route of this table (D266 §3): the compiler wrote a group there,
@@ -1555,9 +1660,9 @@ public sealed class TenancyEntitlements
     }
 
     /// <summary>
-    /// How the <b>routes</b> of a table entitled along declared paths reach this principal (D269 (a),
-    /// <c>docs/design/38-existential-visibility.md</c> §4): how many of them reach it at all, and
-    /// whether any of them reaches rows of more than one tenancy.
+    /// How the <b>routes</b> of a table entitled along declared paths or through a parent reach this
+    /// principal (D269 (a), <c>docs/design/38-existential-visibility.md</c> §4, ADR 0061 §6): how
+    /// many of them reach it at all, and whether any of them reaches rows of more than one tenancy.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -1584,7 +1689,9 @@ public sealed class TenancyEntitlements
             {
                 if (grant.IsGlobal
                     || !Admits(grant, principal)
-                    || !model.AdmittedRoles.Contains(grant.Role, StringComparer.Ordinal))
+                    || !model.AdmittedRoles.Contains(grant.Role, StringComparer.Ordinal)
+                    || !InItsScope(model, principal)
+                    || !Along(declaredPath, grant.Role, principal))
                 {
                     continue;
                 }
@@ -1598,6 +1705,40 @@ public sealed class TenancyEntitlements
                     declaredPath))
                 {
                     tenancies.Add(Tenancy(grant));
+                }
+            }
+
+            if (tenancies.Count == 0)
+            {
+                continue;
+            }
+
+            count++;
+            severalTenancies |= tenancies.Count > 1;
+        }
+
+        // A `Through` parent is read back the same way (ADR 0061 §6): the child's verdicts are
+        // decided on the parent's side and arrive through the very same ordinal, so a parent this
+        // principal reaches in two tenancies makes it a column on the child as well.
+        foreach (var parent in model.Through)
+        {
+            var tenancies = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var grant in principal.Grants)
+            {
+                if (grant.IsGlobal
+                    || !Admits(grant, principal)
+                    || !model.AdmittedRoles.Contains(grant.Role, StringComparer.Ordinal))
+                {
+                    continue;
+                }
+
+                foreach (var dimension in parent.ParentDimensions)
+                {
+                    if (Reaches(grant, model, dimension, parent.ParentDimensions))
+                    {
+                        tenancies.Add(Tenancy(grant));
+                        break;
+                    }
                 }
             }
 
@@ -1705,16 +1846,17 @@ public sealed class TenancyEntitlements
 
             // And a path's perspective, read off the endpoint's dimension of that kind, which is
             // exactly what the compiler wrote the target's rules for that perspective over (D265
-            // §2, §6).
+            // §2, §6) — for a role the path reaches, in a scope its parents' rules allow (D358).
             foreach (var declaredPath in model.Paths)
             {
-                declares |= Reaches(
-                    grant,
-                    model,
-                    declaredPath.EndpointDimension,
-                    declaredPath.EndpointDimensions,
-                    declaredPath.IsRelated ? null : model.Dimensions,
-                    declaredPath);
+                declares |= Along(declaredPath, grant.Role, principal)
+                    && Reaches(
+                        grant,
+                        model,
+                        declaredPath.EndpointDimension,
+                        declaredPath.EndpointDimensions,
+                        declaredPath.IsRelated ? null : model.Dimensions,
+                        declaredPath);
             }
 
             if (!declares)
@@ -1827,7 +1969,9 @@ public sealed class TenancyEntitlements
     /// <para>
     /// Where the table is entitled along <b>declared paths</b> the same sentence is said of the
     /// routes (D269 (a), F87): the verdict is decided at each route's endpoint and read back as an
-    /// ordinal, and it is a constant only where one route reaches the table in one tenancy.
+    /// ordinal, and it is a constant only where one route reaches the table in one tenancy. A
+    /// <c>Through</c> parent is such a route too: the child's verdicts are decided on the parent's
+    /// side and read back through the same ordinal (ADR 0061 §6).
     /// </para>
     /// </remarks>
     private Chalk.Ir.DisclosureOutcome Outcome(
@@ -2082,6 +2226,36 @@ public sealed class TenancyEntitlements
 
         return "";
     }
+}
+
+/// <summary>
+/// One path's exemption from the visibility rules of the tables it steps down to (D358), as
+/// <see cref="TenancyEntitlements.Exemptions"/> lists it.
+/// </summary>
+public sealed class TenancyExemption
+{
+    /// <summary>The source of the table the path entitles.</summary>
+    public required string Source { get; init; }
+
+    /// <summary>The table the path entitles.</summary>
+    public required string Table { get; init; }
+
+    /// <summary>The tenancy kind the path takes.</summary>
+    public required string Kind { get; init; }
+
+    /// <summary>The table the path ends at, which holds the kind.</summary>
+    public required string Endpoint { get; init; }
+
+    /// <summary>
+    /// The roles that take the kind's value along the path, as a marking, without its parents'
+    /// visibility rules.
+    /// </summary>
+    public required IReadOnlyList<string> Roles { get; init; }
+
+    /// <inheritdoc/>
+    public override string ToString() =>
+        $"{Source}.{Table} takes '{Kind}' from '{Endpoint}' for {string.Join(", ", Roles)} without "
+        + "the parents' visibility";
 }
 
 /// <summary>

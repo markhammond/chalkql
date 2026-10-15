@@ -116,12 +116,10 @@ public static class AdoCapabilities
             MaxInList = maxInList,
             SupportsParameters = true,
 
-            // `x IN (VALUES (…), (…))` is a join against an inline relation, and every dialect this
-            // source ships a profile for parses it: PostgreSQL and DuckDB natively, SQLite since
-            // 3.8.3, where VALUES is a select statement in its own right. That is what makes
-            // JOIN_STRATEGY_BROADCAST possible (M5).
-            SupportsValuesJoin = maxInList > 0,
-            SupportsRowValueInList = maxInList > 0 && RowValuesMeasured(profile.Dialect),
+            // A join against an inline relation, and a row-value list, narrow what is fetched
+            // rather than compute: kept as the full descriptor declares them.
+            SupportsValuesJoin = full.SupportsValuesJoin,
+            SupportsRowValueInList = full.SupportsRowValueInList,
         };
     }
 

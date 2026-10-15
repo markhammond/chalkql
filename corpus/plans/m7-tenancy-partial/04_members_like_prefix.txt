@@ -51,3 +51,24 @@ report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_i
 report id:Full, org_id:Full, first_name:PerRow, last_name:PerRow, national_id:Redacted, postcode:Full, members:Some
 1|1|Tara CANARY-FIRST-01|Ng CANARY-LAST-01|<null>|2000
 
+-- u16-a-manager-in-two-orgs
+report id:Full, org_id:Full, first_name:PerRow, last_name:PerRow, national_id:Redacted, postcode:Full, members:Some
+1|1|Tara CANARY-FIRST-01|Ng CANARY-LAST-01|<null>|2000
+3|2|Tomas CANARY-FIRST-03|Ek CANARY-LAST-03|<null>|3000
+7|2|Tara CANARY-FIRST-01|Vo CANARY-LAST-07|<null>|3002
+
+-- u17-an-agent-in-two-orgs
+report id:Full, org_id:Full, first_name:PerRow, last_name:PerRow, national_id:Redacted, postcode:Full, members:Some
+1|1|T|N|<null>|2000
+3|2|T|E|<null>|3000
+7|2|T|V|<null>|3002
+
+-- u18-a-keeper
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:Some
+
+-- u19-a-vendor-in-a-region
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:Some
+
+-- u20-a-picker
+report id:Full, org_id:Full, first_name:Redacted, last_name:Redacted, national_id:Redacted, postcode:Full, members:Some
+

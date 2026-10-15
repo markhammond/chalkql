@@ -117,3 +117,38 @@ report oid:Full, orders:Some, members:Some
 4
 4
 
+-- u16-a-manager-in-two-orgs
+report oid:Full, orders:Some, members:Some
+1
+1
+2
+2
+3
+3
+4
+4
+5
+6
+
+-- u17-an-agent-in-two-orgs
+report oid:Full, orders:Some, members:Some
+1
+1
+2
+2
+3
+3
+4
+4
+5
+6
+
+-- u18-a-keeper
+report oid:Full, orders:Some, members:Some
+
+-- u19-a-vendor-in-a-region
+report oid:Full, orders:Some, members:None
+
+-- u20-a-picker
+report oid:Full, orders:Some, members:Some
+

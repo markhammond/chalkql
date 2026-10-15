@@ -95,7 +95,8 @@ internal static class CapabilityProbes
                     $"CASE WHEN {number} IS NULL THEN 0 WHEN {number} > 0 THEN 1 ELSE 2 END = 1",
                     row => row[numberColumn] is long v && v > 0),
                 ct,
-                "Set SupportsCase = false.").ConfigureAwait(false));
+                declared: "the source evaluates CASE as Chalk does",
+                remedy: "Set SupportsCase = false.").ConfigureAwait(false));
         }
 
         if (capabilities.SupportsLimit)
@@ -153,6 +154,10 @@ internal static class CapabilityProbes
         };
     }
 
+    /// <param name="declared">
+    /// What the descriptor claims, as the report words it: a predicate shape is pushable with
+    /// Chalk's semantics, and a conditional is evaluated as Chalk evaluates it.
+    /// </param>
     /// <param name="remedy">
     /// What a host does about a disagreement — which declaration to take back. The shapes are taken
     /// out of <c>PushablePredicates</c>; a conditional is turned off with <c>SupportsCase</c>.
@@ -162,6 +167,7 @@ internal static class CapabilityProbes
         string subject,
         Probe probe,
         CancellationToken ct,
+        string declared = "pushable with Chalk's semantics",
         string remedy = "Remove it from PushablePredicates.")
     {
         var expected = context.Rows.Where(probe.Expected).ToList();
@@ -177,7 +183,7 @@ internal static class CapabilityProbes
             return new ConformanceFinding
             {
                 Subject = subject,
-                Declared = "pushable",
+                Declared = declared,
                 Observed = $"the source refused the query: {failure.Message}",
                 Outcome = ConformanceOutcome.Fail,
                 Advice = $"The query was: {context.SelectIdsWhere(probe.Sql)}",
@@ -192,7 +198,7 @@ internal static class CapabilityProbes
             ? new ConformanceFinding
             {
                 Subject = subject,
-                Declared = "pushable with Chalk's semantics",
+                Declared = declared,
                 Observed = $"the same {actual.Count} rows the scan gives",
                 Outcome = ConformanceOutcome.Pass,
             }
@@ -202,7 +208,7 @@ internal static class CapabilityProbes
                 Declared = $"rows {expectedIds}",
                 Observed = $"rows {actualIds}",
                 Outcome = ConformanceOutcome.Fail,
-                Advice = $"The source evaluates this shape differently from Chalk. {remedy} The "
+                Advice = $"The source evaluates it differently from Chalk. {remedy} The "
                     + $"query was: {context.SelectIdsWhere(probe.Sql)}",
             };
     }

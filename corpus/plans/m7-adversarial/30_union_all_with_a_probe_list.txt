@@ -104,3 +104,42 @@ Bo CANARY-FIRST-02
 T
 Tara CANARY-FIRST-01
 
+-- u16-a-manager-in-two-orgs
+report n:Full, members:Some
+Ada CANARY-FIRST-04
+B
+Bo CANARY-FIRST-02
+T
+Tara CANARY-FIRST-01
+Tara CANARY-FIRST-01
+Tomas CANARY-FIRST-03
+
+-- u17-an-agent-in-two-orgs
+report n:PerRow, members:Some
+A
+B
+B
+T
+T
+T
+T
+
+-- u18-a-keeper
+report n:PerRow, members:Some
+B
+T
+<null>
+<null>
+
+-- u19-a-vendor-in-a-region
+report n:PerRow, members:None
+B
+T
+
+-- u20-a-picker
+report n:PerRow, members:Some
+B
+T
+<null>
+<null>
+

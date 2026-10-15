@@ -47,3 +47,20 @@ report first_name:Redacted, members:None
 -- u15-a-vendor-and-an-org
 report first_name:Full, members:Some
 
+-- u16-a-manager-in-two-orgs
+report first_name:Full, members:Some
+Tara CANARY-FIRST-01
+
+-- u17-an-agent-in-two-orgs
+report first_name:Masked, members:Some
+T
+
+-- u18-a-keeper
+report first_name:Redacted, members:Some
+
+-- u19-a-vendor-in-a-region
+report first_name:Redacted, members:None
+
+-- u20-a-picker
+report first_name:Redacted, members:Some
+

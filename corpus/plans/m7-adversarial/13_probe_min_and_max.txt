@@ -58,3 +58,23 @@ report lo:Redacted, hi:Redacted, members:None
 report lo:Full, hi:Full, members:Some
 Ito CANARY-LAST-02|Ng CANARY-LAST-01
 
+-- u16-a-manager-in-two-orgs
+report lo:Full, hi:Full, members:Some
+Ek CANARY-LAST-03|Vo CANARY-LAST-07
+
+-- u17-an-agent-in-two-orgs
+report lo:Masked, hi:Masked, members:Some
+E|V
+
+-- u18-a-keeper
+report lo:Redacted, hi:Redacted, members:Some
+<null>|<null>
+
+-- u19-a-vendor-in-a-region
+report lo:Redacted, hi:Redacted, members:None
+<null>|<null>
+
+-- u20-a-picker
+report lo:Redacted, hi:Redacted, members:Some
+<null>|<null>
+

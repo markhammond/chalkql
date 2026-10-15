@@ -60,3 +60,22 @@ report id:Full, org_id:Full, region_id:Full, orders:Some
 1|1|1
 3|1|1
 
+-- u16-a-manager-in-two-orgs
+report id:Full, org_id:Full, region_id:Full, orders:Some
+1|1|1
+3|1|1
+
+-- u17-an-agent-in-two-orgs
+report id:Full, org_id:Full, region_id:Full, orders:Some
+1|1|1
+3|1|1
+
+-- u18-a-keeper
+report id:Full, org_id:Full, region_id:Full, orders:Some
+
+-- u19-a-vendor-in-a-region
+report id:Full, org_id:Full, region_id:Full, orders:Some
+
+-- u20-a-picker
+report id:Full, org_id:Full, region_id:Full, orders:Some
+

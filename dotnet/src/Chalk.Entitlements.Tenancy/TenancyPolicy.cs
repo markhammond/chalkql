@@ -197,6 +197,32 @@ public sealed class TenancyPolicy
     public bool AllowsGlobalGrants { get; private set; }
 
     /// <summary>
+    /// Requires every <c>Inherited</c> or <c>Related</c> path to say what its parents' visibility
+    /// does to each role its table admits that one of them leaves out: exempt from it, with
+    /// <see cref="TenancyPath.ExemptFromParentVisibility"/>, or bound by it, with
+    /// <see cref="TenancyPath.BoundByParentVisibility"/> (D358).
+    /// </summary>
+    /// <remarks>
+    /// Off by default. A role a parent's visibility rule leaves out is then bound by it unless the
+    /// path exempts it, and the policy is refused only where that leaves the role no way into the
+    /// table at all. A policy that declares no combinations cannot say whose grants need the kind a
+    /// path carries, so a role that keeps another route is narrowed quietly; this asks the question
+    /// at every path instead, where both rules are in view, and refuses the policy until it is
+    /// answered.
+    /// </remarks>
+    public TenancyPolicy RequireExplicitParentVisibility(bool require = true)
+    {
+        RequiresExplicitParentVisibility = require;
+        return this;
+    }
+
+    /// <summary>
+    /// Whether every path must say what its parents' visibility does to the roles they leave out
+    /// (D358).
+    /// </summary>
+    public bool RequiresExplicitParentVisibility { get; private set; }
+
+    /// <summary>
     /// Declares a combination of tenancy kinds that grants in <paramref name="roles"/> hold
     /// together (<c>docs/design/59-declared-combinations.md</c>, D320).
     /// </summary>
@@ -440,6 +466,8 @@ public sealed class TenancyPolicy
                                 Kind = restriction.Kind,
                                 TenancyKind = restriction.TenancyKind,
                                 Steps = [.. restriction.Steps],
+                                Exempt = [.. restriction.Exempt],
+                                Bound = [.. restriction.Bound],
                             });
             }
 
@@ -795,13 +823,17 @@ public sealed class TenancyRestrictions
     private TenancyPath Path(RestrictionKind kind, string tenancyKind)
     {
         var steps = new List<VisibilityStep>();
+        var exempt = new List<string>();
+        var bound = new List<string>();
         _restrictions.Add(new Restriction
         {
             Kind = kind,
             TenancyKind = tenancyKind,
             Steps = steps,
+            Exempt = exempt,
+            Bound = bound,
         });
-        return new TenancyPath(this, steps);
+        return new TenancyPath(this, kind, tenancyKind, steps, exempt, bound);
     }
 
     private string Named(Kind kind) =>
@@ -828,12 +860,126 @@ public sealed class TenancyRestrictions
 public sealed class TenancyPath
 {
     private readonly TenancyRestrictions _restrictions;
+    private readonly RestrictionKind _kind;
+    private readonly string _tenancyKind;
     private readonly List<VisibilityStep> _steps;
+    private readonly List<string> _exempt;
+    private readonly List<string> _bound;
 
-    internal TenancyPath(TenancyRestrictions restrictions, List<VisibilityStep> steps)
+    internal TenancyPath(
+        TenancyRestrictions restrictions,
+        RestrictionKind kind,
+        string tenancyKind,
+        List<VisibilityStep> steps,
+        List<string> exempt,
+        List<string> bound)
     {
         _restrictions = restrictions;
+        _kind = kind;
+        _tenancyKind = tenancyKind;
         _steps = steps;
+        _exempt = exempt;
+        _bound = bound;
+    }
+
+    /// <summary>
+    /// Names roles <b>exempt</b> from the visibility rules of the tables this path steps down to
+    /// (D358): along it they take the kind's value as a marking, and read none of those rules —
+    /// neither the roles they admit nor the scopes they hold in. The rest of the roles the table
+    /// admits reach along the path only where every one of those tables admits them too.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For a tasking that carries its asset's classification and is read by roles that may not read
+    /// the asset: <c>.Inherited(classification).Through(assets).ExemptFromParentVisibility(taskingReader)</c>.
+    /// It covers the whole path, including where the path runs on through its parent's own path;
+    /// on a <c>Related</c> path, that is every table after the bridge, which is never consulted.
+    /// </para>
+    /// <para>
+    /// An exemption is checked when the policy compiles: one naming a role the table does not
+    /// admit, or a role every table the path steps down to admits already, would change nothing,
+    /// and is refused.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="CatalogValidationException">
+    /// No role, a role of another policy, a role that stands for a relation to a row, or a role
+    /// already named on this path.
+    /// </exception>
+    public TenancyPath ExemptFromParentVisibility(params Role[] roles)
+    {
+        Name(roles, _exempt, nameof(ExemptFromParentVisibility), _bound, nameof(BoundByParentVisibility));
+        return this;
+    }
+
+    /// <summary>
+    /// Names roles <b>bound</b> by the visibility rules of the tables this path steps down to (D358):
+    /// the default, said aloud. Along the path they reach only where every one of those tables admits
+    /// them, in a scope their rules allow.
+    /// </summary>
+    /// <remarks>
+    /// A policy that requires explicit parent visibility asks it of every role a parent leaves out
+    /// (<see cref="TenancyPolicy.RequireExplicitParentVisibility"/>). In any policy it is checked when
+    /// the policy compiles: naming a role the table does not admit, or one no table the path steps
+    /// down to leaves out, is refused, so a parent that comes to admit the role makes the policy say
+    /// so again.
+    /// </remarks>
+    /// <exception cref="CatalogValidationException">
+    /// No role, a role of another policy, a role that stands for a relation to a row, or a role
+    /// already named on this path.
+    /// </exception>
+    public TenancyPath BoundByParentVisibility(params Role[] roles)
+    {
+        Name(roles, _bound, nameof(BoundByParentVisibility), _exempt, nameof(ExemptFromParentVisibility));
+        return this;
+    }
+
+    /// <summary>Adds roles to one of the two lists, refusing what could not mean anything.</summary>
+    private void Name(Role[] roles, List<string> into, string verb, List<string> other, string otherVerb)
+    {
+        ArgumentNullException.ThrowIfNull(roles);
+        var table = _restrictions.Table;
+        var where = $"tenancy.tables[{table.Name}].{(_kind == RestrictionKind.Related ? "related" : "inherited")}";
+        var path = $"{(_kind == RestrictionKind.Related ? "Related" : "Inherited")}(\"{_tenancyKind}\") on '{table.Name}'";
+        if (roles.Length == 0)
+        {
+            throw new CatalogValidationException(
+                ChalkErrorCodes.InvalidPolicy,
+                where,
+                $"{verb} on {path} names no role. Name the roles it is about: {verb}(role).");
+        }
+
+        foreach (var role in roles)
+        {
+            var declaration = table.Policy.Require(role, where);
+            if (declaration.Marker != RoleMarker.None)
+            {
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidPolicy,
+                    where,
+                    $"{verb} on {path} names '{role.Name}', which stands for a relation to a row rather "
+                    + "than a role a grant is held in. Name the roles grants are held in.");
+            }
+
+            if (into.Contains(role.Name, StringComparer.Ordinal))
+            {
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.DuplicateName,
+                    where,
+                    $"{verb} on {path} names role '{role.Name}' twice.");
+            }
+
+            if (other.Contains(role.Name, StringComparer.Ordinal))
+            {
+                throw new CatalogValidationException(
+                    ChalkErrorCodes.InvalidPolicy,
+                    where,
+                    $"{path} names role '{role.Name}' both in {otherVerb} and in {verb}. A role a "
+                    + "parent's visibility rule leaves out is exempt from it along the path, or bound "
+                    + "by it, and not both.");
+            }
+
+            into.Add(role.Name);
+        }
     }
 
     /// <summary>

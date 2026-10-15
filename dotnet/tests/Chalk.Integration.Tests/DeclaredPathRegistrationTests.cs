@@ -26,6 +26,12 @@ namespace Chalk.Integration.Tests;
 /// flags alone. The engine refused that descriptor as not boolean, and nothing started.
 /// </para>
 /// <para>
+/// The asset is visible to asset readers alone, and its markings are the tasking's: the two paths
+/// name the tasking reader exempt from the asset's visibility, which is what lets it read a tasking
+/// by its asset's classification and releasability without reading the asset (D358). Without them,
+/// the policy is refused when it compiles.
+/// </para>
+/// <para>
 /// Two assets, both REL_FVEY, one SECRET and one TOP SECRET; three taskings, of which only T-1 is a
 /// KESTREL tasking of the SECRET asset. Each case runs the ways a host runs a statement: bound as it
 /// is prepared, bound partially — the tasking reader's lists left to execution — bound as it runs,
@@ -89,6 +95,38 @@ public sealed class DeclaredPathRegistrationTests(SharedSidecar sidecar) : IDisp
 
     private const string TaskingSql = "SELECT TaskingId FROM coalition.tasking ORDER BY TaskingId";
 
+    /// <summary>
+    /// Without the exemptions, the tasking reader holds its combination only through the asset, whose
+    /// rule leaves it out: the policy is refused when it compiles, saying what to declare.
+    /// </summary>
+    [Fact]
+    public void Without_its_exemptions_the_model_is_refused_when_it_compiles()
+    {
+        var refused = Assert.Throws<CatalogValidationException>(
+            () => Declare(Catalog(InProcessSources(null)), exempt: false));
+
+        Assert.Equal(ChalkErrorCodes.ParentVisibilityLeavesRoleOut, refused.Code);
+        Assert.Contains(
+            "'tasking' admits 'tasking_reader', which holds the combination {classification, "
+            + "releasability, mission} there only through 'assets', whose visibility rule leaves it out. "
+            + "Declare .ExemptFromParentVisibility(tasking_reader) on the path, or take the role off "
+            + "'tasking'.",
+            refused.Message,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>The model lists its two exemptions, for a review to read.</summary>
+    [Fact]
+    public void The_model_lists_its_exemptions()
+    {
+        var model = Declare(Catalog(InProcessSources(null)));
+
+        Assert.Equal(
+            ["classification", "releasability"],
+            model.Entitlements.Exemptions.Select(e => e.Kind));
+        Assert.All(model.Entitlements.Exemptions, e => Assert.Equal(["tasking_reader"], e.Roles));
+    }
+
     /// <summary>The shape under test: the tasking's own row answers no combination, and says only the flags.</summary>
     [Fact]
     public void The_taskings_own_row_answers_no_combination()
@@ -147,7 +185,7 @@ public sealed class DeclaredPathRegistrationTests(SharedSidecar sidecar) : IDisp
         Role AssetReader,
         Role TaskingReader);
 
-    private static Model Declare(CatalogContext catalog)
+    private static Model Declare(CatalogContext catalog, bool exempt = true)
     {
         var policy = TenancyPolicy.Declare(catalog);
         var classification = policy.Tenancy("classification");
@@ -163,12 +201,24 @@ public sealed class DeclaredPathRegistrationTests(SharedSidecar sidecar) : IDisp
                 .Direct(releasability, assets.Column("Releasability")))
             .Visible(new VisibilityRule { Roles = [assetReader] });
 
+        // The tasking's classification and releasability are its asset's, read by tasking readers
+        // who may not read the asset: exempt from its visibility rule along both paths.
         var tasking = policy.Source("coalition").Table("tasking");
         tasking
-            .Tenancy(t => t
-                .Direct(mission, tasking.Column("MissionId"))
-                .Inherited(classification).Through(assets)
-                .Inherited(releasability).Through(assets))
+            .Tenancy(t =>
+            {
+                var byClassification = t
+                    .Direct(mission, tasking.Column("MissionId"))
+                    .Inherited(classification).Through(assets);
+                var byReleasability = (exempt
+                        ? byClassification.ExemptFromParentVisibility(taskingReader)
+                        : byClassification)
+                    .Inherited(releasability).Through(assets);
+                if (exempt)
+                {
+                    byReleasability.ExemptFromParentVisibility(taskingReader);
+                }
+            })
             .Visible(new VisibilityRule { Roles = [taskingReader] });
         tasking.Column("AssetId").References(assets.Column("AssetId"));
 

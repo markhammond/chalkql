@@ -97,3 +97,30 @@ report id:Full, lines:Full, orders:Some, order_items:Some
 5|1
 7|1
 
+-- u16-a-manager-in-two-orgs
+report id:Full, lines:Full, orders:Some, order_items:Some
+1|2
+2|1
+3|0
+4|0
+5|1
+6|0
+
+-- u17-an-agent-in-two-orgs
+report id:Full, lines:Full, orders:Some, order_items:Some
+1|2
+2|1
+3|0
+4|0
+5|1
+6|0
+
+-- u18-a-keeper
+report id:Full, lines:Full, orders:Some, order_items:None
+
+-- u19-a-vendor-in-a-region
+report id:Full, lines:Full, orders:Some, order_items:None
+
+-- u20-a-picker
+report id:Full, lines:Full, orders:Some, order_items:Some
+

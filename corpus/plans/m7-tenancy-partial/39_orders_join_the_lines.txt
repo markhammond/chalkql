@@ -81,3 +81,26 @@ report id:Full, id0:Full, quantity:Full, unit_price:PerRow, orders:Some, order_i
 5|4|3|<null>
 7|5|1|<null>
 
+-- u16-a-manager-in-two-orgs
+report id:Full, id0:Full, quantity:Full, unit_price:PerRow, orders:Some, order_items:Some
+1|1|2|50
+1|2|4|30
+2|3|1|200
+5|4|3|70
+
+-- u17-an-agent-in-two-orgs
+report id:Full, id0:Full, quantity:Full, unit_price:PerRow, orders:Some, order_items:Some
+1|1|2|50
+1|2|4|30
+2|3|1|200
+5|4|3|70
+
+-- u18-a-keeper
+report id:Full, id0:Full, quantity:Full, unit_price:PerRow, orders:Some, order_items:Some
+
+-- u19-a-vendor-in-a-region
+report id:Full, id0:Full, quantity:Full, unit_price:PerRow, orders:Some, order_items:Some
+
+-- u20-a-picker
+report id:Full, id0:Full, quantity:Full, unit_price:PerRow, orders:Some, order_items:Some
+

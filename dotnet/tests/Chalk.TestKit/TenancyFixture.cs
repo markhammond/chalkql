@@ -131,7 +131,14 @@ public sealed class TenancyFixture
     /// <c>orders</c> holds along a <c>Related</c> path rather than on its own row. The key is the
     /// row's own identifier, so <c>vendors</c> is where the kind lives <c>Direct</c>ly.
     /// </summary>
-    public sealed record Vendor(int Id, string Name);
+    /// <remarks>
+    /// A vendor's home region is the second kind on the row (F100), which is what lets a vendor grant
+    /// be confined to a region: a table holding both kinds directly. It is on this row and on no
+    /// row of a path, because confining a perspective that reaches an order along a
+    /// <c>Related</c> path is refused (D266 §3): a confined vendor grant reaches its vendor's own
+    /// row and nothing further.
+    /// </remarks>
+    public sealed record Vendor(int Id, string Name, int RegionId);
 
     /// <summary>
     /// A catalogue item, supplied by exactly one vendor: the <b>endpoint</b> of the path, where the
@@ -319,8 +326,8 @@ public sealed class TenancyFixture
     /// <summary>Two vendors, so that one order can carry the goods of both (design 38 §8).</summary>
     public static IReadOnlyList<Vendor> Vendors { get; } =
     [
-        new(1, "Acme"),
-        new(2, "Borealis"),
+        new(1, "Acme", 1),
+        new(2, "Borealis", 2),
     ];
 
     /// <summary>
@@ -370,7 +377,9 @@ public sealed class TenancyFixture
     private const string MemberRows =
         "org_id IN (@ctx.manager_orgs) OR org_id IN (@ctx.agent_orgs) "
         + "OR org_id IN (@ctx.auditor_orgs) OR org_id IN (@ctx.support_orgs) "
-        + "OR org_id IN (@ctx.counter_orgs) OR (id, org_id) IN (@ctx.subject_pairs) OR @ctx.global";
+        + "OR org_id IN (@ctx.counter_orgs) OR org_id IN (@ctx.keeper_orgs) "
+        + "OR org_id IN (@ctx.picker_orgs) "
+        + "OR (id, org_id) IN (@ctx.subject_pairs) OR @ctx.global";
 
     /// <summary>
     /// An order's rows, and the two <b>conjoined</b> groups of D266 beside them: an organisation
@@ -387,8 +396,11 @@ public sealed class TenancyFixture
         + "OR @ctx.global OR created_by = @ctx.user";
 
     /// <summary>
-    /// The <b>organisation kind's</b> reach over an order's rows: one membership per role, the
-    /// region-confined auditor's group among them, and the global grant. It is the endpoint
+    /// The <b>organisation kind's</b> reach over an order's rows: one membership per role the line
+    /// admits that the order admits too, the region-confined auditor's group among them, and the
+    /// global grant — not the keeper's, which the line admits and the order's visibility rule leaves
+    /// out, so the path reaches nothing in that role, and the picker's, which the path names exempt
+    /// from that rule and so takes the order's organisation as a marking (D358). It is the endpoint
     /// predicate of the line's <c>Inherited("org")</c> path, and §2 is exact about what that is —
     /// "in §2's vocabulary over the endpoint table's columns … the same shape a <c>Direct</c>
     /// dimension compiles to", which is the <em>kind's</em> membership and nothing else.
@@ -403,7 +415,7 @@ public sealed class TenancyFixture
     private const string OrderOrgRows =
         "org_id IN (@ctx.manager_orgs) OR org_id IN (@ctx.agent_orgs) "
         + "OR org_id IN (@ctx.auditor_orgs) OR org_id IN (@ctx.support_orgs) "
-        + "OR org_id IN (@ctx.counter_orgs) "
+        + "OR org_id IN (@ctx.counter_orgs) OR org_id IN (@ctx.picker_orgs) "
         + "OR (org_id, region_id) IN (@ctx.auditor_org_regions) "
         + "OR @ctx.global";
 
@@ -422,8 +434,13 @@ public sealed class TenancyFixture
     /// </summary>
     private const string ItemRows = "vendor_id IN (@ctx.vendor_vendor) OR @ctx.global";
 
-    /// <summary>The same for the endpoint of a one-step path: a vendor's own row.</summary>
-    private const string VendorRows = "id IN (@ctx.vendor_vendor) OR @ctx.global";
+    /// <summary>
+    /// A vendor's own row: the vendor grant, and the vendor grant confined to the row's home region
+    /// (F100), which is a pair over <c>(id, region_id)</c> as the region-confined auditor's is over an
+    /// order's <c>(org_id, region_id)</c>.
+    /// </summary>
+    private const string VendorRows =
+        "id IN (@ctx.vendor_vendor) OR (id, region_id) IN (@ctx.vendor_vendor_regions) OR @ctx.global";
 
     /// <summary>
     /// A vendor's reach on an order, decided at the <b>endpoint</b> of the <c>Related</c> path
@@ -686,11 +703,15 @@ public sealed class TenancyFixture
                 Mask = "'********'",
                 Rules =
                 [
+                    // The creator's fail-safe as its own rule, ahead of the roles', as the compiled
+                    // policy writes it (D206, D215) and as `amount` does here. Folded into the
+                    // manager's rule, the two disclose the same and can report differently: for a
+                    // manager in two organisations the one rule is the row predicate and folds to a
+                    // constant, where the compiled pair is decided per row (F98's u16).
+                    new DisclosureRule { When = "created_by = @ctx.user", Then = Disclosure.Full },
                     new DisclosureRule
                     {
-                        When = "org_id IN (@ctx.manager_orgs) OR @ctx.global "
-                            + "OR created_by = @ctx.user "
-                            + "OR " + OrderSubject,
+                        When = "org_id IN (@ctx.manager_orgs) OR @ctx.global OR " + OrderSubject,
                         Then = Disclosure.Full,
                     },
                     new DisclosureRule
@@ -808,8 +829,9 @@ public sealed class TenancyFixture
         RowPredicate =
             "org_id IN (@ctx.manager_orgs) OR org_id IN (@ctx.agent_orgs) "
             + "OR org_id IN (@ctx.auditor_orgs) OR org_id IN (@ctx.support_orgs) "
-            + "OR org_id IN (@ctx.counter_orgs) OR (member_id, org_id) IN (@ctx.subject_pairs) "
-            + "OR @ctx.global",
+            + "OR org_id IN (@ctx.counter_orgs) OR org_id IN (@ctx.keeper_orgs) "
+            + "OR org_id IN (@ctx.picker_orgs) "
+            + "OR (member_id, org_id) IN (@ctx.subject_pairs) OR @ctx.global",
     };
 
     /// <summary>
@@ -1412,6 +1434,50 @@ public sealed class TenancyFixture
         subjectPairs: [],
         vendors: [1]);
 
+    /// <summary>
+    /// A manager in O1 and O2 (F98): one role in two organisations, so a thread is reached in two
+    /// tenancies whose rules answer alike, and a message's <c>content</c> is decided per row.
+    /// </summary>
+    public static RequestContext U16 { get; } = Principal(
+        user: 16, managerOrgs: [1, 2], agentOrgs: [], auditorOrgs: [], subjectPairs: []);
+
+    /// <summary>An agent in O1 and O2 (F98): the same, with the masked level.</summary>
+    public static RequestContext U17 { get; } = Principal(
+        user: 17, managerOrgs: [], agentOrgs: [1, 2], auditorOrgs: [], subjectPairs: []);
+
+    /// <summary>
+    /// A keeper in O1 (F100): a role every table admits but <c>orders</c>, which names the seven
+    /// others. It sees O1's members and threads and their messages, with nothing protected disclosed
+    /// — no rule names it — and no order, and so none of the lines of O1's orders either: a line
+    /// takes its order's organisation along a path, and the order's visibility rule holds along it
+    /// for a role it leaves out (D358). The line admits the keeper still, which reaches it through
+    /// its item, as a vendor would, where the keeper holds the item's vendor.
+    /// </summary>
+    public static RequestContext U18 { get; } = Principal(
+        user: 18, managerOrgs: [], agentOrgs: [], auditorOrgs: [], subjectPairs: [], keeperOrgs: [1]);
+
+    /// <summary>
+    /// A picker in O1 (D358): the keeper's twin, which the line's path to its order names exempt from
+    /// the order's visibility rule. It sees what the keeper sees, and the lines of O1's orders too,
+    /// with the price withheld: a line takes its order's organisation as a marking for it, and no
+    /// rule on the line names it. Still no order.
+    /// </summary>
+    public static RequestContext U20 { get; } = Principal(
+        user: 20, managerOrgs: [], agentOrgs: [], auditorOrgs: [], subjectPairs: [], pickerOrgs: [1]);
+
+    /// <summary>
+    /// V1's grant confined to region 1 (F100): it reaches V1's row, whose home region is R1, and
+    /// nothing a path carries — an item holds no region, so the confined grant resolves nothing there
+    /// and reaches no line and no order.
+    /// </summary>
+    public static RequestContext U19 { get; } = Principal(
+        user: 19,
+        managerOrgs: [],
+        agentOrgs: [],
+        auditorOrgs: [],
+        subjectPairs: [],
+        vendorRegions: [[1, 1]]);
+
     /// <summary>Every principal §8 names, in its order, for a test that runs the lot.</summary>
     /// <remarks>
     /// <c>u3'</c> is §8's query 24 — the same subject grant confined to the other organization, so
@@ -1438,6 +1504,14 @@ public sealed class TenancyFixture
         // these too, which is what makes the path's answer a diff a reviewer reads.
         ("u14-a-vendor", U14),
         ("u15-a-vendor-and-an-org", U15),
+        // F98's two, and F100's: one role in two organisations, a role `orders` does not admit,
+        // and a vendor grant confined to a region.
+        ("u16-a-manager-in-two-orgs", U16),
+        ("u17-an-agent-in-two-orgs", U17),
+        ("u18-a-keeper", U18),
+        ("u19-a-vendor-in-a-region", U19),
+        // D358's: the keeper's twin, exempt from the order's rule along the line's path.
+        ("u20-a-picker", U20),
     ];
 
     /// <summary>One principal's bindings, as a host's own compiler would produce them.</summary>
@@ -1454,6 +1528,9 @@ public sealed class TenancyFixture
         int[][]? auditorOrgRegions = null,
         int[][]? subjectOrgRegions = null,
         int[]? vendors = null,
+        int[]? keeperOrgs = null,
+        int[]? pickerOrgs = null,
+        int[][]? vendorRegions = null,
         string purpose = "",
         string actor = "")
     {
@@ -1472,6 +1549,18 @@ public sealed class TenancyFixture
             // every path that ends at a vendor's catalogue to FALSE — and design 38 §4 then drops
             // the chain, the marker and the verdict ordinals, leaving the plan the plan it was.
             ["vendor_vendor"] = Ids(vendors ?? []),
+            // F100: a role `orders` does not admit, and a vendor grant confined to a region. Empty
+            // for every principal that holds neither, which folds both terms to FALSE.
+            ["keeper_orgs"] = Ids(keeperOrgs ?? []),
+            ["picker_orgs"] = Ids(pickerOrgs ?? []),
+            ["vendor_vendor_regions"] = new ContextRelation
+            {
+                Columns = ["vendor", "region"],
+                Rows = (vendorRegions ?? [])
+                    .Select(p => (IReadOnlyList<object?>)[p[0], p[1]])
+                    .ToArray(),
+                ColumnTypes = [ChalkType.Int32(), ChalkType.Int32()],
+            },
             ["subject_pairs"] = new ContextRelation
             {
                 Columns = ["subject", "within"],

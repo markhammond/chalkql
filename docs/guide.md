@@ -472,7 +472,10 @@ becomes, and how to change a published set safely.
 Some indexes answer prefixes rather than ranges; a trie is one example. Such an index
 declares `IndexKind.Prefix`, and `WHERE name LIKE 'p%'` then becomes a lookup on it
 rather than a filter. An ordered string index serves the same query as the plain range
-`[p, next(p))`, with no change to the adapter at all.
+`[p, next(p))`, with no change to the adapter at all. The planner estimates the rows
+such a lookup reads from the column's statistics: the share of its texts that start with
+the prefix, read from the histogram where there is one, and never less than one value's
+share or the frequent values that start with it.
 
 An index that can also be walked backwards, from its last matching row to its first,
 implements `IReversiblePocoIndex<T>`. That lets `ORDER BY ts DESC LIMIT 1` be one walk
@@ -2484,7 +2487,12 @@ policy anywhere in sight.
 line item to an order, a comment to a post — and the row itself says nothing about who
 may read it. `Restriction.Through("thread_id")` declares the relationship once, and
 reads the parent table and its key from the declared foreign key. The planner compiles
-it into one join with the parent's own entitled scan. What the child's columns disclose
+it into one join with the parent's own entitled scan, so the child is exactly as visible
+as its parent, by every way into it: its grants, its creator, its host predicates. A
+visibility rule of the child's own that would admit fewer roles, or hold in fewer
+scopes, than the parent's is refused, because the join cannot hold it. To make a child
+narrower than its parent, take the parent's kinds along `Inherited` paths, which read
+both rules. What the child's columns disclose
 is decided on the *parent's* side of that join: once per parent row, not once per child
 row. Where the parent's whole chain is visible, over a NOT NULL declared key, the join
 is left out altogether, and the visibility is ALL. Tutorial chapter 11 shows three
@@ -2807,6 +2815,36 @@ takes one or more *restrictions*, OR-ed together:
 
 Unrestricted means every row is visible. The column rules still apply, so a reference
 table with one sensitive column belongs here too.
+
+A visibility rule, `Visible(new VisibilityRule { Roles = […] })`, names the roles that
+may see a table's rows; a table without one admits every role. A path holds its
+parents' rules too. A row that takes a kind from another along `Inherited` or `Related`
+reaches a role only where every table the path steps down to admits it, in a scope
+their rules allow. A role a parent's rule leaves out reads nothing along the path, and
+has no say in the child's column rules there either. A table's own rule, scopes
+included, holds along its paths as it does on its own row.
+
+Sometimes a child should be read by its parent's *value* of a kind, as a marking, by
+roles that may not read the parent: a tasking carries its asset's classification, and
+tasking readers may not read the assets. The path names those roles:
+
+```csharp
+tasking.Tenancy(t => t
+    .Direct(mission, tasking.Column("MissionId"))
+    .Inherited(classification).Through(assets)
+        .ExemptFromParentVisibility(taskingReader));
+```
+
+An exemption covers the whole path, and `TenancyEntitlements.Exemptions` lists every
+one a policy makes, for a review to read. One that would change nothing is refused.
+
+A policy is refused when it compiles where a parent's rule would leave a role the child
+admits with no way into it at all, and the message names the role, the parent and the
+clause to add. Where the compiler cannot see that — the role keeps another route, and
+the policy declares no combinations — a grant that would reach nothing is refused when
+it is bound. To ask the question at every path instead, call
+`RequireExplicitParentVisibility()` on the policy: then each role a parent leaves out
+must be named on the path, `ExemptFromParentVisibility` or `BoundByParentVisibility`.
 
 Sometimes a path has to leave its source. `Column.References(Column)` declares a link
 that a foreign key cannot state, because a foreign key is one source's claim about a
