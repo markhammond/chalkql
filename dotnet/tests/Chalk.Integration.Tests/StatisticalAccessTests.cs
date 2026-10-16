@@ -81,6 +81,27 @@ public sealed class StatisticalAccessTests(SharedSidecar sidecar)
                 + "GROUP BY first_name"));
     }
 
+    /// <summary>
+    /// A FILTER on the raw value selects the rows its aggregate reports on, so the aggregate is held
+    /// to the floor over those rows, as the group is (F232). In organisation 1, a count of the one
+    /// member with a name is withheld, and so is organisation 2's count of none; where the filter
+    /// keeps two members, the count stands. Before, the counts read 1 and 0: who had the name, and
+    /// where.
+    /// </summary>
+    [Fact]
+    public async Task A_filtered_count_is_held_to_the_floor_over_the_rows_it_keeps()
+    {
+        Assert.Equal(
+            ["1|2|<null>|<null>", "2|3|<null>|2"],
+            await RowsAsync(
+                $"""
+                SELECT org_id, COUNT(*),
+                       COUNT(*) FILTER (WHERE first_name = '{Unshared}'),
+                       COUNT(*) FILTER (WHERE first_name LIKE 'T%')
+                FROM members GROUP BY org_id ORDER BY org_id
+                """));
+    }
+
     // ---------------------------------------------------------------- the negatives
 
     /// <summary>

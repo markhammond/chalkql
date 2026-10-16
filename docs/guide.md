@@ -2378,10 +2378,12 @@ source for.
     included.)
 
   A group smaller than the floor is then **dropped**, rather than set to NULL, because
-  with a raw grouping key, the key itself is the disclosure. An aggregate's argument
-  computed from the column, such as `SUM(CASE WHEN … THEN 1 ELSE 0 END)`, is refused;
-  write the condition as the aggregate's `FILTER`. Outside such a statement, the opt-in
-  does not apply, and the column keeps its mask.
+  with a raw grouping key, the key itself is the disclosure. An aggregate whose `FILTER`
+  reads the column is held to the floor over the rows its filter keeps: below it, a
+  count of none included, the aggregate is NULL while its group stands. An aggregate's
+  argument computed from the column, such as `SUM(CASE WHEN … THEN 1 ELSE 0 END)`, is
+  refused; write the condition as the aggregate's `FILTER`. Outside such a statement,
+  the opt-in does not apply, and the column keeps its mask.
 - **Two kernels.**
   - `FINGERPRINT(value, key)` is a keyed, stable pseudonym: HMAC-SHA-256, with the first
     sixteen bytes as hex. So an equality join on fingerprints matches masked rows across

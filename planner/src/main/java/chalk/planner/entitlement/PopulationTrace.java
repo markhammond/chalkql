@@ -306,8 +306,8 @@ final class PopulationTrace {
       // are unchanged for every other position and for whatever else the expression reads.
       refuseAnyUse(project, expr, in, "a value use (" + expr + ")");
       // What an expression computes from a statistical column is still that column to everything
-      // above (D203). The converter writes a FILTER's condition here, which the aggregate reads as
-      // its FILTER, and an argument computed here is refused there (F233).
+      // above (D203). The converter writes a FILTER's condition here, and the aggregate takes the
+      // floor over the rows it keeps (F232); an argument computed here is refused there (F233).
       Taint statistical = statisticalRead(project, expr, in);
       if (statistical != null) {
         out.put(i, statistical.computedFrom());
@@ -411,17 +411,23 @@ final class PopulationTrace {
         refusedComputed(argument, function);
         continue;
       }
+      int filterFloor = 0;
       if (call.filterArg >= 0 && in.containsKey(call.filterArg)) {
         Taint filtered = in.get(call.filterArg);
         if (filtered == null || !filtered.statistical()) {
           refused(taint, "an aggregate's FILTER clause", function);
           continue;
         }
-        // A statistical FILTER is permitted, and this call reads nothing else of the column:
-        // COUNT(*) FILTER (WHERE …) takes no argument at all.
+        // A statistical FILTER is permitted, and it selects the rows this call reports on, so the
+        // floor counts those rows (D364) rather than the group's (F232): a count of one in a group
+        // of hundreds is the one row. COUNT(*) FILTER (WHERE …) reads nothing else of the column.
         if (argument == null) {
+          if (filtered.floor() > 1) {
+            guarded.add(new Guard(i, -1, filtered.floor()));
+          }
           continue;
         }
+        filterFloor = filtered.floor();
       }
       if (call.getArgList().size() != 1) {
         refused(taint, "an aggregate over more than this column", function);
@@ -434,8 +440,9 @@ final class PopulationTrace {
       // An effective floor of one or less is no guard at all (D211): no COUNT(c), no projection.
       // The refusals above still ran — the floor decides what a permitted aggregate costs, never
       // what is permitted.
-      if (taint.floor() > 1) {
-        guarded.add(new Guard(i, call.getArgList().get(0), taint.floor()));
+      int callFloor = Math.max(taint.floor(), filterFloor);
+      if (callFloor > 1) {
+        guarded.add(new Guard(i, call.getArgList().get(0), callFloor));
       }
     }
 
