@@ -277,9 +277,18 @@ public sealed class TenancyEntitlements
     /// </para>
     /// <para>
     /// Everything the named dimensions do not cover stays open, and deliberately so — the subject
-    /// lists, the host's own custom lists, and every scalar, <c>user</c> and <c>mask_key</c> among
+    /// lists, the host's own custom lists, and the scalars, <c>user</c> and <c>mask_key</c> among
     /// them. Each of those is what tells one principal of a tenant from another, and folding one
-    /// would make the plan that principal's rather than the tenant's.
+    /// would make the plan that principal's rather than the tenant's. A <c>user</c> of NULL, a
+    /// principal that owns nothing (<see cref="TenancyPrincipal.User"/>), is folded all the same:
+    /// it is every such principal's.
+    /// </para>
+    /// <para>
+    /// The flags saying which roles the principal holds everywhere, <c>global</c> and
+    /// <c>global_{role}</c>, fold with the dimensions: they are part of the role set a folded plan is
+    /// for. Left open, they would make the plan serve a principal holding any role everywhere, so a
+    /// column one role may only aggregate would be population-only for every principal the plan
+    /// serves, and a statement projecting it refused for all of them (F225).
     /// </para>
     /// </remarks>
     public RequestContext Bind(TenancyPrincipal principal, IReadOnlyCollection<string>? fold)
@@ -316,9 +325,20 @@ public sealed class TenancyEntitlements
         }
 
         open.AddRange(principal.CustomLists.Keys);
-        open.AddRange(whole.Scalars.Keys);
+
+        // A principal that owns nothing folds its NULL user all the same: the NULL is every such
+        // principal's, so the plan stays the tenant's, and folding it is what takes the owner tests
+        // out of the plan.
+        open.AddRange(whole.Scalars.Keys.Where(
+            name => !IsGlobalFlag(name) && (name != "user" || principal.User is not null)));
         return whole.Shape(open);
     }
+
+    /// <summary>Whether a scalar is one of the flags saying which roles the principal holds everywhere.</summary>
+    private bool IsGlobalFlag(string name) =>
+        name == "global"
+        || (name.StartsWith("global_", StringComparison.Ordinal)
+            && _policy.Roles.Contains(name["global_".Length..], StringComparer.Ordinal));
 
     /// <summary>
     /// What <see cref="Bind(TenancyPrincipal)"/> binds, group by group (D266 §5): the list, the
@@ -412,6 +432,12 @@ public sealed class TenancyEntitlements
         return new RequestContext
         {
             Scalars = scalars,
+
+            // A principal that owns nothing binds `user` as NULL, and a NULL carries no type of its
+            // own: it is stated as the owner columns' type, so a shape of this context is theirs.
+            ScalarTypes = principal.User is null
+                ? new Dictionary<string, ChalkType>(StringComparer.Ordinal) { ["user"] = UserType() }
+                : new Dictionary<string, ChalkType>(StringComparer.Ordinal),
             Lists = lists,
             Purpose = principal.Purpose,
             Actor = principal.Actor,
@@ -419,6 +445,27 @@ public sealed class TenancyEntitlements
                 ? principal.FoldMaxRows
                 : RequestContext.DefaultFoldMaxRows,
         };
+    }
+
+    /// <summary>
+    /// The type a NULL <c>user</c> is bound as: the resource-owner column's, the first by table name
+    /// where several tables declare one, and a nullable STRING where none does.
+    /// </summary>
+    private ChalkType UserType()
+    {
+        foreach (var key in _models.Keys.Order(StringComparer.Ordinal))
+        {
+            var model = _models[key];
+            var owner = model.Declared.ResourceOwnerColumn;
+            if (owner.Length > 0
+                && Described(model)?.Columns.FirstOrDefault(
+                    c => string.Equals(c.Name, owner, StringComparison.OrdinalIgnoreCase)) is { } column)
+            {
+                return column.Type.WithNullable(true);
+            }
+        }
+
+        return ChalkType.String(nullable: true);
     }
 
     private ContextRelation Rows(TenancyCompiler.BoundList list, TenancyPrincipal principal)

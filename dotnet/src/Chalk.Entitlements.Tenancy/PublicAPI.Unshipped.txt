@@ -211,7 +211,7 @@ Chalk.Entitlements.Tenancy.TenancyPrincipal.Purpose.init -> void
 Chalk.Entitlements.Tenancy.TenancyPrincipal.Scope.get -> Chalk.Entitlements.Tenancy.Scope?
 Chalk.Entitlements.Tenancy.TenancyPrincipal.Scope.init -> void
 Chalk.Entitlements.Tenancy.TenancyPrincipal.TenancyPrincipal() -> void
-Chalk.Entitlements.Tenancy.TenancyPrincipal.User.get -> object!
+Chalk.Entitlements.Tenancy.TenancyPrincipal.User.get -> object?
 Chalk.Entitlements.Tenancy.TenancyPrincipal.User.init -> void
 Chalk.Entitlements.Tenancy.TenancyReconciliation
 Chalk.Entitlements.Tenancy.TenancyReconciliation.Agrees.get -> bool

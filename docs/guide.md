@@ -2641,6 +2641,11 @@ For example, fold a tenant's grants and leave the principal open. The plan is th
 *tenant's*: one plan and one digest, shared by every principal of that tenant, with the
 tenancy filter in the plan's leaf, where a source can be asked to apply it.
 
+With the tenancy package that is `Bind(principal, fold: ["org"])`. The named dimensions'
+grants fold, and so do the flags that say which roles the principal holds everywhere,
+because they are part of the role set the plan is for. The subject lists and the
+principal's own scalars, such as `user`, stay open.
+
 **One plan for many principals.** Usually you prepare a query with one principal's full
 context, and the planner writes that principal's values straight into the plan. The plan
 then fits those values only, so a principal with other values needs another plan. A host
@@ -2984,6 +2989,13 @@ There are four kinds of grant, and no fifth:
 - `Grant.Global`, which is refused at binding unless the policy opts in;
 - the resource-owner fail-safe, which is not a grant at all, but a row the principal
   owns.
+
+A principal that owns nothing, such as a class principal that stands for many people,
+says so with `User = null`. Its `user` is bound as NULL and folded, so every owner test
+comes out of its plans, its column labels and its explanation, and what is left is its
+roles alone. An id of its own that no row holds would give the same rows, but it leaves
+each owner test in the plan, and a column the roles show in full is then decided row by
+row. `User` is required either way, so a principal says which it is.
 
 **The list is the priority.** Rules are read in the order you wrote them. A rule matches
 a row when the principal holds one of the rule's roles in that row's tenancy, and the

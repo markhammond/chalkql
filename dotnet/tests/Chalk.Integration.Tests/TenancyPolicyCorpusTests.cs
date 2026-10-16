@@ -276,6 +276,51 @@ public sealed class TenancyPolicyCorpusTests(SharedSidecar sidecar)
         }
     }
 
+    /// <summary>
+    /// A column one role may only aggregate no longer refuses another principal's partially bound
+    /// plan (F225). <c>orders.amount</c> is population-only for an auditor. A manager of
+    /// organisation 1 bound with every dimension of <c>orders</c> folded got a plan that left
+    /// <c>global_auditor</c> open, so the plan had to serve a global auditor too, and projecting the
+    /// amount was refused. The role flags now fold with the dimensions: the manager's plan projects
+    /// the amount and gives the rows its fully bound plan gives. A global auditor folded alike is
+    /// refused as before, and so is a plan shaped on everything, which still has to serve any
+    /// principal. A dimension left open keeps a plan that serves whoever holds the auditor role
+    /// there, and refuses as before.
+    /// </summary>
+    [Fact]
+    public async Task A_role_that_may_only_aggregate_does_not_refuse_another_principals_folded_plan()
+    {
+        const string Sql = "SELECT id, amount FROM orders ORDER BY id";
+        var manager = TenancyPolicyFixture.Principal(
+            1, Grant.ForTenancy(TenancyPolicyFixture.Org, 1, TenancyPolicyFixture.Manager));
+        string[] every = ["org", "member", "region", "vendor"];
+        var folded = Fixture.Entitlements.Bind(manager, fold: every);
+        Assert.False(folded.IsShape("global"));
+        Assert.False(folded.IsShape("global_auditor"));
+        Assert.True(folded.IsShape("user"));
+
+        // Prepared with the folded half, run with the manager's own context, which binds the rest.
+        string[] rows;
+        await using (var engine = await EngineAsync())
+        {
+            var prepared = await engine.WithEntitlements().PrepareAsync(Sql, folded);
+            rows = await RowsAsync(engine, prepared, executeWith: Fixture.Entitlements.Bind(manager));
+        }
+
+        Assert.NotEmpty(rows);
+        Assert.Equal(await RowsAsync(Sql, manager), rows);
+
+        var auditor = TenancyPolicyFixture.Principal(5, Grant.Global(TenancyPolicyFixture.Auditor));
+        var refused = await Assert.ThrowsAsync<EntitlementException>(
+            () => PrepareAsync(Sql, Fixture.Entitlements.Bind(auditor, fold: every)));
+        Assert.Contains("population-only", refused.Message, StringComparison.Ordinal);
+
+        await Assert.ThrowsAsync<EntitlementException>(
+            () => PrepareAsync(Sql, Fixture.Entitlements.Bind(manager).Shape()));
+        await Assert.ThrowsAsync<EntitlementException>(
+            () => PrepareAsync(Sql, Fixture.Entitlements.Bind(manager, fold: ["org"])));
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static string FirstSentence(string message)
@@ -316,10 +361,15 @@ public sealed class TenancyPolicyCorpusTests(SharedSidecar sidecar)
     }
 
     private static async Task<string[]> RowsAsync(
-        ChalkEngine engine, PreparedQuery prepared, IReadOnlyList<object?>? parameters = null)
+        ChalkEngine engine,
+        PreparedQuery prepared,
+        IReadOnlyList<object?>? parameters = null,
+        RequestContext? executeWith = null)
     {
         var rows = new List<string>();
-        await using var execution = await engine.ExecuteAsync(prepared, parameters);
+        await using var execution = executeWith is null
+            ? await engine.ExecuteAsync(prepared, parameters)
+            : await engine.ExecuteAsync(prepared, executeWith, parameters);
         await foreach (var batch in execution.Batches)
         {
             using (batch)
