@@ -1394,8 +1394,9 @@ point, with its trailing zeros trimmed, and a whole second has none: `12:34:56.5
 timestamp to the nanosecond where its precision holds one. Cast back, the text is the same
 value. ChalkQL writes this text whichever source holds the value, so the cast is never sent
 to a source, which would write its own: SQLite gives back the text it stored. A year
-outside 1 to 9999 has no such text, and fails the cast. A `TIMESTAMP WITH TIME ZONE` is not
-written as text yet.
+outside 1 to 9999 has no such text, and fails the cast. A `TIMESTAMP WITH LOCAL TIME ZONE` is
+written as its wall clock in UTC and the zone, `2026-01-08 10:00:00+00`, as PostgreSQL and
+DuckDB write one in a session at UTC, and reads back as the same instant.
 
 `CAST` of a timestamp to `TIME` gives its time of day, cut to the time's precision. A `TIME`
 with no precision written has none, so `CAST(ts AS TIME)` is a time to the second, and

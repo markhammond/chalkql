@@ -144,7 +144,7 @@ internal sealed class FixedCastExpr : CastExprBase
 
 /// <summary>
 /// A cast whose target is STRING: the numeric and boolean spellings of <c>02-ir.md</c> §6, and a date,
-/// a time or a timestamp as <see cref="TemporalText"/> writes one (F193).
+/// a time or a timestamp, with a time zone or without, as <see cref="TemporalText"/> writes one (F193).
 /// </summary>
 internal sealed class CastToStringExpr : CastExprBase
 {
@@ -196,6 +196,8 @@ internal sealed class CastToStringExpr : CastExprBase
                 return TemporalText.WriteTime(_buffer, NumberLanes.ReadInteger(operand, row, Source));
             case TypeKind.Timestamp:
                 return TemporalText.WriteTimestamp(_buffer, NumberLanes.ReadInteger(operand, row, Source), Source.Precision);
+            case TypeKind.TimestampTz:
+                return TemporalText.WriteInstant(_buffer, NumberLanes.ReadInteger(operand, row, Source), Source.Precision);
         }
 
         while (true)

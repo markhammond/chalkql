@@ -7,7 +7,9 @@ namespace Chalk.Execution.Expressions;
 /// A date, a time or a timestamp as text (F193), as PostgreSQL and DuckDB write one: <c>2026-01-08</c>,
 /// <c>12:34:56</c> and <c>2026-01-08 12:34:56</c>, with a fraction of a second after a point, its
 /// trailing zeros trimmed, and no point when the second is whole. So <c>12:34:56.5</c>, and a
-/// timestamp to the nanosecond when its precision holds one.
+/// timestamp to the nanosecond when its precision holds one. A timestamp with a time zone is its
+/// wall clock in UTC and the zone, <c>2026-01-08 12:34:56+00</c>, as both write one in a session at
+/// UTC, which reads back as the same instant.
 /// </summary>
 /// <remarks>
 /// A year before 1 or after 9999 has no such text, and is refused as a value the cast cannot convert,
@@ -15,8 +17,8 @@ namespace Chalk.Execution.Expressions;
 /// </remarks>
 internal static class TemporalText
 {
-    /// <summary>The most bytes one value's text takes: a timestamp to the nanosecond.</summary>
-    public const int Longest = 29;
+    /// <summary>The most bytes one value's text takes: a timestamp with a time zone, to the nanosecond.</summary>
+    public const int Longest = 32;
 
     private const long MicrosPerSecond = 1_000_000L;
 
@@ -66,6 +68,19 @@ internal static class TemporalText
         };
 
         return written + Fraction(into[written..], raw - (seconds * unitsPerSecond), digits);
+    }
+
+    /// <summary>
+    /// Writes a TIMESTAMP WITH LOCAL TIME ZONE of <paramref name="precision"/>, an instant in its units
+    /// since 1970 UTC, as its UTC wall clock and <c>+00</c>, and returns the bytes written.
+    /// </summary>
+    public static int WriteInstant(Span<byte> into, long raw, int precision)
+    {
+        var written = WriteTimestamp(into, raw, precision);
+        into[written] = (byte)'+';
+        into[written + 1] = (byte)'0';
+        into[written + 2] = (byte)'0';
+        return written + 3;
     }
 
     /// <summary><c>HH:MM:SS</c> for a second of the day.</summary>

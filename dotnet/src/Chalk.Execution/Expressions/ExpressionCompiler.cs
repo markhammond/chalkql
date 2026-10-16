@@ -409,7 +409,8 @@ internal sealed class ExpressionCompiler
         }
 
         if (target.Kind == TypeKind.String
-            && (sourceNumeric || source.Kind is TypeKind.Bool or TypeKind.Date or TypeKind.Time or TypeKind.Timestamp))
+            && (sourceNumeric || source.Kind is TypeKind.Bool or TypeKind.Date or TypeKind.Time or TypeKind.Timestamp
+                or TypeKind.TimestampTz))
         {
             return new CastToStringExpr(target, operand, failure);
         }

@@ -1190,7 +1190,8 @@ internal sealed class ReferenceInterpreter
                 return value switch
                 {
                     bool flag => flag ? "true" : "false",
-                    long temporal when source.Kind is TypeKind.Date or TypeKind.Time or TypeKind.Timestamp =>
+                    long temporal when source.Kind is TypeKind.Date or TypeKind.Time or TypeKind.Timestamp
+                        or TypeKind.TimestampTz =>
                         TemporalText(temporal, source),
                     long integer => integer.ToString(CultureInfo.InvariantCulture),
                     float single => single.ToString("R", CultureInfo.InvariantCulture),
@@ -1300,6 +1301,8 @@ internal sealed class ReferenceInterpreter
         /// <summary>
         /// F193: a date, a time or a timestamp as PostgreSQL and DuckDB write one, through .NET's own
         /// calendar: the second's fraction after a point, trailing zeros trimmed, none when it is whole.
+        /// A timestamp with a time zone is its UTC wall clock and the zone, <c>+00</c>, as both write one
+        /// in a session at UTC.
         /// </summary>
         private static string TemporalText(long value, ChalkType source)
         {
@@ -1320,7 +1323,8 @@ internal sealed class ReferenceInterpreter
                     var text = fraction.ToString(CultureInfo.InvariantCulture).PadLeft(digits, '0').TrimEnd('0');
                     return Day(days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
                         + " " + clock.ToString("HH:mm:ss", CultureInfo.InvariantCulture)
-                        + (text.Length == 0 ? string.Empty : "." + text);
+                        + (text.Length == 0 ? string.Empty : "." + text)
+                        + (source.Kind == TypeKind.TimestampTz ? "+00" : string.Empty);
             }
         }
 

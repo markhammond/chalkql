@@ -72,6 +72,33 @@ public sealed class TimestampOffsetTests(SharedSidecar sidecar) : IClassFixture<
     }
 
     /// <summary>
+    /// A timestamp with a time zone is written as its wall clock in UTC and the zone, as DuckDB and
+    /// PostgreSQL write one in a session at UTC, and its text reads back as the same instant.
+    /// </summary>
+    [Theory]
+    [InlineData(ExecutionEngine.Vectorised)]
+    [InlineData(ExecutionEngine.Reference)]
+    public async Task A_timestamp_with_a_time_zone_is_written_with_its_zone(ExecutionEngine executor)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var engine = await EngineAsync(executor);
+
+        Assert.Equal(
+            [
+                "1|2026-01-08 12:00:00+00|True",
+                "2|2026-01-08 10:00:00+00|True",
+                "3|2026-01-08 12:00:00+00|True",
+                "4|2026-01-08 17:30:00+00|True",
+                "5|2026-01-08 12:00:00.5+00|True",
+            ],
+            await RowsAsync(
+                engine,
+                "SELECT id, CAST(CAST(txt AS TIMESTAMP WITH LOCAL TIME ZONE) AS VARCHAR), "
+                + "CAST(CAST(CAST(txt AS TIMESTAMP WITH LOCAL TIME ZONE) AS VARCHAR) AS TIMESTAMP WITH LOCAL TIME ZONE) "
+                + "= CAST(txt AS TIMESTAMP WITH LOCAL TIME ZONE) FROM texts ORDER BY id"));
+    }
+
+    /// <summary>
     /// Text written in the statement, and text bound to a parameter as text, are read the same way. A
     /// parameter cast straight to a timestamp is a timestamp, which a string does not bind to.
     /// </summary>
