@@ -22,7 +22,8 @@ import org.junit.jupiter.api.Test;
 /**
  * F191: {@code CURRENT_TIME} and {@code LOCALTIME} are the time of day of the execution's instant,
  * written as the time of day of {@code CURRENT_TIMESTAMP}. F193: a date or a time cast to text is
- * Chalk's text, so the cast is never sent to a source, which writes its own.
+ * Chalk's text, so the cast is never sent to a source, which writes its own. F240: text cast to a
+ * date or a time is read by Chalk, for the same reason.
  *
  * <p>Planned against the declared catalog, whose {@code bars.ts} is a {@code TIMESTAMP(9)}, and the
  * same {@code bars} in a remote schema {@code db} of each dialect.
@@ -77,6 +78,53 @@ class TimeAndTextTest {
       assertThat(remoteSql(profile, "SELECT symbol FROM db.bars WHERE CURRENT_TIME > TIME '12:00:00'"))
           .as(profile.getDialect())
           .doesNotContain("CURRENT");
+    }
+  }
+
+  // ---- F240: text read as a date or a time ----
+
+  /**
+   * Text read as a date, a time or a timestamp is read by Chalk for every dialect, which SQLite would
+   * read as a number, and a zone-less text in its own session zone where a source has one.
+   */
+  @Test
+  void a_source_is_sent_no_text_to_read_as_a_date_or_a_time() {
+    for (DialectProfile profile :
+        List.of(TestCatalogs.sqliteProfile(), TestCatalogs.duckDbProfile(), TestCatalogs.postgresProfile())) {
+      for (String type :
+          List.of("TIMESTAMP", "TIMESTAMP WITH LOCAL TIME ZONE", "DATE", "TIME")) {
+        assertThat(remoteSql(profile, "SELECT CAST(symbol AS " + type + ") AS t FROM db.bars"))
+            .as(profile.getDialect() + " " + type)
+            .doesNotContain("CAST");
+      }
+    }
+  }
+
+  /**
+   * A timestamp written as text in the statement is a value before any source sees it, so a
+   * comparison with it is still sent, as is one with a timestamp literal. At a precision of 3, which
+   * every one of these dialects holds.
+   */
+  @Test
+  void a_comparison_with_a_timestamp_written_in_the_statement_is_still_sent() {
+    for (DialectProfile profile :
+        List.of(TestCatalogs.sqliteProfile(), TestCatalogs.duckDbProfile(), TestCatalogs.postgresProfile())) {
+      for (String bound :
+          List.of("CAST('2026-01-01 08:00:00' AS TIMESTAMP(3))", "TIMESTAMP '2026-01-01 08:00:00.000'")) {
+        assertThat(
+                remoteSql(
+                    profile,
+                    "SELECT symbol FROM db.bars WHERE CAST(ts AS TIMESTAMP(3)) >= " + bound))
+            .as(profile.getDialect() + " " + bound)
+            .contains("WHERE")
+            .contains("2026-01-01 08:00:00");
+      }
+      assertThat(
+              remoteSql(
+                  profile, "SELECT symbol FROM db.bars WHERE CAST(ts AS DATE) >= CAST('2026-01-01' AS DATE)"))
+          .as(profile.getDialect() + " a date")
+          .contains("WHERE")
+          .contains("2026-01-01");
     }
   }
 

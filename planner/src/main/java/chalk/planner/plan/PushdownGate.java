@@ -484,6 +484,19 @@ public final class PushdownGate {
         && org.apache.calcite.sql.type.SqlTypeUtil.isDatetime(cast.getOperands().get(0).getType());
   }
 
+  /**
+   * F240: text read as a date, a time or a timestamp is read as Chalk reads it, the same whichever
+   * source holds the text: a zone the text writes is applied for an instant and dropped for a wall
+   * clock, as DuckDB and PostgreSQL read it, and text without one is UTC. A source reads its own
+   * way: SQLite has no such types and reads the text as a number, and an engine with a session time
+   * zone reads text without a zone in it. So the cast stays with Chalk. A date or a time written as
+   * a literal is not this cast: the planner has already made it a value of its type.
+   */
+  private static boolean readsDatetimeFromText(RexCall cast) {
+    return org.apache.calcite.sql.type.SqlTypeUtil.isDatetime(cast.getType())
+        && org.apache.calcite.sql.type.SqlTypeUtil.isCharacter(cast.getOperands().get(0).getType());
+  }
+
   private boolean truncates(RelDataType type) {
     SqlTypeName name = type.getSqlTypeName();
     if (name == SqlTypeName.DECIMAL) {
@@ -574,7 +587,8 @@ public final class PushdownGate {
       case AND, OR, NOT, EQUALS, NOT_EQUALS, LESS_THAN, LESS_THAN_OR_EQUAL, GREATER_THAN,
               GREATER_THAN_OR_EQUAL, IS_NULL, IS_NOT_NULL ->
           predicate(call);
-      case CAST -> !truncates(call.getType()) && !writesDatetimeAsText(call);
+      case CAST ->
+          !truncates(call.getType()) && !writesDatetimeAsText(call) && !readsDatetimeFromText(call);
       case CASE -> supportsCase() && !truncates(call.getType());
       default -> function(call);
     };
