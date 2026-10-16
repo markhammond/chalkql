@@ -244,7 +244,9 @@ final class StatisticalScope {
 
   /**
    * Refuses a predicate that pins or excludes an individual of a table carrying a statistical column
-   * — a comparison or membership test on a declared single-column unique key.
+   * — a comparison or membership test on a declared single-column unique key, wherever the statement
+   * writes it: in {@code WHERE}, in {@code JOIN … ON}, in an aggregate's {@code FILTER} or in an
+   * expression an aggregate takes.
    *
    * <p>Run on the tree the pass received, before the leaves are rewritten: afterwards the policy's
    * own row predicate is there too, and a subject grant's {@code id IN (@ctx.…)} reads exactly like
@@ -269,6 +271,14 @@ final class StatisticalScope {
 
     if (rel instanceof Filter filter) {
       refuse(filter.getCondition(), keysOf(filter.getInput(), folds));
+    } else if (rel instanceof Project project) {
+      // The converter writes an aggregate's FILTER condition, and an argument's CASE, into the
+      // projection below it, so a pin there is the same pin as in WHERE: COUNT(*) FILTER (WHERE
+      // id = ?) beside a raw key says which group that one person is in (F234).
+      Map<Integer, Key> keys = keysOf(project.getInput(), folds);
+      for (RexNode expr : project.getProjects()) {
+        refuse(expr, keys);
+      }
     } else if (rel instanceof Join join) {
       refuse(join.getCondition(), keysOf(join, folds));
     } else if (rel instanceof Aggregate aggregate) {

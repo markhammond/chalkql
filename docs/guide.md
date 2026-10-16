@@ -2372,7 +2372,8 @@ source for.
   - every output column is an aggregate or a group key;
   - there is no window anywhere;
   - no individual is pinned or excluded. (A comparison on, or a grouping by, a declared
-    unique key is refused.)
+    unique key is refused, wherever the statement writes it, an aggregate's `FILTER`
+    included.)
 
   A group smaller than the floor is then **dropped**, rather than set to NULL, because
   with a raw grouping key, the key itself is the disclosure. An aggregate's argument

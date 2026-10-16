@@ -108,6 +108,25 @@ public sealed class StatisticalAccessTests(SharedSidecar sidecar)
     }
 
     /// <summary>
+    /// A unique key in an aggregate's FILTER, or in an expression it takes, pins an individual as
+    /// it does in WHERE, and is refused the same way (F234). Beside the raw key, each of these said
+    /// which group member 1 is in, and so their first name.
+    /// </summary>
+    [Theory]
+    [InlineData("COUNT(*) FILTER (WHERE id = 1)")]
+    [InlineData("COUNT(*) FILTER (WHERE id <> 1)")]
+    [InlineData("SUM(CASE WHEN id = 1 THEN 1 ELSE 0 END)")]
+    public async Task A_unique_key_in_an_aggregate_is_refused(string aggregate)
+    {
+        var refusal = await Assert.ThrowsAsync<EntitlementException>(
+            async () => await RowsAsync(
+                $"SELECT first_name, {aggregate} FROM members GROUP BY first_name"));
+
+        Assert.Equal(ChalkErrorCodes.Statistical, refusal.Code);
+        Assert.Contains("main.members.id", refusal.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Pinning an individual: an aggregate over one person is that person, and the difference of
     /// two such statements is their value.
     /// </summary>
