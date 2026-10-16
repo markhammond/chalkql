@@ -105,12 +105,13 @@ public enum ViewPlanSwap
 
     /// <summary>
     /// A second instance of the view is built on the new plan in the background, while the view keeps
-    /// updating the one it has. The first update after the build swaps the new instance in: it catches
-    /// up to that update's epoch, and readers keep their place, sent only the keys whose rows differ.
-    /// Until then the view holds both instances' state. Refused for a view that recomputes, which takes
-    /// a new plan at no extra cost.
+    /// updating the one it has, so that no update stalls on the new plan: low jitter, paid for in
+    /// memory. The first update after the build swaps the new instance in: it catches up to that
+    /// update's epoch, and readers keep their place, sent only the keys whose rows differ. Until then
+    /// the view holds both instances' state. Refused for a view that recomputes, which takes a new plan
+    /// at no extra cost.
     /// </summary>
-    BlueGreen = 1,
+    LowJitter = 1,
 }
 
 /// <summary>
@@ -275,8 +276,8 @@ public sealed class ViewOptions<TKey, TRow>
     /// <summary>
     /// How an incremental view moves to a plan its statement takes (design 70 §2):
     /// <see cref="ViewPlanSwap.AtNextUpdate"/>, the default, computes it at the next update;
-    /// <see cref="ViewPlanSwap.BlueGreen"/> builds it beside the plan the view runs, and swaps it in once
-    /// built. <see cref="ViewPlanSwap.BlueGreen"/> is refused for a view that recomputes.
+    /// <see cref="ViewPlanSwap.LowJitter"/> builds it beside the plan the view runs, and swaps it in once
+    /// built. <see cref="ViewPlanSwap.LowJitter"/> is refused for a view that recomputes.
     /// </summary>
     public ViewPlanSwap PlanSwap { get; init; } = ViewPlanSwap.AtNextUpdate;
 

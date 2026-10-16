@@ -117,7 +117,7 @@ Chalk.Incremental.ViewOptions<TKey, TRow>.PlanImprovementMargin.get -> double?
 Chalk.Incremental.ViewOptions<TKey, TRow>.PlanImprovementMargin.init -> void
 Chalk.Incremental.ViewPlanSwap
 Chalk.Incremental.ViewPlanSwap.AtNextUpdate = 0 -> Chalk.Incremental.ViewPlanSwap
-Chalk.Incremental.ViewPlanSwap.BlueGreen = 1 -> Chalk.Incremental.ViewPlanSwap
+Chalk.Incremental.ViewPlanSwap.LowJitter = 1 -> Chalk.Incremental.ViewPlanSwap
 Chalk.Incremental.ViewOptions<TKey, TRow>.PlanSwap.get -> Chalk.Incremental.ViewPlanSwap
 Chalk.Incremental.ViewOptions<TKey, TRow>.PlanSwap.init -> void
 Chalk.Incremental.StandingView<TKey, TRow>.Statement.get -> Chalk.Client.PreparedQuery!
