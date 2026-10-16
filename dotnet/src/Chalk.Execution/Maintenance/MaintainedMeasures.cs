@@ -425,7 +425,7 @@ internal sealed class MaintainedExtremum : MaintainedMeasure
     private readonly LaneOrder _order;
     private Values?[] _values = [];
 
-    // Every group's values, at their size (F223): kept as each group's change, so that Bytes does not walk them.
+    // Every group's values, at their size (F223): kept as each group's values change, so that Bytes does not walk them.
     private long _valueBytes;
 
     /// <param name="resultType">The value's type.</param>

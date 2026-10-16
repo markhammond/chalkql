@@ -190,7 +190,7 @@ internal sealed class ReplayChanges : OperatorBase
     }
 }
 
-internal sealed class ClockedChanges : MaintainedOperator
+internal sealed class ClockedChanges : MaintainedOperator, IKeepsScratch
 {
     private readonly ClockedState _state;
     private readonly IBatchOperator _input;
@@ -210,6 +210,14 @@ internal sealed class ClockedChanges : MaintainedOperator
         _state = state;
         _input = input;
         _body = body;
+        context.Scratch.Add(this);
+    }
+
+    /// <summary>The rows matched in the last update, back to none.</summary>
+    public void Trim()
+    {
+        _matched.Clear();
+        _matched.TrimExcess();
     }
 
     protected override async ValueTask DisposeCoreAsync()

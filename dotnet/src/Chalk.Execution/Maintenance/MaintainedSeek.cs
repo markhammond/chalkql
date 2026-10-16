@@ -231,7 +231,7 @@ internal sealed class PendingRows : OperatorBase
     }
 }
 
-internal sealed class SeekChanges : MaintainedOperator
+internal sealed class SeekChanges : MaintainedOperator, IKeepsScratch
 {
     /// <summary>
     /// A match not known yet: the row waits for its key's last row, or for a seek. Below every slot of
@@ -297,6 +297,23 @@ internal sealed class SeekChanges : MaintainedOperator
         _seek = seek;
         _probe = probe;
         _rightColumns = [.. Enumerable.Range(0, state.RightWidth)];
+        context.Scratch.Add(this);
+    }
+
+    /// <summary>The keys reached and probed, the rows to match and what each found, back to their first size.</summary>
+    public void Trim()
+    {
+        _reached.Trim();
+        _removedKeys.Trim();
+        _removedAt.Trim();
+        _probing.Trim();
+        _owners.Clear();
+        _owners.TrimExcess();
+        _probes.Clear();
+        _probes.TrimExcess();
+        _found = [];
+        _arriving = [];
+        _lasts = [];
     }
 
     protected override async ValueTask DisposeCoreAsync()

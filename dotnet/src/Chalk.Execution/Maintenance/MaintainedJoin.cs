@@ -200,7 +200,7 @@ internal sealed class JoinState : IMaintainedState
     }
 }
 
-internal sealed class JoinChanges : MaintainedOperator
+internal sealed class JoinChanges : MaintainedOperator, IKeepsScratch
 {
     private readonly JoinState _state;
     private readonly IBatchOperator _left;
@@ -235,6 +235,18 @@ internal sealed class JoinChanges : MaintainedOperator
         _right = right;
         _condition = condition;
         _eval = condition is null ? null : context.NewEvalContext();
+        context.Scratch.Add(this);
+    }
+
+    /// <summary>The candidate pairs, the pass marks and the left join's bookkeeping, back to their first size.</summary>
+    public void Trim()
+    {
+        _candidateLeft = new int[64];
+        _candidateUnits = new long[64];
+        _pass = new bool[64];
+        _touched.Clear();
+        _touched.TrimExcess();
+        _changeMatches = new long[64];
     }
 
     protected override async ValueTask DisposeCoreAsync()

@@ -68,36 +68,9 @@ public sealed class StateBytesTests(SharedSidecar sidecar, ITestOutputHelper out
     public async Task Each_state_counts_what_it_holds(string name, string sql, int[] key)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
-        var random = new Random(23);
-        var now = Open.AddHours(1);
-        var orders = Enumerable.Range(1, 20_000)
-            .Select(i => new Order(i, 1 + random.Next(Customers), random.Next(1_000), Math.Round(random.NextDouble() * 100, 2), Open.AddMilliseconds(i * 180)))
-            .ToList();
-        var customers = Enumerable.Range(1, Customers).Select(i => new Customer(i, $"customer-{i}", i % 3 == 0 ? "apac" : "emea")).ToList();
-        var quotes = Enumerable.Range(0, 8_000)
-            .Select(i => new Quote(1 + random.Next(Customers), Open.AddMilliseconds(i * 450), Math.Round(random.NextDouble() * 100, 3)))
-            .ToList();
-        var source = new PocoSourceBuilder("shop")
-            .NamingPolicy(PocoNamingPolicy.SnakeCase)
-            .AddTable("orders", (IReadOnlyList<Order>)orders, t => t.OrderedBy(x => x.Ts))
-            .AddTable("customers", (IReadOnlyList<Customer>)customers, t => t.Keyed(x => x.Id))
-            .AddTable("quotes", (IReadOnlyList<Quote>)quotes, t =>
-            {
-                t.OrderedBy(x => x.Ts);
-                t.Index(x => x.Customer, x => x.Ts);
-            })
-            .Build();
-        await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
-        {
-            Sources = [source],
-            Planner = sidecar.CreatePlanner(),
-            Clock = "now",
-        }, Ct);
-        await engine.RefreshAsync(r => r.AdvanceClock(new DateTimeOffset(now, TimeSpan.Zero)), Ct);
-        var prepared = await engine.PrepareAsync(sql, ct: Ct);
-        var clock = Enumerable.Range(0, prepared.Parameters.Count)
-            .FirstOrDefault(i => string.Equals(prepared.Parameters[i].Name?.TrimStart('@'), "now", StringComparison.OrdinalIgnoreCase), -1);
-        await using var maintained = await prepared.MaintainAsync(Values(prepared, now), clock, key, Ct);
+        await using var shop = await OpenAsync(sql, key);
+        var (engine, source, prepared, maintained, random) = (shop.Engine, shop.Source, shop.Prepared, shop.Maintained, shop.Random);
+        var (orders, customers, quotes, now) = (shop.Orders, shop.Customers, shop.Quotes, shop.Now);
 
         _ = await maintained.UpdateAsync(Values(prepared, now), default, engine.Version, whole: false, Ct);
         AssertCounted(maintained, $"{name}, after the update from nothing");
@@ -128,6 +101,90 @@ public sealed class StateBytesTests(SharedSidecar sidecar, ITestOutputHelper out
         }
 
         AssertCounted(maintained, $"{name}, after three updates");
+    }
+
+    /// <summary>
+    /// After the update from nothing, each operator that keeps scratch between updates holds no more
+    /// than a small update needs (F236): the arrays and maps that update grew to every row, and that
+    /// the next one clears, are let go, as the states' buffers are. Before, a join's candidate pairs,
+    /// a left join's counts and a read's weight column kept the size the first update grew them to,
+    /// for the life of the view.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Statements))]
+    public async Task Each_operator_lets_go_of_the_scratch_its_first_update_grew(string name, string sql, int[] key)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var shop = await OpenAsync(sql, key);
+        _ = await shop.Maintained.UpdateAsync(Values(shop.Prepared, shop.Now), default, shop.Engine.Version, whole: false, Ct);
+
+        Assert.NotEmpty(shop.Maintained.Scratch);
+        foreach (var keeper in shop.Maintained.Scratch)
+        {
+            // The operator and what it keeps for itself: not its state, its inputs, its expressions,
+            // nor the batches it gives, which the next update replaces.
+            var weight = HeapWeight.Of(
+                [keeper],
+                other => other is IMaintainedState or Chalk.Execution.Operators.IBatchOperator or Chalk.Execution.Operators.OperatorContext
+                    or Chalk.Execution.Expressions.EvalContext or Chalk.Execution.Expressions.IVectorExpr or Chalk.Sources.ColumnarBatch);
+            output.WriteLine($"{name}: {keeper.GetType().Name} keeps {weight:N0} bytes after the update from nothing");
+            Assert.True(weight < 16 * 1024, $"{name}: {keeper.GetType().Name} keeps {weight:N0} bytes after the update from nothing");
+        }
+    }
+
+    /// <summary>The shop's tables in an engine with a clock, and the statement maintained over them, before any update.</summary>
+    private async Task<Shop> OpenAsync(string sql, int[] key)
+    {
+        var random = new Random(23);
+        var now = Open.AddHours(1);
+        var orders = Enumerable.Range(1, 20_000)
+            .Select(i => new Order(i, 1 + random.Next(Customers), random.Next(1_000), Math.Round(random.NextDouble() * 100, 2), Open.AddMilliseconds(i * 180)))
+            .ToList();
+        var customers = Enumerable.Range(1, Customers).Select(i => new Customer(i, $"customer-{i}", i % 3 == 0 ? "apac" : "emea")).ToList();
+        var quotes = Enumerable.Range(0, 8_000)
+            .Select(i => new Quote(1 + random.Next(Customers), Open.AddMilliseconds(i * 450), Math.Round(random.NextDouble() * 100, 3)))
+            .ToList();
+        var source = new PocoSourceBuilder("shop")
+            .NamingPolicy(PocoNamingPolicy.SnakeCase)
+            .AddTable("orders", (IReadOnlyList<Order>)orders, t => t.OrderedBy(x => x.Ts))
+            .AddTable("customers", (IReadOnlyList<Customer>)customers, t => t.Keyed(x => x.Id))
+            .AddTable("quotes", (IReadOnlyList<Quote>)quotes, t =>
+            {
+                t.OrderedBy(x => x.Ts);
+                t.Index(x => x.Customer, x => x.Ts);
+            })
+            .Build();
+        var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+        {
+            Sources = [source],
+            Planner = sidecar.CreatePlanner(),
+            Clock = "now",
+        }, Ct);
+        await engine.RefreshAsync(r => r.AdvanceClock(new DateTimeOffset(now, TimeSpan.Zero)), Ct);
+        var prepared = await engine.PrepareAsync(sql, ct: Ct);
+        var clock = Enumerable.Range(0, prepared.Parameters.Count)
+            .FirstOrDefault(i => string.Equals(prepared.Parameters[i].Name?.TrimStart('@'), "now", StringComparison.OrdinalIgnoreCase), -1);
+        var maintained = await prepared.MaintainAsync(Values(prepared, now), clock, key, Ct);
+        return new Shop(engine, source, prepared, maintained, random, orders, customers, quotes, now);
+    }
+
+    /// <summary>The tables, the engine and the maintained statement a test reads and changes.</summary>
+    private sealed record Shop(
+        ChalkEngine Engine,
+        PocoSource Source,
+        PreparedQuery Prepared,
+        MaintainedQuery Maintained,
+        Random Random,
+        List<Order> Orders,
+        List<Customer> Customers,
+        List<Quote> Quotes,
+        DateTime Now) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            await Maintained.DisposeAsync();
+            await Engine.DisposeAsync();
+        }
     }
 
     /// <summary>Each state, and the result, against its weight; each weighed apart from the others.</summary>
