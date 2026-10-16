@@ -633,12 +633,33 @@ await engine.RefreshAsync(refresh => refresh.Append(mem, "ticks", batch).DeferPl
 Compacting with a prepared replacement, in a refresh that defers its planning, holds the lock
 for about as long as an append does.
 
-`PlanAsync` plans now, returns once the new plans are in effect, and says whether a plan
-changed:
+`PlanAsync` plans now. Its task completes once the new plans are in effect, true when a plan
+changed. Await it only where nothing is being served yet, such as after seeding at startup, or
+in tests:
 
 ```csharp
 await engine.RefreshAsync(refresh => refresh.Replace(mem, "ticks", rows).DeferPlanning(), ct);
-var changed = await engine.PlanAsync(ct);
+await engine.PlanAsync(ct); // before serving
+```
+
+Elsewhere, start it and carry on: its plans swap in when its run ends, awaited or not, and a
+caller that waits holds up whatever it serves. Observe the task, so that a failure is logged
+rather than left unobserved:
+
+```csharp
+_ = PlanInTheBackgroundAsync();
+
+async Task PlanInTheBackgroundAsync()
+{
+    try
+    {
+        log.LogInformation("planned again; a plan changed: {Changed}", await engine.PlanAsync(ct));
+    }
+    catch (Exception failure) when (!ct.IsCancellationRequested)
+    {
+        log.LogWarning(failure, "planning failed; the plans stay as they were");
+    }
+}
 ```
 
 - **It is true** when some statement you held when you called it runs another plan once it
@@ -1989,6 +2010,28 @@ var options = new ViewOptions<Key, Row>
   cost.
 
 The build uses the host's spare time. Where updates run back to back, it competes with them.
+
+### Changing what a view reads, without a pause
+
+A host can compact the tables under its views, or replace them whole, while the views go on
+serving:
+
+- **The views** are incremental, with `PlanSwap = ViewPlanSwap.LowJitter`.
+- **Steady changes** are appends, in refreshes that defer their planning, so each costs what it
+  adds.
+- **A compaction** is a replacement prepared off the refresh lock (`PrepareReplaceAsync`) while
+  the appends go on, and committed in the next refresh. When it keeps the old rows in their
+  order, a view takes it as the rows it took out and the rows appended since its cut. One
+  prepared before a whole replacement can no longer commit: dispose it.
+- **A whole replacement** goes in one refresh. Then start `PlanAsync`, without awaiting it.
+- **Every version is answered** by the plan each view runs, which gives the same rows as the new
+  one. The new plan is built beside it, and takes over at a later update with the view's state
+  kept and its readers in place, since the result's columns and key are the same.
+- **Name what readers subscribe to** by the statement's `LogicalDigest`, which a new plan does
+  not move.
+- **To see each swap**, read the view's tracker: the update that first runs the new plan
+  reports it in `ViewUpdate.PlanDigest`. The observer's `PlansTakenIn.Version` says when it was
+  taken in.
 
 ### A view under an access policy
 
