@@ -405,6 +405,20 @@ Both are the same however a statement is spaced or its keywords cased. Both move
 other values, names, windows, tables or policy. A plan served by `RecordedPlanner` has no
 logical digest, and reads zero.
 
+`LogicalDigest` is a statement's identity in its catalog. Every engine and every planner that
+holds the same catalog gives a statement the same digest, whatever the sizes of its tables
+and whichever plan each chose. It covers what the statement reads: every column of every
+table it reads, by name, type and nullability, whether the statement uses the column or not,
+and the policy over them. A change to any of those moves it, and a change to a table the
+statement does not read leaves it as it was. It has two limits:
+
+- **It does not name the catalog.** Two catalogs whose tables share names and columns give a
+  statement the same digest, whatever rows they hold. A key that spans catalogs should add
+  the catalog, such as its `ContextId`, and a cache of results the data's `Version`.
+- **It holds within a ChalkQL version.** It is the planner's own digest of its logical plan,
+  so an upgrade that writes the plan's parts differently moves it. Keep it across upgrades
+  only for something you can rebuild.
+
 
 ## Sources
 
