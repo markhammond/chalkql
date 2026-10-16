@@ -249,6 +249,12 @@ public sealed class PreparedQuery
     /// <see cref="PlanDigest"/>, the identity of the plan that runs, it does not move when new
     /// statistics change the plan's operators, so it is what to name shared work by. Zero when the
     /// plan came from a planner that computes none, such as <see cref="RecordedPlanner"/>.
+    /// <para>
+    /// It is the statement's identity in its catalog: the same on every engine and planner that holds
+    /// the catalog. It covers every column of every table the statement reads, used or not, and the
+    /// policy over them, and no other table. It does not name the catalog, so a key that spans
+    /// catalogs adds one; and it is the planner's own digest, so a ChalkQL upgrade may move it.
+    /// </para>
     /// </remarks>
     public ulong LogicalDigest { get; }
 
