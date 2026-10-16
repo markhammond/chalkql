@@ -194,7 +194,7 @@ public readonly struct PlansTakenIn
     /// The version the refresh published (<see cref="ChalkEngine.Version"/>): the host's own, when it
     /// numbered the refresh, and one past the last otherwise. A view numbers its updates by version,
     /// not epoch (<c>ViewUpdate.Version</c>), so this is the number to match them by. A plan swapped
-    /// in here runs from the view's first update at this version or later; under a blue/green swap,
+    /// in here runs from the view's first update at this version or later; under a low-jitter swap,
     /// that update starts building it beside the plan the view runs, and the first after the build
     /// swaps it in.
     /// </summary>

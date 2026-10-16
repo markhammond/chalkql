@@ -28,7 +28,7 @@ public readonly struct ViewUpdate
     /// <summary>
     /// Whether the update computed the view's rows from nothing: every update of a recomputing view,
     /// and an incremental view's first, its first after its maintenance failed, and its first on a new
-    /// plan, unless the plan was built beside the one it ran (<see cref="ViewPlanSwap.BlueGreen"/>):
+    /// plan, unless the plan was built beside the one it ran (<see cref="ViewPlanSwap.LowJitter"/>):
     /// the update that swaps such a plan in catches it up, and is not whole.
     /// </summary>
     public bool Whole { get; }
@@ -37,7 +37,7 @@ public readonly struct ViewUpdate
     public long Changes { get; }
 
     /// <summary>
-    /// The digest of the plan the update ran: under <see cref="ViewPlanSwap.BlueGreen"/>, the plan the
+    /// The digest of the plan the update ran: under <see cref="ViewPlanSwap.LowJitter"/>, the plan the
     /// view runs until a newer one is built and swapped in, which the statement may have taken already.
     /// </summary>
     public ulong PlanDigest { get; }

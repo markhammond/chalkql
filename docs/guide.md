@@ -1905,26 +1905,28 @@ var options = new ViewOptions<Key, Row>
 {
     // …
     Maintenance = ViewMaintenance.Incremental,
-    PlanSwap = ViewPlanSwap.BlueGreen,
+    PlanSwap = ViewPlanSwap.LowJitter,
 };
 ```
 
-- **Blue** is the instance the view runs. It keeps serving readers, and its updates go on as usual.
-- **Green** is a second instance, on the new plan. Its first update computes its state from nothing,
-  which is the slow part. It runs in the background, over the tables as they were when it began.
-- **The first update after green is built swaps it in.** Green catches up to that update's tables, and
-  the view compares green's whole result with its rows. Readers keep their place, and are sent only
-  the keys whose rows differ. Blue is let go.
-- **Until the swap, the view holds both instances' state.** `StateBytes` counts green once it is
-  built. `StateBudget` is checked against the instance that serves, since the swap lets one go.
-- **A newer plan while green builds** stops the build, and starts one on the newest plan.
-- **A build that fails** is logged, and the view keeps blue on its plan, as it does with a plan it
-  cannot maintain.
+`LowJitter` trades memory for steady update times:
+
+- **The running instance** keeps serving readers, and its updates go on as usual.
+- **The new instance**, on the new plan, computes its state from nothing in its first update, which
+  is the slow part. It runs in the background, over the tables as they were when it began.
+- **The first update after the new instance is built swaps it in.** It catches up to that update's
+  tables, and the view compares its whole result with its rows. Readers keep their place, and are
+  sent only the keys whose rows differ. The running instance is let go.
+- **Until the swap, the view holds both instances' state.** `StateBytes` counts the new instance once
+  it is built. `StateBudget` is checked against the instance that serves, since the swap lets one go.
+- **A newer plan while the new instance builds** stops the build, and starts one on the newest plan.
+- **A build that fails** is logged, and the view keeps the running instance on its plan, as it does
+  with a plan it cannot maintain.
 - **A tenfold drift** does not prepare the statement anew: it is planned again in the background, in
-  place, and the view moves to the new plan blue/green, or keeps its plan, nothing rebuilt, when the
-  plan comes back the same.
-- **A statement prepared again**, after a change of shape, lets green go. The view computes the new
-  statement whole, as before.
+  place, and the view builds the new plan beside its own, or keeps its plan, nothing rebuilt, when
+  the plan comes back the same.
+- **A statement prepared again**, after a change of shape, lets the new instance go. The view
+  computes the new statement whole, as before.
 - **The tracker** hears the swap as an update that is not whole, and that ran the new plan. Until the
   swap, the updates it hears of ran blue's plan.
 - **A view that recomputes refuses the option**: it takes a new plan at its next update at no extra

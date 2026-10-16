@@ -6,7 +6,7 @@ using Chalk.TestKit;
 namespace Chalk.Integration.Tests;
 
 /// <summary>
-/// Blue/green plan swaps (design 70 §2): a view whose statement takes a new plan builds it beside the
+/// Low-jitter plan swaps (design 70 §2): a view whose statement takes a new plan builds it beside the
 /// one it runs, keeps updating the one it runs meanwhile, and swaps the new one in at the first update
 /// after the build, which catches it up rather than computing it from nothing, readers keeping their
 /// place. A newer plan abandons the build for one on that plan; a build that fails keeps the plan the
@@ -15,7 +15,7 @@ namespace Chalk.Integration.Tests;
 /// recomputes refuses the option.
 /// </summary>
 [Collection(SidecarCollection.Name)]
-public sealed class ViewBlueGreenTests(SharedSidecar sidecar)
+public sealed class ViewLowJitterTests(SharedSidecar sidecar)
 {
     private sealed record Fill(int Seq, int Book, long Qty);
 
@@ -92,8 +92,8 @@ public sealed class ViewBlueGreenTests(SharedSidecar sidecar)
     }
 
     /// <summary>
-    /// Without blue/green, the update after the statement takes a new plan computes it from nothing: the
-    /// stall blue/green takes off the update.
+    /// Without a low-jitter swap, the update after the statement takes a new plan computes it from
+    /// nothing: the stall a low-jitter swap takes off the update.
     /// </summary>
     [Fact]
     public async Task Without_it_the_update_after_a_new_plan_computes_it_from_nothing()
@@ -197,10 +197,10 @@ public sealed class ViewBlueGreenTests(SharedSidecar sidecar)
     /// A tenfold drift, planning left in the refresh, makes the statement stale, and the view plans it
     /// again in place rather than prepare it anew on its update's thread: it keeps its statement and its
     /// plan, the background run plans it anew, a refresh swaps the plan in, and the view moves to it as
-    /// to any — blue/green, or whole at its next update.
+    /// to any — built beside, or whole at its next update.
     /// </summary>
     [Theory]
-    [InlineData(ViewPlanSwap.BlueGreen)]
+    [InlineData(ViewPlanSwap.LowJitter)]
     [InlineData(ViewPlanSwap.AtNextUpdate)]
     public async Task A_tenfold_drift_is_planned_again_in_place(ViewPlanSwap swap)
     {
@@ -228,7 +228,7 @@ public sealed class ViewBlueGreenTests(SharedSidecar sidecar)
         Assert.False(statement.IsStale);
         await view.UpdateAsync(Ct);
 
-        if (swap == ViewPlanSwap.BlueGreen)
+        if (swap == ViewPlanSwap.LowJitter)
         {
             // Built beside the plan the view runs, and swapped in at the update after.
             Assert.Equal(planned, tracker.Updates[^1].PlanDigest);
@@ -248,7 +248,7 @@ public sealed class ViewBlueGreenTests(SharedSidecar sidecar)
     /// statement is judged from the new numbers, and no update after it computes from nothing.
     /// </summary>
     [Theory]
-    [InlineData(ViewPlanSwap.BlueGreen)]
+    [InlineData(ViewPlanSwap.LowJitter)]
     [InlineData(ViewPlanSwap.AtNextUpdate)]
     public async Task A_tenfold_drift_to_the_same_plan_rebuilds_nothing(ViewPlanSwap swap)
     {
@@ -299,15 +299,15 @@ public sealed class ViewBlueGreenTests(SharedSidecar sidecar)
     }
 
     [Fact]
-    public async Task A_view_that_recomputes_refuses_blue_green()
+    public async Task A_view_that_recomputes_refuses_low_jitter()
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         await using var desk = await DeskAsync();
 
         var refused = await Assert.ThrowsAsync<ArgumentException>(async () =>
             await desk.Engine.MaterializeAsync(
-                ByDesk, Options(null, ViewPlanSwap.BlueGreen, ViewMaintenance.Recompute), Ct));
-        Assert.Contains("PlanSwap = BlueGreen would do nothing", refused.Message, StringComparison.Ordinal);
+                ByDesk, Options(null, ViewPlanSwap.LowJitter, ViewMaintenance.Recompute), Ct));
+        Assert.Contains("PlanSwap = LowJitter would do nothing", refused.Message, StringComparison.Ordinal);
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
             await desk.Engine.MaterializeAsync(ByDesk, Options(null, (ViewPlanSwap)7), Ct));
@@ -325,7 +325,7 @@ public sealed class ViewBlueGreenTests(SharedSidecar sidecar)
 
     private static ViewOptions<One, One> Options(
         Tracker? tracker,
-        ViewPlanSwap swap = ViewPlanSwap.BlueGreen,
+        ViewPlanSwap swap = ViewPlanSwap.LowJitter,
         ViewMaintenance maintenance = ViewMaintenance.Incremental) => new()
     {
         Key = ["desk"],

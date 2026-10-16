@@ -81,8 +81,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     private long _lastChanges;
 
     /// <summary>
-    /// The instance a blue/green swap builds on the statement's new plan, beside the one the view updates
-    /// (design 70 §2); null when none is building or waiting to be swapped in.
+    /// The instance a low-jitter swap builds on the statement's new plan, beside the one the view updates
+    /// (design 70 §2); null when none is building or waiting to be swapped in. It is built blue/green:
+    /// this is the green one, and the one the view updates is blue.
     /// </summary>
     private Green? _green;
 
@@ -158,7 +159,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// <summary>
     /// What the view holds, in bytes, against <see cref="ViewOptions{TKey, TRow}.StateBudget"/>: its
     /// rows, what it keeps of its reads of databases (D340), what its incremental maintenance keeps, and
-    /// a blue/green instance built beside it and waiting to be swapped in (design 70 §2), which the budget
+    /// an instance built beside it and waiting to be swapped in (design 70 §2), which the budget
     /// does not count, since the swap lets one of the two go.
     /// </summary>
     public long StateBytes
@@ -305,14 +306,14 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.PlanSwap,
-                "a view's PlanSwap is AtNextUpdate or BlueGreen.");
+                "a view's PlanSwap is AtNextUpdate or LowJitter.");
         }
 
-        if (options.PlanSwap == ViewPlanSwap.BlueGreen && options.Maintenance == ViewMaintenance.Recompute)
+        if (options.PlanSwap == ViewPlanSwap.LowJitter && options.Maintenance == ViewMaintenance.Recompute)
         {
             throw new ArgumentException(
                 "a view that recomputes takes a new plan at its next update at no extra cost, so PlanSwap = "
-                + "BlueGreen would do nothing: make the view with ViewMaintenance.Incremental, or leave PlanSwap "
+                + "LowJitter would do nothing: make the view with ViewMaintenance.Incremental, or leave PlanSwap "
                 + "at AtNextUpdate.",
                 nameof(options));
         }
@@ -715,7 +716,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 throw fault;
             }
 
-            // Whole for the tracker only when computed from nothing: a blue/green swap catches up.
+            // Whole for the tracker only when computed from nothing: a low-jitter swap catches up.
             _lastWhole = update.Restarted;
             return Changes(update, stamp);
         }
@@ -1040,7 +1041,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// the view is maintained from it from the start, and its next update is whole, as after the
     /// statement is prepared again; readers keep their place, as the result's columns and key are the
     /// same. A new plan that cannot be maintained is declined: the plan the view keeps answers the same
-    /// rows. Under <see cref="ViewPlanSwap.BlueGreen"/>, the new plan is built beside the one the view
+    /// rows. Under <see cref="ViewPlanSwap.LowJitter"/>, the new plan is built beside the one the view
     /// keeps instead (design 70 §2).
     /// </summary>
     private async ValueTask MaintainedCurrentAsync(CancellationToken ct)
@@ -1056,9 +1057,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             return;
         }
 
-        if (_options.PlanSwap == ViewPlanSwap.BlueGreen)
+        if (_options.PlanSwap == ViewPlanSwap.LowJitter)
         {
-            await BlueGreenAsync(kept).ConfigureAwait(false);
+            await SwapBesideAsync(kept).ConfigureAwait(false);
             return;
         }
 
@@ -1088,7 +1089,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// cannot be maintained, or a build that fails, keeps <paramref name="blue"/> on its plan, as a plan
     /// the view cannot maintain is declined.
     /// </summary>
-    private async ValueTask BlueGreenAsync(MaintainedQuery blue)
+    private async ValueTask SwapBesideAsync(MaintainedQuery blue)
     {
         if (_green is not { } green)
         {
@@ -1133,13 +1134,13 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
     /// <summary>
     /// Starts building the plan the statement runs beside the one the view runs (design 70 §2), when
-    /// the view moves to new plans blue/green, runs another plan, and builds nothing yet. Called at the
+    /// the view builds new plans beside its own, runs another plan, and builds nothing yet. Called at the
     /// end of an update, so that the build runs in the time before the next: the instance is made and
     /// computed from nothing off the update's thread, over the epoch current when the build begins.
     /// </summary>
     private void BuildBeside()
     {
-        if (_options.PlanSwap != ViewPlanSwap.BlueGreen
+        if (_options.PlanSwap != ViewPlanSwap.LowJitter
             || _green is not null
             || _maintained is not { IsCurrent: false })
         {
@@ -1187,7 +1188,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     }
 
     /// <summary>
-    /// Lets a blue/green instance go: its build is stopped, and what it built disposed once the build
+    /// Lets an instance built beside go: its build is stopped, and what it built disposed once the build
     /// has stopped, off the update's thread.
     /// </summary>
     private void LetGo(Green green)
@@ -1216,10 +1217,10 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         green.Cancel.Dispose();
     }
 
-    /// <summary>A blue/green instance's build, for tests that wait for it; null when none is building or built.</summary>
+    /// <summary>The build of an instance beside, for tests that wait for it; null when none is building or built.</summary>
     internal Task? GreenBuild => _green?.Build;
 
-    /// <summary>For tests: awaited by a blue/green build before it begins, with the token that stops it.</summary>
+    /// <summary>For tests: awaited by a build beside before it begins, with the token that stops it.</summary>
     internal Func<CancellationToken, Task>? HoldGreenBuild { get; set; }
 
     /// <summary>
