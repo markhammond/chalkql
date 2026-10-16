@@ -533,6 +533,18 @@ one instead. The zero-copy paths read your own arrays, and this rule is what kee
 running query's view of the data whole. `SnapshotReleased` tells you when a replaced
 collection is no longer being read.
 
+**An append copies its rows** into an array Chalk owns while the refresh runs, so its list is
+yours again once `RefreshAsync` returns. Until then, leave it alone. If other threads go on
+adding to it, append a copy instead.
+
+A refresh made many times a second, as a feed's appends are, can hand its plan what it reads as
+a state. With a `static` lambda the plan captures nothing, so the call allocates no closure:
+
+```csharp
+await engine.RefreshAsync(
+    (mem, batch), static (refresh, s) => refresh.Append(s.mem, "ticks", s.batch), ct);
+```
+
 A table's *shape* is its columns, keys, collations, indexes and foreign keys.
 (Statistics and row counts are not part of it.) A refresh that changes no table's shape
 leaves every `PreparedQuery` runnable, and it runs against the new rows. A schema change

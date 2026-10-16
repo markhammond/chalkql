@@ -77,9 +77,10 @@ public sealed class RefreshBuilder
     /// it started with; one started afterwards sees more.
     /// </summary>
     /// <remarks>
-    /// The appended rows are copied into an array Chalk owns, so the collection given here is not
-    /// held afterwards and is never reported released. The rows themselves are, of course, the
-    /// host's, and the rule about not mutating them is the same one.
+    /// The appended rows are read while the refresh runs, and copied into an array Chalk owns: keep
+    /// the collection unchanged until <c>RefreshAsync</c> returns. It is not held after that, and is
+    /// never reported released. The rows themselves are, of course, the host's, and the rule about
+    /// not mutating them is the same one.
     /// </remarks>
     /// <inheritdoc cref="Replace{T}" path="/param"/>
     /// <param name="statistics">
@@ -118,8 +119,9 @@ public sealed class RefreshBuilder
 
     /// <inheritdoc cref="Replace{T}(ITableTarget{T}, IReadOnlyList{T})"/>
     /// <remarks>
-    /// The appended rows are copied into an array Chalk owns, exactly as the <c>(source, name, rows)</c>
-    /// form copies them.
+    /// The appended rows are read while the refresh runs and copied into an array Chalk owns, exactly as
+    /// the <c>(source, name, rows)</c> form copies them: keep the collection unchanged until
+    /// <c>RefreshAsync</c> returns.
     /// </remarks>
     public RefreshBuilder Append<T>(ITableTarget<T> table, IReadOnlyList<T> rows) =>
         Add(table, SourceRefreshKind.Append, rows);
