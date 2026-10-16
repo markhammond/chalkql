@@ -92,7 +92,7 @@ public final class PolicyExplain {
               disclosure(fold, i, entitled),
               entitled == null || entitled.mask() == null ? "" : entitled.mask().toString(),
               placeholder(fold, i, entitled),
-              entitled == null ? 0 : options.minGroupSize(entitled.minGroupSize())));
+              floor(fold, i, entitled, options)));
     }
 
     return new Table(
@@ -186,6 +186,23 @@ public final class PolicyExplain {
       text.setLength(text.length() - 2);
     }
     return text.toString();
+  }
+
+  /**
+   * The group-size floor this principal's aggregates over the column take: the column's own, or the
+   * host's default, where the column is population-only or statistical for this principal, and none
+   * where it is neither, since nothing of this principal's is guarded by it (F228).
+   */
+  private static int floor(
+      EntitlementPass.LeafFold fold,
+      int column,
+      DescriptorExpressions.@Nullable Column entitled,
+      PolicyOptions options) {
+    if (entitled == null
+        || (fold.map().of(column) != Disclosed.AGGREGATE && !fold.statistical().contains(column))) {
+      return 0;
+    }
+    return options.minGroupSize(entitled.minGroupSize());
   }
 
   /**
