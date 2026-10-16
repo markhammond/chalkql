@@ -2361,7 +2361,9 @@ source for.
   user-defined
   aggregate counts only when its declaration says `.Population()` (see *Composite
   results*). Where the host asks for a floor, each aggregate that uses the column is
-  guarded: `CASE WHEN COUNT(c) >= k THEN agg ELSE NULL END`. No floor ships, so a
+  guarded: `CASE WHEN COUNT(c) >= k THEN agg ELSE NULL END`. The count takes the
+  aggregate's own `FILTER`, so a filtered aggregate is guarded over the rows its filter
+  keeps, and a `FILTER` cannot single out rows the floor withholds. No floor ships, so a
   catalog with population-only columns and no small-group rule pays nothing. A host that
   wants a floor gives it at planning, through `PrepareOptions.DefaultMinGroupSize`, or
   per column on the descriptor.

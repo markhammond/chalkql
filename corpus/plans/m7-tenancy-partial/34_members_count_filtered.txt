@@ -40,7 +40,7 @@ report n:Tested, members:Some
 
 -- u9
 report n:Aggregate, members:Some
-1
+<null>
 
 -- u10-in-a-region
 report n:Redacted, members:Some

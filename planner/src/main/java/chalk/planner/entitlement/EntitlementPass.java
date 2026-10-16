@@ -221,7 +221,7 @@ public final class EntitlementPass {
 
   /**
    * The aggregate form's own guards (§2, D261): a permitted aggregate whose FILTER is a lifted test
-   * is guarded over the population that filter leaves, which is the population it reports on.
+   * is guarded over the population that filter leaves, which is the population it reports on (D364).
    */
   private void guardLiftedFilters() {
     for (Map.Entry<org.apache.calcite.rel.core.Aggregate, List<TestLift.FilteredGuard>> entry :
@@ -231,7 +231,9 @@ public final class EntitlementPass {
       for (TestLift.FilteredGuard guard : entry.getValue()) {
         // COUNT(*) is the guarding count: §3.6 guards on COUNT(c), which for a NOT NULL column is
         // COUNT(*) by the time the converter is done with it (F43), and a filtered count reads no
-        // column of the aggregate's input for a COUNT(c) to be formed over. ADR 0042.
+        // column of the aggregate's input for a COUNT(c) to be formed over. The guard counts it
+        // under the call's own FILTER, so the rows the test selects are what the floor counts
+        // (D364, revising ADR 0042's count of the whole group).
         here.add(new PopulationTrace.Guard(guard.callIndex(), /* argument= */ -1, guard.floor()));
       }
     }
