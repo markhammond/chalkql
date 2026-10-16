@@ -89,7 +89,8 @@ internal sealed class HeldRows
     /// </summary>
     public Action<int, bool>? Changed { get; set; }
 
-    public long Bytes => Rows.Bytes + (_counts.Length * sizeof(long)) + _slots.Bytes;
+    /// <summary>The rows, their counts and identities, at their size (F223).</summary>
+    public long Bytes => Rows.Bytes + HeapSizes.Array(_counts.Length, sizeof(long)) + _slots.Bytes;
 
     public long Count(int slot) => _counts[slot];
 

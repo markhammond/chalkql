@@ -1839,9 +1839,13 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   leaves finds the left rows of its key through the index. So a view under a policy holds its
   reader's share, not the table ([A view under an access policy](#a-view-under-an-access-policy)).
 - **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's
-  `StateBudget`: a budget tuned for a recompute may need raising. The first update computes
-  everything, and takes longer than a recompute. The buffers its rows passed through are let go when
-  it ends, so the view then holds its state and not the first update's rows.
+  `StateBudget`: a budget tuned for a recompute may need raising. The count is an estimate, made from
+  counts the statement keeps as rows come and go, and comes within a few percent of what the heap
+  holds; reading it costs the same however large the view. It leaves out the statement's plan and
+  the buffers its operators work in, which the batch size bounds rather than the data: about a
+  megabyte a view in the shapes measured. The first update computes everything, and
+  takes longer than a recompute. The buffers its rows passed through are let go when it ends, so the
+  view then holds its state and not the first update's rows.
 - **A failed update** — a fault, a cancellation, the budget — leaves the view at the epoch it held.
   The next computes the statement from nothing, and a reader is sent only the keys that differ from
   what it holds.

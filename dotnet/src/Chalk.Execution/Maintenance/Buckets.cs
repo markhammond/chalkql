@@ -13,19 +13,14 @@ internal sealed class Buckets
     private int[] _bucketOf = [];
     private int[] _placeOf = [];
 
-    public long Bytes
-    {
-        get
-        {
-            var bytes = _ids.Bytes + ((_bucketOf.Length + _placeOf.Length) * 4L);
-            foreach (var members in _members)
-            {
-                bytes += 16 + (members.Capacity * 4L);
-            }
+    // Every bucket's list and key array, at its size (F223): kept as buckets are made and grow, so that
+    // Bytes does not walk them. A bucket that empties keeps both, for the next key to reuse.
+    private long _bucketBytes;
 
-            return bytes;
-        }
-    }
+    public long Bytes =>
+        _ids.Bytes + _bucketBytes
+        + HeapSizes.Array(_bucketOf.Length, sizeof(int)) + HeapSizes.Array(_placeOf.Length, sizeof(int))
+        + HeapSizes.Of(_members, HeapSizes.Reference) + HeapSizes.Of(_keys, HeapSizes.Reference) + HeapSizes.Of(_free, sizeof(int));
 
     /// <summary>The slots under <paramref name="key"/>, or null; a list to read, never to change.</summary>
     public List<int>? Find(ReadOnlySpan<byte> key) => _ids.TryGet(key, out var id) ? _members[id] : null;
@@ -48,6 +43,7 @@ internal sealed class Buckets
                 else
                 {
                     _keys[reused] = key.ToArray();
+                    _bucketBytes += HeapSizes.Array(key.Length, 1) - HeapSizes.Array(held.Length, 1);
                 }
             }
             else
@@ -55,6 +51,7 @@ internal sealed class Buckets
                 reused = _members.Count;
                 _members.Add([]);
                 _keys.Add(key.ToArray());
+                _bucketBytes += HeapSizes.List + HeapSizes.Array(key.Length, 1);
             }
 
             id = reused;
@@ -69,9 +66,11 @@ internal sealed class Buckets
         }
 
         var members = _members[bucket];
+        var capacity = members.Capacity;
         _bucketOf[slot] = bucket;
         _placeOf[slot] = members.Count;
         members.Add(slot);
+        _bucketBytes += HeapSizes.Array(members.Capacity, sizeof(int)) - HeapSizes.Array(capacity, sizeof(int));
     }
 
     /// <summary>Takes <paramref name="slot"/> out of its bucket, and the bucket out when it empties.</summary>
@@ -109,5 +108,6 @@ internal sealed class Buckets
         _members.Clear();
         _keys.Clear();
         _free.Clear();
+        _bucketBytes = 0;
     }
 }

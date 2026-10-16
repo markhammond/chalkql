@@ -37,20 +37,15 @@ internal sealed class ChangeWriter
     /// <summary>The batches written, each with the weight last.</summary>
     public int BatchCount => _current + 1;
 
-    /// <summary>Bytes the writer holds on to between updates.</summary>
+    /// <summary>Bytes the writer holds on to between updates: each batch, its columns and their buffers (F223).</summary>
     public long Bytes
     {
         get
         {
-            var bytes = 0L;
+            var bytes = HeapSizes.Of(_chunks, HeapSizes.Reference);
             foreach (var chunk in _chunks)
             {
-                foreach (var column in chunk.Columns)
-                {
-                    bytes += column.Bytes;
-                }
-
-                bytes += chunk.Weights.Bytes;
+                bytes += chunk.Bytes;
             }
 
             return bytes;
@@ -143,6 +138,25 @@ internal sealed class ChangeWriter
         public ChangeColumn[] Columns { get; }
 
         public ChangeColumn Weights { get; }
+
+        /// <summary>The chunk, its columns and their buffers, and the batch it publishes them in.</summary>
+        public long Bytes
+        {
+            get
+            {
+                var bytes = Self + HeapSizes.Array(Columns.Length, HeapSizes.Reference) + Weights.Bytes
+                    + HeapSizes.Batch(Columns.Length + 1);
+                foreach (var column in Columns)
+                {
+                    bytes += column.Bytes;
+                }
+
+                return bytes;
+            }
+        }
+
+        // The chunk's own object: its header, its columns, its weights and its batch.
+        private const int Self = 40;
 
         public void Clear()
         {

@@ -476,7 +476,9 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
             Assert.Equal((1, 1L), (join.Sought, join.Read));
         }
 
-        Assert.True(bytes[true] * 20 < bytes[false], $"seeking, the view holds {bytes[true]} bytes; holding, {bytes[false]}");
+        // Seeking, the view holds ten rows and the empty maps and buffers its states start with, which
+        // StateBytes counts at their size (F223): some thirty kilobytes, against every note's row.
+        Assert.True(bytes[true] * 15 < bytes[false], $"seeking, the view holds {bytes[true]} bytes; holding, {bytes[false]}");
     }
 
     /// <summary>

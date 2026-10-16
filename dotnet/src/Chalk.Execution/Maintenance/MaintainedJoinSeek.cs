@@ -99,8 +99,10 @@ internal sealed class JoinSeekState : IMaintainedState
     /// <summary>How many left rows the last update's lookup found.</summary>
     public long Read { get; set; }
 
+    /// <summary>The right side, and what an update's changes and lookup pass through, at their size (F223).</summary>
     public long Bytes =>
-        Right.Bytes + LeftChanges.Bytes + RightChanges.Bytes + Found.Bytes + Output.Bytes + Touched.Bytes;
+        Right.Bytes + LeftChanges.Bytes + RightChanges.Bytes + Found.Bytes + Output.Bytes + Touched.Bytes
+        + HeapSizes.Of(Ranges, HeapSizes.Reference);
 
     /// <summary>The lookup of the key of row <paramref name="row"/> of the right changes: one value per index column.</summary>
     public IndexKeyRange Range(ReadOnlySpan<ColumnView> columns, int row)

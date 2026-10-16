@@ -29,7 +29,7 @@ namespace Chalk.Execution.Maintenance;
 internal sealed class WindowState : IMaintainedState
 {
     /// <summary>What one entry of an order costs, beside the row it points at: a node of a red-black tree.</summary>
-    private const long EntryBytes = 48;
+    private static readonly long EntryBytes = HeapSizes.SortedSetNode(16);
 
     private readonly int[] _columns;
     private readonly SortedSet<(long Value, int Slot)>[] _orders;
@@ -72,8 +72,10 @@ internal sealed class WindowState : IMaintainedState
     /// <summary>How many rows the last update read: those the clock may have moved past, and the changes.</summary>
     public int Read { get; set; }
 
+    /// <summary>The rows held, each order of them, and what an update's changes pass through, at their size (F223).</summary>
     public long Bytes =>
-        Input.Bytes + _passing.Length + _orders.Sum(order => order.Count * EntryBytes)
+        Input.Bytes + HeapSizes.Array(_passing.Length, sizeof(bool))
+        + _orders.Sum(order => HeapSizes.SortedSet + (order.Count * EntryBytes))
         + InputChanges.Bytes + Replay.Bytes + Output.Bytes;
 
     /// <summary>Whether the row held in <paramref name="slot"/> passed when the filter last read it.</summary>

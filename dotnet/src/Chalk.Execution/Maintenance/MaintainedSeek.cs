@@ -160,7 +160,7 @@ internal sealed class SeekState : IMaintainedState
 
     public long Bytes =>
         Left.Bytes + Matches.Bytes + Found.Bytes + Lasts.Bytes + LeftChanges.Bytes + Pending.Bytes + Output.Bytes
-        + ((LeftCounts.Length * sizeof(long)) + (LeftMatches.Length * sizeof(int)))
+        + HeapSizes.Array(LeftCounts.Length, sizeof(long)) + HeapSizes.Array(LeftMatches.Length, sizeof(int))
         + LeftSlots.Bytes + LeftBuckets.Bytes + LastIndex.Bytes + HandedOver.Bytes;
 
     public void Discard()
