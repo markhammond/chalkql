@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.Aggregate;
+import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.core.CorrelationId;
 import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.core.Join;
@@ -21,6 +23,7 @@ import org.apache.calcite.rel.core.Project;
 import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.core.Union;
 import org.apache.calcite.rel.hint.RelHint;
+import org.apache.calcite.rel.logical.LogicalAggregate;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalJoin;
 import org.apache.calcite.rel.logical.LogicalProject;
@@ -35,6 +38,7 @@ import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.rex.RexSubQuery;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.apache.calcite.util.ImmutableBitSet;
 import org.apache.calcite.util.mapping.Mappings;
 
 /**
@@ -47,10 +51,12 @@ import org.apache.calcite.util.mapping.Mappings;
  * own order, and this class carries it to the root through whatever the statement's shape is.
  *
  * <p>The carry is deliberately narrow. A projection, a filter, a sort, a join and a {@code UNION ALL}
- * all keep a row a row, so a carried column travels through them and the answer stays exact; an
- * aggregate, a set operation that merges rows or a window makes a row out of several and the leaf's
- * per-row answer means nothing there, so the carry stops and the sibling falls back to the report's
- * own constant label for the column, which is the most that position can honestly say. What a sibling never is, is absent: it is emitted
+ * all keep a row a row, so a carried column travels through them and the answer stays exact. An
+ * aggregate makes a row out of a group, and what that row discloses is the least of what the group's
+ * rows did, which it carries as one more aggregate (F224, D363). A set operation that merges rows or
+ * a window makes a row out of several in ways no such meet describes, so the carry stops there and
+ * the sibling falls back to the report's own constant label for the column, which is the most that
+ * position can honestly say. What a sibling never is, is absent: it is emitted
  * for every column with an entitled origin whether the disclosure varies or not, so a consumer has
  * one code path.
  *
@@ -165,6 +171,9 @@ public final class DisclosureColumns {
     if (rel instanceof Join join && join.getJoinType().projectsRight()) {
       return join(join, carriers, emitted, rexBuilder);
     }
+    if (rel instanceof Aggregate aggregate) {
+      return aggregate(aggregate, carriers, emitted, rexBuilder);
+    }
     if (rel instanceof Union union && union.all) {
       return union(union, carriers, emitted, rexBuilder);
     }
@@ -264,6 +273,152 @@ public final class DisclosureColumns {
                 join.getVariablesSet(),
                 join.getJoinType());
     return new Carried(rebuilt, originals, sources);
+  }
+
+  /**
+   * An aggregate (F224, D363): each of its rows is made of a group of rows, so what it discloses is
+   * the least of what those rows disclosed. A key's disclosure is the meet of its own carried columns
+   * over the group, and a measure's the meet of its arguments' and its filter's over the rows its
+   * filter keeps. Each is one {@code MAX} of an ordinal beside the aggregate's own calls, over a
+   * projection that computes the ordinal row by row.
+   *
+   * <p>Only a column whose whole-result label is {@code PER_ROW} is carried. A constant label already
+   * says what every group discloses, so the plan stays as it was there, and so does a population-only
+   * or tested column, whose label the guard and the trace key on. Grouping sets keep the constant
+   * label too, as does a call ordered within its group or distinct on keys of its own.
+   */
+  private static Carried aggregate(
+      Aggregate aggregate,
+      Map<RelNode, RelNode> carriers,
+      Map<RelNode, Disclosed[]> emitted,
+      RexBuilder rexBuilder) {
+    Carried in = pullUp(aggregate.getInput(), carriers, emitted, rexBuilder);
+    if (!isCarrying(in) || aggregate.getGroupType() != Aggregate.Group.SIMPLE) {
+      return barrier(aggregate, carriers, emitted, rexBuilder);
+    }
+    for (AggregateCall call : aggregate.getAggCallList()) {
+      if (!call.getCollation().getFieldCollations().isEmpty()
+          || call.distinctKeys != null
+          || !call.rexList.isEmpty()) {
+        return barrier(aggregate, carriers, emitted, rexBuilder);
+      }
+    }
+
+    Disclosed[] labels = DisclosureFlow.of(aggregate, emitted);
+    List<Integer> keys = aggregate.getGroupSet().asList();
+    List<AggregateCall> calls = aggregate.getAggCallList();
+    int groups = keys.size();
+    int width = aggregate.getRowType().getFieldCount();
+
+    // For each output column carried: the meet of its sources, row by row, and the filter it is
+    // taken under.
+    List<RexNode> ordinals = new ArrayList<>();
+    List<Integer> filters = new ArrayList<>();
+    int[] carriedAt = new int[width];
+    java.util.Arrays.fill(carriedAt, -1);
+    for (int out = 0; out < width; out++) {
+      if (labels[out] != Disclosed.PER_ROW) {
+        continue;
+      }
+      List<Integer> reads = new ArrayList<>();
+      int filter = -1;
+      if (out < groups) {
+        reads.add(keys.get(out));
+      } else {
+        AggregateCall call = calls.get(out - groups);
+        reads.addAll(call.getArgList());
+        if (call.filterArg >= 0) {
+          reads.add(call.filterArg);
+          filter = in.originals()[call.filterArg];
+        }
+      }
+      Set<Integer> sources = new LinkedHashSet<>();
+      for (int column : reads) {
+        sources.addAll(in.sources().get(column));
+      }
+      if (sources.isEmpty()) {
+        continue;
+      }
+      carriedAt[out] = ordinals.size();
+      ordinals.add(meet(in, new ArrayList<>(sources), rexBuilder));
+      filters.add(filter);
+    }
+    if (ordinals.isEmpty()) {
+      return barrier(aggregate, carriers, emitted, rexBuilder);
+    }
+
+    // Below the aggregate: every column of the carrying input, then each ordinal.
+    int inWidth = in.rel().getRowType().getFieldCount();
+    RelDataType ordinal = rexBuilder.getTypeFactory().createSqlType(SqlTypeName.INTEGER);
+    List<RexNode> exprs = new ArrayList<>(inWidth + ordinals.size());
+    List<String> names = new ArrayList<>(in.rel().getRowType().getFieldNames());
+    for (int i = 0; i < inWidth; i++) {
+      exprs.add(rexBuilder.makeInputRef(in.rel(), i));
+    }
+    for (int j = 0; j < ordinals.size(); j++) {
+      exprs.add(rexBuilder.ensureType(ordinal, ordinals.get(j), true));
+      names.add(CARRIED_PREFIX + (inWidth + j));
+    }
+    RelNode below =
+        LogicalProject.create(
+            in.rel(), ImmutableList.<RelHint>of(), exprs, names, Set.<CorrelationId>of());
+
+    // The aggregate itself over the carrying input's places, and one MAX for each ordinal.
+    List<Integer> moved = new ArrayList<>(groups);
+    for (int key : keys) {
+      moved.add(in.originals()[key]);
+    }
+    ImmutableBitSet groupSet = ImmutableBitSet.of(moved);
+    List<AggregateCall> rebuilt = new ArrayList<>(calls.size() + ordinals.size());
+    for (AggregateCall call : calls) {
+      rebuilt.add(moved(call, in.originals()));
+    }
+    for (int j = 0; j < ordinals.size(); j++) {
+      rebuilt.add(least(below, inWidth + j, filters.get(j), groupSet.cardinality()));
+    }
+    RelNode grouped =
+        LogicalAggregate.create(below, aggregate.getHints(), groupSet, null, rebuilt);
+
+    // A key's place among the new keys follows its new input place, which may have moved.
+    List<Integer> ordered = groupSet.asList();
+    int[] originals = new int[width];
+    List<Set<Integer>> sources = new ArrayList<>(width);
+    for (int out = 0; out < width; out++) {
+      originals[out] = out < groups ? ordered.indexOf(moved.get(out)) : out;
+      sources.add(
+          carriedAt[out] < 0 ? Set.of() : Set.of(groups + calls.size() + carriedAt[out]));
+    }
+    return new Carried(grouped, originals, sources);
+  }
+
+  /** A call over the carrying input: its arguments and its filter at their new places. */
+  @SuppressWarnings("deprecation")
+  private static AggregateCall moved(AggregateCall call, int[] originals) {
+    List<Integer> args = new ArrayList<>(call.getArgList().size());
+    for (int arg : call.getArgList()) {
+      args.add(originals[arg]);
+    }
+    int filter = call.filterArg < 0 ? -1 : originals[call.filterArg];
+    return call.copy(args, filter, null, call.getCollation());
+  }
+
+  /** The least disclosure among a group's rows: the greatest of their ordinals, under a filter. */
+  @SuppressWarnings("deprecation")
+  private static AggregateCall least(RelNode input, int column, int filter, int groupCount) {
+    return AggregateCall.create(
+        SqlStdOperatorTable.MAX,
+        /* distinct= */ false,
+        /* approximate= */ false,
+        /* ignoreNulls= */ false,
+        List.of(),
+        List.of(column),
+        filter,
+        (ImmutableBitSet) null,
+        org.apache.calcite.rel.RelCollations.EMPTY,
+        groupCount,
+        input,
+        null,
+        null);
   }
 
   /**

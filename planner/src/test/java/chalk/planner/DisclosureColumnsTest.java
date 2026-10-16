@@ -140,11 +140,40 @@ class DisclosureColumnsTest {
 
   @Test
   void a_column_behind_an_aggregate_keeps_its_sibling_as_a_constant() throws Exception {
-    // The carry cannot pass an aggregate, so the key's sibling is its report's constant label; a
-    // count of rows reads no entitled column and has none.
+    // A constant label already says what every group discloses, so the key's sibling is the
+    // report's constant label and nothing is carried; a count of rows reads no entitled column and
+    // has none.
     PlannerPipeline.Result result =
         plan("SELECT id, COUNT(*) AS n FROM members GROUP BY id", TenancyCatalogs.agent(1));
     assertThat(names(result)).containsExactly("id", "id__disclosure", "n");
+  }
+
+  /**
+   * A column decided row by row keeps its group's disclosure through an aggregate (F224, D363): the
+   * least of what the group's rows disclosed, carried as a MAX of their ordinals. A manager in O1 and
+   * an agent in O2 reads first names in full in O1 and masked in O2, so grouped by organisation, each
+   * group's sibling is its rows' own name rather than the statement's PER_ROW.
+   */
+  @Test
+  void a_group_keeps_the_least_disclosure_of_its_rows() throws Exception {
+    PlannerPipeline.Result result =
+        plan(
+            "SELECT org_id, MIN(first_name) AS earliest FROM members GROUP BY org_id",
+            TenancyCatalogs.managerAndAgent(1, 2));
+    assertThat(names(result))
+        .containsExactly("org_id", "org_id__disclosure", "earliest", "earliest__disclosure");
+    assertThat(result.columnDisclosures())
+        .containsExactly(
+            ReportedDisclosure.REPORTED_DISCLOSURE_FULL,
+            ReportedDisclosure.REPORTED_DISCLOSURE_FULL,
+            ReportedDisclosure.REPORTED_DISCLOSURE_PER_ROW,
+            ReportedDisclosure.REPORTED_DISCLOSURE_FULL);
+    assertThat(result.physicalPlanText())
+        .contains("MAX(")
+        .contains("'FULL'")
+        .contains("'MASKED'")
+        // The carried sibling maps the group's ordinal to its name: no constant PER_ROW fallback.
+        .doesNotContain("['PER_ROW'");
   }
 
   @Test
