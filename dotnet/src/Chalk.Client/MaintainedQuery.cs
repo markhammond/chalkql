@@ -19,6 +19,7 @@ internal sealed class MaintainedQuery : IAsyncDisposable
     private readonly IReadOnlyList<PlaceholderSlot> _slots;
     private readonly IReadOnlyList<ChalkType> _parameterTypes;
     private readonly IReadOnlyList<Chalk.Ir.BoundScalar> _boundScalars;
+    private readonly RequestContext? _context;
     private readonly ExecutionArena _arena = new();
 
     internal MaintainedQuery(
@@ -27,13 +28,15 @@ internal sealed class MaintainedQuery : IAsyncDisposable
         IReadOnlyList<PlaceholderSlot> slots,
         IReadOnlyList<ChalkType> parameterTypes,
         IReadOnlyList<Chalk.Ir.BoundScalar> boundScalars,
-        PreparedQuery.PlanState plans)
+        PreparedQuery.PlanState plans,
+        RequestContext? context)
     {
         _query = query;
         _plan = plan;
         _slots = slots;
         _parameterTypes = parameterTypes;
         _boundScalars = boundScalars;
+        _context = context;
         PlannedWith = plans;
         PlanDigest = plans.Plan.PlanDigest;
     }
@@ -59,6 +62,9 @@ internal sealed class MaintainedQuery : IAsyncDisposable
     /// <summary>Every state the statement's operators keep, for a test to look into.</summary>
     internal IReadOnlyList<IMaintainedState> States => _plan.States;
 
+    /// <summary>The result's rows by key, for a test to weigh.</summary>
+    internal ResultState Result => _plan.Result;
+
     /// <summary>
     /// Brings the statement to the epoch its tables are pinned at now, with <paramref name="values"/>
     /// bound as an execution binds them and <paramref name="now"/> its current time. A key that comes to
@@ -76,7 +82,7 @@ internal sealed class MaintainedQuery : IAsyncDisposable
     public async ValueTask<MaintainedUpdate> UpdateAsync(
         object?[] values, DateTimeOffset now, long version, bool whole, CancellationToken ct)
     {
-        var (flat, relations) = _query.BindUpdate(values, _slots, _parameterTypes, _boundScalars, PlanDigest, version);
+        var (flat, relations) = _query.BindUpdate(values, _slots, _parameterTypes, _boundScalars, PlanDigest, version, _context);
         MaintainedChanges changes;
         try
         {

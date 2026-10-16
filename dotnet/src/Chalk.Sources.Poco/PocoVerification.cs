@@ -25,17 +25,23 @@ internal static class PocoVerification
     /// statement about consecutive rows and the ones before it were checked when they arrived
     /// (D260 §3). Row numbers in the failure are the collection's, either way.
     /// </param>
+    /// <param name="to">
+    /// The row after the last to compare: the collection's end, or, around a row a keyed refresh put in
+    /// another's place, the row after the one that follows it (D367).
+    /// </param>
     public static void VerifyCollation<T>(
         string table,
         IReadOnlyList<T> rows,
         IReadOnlyList<(string Column, SortDirection Direction, PocoStatisticsColumn<T> Order)> keys,
-        int from = 1)
+        int from = 1,
+        int to = int.MaxValue)
     {
         var declaration = "collation ["
             + string.Join(", ", keys.Select(k => $"{k.Column} {Describe(k.Direction)}"))
             + "]";
 
-        for (var i = Math.Max(1, from); i < rows.Count; i++)
+        var end = Math.Min(rows.Count, to);
+        for (var i = Math.Max(1, from); i < end; i++)
         {
             var previous = rows[i - 1];
             var current = rows[i];
@@ -83,6 +89,42 @@ internal static class PocoVerification
             {
                 throw new CatalogVerificationException(
                     table, declaration, i, $"key ({string.Join(", ", key.Select(Render))}) already occurred");
+            }
+        }
+    }
+
+    /// <summary>
+    /// A unique key a declared collation keeps in order (F235): equal keys then stand side by side, so a
+    /// row that repeats a key repeats the one before it, and comparing each row from <paramref name="from"/>
+    /// up to <paramref name="to"/> with the row before it finds every duplicate those rows bring, without
+    /// a set of every key. Row numbers and the message are those of <see cref="VerifyUniqueKey"/>.
+    /// </summary>
+    public static void VerifyUniqueInOrder<T>(
+        string table,
+        IReadOnlyList<T> rows,
+        IReadOnlyList<(string Column, PocoStatisticsColumn<T> Order, Func<T, object?> Value)> keys,
+        int from,
+        int to = int.MaxValue)
+    {
+        var declaration = "unique key (" + string.Join(", ", keys.Select(k => k.Column)) + ")";
+        var end = Math.Min(rows.Count, to);
+        for (var i = Math.Max(1, from); i < end; i++)
+        {
+            var previous = rows[i - 1];
+            var current = rows[i];
+            var repeats = true;
+            for (var k = 0; k < keys.Count && repeats; k++)
+            {
+                repeats = keys[k].Order.CompareRows(previous, current, SortDirection.AscNullsFirst) == 0;
+            }
+
+            if (repeats)
+            {
+                throw new CatalogVerificationException(
+                    table,
+                    declaration,
+                    i,
+                    $"key ({string.Join(", ", keys.Select(k => Render(k.Value(current))))}) already occurred");
             }
         }
     }

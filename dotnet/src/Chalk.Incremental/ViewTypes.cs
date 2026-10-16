@@ -192,9 +192,9 @@ public sealed class ViewOptions<TKey, TRow>
     public ViewRowHash? RowHash { get; init; }
 
     /// <summary>
-    /// The most the view may hold, in bytes: its keyed table, and what it keeps of its reads of
-    /// databases (D340). An update that would hold more fails, and the view keeps its last epoch.
-    /// 64 MB by default.
+    /// The most the view may hold, in bytes: its keyed table, what it keeps of its reads of databases
+    /// (D340), and what incremental maintenance keeps, as <c>StateBytes</c> estimates it. An update that
+    /// would hold more fails, and the view keeps its last epoch. 64 MB by default.
     /// </summary>
     public long StateBudget { get; init; } = 64L << 20;
 
@@ -296,6 +296,22 @@ public sealed class ViewOptions<TKey, TRow>
 
     /// <summary>How the statement is prepared: its parameter types, its pushdown, its options.</summary>
     public PrepareOptions? Prepare { get; init; }
+
+    /// <summary>
+    /// The values the view binds to a statement prepared for a request context's shape, for the life of
+    /// the view (design 74 §3 c). One statement, prepared once from the shape, then serves every
+    /// principal's view, each with its own values, and each update's audit event carries this
+    /// context's purpose and actor. Null, the default, binds nothing: a statement prepared with its
+    /// context's values carries them.
+    /// </summary>
+    /// <remarks>
+    /// The values must fit the statement's shape as an execution's must: the same names, kinds and
+    /// types, and for a statement that folded some names (a tenant's plan), the same values for those.
+    /// A view whose values do not fit, or that gives none to a statement prepared for a shape, is
+    /// refused when it is made. A view made from a statement's text prepares it with no context, so it
+    /// refuses one too.
+    /// </remarks>
+    public RequestContext? Context { get; init; }
 }
 
 /// <summary>A standing view refused, or failed, saying what to do (D339).</summary>

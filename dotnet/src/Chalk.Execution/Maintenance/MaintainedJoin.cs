@@ -33,7 +33,10 @@ internal sealed class JoinSide
 
     public Buckets Buckets { get; } = new();
 
-    public long Bytes => Rows.Bytes + ((Counts.Length + Matches.Length) * sizeof(long)) + Slots.Bytes + Buckets.Bytes;
+    /// <summary>The side's rows, their counts and matches, and the rows by identity and by key, at their size (F223).</summary>
+    public long Bytes =>
+        Rows.Bytes + HeapSizes.Array(Counts.Length, sizeof(long)) + HeapSizes.Array(Matches.Length, sizeof(long))
+        + Slots.Bytes + Buckets.Bytes;
 
     /// <summary>The slots whose rows have the key now in <paramref name="encoder"/>, or null.</summary>
     public List<int>? Bucket(KeyEncoder encoder) => Buckets.Find(encoder.Span);

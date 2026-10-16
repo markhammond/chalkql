@@ -124,10 +124,18 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
     private static SubjectKind Patient => Policy.Policy.Subject("patient", [Policy.Policy.Tenancy("team")]);
 
     /// <summary>Reader 7, who reads what a grant row shares with it, and its own notes as their author.</summary>
-    private static TenancyPrincipal Sharer => new()
+    private static TenancyPrincipal Sharer => ReaderOf(7);
+
+    /// <summary>
+    /// A reader who reads what a grant row shares with it, and its own notes as their author: every
+    /// such reader binds a context of one shape, whatever its id.
+    /// </summary>
+    private static TenancyPrincipal ReaderOf(int id, string purpose = "", string actor = "") => new()
     {
-        User = 7,
-        Grants = [Grant.ForTenancy(Policy.Policy.Tenancy("reader"), 7, Policy.Policy.Role("consented"))],
+        User = id,
+        Grants = [Grant.ForTenancy(Policy.Policy.Tenancy("reader"), id, Policy.Policy.Role("consented"))],
+        Purpose = purpose,
+        Actor = actor,
     };
 
     /// <summary>A counter of teams 1 and 2, who may see their scores only as counts and sums of three or more.</summary>
@@ -468,7 +476,9 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
             Assert.Equal((1, 1L), (join.Sought, join.Read));
         }
 
-        Assert.True(bytes[true] * 20 < bytes[false], $"seeking, the view holds {bytes[true]} bytes; holding, {bytes[false]}");
+        // Seeking, the view holds ten rows and the empty maps and buffers its states start with, which
+        // StateBytes counts at their size (F223): some thirty kilobytes, against every note's row.
+        Assert.True(bytes[true] * 15 < bytes[false], $"seeking, the view holds {bytes[true]} bytes; holding, {bytes[false]}");
     }
 
     /// <summary>
@@ -576,11 +586,13 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
     }
 
     /// <summary>
-    /// A statement prepared for a context's shape binds its values at execution, which a view does
-    /// not: maintenance refuses it when the view is made, naming the context.
+    /// A view of a statement prepared for a context's shape binds a principal's values, and is refused
+    /// when made without them, recomputed or maintained (design 74 §3 c).
     /// </summary>
-    [Fact]
-    public async Task A_maintained_view_of_a_statement_prepared_for_a_shape_is_refused()
+    [Theory]
+    [InlineData(ViewMaintenance.Recompute)]
+    [InlineData(ViewMaintenance.Incremental)]
+    public async Task A_view_of_a_statement_prepared_for_a_shape_needs_its_values(ViewMaintenance maintenance)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         var source = Desk(Policy, [new(1, 1, 101, 5, "one", "body-1", "555-0101", 1)], [], []);
@@ -588,10 +600,195 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
         var entitled = engine.WithEntitlements(new EntitlementsOptions());
         var shaped = await entitled.PrepareAsync("SELECT seq, body FROM desk.notes", Policy.Bind(Seven()).Shape(), ct: Ct);
 
-        var refused = await Assert.ThrowsAsync<StandingViewException>(async () =>
-            await engine.MaterializeAsync(shaped.Query, Options(ViewMaintenance.Incremental), Ct));
-        Assert.Equal(ChalkErrorCodes.UnsupportedInView, refused.Code);
-        Assert.Contains("reads a request's context", refused.Message, StringComparison.Ordinal);
+        var refused = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await engine.MaterializeAsync(shaped.Query, Options(maintenance), Ct));
+        Assert.Contains("give the view them in ViewOptions.Context", refused.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// One statement, prepared once for the shape every reader binds, serves two readers' views, each
+    /// binding its own values for its life (design 74 §3 c). Each view is what the statement returns
+    /// for its reader, through shares made and withdrawn, and both run the one statement. Each reports
+    /// its reader's binding as the context it was made with (§3 a).
+    /// </summary>
+    [Theory]
+    [InlineData(ViewMaintenance.Recompute)]
+    [InlineData(ViewMaintenance.Incremental)]
+    public async Task One_statement_prepared_for_a_shape_serves_every_readers_view(ViewMaintenance maintenance)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        Note[] notes =
+        [
+            new(1, 3, 101, 5, "one", "body-1", "555-0101", 1),
+            new(2, 1, 102, 5, "two", "body-2", "555-0102", 2),
+            new(3, 2, 103, 7, "three", "body-3", "555-0103", 3),
+        ];
+        var source = Desk(Policy, notes, [], []);
+        await using var engine = await EngineAsync(source);
+        var entitled = engine.WithEntitlements(new EntitlementsOptions());
+        var shaped = await entitled.PrepareAsync("SELECT seq, body FROM desk.notes", Policy.Bind(ReaderOf(7)).Shape(), ct: Ct);
+        var seven = Policy.Bind(ReaderOf(7));
+        var eight = Policy.Bind(ReaderOf(8));
+        await using var sevens = await engine.MaterializeAsync(shaped.Query, Options(maintenance, context: seven), Ct);
+        await using var eights = await engine.MaterializeAsync(shaped.Query, Options(maintenance, context: eight), Ct);
+        Assert.Same(sevens.Statement, eights.Statement);
+        Assert.Equal(seven.CanonicalHash, sevens.ContextDigest);
+        Assert.Equal(eight.CanonicalHash, eights.ContextDigest);
+        Assert.NotEqual(sevens.ContextDigest, eights.ContextDigest);
+
+        var (sevenRows, eightRows) = (new Replica(), new Replica());
+        var (sevenCursor, eightCursor) = (ViewCursor.Start, ViewCursor.Start);
+        async Task CheckAsync(Dictionary<long, byte> forSeven, Dictionary<long, byte> forEight)
+        {
+            sevens.Drain(ref sevenCursor, sevenRows);
+            eights.Drain(ref eightCursor, eightRows);
+            Assert.Equal(forSeven, sevenRows.Rows);
+            Assert.Equal(forEight, eightRows.Rows);
+            await AssertIsTheStatementAsync(engine, shaped, sevenRows, seven);
+            await AssertIsTheStatementAsync(engine, shaped, eightRows, eight);
+        }
+
+        // Each its own note, as the author: reader 7 wrote note 3, and reader 8 none.
+        await CheckAsync(new() { [3] = Full }, []);
+
+        await engine.RefreshAsync(r => r.Upsert(source, "note_grants", Shares(new NoteGrant(1, 1, 7), new NoteGrant(2, 2, 8))), Ct);
+        await sevens.UpdateAsync(Ct);
+        await eights.UpdateAsync(Ct);
+        await CheckAsync(new() { [1] = Full, [3] = Full }, new() { [2] = Full });
+
+        await engine.RefreshAsync(
+            r => r.Delete(source, "note_grants", Shares(new NoteGrant(1, 1, 7))).Upsert(source, "note_grants", Shares(new NoteGrant(3, 3, 8))),
+            Ct);
+        await sevens.UpdateAsync(Ct);
+        await eights.UpdateAsync(Ct);
+        await CheckAsync(new() { [3] = Full }, new() { [2] = Full, [3] = Full });
+    }
+
+    /// <summary>
+    /// Each reader's view of one shared statement is audited as that reader: every update's event
+    /// carries the purpose and the actor of the context the view binds, and the one plan's digest
+    /// (design 74 §3 b, c).
+    /// </summary>
+    [Theory]
+    [InlineData(ViewMaintenance.Recompute)]
+    [InlineData(ViewMaintenance.Incremental)]
+    public async Task Each_readers_view_of_a_shared_statement_is_audited_as_that_reader(ViewMaintenance maintenance)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var source = Desk(Policy, [new(1, 1, 101, 7, "one", "body-1", "555-0101", 1)], [], []);
+        await using var engine = await EngineAsync(source);
+        await engine.RefreshAsync(r => r.Version(10), Ct);
+        var audit = new Audit();
+        var entitled = engine.WithEntitlements(new EntitlementsOptions(), audit);
+        var shaped = await entitled.PrepareAsync("SELECT seq, body FROM desk.notes", Policy.Bind(ReaderOf(7)).Shape(), ct: Ct);
+
+        await using var sevens = await engine.MaterializeAsync(
+            shaped.Query, Options(maintenance, context: Policy.Bind(ReaderOf(7, "care", "reader 7"))), Ct);
+        await using var eights = await engine.MaterializeAsync(
+            shaped.Query, Options(maintenance, context: Policy.Bind(ReaderOf(8, "billing", "reader 8"))), Ct);
+        await engine.RefreshAsync(r => r.Version(20).Upsert(source, "note_grants", Shares(new NoteGrant(1, 1, 8))), Ct);
+        await sevens.UpdateAsync(Ct);
+        await eights.UpdateAsync(Ct);
+
+        var events = audit.Events;
+        Assert.Equal([10L, 20L], events.Where(e => e.Actor == "reader 7").Select(e => e.Version));
+        Assert.Equal([10L, 20L], events.Where(e => e.Actor == "reader 8").Select(e => e.Version));
+        Assert.All(events, e =>
+        {
+            Assert.Equal(e.Actor == "reader 7" ? "care" : "billing", e.Purpose);
+            Assert.Equal(shaped.PlanDigest, e.PlanDigest);
+        });
+    }
+
+    /// <summary>
+    /// Values that do not fit the statement are refused when the view is made, as an execution
+    /// refuses them: values for a statement that carries its own, a shape, and values for what a
+    /// tenant's plan folded that are not the ones it folded. A view made from a statement's text
+    /// prepares it with no context, and refuses one.
+    /// </summary>
+    [Fact]
+    public async Task A_view_whose_values_do_not_fit_its_statement_is_refused()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var source = Desk(Policy, [new(1, 1, 101, 5, "one", "body-1", "555-0101", 1)], [], []);
+        await using var engine = await EngineAsync(source);
+        var entitled = engine.WithEntitlements(new EntitlementsOptions());
+        const string Sql = "SELECT seq, body FROM desk.notes";
+        var folded = await entitled.PrepareAsync(Sql, Policy.Bind(Seven()), ct: Ct);
+        var shaped = await entitled.PrepareAsync(Sql, Policy.Bind(Seven()).Shape(), ct: Ct);
+        var tenant = await entitled.PrepareAsync(Sql, Policy.Bind(Seven(), fold: ["team"]), ct: Ct);
+
+        async Task<string> RefusedAsync(PreparedQuery statement, RequestContext context) =>
+            (await Assert.ThrowsAsync<ArgumentException>(async () =>
+                await engine.MaterializeAsync(statement, Options(ViewMaintenance.Recompute, context: context), Ct))).Message;
+
+        Assert.Contains("prepared with its context values and carries them", await RefusedAsync(folded.Query, Policy.Bind(Seven())), StringComparison.Ordinal);
+        Assert.Contains("as shapes again", await RefusedAsync(shaped.Query, Policy.Bind(Seven()).Shape()), StringComparison.Ordinal);
+        Assert.Contains("folded", await RefusedAsync(tenant.Query, Policy.Bind(ReaderOf(8))), StringComparison.Ordinal);
+
+        var text = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await engine.MaterializeAsync(Sql, Options(ViewMaintenance.Recompute, context: Policy.Bind(Seven())), Ct));
+        Assert.Contains("statement's text", text.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A tenant's plan folds the team grants and leaves the rest open (D232): it serves the views of
+    /// two principals with those grants, each binding its own reader and user, each what the statement
+    /// returns for it.
+    /// </summary>
+    [Fact]
+    public async Task A_tenant_plan_serves_the_views_of_its_principals()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        Note[] notes =
+        [
+            new(1, 1, 101, 5, "one", "body-1", "555-0101", 1),
+            new(2, 2, 102, 7, "two", "body-2", "555-0102", 2),
+            new(3, 3, 103, 8, "three", "body-3", "555-0103", 3),
+        ];
+        var source = Desk(Policy, notes, [new NoteGrant(1, 3, 7)], []);
+        await using var engine = await EngineAsync(source);
+        var entitled = engine.WithEntitlements(new EntitlementsOptions());
+        var tenant = await entitled.PrepareAsync("SELECT seq, body FROM desk.notes", Policy.Bind(Seven(), fold: ["team"]), ct: Ct);
+        var twin = new TenancyPrincipal { User = 8, Grants = [.. Seven().Grants.Take(2), Grant.ForTenancy(Policy.Policy.Tenancy("reader"), 8, Policy.Policy.Role("consented"))] };
+
+        foreach (var principal in new[] { Seven(), twin })
+        {
+            var context = Policy.Bind(principal);
+            await using var view = await engine.MaterializeAsync(tenant.Query, Options(ViewMaintenance.Incremental, context: context), Ct);
+            var replica = new Replica();
+            var cursor = ViewCursor.Start;
+            view.Drain(ref cursor, replica);
+            Assert.NotEmpty(replica.Rows);
+            await AssertIsTheStatementAsync(engine, tenant, replica, context);
+            Assert.Equal(context.CanonicalHash, view.ContextDigest);
+        }
+    }
+
+    /// <summary>
+    /// A view of a statement prepared with its principal's values reports the digest of that context,
+    /// so a host whose principal's grants change finds the view, which stands on the old grants, and
+    /// makes it again (design 74 §3 a). Purpose and actor are not grants: the digest does not move
+    /// with them.
+    /// </summary>
+    [Fact]
+    public async Task A_view_reports_the_digest_of_the_grants_it_was_made_with()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var source = Desk(Policy, [new(1, 1, 101, 5, "one", "body-1", "555-0101", 1)], [], []);
+        await using var engine = await EngineAsync(source);
+        var entitled = engine.WithEntitlements(new EntitlementsOptions());
+        var folded = await entitled.PrepareAsync("SELECT seq, body FROM desk.notes", Policy.Bind(Seven()), ct: Ct);
+        await using var view = await engine.MaterializeAsync(folded.Query, Options(ViewMaintenance.Incremental), Ct);
+
+        Assert.Equal(Policy.Bind(Seven()).CanonicalHash, view.ContextDigest);
+        Assert.Equal(Policy.Bind(Seven("audit", "someone else")).CanonicalHash, view.ContextDigest);
+        var widened = new TenancyPrincipal
+        {
+            User = 7,
+            Grants = [.. Seven().Grants, Grant.ForTenancy(Policy.Policy.Tenancy("team"), 3, Policy.Policy.Role("member"))],
+        };
+        Assert.NotEqual(Policy.Bind(widened).CanonicalHash, view.ContextDigest);
     }
 
     public void Dispose()
@@ -902,10 +1099,13 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
         }
     }
 
-    private static async Task<Dictionary<string, object?[]>> StatementAsync(ChalkEngine engine, EntitledQuery statement)
+    private static async Task<Dictionary<string, object?[]>> StatementAsync(
+        ChalkEngine engine, EntitledQuery statement, RequestContext? context = null)
     {
         var rows = new Dictionary<string, object?[]>(StringComparer.Ordinal);
-        await using var execution = await engine.ExecuteAsync(statement, ct: Ct);
+        await using var execution = context is null
+            ? await engine.ExecuteAsync(statement, ct: Ct)
+            : await engine.ExecuteAsync(statement.Query, context, ct: Ct);
         await foreach (var batch in execution.Batches)
         {
             using (batch)
@@ -953,12 +1153,13 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
     };
 
     private static ViewOptions<NoteKey, NoteRow> Options(
-        ViewMaintenance maintenance, ViewDatabaseReads reads = ViewDatabaseReads.None) => new()
+        ViewMaintenance maintenance, ViewDatabaseReads reads = ViewDatabaseReads.None, RequestContext? context = null) => new()
     {
         Key = ["seq"],
         LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
         Maintenance = maintenance,
         DatabaseReads = reads,
+        Context = context,
         Map = static (in ViewRow row, out NoteKey key, out NoteRow value) =>
         {
             key = new NoteKey { Seq = row.GetInt64(0) };
@@ -966,9 +1167,10 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
         },
     };
 
-    private static async Task AssertIsTheStatementAsync(ChalkEngine engine, EntitledQuery statement, Replica replica)
+    private static async Task AssertIsTheStatementAsync(
+        ChalkEngine engine, EntitledQuery statement, Replica replica, RequestContext? context = null)
     {
-        var expected = (await StatementAsync(engine, statement)).Values
+        var expected = (await StatementAsync(engine, statement, context)).Values
             .ToDictionary(row => Convert.ToInt64(row[0]), row => Shown((string?)row[1]));
         Assert.Equal(expected, replica.Rows);
     }

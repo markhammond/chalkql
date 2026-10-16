@@ -162,8 +162,14 @@ internal sealed class ReadChanges : OperatorBase
             else if (!_state.WholeOnRewrite && _state.Diffs.DiffFrom(_state, held, now) is { } diff)
             {
                 // A replacement that kept the rest of the rows in their order, as a compaction does: the
-                // rows it took out, and the rows it appended.
-                await foreach (var batch in ScanAt(held, diff.Removed, ct))
+                // rows it took out, the rows a keyed refresh put in their places (D367), and the rows it
+                // appended.
+                await foreach (var batch in ScanAt(held, diff.Removed, -1, ct))
+                {
+                    yield return batch;
+                }
+
+                await foreach (var batch in ScanAt(now, diff.Added, +1, ct))
                 {
                     yield return batch;
                 }
@@ -217,9 +223,9 @@ internal sealed class ReadChanges : OperatorBase
         }
     }
 
-    /// <summary>The rows of <paramref name="pinned"/> at <paramref name="positions"/>, taken out.</summary>
+    /// <summary>The rows of <paramref name="pinned"/> at <paramref name="positions"/>, each with <paramref name="weight"/>.</summary>
     private async IAsyncEnumerable<ColumnarBatch> ScanAt(
-        object pinned, int[] positions, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+        object pinned, int[] positions, long weight, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         if (positions.Length == 0)
         {
@@ -237,7 +243,7 @@ internal sealed class ReadChanges : OperatorBase
                     yield break;
                 }
 
-                _slot.Set(_weightColumn, Weight(-1, _slot.RowCount));
+                _slot.Set(_weightColumn, Weight(weight, _slot.RowCount));
                 yield return _slot;
             }
         }

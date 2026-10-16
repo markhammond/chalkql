@@ -43,8 +43,11 @@ internal sealed class ExactSum
     [ThreadStatic]
     private static long[]? _magnitude;
 
-    /// <summary>Bytes held.</summary>
-    public long Bytes => 48 + (_digits.Length * sizeof(long));
+    /// <summary>Bytes held: the sum itself and its digits, at their size (F223).</summary>
+    public long Bytes => Self + HeapSizes.Array(_digits.Length, sizeof(long));
+
+    // The sum's own object: its header, its digits and its counts.
+    private const int Self = 80;
 
     public void Clear()
     {

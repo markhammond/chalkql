@@ -445,6 +445,17 @@ on the declared key but reads nothing from the parent, and the key is unique in 
 parent. Then the key promises that the join changes nothing, so the planner *deletes*
 it. If the key is wrong, the answer is wrong.
 
+A declared unique key, and a declared order (`OrderedBy`), are checked against the rows at
+`Build()` and at every refresh after it; `Verify(false)` opts a table out. An append is
+checked where it joins. Its rows are checked against the order from the first of them on,
+and against a unique key where the table already vouches for the rest:
+
+- a key the table is ordered by, its first `OrderedBy` columns, puts equal keys side by
+  side, so each appended row is compared with the row before it;
+- a key a `UniqueIndex` covers is checked by the index, as it takes the appended rows;
+- a key with neither is checked over every row, at every append. On a table of millions
+  that is about a second each time, so declare a `UniqueIndex` on it.
+
 An index serves a comparison on its leading columns. The value compared with may be a
 literal, a parameter, or an expression of them that is the same for the whole execution,
 such as `CURRENT_TIMESTAMP - INTERVAL '5' MINUTE`. Such an expression is computed once,
@@ -1613,6 +1624,12 @@ is applied.
 | `AsOf(t => t.Ts, lateness, t => t.Key…)` | `Append` | a log read by key and time; indexed on the keys, then the time |
 | `Keyed(t => t.Key…)` | `Upsert`, `Delete`, `Replace` | rows that change by key; the key is a unique key |
 
+A keyed table's refresh finds the rows it upserts and deletes by key, and costs about what it changes
+rather than what the table holds: it copies the table's rows once, in bulk, and checks only the rows
+it changed against the table's declarations, its key unique by construction. An index whose key
+values the change kept is extended rather than built again; a delete, or a change to a row's value in
+an index's key, builds that index again. An upsert of keys the table does not hold is an append.
+
 A log's **frontier** is the greatest time it has been given. A row older than the frontier, less the
 table's lateness, refuses the whole refresh it came in, naming the row; the lateness is zero unless
 the table declares a window. `Advance` moves a frontier without a row, and a `Replace` rewrites a
@@ -1756,9 +1773,12 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   whose rows are the old ones — the same objects, in their order — with some taken out and rows
   appended after them, as a compaction of a log makes them, the rows it took out and the rows it
   appended. A replacement prepared off the refresh lock and committed later (`PrepareReplaceAsync`,
-  `Commit`) reaches the view the same way, the rows appended since its cut included. After any other
-  change — another `Replace`, an upsert, a delete — every old row out and every new row in, which costs
-  about what a recompute does, in that update only; an aggregate over a table, through filters and
+  `Commit`) reaches the view the same way, the rows appended since its cut included. A keyed table's
+  upserts and deletes give the rows they changed: a row replaced is one row out and one row in, where
+  it stands, and a new key's row is appended. The table records them, so a view a refresh behind reads
+  them from the record; one further behind finds them by comparing the table's two states. After any
+  other change, such as another `Replace`, every old row is out and every new row is in, which costs
+  about what a recompute does, in that update only. An aggregate over a table, through filters and
   projections, then takes the new rows only and builds its groups again from them.
 - **Plans made in the background.** Under `DeferPlanning()`, a plan the background made swaps into the
   view's statement at a refresh. The view is maintained from it from its next update, which gives the
@@ -1822,9 +1842,13 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   leaves finds the left rows of its key through the index. So a view under a policy holds its
   reader's share, not the table ([A view under an access policy](#a-view-under-an-access-policy)).
 - **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's
-  `StateBudget`: a budget tuned for a recompute may need raising. The first update computes
-  everything, and takes longer than a recompute. The buffers its rows passed through are let go when
-  it ends, so the view then holds its state and not the first update's rows.
+  `StateBudget`: a budget tuned for a recompute may need raising. The count is an estimate, made from
+  counts the statement keeps as rows come and go, and comes within a few percent of what the heap
+  holds; reading it costs the same however large the view. It leaves out the statement's plan and
+  the buffers its operators work in, which the batch size bounds rather than the data: about a
+  megabyte a view in the shapes measured. The first update computes everything, and
+  takes longer than a recompute. The buffers its rows passed through are let go when it ends, so the
+  view then holds its state and not the first update's rows.
 - **A failed update** — a fault, a cancellation, the budget — leaves the view at the epoch it held.
   The next computes the statement from nothing, and a reader is sent only the keys that differ from
   what it holds.
@@ -1958,7 +1982,9 @@ await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions
 - **Grants that change belong in a table**, reached along a path. Sharing is then a row added in a
   refresh, and withdrawing a row deleted: the view gives or drops the rows they govern at its next
   update. Grants folded into the statement when it was prepared stand for the view's life: to revoke
-  one, dispose of the view and make another.
+  one, dispose of the view and make another. `view.ContextDigest` says which binding a view stands
+  on, as `RequestContext.CanonicalHash` (no purpose or actor), so the views a changed grant touches
+  are those whose digest is no longer `entitlements.Bind(principal).CanonicalHash`.
 - **An index on the table keeps a view to its reader's share.** A path joins the table to the keys
   its grants name, and a maintained join holds both its sides, so without an index every view holds
   a copy of the table. Where an index of the table begins with the column the path joins on — for
@@ -1967,11 +1993,12 @@ await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions
   row that changes is matched against the keys held. `Keyed(…)` on an in-process table says how its
   rows change and does not index them: declare the index too, as `t.UniqueIndex(x => x.Seq)`.
 - **Lists too long to fold** stay relations, as they do for an execution, and every update binds
-  them from the context the statement was prepared with. The statement reads them through a
+  them from the view's context, or else from the one the statement was prepared with. The statement reads them through a
   membership test, or splits its rows over them with a semi and an anti join; both are maintained.
 - **Every update is audited.** An `IEntitlementsAudit` hears one event per update that runs, before
   it runs, whether the view recomputes or is maintained. The event carries the purpose and actor of
-  the context the statement was prepared with, the digest of the plan the update runs, and the
+  the context the view binds, or else of the one the statement was prepared with, the digest of the
+  plan the update runs, and the
   `Version` the update brings the view to, which says which grants a table of grants held. An update
   at the epoch the view already holds runs nothing and raises nothing. Any refresh moves the epoch,
   though, even one that touches no table the view reads: the next update then runs, and is audited.
@@ -1979,8 +2006,27 @@ await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions
 - **A change of shape keeps the policy.** When a table the statement reads changes shape, the view
   prepares the statement again through the policy, with the same context, and its updates go on
   being audited.
-- **The context is the statement's.** A statement prepared with `context.Shape()` binds its values at
-  each execution, and a view binds none: incremental maintenance refuses it when the view is made.
+- **One statement serves every principal's view.** Prepare the statement once for the shape of a
+  context, and give each view its principal's values in `ViewOptions.Context`:
+
+  ```csharp
+  var feed = await entitled.PrepareAsync(sql, entitlements.Bind(anyone).Shape());
+  await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions<Key, Row>
+  {
+      // …
+      Maintenance = ViewMaintenance.Incremental,
+      Context = entitlements.Bind(principal),
+  });
+  ```
+
+  - The view binds those values for its life, at every update, recomputed or maintained, as an
+    execution binds them. Its rows are what the statement returns for that principal, and each
+    update's audit event carries that context's purpose and actor.
+  - The values must fit the statement's shape as an execution's must: the same names, kinds and
+    types, and for a tenant's plan, prepared with `Bind(principal, fold: …)`, the same values for
+    what it folded. A view whose values do not fit is refused when it is made, and so is a view of a
+    statement prepared for a shape that is given none.
+  - A view made from a statement's text prepares it with no context, so it refuses one.
 
 ### What a view refuses
 

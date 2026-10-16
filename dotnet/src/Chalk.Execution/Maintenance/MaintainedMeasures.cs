@@ -145,7 +145,7 @@ internal sealed class MaintainedCount(ChalkType resultType) : MaintainedMeasure(
 {
     private long[] _counts = [];
 
-    public override long Bytes => _counts.Length * sizeof(long);
+    public override long Bytes => HeapSizes.Array(_counts.Length, sizeof(long));
 
     public override void Ensure(int groups) => Grow(ref _counts, groups);
 
@@ -196,7 +196,7 @@ internal abstract class MaintainedSum : MaintainedMeasure
 
     protected ChalkType ArgumentType => _argumentType;
 
-    public override long Bytes => _seen.Length * sizeof(long);
+    public override long Bytes => HeapSizes.Array(_seen.Length, sizeof(long));
 
     public override void Ensure(int groups) => Grow(ref _seen, groups);
 
@@ -277,7 +277,7 @@ internal sealed class MaintainedIntegerSum(ChalkType resultType, ChalkType argum
 {
     private Int128[] _sums = [];
 
-    public override long Bytes => base.Bytes + (_sums.Length * 16L);
+    public override long Bytes => base.Bytes + HeapSizes.Array(_sums.Length, 16);
 
     public override void Ensure(int groups)
     {
@@ -309,7 +309,7 @@ internal sealed class MaintainedDecimalSum(ChalkType resultType, ChalkType argum
 {
     private decimal[] _sums = [];
 
-    public override long Bytes => base.Bytes + (_sums.Length * 16L);
+    public override long Bytes => base.Bytes + HeapSizes.Array(_sums.Length, sizeof(decimal));
 
     public override void Ensure(int groups)
     {
@@ -344,19 +344,10 @@ internal sealed class MaintainedFloatSum(ChalkType resultType, ChalkType argumen
 {
     private ExactSum?[] _sums = [];
 
-    public override long Bytes
-    {
-        get
-        {
-            var bytes = base.Bytes + (_sums.Length * (long)IntPtr.Size);
-            foreach (var sum in _sums)
-            {
-                bytes += sum?.Bytes ?? 0;
-            }
+    // Every group's sum, at its size (F223): kept as sums are made and grow, so that Bytes does not walk them.
+    private long _sumBytes;
 
-            return bytes;
-        }
-    }
+    public override long Bytes => base.Bytes + HeapSizes.Array(_sums.Length, HeapSizes.Reference) + _sumBytes;
 
     public override void Ensure(int groups)
     {
@@ -379,15 +370,32 @@ internal sealed class MaintainedFloatSum(ChalkType resultType, ChalkType argumen
             value = (float)value;
         }
 
-        (_sums[group] ??= new ExactSum()).Add(value, weight);
+        var sum = SumOf(group);
+        var bytes = sum.Bytes;
+        sum.Add(value, weight);
+        _sumBytes += sum.Bytes - bytes;
     }
 
     protected override void MergeSum(int group, MaintainedSum other, int from)
     {
         if (((MaintainedFloatSum)other)._sums[from] is { } changes)
         {
-            (_sums[group] ??= new ExactSum()).Merge(changes);
+            var sum = SumOf(group);
+            var bytes = sum.Bytes;
+            sum.Merge(changes);
+            _sumBytes += sum.Bytes - bytes;
         }
+    }
+
+    private ExactSum SumOf(int group)
+    {
+        if (_sums[group] is not { } sum)
+        {
+            sum = _sums[group] = new ExactSum();
+            _sumBytes += sum.Bytes;
+        }
+
+        return sum;
     }
 
     public override MaintainedMeasure Twin() => new MaintainedFloatSum(ResultType, ArgumentType, ZeroWhenEmpty);
@@ -417,6 +425,9 @@ internal sealed class MaintainedExtremum : MaintainedMeasure
     private readonly LaneOrder _order;
     private Values?[] _values = [];
 
+    // Every group's values, at their size (F223): kept as each group's change, so that Bytes does not walk them.
+    private long _valueBytes;
+
     /// <param name="resultType">The value's type.</param>
     /// <param name="max">MAX rather than MIN.</param>
     /// <param name="signed">
@@ -432,19 +443,7 @@ internal sealed class MaintainedExtremum : MaintainedMeasure
         Kinds.Of(resultType, $"{(max ? "MAX" : "MIN")}'s value");
     }
 
-    public override long Bytes
-    {
-        get
-        {
-            var bytes = _values.Length * (long)IntPtr.Size;
-            foreach (var values in _values)
-            {
-                bytes += values?.Bytes ?? 0;
-            }
-
-            return bytes;
-        }
-    }
+    public override long Bytes => HeapSizes.Array(_values.Length, HeapSizes.Reference) + _valueBytes;
 
     public override void Ensure(int groups) => Grow(ref _values, groups);
 
@@ -455,10 +454,21 @@ internal sealed class MaintainedExtremum : MaintainedMeasure
             return;
         }
 
-        (_values[group] ??= new Values(_order, _signed)).Add(lane, weight);
+        var values = ValuesOf(group);
+        var bytes = values.Bytes;
+        values.Add(lane, weight);
+        _valueBytes += values.Bytes - bytes;
     }
 
-    public override void Clear(int group) => _values[group]?.Clear();
+    public override void Clear(int group)
+    {
+        if (_values[group] is { } values)
+        {
+            var bytes = values.Bytes;
+            values.Clear();
+            _valueBytes += values.Bytes - bytes;
+        }
+    }
 
     public override void Merge(int group, MaintainedMeasure other, int from)
     {
@@ -467,7 +477,21 @@ internal sealed class MaintainedExtremum : MaintainedMeasure
             return;
         }
 
-        changes.MergeInto(_values[group] ??= new Values(_order, _signed));
+        var values = ValuesOf(group);
+        var bytes = values.Bytes;
+        changes.MergeInto(values);
+        _valueBytes += values.Bytes - bytes;
+    }
+
+    private Values ValuesOf(int group)
+    {
+        if (_values[group] is not { } values)
+        {
+            values = _values[group] = new Values(_order, _signed);
+            _valueBytes += values.Bytes;
+        }
+
+        return values;
     }
 
     public override MaintainedMeasure Twin() => new MaintainedExtremum(ResultType, _max, signed: true);
@@ -506,14 +530,26 @@ internal sealed class MaintainedExtremum : MaintainedMeasure
         private int _freeCount;
         private int _used;
 
+        // The bytes of every value in the order, each its own array.
+        private long _held;
+
         public int Count => _ids.Count;
 
         public byte[] Min => _ordered!.Min!;
 
         public byte[] Max => _ordered!.Max!;
 
+        /// <summary>
+        /// The values' own object, their ids and counts, and, for a group's own values, each value's
+        /// bytes and its place in the order (F223).
+        /// </summary>
         public long Bytes =>
-            _ids.Bytes + (_counts.Length * sizeof(long)) + ((long)_bytes.Length * IntPtr.Size) + ((_ordered?.Count ?? 0) * 48L);
+            Self + _ids.Bytes + HeapSizes.Array(_counts.Length, sizeof(long)) + HeapSizes.Array(_free.Length, sizeof(int))
+            + HeapSizes.Array(_bytes.Length, HeapSizes.Reference) + _held
+            + (_ordered is null ? 0 : HeapSizes.SortedSet + (_ordered.Count * (long)HeapSizes.SortedSetNode(HeapSizes.Reference)));
+
+        // The object itself: its header, its order, ids, arrays and counts.
+        private const int Self = 72;
 
         /// <summary>Adds each value these changes hold, with its count, to a group's values: in any order, as each comes once.</summary>
         public void MergeInto(Values group)
@@ -544,6 +580,7 @@ internal sealed class MaintainedExtremum : MaintainedMeasure
                 if (_ordered is not null)
                 {
                     _ordered.Remove(_bytes[held]!);
+                    _held -= HeapSizes.Array(_bytes[held]!.Length, 1);
                     _bytes[held] = null;
                 }
 
@@ -580,6 +617,7 @@ internal sealed class MaintainedExtremum : MaintainedMeasure
                 var bytes = lane.ToArray();
                 _bytes[fresh] = bytes;
                 _ordered.Add(bytes);
+                _held += HeapSizes.Array(bytes.Length, 1);
             }
         }
 
@@ -587,6 +625,7 @@ internal sealed class MaintainedExtremum : MaintainedMeasure
         {
             _ordered?.Clear();
             Array.Clear(_bytes);
+            _held = 0;
             _ids.Clear();
             _freeCount = 0;
             _used = 0;

@@ -121,3 +121,6 @@ Chalk.Incremental.ViewPlanSwap.LowJitter = 1 -> Chalk.Incremental.ViewPlanSwap
 Chalk.Incremental.ViewOptions<TKey, TRow>.PlanSwap.get -> Chalk.Incremental.ViewPlanSwap
 Chalk.Incremental.ViewOptions<TKey, TRow>.PlanSwap.init -> void
 Chalk.Incremental.StandingView<TKey, TRow>.Statement.get -> Chalk.Client.PreparedQuery!
+Chalk.Incremental.StandingView<TKey, TRow>.ContextDigest.get -> string?
+Chalk.Incremental.ViewOptions<TKey, TRow>.Context.get -> Chalk.Client.RequestContext?
+Chalk.Incremental.ViewOptions<TKey, TRow>.Context.init -> void

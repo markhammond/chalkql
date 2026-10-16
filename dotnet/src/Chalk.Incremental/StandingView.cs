@@ -108,6 +108,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         _key = key;
         _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
         _reads = options.DatabaseReads == ViewDatabaseReads.WhenRefreshed ? new ViewReads(engine) : null;
+        ContextDigest = (options.Context ?? prepared.Context) is { IsEmpty: false } context ? context.CanonicalHash : null;
         if (options.RefreshQueryPlan is not null || options.PlanImprovementMargin is not null)
         {
             _choice = new PreparedQuery.PlanChoice(options.RefreshQueryPlan, options.PlanImprovementMargin);
@@ -119,6 +120,19 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
     /// <summary>How the view computes an update (D343): as the host asked in its options.</summary>
     public ViewMaintenance Maintenance => _options.Maintenance;
+
+    /// <summary>
+    /// The digest of the context the view binds (<see cref="ViewOptions{TKey, TRow}.Context"/>), or of
+    /// the one its statement folded when it was prepared with values; null when it has neither
+    /// (design 74 §3 a).
+    /// </summary>
+    /// <remarks>
+    /// It is <see cref="RequestContext.CanonicalHash"/>: every name, kind, type and value, and no purpose
+    /// or actor. The grants a view was made with stand for its life, so a host that changes a grant finds
+    /// the views it touches by comparing this with the digest of the principal's binding now, and makes
+    /// those again. Grants kept in a table need none of this: a refresh revokes them.
+    /// </remarks>
+    public string? ContextDigest { get; }
 
     /// <summary>The result's columns, as a <see cref="ViewRow"/> reads them.</summary>
     public Schema Columns => Volatile.Read(ref _prepared).OutputSchema;
@@ -204,6 +218,13 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
         Validate(engine, binding, options);
+        if (options.Context is not null)
+        {
+            throw new ArgumentException(
+                "a view made from a statement's text prepares it with no context, so ViewOptions.Context has "
+                + "nothing to bind. Prepare the statement for the context's shape, and make the view from it.",
+                nameof(options));
+        }
 
         var prepare = ViewPrepare.For(options);
         var prepared = await engine.PrepareAsync(sql, prepare, ct).ConfigureAwait(false);
@@ -237,6 +258,31 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             throw new ArgumentException(
                 "the statement is prepared already, so ViewOptions.Prepare has nothing to prepare. Leave it "
                 + "unset, or make the view from the statement's text.",
+                nameof(options));
+        }
+
+        // A statement prepared for a context's shape binds a principal's values at each run: the view
+        // gives them, for its life, and they must fit the shape as an execution's must (design 74 §3 c).
+        if (options.Context is { } context)
+        {
+            try
+            {
+                prepared.CheckBinding(context);
+            }
+            catch (ArgumentException misfit)
+            {
+                var reason = misfit.ParamName is { } name
+                    ? misfit.Message.Replace($" (Parameter '{name}')", string.Empty, StringComparison.Ordinal)
+                    : misfit.Message;
+                throw new ArgumentException($"ViewOptions.Context does not fit the statement: {reason}", nameof(options), misfit);
+            }
+        }
+        else if (prepared.PreparedForShape)
+        {
+            throw new ArgumentException(
+                "the statement was prepared for a request context's shape, so each run binds a principal's "
+                + "values: give the view them in ViewOptions.Context. One statement prepared for the shape then "
+                + "serves every principal's view.",
                 nameof(options));
         }
 
@@ -723,7 +769,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
         _lastWhole = true;
         await using var execution = await prepared.ExecuteAsync(
-            values, context: null, arena: null, ct, version: stamp.Version).ConfigureAwait(false);
+            values, context: _options.Context, arena: null, ct, version: stamp.Version).ConfigureAwait(false);
         if (_readsTime)
         {
             _clock.Now = stamp.Clock!.Value;
@@ -940,7 +986,8 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 _binding.Values(prepared, _engine.ClockName, time: null),
                 ViewBinding.ClockIndex(prepared, _engine.ClockName),
                 key,
-                ct).ConfigureAwait(false);
+                ct,
+                _options.Context).ConfigureAwait(false);
         }
         catch (NotMaintainableException refusal)
         {

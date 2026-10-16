@@ -43,12 +43,12 @@ internal sealed class RowStore
 
     public StoredColumn Column(int index) => _columns[index];
 
-    /// <summary>Bytes held: every column's buffers, and the free list.</summary>
+    /// <summary>Bytes held: every column and its buffers, and the free list, at their size (F223).</summary>
     public long Bytes
     {
         get
         {
-            var bytes = (long)_free.Length * sizeof(int);
+            var bytes = Self + HeapSizes.Array(_columns.Length, HeapSizes.Reference) + HeapSizes.Array(_free.Length, sizeof(int));
             foreach (var column in _columns)
             {
                 bytes += column.Held;
@@ -57,6 +57,9 @@ internal sealed class RowStore
             return bytes;
         }
     }
+
+    // The store's own object: its header, three arrays and counts.
+    private const int Self = 56;
 
     /// <summary>Keeps row <paramref name="row"/> of <paramref name="columns"/>, the store's own types, and returns its slot.</summary>
     public int Add(ReadOnlySpan<ColumnView> columns, int row)
@@ -178,7 +181,13 @@ internal sealed class StoredColumn
 
     public bool Variable => _variable;
 
-    public long Held => _lanes.Length + _valid.Length + _data.Length + _spare.Length + ((_starts.Length + _lengths.Length) * 4L);
+    /// <summary>The column itself and its buffers, at their size (F223).</summary>
+    public long Held =>
+        Self + HeapSizes.Array(_lanes.Length, 1) + HeapSizes.Array(_valid.Length, 1) + HeapSizes.Array(_data.Length, 1)
+        + HeapSizes.Array(_spare.Length, 1) + HeapSizes.Array(_starts.Length, sizeof(int)) + HeapSizes.Array(_lengths.Length, sizeof(int));
+
+    // The column's own object: its header, its type, six arrays and its counts.
+    private const int Self = 120;
 
     public bool IsValid(int slot) => _valid[slot];
 

@@ -36,8 +36,9 @@ internal interface ITrackedSource : IPinnableSource
     /// <summary>
     /// When <paramref name="later"/> holds <paramref name="earlier"/>'s rows with some taken out, the
     /// rest in their order, and rows appended after them — as a host's compaction of a log makes it —
-    /// the rows taken out and where the appended rows begin; null for any other rewrite, which is read
-    /// whole. Asked only when <see cref="AppendedFrom"/> says -1.
+    /// the rows taken out and where the appended rows begin; and, for a source that knows them, the
+    /// rows put in the places of rows taken out, as a keyed refresh's replacements are (D367). Null for
+    /// any other rewrite, which is read whole. Asked only when <see cref="AppendedFrom"/> says -1.
     /// </summary>
     TableDiff? DiffFrom(string table, object earlier, object later);
 
@@ -58,4 +59,11 @@ internal interface ITrackedSource : IPinnableSource
 /// positions of the rows it took out, in the earlier state, ascending; and the first of the rows it
 /// appended, in the later state.
 /// </summary>
-internal sealed record TableDiff(int[] Removed, long AppendedFrom);
+internal sealed record TableDiff(int[] Removed, long AppendedFrom)
+{
+    /// <summary>
+    /// The positions, in the later state and ascending, of rows put where rows it took out stood: a
+    /// keyed refresh's replacements, which keep their rows' places (D367). Empty for a compaction.
+    /// </summary>
+    public int[] Added { get; init; } = [];
+}

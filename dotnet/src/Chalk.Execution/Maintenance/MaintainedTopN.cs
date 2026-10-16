@@ -84,7 +84,10 @@ internal sealed class TopNState : IMaintainedState
     /// <summary>How many rows a bounded step holds: the window, the rows before it, and a margin of the count again.</summary>
     public long Holding => Count == long.MaxValue || Offset + Count > long.MaxValue - Count ? long.MaxValue : Offset + (2 * Count);
 
-    public long Bytes => Rows.Bytes + Shown.Bytes + ((Held.Count + ShownSlots.Count) * 4L) + Changes.Bytes + Output.Bytes;
+    /// <summary>The rows held and shown, their lists, and what an update's changes pass through, at their size (F223).</summary>
+    public long Bytes =>
+        Rows.Bytes + Shown.Bytes + HeapSizes.Of(Held, sizeof(int)) + HeapSizes.Of(ShownSlots, sizeof(int))
+        + Changes.Bytes + Output.Bytes;
 
     /// <summary>The bounds this view runs under: its parameters bind once (design 64 §6 d).</summary>
     public void Resolve(IReadOnlyList<ScalarValue> parameters)

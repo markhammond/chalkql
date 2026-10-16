@@ -33,7 +33,13 @@ internal sealed class ByteMap
     /// <summary>Entries ever added since the map was cleared or compacted: the bound of <see cref="IsLive"/>.</summary>
     public int Entries => _entries;
 
-    public long Bytes => _keys.Length + ((long)_starts.Length * 16) + ((long)_table.Length * 4);
+    /// <summary>The map itself, its keys' bytes, the four arrays of its entries and its table, at their size (F223).</summary>
+    public long Bytes =>
+        Self + HeapSizes.Array(_keys.Length, 1) + (4 * HeapSizes.Array(_starts.Length, sizeof(int)))
+        + HeapSizes.Array(_table.Length, sizeof(int));
+
+    // The map's own object: its header, six arrays and six counts.
+    private const int Self = 88;
 
     public bool IsLive(int entry) => _lengths[entry] >= 0;
 

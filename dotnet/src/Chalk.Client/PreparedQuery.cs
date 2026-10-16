@@ -983,14 +983,22 @@ public sealed class PreparedQuery
     /// that cannot be maintained is refused with <see cref="NotMaintainableException"/>, naming why.
     /// </summary>
     internal async ValueTask<MaintainedQuery> MaintainAsync(
-        object?[] values, int clockParameter, int[] key, CancellationToken ct)
+        object?[] values, int clockParameter, int[] key, CancellationToken ct, RequestContext? context = null)
     {
         // A statement prepared with values carries them, and each update binds them as an execution
-        // does; one prepared with a shape has none to bind (D361).
-        if (RequiredContext.Count > 0 || Context is { ShapeNames.Count: > 0 })
+        // does (D361); one prepared for a shape binds the values the view gives it, which must fit
+        // the shape as an execution's must (design 74 §3 c).
+        if (context is null && PreparedForShape)
         {
             throw new NotMaintainableException(
-                "the statement reads a request's context, which a maintained view does not bind.", "root");
+                "the statement was prepared for a request context's shape, and the view gives it no values to "
+                + "bind: give them in ViewOptions.Context.",
+                "root");
+        }
+
+        if (context is not null)
+        {
+            CheckBinding(context);
         }
 
         var state = Volatile.Read(ref _state);
@@ -1008,8 +1016,22 @@ public sealed class PreparedQuery
 
         maintained.Key = key;
         return new MaintainedQuery(
-            this, maintained, plan.Rendered.Slots, plan.Compiled.ParameterTypes, plan.Compiled.BoundScalars, state);
+            this, maintained, plan.Rendered.Slots, plan.Compiled.ParameterTypes, plan.Compiled.BoundScalars, state, context);
     }
+
+    /// <summary>
+    /// Whether this statement was prepared for a context's shape, wholly or partly, and so binds values
+    /// at each run (D209, D232): the ones an execution, or a view, gives it.
+    /// </summary>
+    internal bool PreparedForShape => RequiredContext.Count > 0 || Context is { ShapeNames.Count: > 0 };
+
+    /// <summary>
+    /// Refuses <paramref name="context"/> as the values of every run of this statement, as an execution
+    /// would refuse them: values for a statement that folded its own, a shape, another shape, or other
+    /// values for what the statement folded (D209, D232). Checked when a view is made, so that a view
+    /// whose values do not fit is never made.
+    /// </summary>
+    internal void CheckBinding(RequestContext context) => _ = Bindings(context);
 
     /// <summary>
     /// This statement prepared again in a view's place, for <paramref name="reason"/>: by the extension
@@ -1041,15 +1063,20 @@ public sealed class PreparedQuery
     /// <param name="boundScalars">The context's scalars that plan reads as parameters.</param>
     /// <param name="planDigest">The digest of that plan.</param>
     /// <param name="version">The version of the epoch the update brings the view to.</param>
+    /// <param name="context">
+    /// The values the view binds to a statement prepared for a shape (design 74 §3 c), or null for one
+    /// that carries its own.
+    /// </param>
     internal (object?[] Values, IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>>? Relations) BindUpdate(
         object?[] values,
         IReadOnlyList<PlaceholderSlot> slots,
         IReadOnlyList<ChalkType> types,
         IReadOnlyList<BoundScalar> boundScalars,
         ulong planDigest,
-        long version)
+        long version,
+        RequestContext? context)
     {
-        var bindings = Bindings(null);
+        var bindings = Bindings(context);
         _beforeRun?.Invoke(new StatementRun(bindings, planDigest, version));
         var flat = ParameterBinder.Flatten(Parameters, values, slots, types, _engine.Binding);
         return (WithBoundScalars(flat, boundScalars, bindings), BoundRelations(bindings));
