@@ -24,7 +24,10 @@ public interface IPlanningObserver
     {
     }
 
-    /// <summary>A refresh that took a background run's work in, after it published.</summary>
+    /// <summary>
+    /// A refresh that took a background run's work in, after it published; or
+    /// <see cref="ChalkEngine.PlanAsync"/>, which took its plans in and publishes nothing.
+    /// </summary>
     void TookIn(in PlansTakenIn takenIn)
     {
     }
@@ -175,7 +178,7 @@ public readonly struct PlanningRun
     public TimeSpan Elapsed { get; }
 }
 
-/// <summary>A refresh that took a background run's work in.</summary>
+/// <summary>A refresh, or <see cref="ChalkEngine.PlanAsync"/>, that took a background run's work in.</summary>
 public readonly struct PlansTakenIn
 {
     internal PlansTakenIn(long epoch, long version, int plansSwappedIn, int plansUnchanged, int statisticsTables)
@@ -187,7 +190,11 @@ public readonly struct PlansTakenIn
         StatisticsTables = statisticsTables;
     }
 
-    /// <summary>The epoch the refresh published: the number its <c>RefreshAsync</c> returned.</summary>
+    /// <summary>
+    /// The epoch the refresh published: the number its <c>RefreshAsync</c> returned. For
+    /// <see cref="ChalkEngine.PlanAsync"/>, which publishes none, the epoch current as it took the
+    /// plans in.
+    /// </summary>
     public long Epoch { get; }
 
     /// <summary>
@@ -196,7 +203,8 @@ public readonly struct PlansTakenIn
     /// not epoch (<c>ViewUpdate.Version</c>), so this is the number to match them by. A plan swapped
     /// in here runs from the view's first update at this version or later; under a low-jitter swap,
     /// that update starts building it beside the plan the view runs, and the first after the build
-    /// swaps it in.
+    /// swaps it in. For <see cref="ChalkEngine.PlanAsync"/>, the version current as it took the plans
+    /// in: a view already at it moves at its first update to a later one.
     /// </summary>
     public long Version { get; }
 
@@ -209,7 +217,10 @@ public readonly struct PlansTakenIn
     /// </summary>
     public int PlansUnchanged { get; }
 
-    /// <summary>The tables whose computed statistics entered with this refresh.</summary>
+    /// <summary>
+    /// The tables whose computed statistics entered with this refresh. None for
+    /// <see cref="ChalkEngine.PlanAsync"/>: they enter with the next refresh.
+    /// </summary>
     public int StatisticsTables { get; }
 }
 

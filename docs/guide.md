@@ -633,6 +633,31 @@ await engine.RefreshAsync(refresh => refresh.Append(mem, "ticks", batch).DeferPl
 Compacting with a prepared replacement, in a refresh that defers its planning, holds the lock
 for about as long as an append does.
 
+`PlanAsync` plans now, and returns once the new plans are in effect:
+
+```csharp
+await engine.RefreshAsync(refresh => refresh.Replace(mem, "ticks", rows).DeferPlanning(), ct);
+await engine.PlanAsync(ct);
+```
+
+- **It waits for a run that begins after the call**, so the run sees every refresh you made
+  before it. A run already going is followed by one more. Then that run's plans swap in, under
+  the refresh lock, as a refresh would swap them in.
+- **It publishes nothing.** The rows, the epoch and `Version` stay as they are. The run's
+  statistics reach the planner at once, so a statement you prepare next is planned on them,
+  and they enter the catalog at the next refresh.
+- **A standing view** moves to its statement's new plan at its first update after the next
+  refresh. An update before then has no new rows to read, so it does nothing, except that under
+  `ViewPlanSwap.LowJitter` it starts building the new plan beside the old one.
+- **It works without `DeferPlanning()` too.** A refresh that does not defer sends the planner
+  its numbers, but plans nothing again. `PlanAsync` plans again each statement you hold whose
+  tables have moved twofold since it was planned.
+- **It fails when the run fails**, with what failed, such as `PlannerUnavailableException`, and
+  the plans stay as they were. When the planner cannot plan one statement again, that statement
+  keeps its plan, the others' new plans swap in, and the task fails with the planner's error. A
+  statement whose view's host said not now (`RefreshQueryPlan`) is not a failure.
+- **Cancelling** stops the wait, not the run. What the run plans swaps in at the next refresh.
+
 #### Watching planning
 
 The engine logs its planning under its own category, `Chalk.Client.Planning`: each background
@@ -1810,9 +1835,10 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   about what a recompute does, in that update only. An aggregate over a table, through filters and
   projections, then takes the new rows only and builds its groups again from them.
 - **Plans made in the background.** Under `DeferPlanning()`, a plan the background made swaps into the
-  view's statement at a refresh. The view is maintained from it from its next update, which gives the
-  whole result once; readers keep their place, sent only the keys that differ. A new plan the view
-  cannot maintain is declined: the plan it keeps answers the same rows.
+  view's statement at a refresh, or at `PlanAsync`. The view is maintained from it from its first
+  update after a refresh, which gives the whole result once; readers keep their place, sent only the
+  keys that differ. A new plan the view cannot maintain is declined: the plan it keeps answers the same
+  rows.
 - **The clock.** A filter or a projection that reads the clock runs on its changes while the clock
   stands, and on every row it holds when the clock moves. A filter whose every read of the clock is a
   cut-off a column is compared with, such as `ts > CURRENT_TIMESTAMP - INTERVAL '2' HOUR`, reads again
@@ -1902,9 +1928,9 @@ left rows and its right rows by key, an aggregate its groups — so an update re
 ### Plans a view takes
 
 Under `DeferPlanning()`, a view's statement is planned again in the background once a table it reads
-has moved twofold, and the new plan is taken at a refresh. An incremental view then builds its state
-again on the new plan, which makes that update its slowest. A host can say when that may happen and
-how much better a new plan must be, and be told what each update cost:
+has moved twofold, and the new plan is taken at a refresh, or at `PlanAsync`. An incremental view then
+builds its state again on the new plan, which makes that update its slowest. A host can say when that
+may happen and how much better a new plan must be, and be told what each update cost:
 
 ```csharp
 var options = new ViewOptions<Key, Row>

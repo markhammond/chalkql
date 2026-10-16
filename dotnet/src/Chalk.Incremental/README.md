@@ -116,9 +116,9 @@ await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKe
   other change gives its old rows out and its new rows in. A replacement prepared off the refresh lock
   and committed later reaches the view the same way, and a compaction that takes out only rows no
   as-of join matches moves no match.
-- A plan the background made under `DeferPlanning()` is taken at the view's next update, maintained
-  from the start; a plan the view cannot maintain is declined, as the one it keeps answers the same
-  rows.
+- A plan the background made under `DeferPlanning()` is taken at the view's first update after a
+  refresh, whether that refresh or `ChalkEngine.PlanAsync` swapped it in, and maintained from the
+  start; a plan the view cannot maintain is declined, as the one it keeps answers the same rows.
 - A view may be built with a tracker of what its updates cost (`ViewOptions.Tracker`), and with a
   host callback that may veto requesting a new plan for drift (`ViewOptions.RefreshQueryPlan`): the
   statement keeps its plan, and the next refresh that defers its planning asks again.
