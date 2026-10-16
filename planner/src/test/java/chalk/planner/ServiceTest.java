@@ -215,23 +215,25 @@ class ServiceTest {
 
   /**
    * A declared parameter type holds at validation (D337). Inferred from what is around it, the
-   * parameter takes the interval's type and the comparison is refused; declared, it is the
-   * timestamp it was declared, and the plan carries it with no cast.
+   * parameter is the timestamp its arithmetic is compared with (F192); declared, it is the type it
+   * was declared, here a coarser timestamp, and the plan carries it with no cast.
    */
   @Test
   void a_declared_parameter_type_holds_at_validation() {
     String sql = "SELECT symbol FROM bars WHERE ts >= ? - INTERVAL '60' SECOND";
-    chalk.ir.v1.Type timestamp =
+    chalk.ir.v1.Type micros =
         chalk.ir.v1.Type.newBuilder()
             .setKind(chalk.ir.v1.TypeKind.TYPE_KIND_TIMESTAMP)
-            .setPrecision(9)
+            .setPrecision(6)
             .build();
 
-    assertThat(kind(decode(refused(request(sql)))))
-        .isEqualTo(PlanErrorKind.VALIDATION);
-    PlanResponse response = client.plan(request(sql).addParameterTypes(timestamp).build());
+    chalk.ir.v1.Type inferred =
+        client.plan(request(sql).build()).getPlan().getParameterTypesList().get(0);
+    PlanResponse response = client.plan(request(sql).addParameterTypes(micros).build());
 
-    assertThat(response.getPlan().getParameterTypesList()).containsExactly(timestamp);
+    assertThat(inferred.getKind()).isEqualTo(chalk.ir.v1.TypeKind.TYPE_KIND_TIMESTAMP);
+    assertThat(inferred.getPrecision()).isEqualTo(9);
+    assertThat(response.getPlan().getParameterTypesList()).containsExactly(micros);
   }
 
   /**

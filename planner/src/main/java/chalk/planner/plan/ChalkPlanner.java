@@ -404,19 +404,29 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
             .withLenientOperatorLookup(connectionConfig.lenientOperatorLookup())
             .withConformance(connectionConfig.conformance())
             .withIdentifierExpansion(true)) {
+      private final ParameterBesideInterval besideInterval = new ParameterBesideInterval();
+
       /**
        * A parameter the host declared a type for takes that type, rather than one inferred from
-       * what is around it (D337). Calcite's own inference stands for every other parameter.
+       * what is around it (D337); one beside an interval takes the datetime type its arithmetic is
+       * compared with (F192). Calcite's own inference stands for every other parameter.
        */
       @Override
       protected void inferUnknownTypes(
           RelDataType inferredType,
           org.apache.calcite.sql.validate.SqlValidatorScope scope,
           org.apache.calcite.sql.SqlNode node) {
-        RelDataType type = declaredType(node);
+        RelDataType type = typeOf(node);
         if (type != null) {
           setValidatedNodeType(node, type);
           return;
+        }
+        if (node instanceof org.apache.calcite.sql.SqlCall call) {
+          besideInterval.infer(
+              call,
+              inferredType,
+              operand -> typeOrNull(scope, operand),
+              parameter -> declaredType(parameter) != null);
         }
         super.inferUnknownTypes(inferredType, scope, node);
       }
@@ -430,7 +440,7 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
       public RelDataType deriveType(
           org.apache.calcite.sql.validate.SqlValidatorScope scope,
           org.apache.calcite.sql.SqlNode expr) {
-        RelDataType type = declaredType(expr);
+        RelDataType type = typeOf(expr);
         if (type != null) {
           setValidatedNodeType(expr, type);
           return type;
@@ -456,6 +466,27 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
                 && param.getIndex() < declared.size()
             ? declared.get(param.getIndex())
             : null;
+      }
+
+      /** A parameter's declared type, or else the one F192's rule gave it. */
+      private @Nullable RelDataType typeOf(org.apache.calcite.sql.SqlNode node) {
+        RelDataType type = declaredType(node);
+        return type != null ? type : besideInterval.typeOf(node);
+      }
+
+      /**
+       * The type of a node that holds no parameter, or null where it has none on its own. Asked only
+       * of the operands beside arithmetic that holds a parameter, to find a datetime among them, so
+       * a node that cannot be typed alone simply is not one.
+       */
+      private @Nullable RelDataType typeOrNull(
+          org.apache.calcite.sql.validate.SqlValidatorScope scope,
+          org.apache.calcite.sql.SqlNode node) {
+        try {
+          return deriveType(scope, node);
+        } catch (org.apache.calcite.runtime.CalciteException | UnsupportedOperationException none) {
+          return null;
+        }
       }
     };
   }
