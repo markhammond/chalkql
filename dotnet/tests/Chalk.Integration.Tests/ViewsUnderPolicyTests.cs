@@ -42,6 +42,11 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
 
     private sealed record Visit(long Seq, int TeamId, int PatientId, string Name);
 
+    private sealed record Event(long Seq, int SiteId, int ClientId, int StaffId, string ClientUser, DateTime OccurredAt);
+
+    private sealed record Mark(
+        long Seq, long EventSeq, string MarkKind, bool IsFirst, string PersonRole, string PersonName, DateTime OccurredAt);
+
     private struct NoteKey
     {
         public long Seq;
@@ -221,6 +226,156 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
                 Assert.False(given[8], $"seed {seed}: team 1's total is given at epoch 8");
                 Assert.True(given[14], $"seed {seed}: team 1's total is withheld at epoch 14");
             }
+        }
+    }
+
+    /// <summary>
+    /// A statement of left joins to a child visible through its parent, which the policy reads as
+    /// left joins to the parent joined with the child. Over five thousand events the planner builds
+    /// one of them on the other side, as a right join, and maintenance refused the plan, so a view
+    /// of it recomputed at every update (F230). Kept now as the left join it mirrors, through twelve
+    /// epochs that add events and marks, take marks out, change them, and take an event out with its
+    /// marks, and after each it is what the statement returns.
+    /// </summary>
+    [Fact]
+    public async Task A_statement_planned_with_a_right_join_is_kept()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var start = new DateTime(2026, 10, 16, 8, 0, 0);
+        var events = new Dictionary<long, Event>();
+        var marks = new Dictionary<long, Mark>();
+        var markSeq = 0L;
+        void Add(Event added)
+        {
+            events[added.Seq] = added;
+            if (added.Seq % 3 == 0)
+            {
+                marks[++markSeq] = new Mark(markSeq, added.Seq, "acknowledged", false, "client", "client", added.OccurredAt);
+            }
+
+            for (var s = 0; s < 2; s++)
+            {
+                marks[++markSeq] = new Mark(markSeq, added.Seq, "seen", s == 0, "desk", $"person {s}", added.OccurredAt.AddSeconds(s + 1));
+            }
+        }
+
+        Event NewEvent(long seq) => new(seq, 1 + (int)(seq % 2), 1000 + (int)(seq % 200), 201 + (int)(seq % 3), $"client-{1000 + (seq % 200)}", start.AddSeconds(seq));
+        for (var i = 1L; i <= 5000; i++)
+        {
+            Add(NewEvent(i));
+        }
+
+        var (source, policy) = Events([.. events.Values], [.. marks.Values]);
+        await using var engine = await EngineAsync(source);
+        var desk = new TenancyPrincipal
+        {
+            User = "class:desk@1",
+            Grants = [Grant.ForTenancy(policy.Policy.Tenancy("site"), 1, policy.Policy.Role("desk"))],
+        };
+        var statement = await engine.WithEntitlements(new EntitlementsOptions()).PrepareAsync(
+            """
+            SELECT e.seq, a.occurred_at AS acked_at, a.person_name AS acked_by, k.read_at, f.person_name AS read_by, k.readers
+            FROM desk.events e
+            LEFT JOIN desk.marks a ON a.event_seq = e.seq AND a.mark_kind = 'acknowledged'
+            LEFT JOIN desk.marks f ON f.event_seq = e.seq AND f.mark_kind = 'seen' AND f.is_first
+            LEFT JOIN (SELECT event_seq, MIN(occurred_at) AS read_at,
+                              COUNT(CASE WHEN person_role = 'desk' THEN 1 END) AS readers
+                       FROM desk.marks
+                       WHERE mark_kind = 'seen' AND person_role <> 'client'
+                       GROUP BY event_seq) k ON k.event_seq = e.seq
+            ORDER BY e.seq DESC LIMIT 300
+            """,
+            policy.Bind(desk),
+            ct: Ct);
+        Assert.True(
+            JoinTypes(statement.Plan).Contains(JoinType.Right),
+            $"the statement is not planned with a right join: {statement.Plan.ToPlanText()}");
+
+        await using var maintained = await statement.Query.MaintainAsync([], -1, [0], Ct);
+        var held = new Dictionary<string, object?[]>(StringComparer.Ordinal);
+        var random = new Random(5);
+        var seq = events.Keys.Max();
+        for (var epoch = 0; epoch < 12; epoch++)
+        {
+            if (epoch > 0)
+            {
+                var before = marks.Keys.ToHashSet();
+                var added = new List<Event>();
+                for (var i = random.Next(1, 4); i > 0; i--)
+                {
+                    var next = NewEvent(++seq);
+                    Add(next);
+                    added.Add(next);
+                }
+
+                // Marks taken out and marks changed, each event keeping one acknowledgement and one
+                // first sighting at most, so the statement keeps one row an event.
+                var changed = new List<Mark>();
+                var gone = new List<Mark>();
+                var lost = new List<Event>();
+                foreach (var key in before.Where(_ => random.Next(400) == 0).ToList())
+                {
+                    var mark = marks[key];
+                    if (random.Next(2) == 0)
+                    {
+                        marks.Remove(key);
+                        gone.Add(mark);
+                    }
+                    else
+                    {
+                        changed.Add(marks[key] = mark with
+                        {
+                            PersonRole = mark.PersonRole == "desk" ? "client" : "desk",
+                            PersonName = $"{mark.PersonName} again",
+                            OccurredAt = mark.OccurredAt.AddMinutes(1),
+                        });
+                    }
+                }
+
+                var acknowledged = marks.Values.Where(m => m.MarkKind == "acknowledged").Select(m => m.EventSeq).ToHashSet();
+                foreach (var waiting in events.Keys.Where(key => !acknowledged.Contains(key)).OrderBy(_ => random.Next()).Take(2).ToList())
+                {
+                    marks[++markSeq] = new Mark(markSeq, waiting, "acknowledged", false, "desk", "person 9", start.AddDays(1));
+                }
+
+                if (epoch % 4 == 0)
+                {
+                    // The newest event the view showed leaves, with its marks.
+                    var last = events[events.Keys.Where(key => added.All(a => a.Seq != key)).Max()];
+                    events.Remove(last.Seq);
+                    lost.Add(last);
+                    foreach (var mark in marks.Values.Where(m => m.EventSeq == last.Seq).ToList())
+                    {
+                        marks.Remove(mark.Seq);
+                        changed.Remove(mark);
+                        gone.Add(mark);
+                    }
+                }
+
+                var appended = marks.Values.Where(m => !before.Contains(m.Seq)).ToList();
+                await engine.RefreshAsync(
+                    r =>
+                    {
+                        if (gone.Count > 0)
+                        {
+                            r.Delete(source, "marks", (IReadOnlyList<Mark>)gone);
+                        }
+
+                        if (lost.Count > 0)
+                        {
+                            r.Delete(source, "events", (IReadOnlyList<Event>)lost);
+                        }
+
+                        r.Upsert(source, "events", (IReadOnlyList<Event>)added);
+                        r.Upsert(source, "marks", (IReadOnlyList<Mark>)[.. appended.Where(m => events.ContainsKey(m.EventSeq)), .. changed]);
+                    },
+                    Ct);
+            }
+
+            var update = await maintained.UpdateAsync([], default, engine.Version, false, Ct);
+
+            Apply(update, held);
+            Compare(held, await StatementAsync(engine, statement), 5, epoch);
         }
     }
 
@@ -862,6 +1017,62 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
     }
 
     // ------------------------------------------------------------------ the policy and its tables
+
+    /// <summary>
+    /// Events kept by site, by client and by member of staff within a site, and by the client who
+    /// owns each, with the client's identifiers in a realm; marks, through their event, with the name
+    /// of whoever made each in a realm of its own. The desk and the doctor read both in full.
+    /// </summary>
+    private static (PocoSource Source, TenancyEntitlements Policy) Events(IReadOnlyList<Event> events, IReadOnlyList<Mark> marks)
+    {
+        PocoSource Source(TenancyEntitlements? policy) => new PocoSourceBuilder("mem", "desk")
+            .NamingPolicy(PocoNamingPolicy.SnakeCase)
+            .AddTable("events", events, t =>
+            {
+                t.Keyed(e => e.Seq);
+                if (policy?.For("desk", "events") is { } descriptor)
+                {
+                    t.Entitlement(descriptor);
+                }
+            })
+            .AddTable("marks", marks, t =>
+            {
+                t.Keyed(m => m.Seq);
+                t.ForeignKey(m => m.EventSeq).References<Event>(e => e.Seq, verify: true);
+                if (policy?.For("desk", "marks") is { } descriptor)
+                {
+                    t.Entitlement(descriptor);
+                }
+            })
+            .Build();
+
+        var bare = new CatalogContext { ContextId = ContextId, Epoch = 1, Schemas = [Source(null).DescribeSchema()] };
+        var declared = TenancyPolicy.Declare(bare);
+        var site = declared.Tenancy("site");
+        var client = declared.Subject("client", [site]);
+        var staff = declared.Subject("staff", [site]);
+        var contact = declared.Realm("contact");
+        var people = declared.Realm("people");
+        Role[] reading = [declared.Role("desk"), declared.Role("doctor")];
+        var store = declared.Source("desk");
+        var eventTable = store.Table("events");
+        var markTable = store.Table("marks");
+        eventTable
+            .Tenancy(t => t
+                .Direct(site, eventTable.Column("site_id"))
+                .Direct(client, eventTable.Column("client_id"))
+                .Direct(staff, eventTable.Column("staff_id"))
+                .ResourceOwner(eventTable.Column("client_user")))
+            .Realm(contact, eventTable.Column("client_id"), eventTable.Column("client_user"))
+            .Access(new AccessRule { Roles = [Roles.Owner], Grants = Verdict.Full })
+            .Access(new AccessRule { Roles = reading, Grants = Verdict.Full });
+        markTable
+            .Tenancy(t => t.Through(markTable.Column("event_seq")))
+            .Realm(people, markTable.Column("person_name"))
+            .Access(new AccessRule { Roles = reading, Realm = people, Grants = Verdict.Full });
+        var policy = declared.Compile(bare);
+        return (Source(policy), policy);
+    }
 
     private async Task<ChalkEngine> EngineAsync(PocoSource source) =>
         await ChalkEngine.CreateAsync(
