@@ -288,6 +288,12 @@ public sealed class RefreshBuilder
     /// the checks the first one passed and come with the same report.
     /// </para>
     /// <para>
+    /// A statement prepared before the run has sent the planner this refresh's numbers is planned on
+    /// the ones the planner held before the refresh, and its drift is measured from them: a later run
+    /// plans it again once its tables have moved twofold from them. So before anything is served, as
+    /// after seeding at startup, await <see cref="ChalkEngine.PlanAsync"/>, and prepare after it.
+    /// </para>
+    /// <para>
     /// A refresh that defers its planning re-reads nothing: a scope re-describes its tables with
     /// their statistics now, which is the opposite request, and is refused beside this.
     /// </para>
@@ -320,7 +326,11 @@ public sealed class RefreshBuilder
     /// building the plan beside its own as soon as the plan swaps in.
     /// </para>
     /// <para>
-    /// A refresh that plans now re-reads nothing, as one that defers does not.
+    /// A statement prepared while the run is still going may be planned on the numbers from before the
+    /// refresh, as after <see cref="DeferPlanning"/>, and is planned again later. A refresh that plans
+    /// now is for one made while serving: to seed at startup, defer the planning and await
+    /// <see cref="ChalkEngine.PlanAsync"/> before preparing or serving. A refresh that plans now
+    /// re-reads nothing, as one that defers does not.
     /// </para>
     /// </remarks>
     public RefreshBuilder PlanNow()

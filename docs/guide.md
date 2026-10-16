@@ -617,6 +617,10 @@ await engine.RefreshAsync(refresh => refresh.Append(mem, "ticks", batch).DeferPl
   statement whose tables' rows have moved twofold since it was planned: a standing view's,
   and every prepared statement you still hold. A refresh that defers while a run is busy asks
   for one more run, over whatever is published when it starts.
+- **A statement prepared before the run has sent the numbers** is planned on the ones the planner
+  held before the refresh, and its drift is measured from them, so a later run plans it again once
+  its tables have moved twofold from them. Before you serve anything, as after seeding at startup,
+  await `PlanAsync`, and prepare after it.
 - **A refresh that leaves nothing new asks for no run.** It asks for one when some table's
   numbers have moved past what the planner holds, when a POCO table's statistics are due,
   when a refresh that did not defer has sent numbers since the last run, or when the last run
@@ -694,6 +698,9 @@ await engine.RefreshAsync(refresh => refresh.Replace(mem, "ticks", rows).PlanNow
 - **Nothing waits for the run**, so nothing throws when it fails. A run that fails is logged
   under `Chalk.Client.Planning`, and so is a statement it could not plan again, which the
   planning observer is told of too. The plans stay as they were.
+- **A statement prepared while the run is still going** may be planned on the numbers from before
+  the refresh, and is planned again later. So seed at startup with `DeferPlanning()` and await
+  `PlanAsync` before preparing or serving; keep `PlanNow()` for refreshes made while serving.
 - **It cannot re-read** a source or table (`refresh.Refresh(…)`), as a refresh that defers
   cannot.
 
