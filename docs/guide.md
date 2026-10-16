@@ -1401,6 +1401,21 @@ written as text yet.
 with no precision written has none, so `CAST(ts AS TIME)` is a time to the second, and
 `CAST(ts AS TIME(6))` keeps the microseconds.
 
+`CAST` of text to a timestamp reads it as PostgreSQL and DuckDB do, whatever the machine's
+time zone. A zone the text writes, an offset such as `+02:00` or a `Z`, names an instant:
+
+- A `TIMESTAMP` is the wall clock as written, with the zone dropped, so
+  `'2026-01-08 12:00:00+02:00'` is `2026-01-08 12:00:00`.
+- A `TIMESTAMP WITH LOCAL TIME ZONE` is the instant, so the same text is 10:00 UTC.
+- Text that writes no zone is read as written, which for an instant is UTC.
+
+ChalkQL reads the text whichever source holds it, so a cast from text to a date, a time or a
+timestamp is never sent to a source either: SQLite has no such types, and would read
+`'2026-01-08'` as the number 2026. A date or a timestamp written in the statement, such as
+`CAST('2026-01-08' AS DATE)`, is a value before any source sees it, so a comparison with one
+is still sent. Where a SQLite column declared `DATE` holds text that writes a time and a
+zone, it is the date of that instant in UTC, as SQLite's own `date()` reads it.
+
 ### DECIMAL arithmetic
 
 A DECIMAL sum, difference, product or quotient is typed as SQL Server types it, with up to

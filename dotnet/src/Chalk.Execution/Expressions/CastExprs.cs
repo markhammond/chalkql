@@ -342,8 +342,7 @@ internal sealed class CastFromStringExpr : CastExprBase
             case TypeKind.Timestamp:
             case TypeKind.TimestampTz:
             {
-                var parsed = DateTime.Parse(
-                    trimmed, CultureInfo.InvariantCulture, DateTimeStyles.NoCurrentDateDefault);
+                var parsed = Timestamp(trimmed, instant: Type.Kind == TypeKind.TimestampTz);
                 var days = CivilTime.FromCivil(parsed.Year, parsed.Month, parsed.Day);
                 var secondOfDay = (parsed.Hour * 3600L) + (parsed.Minute * 60L) + parsed.Second;
                 var unitsPerSecond = IrTypes.TimestampUnitsPerSecond((uint)Type.Precision);
@@ -361,6 +360,27 @@ internal sealed class CastFromStringExpr : CastExprBase
                     Kind, Type, long.Parse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture), lane);
                 return;
         }
+    }
+
+    /// <summary>
+    /// The timestamp <paramref name="text"/> writes, read in no machine's time zone (F240), as DuckDB
+    /// and PostgreSQL read it. A zone written in the text, an offset or a <c>Z</c>, names an instant.
+    /// A timestamp with a time zone is that instant, so <c>12:00+02:00</c> is 10:00 UTC. A timestamp
+    /// without one is the wall clock as written, the zone dropped, so the same text is 12:00. Text
+    /// that writes no zone is read as written, which for an instant is UTC.
+    /// </summary>
+    private static DateTime Timestamp(ReadOnlySpan<char> text, bool instant)
+    {
+        // Adjusting to UTC applies the offset the text writes, and never the machine's: a parse is
+        // UTC exactly when the text writes a zone.
+        var utc = DateTime.Parse(
+            text, CultureInfo.InvariantCulture, DateTimeStyles.NoCurrentDateDefault | DateTimeStyles.AdjustToUniversal);
+        if (instant || utc.Kind != DateTimeKind.Utc)
+        {
+            return utc;
+        }
+
+        return utc + DateTimeOffset.Parse(text, CultureInfo.InvariantCulture).Offset;
     }
 }
 

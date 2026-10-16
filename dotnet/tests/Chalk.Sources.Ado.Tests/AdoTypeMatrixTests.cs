@@ -165,6 +165,14 @@ public sealed class AdoTypeMatrixTests(SharedTypeMatrixPostgres postgres)
             Override = { ["sqlite"] = ("DATE", "'1969-12-31'") },
         },
 
+        // F240: SQLite text that writes a time and a zone is the date of that instant in UTC, as
+        // SQLite's own date() reads it, wherever the machine stands: 23:00 at UTC-5 is the ninth.
+        new("c_date_zoned", ChalkType.Date(nullable: true), Date32Type.Default,
+            "DATE", "DATE '2026-01-09'", Days(2026, 1, 9))
+        {
+            Override = { ["sqlite"] = ("DATE", "'2026-01-08T23:00:00-05:00'") },
+        },
+
         // Midnight is midnight wherever the machine stands: a TIME of 00:00:00 is zero
         // microseconds, and a timestamp at midnight is a whole number of days.
         new("c_midnight", ChalkType.Time(6, nullable: true), new Time64Type(TimeUnit.Microsecond),
