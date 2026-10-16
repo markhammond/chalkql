@@ -280,6 +280,12 @@ public sealed class PlannerOptions
     /// <summary>Ask for <c>RelOptUtil.toString</c> of both plans, and the list of rules that fired.</summary>
     public bool IncludePlanText { get; init; }
 
+    /// <summary>
+    /// With <see cref="IncludePlanText"/>, add to the plan text what varies from run to run: the search
+    /// governor's sampled costs on its planning line (F195).
+    /// </summary>
+    public bool VerbosePlanText { get; init; }
+
     /// <summary>M2+: plan as if no index existed. Plumbed end to end now; M1 ignores it.</summary>
     public bool DisableIndexLookup { get; init; }
 

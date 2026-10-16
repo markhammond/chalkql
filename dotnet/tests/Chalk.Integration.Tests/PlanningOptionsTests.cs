@@ -143,19 +143,35 @@ public sealed class PlanningOptionsTests(SharedSidecar sidecar)
     }
 
     /// <summary>
-    /// A governed prepare counts its evaluations, samples the root's cost, and says so both on the
-    /// prepared query and in the plan text.
+    /// A governed prepare counts its evaluations, samples the root's cost, and says so on the prepared
+    /// query, and in a verbose plan text. A plain plan text gives the line without the costs, so it is
+    /// the same however the samples landed (F195).
     /// </summary>
     [Fact]
     public async Task A_governed_prepare_reports_its_counts_and_its_costs()
     {
         await using var engine = await CreateEngineAsync();
+        var governed = new PlanningOptions
+        {
+            ConvergencePatience = 3,
+            ConvergenceEvaluationInterval = 5,
+        };
+
+        var plain = await engine.PrepareAsync(
+            LongStatement,
+            new PrepareOptions { IncludePlanText = true, Planning = governed },
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(plain.PlanningState.CostRatio);
+        Assert.Contains("-- planning: converged after", plain.PlanText, StringComparison.Ordinal);
+        Assert.DoesNotContain("ratio ", plain.PlanText, StringComparison.Ordinal);
+        Assert.DoesNotContain(", first ", plain.PlanText, StringComparison.Ordinal);
 
         var prepared = await engine.PrepareAsync(
             LongStatement,
             new PrepareOptions
             {
                 IncludePlanText = true,
+                VerbosePlanText = true,
                 Planning = new PlanningOptions
                 {
                     ConvergencePatience = 3,

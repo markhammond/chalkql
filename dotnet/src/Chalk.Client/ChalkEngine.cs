@@ -2152,6 +2152,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             {
                 Pushdown = options.Pushdown,
                 IncludePlanText = options.IncludePlanText,
+                VerbosePlanText = options.VerbosePlanText,
                 Conformance = options.Conformance,
                 Libraries = options.Libraries,
                 DisabledCapabilities = options.DisabledCapabilities,
