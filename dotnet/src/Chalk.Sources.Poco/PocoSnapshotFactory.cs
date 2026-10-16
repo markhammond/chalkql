@@ -216,25 +216,95 @@ internal sealed class PocoSnapshotFactory<T>
 
         if (change.Replaced.Length > 0 || change.Appended.Length > 0)
         {
-            VerifyUniqueKeys(rows, unique);
+            VerifyUniqueKeys(rows, change.Appended.Length > 0 ? kept : rows.Count, unique, added);
         }
     }
 
-    /// <summary>Every declared unique key over every row, but the one <paramref name="unique"/> names.</summary>
-    private void VerifyUniqueKeys(IReadOnlyList<T> rows, int[]? unique)
+    /// <summary>
+    /// Each declared unique key but the one <paramref name="unique"/> names, checked as cheaply as what
+    /// the table declares besides allows (F235): the rows from <paramref name="from"/> on, and the rows
+    /// at <paramref name="around"/>, are what is new.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A unique index on the key's columns checks its rows as it is built or extended, an append's
+    /// against their neighbours in its order, so the key needs no check of its own. A collation whose
+    /// first keys are the key's columns puts equal keys side by side, so only the new rows are compared,
+    /// each with the row before it and the one after. A key with neither is checked over every row, as
+    /// before: knowing the keys already held would take a structure the table does not otherwise keep,
+    /// and declaring a unique index on the key is the way to have one.
+    /// </para>
+    /// </remarks>
+    private void VerifyUniqueKeys(IReadOnlyList<T> rows, int from, int[]? unique, int[]? around = null)
     {
-        foreach (var key in _uniqueKeys)
+        for (var k = 0; k < _uniqueKeys.Count; k++)
         {
+            var key = _uniqueKeys[k];
             if (unique is not null && key.Columns.Order().SequenceEqual(unique.Order()))
             {
                 continue;
             }
 
-            PocoVerification.VerifyUniqueKey(
-                _table,
-                rows,
-                key.Columns.Select(c => _columns[c].Name).ToArray(),
-                key.Columns.Select(c => _columns[c].LogicalAccessor).ToArray());
+            switch (Backing(k))
+            {
+                case UniqueBacking.Index:
+                    break;
+                case UniqueBacking.Order:
+                    var keys = key.Columns
+                        .Select(c => (_columns[c].Name, _columns[c].Statistics, _columns[c].LogicalAccessor))
+                        .ToArray();
+                    foreach (var at in around ?? [])
+                    {
+                        PocoVerification.VerifyUniqueInOrder(_table, rows, keys, from: at, to: at + 2);
+                    }
+
+                    PocoVerification.VerifyUniqueInOrder(_table, rows, keys, from: Math.Max(1, from));
+                    break;
+                default:
+                    PocoVerification.VerifyUniqueKey(
+                        _table,
+                        rows,
+                        key.Columns.Select(c => _columns[c].Name).ToArray(),
+                        key.Columns.Select(c => _columns[c].LogicalAccessor).ToArray());
+                    break;
+            }
+        }
+    }
+
+    /// <summary>What vouches for a declared unique key besides a check of every row (F235).</summary>
+    private enum UniqueBacking
+    {
+        /// <summary>Nothing: the key is checked over every row.</summary>
+        None,
+
+        /// <summary>A unique built-in index on the key's columns, which checks its own rows.</summary>
+        Index,
+
+        /// <summary>A collation whose first keys are the key's columns, which puts equal keys side by side.</summary>
+        Order,
+    }
+
+    private UniqueBacking[]? _backings;
+
+    /// <summary>What vouches for the unique key at <paramref name="key"/>, found once: the declarations are shape.</summary>
+    private UniqueBacking Backing(int key)
+    {
+        _backings ??= [.. _uniqueKeys.Select(Find)];
+        return _backings[key];
+
+        UniqueBacking Find(UniqueKeyDescriptor declared)
+        {
+            int[] columns = [.. declared.Columns.Order()];
+            if (_indexes.Any(i => i.Descriptor is { Unique: true, Kind: not IndexKind.Clustered }
+                && i.Descriptor.Columns.Order().SequenceEqual(columns)))
+            {
+                return UniqueBacking.Index;
+            }
+
+            return _collations.Any(c => c.Keys.Count >= columns.Length
+                && c.Keys.Take(columns.Length).Select(k => k.Column).Order().SequenceEqual(columns))
+                ? UniqueBacking.Order
+                : UniqueBacking.None;
         }
     }
 
@@ -324,7 +394,7 @@ internal sealed class PocoSnapshotFactory<T>
                 Math.Max(1, appendedFrom));
         }
 
-        VerifyUniqueKeys(rows, unique);
+        VerifyUniqueKeys(rows, appendedFrom, unique);
     }
 }
 

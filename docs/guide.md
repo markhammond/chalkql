@@ -445,6 +445,17 @@ on the declared key but reads nothing from the parent, and the key is unique in 
 parent. Then the key promises that the join changes nothing, so the planner *deletes*
 it. If the key is wrong, the answer is wrong.
 
+A declared unique key, and a declared order (`OrderedBy`), are checked against the rows at
+`Build()` and at every refresh after it; `Verify(false)` opts a table out. An append is
+checked where it joins. Its rows are checked against the order from the first of them on,
+and against a unique key where the table already vouches for the rest:
+
+- a key the table is ordered by, its first `OrderedBy` columns, puts equal keys side by
+  side, so each appended row is compared with the row before it;
+- a key a `UniqueIndex` covers is checked by the index, as it takes the appended rows;
+- a key with neither is checked over every row, at every append. On a table of millions
+  that is about a second each time, so declare a `UniqueIndex` on it.
+
 An index serves a comparison on its leading columns. The value compared with may be a
 literal, a parameter, or an expression of them that is the same for the whole execution,
 such as `CURRENT_TIMESTAMP - INTERVAL '5' MINUTE`. Such an expression is computed once,
