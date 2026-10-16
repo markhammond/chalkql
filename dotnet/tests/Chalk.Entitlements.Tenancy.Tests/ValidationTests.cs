@@ -444,6 +444,36 @@ public sealed class ValidationTests
         Assert.True(Compiled.Bind(principal).Shape().IsShape("org_manager"));
     }
 
+    /// <summary>
+    /// A principal that owns nothing (F229) binds <c>user</c> as a NULL of the owner columns' type,
+    /// a value rather than a shape, so the planner folds it; and a tenant's plan folds it too,
+    /// while its mask key stays open.
+    /// </summary>
+    [Fact]
+    public void A_principal_that_owns_nothing_binds_a_null_user_that_folds()
+    {
+        var principal = new TenancyPrincipal
+        {
+            User = null,
+            MaskKey = "k",
+            Grants = [Grant.ForTenancy(TenancyPolicyFixture.Org, 1, TenancyPolicyFixture.Manager)],
+            CustomLists = TenancyPolicyFixture.Principal(0).CustomLists,
+        };
+
+        var whole = Compiled.Bind(principal);
+        Assert.True(whole.Scalars.ContainsKey("user"));
+        Assert.Null(whole.Scalars["user"]);
+        Assert.Equal(ChalkType.Int32(nullable: true), whole.ScalarTypes["user"]);
+        Assert.False(whole.IsShape("user"));
+
+        var partial = Compiled.Bind(principal, fold: ["org"]);
+        Assert.False(partial.IsShape("user"));
+        Assert.True(partial.IsShape("mask_key"));
+
+        // A principal with an id keeps it open in a tenant's plan, as before.
+        Assert.True(Compiled.Bind(TenancyPolicyFixture.Principal(3), fold: ["org"]).IsShape("user"));
+    }
+
     /// <summary>A dimension this policy does not declare is named rather than silently ignored.</summary>
     [Fact]
     public void Folding_a_dimension_the_policy_does_not_declare_is_refused()

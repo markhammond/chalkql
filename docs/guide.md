@@ -2586,6 +2586,13 @@ There are four kinds of grant, and no fifth:
 - the resource-owner fail-safe, which is not a grant at all, but a row the principal
   owns.
 
+A principal that owns nothing, such as a class principal that stands for many people,
+says so with `User = null`. Its `user` is bound as NULL and folded, so every owner test
+comes out of its plans, its column labels and its explanation, and what is left is its
+roles alone. An id of its own that no row holds would give the same rows, but it leaves
+each owner test in the plan, and a column the roles show in full is then decided row by
+row. `User` is required either way, so a principal says which it is.
+
 **The list is the priority.** Rules are read in the order you wrote them. A rule matches
 a row when the principal holds one of the rule's roles in that row's tenancy, and the
 rule's `When` holds. `StopOnMatch`, true by default, ends the reading there. So the
