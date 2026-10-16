@@ -5936,14 +5936,14 @@ public static partial class PolicyCases
         {
             Id = "196",
             Group = "T",
-            Covers = "D261 §2 — the aggregate form under the group-size guard",
+            Covers = "D261 §2, D364 — the aggregate form under the group-size guard",
             File = "cases/196-members-counted-filtered-u2.sql",
             Principal = "u2",
             Catalog = PolicyCatalog.Default with { Members = PolicyEntitlements.MembersCounted },
             Compare = PolicyCompare.Ordered,
             Expect = new PolicyExpectation
             {
-                Rows = [[1L]],
+                Rows = [[null]],
                 Labels = new ColumnLabels(StringComparer.Ordinal)
                 {
                     ["n"] = ReportedDisclosure.Aggregate,
@@ -5954,9 +5954,10 @@ public static partial class PolicyCases
                 },
             },
             Notes = "The one place a population-only column may be compared: the FILTER of an "
-                + "aggregate its own allow-list names, with the shape its own rule names. Five "
-                + "visible rows clear the floor of three, so the count is disclosed; `Aggregate` "
-                + "is the label because below the floor it would be a withheld NULL (D202).",
+                + "aggregate its own allow-list names, with the shape its own rule names. The floor "
+                + "counts the rows the test selects (D364): one identifier selects one of the five "
+                + "visible rows, below the floor of three, so the count is a withheld NULL (D202), "
+                + "and `Aggregate` is its label.",
         },
         new PolicyBatteryCase
         {

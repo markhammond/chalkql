@@ -215,6 +215,29 @@ public sealed class EntitlementsTests(SharedSidecar sidecar)
                 auditor));
     }
 
+    /// <summary>
+    /// A filtered sum has the floor over the rows its <c>FILTER</c> keeps, which are the rows it
+    /// reports on (D364). u6 audits O1's four orders, which clear the floor of three summed whole. A
+    /// filter on one order's key keeps one row, and its sum is NULL, where a floor counting the group
+    /// would hand that order's amount back. A filter keeping three of the four is a sum.
+    /// </summary>
+    [Fact]
+    public async Task Q13_a_filtered_sum_has_the_floor_over_the_rows_it_keeps()
+    {
+        var o1 = TenancyFixture.Orders.Where(o => o.OrgId == 1).OrderBy(o => o.Id).ToList();
+        var one = o1[0];
+        Assert.Equal(4, o1.Count);
+
+        Assert.Equal(
+            [$"{o1.Sum(o => o.Amount)}|"],
+            await RowsAsync(
+                $"SELECT SUM(amount), SUM(amount) FILTER (WHERE id = {one.Id}) FROM orders", TenancyFixture.U6));
+        Assert.Equal(
+            [$"{o1.Where(o => o.Id != one.Id).Sum(o => o.Amount)}"],
+            await RowsAsync(
+                $"SELECT SUM(amount) FILTER (WHERE id <> {one.Id}) FROM orders", TenancyFixture.U6));
+    }
+
     /// <summary>§8's query 12: every value and query use of a population-only column is refused.</summary>
     [Theory]
     [InlineData("SELECT amount - amount FROM orders")]

@@ -2722,21 +2722,28 @@ source for.
   user-defined
   aggregate counts only when its declaration says `.Population()` (see *Composite
   results*). Where the host asks for a floor, each aggregate that uses the column is
-  guarded: `CASE WHEN COUNT(c) >= k THEN agg ELSE NULL END`. No floor ships, so a
+  guarded: `CASE WHEN COUNT(c) >= k THEN agg ELSE NULL END`. The count takes the
+  aggregate's own `FILTER`, so a filtered aggregate is guarded over the rows its filter
+  keeps, and a `FILTER` cannot single out rows the floor withholds. No floor ships, so a
   catalog with population-only columns and no small-group rule pays nothing. A host that
   wants a floor gives it at planning, through `PrepareOptions.DefaultMinGroupSize`, or
   per column on the descriptor.
 - **Statistical columns.** A host may decide that a column is protected by
   *query-set-size control* rather than by a mask: `ColumnEntitlement.Statistical`. The
-  raw value may then reach filters, join conditions, an aggregate's `FILTER`, and
-  grouping keys, but only in a statement where:
+  raw value may then decide which rows an aggregate reports on, in filters, join
+  conditions, an aggregate's `FILTER`, and grouping keys, but only in a statement where:
   - every output column is an aggregate or a group key;
   - there is no window anywhere;
   - no individual is pinned or excluded. (A comparison on, or a grouping by, a declared
-    unique key is refused.)
+    unique key is refused, wherever the statement writes it, an aggregate's `FILTER`
+    included.)
 
   A group smaller than the floor is then **dropped**, rather than set to NULL, because
-  with a raw grouping key, the key itself is the disclosure. Outside such a statement,
+  with a raw grouping key, the key itself is the disclosure. An aggregate whose `FILTER`
+  reads the column is held to the floor over the rows its filter keeps: below it, a
+  count of none included, the aggregate is NULL while its group stands. An aggregate's
+  argument computed from the column, such as `SUM(CASE WHEN … THEN 1 ELSE 0 END)`, is
+  refused; write the condition as the aggregate's `FILTER`. Outside such a statement,
   the opt-in does not apply, and the column keeps its mask.
 - **Two kernels.**
   - `FINGERPRINT(value, key)` is a keyed, stable pseudonym: HMAC-SHA-256, with the first

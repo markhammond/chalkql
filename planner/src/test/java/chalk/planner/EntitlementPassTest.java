@@ -232,6 +232,74 @@ class EntitlementPassTest {
     assertThat(only(narrowed).of(3)).isEqualTo(Disclosed.FULL);
   }
 
+  /**
+   * A filtered population aggregate is guarded by a count under its own FILTER (D364): the rows it
+   * reports on. Guarded by the whole group's count, a FILTER on the key would hand back one row's
+   * amount past the floor; beside it, the unfiltered sum keeps the whole group's count.
+   */
+  @Test
+  void a_filtered_aggregate_is_guarded_by_a_count_of_the_rows_its_filter_keeps() throws Exception {
+    PlannerPipeline.Result result =
+        plan(
+            "SELECT SUM(amount) AS total, SUM(amount) FILTER (WHERE id = 7) AS picked FROM orders",
+            TenancyCatalogs.auditor(1));
+    org.apache.calcite.rel.core.Aggregate aggregate = aggregateIn(result.physical());
+    org.apache.calcite.rel.core.Project guard = (org.apache.calcite.rel.core.Project) result.physical();
+    int groups = aggregate.getGroupCount();
+    java.util.List<org.apache.calcite.rel.core.AggregateCall> calls = aggregate.getAggCallList();
+
+    // Each output is CASE WHEN count >= 3 THEN … : the count it compares is the one under the same
+    // filter as the sum it guards.
+    for (int output = 0; output < 2; output++) {
+      org.apache.calcite.rex.RexCall when = (org.apache.calcite.rex.RexCall) guard.getProjects().get(output);
+      org.apache.calcite.rex.RexCall enough = (org.apache.calcite.rex.RexCall) when.getOperands().get(0);
+      assertThat(enough.getOperator().getKind()).isEqualTo(org.apache.calcite.sql.SqlKind.GREATER_THAN_OR_EQUAL);
+      int counted = ((org.apache.calcite.rex.RexInputRef) enough.getOperands().get(0)).getIndex() - groups;
+      int guarded = sumUnder(guard.getProjects().get(output), groups);
+      assertThat(calls.get(counted).getAggregation().getKind()).isEqualTo(org.apache.calcite.sql.SqlKind.COUNT);
+      assertThat(calls.get(counted).filterArg).isEqualTo(calls.get(guarded).filterArg);
+    }
+
+    assertThat(calls.get(sumUnder(guard.getProjects().get(1), groups)).filterArg).isNotNegative();
+    assertThat(only(result).of(3)).isEqualTo(Disclosed.AGGREGATE);
+  }
+
+  /** The aggregate call a guarded output finally reads: the sum its CASE hands back. */
+  private static int sumUnder(org.apache.calcite.rex.RexNode node, int groups) {
+    java.util.List<Integer> sums = new java.util.ArrayList<>();
+    node.accept(
+        new org.apache.calcite.rex.RexVisitorImpl<Void>(true) {
+          @Override
+          public Void visitInputRef(org.apache.calcite.rex.RexInputRef ref) {
+            sums.add(ref.getIndex() - groups);
+            return null;
+          }
+        });
+    // The last reference is the measure itself: the conditions before it read counts.
+    return sums.get(sums.size() - 1);
+  }
+
+  /** The one aggregate under a plan's root. */
+  private static org.apache.calcite.rel.core.Aggregate aggregateIn(org.apache.calcite.rel.RelNode rel) {
+    if (rel instanceof org.apache.calcite.rel.core.Aggregate aggregate) {
+      return aggregate;
+    }
+    for (org.apache.calcite.rel.RelNode input : rel.getInputs()) {
+      org.apache.calcite.rel.core.Aggregate found = aggregateIn(input);
+      if (found != null) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  private static java.util.List<org.apache.calcite.rel.core.AggregateCall> calls(
+      org.apache.calcite.rel.core.Aggregate aggregate, org.apache.calcite.sql.SqlKind kind) {
+    return aggregate.getAggCallList().stream()
+        .filter(call -> call.getAggregation().getKind() == kind)
+        .toList();
+  }
+
   @Test
   void the_guard_reuses_a_count_the_statement_already_asks_for() throws Exception {
     PlannerPipeline.Result result =

@@ -42,7 +42,7 @@ report org_id:Full, n:Tested, members:Some
 -- u9
 report org_id:Full, n:Aggregate, members:Some
 1|<null>
-2|1
+2|<null>
 
 -- u10-in-a-region
 report org_id:Full, n:Redacted, members:Some

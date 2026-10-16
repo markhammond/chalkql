@@ -40,6 +40,9 @@ public sealed class StatisticalAccessTests(SharedSidecar sidecar)
     /// </summary>
     private static string Shared => TenancyFixture.Members[0].FirstName;
 
+    /// <summary>A first name only member 2 has, in organisation 1, read off the fixture as <see cref="Shared"/> is.</summary>
+    private static string Unshared => TenancyFixture.Members[1].FirstName;
+
     private static readonly RequestContext Agent = TenancyFixture.Principal(
         user: 2, managerOrgs: [], agentOrgs: [1, 2], auditorOrgs: [], subjectPairs: []);
 
@@ -78,7 +81,71 @@ public sealed class StatisticalAccessTests(SharedSidecar sidecar)
                 + "GROUP BY first_name"));
     }
 
+    /// <summary>
+    /// A FILTER on the raw value selects the rows its aggregate reports on, so the aggregate is held
+    /// to the floor over those rows, as the group is (F232). In organisation 1, a count of the one
+    /// member with a name is withheld, and so is organisation 2's count of none; where the filter
+    /// keeps two members, the count stands. Before, the counts read 1 and 0: who had the name, and
+    /// where.
+    /// </summary>
+    [Fact]
+    public async Task A_filtered_count_is_held_to_the_floor_over_the_rows_it_keeps()
+    {
+        Assert.Equal(
+            ["1|2|<null>|<null>", "2|3|<null>|2"],
+            await RowsAsync(
+                $"""
+                SELECT org_id, COUNT(*),
+                       COUNT(*) FILTER (WHERE first_name = '{Unshared}'),
+                       COUNT(*) FILTER (WHERE first_name LIKE 'T%')
+                FROM members GROUP BY org_id ORDER BY org_id
+                """));
+    }
+
     // ---------------------------------------------------------------- the negatives
+
+    /// <summary>
+    /// An aggregate's argument computed from the raw value is refused (F233). It is a FILTER
+    /// written where no floor can count its rows, or the value itself by another route. Before, the
+    /// first of these counted the one member with a name, the second returned that member's id, and
+    /// the last two returned a first name, for a column that permits no aggregate at all.
+    /// </summary>
+    [Theory]
+    [InlineData("SUM(CASE WHEN first_name = '{name}' THEN 1 ELSE 0 END)", "SUM")]
+    [InlineData("SUM(CASE WHEN first_name = '{name}' THEN id END)", "SUM")]
+    [InlineData("MIN(first_name || '')", "MIN")]
+    [InlineData("MIN(CAST(first_name AS VARCHAR(80)))", "MIN")]
+    public async Task An_argument_computed_from_the_raw_value_is_refused(string aggregate, string function)
+    {
+        var refusal = await Assert.ThrowsAsync<EntitlementException>(
+            async () => await RowsAsync(
+                $"SELECT COUNT(*), {aggregate.Replace("{name}", Unshared, StringComparison.Ordinal)} FROM members"));
+
+        Assert.Equal(ChalkErrorCodes.Statistical, refusal.Code);
+        Assert.Contains(
+            $"main.members.first_name is a statistical column, and this statement computes the argument of {function} from it",
+            refusal.Message,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A unique key in an aggregate's FILTER, or in an expression it takes, pins an individual as
+    /// it does in WHERE, and is refused the same way (F234). Beside the raw key, each of these said
+    /// which group member 1 is in, and so their first name.
+    /// </summary>
+    [Theory]
+    [InlineData("COUNT(*) FILTER (WHERE id = 1)")]
+    [InlineData("COUNT(*) FILTER (WHERE id <> 1)")]
+    [InlineData("SUM(CASE WHEN id = 1 THEN 1 ELSE 0 END)")]
+    public async Task A_unique_key_in_an_aggregate_is_refused(string aggregate)
+    {
+        var refusal = await Assert.ThrowsAsync<EntitlementException>(
+            async () => await RowsAsync(
+                $"SELECT first_name, {aggregate} FROM members GROUP BY first_name"));
+
+        Assert.Equal(ChalkErrorCodes.Statistical, refusal.Code);
+        Assert.Contains("main.members.id", refusal.Message, StringComparison.Ordinal);
+    }
 
     /// <summary>
     /// Pinning an individual: an aggregate over one person is that person, and the difference of

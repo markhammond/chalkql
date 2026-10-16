@@ -130,35 +130,42 @@ public sealed class TestVerdictTests(SharedSidecar sidecar)
 
     /// <summary>
     /// The aggregate form (§36.2): a permitted aggregate's <c>FILTER</c> over a population-only
-    /// column, guarded by the floor. The group is the organisation, so one statement shows the guard
-    /// withholding a group of two and disclosing a group of three.
+    /// column, guarded by the floor over the rows the test selects, which are the rows the count
+    /// reports on (D364). An identifier is a member's own, so a probe for one selects one row at
+    /// most, and its count is withheld however large the group it is counted in: by organisation,
+    /// where O2's group of three would clear the floor, and over all five members u9 can see.
     /// </summary>
-    [Fact]
-    public async Task The_aggregate_form_counts_matches_under_the_group_size_guard()
+    [Theory]
+    [InlineData("SELECT org_id, COUNT(*) FILTER (WHERE national_id = ?) AS n FROM members GROUP BY org_id ORDER BY org_id", true)]
+    [InlineData("SELECT 0 AS org_id, COUNT(*) FILTER (WHERE national_id = ?) AS n FROM members", false)]
+    public async Task The_aggregate_forms_floor_counts_the_rows_its_test_selects(string sql, bool byOrganisation)
     {
-        const string Sql =
-            "SELECT org_id, COUNT(*) FILTER (WHERE national_id = ?) AS n "
-            + "FROM members GROUP BY org_id ORDER BY org_id";
         var context = Context("u9");
         var probe = TenancyFixture.Members[2].NationalId;
 
         var expected = new List<string>();
         foreach (var group in TenancyOracle.VisibleMembers(context)
-                     .GroupBy(m => m.OrgId)
+                     .GroupBy(m => byOrganisation ? m.OrgId : 0)
                      .OrderBy(g => g.Key))
         {
-            var matches = group.Count(m => TenancyOracle.Counted(context, m, probe) == true);
-            // The floor is the whole of the guard: a group smaller than it discloses nothing, and a
-            // NULL there is a withheld value rather than "no rows" (D202).
+            // The rows the test selects: where the rule reaches the row and the comparison holds.
+            var selected = group.Count(m => TenancyOracle.Counted(context, m, probe) == true);
+
+            // A count the floor withholds is a withheld value, not "no rows" (D202).
             expected.Add(
-                group.Count() >= TenancyFixture.MinGroupSize
-                    ? $"{group.Key}|{matches}"
+                selected >= TenancyFixture.MinGroupSize
+                    ? $"{group.Key}|{selected}"
                     : $"{group.Key}|<null>");
         }
 
-        var (rows, report) = await RowsAsync(Sql, context, [probe]);
+        var (rows, report) = await RowsAsync(sql, context, [probe]);
         Assert.Equal(expected, rows);
         Assert.Equal(ReportedDisclosure.Aggregate, report.Columns[1].Disclosure);
+
+        // A probe for one identifier is never shown, though it matches a member u9 can see.
+        Assert.NotEmpty(rows);
+        Assert.All(rows, row => Assert.EndsWith("|<null>", row, StringComparison.Ordinal));
+        Assert.Contains(TenancyOracle.VisibleMembers(context), m => TenancyOracle.Counted(context, m, probe) == true);
     }
 
     /// <summary>
