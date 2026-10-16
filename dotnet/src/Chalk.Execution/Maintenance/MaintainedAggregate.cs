@@ -323,6 +323,19 @@ internal sealed class AggregateState : IMaintainedState
         FinestRows.TrimExcess();
         FinestCounts.Clear();
         FinestCounts.TrimExcess();
+
+        // Each measure's changes were kept by finest group, and an update from nothing touches them
+        // all: fresh ones hold nothing until the next update's groups.
+        for (var m = 0; m < Changed.Length; m++)
+        {
+            Changed[m] = Changed[m]?.Twin();
+        }
+
+        foreach (var set in Sets)
+        {
+            set.Untouch();
+            set.Touched.TrimExcess();
+        }
     }
 }
 
