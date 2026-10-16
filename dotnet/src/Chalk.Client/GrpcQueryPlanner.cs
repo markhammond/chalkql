@@ -352,6 +352,7 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
             {
                 Pushdown = (Rpc.PushdownLevel)request.Options.Pushdown,
                 IncludePlanText = request.Options.IncludePlanText,
+                VerbosePlanText = request.Options.VerbosePlanText,
                 DisableIndexLookup = request.Options.DisableIndexLookup,
                 Conformance = request.Options.Conformance.Name,
             },

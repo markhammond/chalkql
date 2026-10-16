@@ -301,6 +301,14 @@ public sealed record PrepareOptions
     public bool IncludePlanText { get; init; }
 
     /// <summary>
+    /// With <see cref="IncludePlanText"/>, ask for a verbose plan text: its planning line then carries
+    /// the costs the search governor sampled (first, best, ratio). They are left out otherwise, as a
+    /// sample lands before the search converges or not as the clock has it, so the plan text is the
+    /// same from one run to the next (F195). Diagnostics only.
+    /// </summary>
+    public bool VerbosePlanText { get; init; }
+
+    /// <summary>
     /// Ask the planner for this statement's literals as keyed pseudonyms, so the text can be logged
     /// (D262). Null — the default — uses <see cref="ChalkEngineOptions.Redaction"/>, whose own
     /// default is off.

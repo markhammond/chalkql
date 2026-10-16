@@ -1584,6 +1584,13 @@ Console.WriteLine(query.PlanningState);               // Converged after 184 eva
 Every field defaults to today's behaviour, so a prepare that sets none of them installs
 no listener and samples no costs.
 
+With `PrepareOptions.IncludePlanText`, the plan text begins with a line saying how the
+search ended: `-- planning: converged after 184 evaluations`. The costs it sampled
+(`first …, best …, ratio …`) are added to that line only with
+`PrepareOptions.VerbosePlanText`. Whether a sample lands before the search converges
+depends on the clock, so a plan text without them is the same on every run.
+`PlanningState` always carries the costs.
+
 - The interval is a **count of rule evaluations, never a duration**. That is what makes
   a plan that stopped on convergence the same plan on every machine.
 - The time budget is the one control that can give different plans on different runs. A

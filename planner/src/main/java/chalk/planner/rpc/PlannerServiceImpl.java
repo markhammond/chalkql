@@ -539,7 +539,7 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
               // plan text that nothing could have cut short says nothing about it, so every plan
               // text recorded before this option existed is byte-identical to the one it was.
               response.setPlanText(
-                  planningBlock(result.planningState())
+                  planningBlock(result.planningState(), options.getVerbosePlanText())
                       + "-- logical\n"
                       + result.logicalPlanText()
                       + "-- physical\n"
@@ -596,9 +596,11 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
 
   /**
    * The plan text's stats block: how the search ended and what it measured, for a governed run, and
-   * nothing at all for an ungoverned one (D237).
+   * nothing at all for an ungoverned one (D237). The costs the governor sampled are written only for
+   * a request that asked for a verbose plan text: a sample lands before the search converges or not
+   * as the clock has it, so a plan text that carried them would differ from run to run (F195).
    */
-  private static String planningBlock(PlannerPipeline.PlanningState state) {
+  private static String planningBlock(PlannerPipeline.PlanningState state, boolean verbose) {
     if (!state.governed()) {
       return "";
     }
@@ -608,7 +610,7 @@ public final class PlannerServiceImpl extends PlannerServiceGrpc.PlannerServiceI
             .append(" after ")
             .append(state.evaluations())
             .append(" evaluations");
-    if (state.firstCost() != null && state.bestCost() != null) {
+    if (verbose && state.firstCost() != null && state.bestCost() != null) {
       line.append(", first ")
           .append(state.firstCost())
           .append(", best ")

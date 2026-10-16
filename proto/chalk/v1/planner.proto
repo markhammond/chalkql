@@ -476,6 +476,11 @@ message PlannerOptions {
   PushdownLevel pushdown = 1;
   // Populate PlanResponse.plan_text (RelOptUtil.toString of the logical and physical plans).
   bool include_plan_text = 2;
+  // With include_plan_text: add what varies from one run to the next. The planning line then carries
+  // the search governor's sampled costs (first, best, ratio), which it has only when a sample landed
+  // before the search converged, and that depends on the clock. Without it the line says how the
+  // search ended and how many evaluations it took, the same on every run (F195).
+  bool verbose_plan_text = 11;
   // Plan as if no index existed.
   bool disable_index_lookup = 3;
   // Numbered enums until 0.4 (D318).
