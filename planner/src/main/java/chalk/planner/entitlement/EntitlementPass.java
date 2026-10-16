@@ -3096,7 +3096,10 @@ public final class EntitlementPass {
           condition = settled;
         }
       }
-      if (condition.isAlwaysFalse()) {
+      // A rule whose folded condition is one an earlier rule's already folded to can never be the
+      // first to match, as when a resource owner and an explicit owner rule both name the owner:
+      // it is not reachable, and neither the sanitiser nor the explanation repeats it (F227).
+      if (condition.isAlwaysFalse() || conditions.contains(condition)) {
         continue;
       }
       rules.add(i);

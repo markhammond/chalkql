@@ -293,6 +293,13 @@ public sealed class ExplainedTable
     /// <summary>
     /// The folded row predicate as SQL text, or empty where it folded away and every row is visible.
     /// </summary>
+    /// <remarks>
+    /// A column reference <c>$n</c> reads this table's row. Where the table's visibility derives
+    /// through a parent (<see cref="Parents"/>), <c>$n</c> may reach past the table's own columns:
+    /// the row it reads is this table's columns, then each parent table's columns in turn, in the
+    /// order <see cref="Parents"/> first names them, and then each path's endpoint's. So on a child
+    /// of ten columns, <c>$10</c> is its parent's first column.
+    /// </remarks>
     public required string RowPredicate { get; init; }
 
     /// <summary>Whether it reached the source (§3.7).</summary>
@@ -441,7 +448,10 @@ public sealed class ExplainedColumn
 
     /// <summary>
     /// The folded disclosure: a constant name where the fold settled it for every row this principal
-    /// can see, and otherwise the folded rule conditions in order, as text.
+    /// can see, and otherwise the folded rule conditions in order, as text. A rule whose condition
+    /// folds to one an earlier rule's already did is left out, since it can never be the first to
+    /// match. Column references read the row <see cref="ExplainedTable.RowPredicate"/> describes,
+    /// which for a table that derives its visibility through a parent runs on into the parent's.
     /// </summary>
     public required string Disclosure { get; init; }
 
@@ -452,8 +462,9 @@ public sealed class ExplainedColumn
     public required string Placeholder { get; init; }
 
     /// <summary>
-    /// The group-size floor this column's population aggregates take, after the host's default has
-    /// been applied (D211). Zero means no guard.
+    /// The group-size floor this principal's aggregates over the column take, after the host's
+    /// default has been applied (D211): set where the column is population-only or statistical for
+    /// this principal, and zero where it is neither, or where it has no guard.
     /// </summary>
     public required int MinGroupSize { get; init; }
 }
