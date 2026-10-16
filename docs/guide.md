@@ -2280,6 +2280,11 @@ For example, fold a tenant's grants and leave the principal open. The plan is th
 *tenant's*: one plan and one digest, shared by every principal of that tenant, with the
 tenancy filter in the plan's leaf, where a source can be asked to apply it.
 
+With the tenancy package that is `Bind(principal, fold: ["org"])`. The named dimensions'
+grants fold, and so do the flags that say which roles the principal holds everywhere,
+because they are part of the role set the plan is for. The subject lists and the
+principal's own scalars, such as `user`, stay open.
+
 **One plan for many principals.** Usually you prepare a query with one principal's full
 context, and the planner writes that principal's values straight into the plan. The plan
 then fits those values only, so a principal with other values needs another plan. A host

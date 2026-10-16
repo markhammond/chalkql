@@ -411,7 +411,9 @@ public sealed class ValidationTests
 
     /// <summary>
     /// <c>Bind(principal, fold:)</c> names the dimensions whose grants become literals; everything
-    /// that tells one principal of a tenant from another stays open (§2.1, D232).
+    /// that tells one principal of a tenant from another stays open (§2.1, D232). The flags saying
+    /// which roles the principal holds everywhere fold with the dimensions, as part of the role set
+    /// the plan is for (F225).
     /// </summary>
     [Fact]
     public void Folding_one_dimension_leaves_the_rest_open()
@@ -430,7 +432,9 @@ public sealed class ValidationTests
         Assert.Empty(partial.Lists["member_self_pairs"].Rows);
         Assert.True(partial.IsShape("user"));
         Assert.True(partial.IsShape("mask_key"));
-        Assert.True(partial.IsShape("global"));
+        Assert.False(partial.IsShape("global"));
+        Assert.False(partial.IsShape("global_manager"));
+        Assert.Equal(false, partial.Scalars["global_manager"]);
 
         // The two unchanged ends of the same axis.
         Assert.Empty(Compiled.Bind(principal).ShapeNames);

@@ -234,9 +234,16 @@ public sealed class TenancyEntitlements
     /// </para>
     /// <para>
     /// Everything the named dimensions do not cover stays open, and deliberately so — the subject
-    /// lists, the host's own custom lists, and every scalar, <c>user</c> and <c>mask_key</c> among
+    /// lists, the host's own custom lists, and the scalars, <c>user</c> and <c>mask_key</c> among
     /// them. Each of those is what tells one principal of a tenant from another, and folding one
     /// would make the plan that principal's rather than the tenant's.
+    /// </para>
+    /// <para>
+    /// The flags saying which roles the principal holds everywhere, <c>global</c> and
+    /// <c>global_{role}</c>, fold with the dimensions: they are part of the role set a folded plan is
+    /// for. Left open, they would make the plan serve a principal holding any role everywhere, so a
+    /// column one role may only aggregate would be population-only for every principal the plan
+    /// serves, and a statement projecting it refused for all of them (F225).
     /// </para>
     /// </remarks>
     public RequestContext Bind(TenancyPrincipal principal, IReadOnlyCollection<string>? fold)
@@ -273,9 +280,15 @@ public sealed class TenancyEntitlements
         }
 
         open.AddRange(principal.CustomLists.Keys);
-        open.AddRange(whole.Scalars.Keys);
+        open.AddRange(whole.Scalars.Keys.Where(name => !IsGlobalFlag(name)));
         return whole.Shape(open);
     }
+
+    /// <summary>Whether a scalar is one of the flags saying which roles the principal holds everywhere.</summary>
+    private bool IsGlobalFlag(string name) =>
+        name == "global"
+        || (name.StartsWith("global_", StringComparison.Ordinal)
+            && _policy.Roles.Contains(name["global_".Length..], StringComparer.Ordinal));
 
     /// <summary>
     /// What <see cref="Bind(TenancyPrincipal)"/> binds, group by group (D266 §5): the list, the
