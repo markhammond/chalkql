@@ -68,6 +68,9 @@ internal sealed class MaintainedPlan : IAsyncDisposable
     /// <summary>The result's rows by key, for a test to weigh.</summary>
     internal ResultState Result => _result;
 
+    /// <summary>The operators of the tree the last update ran that keep scratch, for a test to weigh.</summary>
+    internal IReadOnlyList<IKeepsScratch> Scratch => _tree?.Context.Scratch ?? [];
+
     /// <summary>The result's key columns: positions in the output.</summary>
     public int[] Key
     {
@@ -192,6 +195,10 @@ internal sealed class MaintainedPlan : IAsyncDisposable
                     }
 
                     _result.Trim();
+                    foreach (var keeper in tree.Context.Scratch)
+                    {
+                        keeper.Trim();
+                    }
                 }
 
                 _restart = false;

@@ -7,6 +7,18 @@ using ArrowSchema = Apache.Arrow.Schema;
 namespace Chalk.Execution.Maintenance;
 
 /// <summary>
+/// An operator of a maintained plan that keeps scratch from one update to the next: arrays and maps
+/// an update grows as it needs and the next clears. An update from nothing grows them to every row
+/// the statement reads, so the plan has them let go after one (F236), as it has its states let go
+/// of their buffers. Each registers itself in its tree's <see cref="OperatorContext.Scratch"/>.
+/// </summary>
+internal interface IKeepsScratch
+{
+    /// <summary>Lets go of the scratch the last update grew, keeping what a small update starts with.</summary>
+    void Trim();
+}
+
+/// <summary>
 /// A stateful operator of a maintained plan (D343, design 68 §2): in each update it reads all its
 /// inputs' changes, brings its state up to date, and then gives its own changes, as batches whose last
 /// column is the weight.

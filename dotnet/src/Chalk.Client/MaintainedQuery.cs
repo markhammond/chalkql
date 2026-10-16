@@ -65,6 +65,9 @@ internal sealed class MaintainedQuery : IAsyncDisposable
     /// <summary>The result's rows by key, for a test to weigh.</summary>
     internal ResultState Result => _plan.Result;
 
+    /// <summary>The statement's operators that keep scratch between updates, for a test to weigh.</summary>
+    internal IReadOnlyList<IKeepsScratch> Scratch => _plan.Scratch;
+
     /// <summary>
     /// Brings the statement to the epoch its tables are pinned at now, with <paramref name="values"/>
     /// bound as an execution binds them and <paramref name="now"/> its current time. A key that comes to

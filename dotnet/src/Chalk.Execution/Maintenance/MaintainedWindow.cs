@@ -161,7 +161,7 @@ internal sealed class WindowState : IMaintainedState
 /// The windowed filter's update: the rows the clock may have moved past, read again against the new
 /// cut-offs, and the input's changes, read once.
 /// </summary>
-internal sealed class WindowChanges : MaintainedOperator
+internal sealed class WindowChanges : MaintainedOperator, IKeepsScratch
 {
     private readonly WindowState _state;
     private readonly IBatchOperator _input;
@@ -189,6 +189,19 @@ internal sealed class WindowChanges : MaintainedOperator
         _condition = condition;
         _cuts = cuts;
         _eval = context.NewEvalContext();
+        context.Scratch.Add(this);
+    }
+
+    /// <summary>The rows the last update read and their pass marks, back to none.</summary>
+    public void Trim()
+    {
+        _slots.Clear();
+        _slots.TrimExcess();
+        _seen.Clear();
+        _seen.TrimExcess();
+        _rows.Clear();
+        _rows.TrimExcess();
+        _pass = [];
     }
 
     protected override ValueTask DisposeCoreAsync() => _input.DisposeAsync();

@@ -103,7 +103,7 @@ internal sealed class ReadState : IMaintainedState
 /// append added and nothing else: at the first read and after a rewrite it gives no rows and says
 /// <see cref="ReadState.Rewritten"/>.
 /// </remarks>
-internal sealed class ReadChanges : OperatorBase
+internal sealed class ReadChanges : OperatorBase, IKeepsScratch
 {
     private readonly ReadState _state;
     private readonly bool _appendsOnly;
@@ -125,6 +125,14 @@ internal sealed class ReadChanges : OperatorBase
         _appendsOnly = appendsOnly;
         _slot = NewOutput();
         _weightColumn = types.Count - 1;
+        context.Scratch.Add(this);
+    }
+
+    /// <summary>The weight columns, which a batch of every row grew to a batch's length.</summary>
+    public void Trim()
+    {
+        _plus = [];
+        _minus = [];
     }
 
     protected override ValueTask DisposeCoreAsync() => default;

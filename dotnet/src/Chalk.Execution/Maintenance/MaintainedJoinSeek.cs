@@ -143,7 +143,7 @@ internal sealed class JoinSeekState : IMaintainedState
 }
 
 /// <summary>A seeking join's update: the left changes against the right as it was, then the right changes against the left rows of their keys as they are.</summary>
-internal sealed class JoinSeekChanges : MaintainedOperator
+internal sealed class JoinSeekChanges : MaintainedOperator, IKeepsScratch
 {
     private readonly JoinSeekState _state;
     private readonly IBatchOperator _left;
@@ -172,6 +172,16 @@ internal sealed class JoinSeekChanges : MaintainedOperator
         _left = left;
         _right = right;
         _lookup = lookup;
+        context.Scratch.Add(this);
+    }
+
+    /// <summary>The keys sought and their rows' links, back to their first size.</summary>
+    public void Trim()
+    {
+        _before = new long[16];
+        _moved = new long[16];
+        _first = new int[16];
+        _next = new int[64];
     }
 
     protected override async ValueTask DisposeCoreAsync()
