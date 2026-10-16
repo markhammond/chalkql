@@ -68,8 +68,13 @@ public final class ChalkRelMetadata {
    * <p>{@link ChalkIndexLookup} is an {@code AbstractRelNode} rather than a {@code TableScan} — the
    * index is its input — so Calcite's default handler answers "unknown" for it, and the taint check
    * fails a node it does not know. This is the handler that makes an index lookup a node it knows:
-   * output column i is table column {@code projection().get(i)} of the lookup's own table, exactly
-   * as it is for a scan.
+   * output column i is column i of the lookup's own table, exactly as it is for a scan.
+   *
+   * <p>The lookup's table is the scan's it was made from, which for a scan that reads only some
+   * columns is the projected view of them ({@code ProjectedRelOptTable}), and every reader of an
+   * origin maps a column of that view back through its projection. So the origin is the view's own
+   * column, as a scan's is: naming the table's column there instead mapped it twice, and the taint
+   * check missed the join of a path over a grant table read through an index (F231).
    */
   public static final class ColumnOrigin implements MetadataHandler<BuiltInMetadata.ColumnOrigin> {
     @Override
@@ -82,8 +87,7 @@ public final class ChalkRelMetadata {
       if (column < 0 || column >= rel.projection().size()) {
         return null;
       }
-      return java.util.Set.of(
-          new RelColumnOrigin(rel.getTable(), rel.projection().get(column), false));
+      return java.util.Set.of(new RelColumnOrigin(rel.getTable(), column, false));
     }
 
     /**
