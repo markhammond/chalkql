@@ -46,8 +46,12 @@ internal sealed class ChangeColumn
     /// <summary>Rows written since <see cref="Clear"/>.</summary>
     public int Count => _count;
 
-    /// <summary>Bytes the column holds on to.</summary>
-    public long Bytes => _values.Length + _offsets.Length + _validity.Length;
+    /// <summary>The column itself and the buffers it holds on to, at their size (F223).</summary>
+    public long Bytes =>
+        Self + HeapSizes.Array(_values.Length, 1) + HeapSizes.Array(_offsets.Length, 1) + HeapSizes.Array(_validity.Length, 1);
+
+    // The column's own object: its header, its type, three buffers and its counts.
+    private const int Self = 96;
 
     /// <summary>Forgets the rows, keeping the buffers for the next update.</summary>
     public void Clear()

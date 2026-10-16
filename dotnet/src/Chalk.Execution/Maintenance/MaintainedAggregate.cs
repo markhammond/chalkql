@@ -115,11 +115,14 @@ internal sealed class GroupSet
 
     public bool IsGrandTotal => Keys.Length == 0;
 
+    /// <summary>The groups' keys, ids, counts and measures, and what an update marks of them, at their size (F223).</summary>
     public long Bytes
     {
         get
         {
-            var bytes = Values.Bytes + (Counts.Length * (sizeof(long) + 2)) + Groups.Bytes;
+            var bytes = Values.Bytes + Groups.Bytes + HeapSizes.Array(Counts.Length, sizeof(long))
+                + HeapSizes.Array(IsTouched.Length, sizeof(bool)) + HeapSizes.Array(WasLive.Length, sizeof(bool))
+                + HeapSizes.Of(Touched, sizeof(int));
             foreach (var measure in Measures)
             {
                 bytes += measure?.Bytes ?? 0;
@@ -275,7 +278,29 @@ internal sealed class AggregateState : IMaintainedState
     /// <summary>Whether an update has run since the state was made or discarded.</summary>
     public bool Started { get; set; }
 
-    public long Bytes => Sets.Sum(s => s.Bytes) + Changes.Bytes + Output.Bytes;
+    /// <summary>
+    /// Every set's groups, and what an update's changes pass through: the changes, the finest groups
+    /// they add up in and each one's measures, and the rows written (F223).
+    /// </summary>
+    public long Bytes
+    {
+        get
+        {
+            var bytes = Changes.Bytes + Output.Bytes + FinestGroups.Bytes
+                + HeapSizes.Of(FinestRows, sizeof(int)) + HeapSizes.Of(FinestCounts, sizeof(long));
+            foreach (var set in Sets)
+            {
+                bytes += set.Bytes;
+            }
+
+            foreach (var measure in Changed)
+            {
+                bytes += measure?.Bytes ?? 0;
+            }
+
+            return bytes;
+        }
+    }
 
     public void Discard()
     {

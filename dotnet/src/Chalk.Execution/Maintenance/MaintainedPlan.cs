@@ -65,6 +65,9 @@ internal sealed class MaintainedPlan : IAsyncDisposable
     /// <summary>Every state the plan's operators keep, for a test to look into.</summary>
     internal IReadOnlyList<IMaintainedState> States => _states;
 
+    /// <summary>The result's rows by key, for a test to weigh.</summary>
+    internal ResultState Result => _result;
+
     /// <summary>The result's key columns: positions in the output.</summary>
     public int[] Key
     {
@@ -293,6 +296,10 @@ internal sealed class ResultState
     private ColumnarBatch? _nowColumns;
     private ColumnarBatch? _wasColumns;
 
+    // Each key's array and list of rows in the key index, at their size (F223): kept as keys come and
+    // go and lists grow, so that Bytes does not walk the index.
+    private long _keyBytes;
+
     public ResultState(IReadOnlyList<ChalkType> types)
     {
         _types = types;
@@ -312,13 +319,23 @@ internal sealed class ResultState
         }
     }
 
-    public long Bytes => _rows.Bytes + (_counts.Length * sizeof(long)) + _slots.Bytes + (_byKey.Count * 64L);
+    /// <summary>
+    /// The rows, their counts and identities, the key index, and the buffers kept from one update to
+    /// the next: what the last update wrote, and room for the keys it touched (F223).
+    /// </summary>
+    public long Bytes =>
+        _rows.Bytes + HeapSizes.Array(_counts.Length, sizeof(long)) + _slots.Bytes
+        + HeapSizes.Of(_byKey, HeapSizes.ReferenceEntry) + _keyBytes
+        + HeapSizes.Of(_before, HeapSizes.ReferenceEntry) + HeapSizes.Of(_removed, sizeof(int))
+        + (_now?.Bytes ?? 0) + (_was?.Bytes ?? 0)
+        + (_nowColumns is null ? 0 : HeapSizes.Batch(_types.Count)) + (_wasColumns is null ? 0 : HeapSizes.Batch(_types.Count));
 
     public void Restart()
     {
         _rows.Clear();
         _slots.Clear();
         _byKey.Clear();
+        _keyBytes = 0;
         _before.Clear();
         _removed.Clear();
     }
@@ -328,7 +345,6 @@ internal sealed class ResultState
         _before.Clear();
         _removed.Clear();
     }
-
     /// <summary>Applies one batch of the root's changes: rows, then the weight.</summary>
     public void Add(ColumnarBatch batch)
     {
@@ -363,6 +379,7 @@ internal sealed class ResultState
                     if (list.Count == 0)
                     {
                         members.Remove(_keyEncoder.Span);
+                        _keyBytes -= KeyBytes(_keyEncoder.Span.Length, list.Capacity);
                     }
 
                     // Kept until the update ends: the view reads the row the key held before.
@@ -392,11 +409,17 @@ internal sealed class ResultState
             {
                 held = [];
                 byKey[_keyEncoder.Span] = held;
+                _keyBytes += KeyBytes(_keyEncoder.Span.Length, 0);
             }
 
+            var capacity = held.Capacity;
             held.Add(slot);
+            _keyBytes += HeapSizes.Array(held.Capacity, sizeof(int)) - HeapSizes.Array(capacity, sizeof(int));
         }
     }
+
+    /// <summary>A key of the index: its array, and its list of rows with room for <paramref name="capacity"/>.</summary>
+    private static long KeyBytes(int length, int capacity) => HeapSizes.Array(length, 1) + HeapSizes.ListOf(capacity, sizeof(int));
 
     /// <summary>
     /// Ends the update: checks each changed key holds at most one row, once, and writes the changes —

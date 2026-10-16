@@ -57,6 +57,7 @@ internal sealed class AsOfState : IMaintainedState
         Spare = new RowStore(rightTypes);
         LeftChanges = new ChangeSet(leftTypes);
         Output = new ChangeWriter(outputTypes, batchSize);
+        Arrived = new ChangeWriter(rightTypes, batchSize);
     }
 
     public int LeftWidth { get; }
@@ -95,6 +96,12 @@ internal sealed class AsOfState : IMaintainedState
 
     public ChangeWriter Output { get; }
 
+    /// <summary>The right changes of this update, in the order they arrived: never added up, since a rewrite gives every row again and its order is the table's.</summary>
+    public ChangeWriter Arrived { get; }
+
+    /// <summary>The keys this update's right rows reached.</summary>
+    public HashSet<byte[]> Reached { get; } = new(ByteKeys.Instance);
+
     public KeyEncoder Encoder { get; } = new();
 
     /// <summary>The left rows held: how many times, by key, and the right slot each matches, or -1.</summary>
@@ -115,10 +122,19 @@ internal sealed class AsOfState : IMaintainedState
     /// <summary>The arrival number the next right row takes.</summary>
     public long NextArrival { get; set; }
 
+    /// <summary>Every run of <see cref="Runs"/> at its size: its key, itself, and its list of rows (F223).</summary>
+    public long RunBytes { get; set; }
+
+    /// <summary>
+    /// The left and right rows, the runs and the left rows' buckets, and what an update's changes pass
+    /// through, at their size (F223).
+    /// </summary>
     public long Bytes =>
-        Left.Bytes + Right.Bytes + Spare.Bytes + LeftChanges.Bytes + Output.Bytes
-        + ((LeftCounts.Length * sizeof(long)) + (LeftMatches.Length * sizeof(int)))
-        + LeftSlots.Bytes + LeftBuckets.Bytes + (Runs.Count * 64L) + (Right.Count * 16L);
+        Left.Bytes + Right.Bytes + Spare.Bytes + LeftChanges.Bytes + Output.Bytes + Arrived.Bytes
+        + HeapSizes.Array(LeftCounts.Length, sizeof(long)) + HeapSizes.Array(LeftMatches.Length, sizeof(int))
+        + LeftSlots.Bytes + LeftBuckets.Bytes
+        + HeapSizes.Of(Runs, HeapSizes.ReferenceEntry) + HeapSizes.Of(SpareRuns, HeapSizes.ReferenceEntry) + RunBytes
+        + HeapSizes.DictionaryOf(Reached.EnsureCapacity(0), 16);
 
     public void Discard()
     {
@@ -131,6 +147,9 @@ internal sealed class AsOfState : IMaintainedState
         LeftBuckets.Clear();
         Runs.Clear();
         SpareRuns.Clear();
+        RunBytes = 0;
+        Arrived.Clear();
+        Reached.Clear();
         NextArrival = 0;
     }
 
@@ -143,6 +162,12 @@ internal sealed class AsOfState : IMaintainedState
     /// <summary>One key's right rows, ordered by time and then by arrival.</summary>
     internal sealed class Run(byte[] key)
     {
+        /// <summary>A run's own object, and its list before it holds a row.</summary>
+        public const int Empty = 32 + HeapSizes.List;
+
+        /// <summary>A row's place in a run's list: its slot and its arrival.</summary>
+        public const int Entry = 16;
+
         /// <summary>The key, as the dictionary of runs holds it.</summary>
         public byte[] Key { get; } = key;
 
@@ -185,8 +210,6 @@ internal sealed class AsOfChanges : MaintainedOperator
     private readonly AsOfState _state;
     private readonly IBatchOperator _left;
     private readonly IBatchOperator _right;
-    private readonly ChangeWriter _arrived;
-    private readonly HashSet<byte[]> _reached = new(ByteKeys.Instance);
     private readonly KeyEncoder _first = new();
     private readonly KeyEncoder _second = new();
     private readonly int[] _rightColumns;
@@ -207,7 +230,6 @@ internal sealed class AsOfChanges : MaintainedOperator
         _state = state;
         _left = left;
         _right = right;
-        _arrived = new ChangeWriter(state.Right.Types, context.Settings.BatchSize);
         _rightColumns = [.. Enumerable.Range(0, state.RightWidth)];
     }
 
@@ -224,14 +246,15 @@ internal sealed class AsOfChanges : MaintainedOperator
 
         // The right changes in the order they arrived: never added up, since a rewrite gives every row
         // again and its order is the table's.
-        _arrived.Clear();
+        var arrived = state.Arrived;
+        arrived.Clear();
         await foreach (var batch in _right.ExecuteAsync(ct).ConfigureAwait(false))
         {
             var columns = batch.Columns;
             for (var i = 0; i < batch.Count; i++)
             {
                 var row = batch.RowAt(i);
-                _arrived.Write(columns, row, Weights.Of(batch, row));
+                arrived.Write(columns, row, Weights.Of(batch, row));
             }
         }
 
@@ -253,10 +276,12 @@ internal sealed class AsOfChanges : MaintainedOperator
     private void Append()
     {
         var state = _state;
-        _reached.Clear();
-        for (var b = 0; b < _arrived.BatchCount; b++)
+        var reached = state.Reached;
+        var bytes = 0L;
+        reached.Clear();
+        for (var b = 0; b < state.Arrived.BatchCount; b++)
         {
-            var batch = _arrived.Batch(b);
+            var batch = state.Arrived.Batch(b);
             var columns = batch.Columns;
             for (var row = 0; row < batch.RowCount; row++)
             {
@@ -269,15 +294,16 @@ internal sealed class AsOfChanges : MaintainedOperator
 
                 for (var copy = 0; copy < weight; copy++)
                 {
-                    if (Place(state.Right, state.Runs, columns, row) is { } key)
+                    if (Place(state.Right, state.Runs, columns, row, ref bytes) is { } key)
                     {
-                        _reached.Add(key);
+                        reached.Add(key);
                     }
                 }
             }
         }
 
-        foreach (var key in _reached)
+        state.RunBytes += bytes;
+        foreach (var key in reached)
         {
             if (state.LeftBuckets.Find(key) is { } bucket && state.Runs.TryGetValue(key, out var run))
             {
@@ -297,19 +323,20 @@ internal sealed class AsOfChanges : MaintainedOperator
             ? state.Spare = new RowStore(state.Right.Types, Math.Max(state.Right.Count, _rebuiltSize))
             : state.Spare;
         var runs = state.SpareRuns;
+        var bytes = 0L;
         fresh.Clear();
         runs.Clear();
         state.NextArrival = 0;
-        for (var b = 0; b < _arrived.BatchCount; b++)
+        for (var b = 0; b < state.Arrived.BatchCount; b++)
         {
-            var batch = _arrived.Batch(b);
+            var batch = state.Arrived.Batch(b);
             var columns = batch.Columns;
             for (var row = 0; row < batch.RowCount; row++)
             {
                 var weight = Weights.Of(batch, row);
                 for (var copy = 0; copy < weight; copy++)
                 {
-                    Place(fresh, runs, columns, row);
+                    Place(fresh, runs, columns, row, ref bytes);
                 }
             }
         }
@@ -332,10 +359,15 @@ internal sealed class AsOfChanges : MaintainedOperator
         state.SpareRuns = state.Runs;
         state.SpareRuns.Clear();
         state.Runs = runs;
+        state.RunBytes = bytes;
     }
 
-    /// <summary>Keeps a right row, unless its key or time is NULL, and returns its key; null for a row kept nowhere.</summary>
-    private byte[]? Place(RowStore store, Dictionary<byte[], AsOfState.Run> runs, ReadOnlySpan<ColumnView> columns, int row)
+    /// <summary>
+    /// Keeps a right row, unless its key or time is NULL, and returns its key; null for a row kept
+    /// nowhere. Adds to <paramref name="bytes"/> what the runs grew by.
+    /// </summary>
+    private byte[]? Place(
+        RowStore store, Dictionary<byte[], AsOfState.Run> runs, ReadOnlySpan<ColumnView> columns, int row, ref long bytes)
     {
         var state = _state;
         if (!columns[state.RightTime].IsValid(row) || !state.RightKeys.Encode(state.Encoder, columns, row, normalise: true))
@@ -348,6 +380,7 @@ internal sealed class AsOfChanges : MaintainedOperator
             var key = state.Encoder.Span.ToArray();
             run = new AsOfState.Run(key);
             runs[key] = run;
+            bytes += HeapSizes.Array(key.Length, 1) + AsOfState.Run.Empty;
         }
 
         var slot = store.Add(columns[..state.RightWidth], row);
@@ -360,7 +393,9 @@ internal sealed class AsOfChanges : MaintainedOperator
         var at = rows.Count > 0 && state.Times.Compare(store.Column(state.RightTime).Lane(rows[^1].Slot), time) > 0
             ? Upper(rows, store, time)
             : rows.Count;
+        var capacity = rows.Capacity;
         rows.Insert(at, (slot, arrival));
+        bytes += HeapSizes.Array(rows.Capacity, AsOfState.Run.Entry) - HeapSizes.Array(capacity, AsOfState.Run.Entry);
         return run.Key;
     }
 

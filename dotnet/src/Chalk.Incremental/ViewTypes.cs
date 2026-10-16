@@ -192,9 +192,9 @@ public sealed class ViewOptions<TKey, TRow>
     public ViewRowHash? RowHash { get; init; }
 
     /// <summary>
-    /// The most the view may hold, in bytes: its keyed table, and what it keeps of its reads of
-    /// databases (D340). An update that would hold more fails, and the view keeps its last epoch.
-    /// 64 MB by default.
+    /// The most the view may hold, in bytes: its keyed table, what it keeps of its reads of databases
+    /// (D340), and what incremental maintenance keeps, as <c>StateBytes</c> estimates it. An update that
+    /// would hold more fails, and the view keeps its last epoch. 64 MB by default.
     /// </summary>
     public long StateBudget { get; init; } = 64L << 20;
 

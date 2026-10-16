@@ -37,7 +37,8 @@ internal sealed class ChangeSet
     {
         get
         {
-            var bytes = ((long)_weights.Length * sizeof(long)) + _index.Bytes;
+            var bytes = HeapSizes.Array(_weights.Length, sizeof(long)) + _index.Bytes
+                + HeapSizes.Array(_columns.Length, HeapSizes.Reference) + HeapSizes.Array(_views.Length, HeapSizes.ColumnView);
             foreach (var column in _columns)
             {
                 bytes += column.Bytes;
