@@ -27,6 +27,9 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
     private const string ByDesk =
         "SELECT b.desk, SUM(f.qty) AS qty FROM fills AS f JOIN books AS b ON b.id = f.book GROUP BY b.desk";
 
+    private const string FillsByDesk =
+        "SELECT b.desk, COUNT(*) AS fills FROM fills AS f JOIN books AS b ON b.id = f.book GROUP BY b.desk";
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>
@@ -407,6 +410,246 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         Assert.Equal(1, desk.Engine.BackgroundPlanningRuns);
     }
 
+    // ---- PlanAsync ----
+
+    /// <summary>
+    /// <c>PlanAsync</c> swaps the background's plan in without a refresh: the statement runs the plan
+    /// a prepare makes now, and the rows, the epoch and the version stay as they were.
+    /// </summary>
+    [Theory]
+    [InlineData(ExecutionEngine.Vectorised)]
+    [InlineData(ExecutionEngine.Reference)]
+    public async Task PlanAsync_swaps_the_plans_in_without_a_refresh(ExecutionEngine executor)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync(new GatedPlanner(sidecar.CreatePlanner()), [], [], executor);
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var planned = statement.PlanDigest;
+        await desk.LoadAsync(Fills(5_000, books: 50), Books(50), deferred: true);
+        var epoch = desk.Engine.Catalog.Epoch;
+        var version = desk.Engine.Version;
+        var rowsBefore = await RowsAsync(desk.Engine, statement);
+
+        await desk.Engine.PlanAsync(Ct);
+
+        var prepared = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        Assert.NotEqual(planned, statement.PlanDigest);
+        Assert.Equal(prepared.PlanDigest, statement.PlanDigest);
+        Assert.Equal(prepared.LogicalDigest, statement.LogicalDigest);
+        Assert.False(statement.IsStale);
+        Assert.Equal(epoch, desk.Engine.Catalog.Epoch);
+        Assert.Equal(version, desk.Engine.Version);
+        Assert.Equal(rowsBefore, await RowsAsync(desk.Engine, statement));
+    }
+
+    /// <summary>
+    /// The statistics a run computed reach the planner at once, and enter the catalog only at the next
+    /// refresh, since <c>PlanAsync</c> publishes nothing.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_leaves_the_statistics_to_the_next_refresh()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync(new GatedPlanner(sidecar.CreatePlanner()), Fills(100, books: 10), Books(10));
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", Fills(50, books: 10, qty: 99_999)).DeferPlanning(), Ct);
+
+        await desk.Engine.PlanAsync(Ct);
+        Assert.Equal(7L, QtyMax(desk.Engine));
+        Assert.True(desk.Engine.BackgroundPlanningStaged);
+
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        Assert.Equal(99_999L, QtyMax(desk.Engine));
+        Assert.False(desk.Engine.BackgroundPlanningStaged);
+    }
+
+    /// <summary>
+    /// A run already going when <c>PlanAsync</c> is called began before it, so it waits for the run
+    /// that follows, and then takes in what both made.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_waits_for_a_run_that_begins_after_it()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var planner = new GatedPlanner(sidecar.CreatePlanner());
+        await using var desk = await DeskAsync(planner, [], []);
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var planned = statement.PlanDigest;
+        planner.Hold();
+        await desk.LoadAsync(Fills(5_000, books: 50), Books(50), deferred: true);
+        await planner.Arrived.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+
+        var planning = desk.Engine.PlanAsync(Ct);
+        Assert.False(planning.IsCompleted);
+        Assert.Equal(1, desk.Engine.BackgroundPlanningRuns);
+
+        planner.Release();
+        await planning.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        Assert.Equal(2, desk.Engine.BackgroundPlanningRuns);
+        Assert.NotEqual(planned, statement.PlanDigest);
+    }
+
+    /// <summary>
+    /// Without a refresh that deferred, nothing plans a held statement again; <c>PlanAsync</c> does,
+    /// on the numbers the planner already holds.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_plans_again_after_refreshes_that_did_not_defer()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync(new GatedPlanner(sidecar.CreatePlanner()), [], []);
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var planned = statement.PlanDigest;
+        await desk.LoadAsync(Fills(5_000, books: 50), Books(50), deferred: false);
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(0, desk.Engine.BackgroundPlanningRuns);
+        Assert.Equal(planned, statement.PlanDigest);
+
+        await desk.Engine.PlanAsync(Ct);
+
+        Assert.Equal(1, desk.Engine.BackgroundPlanningRuns);
+        Assert.NotEqual(planned, statement.PlanDigest);
+        Assert.Equal((await desk.Engine.PrepareAsync(ByDesk, ct: Ct)).PlanDigest, statement.PlanDigest);
+    }
+
+    /// <summary>
+    /// A run that fails faults <c>PlanAsync</c> with what failed, and the plans stay as they were. A
+    /// call once the planner is back swaps the new plan in.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_faults_when_the_run_fails_and_keeps_the_plans()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var planner = new GatedPlanner(sidecar.CreatePlanner());
+        await using var desk = await DeskAsync(planner, [], []);
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var planned = statement.PlanDigest;
+        planner.FailNext(new IOException("the planner went away"));
+        await desk.LoadAsync(Fills(5_000, books: 50), Books(50), deferred: true);
+        await desk.Engine.BackgroundPlanningSettledAsync();
+
+        var away = new IOException("the planner is still away");
+        planner.FailNext(away);
+        var failure = await Assert.ThrowsAsync<IOException>(() => desk.Engine.PlanAsync(Ct));
+
+        Assert.Same(away, failure);
+        Assert.Equal(planned, statement.PlanDigest);
+        await desk.Engine.PlanAsync(Ct);
+        Assert.NotEqual(planned, statement.PlanDigest);
+    }
+
+    /// <summary>
+    /// A statement the planner cannot plan again faults <c>PlanAsync</c> with the planner's failure and
+    /// keeps its plan; another statement's new plan swaps in even so.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_faults_for_a_statement_it_cannot_plan_and_swaps_the_others_in()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var planner = new GatedPlanner(sidecar.CreatePlanner());
+        await using var desk = await DeskAsync(planner, [], []);
+        var failing = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var other = await desk.Engine.PrepareAsync(FillsByDesk, ct: Ct);
+        var (failingPlan, otherPlan) = (failing.PlanDigest, other.PlanDigest);
+        await desk.LoadAsync(Fills(5_000, books: 50), Books(50), deferred: false);
+
+        var refused = new InvalidOperationException("the planner refused it");
+        planner.FailPlansOf("SUM(f.qty)", refused);
+        var planning = desk.Engine.PlanAsync(Ct);
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => planning);
+
+        Assert.Same(refused, failure);
+        Assert.Same(refused, Assert.Single(planning.Exception!.InnerExceptions));
+        Assert.Equal(1, desk.Engine.LastBackgroundPlans!.Failed);
+        Assert.Equal(failingPlan, failing.PlanDigest);
+        Assert.NotEqual(otherPlan, other.PlanDigest);
+
+        planner.FailPlansOf("SUM(f.qty)", null);
+        await desk.Engine.PlanAsync(Ct);
+        Assert.NotEqual(failingPlan, failing.PlanDigest);
+    }
+
+    /// <summary>
+    /// A standing view moves to the plan <c>PlanAsync</c> swapped in at its first update over a later
+    /// epoch, as after a refresh that swaps one in: an update at the epoch it holds does nothing.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_moves_a_view_at_its_first_update_after_a_refresh()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync(new GatedPlanner(sidecar.CreatePlanner()), [], []);
+        await using var view = await desk.Engine.MaterializeAsync(ByDesk, DeskOptions(ViewMaintenance.Incremental), Ct);
+        var sink = new Recorder();
+        var cursor = ViewCursor.Start;
+        var planned = view.Statement.PlanDigest;
+        await desk.LoadAsync(Fills(3_000, books: 3), Books(3), deferred: true);
+        await view.UpdateAsync(Ct);
+        Assert.Equal(DrainOutcome.Complete, view.Drain(ref cursor, sink));
+        sink.Calls.Clear();
+
+        await desk.Engine.PlanAsync(Ct);
+        Assert.NotEqual(planned, view.Statement.PlanDigest);
+        Assert.False(view.MaintainsCurrentPlan);
+        await view.UpdateAsync(Ct);
+        Assert.False(view.MaintainsCurrentPlan);
+
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        await view.UpdateAsync(Ct);
+        Assert.True(view.MaintainsCurrentPlan);
+        Assert.Equal(DrainOutcome.Complete, view.Drain(ref cursor, sink));
+        Assert.DoesNotContain("reset", sink.Calls);
+        Assert.Equal(await RowsAsync(desk.Engine, view.Statement), sink.Rows);
+    }
+
+    /// <summary>
+    /// Cancelling <c>PlanAsync</c> stops the wait and not the runs: what they planned swaps in at the
+    /// next refresh.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_cancelled_leaves_the_runs_to_finish()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var planner = new GatedPlanner(sidecar.CreatePlanner());
+        await using var desk = await DeskAsync(planner, [], []);
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var planned = statement.PlanDigest;
+        planner.Hold();
+        await desk.LoadAsync(Fills(5_000, books: 50), Books(50), deferred: true);
+        await planner.Arrived.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+
+        var planning = desk.Engine.PlanAsync(cancel.Token);
+        await cancel.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => planning);
+        Assert.True(planning.IsCanceled);
+
+        planner.Release();
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(planned, statement.PlanDigest);
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        Assert.NotEqual(planned, statement.PlanDigest);
+    }
+
+    /// <summary>
+    /// An engine disposed while <c>PlanAsync</c> waits on its run ends the wait with
+    /// <see cref="ObjectDisposedException"/>, and a call after disposal throws it too.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_on_a_disposed_engine_throws()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var planner = new GatedPlanner(sidecar.CreatePlanner());
+        var desk = await DeskAsync(planner, [], []);
+        planner.Hold();
+        await desk.LoadAsync(Fills(5_000, books: 50), Books(50), deferred: true);
+        await planner.Arrived.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+
+        var planning = desk.Engine.PlanAsync(Ct);
+        await desk.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => planning);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => desk.Engine.PlanAsync(Ct));
+    }
+
     // ---- the parts ----
 
     private static IReadOnlyList<Fill> Fills(int count, int books, long? qty = null) =>
@@ -543,6 +786,7 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         private TaskCompletionSource? _held;
         private TaskCompletionSource _arrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private Exception? _failNext;
+        private (string Sql, Exception Failure)? _failPlans;
         private int _plans;
         private int _unchanged;
 
@@ -563,6 +807,15 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         public void Release() => Interlocked.Exchange(ref _held, null)?.TrySetResult();
 
         public void FailNext(Exception failure) => Volatile.Write(ref _failNext, failure);
+
+        /// <summary>Fails every plan asked for a statement whose SQL holds <paramref name="sql"/>, until given null.</summary>
+        public void FailPlansOf(string sql, Exception? failure)
+        {
+            lock (this)
+            {
+                _failPlans = failure is null ? null : (sql, failure);
+            }
+        }
 
         public bool AcceptsCatalogDeltas => inner.AcceptsCatalogDeltas;
 
@@ -590,6 +843,14 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         public async ValueTask<PlanResult> PlanAsync(PlanRequest request, CancellationToken ct = default)
         {
             Interlocked.Increment(ref _plans);
+            lock (this)
+            {
+                if (_failPlans is { } fail && request.Sql.Contains(fail.Sql, StringComparison.Ordinal))
+                {
+                    throw fail.Failure;
+                }
+            }
+
             var result = await inner.PlanAsync(request, ct).ConfigureAwait(false);
             if (result.Unchanged)
             {

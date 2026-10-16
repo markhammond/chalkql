@@ -276,8 +276,9 @@ public sealed class RefreshBuilder
     /// </para>
     /// <para>
     /// What the run produced takes effect at the next refresh, deferred or not, under its lock: the
-    /// statistics enter the catalog and the plans swap in. A prepared statement then runs its new plan,
-    /// and reports its <see cref="PreparedQuery.PlanDigest"/> and plan text; its
+    /// statistics enter the catalog and the plans swap in. <see cref="ChalkEngine.PlanAsync"/> swaps
+    /// the plans in sooner, once a run it waits for is over. A prepared statement then runs its new
+    /// plan, and reports its <see cref="PreparedQuery.PlanDigest"/> and plan text; its
     /// <see cref="PreparedQuery.LogicalDigest"/> is the same, and so are its results. An execution
     /// already running keeps the plan it started with. A statement prepared through an extension
     /// takes a new plan only when the extension checks it, as entitlements do: the new plan must pass

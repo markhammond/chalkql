@@ -133,6 +133,41 @@ public sealed class PlanningObserverTests(SharedSidecar sidecar) : IDisposable
         Assert.Equal(view.Statement.PlanDigest, update.PlanDigest);
     }
 
+    /// <summary>
+    /// <c>PlanAsync</c> tells of the plans it takes in at the epoch and version current, which it does
+    /// not move, and of no statistics: those enter with the next refresh, which tells of them.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_tells_of_the_plans_it_takes_in_at_the_current_version()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var observer = new Recorder();
+        await using var desk = await DeskAsync(observer);
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var planned = statement.PlanDigest;
+        await desk.LoadAsync(Fills(3_000, books: 3), Books(3));
+        var epoch = desk.Engine.Catalog.Epoch;
+        var version = desk.Engine.Version;
+
+        await desk.Engine.PlanAsync(Ct);
+
+        var takenIn = Assert.Single(observer.TakenIn);
+        Assert.Equal(epoch, takenIn.Epoch);
+        Assert.Equal(version, takenIn.Version);
+        Assert.Equal(1, takenIn.PlansSwappedIn);
+        Assert.Equal(0, takenIn.StatisticsTables);
+        Assert.NotEqual(planned, statement.PlanDigest);
+        Assert.Equal(epoch, desk.Engine.Catalog.Epoch);
+
+        var next = await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+
+        Assert.Equal(2, observer.TakenIn.Count);
+        var refresh = observer.TakenIn[^1];
+        Assert.Equal(next, refresh.Epoch);
+        Assert.Equal(0, refresh.PlansSwappedIn);
+        Assert.True(refresh.StatisticsTables > 0);
+    }
+
     [Fact]
     public async Task A_statement_planned_again_to_its_own_plan_is_observed_unchanged()
     {
