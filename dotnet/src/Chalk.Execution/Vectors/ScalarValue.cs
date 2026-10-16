@@ -32,7 +32,7 @@ internal sealed class ScalarValue
 
     public string? Text { get; init; }
 
-    /// <summary>BINARY payload, the 16 UUID bytes, or the 16 unscaled DECIMAL bytes.</summary>
+    /// <summary>BINARY payload, the 16 UUID bytes, the 16 unscaled DECIMAL bytes, or a STRING's UTF-8 bytes.</summary>
     public byte[]? Bytes { get; init; }
 
     /// <summary>A LIST constant's elements, in order (D58). Empty for every other kind.</summary>
@@ -65,10 +65,13 @@ internal sealed class ScalarValue
                 new ScalarValue { Type = type, Integer = column.Lanes<long>()[row] },
             TypeKind.Fp32 => new ScalarValue { Type = type, Single = column.Lanes<float>()[row] },
             TypeKind.Fp64 => new ScalarValue { Type = type, Double = column.Lanes<double>()[row] },
+            // A STRING scalar carries its bytes beside its text, as a literal's does: the bytes are
+            // what an output column is written from (F239).
             TypeKind.String => new ScalarValue
             {
                 Type = type,
                 Text = System.Text.Encoding.UTF8.GetString(column.VarValue(row)),
+                Bytes = column.VarValue(row).ToArray(),
             },
             TypeKind.Binary or TypeKind.Uuid or TypeKind.Decimal =>
                 new ScalarValue { Type = type, Bytes = BytesOf(column, row, type) },

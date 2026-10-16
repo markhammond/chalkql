@@ -53,7 +53,34 @@ public sealed class ConstantExpressionTests(SharedSidecar sidecar) : IClassFixtu
         Assert.Equal(1, _calls);
     }
 
-    private async Task<ChalkEngine> CreateEngineAsync() =>
+    /// <summary>
+    /// A string computed once keeps its text in the result, with either executor, in every batch
+    /// (F239). The vectorised executor kept the text of a string it computed once but not the bytes an
+    /// output column is written from, so the column came out empty while the reference executor gave
+    /// the text.
+    /// </summary>
+    [Theory]
+    [InlineData(ExecutionEngine.Vectorised)]
+    [InlineData(ExecutionEngine.Reference)]
+    public async Task A_string_computed_once_keeps_its_text(ExecutionEngine executor)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var engine = await CreateEngineAsync(executor);
+        var prepared = await engine.PrepareAsync(
+            "SELECT CAST(? AS VARCHAR) || 'x' AS joined, UPPER(CAST(? AS VARCHAR)) AS shouted FROM items WHERE id < 5");
+
+        var rows = new List<string>();
+        await using var execution = await engine.ExecuteAsync(prepared, (IReadOnlyList<object?>)["abc", "abc"]);
+        await foreach (var batch in execution.Batches)
+        {
+            rows.AddRange(BatchReader.ToRows(batch).Select(row => string.Join("|", row)));
+            batch.Dispose();
+        }
+
+        Assert.Equal(Enumerable.Repeat("abcx|ABC", 5), rows);
+    }
+
+    private async Task<ChalkEngine> CreateEngineAsync(ExecutionEngine executor = ExecutionEngine.Vectorised) =>
         await ChalkEngine.CreateAsync(new ChalkEngineOptions
         {
             ContextId = "constant-expressions",
@@ -67,7 +94,7 @@ public sealed class ConstantExpressionTests(SharedSidecar sidecar) : IClassFixtu
             ],
             Functions = registry => registry.AddScalar<int, int>("counted", Count),
             Planner = sidecar.CreatePlanner(),
-            Execution = new ExecutionOptions { BatchSize = 2 },
+            Execution = new ExecutionOptions { BatchSize = 2, Engine = executor },
         });
 
     private int Count(int x)

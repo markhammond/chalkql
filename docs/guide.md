@@ -1453,9 +1453,10 @@ memory budget, `ArenaOptions.MaxBytes`.
 
 ### The current time
 
-`CURRENT_TIMESTAMP`, `LOCALTIMESTAMP` and `CURRENT_DATE` read one instant for each
-execution. It is taken from `ExecutionOptions.TimeProvider` when the execution starts, so
-every row and every operator see the same value, and the next execution reads its own:
+`CURRENT_TIMESTAMP`, `LOCALTIMESTAMP`, `CURRENT_DATE`, `CURRENT_TIME` and `LOCALTIME` read
+one instant for each execution. It is taken from `ExecutionOptions.TimeProvider` when the
+execution starts, so every row and every operator see the same value, and the next
+execution reads its own:
 
 ```sql
 SELECT symbol, price FROM trades
@@ -1463,10 +1464,27 @@ WHERE ts >= CURRENT_TIMESTAMP - INTERVAL '5' MINUTE
 ```
 
 ChalkQL has no session time zone, so the instant is read as a UTC wall clock.
-`CURRENT_TIMESTAMP` and `LOCALTIMESTAMP` are the same `TIMESTAMP`, and `CURRENT_DATE` is
-the date in UTC. A timestamp has precision 6, microseconds, unless you write one, up to
-9: `CURRENT_TIMESTAMP(9)`. A remote source is never sent the current time, so it cannot
-use a "now" of its own. A comparison with it is made in the host.
+`CURRENT_TIMESTAMP` and `LOCALTIMESTAMP` are the same `TIMESTAMP`, `CURRENT_DATE` is the
+date in UTC, and `CURRENT_TIME` and `LOCALTIME` are the same `TIME`, the timestamp's time
+of day. A timestamp or a time has precision 6, microseconds, unless you write one: up to 9
+for a timestamp, `CURRENT_TIMESTAMP(9)`, and up to 6 for a time, `CURRENT_TIME(0)`. A remote
+source is never sent the current time, so it cannot use a "now" of its own. A comparison
+with it is made in the host.
+
+### Dates and times as text
+
+`CAST` of a `DATE`, a `TIME` or a `TIMESTAMP` to `VARCHAR` writes it as PostgreSQL and
+DuckDB do: `2026-01-08`, `12:34:56`, `2026-01-08 12:34:56`. A fraction of a second follows a
+point, with its trailing zeros trimmed, and a whole second has none: `12:34:56.5`, and a
+timestamp to the nanosecond where its precision holds one. Cast back, the text is the same
+value. ChalkQL writes this text whichever source holds the value, so the cast is never sent
+to a source, which would write its own: SQLite gives back the text it stored. A year
+outside 1 to 9999 has no such text, and fails the cast. A `TIMESTAMP WITH TIME ZONE` is not
+written as text yet.
+
+`CAST` of a timestamp to `TIME` gives its time of day, cut to the time's precision. A `TIME`
+with no precision written has none, so `CAST(ts AS TIME)` is a time to the second, and
+`CAST(ts AS TIME(6))` keeps the microseconds.
 
 ### DECIMAL arithmetic
 
@@ -1654,9 +1672,9 @@ await engine.RefreshAsync(epoch => epoch
 
 `ChalkEngineOptions.Clock` names the clock, and on that engine every query reads it, a view or not:
 
-- `CURRENT_TIMESTAMP`, `LOCALTIMESTAMP` and `CURRENT_DATE` read the clock as of the refresh the
-  query's tables are read at, taken in one step with them, so a query's rows and its time are of one
-  refresh. A view reads it as of the view's epoch.
+- `CURRENT_TIMESTAMP`, `LOCALTIMESTAMP`, `CURRENT_DATE`, `CURRENT_TIME` and `LOCALTIME` read the
+  clock as of the refresh the query's tables are read at, taken in one step with them, so a query's
+  rows and its time are of one refresh. A view reads it as of the view's epoch.
 - The parameter named after the clock, `@now`, is the clock when the host binds none, and the host's
   value when it binds one.
 - Before any refresh sets the clock, a query that reads the time is refused with

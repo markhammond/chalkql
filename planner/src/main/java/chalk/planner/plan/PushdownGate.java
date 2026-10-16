@@ -474,6 +474,16 @@ public final class PushdownGate {
     return false;
   }
 
+  /**
+   * F193: a date, a time or a timestamp written as text is Chalk's text, the same whichever source
+   * holds the value. A source writes its own: SQLite gives back the text it stored, SQL Server pads
+   * the fraction to its precision, PostgreSQL and DuckDB trim it. So the cast stays with Chalk.
+   */
+  private static boolean writesDatetimeAsText(RexCall cast) {
+    return org.apache.calcite.sql.type.SqlTypeUtil.isCharacter(cast.getType())
+        && org.apache.calcite.sql.type.SqlTypeUtil.isDatetime(cast.getOperands().get(0).getType());
+  }
+
   private boolean truncates(RelDataType type) {
     SqlTypeName name = type.getSqlTypeName();
     if (name == SqlTypeName.DECIMAL) {
@@ -564,7 +574,7 @@ public final class PushdownGate {
       case AND, OR, NOT, EQUALS, NOT_EQUALS, LESS_THAN, LESS_THAN_OR_EQUAL, GREATER_THAN,
               GREATER_THAN_OR_EQUAL, IS_NULL, IS_NOT_NULL ->
           predicate(call);
-      case CAST -> !truncates(call.getType());
+      case CAST -> !truncates(call.getType()) && !writesDatetimeAsText(call);
       case CASE -> supportsCase() && !truncates(call.getType());
       default -> function(call);
     };
