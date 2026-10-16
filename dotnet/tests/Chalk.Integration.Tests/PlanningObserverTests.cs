@@ -168,6 +168,34 @@ public sealed class PlanningObserverTests(SharedSidecar sidecar) : IDisposable
         Assert.True(refresh.StatisticsTables > 0);
     }
 
+    /// <summary>
+    /// A refresh that plans now orders its run after its publish itself, so the host need not await the
+    /// refresh. The plans its run takes in are told of at the refresh's epoch and version, with no
+    /// statistics: those enter with the next refresh.
+    /// </summary>
+    [Fact]
+    public async Task A_refresh_that_plans_now_tells_of_the_plans_its_run_takes_in()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var observer = new Recorder();
+        await using var desk = await DeskAsync(observer);
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var planned = statement.PlanDigest;
+
+        var refreshing = desk.Engine.RefreshAsync(
+            r => r.Replace(desk.Source, "fills", Fills(3_000, books: 3)).Replace(desk.Source, "books", Books(3)).PlanNow(),
+            Ct);
+        var takenIn = await observer.FirstTakenIn.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        var epoch = await refreshing;
+
+        Assert.Equal(epoch, takenIn.Epoch);
+        Assert.Equal(desk.Engine.Version, takenIn.Version);
+        Assert.Equal(1, takenIn.PlansSwappedIn);
+        Assert.Equal(0, takenIn.StatisticsTables);
+        Assert.NotEqual(planned, statement.PlanDigest);
+        Assert.Equal((await desk.Engine.PrepareAsync(ByDesk, ct: Ct)).PlanDigest, statement.PlanDigest);
+    }
+
     [Fact]
     public async Task A_statement_planned_again_to_its_own_plan_is_observed_unchanged()
     {
@@ -301,8 +329,13 @@ public sealed class PlanningObserverTests(SharedSidecar sidecar) : IDisposable
         private readonly ConcurrentQueue<PlanningRun> _runs = new();
         private readonly ConcurrentQueue<PlansTakenIn> _takenIn = new();
         private readonly ConcurrentQueue<StatementPrepared> _prepares = new();
+        private readonly TaskCompletionSource<PlansTakenIn> _firstTakenIn =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public bool Throws { get; init; }
+
+        /// <summary>Completes with the first take-in this observer is told of.</summary>
+        public Task<PlansTakenIn> FirstTakenIn => _firstTakenIn.Task;
 
         public IReadOnlyList<StatementJudged> Judgements => [.. _judgements];
 
@@ -335,6 +368,7 @@ public sealed class PlanningObserverTests(SharedSidecar sidecar) : IDisposable
         public void TookIn(in PlansTakenIn takenIn)
         {
             _takenIn.Enqueue(takenIn);
+            _firstTakenIn.TrySetResult(takenIn);
             Throw();
         }
 

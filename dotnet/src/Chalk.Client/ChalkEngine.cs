@@ -1325,7 +1325,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         if (deferred && builder.Scopes.Count > 0)
         {
             throw new ArgumentException(
-                "the refresh defers its planning and re-reads "
+                (builder.PlanningNow ? "the refresh plans now and re-reads " : "the refresh defers its planning and re-reads ")
                 + string.Join(", ", builder.Scopes.Select(Describe))
                 + ". A re-read describes its tables with their statistics now, which is what deferring "
                 + "leaves to the background; re-read in a refresh of its own.",
@@ -1523,8 +1523,13 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         }
 
         // After the lock: the statistics and plans this refresh left behind are worked out beside the
-        // next refreshes, not in front of them — when it left any (D351).
-        if (deferred && BackgroundPlanningDue(numbersBehind))
+        // next refreshes, not in front of them — when it left any (D351). One that plans now asks for a
+        // run whatever it left, and takes the run's plans in as soon as it ends.
+        if (builder.PlanningNow)
+        {
+            PlanNowInBackground();
+        }
+        else if (deferred && BackgroundPlanningDue(numbersBehind))
         {
             RequestBackgroundPlanning();
         }

@@ -724,6 +724,110 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         await Assert.ThrowsAsync<ObjectDisposedException>(() => desk.Engine.PlanAsync(Ct));
     }
 
+    // ---- PlanNow ----
+
+    /// <summary>
+    /// A refresh that plans now publishes its rows, and its run's plans swap in as soon as the run
+    /// ends, with no refresh after it: the statement runs the plan a prepare makes now, and the epoch
+    /// and the version stay the refresh's own. The statistics wait for the next refresh.
+    /// </summary>
+    [Theory]
+    [InlineData(ExecutionEngine.Vectorised)]
+    [InlineData(ExecutionEngine.Reference)]
+    public async Task A_refresh_that_plans_now_swaps_the_plans_in_when_its_run_ends(ExecutionEngine executor)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync(new GatedPlanner(sidecar.CreatePlanner()), [], [], executor);
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var planned = statement.PlanDigest;
+
+        var epoch = await desk.Engine.RefreshAsync(
+            r => r.Replace(desk.Source, "fills", Fills(5_000, books: 50)).Replace(desk.Source, "books", Books(50)).PlanNow(),
+            Ct);
+        var version = desk.Engine.Version;
+        await desk.Engine.PlannedNow;
+
+        var prepared = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        Assert.NotEqual(planned, statement.PlanDigest);
+        Assert.Equal(prepared.PlanDigest, statement.PlanDigest);
+        Assert.Equal(1, desk.Engine.BackgroundPlanningRuns);
+        Assert.Equal(epoch, desk.Engine.Catalog.Epoch);
+        Assert.Equal(version, desk.Engine.Version);
+        Assert.Equal(5_000, RowCount(desk.Engine, "fills"));
+        Assert.True(desk.Engine.BackgroundPlanningStaged);
+        Assert.Equal(await RowsAsync(desk.Engine, prepared), await RowsAsync(desk.Engine, statement));
+    }
+
+    /// <summary>
+    /// A refresh that plans now asks for a run whatever it moved: one that changes too little for a
+    /// deferred refresh to ask for a run still has one, which swaps in what it plans.
+    /// </summary>
+    [Fact]
+    public async Task A_refresh_that_plans_now_asks_for_a_run_whatever_it_moved()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync(new GatedPlanner(sidecar.CreatePlanner()), Fills(1_000, books: 10), Books(10));
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", Fills(1, books: 10)).DeferPlanning(), Ct);
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(0, desk.Engine.BackgroundPlanningRuns);
+
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", Fills(1, books: 10)).PlanNow(), Ct);
+        await desk.Engine.PlannedNow;
+
+        Assert.Equal(1, desk.Engine.BackgroundPlanningRuns);
+    }
+
+    /// <summary>
+    /// A refresh that plans now completes whatever its run comes to. A run that fails leaves the
+    /// plans as they were, with nothing to throw to, and a later call to <c>PlanAsync</c> swaps the
+    /// new plan in.
+    /// </summary>
+    [Fact]
+    public async Task A_refresh_that_plans_now_keeps_the_plans_when_its_run_fails()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var planner = new GatedPlanner(sidecar.CreatePlanner());
+        await using var desk = await DeskAsync(planner, [], []);
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var planned = statement.PlanDigest;
+        planner.FailNext(new IOException("the planner went away"));
+
+        var epoch = await desk.Engine.RefreshAsync(
+            r => r.Replace(desk.Source, "fills", Fills(5_000, books: 50)).Replace(desk.Source, "books", Books(50)).PlanNow(),
+            Ct);
+        await desk.Engine.PlannedNow;
+
+        Assert.Equal(epoch, desk.Engine.Catalog.Epoch);
+        Assert.Equal(5_000, RowCount(desk.Engine, "fills"));
+        Assert.Equal(planned, statement.PlanDigest);
+        Assert.True(await desk.Engine.PlanAsync(Ct));
+        Assert.NotEqual(planned, statement.PlanDigest);
+    }
+
+    /// <summary>
+    /// A refresh that plans now re-reads nothing, as one that defers does not: the two together are
+    /// refused before anything is applied, and no run is asked for.
+    /// </summary>
+    [Fact]
+    public async Task A_refresh_that_plans_now_and_re_reads_is_refused()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync(new GatedPlanner(sidecar.CreatePlanner()), Fills(10, books: 2), Books(2));
+        var epoch = desk.Engine.Catalog.Epoch;
+
+        var refused = await Assert.ThrowsAsync<ArgumentException>(
+            async () => await desk.Engine.RefreshAsync(
+                r => r.Refresh(Chalk.Sources.RefreshTarget.Source("trading"))
+                    .Append(desk.Source, "fills", Fills(1, books: 2))
+                    .PlanNow(),
+                Ct));
+
+        Assert.Contains("plans now and re-reads source 'trading'", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(epoch, desk.Engine.Catalog.Epoch);
+        Assert.Equal(10, RowCount(desk.Engine, "fills"));
+        Assert.Equal(0, desk.Engine.BackgroundPlanningRuns);
+    }
+
     // ---- the parts ----
 
     private static IReadOnlyList<Fill> Fills(int count, int books, long? qty = null) =>

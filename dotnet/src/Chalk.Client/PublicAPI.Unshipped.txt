@@ -1713,3 +1713,4 @@ Chalk.Client.StatementPrepared.Reason.get -> Chalk.Client.PrepareReason
 Chalk.Client.StatementPrepared.StatementPrepared() -> void
 Chalk.Client.ChalkEngine.PlanAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 Chalk.Client.ChalkEngine.RefreshAsync<TState>(TState state, System.Action<Chalk.Client.RefreshBuilder!, TState>! plan, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<long>
+Chalk.Client.RefreshBuilder.PlanNow() -> Chalk.Client.RefreshBuilder!

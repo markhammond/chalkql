@@ -654,31 +654,10 @@ await engine.RefreshAsync(refresh => refresh.Replace(mem, "ticks", rows).DeferPl
 await engine.PlanAsync(ct); // before serving
 ```
 
-Elsewhere, start it and carry on: its plans swap in when its run ends, awaited or not, and a
-caller that waits holds up whatever it serves. Observe the task, so that a failure is logged
-rather than left unobserved:
-
-```csharp
-_ = PlanInTheBackgroundAsync();
-
-async Task PlanInTheBackgroundAsync()
-{
-    try
-    {
-        log.LogInformation("planned again; a plan changed: {Changed}", await engine.PlanAsync(ct));
-    }
-    catch (Exception failure) when (!ct.IsCancellationRequested)
-    {
-        log.LogWarning(failure, "planning failed; the plans stay as they were");
-    }
-}
-```
-
 - **It is true** when some statement you held when you called it runs another plan once it
   returns. **It is false** when none does: nothing was due, or the planner came back to the
   plan each statement runs. The planner says so without sending the plan again, since each
   request names the plan the statement runs, and nothing swaps in.
-
 - **It waits for a run that begins after the call**, so the run sees every refresh you made
   before it. A run already going is followed by one more. Then that run's plans swap in, under
   the refresh lock, as a refresh would swap them in.
@@ -696,6 +675,26 @@ async Task PlanInTheBackgroundAsync()
   keeps its plan, the others' new plans swap in, and the task fails with the planner's error. A
   statement whose view's host said not now (`RefreshQueryPlan`) is not a failure.
 - **Cancelling** stops the wait, not the run. What the run plans swaps in at the next refresh.
+
+While you serve, ask for the same run in the refresh instead, with `PlanNow()`. Nothing waits
+for the plans, and they swap in as soon as they are made:
+
+```csharp
+await engine.RefreshAsync(refresh => refresh.Replace(mem, "ticks", rows).PlanNow(), ct);
+```
+
+- **It defers the refresh's planning**, and asks for a run whatever the refresh moved, even
+  less than a tenth. `DeferPlanning()` beside it changes nothing.
+- **The engine starts the run once the refresh has published**, so the run reads what the
+  refresh brought whether you await the refresh or not.
+- **The run's plans swap in as soon as it ends**, as `PlanAsync`'s do. Nothing more is
+  published: the epoch and `Version` stay the refresh's own, and the statistics enter the
+  catalog at the next refresh.
+- **Nothing waits for the run**, so nothing throws when it fails. A run that fails is logged
+  under `Chalk.Client.Planning`, and so is a statement it could not plan again, which the
+  planning observer is told of too. The plans stay as they were.
+- **It cannot re-read** a source or table (`refresh.Refresh(…)`), as a refresh that defers
+  cannot.
 
 #### Watching planning
 
@@ -736,7 +735,8 @@ sealed class Planning : IPlanningObserver
 - **`TookIn`** tells of each refresh that took a run's work in, once it has published: its epoch
   and version, the plans it swapped in, and the tables whose statistics entered. A view numbers
   its updates by version (`ViewUpdate.Version`), so match a view's update to its take-in by
-  version: the epoch counts apart.
+  version: the epoch counts apart. `PlanAsync`, and a refresh that plans now, are told of once
+  the run's plans are in, at the epoch and version current then, with no statistics.
 - **`Prepared`** tells of each prepare, and why: the host's own, or a view's in place of its
   statement, after a change of shape or a drift the background cannot plan.
 - **Each method does nothing** unless you override it, so implement only the ones you want.
@@ -1845,10 +1845,10 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   about what a recompute does, in that update only. An aggregate over a table, through filters and
   projections, then takes the new rows only and builds its groups again from them.
 - **Plans made in the background.** Under `DeferPlanning()`, a plan the background made swaps into the
-  view's statement at a refresh, or at `PlanAsync`. The view is maintained from it from its first
-  update after a refresh, which gives the whole result once; readers keep their place, sent only the
-  keys that differ. A new plan the view cannot maintain is declined: the plan it keeps answers the same
-  rows.
+  view's statement at a refresh, at `PlanAsync`, or as a refresh's `PlanNow()` run ends. The view is
+  maintained from it from its first update after a refresh, which gives the whole result once;
+  readers keep their place, sent only the keys that differ. A new plan the view cannot maintain is
+  declined: the plan it keeps answers the same rows.
 - **The clock.** A filter or a projection that reads the clock runs on its changes while the clock
   stands, and on every row it holds when the clock moves. A filter whose every read of the clock is a
   cut-off a column is compared with, such as `ts > CURRENT_TIMESTAMP - INTERVAL '2' HOUR`, reads again
@@ -1938,9 +1938,10 @@ left rows and its right rows by key, an aggregate its groups — so an update re
 ### Plans a view takes
 
 Under `DeferPlanning()`, a view's statement is planned again in the background once a table it reads
-has moved twofold, and the new plan is taken at a refresh, or at `PlanAsync`. An incremental view then
-builds its state again on the new plan, which makes that update its slowest. A host can say when that
-may happen and how much better a new plan must be, and be told what each update cost:
+has moved twofold, and the new plan is taken at a refresh, at `PlanAsync`, or as a refresh's
+`PlanNow()` run ends. An incremental view then builds its state again on the new plan, which makes
+that update its slowest. A host can say when that may happen and how much better a new plan must be,
+and be told what each update cost:
 
 ```csharp
 var options = new ViewOptions<Key, Row>
@@ -2028,6 +2029,16 @@ The build uses the host's spare time. Where updates run back to back, it compete
 A host can compact the tables under its views, or replace them whole, while the views go on
 serving:
 
+```csharp
+// Steady changes: appends that leave their planning to the background, with no closure.
+await engine.RefreshAsync(
+    (mem, batch), static (refresh, s) => refresh.Append(s.mem, "fills", s.batch).DeferPlanning(), ct);
+
+// The cutover: one refresh replaces the tables, and plans now.
+await engine.RefreshAsync(
+    refresh => refresh.Replace(mem, "fills", fills).Replace(mem, "books", books).PlanNow(), ct);
+```
+
 - **The views** are incremental, with `PlanSwap = ViewPlanSwap.LowJitter`.
 - **Steady changes** are appends, in refreshes that defer their planning, so each costs what it
   adds.
@@ -2035,7 +2046,9 @@ serving:
   the appends go on, and committed in the next refresh. When it keeps the old rows in their
   order, a view takes it as the rows it took out and the rows appended since its cut. One
   prepared before a whole replacement can no longer commit: dispose it.
-- **A whole replacement** goes in one refresh. Then start `PlanAsync`, without awaiting it.
+- **A whole replacement** goes in one refresh that plans now (`PlanNow()`). The engine starts its
+  run once the refresh has published, so the cutover is the same whether you await the refresh
+  or not, and whatever the views' `PlanSwap`.
 - **Every version is answered** by the plan each view runs, which gives the same rows as the new
   one. The new plan is built beside it, and takes over at a later update with the view's state
   kept and its readers in place, since the result's columns and key are the same.
