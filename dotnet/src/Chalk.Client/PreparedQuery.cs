@@ -629,7 +629,7 @@ public sealed class PreparedQuery
                     result.KnownPlanCost);
             }
 
-            current.Rebase(PlannedRows(result.PlannedOn ?? _engine.Catalog, current.TablesRead));
+            current.Rebase(PlannedRows(result.PlannedOn ?? _engine.Catalog, current.TablesRead), result.PlannedOnVersion);
             return result.Held
                 ? new PlanAgain(null, PlanAgainOutcome.Held, 0, result.PlanCost, result.KnownPlanCost)
                 : new PlanAgain(null, PlanAgainOutcome.Unchanged, current.Plan.PlanDigest, result.PlanCost, result.KnownPlanCost);
@@ -771,6 +771,9 @@ public sealed class PreparedQuery
         }
     }
 
+    /// <summary>The statistics version the running plan was made on, or last judged right on (F241).</summary>
+    internal string PlannedOnVersion => Volatile.Read(ref _state).PlannedOnVersion;
+
     /// <summary>
     /// Whether a table this statement reads has changed shape since it was planned: the half of
     /// <see cref="IsStale"/> after which the statement no longer runs, throwing
@@ -792,9 +795,10 @@ public sealed class PreparedQuery
     }
 
     /// <summary>
-    /// Runs <paramref name="next"/> from now on, when it is still current: a refresh may have changed
-    /// a table it reads since it was planned, and then neither plan runs. Called under the refresh
-    /// lock, at the refresh that takes a background run's work in. An execution already running keeps
+    /// Runs <paramref name="next"/> from now on, when it is still current, as a refresh may have
+    /// changed a table it reads since it was planned and then neither plan runs; and when it was made
+    /// on numbers no older than the running plan's. Called under the refresh lock, by the refresh or
+    /// the <c>PlanAsync</c> that takes a background run's work in. An execution already running keeps
     /// the plan it read when it began.
     /// </summary>
     internal bool Adopt(PlanState next)
@@ -804,12 +808,19 @@ public sealed class PreparedQuery
             return false;
         }
 
+        // A plan made on older numbers than the ones the running plan was last judged right on is
+        // stale (F241): a later planning kept the running plan on newer numbers, which win.
+        var current = Volatile.Read(ref _state);
+        if (next.OlderThan(current.PlannedOnVersion))
+        {
+            return false;
+        }
+
         // The plan this statement runs, planned again on newer numbers: nothing to swap in, so a view
         // kept from it keeps on, and drift is judged from the newer numbers.
-        var current = Volatile.Read(ref _state);
         if (current.Plan.PlanDigest == next.Plan.PlanDigest)
         {
-            current.Rebase(next.PlannedRows);
+            current.Rebase(next.PlannedRows, next.PlannedOnVersion);
             return false;
         }
 
@@ -1306,7 +1317,7 @@ public sealed class PreparedQuery
             CompiledPlan compiled,
             ConcurrentDictionary<string, ShapePlan> shapes,
             IReadOnlyList<TableKey>? tablesRead,
-            (TableKey Table, long Rows)[] plannedRows)
+            Basis basis)
         {
             Plan = plan;
             PlanText = planText;
@@ -1315,7 +1326,7 @@ public sealed class PreparedQuery
             Compiled = compiled;
             Shapes = shapes;
             TablesRead = tablesRead;
-            _plannedRows = plannedRows;
+            _basis = basis;
         }
 
         public Plan Plan { get; }
@@ -1342,15 +1353,29 @@ public sealed class PreparedQuery
         /// The row count of each table this plan reads, as the numbers it was made on gave it, for the
         /// tables whose count was known (D342): what drift is judged against.
         /// </summary>
-        public (TableKey Table, long Rows)[] PlannedRows => Volatile.Read(ref _plannedRows);
+        public (TableKey Table, long Rows)[] PlannedRows => Volatile.Read(ref _basis).Rows;
 
-        private (TableKey Table, long Rows)[] _plannedRows;
+        /// <summary>
+        /// The statistics version of the numbers this plan was made on, or last judged right on: what
+        /// orders it against another plan of the statement, the newest numbers winning (F241).
+        /// </summary>
+        public string PlannedOnVersion => Volatile.Read(ref _basis).Version;
+
+        private Basis _basis;
 
         /// <summary>
         /// Judges drift from <paramref name="rows"/> from now on: the planner came to this same plan on
-        /// them, so the plan is as current as one made on them would be.
+        /// them, numbered <paramref name="version"/>, so the plan is as current as one made on them
+        /// would be.
         /// </summary>
-        public void Rebase((TableKey Table, long Rows)[] rows) => Volatile.Write(ref _plannedRows, rows);
+        public void Rebase((TableKey Table, long Rows)[] rows, string version) =>
+            Volatile.Write(ref _basis, new Basis(rows, version));
+
+        /// <summary>Whether this plan was made on numbers older than <paramref name="version"/>.</summary>
+        public bool OlderThan(string version) => string.CompareOrdinal(PlannedOnVersion, version) < 0;
+
+        /// <summary>The numbers a plan was made on, replaced whole so that no reader sees half of them.</summary>
+        private sealed record Basis((TableKey Table, long Rows)[] Rows, string Version);
 
         /// <summary>
         /// The state of a plan the engine returned: <paramref name="names"/>, when the prepare asked
@@ -1380,7 +1405,7 @@ public sealed class PreparedQuery
                 compiled,
                 shapes,
                 tablesRead,
-                PlannedRows(result.PlannedOn ?? engine.Catalog, tablesRead));
+                new Basis(PlannedRows(result.PlannedOn ?? engine.Catalog, tablesRead), result.PlannedOnVersion));
         }
 
         /// <summary>The same plan with the prepare shape's compiled plan replaced, as a decoration does.</summary>
@@ -1390,7 +1415,7 @@ public sealed class PreparedQuery
             {
                 [key] = new ShapePlan(compiled, rendered),
             };
-            return new PlanState(Plan, PlanText, Stats, PlanningState, compiled, shapes, TablesRead, PlannedRows);
+            return new PlanState(Plan, PlanText, Stats, PlanningState, compiled, shapes, TablesRead, Volatile.Read(ref _basis));
         }
     }
 }

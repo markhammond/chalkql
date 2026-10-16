@@ -463,6 +463,7 @@ public sealed partial class ChalkEngine
         }
 
         var plans = new List<(PreparedQuery Statement, PreparedQuery.PlanState Plan)>();
+        var kept = new List<(PreparedQuery Statement, string Version)>();
         var failures = new List<Exception>();
         var owed = false;
         int drifted = 0, unchanged = 0, held = 0, vetoed = 0, notTheSame = 0, failed = 0;
@@ -519,9 +520,11 @@ public sealed partial class ChalkEngine
                         break;
                     case PlanVerdict.Unchanged:
                         unchanged++;
+                        kept.Add((statement, statement.PlannedOnVersion));
                         break;
                     case PlanVerdict.HeldByMargin:
                         held++;
+                        kept.Add((statement, statement.PlannedOnVersion));
                         break;
                     default:
                         notTheSame++;
@@ -549,7 +552,7 @@ public sealed partial class ChalkEngine
             }
         }
 
-        Stage(computed.Select(c => (c.Source, c.Tables)), plans);
+        Stage(computed.Select(c => (c.Source, c.Tables)), plans, kept);
         lock (_plannedGate)
         {
             _judgedStatisticsVersion = judged;
@@ -664,11 +667,14 @@ public sealed partial class ChalkEngine
 
     /// <summary>
     /// Keeps what a run produced for the next refresh, over whatever an earlier run left that no
-    /// refresh has taken in yet: per table and per statement, the later run's word stands.
+    /// refresh has taken in yet: per table, the later run's word stands; per statement, the plan made
+    /// on the newest numbers (F241). A plan staged on older numbers gives way to a newer one, and to
+    /// the plan the statement runs when <paramref name="kept"/> says a later planning came back to it.
     /// </summary>
     private void Stage(
         IEnumerable<(IDeferredStatisticsSource Source, IReadOnlyList<DeferredStatistics> Tables)> statistics,
-        List<(PreparedQuery Statement, PreparedQuery.PlanState Plan)> plans)
+        List<(PreparedQuery Statement, PreparedQuery.PlanState Plan)> plans,
+        List<(PreparedQuery Statement, string Version)> kept)
     {
         lock (_planningGate)
         {
@@ -683,7 +689,18 @@ public sealed partial class ChalkEngine
 
             foreach (var (statement, plan) in plans)
             {
-                staged.Plans[statement] = plan;
+                if (!staged.Plans.TryGetValue(statement, out var waiting) || !plan.OlderThan(waiting.PlannedOnVersion))
+                {
+                    staged.Plans[statement] = plan;
+                }
+            }
+
+            foreach (var (statement, version) in kept)
+            {
+                if (staged.Plans.TryGetValue(statement, out var waiting) && waiting.OlderThan(version))
+                {
+                    staged.Plans.Remove(statement);
+                }
             }
 
             _planned = staged.Statistics.Count == 0 && staged.Plans.Count == 0 ? null : staged;

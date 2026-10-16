@@ -410,6 +410,36 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         Assert.Equal(1, desk.Engine.BackgroundPlanningRuns);
     }
 
+    /// <summary>
+    /// A plan a run staged is dropped when a later run, on newer numbers, comes back to the plan the
+    /// statement runs: the newest numbers win. Here the tables fill, a run plans for them, and they
+    /// empty again before any refresh takes that plan in; the run that follows finds the plan for
+    /// empty tables, which the statement runs, so nothing swaps in.
+    /// </summary>
+    [Fact]
+    public async Task A_plan_made_on_older_numbers_is_dropped_when_newer_ones_keep_the_running_plan()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var planner = new GatedPlanner(sidecar.CreatePlanner());
+        await using var desk = await DeskAsync(planner, [], []);
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var planned = statement.PlanDigest;
+
+        // The first run waits at the planner while the tables empty again, so the run after it starts
+        // with no refresh between them to take the first one's plan in.
+        planner.Hold();
+        await desk.LoadAsync(Fills(5_000, books: 50), Books(50), deferred: true);
+        await planner.Arrived.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        await desk.LoadAsync([], [], deferred: true);
+        planner.Release();
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(2, desk.Engine.BackgroundPlanningRuns);
+        Assert.Equal(1, desk.Engine.LastBackgroundPlans!.Unchanged);
+
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        Assert.Equal(planned, statement.PlanDigest);
+    }
+
     // ---- PlanAsync ----
 
     /// <summary>

@@ -354,6 +354,12 @@ public sealed class PlanResult
     /// </summary>
     internal Chalk.Catalog.CatalogContext? PlannedOn { get; set; }
 
+    /// <summary>
+    /// The statistics version the plan was made on, as the request named it: what orders two plans of
+    /// one statement, the newest numbers winning (F241). Empty from a planner called directly.
+    /// </summary>
+    internal string PlannedOnVersion { get; set; } = string.Empty;
+
     public ulong PlanDigest => Plan.PlanDigest;
 
     /// <summary>

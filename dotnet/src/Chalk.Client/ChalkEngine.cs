@@ -2334,6 +2334,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         if (result.Unchanged || result.Held)
         {
             result.PlannedOn = plannedOn;
+            result.PlannedOnVersion = request.StatisticsVersion;
             return result;
         }
 
@@ -2363,6 +2364,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         }
 
         result.PlannedOn = plannedOn;
+        result.PlannedOnVersion = request.StatisticsVersion;
         return result;
     }
 
