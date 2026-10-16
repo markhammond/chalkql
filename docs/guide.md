@@ -694,7 +694,9 @@ var source = new AdoSourceBuilder("sales", SqliteFactory.Instance, connectionStr
 ```
 
 Presets ship for **SQLite**, **DuckDB**, **PostgreSQL** and **ANSI**. Each has its own
-dialect subclass, and a conformance-kit run behind it.
+dialect subclass, and a conformance-kit run behind it. SQLite has no interval type, so
+arithmetic with an interval, such as `ts + INTERVAL '6' HOUR`, is never sent to it: Chalk
+evaluates it on the rows SQLite returns. The other presets are sent it as written.
 
 You can also name any other Calcite `SqlDialect.DatabaseProduct`, such as `oracle`,
 `mssql` or `big_query`. Case does not matter, and `-` and `_` are both accepted. This
@@ -1082,12 +1084,14 @@ list gives no rows for `IN`, and all rows for `NOT IN`.
 ### What a value binds to
 
 A parameter's type comes from the statement: the column it is compared with, or the
-function it is passed to. Or you declare it, in `PrepareOptions.ParameterTypes`, one type
-for each parameter in order. A declared type holds when the statement is checked, so
-`ts >= ? - INTERVAL '60' SECOND` works with the parameter declared `TIMESTAMP(9)`. Left
-to itself, the parameter would take the interval's type, and the comparison would be
-refused. A declared type's nullability holds too. A row count in `LIMIT` or `OFFSET`
-keeps the type it has always had, and must be declared an integer type.
+function it is passed to. Beside an interval, it is the date or timestamp its arithmetic
+is compared with: in `ts >= ? - INTERVAL '60' SECOND` the parameter is `ts`'s type. With
+nothing to compare with, as in `SELECT ? - INTERVAL '1' HOUR`, it could as well be an
+interval, and is typed as one. Or you declare it, in `PrepareOptions.ParameterTypes`, one
+type for each parameter in order. A declared type holds when the statement is checked,
+over whatever the statement would give it. A declared type's nullability holds too. A
+row count in `LIMIT` or `OFFSET` keeps the type it has always had, and must be declared
+an integer type.
 
 A value binds only if the parameter's type holds it
 **exactly**. Anything else is refused by `ExecuteAsync` with a `ParameterBindingException`,

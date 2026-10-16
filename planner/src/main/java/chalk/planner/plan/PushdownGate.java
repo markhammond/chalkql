@@ -65,6 +65,9 @@ public final class PushdownGate {
   /** Whether this profile's dialect writes an {@code OFFSET} (F121); measured on first use. */
   private @org.checkerframework.checker.nullness.qual.Nullable Boolean rendersOffset;
 
+  /** This profile's dialect, built on first use: building one resolves a product reflectively. */
+  private org.apache.calcite.sql.@org.checkerframework.checker.nullness.qual.Nullable SqlDialect dialect;
+
   public PushdownGate(
       SourceCapabilities capabilities, DialectProfile profile, Set<DisabledCapability> disabled) {
     this(capabilities, profile, disabled, "");
@@ -508,6 +511,13 @@ public final class PushdownGate {
    * needs {@code supports_parameters}; a call needs its function declared and its operands pushable.
    */
   public boolean pushable(RexNode node) {
+    if (org.apache.calcite.sql.type.SqlTypeUtil.isInterval(node.getType())
+        && !dialect().supportsDataType(node.getType())) {
+      // F238: an interval the source's dialect has no type for stays in Chalk, and with it the
+      // arithmetic it stands in, whose operands are each asked this. SQLite has neither the type
+      // nor its literal, so `ts + INTERVAL '6' HOUR` sent there is a syntax error.
+      return false;
+    }
     if (node instanceof RexInputRef || node instanceof RexLiteral) {
       return true;
     }
@@ -669,10 +679,19 @@ public final class PushdownGate {
   private boolean dialectWritesAnOffset() {
     Boolean answer = rendersOffset;
     if (answer == null) {
-      answer = SourceDialects.rendersOffset(SourceDialects.of(profile));
+      answer = SourceDialects.rendersOffset(dialect());
       rendersOffset = answer;
     }
     return answer;
+  }
+
+  private org.apache.calcite.sql.SqlDialect dialect() {
+    org.apache.calcite.sql.SqlDialect built = dialect;
+    if (built == null) {
+      built = SourceDialects.of(profile);
+      dialect = built;
+    }
+    return built;
   }
 
   public boolean supportsGroupBy() {

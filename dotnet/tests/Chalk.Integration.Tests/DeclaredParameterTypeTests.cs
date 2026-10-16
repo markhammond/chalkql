@@ -1,5 +1,6 @@
 using Chalk.Catalog;
 using Chalk.Client;
+using Chalk.Ir;
 using Chalk.Sources.Poco;
 using Chalk.TestKit;
 
@@ -9,7 +10,8 @@ namespace Chalk.Integration.Tests;
 /// A type declared in <see cref="PrepareOptions.ParameterTypes"/> holds when the statement is checked
 /// (D337, F171). Before, the planner used it only to key its cache: Calcite typed a parameter from
 /// what was around it, so <c>ts &gt;= ? - INTERVAL '60' SECOND</c> was refused whatever was declared,
-/// and a host wrote <c>CAST(? AS TIMESTAMP(9))</c> instead.
+/// and a host wrote <c>CAST(? AS TIMESTAMP(9))</c> instead. Since F192 that parameter is inferred the
+/// timestamp it is compared with, and a declaration still wins over what is inferred.
 /// </summary>
 public sealed class DeclaredParameterTypeTests(SharedSidecar sidecar) : IClassFixture<SharedSidecar>
 {
@@ -17,19 +19,23 @@ public sealed class DeclaredParameterTypeTests(SharedSidecar sidecar) : IClassFi
 
     private static readonly DateTime Now = new(2026, 10, 12, 12, 0, 0);
 
+    /// <summary>
+    /// The window's parameter is inferred the timestamp it is compared with (F192), and a declared
+    /// precision holds over that.
+    /// </summary>
     [Fact]
-    public async Task A_declared_type_holds_where_inference_would_refuse_the_statement()
+    public async Task A_declared_type_holds_over_the_one_inferred()
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
         await using var engine = await CreateEngineAsync();
 
-        var inferred = await Assert.ThrowsAsync<PlanningException>(
-            async () => await engine.PrepareAsync(Window));
+        var inferred = await engine.PrepareAsync(Window);
         var prepared = await engine.PrepareAsync(
-            Window, new PrepareOptions { ParameterTypes = [ChalkType.Timestamp(9)] });
+            Window, new PrepareOptions { ParameterTypes = [ChalkType.Timestamp(6)] });
 
-        Assert.Equal(ChalkErrorCodes.SqlValidation, inferred.Code);
-        Assert.Equal([ChalkType.Timestamp(9)], prepared.ParameterTypes);
+        Assert.Equal((TypeKind.Timestamp, 9), (inferred.ParameterTypes[0].Kind, inferred.ParameterTypes[0].Precision));
+        Assert.Equal([ChalkType.Timestamp(6)], prepared.ParameterTypes);
+        Assert.Equal([0L, 1L, 2L], await IdsAsync(engine, inferred, Now));
         Assert.Equal([0L, 1L, 2L], await IdsAsync(engine, prepared, Now));
     }
 
