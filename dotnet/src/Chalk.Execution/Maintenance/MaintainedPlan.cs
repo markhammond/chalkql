@@ -190,6 +190,8 @@ internal sealed class MaintainedPlan : IAsyncDisposable
                     {
                         state.Trim();
                     }
+
+                    _result.Trim();
                 }
 
                 _restart = false;
@@ -345,6 +347,23 @@ internal sealed class ResultState
         _before.Clear();
         _removed.Clear();
     }
+
+    /// <summary>
+    /// Lets go of what an update from nothing grew: room for every key it touched, and the whole
+    /// result it wrote, which the batches it gave were copied out of.
+    /// </summary>
+    public void Trim()
+    {
+        _before.TrimExcess();
+        _removed.TrimExcess();
+        _now?.Trim();
+        _was?.Trim();
+
+        // The batches view the writers' old buffers: they go with them.
+        _nowColumns = null;
+        _wasColumns = null;
+    }
+
     /// <summary>Applies one batch of the root's changes: rows, then the weight.</summary>
     public void Add(ColumnarBatch batch)
     {

@@ -157,6 +157,9 @@ internal sealed class AsOfState : IMaintainedState
     {
         LeftChanges.Trim();
         Output.Trim();
+        Arrived.Trim();
+        Reached.Clear();
+        Reached.TrimExcess();
     }
 
     /// <summary>One key's right rows, ordered by time and then by arrival.</summary>
@@ -358,6 +361,7 @@ internal sealed class AsOfChanges : MaintainedOperator
         state.Right = fresh;
         state.SpareRuns = state.Runs;
         state.SpareRuns.Clear();
+        state.SpareRuns.TrimExcess();
         state.Runs = runs;
         state.RunBytes = bytes;
     }
