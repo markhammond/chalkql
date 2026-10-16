@@ -84,7 +84,11 @@ internal sealed class PocoChanges<T>
         }
 
         _keys = Array.ConvertAll(declaration.Keys, key => key.Compile());
+        KeyExpressions = declaration.Keys;
     }
+
+    /// <summary>The key members as they were declared, so a reader can be compiled that does not box them (D367).</summary>
+    public LambdaExpression[] KeyExpressions { get; }
 
     public PocoChangeKind Kind { get; }
 

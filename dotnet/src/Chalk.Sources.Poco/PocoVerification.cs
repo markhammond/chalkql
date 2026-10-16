@@ -25,17 +25,23 @@ internal static class PocoVerification
     /// statement about consecutive rows and the ones before it were checked when they arrived
     /// (D260 §3). Row numbers in the failure are the collection's, either way.
     /// </param>
+    /// <param name="to">
+    /// The row after the last to compare: the collection's end, or, around a row a keyed refresh put in
+    /// another's place, the row after the one that follows it (D367).
+    /// </param>
     public static void VerifyCollation<T>(
         string table,
         IReadOnlyList<T> rows,
         IReadOnlyList<(string Column, SortDirection Direction, PocoStatisticsColumn<T> Order)> keys,
-        int from = 1)
+        int from = 1,
+        int to = int.MaxValue)
     {
         var declaration = "collation ["
             + string.Join(", ", keys.Select(k => $"{k.Column} {Describe(k.Direction)}"))
             + "]";
 
-        for (var i = Math.Max(1, from); i < rows.Count; i++)
+        var end = Math.Min(rows.Count, to);
+        for (var i = Math.Max(1, from); i < end; i++)
         {
             var previous = rows[i - 1];
             var current = rows[i];

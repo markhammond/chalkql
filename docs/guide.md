@@ -1610,6 +1610,12 @@ is applied.
 | `AsOf(t => t.Ts, lateness, t => t.Key…)` | `Append` | a log read by key and time; indexed on the keys, then the time |
 | `Keyed(t => t.Key…)` | `Upsert`, `Delete`, `Replace` | rows that change by key; the key is a unique key |
 
+A keyed table's refresh finds the rows it upserts and deletes by key, and costs about what it changes
+rather than what the table holds: it copies the table's rows once, in bulk, and checks only the rows
+it changed against the table's declarations, its key unique by construction. An index whose key
+values the change kept is extended rather than built again; a delete, or a change to a row's value in
+an index's key, builds that index again. An upsert of keys the table does not hold is an append.
+
 A log's **frontier** is the greatest time it has been given. A row older than the frontier, less the
 table's lateness, refuses the whole refresh it came in, naming the row; the lateness is zero unless
 the table declares a window. `Advance` moves a frontier without a row, and a `Replace` rewrites a
@@ -1753,9 +1759,12 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   whose rows are the old ones — the same objects, in their order — with some taken out and rows
   appended after them, as a compaction of a log makes them, the rows it took out and the rows it
   appended. A replacement prepared off the refresh lock and committed later (`PrepareReplaceAsync`,
-  `Commit`) reaches the view the same way, the rows appended since its cut included. After any other
-  change — another `Replace`, an upsert, a delete — every old row out and every new row in, which costs
-  about what a recompute does, in that update only; an aggregate over a table, through filters and
+  `Commit`) reaches the view the same way, the rows appended since its cut included. A keyed table's
+  upserts and deletes give the rows they changed: a row replaced is one row out and one row in, where
+  it stands, and a new key's row is appended. The table records them, so a view a refresh behind reads
+  them from the record; one further behind finds them by comparing the table's two states. After any
+  other change, such as another `Replace`, every old row is out and every new row is in, which costs
+  about what a recompute does, in that update only. An aggregate over a table, through filters and
   projections, then takes the new rows only and builds its groups again from them.
 - **Plans made in the background.** Under `DeferPlanning()`, a plan the background made swaps into the
   view's statement at a refresh. The view is maintained from it from its next update, which gives the

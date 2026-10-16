@@ -110,6 +110,12 @@ internal sealed class PocoTableSnapshot<T>
     public IPocoIndex<T>[] Indexes { get; }
 
     /// <summary>
+    /// What the refresh of upserts and deletes that made this snapshot changed, and which snapshot it
+    /// made it from (D367); null for any other snapshot. Set by the table before any reader can see it.
+    /// </summary>
+    public PocoRecordedChange? Change { get; set; }
+
+    /// <summary>
     /// How many times the table had been rewritten when this snapshot was published: replaced, changed
     /// by key, re-read from its registration, or given a prepared replacement (design 69 §3). An append
     /// keeps the count of the snapshot it extends, so two snapshots with one count differ only by
@@ -374,3 +380,12 @@ internal sealed class PocoTableSnapshot<T>
     private bool Moved(PocoStatisticsPlan plan) =>
         Changes - _carriedChanges >= _carriedAt * plan.RefreshWhenGrownBy;
 }
+
+/// <summary>
+/// What a refresh of upserts and deletes changed in a keyed table, as the snapshot it made records it
+/// (D367): the <see cref="PocoTableSnapshot{T}.Sequence"/> of the snapshot it was made from, the positions
+/// there of the rows it took out, the positions in its own of the rows it put in their places, and where
+/// the rows it appended begin. A maintained read takes it as the table's change, rather than walking
+/// both snapshots to find it.
+/// </summary>
+internal sealed record PocoRecordedChange(long From, int[] Removed, int[] Added, int AppendedFrom);

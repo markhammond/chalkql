@@ -110,7 +110,13 @@ internal sealed class PocoSnapshotFactory<T>
     /// the one the previous snapshot held is reported when that snapshot retires, which is exactly
     /// when Chalk stopped reading it.
     /// </summary>
-    public PocoTableSnapshot<T> Appended(PocoTableSnapshot<T> previous, IReadOnlyList<T> added)
+    /// <param name="previous">The snapshot the rows are appended to.</param>
+    /// <param name="added">The rows appended.</param>
+    /// <param name="unique">
+    /// The columns of a unique key the table keeps unique by construction, which is not checked again: a
+    /// keyed table's key, whose upserts find their rows by it (D367). Null for none.
+    /// </param>
+    public PocoTableSnapshot<T> Appended(PocoTableSnapshot<T> previous, IReadOnlyList<T> added, int[]? unique = null)
     {
         var existing = previous.Rows
             ?? throw new InvalidOperationException(
@@ -118,16 +124,119 @@ internal sealed class PocoSnapshotFactory<T>
                 + "have no positions to append after.");
 
         var rows = PocoAppendedRows<T>.Extend(existing, previous.RowCount, added);
-        return Build(rows, hostCollection: null, rows, previous);
+        lock (_gate)
+        {
+            return Build(rows, hostCollection: null, rows, previous, _scratch, unique);
+        }
     }
 
     /// <summary>
-    /// A snapshot over rows Chalk assembled itself — a keyed table's rows after a refresh's upserts
-    /// and deletes (D339) — built whole, as a replacement is. No host collection is reported released
-    /// for it: the one the previous snapshot held is, when that snapshot retires.
+    /// A keyed table's next snapshot (D367): <paramref name="rows"/>, which <paramref name="change"/>
+    /// made from <paramref name="previous"/>'s, built from <paramref name="previous"/> rather than
+    /// whole.
     /// </summary>
-    public PocoTableSnapshot<T> Owned(IReadOnlyList<T> rows) =>
-        Build(rows, hostCollection: null, rows, previous: null);
+    /// <remarks>
+    /// <para>
+    /// An index is extended from the previous one where the change kept it valid: no row deleted, so no
+    /// row moved, and no replaced row's values in its key changed. It is built again where the change
+    /// did not keep it valid, and a clustered copy, which holds every column, is built again when any
+    /// row was replaced.
+    /// </para>
+    /// <para>
+    /// Only what the change touched is checked. The key the table changes by is unique by construction.
+    /// A collation is checked on either side of each replaced row and from the first appended row on,
+    /// and a deleted row leaves the rest in their order. Another unique key is checked over every row,
+    /// as before, when a row was replaced or appended.
+    /// </para>
+    /// </remarks>
+    /// <param name="previous">The snapshot the change was made from.</param>
+    /// <param name="rows">The rows it made.</param>
+    /// <param name="change">What it changed.</param>
+    /// <param name="added">Where each replaced row now stands, in <paramref name="change"/>'s order.</param>
+    /// <param name="unique">The columns of the key the table changes by.</param>
+    public PocoTableSnapshot<T> Changed(
+        PocoTableSnapshot<T> previous, IReadOnlyList<T> rows, PocoKeyedChange<T> change, int[] added, int[] unique)
+    {
+        var earlier = previous.Rows!;
+        lock (_gate)
+        {
+            var indexes = new IPocoIndex<T>[_indexes.Length + _hostIndexes.Length];
+            for (var i = 0; i < _indexes.Length; i++)
+            {
+                var plan = _indexes[i];
+                var keeps = change.Deleted.Length == 0
+                    && (change.Replaced.Length == 0
+                        || (plan.Descriptor.Kind != IndexKind.Clustered
+                            && !Array.Exists(change.Replaced, r => KeyMoved(plan, earlier[r.Position], r.Row))));
+                indexes[i] = plan.Build(
+                    _table, rows, _columns, _scratch, keeps ? previous.Indexes[i] : null, keeps ? previous.RowCount : 0);
+            }
+
+            for (var i = 0; i < _hostIndexes.Length; i++)
+            {
+                lock (_hostGate)
+                {
+                    indexes[_indexes.Length + i] = _hostIndexes[i].Make(_table, rows);
+                }
+            }
+
+            if (_verify)
+            {
+                VerifyChanged(rows, change, added, previous.RowCount - change.Deleted.Length, unique);
+            }
+
+            return new PocoTableSnapshot<T>(rows, rows, indexes, hostCollection: null);
+        }
+    }
+
+    /// <summary>Whether a replaced row's values in <paramref name="plan"/>'s key differ from the row it replaced.</summary>
+    private static bool KeyMoved(PocoIndexPlan<T> plan, T before, T after) =>
+        !PocoChanges<T>.KeyComparer.Equals(
+            Array.ConvertAll(plan.Accessors, read => read(before)),
+            Array.ConvertAll(plan.Accessors, read => read(after)));
+
+    /// <summary>The checks of D17, on what a keyed refresh touched (D367).</summary>
+    private void VerifyChanged(IReadOnlyList<T> rows, PocoKeyedChange<T> change, int[] added, int kept, int[] unique)
+    {
+        foreach (var collation in _collations)
+        {
+            var keys = collation.Keys
+                .Select(k => (_columns[k.Column].Name, k.Direction, _columns[k.Column].Statistics))
+                .ToArray();
+            foreach (var at in added)
+            {
+                PocoVerification.VerifyCollation(_table, rows, keys, from: at, to: at + 2);
+            }
+
+            if (change.Appended.Length > 0)
+            {
+                PocoVerification.VerifyCollation(_table, rows, keys, from: Math.Max(1, kept));
+            }
+        }
+
+        if (change.Replaced.Length > 0 || change.Appended.Length > 0)
+        {
+            VerifyUniqueKeys(rows, unique);
+        }
+    }
+
+    /// <summary>Every declared unique key over every row, but the one <paramref name="unique"/> names.</summary>
+    private void VerifyUniqueKeys(IReadOnlyList<T> rows, int[]? unique)
+    {
+        foreach (var key in _uniqueKeys)
+        {
+            if (unique is not null && key.Columns.Order().SequenceEqual(unique.Order()))
+            {
+                continue;
+            }
+
+            PocoVerification.VerifyUniqueKey(
+                _table,
+                rows,
+                key.Columns.Select(c => _columns[c].Name).ToArray(),
+                key.Columns.Select(c => _columns[c].LogicalAccessor).ToArray());
+        }
+    }
 
     /// <summary>
     /// A replacement prepared before its refresh (design 69 §3): a snapshot over a copy of
@@ -162,7 +271,8 @@ internal sealed class PocoSnapshotFactory<T>
         object? hostCollection,
         IReadOnlyList<T>? rows,
         PocoTableSnapshot<T>? previous,
-        PermutationIndexScratch scratch)
+        PermutationIndexScratch scratch,
+        int[]? unique = null)
     {
         // A collection that only enumerates has no positions, so it declares no collation and no
         // built-in index (§1); the one materialisation here is for verification, and it is dropped
@@ -187,7 +297,7 @@ internal sealed class PocoSnapshotFactory<T>
 
         if (_verify)
         {
-            Verify(indexed, appendedFrom);
+            Verify(indexed, appendedFrom, unique);
         }
 
         return new PocoTableSnapshot<T>(values, rows, indexes, hostCollection);
@@ -198,20 +308,8 @@ internal sealed class PocoSnapshotFactory<T>
     /// new rows do not keep is a silent wrong-answer bug of exactly the kind one linear pass at
     /// registration was cheap insurance against, and a replacement is a registration.
     /// </summary>
-    private void Verify(IReadOnlyList<T> rows, int appendedFrom)
+    private void Verify(IReadOnlyList<T> rows, int appendedFrom, int[]? unique)
     {
-        var accessors = new Dictionary<int, Func<T, object?>>();
-        Func<T, object?> Accessor(int column)
-        {
-            if (!accessors.TryGetValue(column, out var accessor))
-            {
-                accessor = _columns[column].LogicalAccessor;
-                accessors[column] = accessor;
-            }
-
-            return accessor;
-        }
-
         // An append only has to be checked where it joins: the rows before it were checked when they
         // arrived, and a collation is a statement about consecutive rows, so the first appended row
         // and everything after it is the whole of what is new (§3).
@@ -226,14 +324,7 @@ internal sealed class PocoSnapshotFactory<T>
                 Math.Max(1, appendedFrom));
         }
 
-        foreach (var key in _uniqueKeys)
-        {
-            PocoVerification.VerifyUniqueKey(
-                _table,
-                rows,
-                key.Columns.Select(c => _columns[c].Name).ToArray(),
-                key.Columns.Select(Accessor).ToArray());
-        }
+        VerifyUniqueKeys(rows, unique);
     }
 }
 

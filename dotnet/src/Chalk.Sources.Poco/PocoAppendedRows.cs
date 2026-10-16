@@ -77,6 +77,74 @@ internal sealed class PocoAppendedRows<T> : IReadOnlyList<T>
         return new PocoAppendedRows<T>(buffer, count);
     }
 
+    /// <summary>
+    /// A keyed table's next rows (D367): <paramref name="existing"/>'s first <paramref name="count"/>, with
+    /// the ones at <paramref name="deleted"/> taken out, the ones at <paramref name="replaced"/> replaced
+    /// in place, and <paramref name="appended"/> after the rest, in an array Chalk owns with room for an
+    /// eighth more, so an upsert of new keys after it appends in place. The rows between the changes
+    /// are copied in bulk.
+    /// </summary>
+    /// <returns>The rows, and where each replaced row now stands, in <paramref name="replaced"/>'s order.</returns>
+    public static (PocoAppendedRows<T> Rows, int[] Added) Assemble(
+        IReadOnlyList<T> existing, int count, int[] deleted, (int Position, T Row)[] replaced, T[] appended)
+    {
+        var kept = count - deleted.Length;
+        var wanted = checked(kept + appended.Length);
+        var buffer = new T[(int)Math.Min(Array.MaxLength, wanted + Math.Max(16L, wanted / 8L))];
+        var source = existing switch
+        {
+            T[] array => array,
+            PocoAppendedRows<T> owned => owned._items,
+            _ => null,
+        };
+
+        // The rows between deleted ones keep their order, each block moved up past the deletes before it.
+        var write = 0;
+        var from = 0;
+        foreach (var gone in deleted.Append(count))
+        {
+            var length = gone - from;
+            if (length > 0)
+            {
+                if (source is not null)
+                {
+                    Array.Copy(source, from, buffer, write, length);
+                }
+                else if (existing is List<T> list)
+                {
+                    list.CopyTo(from, buffer, write, length);
+                }
+                else
+                {
+                    for (var i = 0; i < length; i++)
+                    {
+                        buffer[write + i] = existing[from + i];
+                    }
+                }
+            }
+
+            write += length;
+            from = gone + 1;
+        }
+
+        var added = new int[replaced.Length];
+        var passed = 0;
+        for (var i = 0; i < replaced.Length; i++)
+        {
+            var (position, row) = replaced[i];
+            while (passed < deleted.Length && deleted[passed] < position)
+            {
+                passed++;
+            }
+
+            added[i] = position - passed;
+            buffer[added[i]] = row;
+        }
+
+        Array.Copy(appended, 0, buffer, kept, appended.Length);
+        return (new PocoAppendedRows<T>(buffer, wanted), added);
+    }
+
     public IEnumerator<T> GetEnumerator()
     {
         for (var i = 0; i < Count; i++)

@@ -878,6 +878,15 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     /// <summary>The change kind this table declares (D339), or null for none.</summary>
     private PocoChanges<T>? _changes;
 
+    /// <summary>
+    /// Where each key of a keyed table stands (D367): what its upserts and deletes find their rows by.
+    /// Null for a table that does not change by key.
+    /// </summary>
+    private PocoKeyPositions<T>? _keyPositions;
+
+    /// <summary>The columns of a keyed table's key, which its refreshes keep unique by construction (D367).</summary>
+    private int[]? _keyColumns;
+
     /// <inheritdoc />
     public override object Pin() => Acquire();
 
@@ -950,6 +959,13 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     {
         var before = (PocoTableSnapshot<T>)earlier;
         var after = (PocoTableSnapshot<T>)later;
+
+        // A keyed refresh said what it changed (D367): taken as it is, rather than found by walking.
+        if (after.Change is { } recorded && recorded.From == before.Sequence)
+        {
+            return new TableDiff(recorded.Removed, recorded.AppendedFrom) { Added = recorded.Added };
+        }
+
         if (typeof(T).IsValueType || before.Rows is not { } old || after.Rows is not { } rows)
         {
             return null;
@@ -1032,6 +1048,12 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     public void Declare(PocoChanges<T> changes)
     {
         _changes = changes;
+        if (changes.Kind == PocoChangeKind.Keyed)
+        {
+            _keyPositions = new PocoKeyPositions<T>(changes);
+            _keyColumns = Array.ConvertAll(changes.KeyMembers, member => _byMember[member]);
+        }
+
         if (changes.HasTime)
         {
             changes.Frontier = Latest(changes, Values(Current));
@@ -1167,6 +1189,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         PocoTableSnapshot<T>? next = null;
         PocoPreparedReplacement<T>? committing = null;
         var replaces = false;
+        PocoKeyedChange<T>? keyed = null;
 
         if (rows is { Kind: SourceRefreshKind.Replace })
         {
@@ -1208,12 +1231,27 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         {
             var upserts = (IReadOnlyList<T>?)upsert?.Rows ?? [];
             var deletes = (IReadOnlyList<T>?)delete?.Rows ?? [];
-            var changed = ByKey(sourceId, _changes!, Current.Rows!, upserts, deletes);
+            var current = Current;
+            keyed = ByKey(sourceId, _changes!, current, upserts, deletes);
             var statistics = upsert?.Statistics == StatisticsRefresh.Now || delete?.Statistics == StatisticsRefresh.Now
                 ? StatisticsRefresh.Now
                 : StatisticsRefresh.Defer;
-            next = Carry(_factory.Owned(changed), statistics, upserts.Count + deletes.Count);
-            replaces = true;
+            if (keyed.OnlyAppends)
+            {
+                // Only keys the table did not hold: an append, every earlier row where it was (D367).
+                next = Carry(_factory.Appended(current, keyed.Appended, _keyColumns), statistics, upserts.Count + deletes.Count);
+            }
+            else
+            {
+                // The table built from its last snapshot, with what changed recorded for the views that
+                // read it (D367): the rows taken out, the rows put in their places, the rows appended.
+                var (changed, added) = PocoAppendedRows<T>.Assemble(
+                    current.Rows!, current.RowCount, keyed.Deleted, keyed.Replaced, keyed.Appended);
+                next = Carry(_factory.Changed(current, changed, keyed, added, _keyColumns!), statistics, upserts.Count + deletes.Count);
+                int[] removed = [.. keyed.Deleted.Concat(keyed.Replaced.Select(r => r.Position)).Order()];
+                next.Change = new PocoRecordedChange(current.Sequence, removed, added, current.RowCount - keyed.Deleted.Length);
+                replaces = true;
+            }
         }
 
         if (advance is not null)
@@ -1234,7 +1272,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             frontier = frontier is { } reached ? Math.Max(reached, to) : to;
         }
 
-        return new PreparedChange(this, next, frontier, replaces, committing);
+        return new PreparedChange(this, next, frontier, replaces, committing, keyed);
     }
 
     /// <inheritdoc />
@@ -1390,14 +1428,15 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     private static IReadOnlyCollection<T> Values(PocoTableSnapshot<T> snapshot) => snapshot.Values;
 
     /// <summary>
-    /// A keyed table's next rows: the current ones in their order with each upserted key's row in its
-    /// place and each deleted key's row gone, then the rows of keys it did not hold, in the order they
-    /// were given.
+    /// What a refresh of upserts and deletes does to a keyed table (D367): each upserted key's row in the
+    /// place of the row it replaces, each deleted key's row gone, and the rows of keys the table did not
+    /// hold after the rest, in the order they were given. The rows are found by their keys' positions,
+    /// not by reading the key of every row.
     /// </summary>
-    private List<T> ByKey(
+    private PocoKeyedChange<T> ByKey(
         string sourceId,
         PocoChanges<T> keyed,
-        IReadOnlyList<T> current,
+        PocoTableSnapshot<T> current,
         IReadOnlyList<T> upserts,
         IReadOnlyList<T> deletes)
     {
@@ -1411,7 +1450,6 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             }
         }
 
-        var deleted = new HashSet<object?[]>(PocoChanges<T>.KeyComparer);
         foreach (var row in deletes)
         {
             var key = keyed.KeyOf(row);
@@ -1424,40 +1462,48 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
                     $"the key {PocoChanges<T>.Render(key)} is both upserted and deleted in one refresh. "
                     + "Say once what each key becomes; nothing in the refresh was applied.");
             }
-
-            deleted.Add(key);
         }
 
-        var next = new List<T>(current.Count + upserts.Count);
-        var placed = new bool[upserts.Count];
-        foreach (var row in current)
+        var positions = _keyPositions!;
+        if (!positions.Describes(current))
         {
-            var key = keyed.KeyOf(row);
-            if (deleted.Contains(key))
-            {
-                continue;
-            }
+            positions.Build(current);
+        }
 
-            if (upserted.TryGetValue(key, out var replacement))
+        var replaced = new List<(int Position, T Row)>();
+        var appended = new List<T>();
+        foreach (var row in upserts)
+        {
+            var at = positions.PositionOf(row);
+            if (at >= 0)
             {
-                next.Add(upserts[replacement]);
-                placed[replacement] = true;
+                replaced.Add((at, row));
             }
             else
             {
-                next.Add(row);
+                appended.Add(row);
             }
         }
 
-        for (var i = 0; i < upserts.Count; i++)
+        var deleted = new SortedSet<int>();
+        foreach (var row in deletes)
         {
-            if (!placed[i])
+            var at = positions.PositionOf(row);
+            if (at >= 0)
             {
-                next.Add(upserts[i]);
+                deleted.Add(at);
             }
         }
 
-        return next;
+        var rows = current.Rows!;
+        int[] gone = [.. deleted];
+        return new PocoKeyedChange<T>
+        {
+            Deleted = gone,
+            DeletedRows = Array.ConvertAll(gone, at => rows[at]),
+            Replaced = [.. replaced.OrderBy(r => r.Position)],
+            Appended = [.. appended],
+        };
     }
 
     /// <summary>
@@ -1508,19 +1554,22 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         private readonly long? _frontier;
         private readonly bool _replaces;
         private readonly PocoPreparedReplacement<T>? _committing;
+        private readonly PocoKeyedChange<T>? _keyed;
 
         public PreparedChange(
             PocoTableRuntime<T> table,
             PocoTableSnapshot<T>? snapshot,
             long? frontier,
             bool replaces,
-            PocoPreparedReplacement<T>? committing)
+            PocoPreparedReplacement<T>? committing,
+            PocoKeyedChange<T>? keyed)
         {
             _table = table;
             _snapshot = snapshot;
             _frontier = frontier;
             _replaces = replaces;
             _committing = committing;
+            _keyed = keyed;
         }
 
         public void Commit()
@@ -1528,6 +1577,13 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             if (_snapshot is not null)
             {
                 _table.Publish(_snapshot, _replaces);
+
+                // The key positions move on with the snapshot they now describe, and only when it is
+                // published: a refresh that is not committed leaves them describing the one served.
+                if (_keyed is not null)
+                {
+                    _table._keyPositions!.Apply(_snapshot, _keyed);
+                }
             }
 
             _committing?.Committed();
