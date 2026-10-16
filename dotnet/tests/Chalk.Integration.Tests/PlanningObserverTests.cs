@@ -149,7 +149,7 @@ public sealed class PlanningObserverTests(SharedSidecar sidecar) : IDisposable
         var epoch = desk.Engine.Catalog.Epoch;
         var version = desk.Engine.Version;
 
-        await desk.Engine.PlanAsync(Ct);
+        Assert.True(await desk.Engine.PlanAsync(Ct));
 
         var takenIn = Assert.Single(observer.TakenIn);
         Assert.Equal(epoch, takenIn.Epoch);

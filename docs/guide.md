@@ -613,6 +613,9 @@ await engine.RefreshAsync(refresh => refresh.Append(mem, "ticks", batch).DeferPl
   plans swap in. So a plan changes only at a refresh you make, never underneath one. A
   statement then runs its new plan, and an execution already running keeps the one it began
   with. `PlanDigest` moves, `LogicalDigest` does not, and the rows are the same.
+- **The newest numbers win.** Each plan records the numbers it was made on. A plan made on
+  older numbers never replaces one made on newer, and when a later run comes back to the plan
+  a statement runs, what an earlier run left for it is dropped.
 - **An entitled statement** takes a new plan only when it passes the checks its first plan
   passed, and comes with the same entitlements report. Its labels and audit events then stay
   true, and an audit event names the plan that ran. A plan whose report differs, as when a
@@ -630,12 +633,18 @@ await engine.RefreshAsync(refresh => refresh.Append(mem, "ticks", batch).DeferPl
 Compacting with a prepared replacement, in a refresh that defers its planning, holds the lock
 for about as long as an append does.
 
-`PlanAsync` plans now, and returns once the new plans are in effect:
+`PlanAsync` plans now, returns once the new plans are in effect, and says whether a plan
+changed:
 
 ```csharp
 await engine.RefreshAsync(refresh => refresh.Replace(mem, "ticks", rows).DeferPlanning(), ct);
-await engine.PlanAsync(ct);
+var changed = await engine.PlanAsync(ct);
 ```
+
+- **It is true** when some statement you held when you called it runs another plan once it
+  returns. **It is false** when none does: nothing was due, or the planner came back to the
+  plan each statement runs. The planner says so without sending the plan again, since each
+  request names the plan the statement runs, and nothing swaps in.
 
 - **It waits for a run that begins after the call**, so the run sees every refresh you made
   before it. A run already going is followed by one more. Then that run's plans swap in, under

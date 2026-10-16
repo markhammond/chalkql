@@ -290,6 +290,11 @@ public sealed partial class ChalkEngine
     /// moved twofold since it was planned. Its plans swap in here, under the refresh lock, rather than
     /// at the next refresh.
     /// </summary>
+    /// <returns>
+    /// Whether a plan changed: true when some statement this engine held when it was called runs
+    /// another plan once it completes, and false when none does. Nothing was due, or the planner came
+    /// back to the plan each statement runs, which it says without sending the plan again.
+    /// </returns>
     /// <remarks>
     /// <para>
     /// The run begins after this call, so it sees every refresh published before it. One already
@@ -318,18 +323,20 @@ public sealed partial class ChalkEngine
     /// next refresh or the next call. A disposed engine throws <see cref="ObjectDisposedException"/>.
     /// </para>
     /// </remarks>
-    public Task PlanAsync(CancellationToken ct = default)
+    public Task<bool> PlanAsync(CancellationToken ct = default)
     {
-        var planned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var planned = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _ = PlanAndTakeInAsync(planned, ct);
         return planned.Task;
     }
 
     /// <summary>The body of <see cref="PlanAsync"/>, which ends <paramref name="planned"/> however it ends.</summary>
-    private async Task PlanAndTakeInAsync(TaskCompletionSource planned, CancellationToken ct)
+    private async Task PlanAndTakeInAsync(TaskCompletionSource<bool> planned, CancellationToken ct)
     {
         try
         {
+            // The plan each held statement runs as the call begins: what the answer is judged by.
+            var before = HeldStatements().ConvertAll(statement => (Statement: statement, statement.PlanDigest));
             var failed = await AskForRun().WaitAsync(ct).ConfigureAwait(false);
 
             TakenIn? taken;
@@ -348,7 +355,7 @@ public sealed partial class ChalkEngine
             ObserveTakenIn(taken, stamp.Epoch, stamp.Version);
             if (failed.Count == 0)
             {
-                planned.SetResult();
+                planned.SetResult(before.Exists(held => held.Statement.PlanDigest != held.PlanDigest));
             }
             else
             {
