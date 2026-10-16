@@ -301,8 +301,8 @@ public sealed partial class ChalkEngine
     /// The run begins after this call, so it sees every refresh published before it. One already
     /// running is followed by it. A statement runs its new plan from its next execution; one already
     /// running keeps the plan it began with. A standing view moves to the new plan at its first update
-    /// over a later epoch, as after a refresh that swaps one in; under a low-jitter swap, an update
-    /// before that starts building it beside.
+    /// over a later epoch, as after a refresh that swaps one in; under a low-jitter swap, it starts
+    /// building the plan beside its own as the plan swaps in, so that update can take it.
     /// </para>
     /// <para>
     /// Nothing is published: the rows, the epoch and the <see cref="Version"/> stay as they are, and

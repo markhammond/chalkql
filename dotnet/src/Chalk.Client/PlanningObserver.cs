@@ -206,10 +206,10 @@ public readonly struct PlansTakenIn
     /// numbered the refresh, and one past the last otherwise. A view numbers its updates by version,
     /// not epoch (<c>ViewUpdate.Version</c>), so this is the number to match them by. A plan swapped
     /// in here runs from the view's first update at this version or later; under a low-jitter swap,
-    /// that update starts building it beside the plan the view runs, and the first after the build
-    /// swaps it in. For <see cref="ChalkEngine.PlanAsync"/>, and a refresh that plans now, the version
-    /// current as the plans were taken in: a view already at it moves at its first update to a later
-    /// one.
+    /// the view starts building it beside the plan it runs as it swaps in, and its first update once
+    /// the build is done swaps it in. For <see cref="ChalkEngine.PlanAsync"/>, and a refresh that plans
+    /// now, the version current as the plans were taken in: a view already at it moves at its first
+    /// update to a later one.
     /// </summary>
     public long Version { get; }
 

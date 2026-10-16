@@ -125,8 +125,9 @@ await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKe
   statement keeps its plan, and the next refresh that defers its planning asks again.
 - A view may set the fraction of its plan's cost a new plan must save
   (`ViewOptions.PlanImprovementMargin`): the planner holds back a plan that saves less.
-- A view may build a new plan beside the one it runs, and swap it in once built
-  (`ViewOptions.PlanSwap = ViewPlanSwap.LowJitter`), so that no update computes it from nothing.
+- A view may build a new plan beside the one it runs, from the moment its statement takes the plan,
+  and swap it in once built (`ViewOptions.PlanSwap = ViewPlanSwap.LowJitter`), so that no update
+  computes it from nothing.
 - Joins (inner and left), as-of joins, aggregates with grouping sets, filters, projections,
   `UNION ALL`, `VALUES` and `WITH` subtrees are maintained, the clock in a filter or a projection,
   and an index lookup pinned to keys, as a constant key or an `IN` list makes, which is read as its

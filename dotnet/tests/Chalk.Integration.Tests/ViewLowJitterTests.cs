@@ -7,12 +7,13 @@ namespace Chalk.Integration.Tests;
 
 /// <summary>
 /// Low-jitter plan swaps (design 70 §2): a view whose statement takes a new plan builds it beside the
-/// one it runs, keeps updating the one it runs meanwhile, and swaps the new one in at the first update
-/// after the build, which catches it up rather than computing it from nothing, readers keeping their
-/// place. A newer plan abandons the build for one on that plan; a build that fails keeps the plan the
-/// view runs; a tenfold drift is planned again in place, and moves the view as any new plan does, or
-/// rebuilds nothing when the plan comes back the same; disposing the view stops the build; and a view that
-/// recomputes refuses the option.
+/// one it runs from the moment the plan swaps in, keeps updating the one it runs meanwhile, and swaps
+/// the new one in at the first update after the build, which catches it up rather than computing it
+/// from nothing, readers keeping their place. A refresh that plans now moves the view so. A newer plan
+/// abandons the build for one on that plan; a build that fails keeps the plan the view runs; a tenfold
+/// drift is planned again in place, and moves the view as any new plan does, or rebuilds nothing when
+/// the plan comes back the same; disposing the view stops the build; and a view that recomputes
+/// refuses the option.
 /// </summary>
 [Collection(SidecarCollection.Name)]
 public sealed class ViewLowJitterTests(SharedSidecar sidecar)
@@ -49,7 +50,9 @@ public sealed class ViewLowJitterTests(SharedSidecar sidecar)
         Assert.Null(view.GreenBuild);
 
         // The statement takes a new plan. The view keeps updating the plan it runs, incrementally,
-        // while the new one is built beside it.
+        // while the new one is built beside it: here, held until after the update.
+        var built = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        view.HoldGreenBuild = stop => built.Task.WaitAsync(stop);
         await desk.LoadAsync(Fills(3_000, books: 3), Books(3));
         await desk.Engine.BackgroundPlanningSettledAsync();
         await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
@@ -62,6 +65,7 @@ public sealed class ViewLowJitterTests(SharedSidecar sidecar)
         Assert.False(during.Whole);
         Assert.Equal(planned, during.PlanDigest);
         Assert.NotNull(view.GreenBuild);
+        built.SetResult();
         await view.GreenBuild!;
         Assert.True(view.StateBytes > 0);
         view.Drain(ref cursor, sink);
@@ -175,11 +179,13 @@ public sealed class ViewLowJitterTests(SharedSidecar sidecar)
         await desk.LoadAsync(Fills(3_000, books: 3), Books(3));
         await desk.Engine.BackgroundPlanningSettledAsync();
         await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
-        await view.UpdateAsync(Ct);
+        await view.BuildingAtSwap;
         await view.GreenBuild!.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext);
 
         // The failure is found at the next update, which keeps the plan the view runs, and asks for no
         // other build on the plan the statement runs.
+        await view.UpdateAsync(Ct);
+        Assert.Null(view.GreenBuild);
         await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", [new Fill(3_001, 1, 5)]), Ct);
         await view.UpdateAsync(Ct);
         Assert.Null(view.GreenBuild);
@@ -197,7 +203,7 @@ public sealed class ViewLowJitterTests(SharedSidecar sidecar)
     /// A tenfold drift, planning left in the refresh, makes the statement stale, and the view plans it
     /// again in place rather than prepare it anew on its update's thread: it keeps its statement and its
     /// plan, the background run plans it anew, a refresh swaps the plan in, and the view moves to it as
-    /// to any — built beside, or whole at its next update.
+    /// to any — built beside from the swap, or whole at its next update.
     /// </summary>
     [Theory]
     [InlineData(ViewPlanSwap.LowJitter)]
@@ -226,16 +232,14 @@ public sealed class ViewLowJitterTests(SharedSidecar sidecar)
         Assert.Same(statement, view.Statement);
         Assert.NotEqual(planned, statement.PlanDigest);
         Assert.False(statement.IsStale);
-        await view.UpdateAsync(Ct);
-
         if (swap == ViewPlanSwap.LowJitter)
         {
-            // Built beside the plan the view runs, and swapped in at the update after.
-            Assert.Equal(planned, tracker.Updates[^1].PlanDigest);
+            // Built beside the plan the view runs from the swap, so the update after the refresh takes it.
+            await view.BuildingAtSwap;
             await view.GreenBuild!;
-            await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", [new Fill(3_002, 2, 7)]), Ct);
-            await view.UpdateAsync(Ct);
         }
+
+        await view.UpdateAsync(Ct);
 
         Assert.Equal(swap == ViewPlanSwap.AtNextUpdate, tracker.Updates[^1].Whole);
         Assert.Equal(statement.PlanDigest, tracker.Updates[^1].PlanDigest);
@@ -276,6 +280,86 @@ public sealed class ViewLowJitterTests(SharedSidecar sidecar)
         Assert.Null(view.GreenBuild);
         Assert.All(tracker.Updates.Skip(1), update => Assert.False(update.Whole));
         Assert.Equal(await RowsAsync(desk.Engine, view.Statement), await ViewRowsAsync(view));
+    }
+
+    /// <summary>
+    /// The view starts building its statement's new plan as the plan swaps in, before any update, so
+    /// that the first update after the refresh can take it: the view runs the new plan an update
+    /// sooner than if the build began at an update's end.
+    /// </summary>
+    [Fact]
+    public async Task A_view_starts_building_a_new_plan_as_it_swaps_in()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var tracker = new Tracker();
+        await using var desk = await DeskAsync();
+        await using var view = await desk.Engine.MaterializeAsync(ByDesk, Options(tracker), Ct);
+        var sink = new Recorder();
+        var cursor = ViewCursor.Start;
+        var planned = view.Statement.PlanDigest;
+        await desk.LoadAsync(Fills(3_000, books: 3), Books(3));
+        await view.UpdateAsync(Ct);
+        view.Drain(ref cursor, sink);
+        sink.Calls.Clear();
+        await desk.Engine.BackgroundPlanningSettledAsync();
+
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", [new Fill(3_001, 1, 5)]), Ct);
+        var swapped = view.Statement.PlanDigest;
+        Assert.NotEqual(planned, swapped);
+        await view.BuildingAtSwap;
+        Assert.NotNull(view.GreenBuild);
+        await view.GreenBuild!;
+        Assert.Equal(planned, tracker.Updates[^1].PlanDigest);
+
+        await view.UpdateAsync(Ct);
+
+        Assert.True(view.MaintainsCurrentPlan);
+        Assert.Null(view.GreenBuild);
+        var update = tracker.Updates[^1];
+        Assert.False(update.Whole);
+        Assert.Equal(swapped, update.PlanDigest);
+        view.Drain(ref cursor, sink);
+        Assert.Equal(["upsert 1", $"commit {view.Version}"], sink.Calls);
+        Assert.Equal(await RowsAsync(desk.Engine, view.Statement), sink.Rows);
+    }
+
+    /// <summary>
+    /// The cutover a host makes to change what a view reads: one refresh replaces the tables and plans
+    /// now. The view's next plan is built beside the one it runs as the run's plan swaps in, and the
+    /// view's next update runs it, caught up, without computing it from nothing; readers keep their
+    /// place.
+    /// </summary>
+    [Fact]
+    public async Task A_refresh_that_plans_now_moves_the_view_without_a_whole_update()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var tracker = new Tracker();
+        await using var desk = await DeskAsync();
+        await using var view = await desk.Engine.MaterializeAsync(ByDesk, Options(tracker), Ct);
+        var sink = new Recorder();
+        var cursor = ViewCursor.Start;
+        view.Drain(ref cursor, sink);
+        sink.Calls.Clear();
+        var planned = view.Statement.PlanDigest;
+
+        await desk.Engine.RefreshAsync(
+            r => r.Replace(desk.Source, "fills", Fills(3_000, books: 3)).Replace(desk.Source, "books", Books(3)).PlanNow(),
+            Ct);
+        await desk.Engine.PlannedNow;
+        var swapped = view.Statement.PlanDigest;
+        Assert.NotEqual(planned, swapped);
+        await view.BuildingAtSwap;
+        await view.GreenBuild!;
+
+        await view.UpdateAsync(Ct);
+
+        Assert.True(view.MaintainsCurrentPlan);
+        var update = tracker.Updates[^1];
+        Assert.False(update.Whole);
+        Assert.Equal(swapped, update.PlanDigest);
+        view.Drain(ref cursor, sink);
+        Assert.DoesNotContain("reset", sink.Calls);
+        Assert.Equal(await RowsAsync(desk.Engine, view.Statement), sink.Rows);
     }
 
     [Fact]

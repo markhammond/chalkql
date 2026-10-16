@@ -664,9 +664,10 @@ await engine.PlanAsync(ct); // before serving
 - **It publishes nothing.** The rows, the epoch and `Version` stay as they are. The run's
   statistics reach the planner at once, so a statement you prepare next is planned on them,
   and they enter the catalog at the next refresh.
-- **A standing view** moves to its statement's new plan at its first update after the next
-  refresh. An update before then has no new rows to read, so it does nothing, except that under
-  `ViewPlanSwap.LowJitter` it starts building the new plan beside the old one.
+- **A standing view** moves to its statement's new plan at its first update to an epoch it
+  does not hold yet, usually the one after the next refresh. Under `ViewPlanSwap.LowJitter` it
+  starts building the new plan beside the old one as soon as the plan swaps in, so that update
+  can take it.
 - **It works without `DeferPlanning()` too.** A refresh that does not defer sends the planner
   its numbers, but plans nothing again. `PlanAsync` plans again each statement you hold whose
   tables have moved twofold since it was planned.
@@ -2003,7 +2004,9 @@ var options = new ViewOptions<Key, Row>
 
 - **The running instance** keeps serving readers, and its updates go on as usual.
 - **The new instance**, on the new plan, computes its state from nothing in its first update, which
-  is the slow part. It runs in the background, over the tables as they were when it began.
+  is the slow part. It runs in the background, over the tables as they were when it began. It
+  begins as soon as the statement takes the new plan: at a refresh, at `PlanAsync`, or as a
+  `PlanNow()` run ends.
 - **The first update after the new instance is built swaps it in.** It catches up to that update's
   tables, and the view compares its whole result with its rows. Readers keep their place, and are
   sent only the keys whose rows differ. The running instance is let go.
@@ -2050,8 +2053,9 @@ await engine.RefreshAsync(
   run once the refresh has published, so the cutover is the same whether you await the refresh
   or not, and whatever the views' `PlanSwap`.
 - **Every version is answered** by the plan each view runs, which gives the same rows as the new
-  one. The new plan is built beside it, and takes over at a later update with the view's state
-  kept and its readers in place, since the result's columns and key are the same.
+  one. The new plan is built beside it from the moment it swaps in, and takes over at the first
+  update after the build, with the view's state kept and its readers in place, since the result's
+  columns and key are the same.
 - **Name what readers subscribe to** by the statement's `LogicalDigest`, which a new plan does
   not move.
 - **To see each swap**, read the view's tracker: the update that first runs the new plan

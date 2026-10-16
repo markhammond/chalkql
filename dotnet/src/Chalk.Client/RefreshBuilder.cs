@@ -316,7 +316,8 @@ public sealed class RefreshBuilder
     /// refresh brought, whether or not the host awaits the refresh. Nothing awaits the run: what fails
     /// in it is logged under <c>Chalk.Client.Planning</c> and told to the planning observer, as a
     /// background run's failures are, and the plans it could not make stay as they were. A standing
-    /// view moves to its new plan as after any swap.
+    /// view moves to its new plan as after any swap; under <c>ViewPlanSwap.LowJitter</c> it starts
+    /// building the plan beside its own as soon as the plan swaps in.
     /// </para>
     /// <para>
     /// A refresh that plans now re-reads nothing, as one that defers does not.
