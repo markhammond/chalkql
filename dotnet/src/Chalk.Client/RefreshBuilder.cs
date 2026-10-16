@@ -29,6 +29,7 @@ public sealed class RefreshBuilder
     private long? _version;
     private DateTimeOffset? _clock;
     private bool _deferPlanning;
+    private bool _planNow;
 
     internal RefreshBuilder()
     {
@@ -77,9 +78,10 @@ public sealed class RefreshBuilder
     /// it started with; one started afterwards sees more.
     /// </summary>
     /// <remarks>
-    /// The appended rows are copied into an array Chalk owns, so the collection given here is not
-    /// held afterwards and is never reported released. The rows themselves are, of course, the
-    /// host's, and the rule about not mutating them is the same one.
+    /// The appended rows are read while the refresh runs, and copied into an array Chalk owns: keep
+    /// the collection unchanged until <c>RefreshAsync</c> returns. It is not held after that, and is
+    /// never reported released. The rows themselves are, of course, the host's, and the rule about
+    /// not mutating them is the same one.
     /// </remarks>
     /// <inheritdoc cref="Replace{T}" path="/param"/>
     /// <param name="statistics">
@@ -118,8 +120,9 @@ public sealed class RefreshBuilder
 
     /// <inheritdoc cref="Replace{T}(ITableTarget{T}, IReadOnlyList{T})"/>
     /// <remarks>
-    /// The appended rows are copied into an array Chalk owns, exactly as the <c>(source, name, rows)</c>
-    /// form copies them.
+    /// The appended rows are read while the refresh runs and copied into an array Chalk owns, exactly as
+    /// the <c>(source, name, rows)</c> form copies them: keep the collection unchanged until
+    /// <c>RefreshAsync</c> returns.
     /// </remarks>
     public RefreshBuilder Append<T>(ITableTarget<T> table, IReadOnlyList<T> rows) =>
         Add(table, SourceRefreshKind.Append, rows);
@@ -295,6 +298,38 @@ public sealed class RefreshBuilder
         return this;
     }
 
+    /// <summary>
+    /// Plans now what this refresh moved: the statistics and plans are left to a run that begins as
+    /// soon as the refresh publishes, off its lock, and that run's plans swap in the moment it ends,
+    /// rather than at the next refresh.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It is <see cref="DeferPlanning"/>'s run, asked for whatever the refresh moved, with its plans
+    /// taken in as <c>ChalkEngine.PlanAsync</c> takes them in: each held statement whose tables have
+    /// moved twofold since it was planned is planned again, and nothing is published, so the epoch and
+    /// the version stay the refresh's own. Writing <see cref="DeferPlanning"/> beside it changes
+    /// nothing.
+    /// </para>
+    /// <para>
+    /// The run is ordered after the refresh's publish by the engine itself, so it always reads what the
+    /// refresh brought, whether or not the host awaits the refresh. Nothing awaits the run: what fails
+    /// in it is logged under <c>Chalk.Client.Planning</c> and told to the planning observer, as a
+    /// background run's failures are, and the plans it could not make stay as they were. A standing
+    /// view moves to its new plan as after any swap; under <c>ViewPlanSwap.LowJitter</c> it starts
+    /// building the plan beside its own as soon as the plan swaps in.
+    /// </para>
+    /// <para>
+    /// A refresh that plans now re-reads nothing, as one that defers does not.
+    /// </para>
+    /// </remarks>
+    public RefreshBuilder PlanNow()
+    {
+        _deferPlanning = true;
+        _planNow = true;
+        return this;
+    }
+
     private RefreshBuilder AddAdvance(ISourceRuntime source, string table, object time)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -360,6 +395,9 @@ public sealed class RefreshBuilder
 
     /// <summary>Whether this refresh leaves its statistics and plans to the background (design 69 §4).</summary>
     internal bool PlanningDeferred => _deferPlanning;
+
+    /// <summary>Whether this refresh's planning runs as soon as it publishes, its plans swapped in when ready.</summary>
+    internal bool PlanningNow => _planNow;
 
     /// <summary>What this transaction re-reads, in the order it was written (D271 (f)).</summary>
     internal IReadOnlyList<IRefreshTarget> Scopes => _scopes;

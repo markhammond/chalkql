@@ -1260,12 +1260,58 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// now (<see cref="PreparedQuery.IsStale"/>, D342).
     /// </para>
     /// </remarks>
-    public async ValueTask<long> RefreshAsync(Action<RefreshBuilder> plan, CancellationToken ct = default)
+    public ValueTask<long> RefreshAsync(Action<RefreshBuilder> plan, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(plan);
-
         var builder = new RefreshBuilder();
-        plan(builder);
+        try
+        {
+            ArgumentNullException.ThrowIfNull(plan);
+            plan(builder);
+        }
+        catch (Exception failure)
+        {
+            return ValueTask.FromException<long>(failure);
+        }
+
+        return RunRefreshAsync(builder, ct);
+    }
+
+    /// <summary>
+    /// The same refresh transaction, its plan given <paramref name="state"/>: a <c>static</c> lambda that
+    /// reads all it needs from the state captures nothing, so the call allocates no closure and no
+    /// delegate, which a refresh on a host's hot path otherwise pays for every time.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="plan"/> runs before this returns, as the other form's does, so the state is not
+    /// kept: a struct passed here is never copied to the heap.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// await engine.RefreshAsync((ticks, batch), static (refresh, s) => refresh.Append(s.ticks, s.batch), ct);
+    /// </code>
+    /// </example>
+    /// <inheritdoc cref="RefreshAsync(Action{RefreshBuilder}, CancellationToken)" path="/returns"/>
+    public ValueTask<long> RefreshAsync<TState>(
+        TState state, Action<RefreshBuilder, TState> plan, CancellationToken ct = default)
+    {
+        var builder = new RefreshBuilder();
+        try
+        {
+            ArgumentNullException.ThrowIfNull(plan);
+            plan(builder, state);
+        }
+        catch (Exception failure)
+        {
+            return ValueTask.FromException<long>(failure);
+        }
+
+        return RunRefreshAsync(builder, ct);
+    }
+
+    /// <summary>The refresh transaction <paramref name="builder"/> recorded, whichever form recorded it.</summary>
+    private async ValueTask<long> RunRefreshAsync(RefreshBuilder builder, CancellationToken ct)
+    {
+        const string plan = "plan";
         var deferred = builder.PlanningDeferred;
         if (builder.Entries.Count == 0
             && builder.Scopes.Count == 0
@@ -1279,11 +1325,11 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         if (deferred && builder.Scopes.Count > 0)
         {
             throw new ArgumentException(
-                "the refresh defers its planning and re-reads "
+                (builder.PlanningNow ? "the refresh plans now and re-reads " : "the refresh defers its planning and re-reads ")
                 + string.Join(", ", builder.Scopes.Select(Describe))
                 + ". A re-read describes its tables with their statistics now, which is what deferring "
                 + "leaves to the background; re-read in a refresh of its own.",
-                nameof(plan));
+                plan);
         }
 
         if (builder.ClockGiven is not null && _options.Clock is null)
@@ -1291,7 +1337,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             throw new ArgumentException(
                 "the refresh advances the clock, and this engine declares none. Name one with "
                 + "ChalkEngineOptions.Clock; it is what a standing view reads as the current time.",
-                nameof(plan));
+                plan);
         }
 
         // Every scope is resolved to a source before the lock is taken, so a target this engine does
@@ -1299,7 +1345,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         var scopes = new List<(ISourceRuntime Source, string Table)>(builder.Scopes.Count);
         foreach (var target in builder.Scopes)
         {
-            scopes.Add((Resolve(target, nameof(plan)), target.Table));
+            scopes.Add((Resolve(target, plan), target.Table));
         }
 
         // Grouped by source instance, in the order the entries were written, so a source hears about
@@ -1315,7 +1361,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 throw new ArgumentException(
                     $"the source '{source.SourceId}' is not one this engine was built with; a refresh "
                     + "replaces the rows of a source the engine is already serving.",
-                    nameof(plan));
+                    plan);
             }
 
             if (source is not IRefreshableSource refreshable)
@@ -1325,7 +1371,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                     + "implement IRefreshableSource, so its rows cannot be replaced from a refresh. "
                     + "An in-process POCO source can; a source over a database is refreshed by "
                     + "changing the database.",
-                    nameof(plan));
+                    plan);
             }
 
             var found = bySource.FindIndex(g => ReferenceEquals(g.Refreshable, refreshable));
@@ -1477,8 +1523,13 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         }
 
         // After the lock: the statistics and plans this refresh left behind are worked out beside the
-        // next refreshes, not in front of them — when it left any (D351).
-        if (deferred && BackgroundPlanningDue(numbersBehind))
+        // next refreshes, not in front of them — when it left any (D351). One that plans now asks for a
+        // run whatever it left, and takes the run's plans in as soon as it ends.
+        if (builder.PlanningNow)
+        {
+            PlanNowInBackground();
+        }
+        else if (deferred && BackgroundPlanningDue(numbersBehind))
         {
             RequestBackgroundPlanning();
         }

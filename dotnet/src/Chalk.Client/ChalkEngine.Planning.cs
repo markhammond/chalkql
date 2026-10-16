@@ -60,10 +60,11 @@ public sealed partial class ChalkEngine
     private int _planningRuns;
 
     /// <summary>
-    /// The callers of <see cref="PlanAsync"/> waiting on a run, each with the count of requests made
-    /// when it asked. A run answers those that asked before it began, with what failed in it.
+    /// The callers of <see cref="PlanAsync"/>, and refreshes that plan now, waiting on a run, each with
+    /// the count of requests made when it asked. A run answers those that asked before it began, with
+    /// how it ended.
     /// </summary>
-    private readonly List<(long Asked, TaskCompletionSource<IReadOnlyList<Exception>> Ran)> _planningWaiters = [];
+    private readonly List<(long Asked, TaskCompletionSource<RunEnded> Ran)> _planningWaiters = [];
     private long _planningAsked;
 
     /// <summary>What finished runs produced, waiting for the next refresh to take it in.</summary>
@@ -262,10 +263,10 @@ public sealed partial class ChalkEngine
                 asked = _planningAsked;
             }
 
-            IReadOnlyList<Exception> failed;
+            RunEnded ended;
             try
             {
-                failed = await PlanInBackgroundAsync(_planningStop.Token).ConfigureAwait(false);
+                ended = new RunEnded(null, await PlanInBackgroundAsync(_planningStop.Token).ConfigureAwait(false));
             }
             catch (OperationCanceledException) when (_planningStop.IsCancellationRequested)
             {
@@ -276,10 +277,10 @@ public sealed partial class ChalkEngine
             {
                 // The plans stay as they were; the next refresh that defers its planning tries again.
                 PlanningLog.LogWarning(failure, "planning in the background failed; the plans stay as they were");
-                failed = [failure];
+                ended = new RunEnded(failure, []);
             }
 
-            Answer(asked, failed);
+            Answer(asked, ended);
         }
     }
 
@@ -300,8 +301,8 @@ public sealed partial class ChalkEngine
     /// The run begins after this call, so it sees every refresh published before it. One already
     /// running is followed by it. A statement runs its new plan from its next execution; one already
     /// running keeps the plan it began with. A standing view moves to the new plan at its first update
-    /// over a later epoch, as after a refresh that swaps one in; under a low-jitter swap, an update
-    /// before that starts building it beside.
+    /// over a later epoch, as after a refresh that swaps one in; under a low-jitter swap, it starts
+    /// building the plan beside its own as the plan swaps in, so that update can take it.
     /// </para>
     /// <para>
     /// Nothing is published: the rows, the epoch and the <see cref="Version"/> stay as they are, and
@@ -337,22 +338,9 @@ public sealed partial class ChalkEngine
         {
             // The plan each held statement runs as the call begins: what the answer is judged by.
             var before = HeldStatements().ConvertAll(statement => (Statement: statement, statement.PlanDigest));
-            var failed = await AskForRun().WaitAsync(ct).ConfigureAwait(false);
-
-            TakenIn? taken;
-            EpochStamp stamp;
-            await _refreshing.WaitAsync(ct).ConfigureAwait(false);
-            try
-            {
-                taken = AdmitBackgroundPlanning(statistics: false);
-                stamp = Stamp;
-            }
-            finally
-            {
-                _refreshing.Release();
-            }
-
-            ObserveTakenIn(taken, stamp.Epoch, stamp.Version);
+            var ended = await AskForRun().WaitAsync(ct).ConfigureAwait(false);
+            await TakeInPlansAsync(ct).ConfigureAwait(false);
+            IReadOnlyList<Exception> failed = ended.Failure is { } failure ? [failure] : ended.Statements;
             if (failed.Count == 0)
             {
                 planned.SetResult(before.Exists(held => held.Statement.PlanDigest != held.PlanDigest));
@@ -373,12 +361,85 @@ public sealed partial class ChalkEngine
     }
 
     /// <summary>
-    /// Asks for a background run, and returns what failed in the first run to begin after the ask:
-    /// nothing when it planned all it found due.
+    /// The planning a refresh asked for with <see cref="RefreshBuilder.PlanNow"/>, started once it has
+    /// published: a run that begins after the publish, its plans swapped in as soon as it ends. Nothing
+    /// awaits it, so what fails is logged here, beside what the run's own log and the observer say.
     /// </summary>
-    private Task<IReadOnlyList<Exception>> AskForRun()
+    private void PlanNowInBackground()
     {
-        var ran = new TaskCompletionSource<IReadOnlyList<Exception>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<RunEnded> ran;
+        try
+        {
+            ran = AskForRun();
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        Volatile.Write(ref _plannedNow, TakeInWhenRunAsync(ran));
+    }
+
+    private Task _plannedNow = Task.CompletedTask;
+
+    /// <summary>For tests: the take-in of the last refresh that planned now, which never faults.</summary>
+    internal Task PlannedNow => Volatile.Read(ref _plannedNow);
+
+    /// <summary>Waits for the run a refresh that plans now asked for, swaps its plans in, and logs what failed.</summary>
+    private async Task TakeInWhenRunAsync(Task<RunEnded> ran)
+    {
+        try
+        {
+            var ended = await ran.ConfigureAwait(false);
+            await TakeInPlansAsync(CancellationToken.None).ConfigureAwait(false);
+            if (ended.Statements.Count > 0)
+            {
+                PlanningLog.LogWarning(
+                    ended.Statements[0],
+                    "planning asked for by a refresh could not plan {Count} statements again; they keep their plans",
+                    ended.Statements.Count);
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // The engine was disposed before the plans could swap in.
+        }
+        catch (Exception failure)
+        {
+            PlanningLog.LogWarning(failure, "planning asked for by a refresh failed; the plans stay as they were");
+        }
+    }
+
+    /// <summary>
+    /// Swaps in, under the refresh lock, the plans background runs staged, as <see cref="PlanAsync"/> and a
+    /// refresh that plans now take them in: the statistics stay staged for the next refresh, which
+    /// publishes them.
+    /// </summary>
+    private async Task TakeInPlansAsync(CancellationToken ct)
+    {
+        TakenIn? taken;
+        EpochStamp stamp;
+        await _refreshing.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            taken = AdmitBackgroundPlanning(statistics: false);
+            stamp = Stamp;
+        }
+        finally
+        {
+            _refreshing.Release();
+        }
+
+        ObserveTakenIn(taken, stamp.Epoch, stamp.Version);
+    }
+
+    /// <summary>
+    /// Asks for a background run, and returns how the first run to begin after the ask ended: whether
+    /// it failed, and what failed in it.
+    /// </summary>
+    private Task<RunEnded> AskForRun()
+    {
+        var ran = new TaskCompletionSource<RunEnded>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_planningGate)
         {
             ObjectDisposedException.ThrowIf(_planningStop.IsCancellationRequested, this);
@@ -389,10 +450,10 @@ public sealed partial class ChalkEngine
         return ran.Task;
     }
 
-    /// <summary>Tells the callers that asked before the run began, by <paramref name="asked"/>, what failed in it.</summary>
-    private void Answer(long asked, IReadOnlyList<Exception> failed)
+    /// <summary>Tells the callers that asked before the run began, by <paramref name="asked"/>, how it ended.</summary>
+    private void Answer(long asked, RunEnded ended)
     {
-        List<TaskCompletionSource<IReadOnlyList<Exception>>> answered = [];
+        List<TaskCompletionSource<RunEnded>> answered = [];
         lock (_planningGate)
         {
             _planningWaiters.RemoveAll(waiter =>
@@ -409,9 +470,12 @@ public sealed partial class ChalkEngine
 
         foreach (var ran in answered)
         {
-            ran.TrySetResult(failed);
+            ran.TrySetResult(ended);
         }
     }
+
+    /// <summary>How a background run ended: the failure that ended it, or why each statement it could not plan again failed.</summary>
+    private sealed record RunEnded(Exception? Failure, IReadOnlyList<Exception> Statements);
 
     /// <summary>
     /// One background run (design 69 §4): the statistics deferred refreshes left, computed over the
@@ -718,8 +782,8 @@ public sealed partial class ChalkEngine
     /// Takes in what background runs produced (design 69 §4): the plans swap in, and with
     /// <paramref name="statistics"/> the statistics enter their tables. Called under the refresh lock:
     /// by a refresh as it begins, deferred or not, whose publish carries the statistics into the
-    /// catalog; and by <see cref="PlanAsync"/>, which publishes nothing, so they wait for the next
-    /// refresh.
+    /// catalog; and by <see cref="PlanAsync"/>, or a refresh that plans now once its run ends, which
+    /// publish nothing, so they wait for the next refresh.
     /// </summary>
     private TakenIn? AdmitBackgroundPlanning(bool statistics = true)
     {
@@ -762,15 +826,15 @@ public sealed partial class ChalkEngine
     }
 
     /// <summary>
-    /// What a refresh, or <see cref="PlanAsync"/>, took in of the background's work, told to the host's
-    /// observer once it lets go of the lock.
+    /// What a refresh, <see cref="PlanAsync"/> or a refresh that plans now took in of the background's
+    /// work, told to the host's observer once it lets go of the lock.
     /// </summary>
     private readonly record struct TakenIn(int Swapped, int Unchanged, int Statistics);
 
     /// <summary>
     /// Tells the host's observer what the refresh that published <paramref name="epoch"/> and
-    /// <paramref name="version"/> took in, after its lock; or <see cref="PlanAsync"/>, at the epoch and
-    /// version current as it took the work in.
+    /// <paramref name="version"/> took in, after its lock; or <see cref="PlanAsync"/>, or a refresh that
+    /// plans now, at the epoch and version current as the plans were taken in.
     /// </summary>
     private void ObserveTakenIn(TakenIn? taken, long epoch, long version)
     {
@@ -866,7 +930,7 @@ public sealed partial class ChalkEngine
             await planning.ConfigureAwait(false);
         }
 
-        List<(long Asked, TaskCompletionSource<IReadOnlyList<Exception>> Ran)> waiting;
+        List<(long Asked, TaskCompletionSource<RunEnded> Ran)> waiting;
         lock (_planningGate)
         {
             waiting = [.. _planningWaiters];

@@ -90,6 +90,12 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// <summary>Instances let go while their builds ran, each disposed once its build has stopped.</summary>
     private readonly List<Task> _lettingGo = [];
 
+    /// <summary>
+    /// Starts building a plan beside the view's own as its statement swaps the plan in (design 70 §2),
+    /// for a view that swaps with low jitter; null for any other.
+    /// </summary>
+    private readonly Action? _buildAtSwap;
+
     private StandingView(
         ChalkEngine engine,
         string sql,
@@ -112,6 +118,11 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         if (options.RefreshQueryPlan is not null || options.PlanImprovementMargin is not null)
         {
             _choice = new PreparedQuery.PlanChoice(options.RefreshQueryPlan, options.PlanImprovementMargin);
+        }
+
+        if (options.PlanSwap == ViewPlanSwap.LowJitter)
+        {
+            _buildAtSwap = BuildAtSwap;
         }
     }
 
@@ -523,10 +534,16 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// Puts the host's say on the view's plans on <paramref name="prepared"/> (design 70 §1, §3), where a
     /// background run asks it; with a margin, asks the planner too to keep the plan the statement runs,
     /// so the first plan a background run makes can be priced against it. A statement keeps one view's:
-    /// <c>MakeAsync</c> refuses a host's statement that carries another view's.
+    /// <c>MakeAsync</c> refuses a host's statement that carries another view's. Under a low-jitter swap,
+    /// the view also listens for the statement's new plans, to build each beside its own as it swaps in.
     /// </summary>
     private async ValueTask AttachAsync(PreparedQuery prepared, CancellationToken ct)
     {
+        if (_buildAtSwap is not null)
+        {
+            prepared.PlanSwapped += _buildAtSwap;
+        }
+
         if (_choice is not null)
         {
             prepared.Choice = _choice;
@@ -537,9 +554,14 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         }
     }
 
-    /// <summary>Takes the host's say off <paramref name="prepared"/>, when it is the view's.</summary>
+    /// <summary>Stops listening to <paramref name="prepared"/>, and takes the host's say off it when it is the view's.</summary>
     private void Detach(PreparedQuery prepared)
     {
+        if (_buildAtSwap is not null)
+        {
+            prepared.PlanSwapped -= _buildAtSwap;
+        }
+
         if (_choice is not null && ReferenceEquals(prepared.Choice, _choice))
         {
             prepared.Choice = null;
@@ -1128,13 +1150,13 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
     /// <summary>
     /// Moves the view to the plan its statement swapped in, without computing it from nothing at an
-    /// update (design 70 §2). An instance on the new plan is built in the background, from the end of
-    /// an update, while the view keeps updating <paramref name="blue"/> (<see cref="BuildBeside"/>). The
-    /// first update after the build swaps the new instance in: it catches up to that update's epoch and
-    /// gives its whole result, which the view compares with its rows, so readers keep their place. A
-    /// newer plan meanwhile abandons the build, and the update's end starts one on that plan; a plan that
-    /// cannot be maintained, or a build that fails, keeps <paramref name="blue"/> on its plan, as a plan
-    /// the view cannot maintain is declined.
+    /// update (design 70 §2). An instance on the new plan is built in the background, from the moment
+    /// the statement swaps the plan in, while the view keeps updating <paramref name="blue"/>
+    /// (<see cref="BuildBeside"/>). The first update after the build swaps the new instance in: it
+    /// catches up to that update's epoch and gives its whole result, which the view compares with its
+    /// rows, so readers keep their place. A newer plan meanwhile abandons the build, and its swap starts
+    /// one on that plan; a plan that cannot be maintained, or a build that fails, keeps
+    /// <paramref name="blue"/> on its plan, as a plan the view cannot maintain is declined.
     /// </summary>
     private async ValueTask SwapBesideAsync(MaintainedQuery blue)
     {
@@ -1180,10 +1202,48 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     }
 
     /// <summary>
+    /// Starts building the plan its statement just swapped in beside the one the view runs (design 70
+    /// §2), rather than at the end of the view's next update, so that the update after a swap can take
+    /// it. The statement raises this under the engine's refresh lock, which an update may wait for while
+    /// it holds the view's own: the build is started off this thread, under the update lock.
+    /// </summary>
+    private void BuildAtSwap() => Volatile.Write(ref _buildingAtSwap, Task.Run(BuildAtSwapAsync));
+
+    private Task _buildingAtSwap = Task.CompletedTask;
+
+    /// <summary>For tests: the start of the last build at a swap, done once the build has begun or was found not needed.</summary>
+    internal Task BuildingAtSwap => Volatile.Read(ref _buildingAtSwap);
+
+    private async Task BuildAtSwapAsync()
+    {
+        await _updating.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_disposed || _fault is not null)
+            {
+                return;
+            }
+
+            // An instance building for a plan swapped out since would be let go at the next update.
+            if (_green is { } stale && !ReferenceEquals(stale.PlannedFor, _prepared.Plans))
+            {
+                LetGo(stale);
+            }
+
+            BuildBeside();
+        }
+        finally
+        {
+            _updating.Release();
+        }
+    }
+
+    /// <summary>
     /// Starts building the plan the statement runs beside the one the view runs (design 70 §2), when
-    /// the view builds new plans beside its own, runs another plan, and builds nothing yet. Called at the
-    /// end of an update, so that the build runs in the time before the next: the instance is made and
-    /// computed from nothing off the update's thread, over the epoch current when the build begins.
+    /// the view builds new plans beside its own, runs another plan, and builds nothing yet. Called as
+    /// the statement swaps a plan in, and at the end of an update, so that the build runs in the time
+    /// before the next: the instance is made and computed from nothing off the update's thread, over the
+    /// epoch current when the build begins.
     /// </summary>
     private void BuildBeside()
     {

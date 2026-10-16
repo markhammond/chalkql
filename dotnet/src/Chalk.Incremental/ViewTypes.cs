@@ -104,12 +104,12 @@ public enum ViewPlanSwap
     AtNextUpdate = 0,
 
     /// <summary>
-    /// A second instance of the view is built on the new plan in the background, while the view keeps
-    /// updating the one it has, so that no update stalls on the new plan: low jitter, paid for in
-    /// memory. The first update after the build swaps the new instance in: it catches up to that
-    /// update's epoch, and readers keep their place, sent only the keys whose rows differ. Until then
-    /// the view holds both instances' state. Refused for a view that recomputes, which takes a new plan
-    /// at no extra cost.
+    /// A second instance of the view is built on the new plan in the background, from the moment the
+    /// statement swaps the plan in, while the view keeps updating the one it has, so that no update
+    /// stalls on the new plan: low jitter, paid for in memory. The first update after the build swaps
+    /// the new instance in: it catches up to that update's epoch, and readers keep their place, sent
+    /// only the keys whose rows differ. Until then the view holds both instances' state. Refused for a
+    /// view that recomputes, which takes a new plan at no extra cost.
     /// </summary>
     LowJitter = 1,
 }

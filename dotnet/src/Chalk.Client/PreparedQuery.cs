@@ -725,6 +725,13 @@ public sealed class PreparedQuery
     /// </summary>
     internal PlanChoice? Choice { get; set; }
 
+    /// <summary>
+    /// Raised when a plan made in the background swaps in (<see cref="Adopt"/>), under the refresh
+    /// lock: for a view that builds a new plan beside its own to start as the plan swaps in (design 70
+    /// §2). A handler queues its work, and neither blocks nor throws.
+    /// </summary>
+    internal event Action? PlanSwapped;
+
     /// <summary>A view's say on its statement's plans (design 70).</summary>
     /// <param name="RefreshQueryPlan">
     /// The host's veto on requesting a new plan for drift (§1): asked before one is requested, and
@@ -831,6 +838,7 @@ public sealed class PreparedQuery
         }
 
         Volatile.Write(ref _state, next);
+        PlanSwapped?.Invoke();
         return true;
     }
 

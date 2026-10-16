@@ -117,15 +117,17 @@ await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKe
   and committed later reaches the view the same way, and a compaction that takes out only rows no
   as-of join matches moves no match.
 - A plan the background made under `DeferPlanning()` is taken at the view's first update after a
-  refresh, whether that refresh or `ChalkEngine.PlanAsync` swapped it in, and maintained from the
-  start; a plan the view cannot maintain is declined, as the one it keeps answers the same rows.
+  refresh, whether that refresh, `ChalkEngine.PlanAsync` or a refresh's `PlanNow()` run swapped it
+  in, and maintained from the start; a plan the view cannot maintain is declined, as the one it
+  keeps answers the same rows.
 - A view may be built with a tracker of what its updates cost (`ViewOptions.Tracker`), and with a
   host callback that may veto requesting a new plan for drift (`ViewOptions.RefreshQueryPlan`): the
   statement keeps its plan, and the next refresh that defers its planning asks again.
 - A view may set the fraction of its plan's cost a new plan must save
   (`ViewOptions.PlanImprovementMargin`): the planner holds back a plan that saves less.
-- A view may build a new plan beside the one it runs, and swap it in once built
-  (`ViewOptions.PlanSwap = ViewPlanSwap.LowJitter`), so that no update computes it from nothing.
+- A view may build a new plan beside the one it runs, from the moment its statement takes the plan,
+  and swap it in once built (`ViewOptions.PlanSwap = ViewPlanSwap.LowJitter`), so that no update
+  computes it from nothing.
 - Joins (inner and left), as-of joins, aggregates with grouping sets, filters, projections,
   `UNION ALL`, `VALUES` and `WITH` subtrees are maintained, the clock in a filter or a projection,
   and an index lookup pinned to keys, as a constant key or an `IN` list makes, which is read as its
