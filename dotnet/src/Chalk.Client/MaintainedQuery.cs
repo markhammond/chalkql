@@ -19,6 +19,7 @@ internal sealed class MaintainedQuery : IAsyncDisposable
     private readonly IReadOnlyList<PlaceholderSlot> _slots;
     private readonly IReadOnlyList<ChalkType> _parameterTypes;
     private readonly IReadOnlyList<Chalk.Ir.BoundScalar> _boundScalars;
+    private readonly RequestContext? _context;
     private readonly ExecutionArena _arena = new();
 
     internal MaintainedQuery(
@@ -27,13 +28,15 @@ internal sealed class MaintainedQuery : IAsyncDisposable
         IReadOnlyList<PlaceholderSlot> slots,
         IReadOnlyList<ChalkType> parameterTypes,
         IReadOnlyList<Chalk.Ir.BoundScalar> boundScalars,
-        PreparedQuery.PlanState plans)
+        PreparedQuery.PlanState plans,
+        RequestContext? context)
     {
         _query = query;
         _plan = plan;
         _slots = slots;
         _parameterTypes = parameterTypes;
         _boundScalars = boundScalars;
+        _context = context;
         PlannedWith = plans;
         PlanDigest = plans.Plan.PlanDigest;
     }
@@ -76,7 +79,7 @@ internal sealed class MaintainedQuery : IAsyncDisposable
     public async ValueTask<MaintainedUpdate> UpdateAsync(
         object?[] values, DateTimeOffset now, long version, bool whole, CancellationToken ct)
     {
-        var (flat, relations) = _query.BindUpdate(values, _slots, _parameterTypes, _boundScalars, PlanDigest, version);
+        var (flat, relations) = _query.BindUpdate(values, _slots, _parameterTypes, _boundScalars, PlanDigest, version, _context);
         MaintainedChanges changes;
         try
         {

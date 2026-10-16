@@ -1955,7 +1955,9 @@ await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions
 - **Grants that change belong in a table**, reached along a path. Sharing is then a row added in a
   refresh, and withdrawing a row deleted: the view gives or drops the rows they govern at its next
   update. Grants folded into the statement when it was prepared stand for the view's life: to revoke
-  one, dispose of the view and make another.
+  one, dispose of the view and make another. `view.ContextDigest` says which binding a view stands
+  on, as `RequestContext.CanonicalHash` (no purpose or actor), so the views a changed grant touches
+  are those whose digest is no longer `entitlements.Bind(principal).CanonicalHash`.
 - **An index on the table keeps a view to its reader's share.** A path joins the table to the keys
   its grants name, and a maintained join holds both its sides, so without an index every view holds
   a copy of the table. Where an index of the table begins with the column the path joins on — for
@@ -1964,11 +1966,12 @@ await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions
   row that changes is matched against the keys held. `Keyed(…)` on an in-process table says how its
   rows change and does not index them: declare the index too, as `t.UniqueIndex(x => x.Seq)`.
 - **Lists too long to fold** stay relations, as they do for an execution, and every update binds
-  them from the context the statement was prepared with. The statement reads them through a
+  them from the view's context, or else from the one the statement was prepared with. The statement reads them through a
   membership test, or splits its rows over them with a semi and an anti join; both are maintained.
 - **Every update is audited.** An `IEntitlementsAudit` hears one event per update that runs, before
   it runs, whether the view recomputes or is maintained. The event carries the purpose and actor of
-  the context the statement was prepared with, the digest of the plan the update runs, and the
+  the context the view binds, or else of the one the statement was prepared with, the digest of the
+  plan the update runs, and the
   `Version` the update brings the view to, which says which grants a table of grants held. An update
   at the epoch the view already holds runs nothing and raises nothing. Any refresh moves the epoch,
   though, even one that touches no table the view reads: the next update then runs, and is audited.
@@ -1976,8 +1979,27 @@ await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions
 - **A change of shape keeps the policy.** When a table the statement reads changes shape, the view
   prepares the statement again through the policy, with the same context, and its updates go on
   being audited.
-- **The context is the statement's.** A statement prepared with `context.Shape()` binds its values at
-  each execution, and a view binds none: incremental maintenance refuses it when the view is made.
+- **One statement serves every principal's view.** Prepare the statement once for the shape of a
+  context, and give each view its principal's values in `ViewOptions.Context`:
+
+  ```csharp
+  var feed = await entitled.PrepareAsync(sql, entitlements.Bind(anyone).Shape());
+  await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions<Key, Row>
+  {
+      // …
+      Maintenance = ViewMaintenance.Incremental,
+      Context = entitlements.Bind(principal),
+  });
+  ```
+
+  - The view binds those values for its life, at every update, recomputed or maintained, as an
+    execution binds them. Its rows are what the statement returns for that principal, and each
+    update's audit event carries that context's purpose and actor.
+  - The values must fit the statement's shape as an execution's must: the same names, kinds and
+    types, and for a tenant's plan, prepared with `Bind(principal, fold: …)`, the same values for
+    what it folded. A view whose values do not fit is refused when it is made, and so is a view of a
+    statement prepared for a shape that is given none.
+  - A view made from a statement's text prepares it with no context, so it refuses one.
 
 ### What a view refuses
 
