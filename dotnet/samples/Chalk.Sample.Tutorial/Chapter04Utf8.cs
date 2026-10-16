@@ -80,21 +80,52 @@ public static class Chapter04Utf8
         var query = await engine.PrepareAsync(Sql);
 
         // The first run warms the compiled chunk writers, the JIT and the arena's pools; the three
-        // after it are counted. Process-wide and precise, so a thread hop cannot flatter a reading —
-        // and so what another thread allocates meanwhile lands in one too (F207). The least of the
-        // three is the read's own.
+        // after it are counted, and the least of them is reported.
         await Tutorial.DrainAsync(await engine.ExecuteAsync(query));
         var rows = 0;
         var least = long.MaxValue;
         for (var reading = 0; reading < 3; reading++)
         {
-            var before = GC.GetTotalAllocatedBytes(precise: true);
-            rows = await Tutorial.DrainAsync(await engine.ExecuteAsync(query));
-            least = Math.Min(least, GC.GetTotalAllocatedBytes(precise: true) - before);
+            (rows, var bytes) = Read(engine, query);
+            least = Math.Min(least, bytes);
         }
 
         return (rows, least);
     }
+
+    /// <summary>
+    /// One run, counted on the thread that runs it. A read of in-memory rows never waits, so the run
+    /// completes start to end on this thread, and every byte it allocates is counted here. What the
+    /// runtime does on its other threads meanwhile, such as starting a thread or running a finalizer,
+    /// is not counted (F220). A step that did not complete at once would carry the run to another
+    /// thread and leave its bytes out, so the read refuses one rather than print a count that
+    /// flatters it.
+    /// </summary>
+    private static (int Rows, long Bytes) Read(ChalkEngine engine, PreparedQuery query)
+    {
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var execution = Now(engine.ExecuteAsync(query));
+        var batches = execution.Batches.GetAsyncEnumerator();
+        var rows = 0;
+        while (Now(batches.MoveNextAsync()))
+        {
+            rows += batches.Current.Length;
+            batches.Current.Dispose();
+        }
+
+        if (!batches.DisposeAsync().IsCompleted)
+        {
+            throw new InvalidOperationException("The read waited as it ended, so one thread cannot count it.");
+        }
+
+        return (rows, GC.GetAllocatedBytesForCurrentThread() - before);
+    }
+
+    /// <summary>The result of a step that completed at once; one that waits is refused.</summary>
+    private static T Now<T>(ValueTask<T> step) =>
+        step.IsCompleted
+            ? step.Result
+            : throw new InvalidOperationException("The read waited, so one thread cannot count it.");
 
     private static ValueTask<ChalkEngine> EngineAsync(
         Func<IQueryPlanner> planner, string contextId, IReadOnlyList<Product> rows, int batchSize) =>

@@ -465,12 +465,14 @@ Console.WriteLine(Encoding.UTF8.GetString(bytes));       // the host deciding to
 
 The measurement asks the only question worth asking: what does a row cost on the managed
 heap? Two sizes, each read in one batch, because a slope taken with the batch count growing
-is a per-batch cost in disguise.
+is a per-batch cost in disguise. Each size is read three times after a warm-up, counted on
+the thread that reads it, and the least is shown, so nothing the runtime does on its other
+threads meanwhile is counted.
 
 ```
 -- what a row costs on the managed heap
-    17000 rows in one batch: 2712 bytes allocated
-    34000 rows in one batch: 2712 bytes allocated
+    17000 rows in one batch: 2640 bytes allocated
+    34000 rows in one batch: 2640 bytes allocated
     slope: 0.0000 bytes per row
     The allocation gates hold a POCO Utf8String column at 0.0000 bytes per row.
     Two sizes read in one batch each, because a slope taken with the batch count
