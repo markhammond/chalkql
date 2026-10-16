@@ -410,6 +410,36 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         Assert.Equal(1, desk.Engine.BackgroundPlanningRuns);
     }
 
+    /// <summary>
+    /// A plan a run staged is dropped when a later run, on newer numbers, comes back to the plan the
+    /// statement runs: the newest numbers win. Here the tables fill, a run plans for them, and they
+    /// empty again before any refresh takes that plan in; the run that follows finds the plan for
+    /// empty tables, which the statement runs, so nothing swaps in.
+    /// </summary>
+    [Fact]
+    public async Task A_plan_made_on_older_numbers_is_dropped_when_newer_ones_keep_the_running_plan()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var planner = new GatedPlanner(sidecar.CreatePlanner());
+        await using var desk = await DeskAsync(planner, [], []);
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var planned = statement.PlanDigest;
+
+        // The first run waits at the planner while the tables empty again, so the run after it starts
+        // with no refresh between them to take the first one's plan in.
+        planner.Hold();
+        await desk.LoadAsync(Fills(5_000, books: 50), Books(50), deferred: true);
+        await planner.Arrived.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        await desk.LoadAsync([], [], deferred: true);
+        planner.Release();
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(2, desk.Engine.BackgroundPlanningRuns);
+        Assert.Equal(1, desk.Engine.LastBackgroundPlans!.Unchanged);
+
+        await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
+        Assert.Equal(planned, statement.PlanDigest);
+    }
+
     // ---- PlanAsync ----
 
     /// <summary>
@@ -430,7 +460,7 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         var version = desk.Engine.Version;
         var rowsBefore = await RowsAsync(desk.Engine, statement);
 
-        await desk.Engine.PlanAsync(Ct);
+        Assert.True(await desk.Engine.PlanAsync(Ct));
 
         var prepared = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
         Assert.NotEqual(planned, statement.PlanDigest);
@@ -453,7 +483,7 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         await using var desk = await DeskAsync(new GatedPlanner(sidecar.CreatePlanner()), Fills(100, books: 10), Books(10));
         await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", Fills(50, books: 10, qty: 99_999)).DeferPlanning(), Ct);
 
-        await desk.Engine.PlanAsync(Ct);
+        Assert.False(await desk.Engine.PlanAsync(Ct));
         Assert.Equal(7L, QtyMax(desk.Engine));
         Assert.True(desk.Engine.BackgroundPlanningStaged);
 
@@ -483,7 +513,7 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         Assert.Equal(1, desk.Engine.BackgroundPlanningRuns);
 
         planner.Release();
-        await planning.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        Assert.True(await planning.WaitAsync(TimeSpan.FromSeconds(30), Ct));
         Assert.Equal(2, desk.Engine.BackgroundPlanningRuns);
         Assert.NotEqual(planned, statement.PlanDigest);
     }
@@ -504,11 +534,55 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         Assert.Equal(0, desk.Engine.BackgroundPlanningRuns);
         Assert.Equal(planned, statement.PlanDigest);
 
-        await desk.Engine.PlanAsync(Ct);
+        Assert.True(await desk.Engine.PlanAsync(Ct));
 
         Assert.Equal(1, desk.Engine.BackgroundPlanningRuns);
         Assert.NotEqual(planned, statement.PlanDigest);
         Assert.Equal((await desk.Engine.PrepareAsync(ByDesk, ct: Ct)).PlanDigest, statement.PlanDigest);
+    }
+
+    /// <summary>
+    /// <c>PlanAsync</c> says whether a plan changed: a call that swaps a new plan in says so, and a call
+    /// straight after it, with nothing new to plan, says no plan changed.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_says_whether_a_plan_changed()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync(new GatedPlanner(sidecar.CreatePlanner()), [], []);
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        await desk.LoadAsync(Fills(5_000, books: 50), Books(50), deferred: true);
+
+        Assert.True(await desk.Engine.PlanAsync(Ct));
+        var planned = statement.PlanDigest;
+
+        Assert.False(await desk.Engine.PlanAsync(Ct));
+        Assert.Equal(planned, statement.PlanDigest);
+    }
+
+    /// <summary>
+    /// A statement whose tables moved, planned again to the plan it runs, is answered by the planner
+    /// without the plan, against the digest the statement sent. Nothing swaps in, the version stays,
+    /// and <c>PlanAsync</c> says no plan changed.
+    /// </summary>
+    [Fact]
+    public async Task PlanAsync_is_false_when_the_planner_comes_back_to_each_plan()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        const string ByBook = "SELECT f.book AS desk, SUM(f.qty) AS qty FROM fills AS f GROUP BY f.book";
+        var planner = new GatedPlanner(sidecar.CreatePlanner());
+        await using var desk = await DeskAsync(planner, Fills(100, books: 10), Books(10));
+        var statement = await desk.Engine.PrepareAsync(ByBook, ct: Ct);
+        var planned = statement.PlanDigest;
+        await desk.LoadAsync(Fills(5_000, books: 10), Books(10), deferred: true);
+        var version = desk.Engine.Version;
+
+        Assert.False(await desk.Engine.PlanAsync(Ct));
+
+        Assert.True(planner.Unchanged >= 1, $"the planner answered {planner.Unchanged} plans unchanged");
+        Assert.Equal(planned, statement.PlanDigest);
+        Assert.Equal(version, desk.Engine.Version);
+        Assert.False(statement.DriftedFrom(desk.Engine.Catalog));
     }
 
     /// <summary>
@@ -533,7 +607,7 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
 
         Assert.Same(away, failure);
         Assert.Equal(planned, statement.PlanDigest);
-        await desk.Engine.PlanAsync(Ct);
+        Assert.True(await desk.Engine.PlanAsync(Ct));
         Assert.NotEqual(planned, statement.PlanDigest);
     }
 
@@ -564,7 +638,7 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         Assert.NotEqual(otherPlan, other.PlanDigest);
 
         planner.FailPlansOf("SUM(f.qty)", null);
-        await desk.Engine.PlanAsync(Ct);
+        Assert.True(await desk.Engine.PlanAsync(Ct));
         Assert.NotEqual(failingPlan, failing.PlanDigest);
     }
 
@@ -586,7 +660,7 @@ public sealed class DeferredPlanningTests(SharedSidecar sidecar)
         Assert.Equal(DrainOutcome.Complete, view.Drain(ref cursor, sink));
         sink.Calls.Clear();
 
-        await desk.Engine.PlanAsync(Ct);
+        Assert.True(await desk.Engine.PlanAsync(Ct));
         Assert.NotEqual(planned, view.Statement.PlanDigest);
         Assert.False(view.MaintainsCurrentPlan);
         await view.UpdateAsync(Ct);

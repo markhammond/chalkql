@@ -1718,4 +1718,4 @@ Chalk.Client.StatementPrepared.LogicalDigest.get -> ulong
 Chalk.Client.StatementPrepared.PlanDigest.get -> ulong
 Chalk.Client.StatementPrepared.Reason.get -> Chalk.Client.PrepareReason
 Chalk.Client.StatementPrepared.StatementPrepared() -> void
-Chalk.Client.ChalkEngine.PlanAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Chalk.Client.ChalkEngine.PlanAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!

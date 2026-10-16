@@ -290,6 +290,11 @@ public sealed partial class ChalkEngine
     /// moved twofold since it was planned. Its plans swap in here, under the refresh lock, rather than
     /// at the next refresh.
     /// </summary>
+    /// <returns>
+    /// Whether a plan changed: true when some statement this engine held when it was called runs
+    /// another plan once it completes, and false when none does. Nothing was due, or the planner came
+    /// back to the plan each statement runs, which it says without sending the plan again.
+    /// </returns>
     /// <remarks>
     /// <para>
     /// The run begins after this call, so it sees every refresh published before it. One already
@@ -318,18 +323,20 @@ public sealed partial class ChalkEngine
     /// next refresh or the next call. A disposed engine throws <see cref="ObjectDisposedException"/>.
     /// </para>
     /// </remarks>
-    public Task PlanAsync(CancellationToken ct = default)
+    public Task<bool> PlanAsync(CancellationToken ct = default)
     {
-        var planned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var planned = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _ = PlanAndTakeInAsync(planned, ct);
         return planned.Task;
     }
 
     /// <summary>The body of <see cref="PlanAsync"/>, which ends <paramref name="planned"/> however it ends.</summary>
-    private async Task PlanAndTakeInAsync(TaskCompletionSource planned, CancellationToken ct)
+    private async Task PlanAndTakeInAsync(TaskCompletionSource<bool> planned, CancellationToken ct)
     {
         try
         {
+            // The plan each held statement runs as the call begins: what the answer is judged by.
+            var before = HeldStatements().ConvertAll(statement => (Statement: statement, statement.PlanDigest));
             var failed = await AskForRun().WaitAsync(ct).ConfigureAwait(false);
 
             TakenIn? taken;
@@ -348,7 +355,7 @@ public sealed partial class ChalkEngine
             ObserveTakenIn(taken, stamp.Epoch, stamp.Version);
             if (failed.Count == 0)
             {
-                planned.SetResult();
+                planned.SetResult(before.Exists(held => held.Statement.PlanDigest != held.PlanDigest));
             }
             else
             {
@@ -463,6 +470,7 @@ public sealed partial class ChalkEngine
         }
 
         var plans = new List<(PreparedQuery Statement, PreparedQuery.PlanState Plan)>();
+        var kept = new List<(PreparedQuery Statement, string Version)>();
         var failures = new List<Exception>();
         var owed = false;
         int drifted = 0, unchanged = 0, held = 0, vetoed = 0, notTheSame = 0, failed = 0;
@@ -519,9 +527,11 @@ public sealed partial class ChalkEngine
                         break;
                     case PlanVerdict.Unchanged:
                         unchanged++;
+                        kept.Add((statement, statement.PlannedOnVersion));
                         break;
                     case PlanVerdict.HeldByMargin:
                         held++;
+                        kept.Add((statement, statement.PlannedOnVersion));
                         break;
                     default:
                         notTheSame++;
@@ -549,7 +559,7 @@ public sealed partial class ChalkEngine
             }
         }
 
-        Stage(computed.Select(c => (c.Source, c.Tables)), plans);
+        Stage(computed.Select(c => (c.Source, c.Tables)), plans, kept);
         lock (_plannedGate)
         {
             _judgedStatisticsVersion = judged;
@@ -664,11 +674,14 @@ public sealed partial class ChalkEngine
 
     /// <summary>
     /// Keeps what a run produced for the next refresh, over whatever an earlier run left that no
-    /// refresh has taken in yet: per table and per statement, the later run's word stands.
+    /// refresh has taken in yet: per table, the later run's word stands; per statement, the plan made
+    /// on the newest numbers (F241). A plan staged on older numbers gives way to a newer one, and to
+    /// the plan the statement runs when <paramref name="kept"/> says a later planning came back to it.
     /// </summary>
     private void Stage(
         IEnumerable<(IDeferredStatisticsSource Source, IReadOnlyList<DeferredStatistics> Tables)> statistics,
-        List<(PreparedQuery Statement, PreparedQuery.PlanState Plan)> plans)
+        List<(PreparedQuery Statement, PreparedQuery.PlanState Plan)> plans,
+        List<(PreparedQuery Statement, string Version)> kept)
     {
         lock (_planningGate)
         {
@@ -683,7 +696,18 @@ public sealed partial class ChalkEngine
 
             foreach (var (statement, plan) in plans)
             {
-                staged.Plans[statement] = plan;
+                if (!staged.Plans.TryGetValue(statement, out var waiting) || !plan.OlderThan(waiting.PlannedOnVersion))
+                {
+                    staged.Plans[statement] = plan;
+                }
+            }
+
+            foreach (var (statement, version) in kept)
+            {
+                if (staged.Plans.TryGetValue(statement, out var waiting) && waiting.OlderThan(version))
+                {
+                    staged.Plans.Remove(statement);
+                }
             }
 
             _planned = staged.Statistics.Count == 0 && staged.Plans.Count == 0 ? null : staged;
