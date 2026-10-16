@@ -613,7 +613,9 @@ var source = new AdoSourceBuilder("sales", SqliteFactory.Instance, connectionStr
 ```
 
 Presets ship for **SQLite**, **DuckDB**, **PostgreSQL** and **ANSI**. Each has its own
-dialect subclass, and a conformance-kit run behind it.
+dialect subclass, and a conformance-kit run behind it. SQLite has no interval type, so
+arithmetic with an interval, such as `ts + INTERVAL '6' HOUR`, is never sent to it: Chalk
+evaluates it on the rows SQLite returns. The other presets are sent it as written.
 
 You can also name any other Calcite `SqlDialect.DatabaseProduct`, such as `oracle`,
 `mssql` or `big_query`. Case does not matter, and `-` and `_` are both accepted. This
