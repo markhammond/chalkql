@@ -40,6 +40,9 @@ public sealed class StatisticalAccessTests(SharedSidecar sidecar)
     /// </summary>
     private static string Shared => TenancyFixture.Members[0].FirstName;
 
+    /// <summary>A first name only member 2 has, in organisation 1, read off the fixture as <see cref="Shared"/> is.</summary>
+    private static string Unshared => TenancyFixture.Members[1].FirstName;
+
     private static readonly RequestContext Agent = TenancyFixture.Principal(
         user: 2, managerOrgs: [], agentOrgs: [1, 2], auditorOrgs: [], subjectPairs: []);
 
@@ -79,6 +82,30 @@ public sealed class StatisticalAccessTests(SharedSidecar sidecar)
     }
 
     // ---------------------------------------------------------------- the negatives
+
+    /// <summary>
+    /// An aggregate's argument computed from the raw value is refused (F233). It is a FILTER
+    /// written where no floor can count its rows, or the value itself by another route. Before, the
+    /// first of these counted the one member with a name, the second returned that member's id, and
+    /// the last two returned a first name, for a column that permits no aggregate at all.
+    /// </summary>
+    [Theory]
+    [InlineData("SUM(CASE WHEN first_name = '{name}' THEN 1 ELSE 0 END)", "SUM")]
+    [InlineData("SUM(CASE WHEN first_name = '{name}' THEN id END)", "SUM")]
+    [InlineData("MIN(first_name || '')", "MIN")]
+    [InlineData("MIN(CAST(first_name AS VARCHAR(80)))", "MIN")]
+    public async Task An_argument_computed_from_the_raw_value_is_refused(string aggregate, string function)
+    {
+        var refusal = await Assert.ThrowsAsync<EntitlementException>(
+            async () => await RowsAsync(
+                $"SELECT COUNT(*), {aggregate.Replace("{name}", Unshared, StringComparison.Ordinal)} FROM members"));
+
+        Assert.Equal(ChalkErrorCodes.Statistical, refusal.Code);
+        Assert.Contains(
+            $"main.members.first_name is a statistical column, and this statement computes the argument of {function} from it",
+            refusal.Message,
+            StringComparison.Ordinal);
+    }
 
     /// <summary>
     /// Pinning an individual: an aggregate over one person is that person, and the difference of

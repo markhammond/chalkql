@@ -2367,16 +2367,18 @@ source for.
   per column on the descriptor.
 - **Statistical columns.** A host may decide that a column is protected by
   *query-set-size control* rather than by a mask: `ColumnEntitlement.Statistical`. The
-  raw value may then reach filters, join conditions, an aggregate's `FILTER`, and
-  grouping keys, but only in a statement where:
+  raw value may then decide which rows an aggregate reports on, in filters, join
+  conditions, an aggregate's `FILTER`, and grouping keys, but only in a statement where:
   - every output column is an aggregate or a group key;
   - there is no window anywhere;
   - no individual is pinned or excluded. (A comparison on, or a grouping by, a declared
     unique key is refused.)
 
   A group smaller than the floor is then **dropped**, rather than set to NULL, because
-  with a raw grouping key, the key itself is the disclosure. Outside such a statement,
-  the opt-in does not apply, and the column keeps its mask.
+  with a raw grouping key, the key itself is the disclosure. An aggregate's argument
+  computed from the column, such as `SUM(CASE WHEN … THEN 1 ELSE 0 END)`, is refused;
+  write the condition as the aggregate's `FILTER`. Outside such a statement, the opt-in
+  does not apply, and the column keeps its mask.
 - **Two kernels.**
   - `FINGERPRINT(value, key)` is a keyed, stable pseudonym: HMAC-SHA-256, with the first
     sixteen bytes as hex. So an equality join on fingerprints matches masked rows across

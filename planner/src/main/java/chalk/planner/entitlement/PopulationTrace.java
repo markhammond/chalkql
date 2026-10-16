@@ -58,14 +58,27 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  */
 final class PopulationTrace {
 
-  /** One population-only column, as the trace carries it upward. */
+  /**
+   * One population-only column, as the trace carries it upward.
+   *
+   * @param computed a value an expression computed from a statistical column rather than the column
+   *     itself (D203): a predicate's to test, a key's to group on and a FILTER's to select rows by,
+   *     and never an aggregate's argument
+   */
   record Taint(
       String table,
       String column,
       List<String> allowList,
       int floor,
       RelDataType type,
-      boolean statistical) {}
+      boolean statistical,
+      boolean computed) {
+
+    /** This statistical column as an expression over it carries it on: no aggregate may take it. */
+    Taint computedFrom() {
+      return new Taint(table, column, List.of(), floor, type, true, true);
+    }
+  }
 
   /**
    * One aggregate call the guard rewrites: which call, what the guarding count counts, and the floor
@@ -264,7 +277,8 @@ final class PopulationTrace {
               entitled == null ? List.of() : entitled.allowList(),
               options.minGroupSize(entitled == null ? 0 : entitled.minGroupSize()),
               rowType.getFieldList().get(column).getType(),
-              fold.statistical().contains(column)));
+              fold.statistical().contains(column),
+              false));
     }
     return out;
   }
@@ -291,8 +305,46 @@ final class PopulationTrace {
       // writes a FILTER as `IS TRUE(<comparison>)` in this very projection — and §3.4's refusals
       // are unchanged for every other position and for whatever else the expression reads.
       refuseAnyUse(project, expr, in, "a value use (" + expr + ")");
+      // What an expression computes from a statistical column is still that column to everything
+      // above (D203). The converter writes a FILTER's condition here, which the aggregate reads as
+      // its FILTER, and an argument computed here is refused there (F233).
+      Taint statistical = statisticalRead(project, expr, in);
+      if (statistical != null) {
+        out.put(i, statistical.computedFrom());
+      }
     }
     return out;
+  }
+
+  /**
+   * The statistical column {@code expr} reads, outside any comparison the leaf computes (D261), or
+   * null. Of two, the one with the higher floor, since the guard it leads to must hold for both.
+   */
+  private @Nullable Taint statisticalRead(RelNode at, RexNode expr, Map<Integer, Taint> in) {
+    List<Taint> read = new ArrayList<>(1);
+    expr.accept(
+        new RexVisitorImpl<Void>(true) {
+          @Override
+          public Void visitCall(RexCall call) {
+            if (lifts.lifts(at, call)) {
+              return null;
+            }
+            return super.visitCall(call);
+          }
+
+          @Override
+          public Void visitInputRef(RexInputRef ref) {
+            Taint taint = in.get(ref.getIndex());
+            if (taint != null
+                && taint.statistical()
+                && (read.isEmpty() || taint.floor() > read.get(0).floor())) {
+              read.clear();
+              read.add(taint);
+            }
+            return null;
+          }
+        });
+    return read.isEmpty() ? null : read.get(0);
   }
 
   /** The taint {@code expr} carries when it is one, or null. */
@@ -351,6 +403,14 @@ final class PopulationTrace {
         continue;
       }
       String function = call.getAggregation().getName().toUpperCase(Locale.ROOT);
+      Taint argument = argumentOnly(call, in);
+      // An aggregate takes a statistical column only as itself, under its allow-list. An argument
+      // computed from it is a FILTER written as an argument, whose rows no floor can count — SUM(
+      // CASE WHEN first_name = ? THEN 1 ELSE 0 END) — or the raw value by another route (F233).
+      if (argument != null && argument.computed()) {
+        refusedComputed(argument, function);
+        continue;
+      }
       if (call.filterArg >= 0 && in.containsKey(call.filterArg)) {
         Taint filtered = in.get(call.filterArg);
         if (filtered == null || !filtered.statistical()) {
@@ -359,7 +419,7 @@ final class PopulationTrace {
         }
         // A statistical FILTER is permitted, and this call reads nothing else of the column:
         // COUNT(*) FILTER (WHERE …) takes no argument at all.
-        if (argumentOnly(call, in) == null) {
+        if (argument == null) {
           continue;
         }
       }
@@ -523,6 +583,27 @@ final class PopulationTrace {
   private void refused(Taint taint, String use, @Nullable String function) {
     if (!describing) {
       throw refuse(taint, use, function);
+    }
+  }
+
+  /** An aggregate's argument computed from a statistical column: refused, as {@link #refused} is. */
+  private void refusedComputed(Taint taint, String function) {
+    if (!describing) {
+      throw new PolicyException(
+          ErrorCode.STATISTICAL,
+          taint.table(),
+          taint.column(),
+          "an aggregate's argument computed from it: " + function,
+          List.of(),
+          taint.table()
+              + "."
+              + taint.column()
+              + " is a statistical column, and this statement computes the argument of "
+              + function
+              + " from it. Its raw value may decide which rows an aggregate reports on, in WHERE,"
+              + " JOIN ... ON, an aggregate's FILTER or a grouping key, where the group-size floor"
+              + " guards it. An argument computed from it is none of these: write the condition as"
+              + " the aggregate's FILTER, COUNT(*) FILTER (WHERE ...).");
     }
   }
 
