@@ -1805,6 +1805,10 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   - A `LIMIT ?` binds once, when the view is made, as every parameter of a view does.
   - Two rows that tie under the whole order have one key, so the key does not hold before the
     `LIMIT`: the view is faulted with `DeclarationNotHeld`, saying so.
+- **Right joins.** The planner may write a statement's `LEFT JOIN` as a `RIGHT JOIN` with its sides
+  swapped, where building on the other side is cheaper, and a policy's joins make that more likely as
+  the tables grow. Such a join is maintained as the left join it mirrors, so the same view is
+  maintained whichever side the planner chose.
 - **Semi and anti joins.** An `EXISTS` or an `IN` over a subquery, which the planner writes as a
   semi join, is maintained. A left row is given while at least one right row matches it, so a right
   row's change moves it in or out only when the count of its matches crosses zero. An anti join gives
@@ -1826,7 +1830,7 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   - window functions;
   - a `LIMIT` before the statement's last step;
   - set operations but `UNION ALL`;
-  - right and full joins;
+  - full joins;
   - `DISTINCT`, ordered, holistic and host aggregates;
   - an as-of join whose right input is not a table read, or a lookup of one key in the table's
     order, through filters and projections;

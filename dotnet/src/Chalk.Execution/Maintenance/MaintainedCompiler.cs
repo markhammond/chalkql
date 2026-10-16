@@ -589,10 +589,15 @@ internal sealed class MaintainedCompiler
         Expr? condition,
         JoinType type)
     {
+        if (type == JoinType.Right)
+        {
+            return Mirrored(rel, path, left, right, leftKeys, rightKeys, condition);
+        }
+
         if (type is not (JoinType.Inner or JoinType.Left or JoinType.Semi or JoinType.Anti))
         {
             throw new NotMaintainedException(
-                $"a {type.ToString().ToUpperInvariant()} join is not maintained; inner, left, semi and anti joins are.");
+                $"a {type.ToString().ToUpperInvariant()} join is not maintained; inner, left, right, semi and anti joins are.");
         }
 
         if (condition is not null)
@@ -641,6 +646,51 @@ internal sealed class MaintainedCompiler
             leftFactory(context),
             rightFactory(context),
             condition is null ? null : _compilation.ExpressionsAt(path).Compile(condition)));
+    }
+
+    /// <summary>
+    /// A right join, maintained as the left join it mirrors: its inputs swapped, their keys with them,
+    /// its condition read across the swap, and a projection that puts the columns back in the order
+    /// the plan has them. The planner writes a statement's left join as a right one where it would
+    /// rather build on the other side, which a view under a policy meets once its tables grow.
+    /// </summary>
+    private Rel Mirrored(
+        Rel rel,
+        string path,
+        Rel left,
+        Rel right,
+        IEnumerable<uint> leftKeys,
+        IEnumerable<uint> rightKeys,
+        Expr? condition)
+    {
+        var leftWidth = left.RowType.Fields.Count;
+        var rightWidth = right.RowType.Fields.Count;
+        var row = new RowType();
+        row.Fields.AddRange(rel.RowType.Fields.Skip(leftWidth));
+        row.Fields.AddRange(rel.RowType.Fields.Take(leftWidth));
+        Expr? across = null;
+        if (condition is not null)
+        {
+            across = condition.Clone();
+            foreach (var node in Descendants(across))
+            {
+                if (node.KindCase == Expr.KindOneofCase.FieldRef)
+                {
+                    var index = (int)node.FieldRef.Index;
+                    node.FieldRef.Index = (uint)(index < leftWidth ? rightWidth + index : index - leftWidth);
+                }
+            }
+        }
+
+        var mirror = new Rel { RowType = row, Join = new Ir.Join { Left = right, Right = left, Type = JoinType.Left } };
+        var joined = Join(mirror, path, right, left, rightKeys, leftKeys, across, JoinType.Left);
+        var back = new Ir.Project();
+        back.Exprs.AddRange(rel.RowType.Fields.Select((field, i) => new Expr
+        {
+            Type = field.Type,
+            FieldRef = new FieldRef { Index = (uint)(i < leftWidth ? rightWidth + i : i - leftWidth) },
+        }));
+        return Project(new Rel { RowType = rel.RowType, Project = back }, joined);
     }
 
     /// <summary>
