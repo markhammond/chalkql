@@ -1190,6 +1190,8 @@ internal sealed class ReferenceInterpreter
                 return value switch
                 {
                     bool flag => flag ? "true" : "false",
+                    long temporal when source.Kind is TypeKind.Date or TypeKind.Time or TypeKind.Timestamp =>
+                        TemporalText(temporal, source),
                     long integer => integer.ToString(CultureInfo.InvariantCulture),
                     float single => single.ToString("R", CultureInfo.InvariantCulture),
                     double real => real.ToString("R", CultureInfo.InvariantCulture),
@@ -1295,8 +1297,65 @@ internal sealed class ReferenceInterpreter
                 : throw new OverflowException($"{value} is outside {target}.");
         }
 
+        /// <summary>
+        /// F193: a date, a time or a timestamp as PostgreSQL and DuckDB write one, through .NET's own
+        /// calendar: the second's fraction after a point, trailing zeros trimmed, none when it is whole.
+        /// </summary>
+        private static string TemporalText(long value, ChalkType source)
+        {
+            switch (source.Kind)
+            {
+                case TypeKind.Date:
+                    return Day(value).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                case TypeKind.Time:
+                    return new TimeOnly(value * (TimeSpan.TicksPerSecond / 1_000_000L))
+                        .ToString("HH:mm:ss.FFFFFF", CultureInfo.InvariantCulture);
+                default:
+                    var units = IrTypes.TimestampUnitsPerSecond((uint)source.Precision);
+                    var seconds = value >= 0 ? value / units : ((value + 1) / units) - 1;
+                    var fraction = value - (seconds * units);
+                    var days = seconds >= 0 ? seconds / 86_400L : ((seconds + 1) / 86_400L) - 1;
+                    var clock = TimeOnly.FromTimeSpan(TimeSpan.FromSeconds(seconds - (days * 86_400L)));
+                    var digits = units.ToString(CultureInfo.InvariantCulture).Length - 1;
+                    var text = fraction.ToString(CultureInfo.InvariantCulture).PadLeft(digits, '0').TrimEnd('0');
+                    return Day(days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                        + " " + clock.ToString("HH:mm:ss", CultureInfo.InvariantCulture)
+                        + (text.Length == 0 ? string.Empty : "." + text);
+            }
+        }
+
+        /// <summary>A day number since 1970, refused where its year has no four digits.</summary>
+        private static DateOnly Day(long days)
+        {
+            var number = days + 719_162L;
+            return number is >= 0 and <= 3_652_058L
+                ? DateOnly.FromDayNumber((int)number)
+                : throw new FormatException($"The day {days} after 1970 falls outside the years 1 to 9999.");
+        }
+
         private static long TemporalCast(long raw, ChalkType source, ChalkType target)
         {
+            if (target.Kind == TypeKind.Time)
+            {
+                // TIME is microseconds since midnight at every precision: a timestamp's time of day, or a
+                // time, cut to the target's digits (F191).
+                long micros;
+                if (source.Kind == TypeKind.Time)
+                {
+                    micros = raw;
+                }
+                else
+                {
+                    var units = IrTypes.TimestampUnitsPerSecond((uint)source.Precision);
+                    var perDay = 86_400L * units;
+                    var ofDay = ((raw % perDay) + perDay) % perDay;
+                    micros = units >= 1_000_000L ? ofDay / (units / 1_000_000L) : ofDay * (1_000_000L / units);
+                }
+
+                var cut = (long)Math.Pow(10, 6 - Math.Clamp(target.Precision, 0, 6));
+                return micros - (micros % cut);
+            }
+
             if (source.Kind == TypeKind.Date && target.Kind != TypeKind.Date)
             {
                 return raw * 86_400L * IrTypes.TimestampUnitsPerSecond((uint)target.Precision);

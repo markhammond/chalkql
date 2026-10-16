@@ -408,7 +408,8 @@ internal sealed class ExpressionCompiler
             return new FixedCastExpr(target, operand, failure);
         }
 
-        if (target.Kind == TypeKind.String && (sourceNumeric || source.Kind == TypeKind.Bool))
+        if (target.Kind == TypeKind.String
+            && (sourceNumeric || source.Kind is TypeKind.Bool or TypeKind.Date or TypeKind.Time or TypeKind.Timestamp))
         {
             return new CastToStringExpr(target, operand, failure);
         }
@@ -422,7 +423,11 @@ internal sealed class ExpressionCompiler
 
         var temporalPair = source.Kind is TypeKind.Date or TypeKind.Timestamp or TypeKind.TimestampTz
             && target.Kind is TypeKind.Date or TypeKind.Timestamp or TypeKind.TimestampTz;
-        if (temporalPair || (source.Kind == TypeKind.Time && target.Kind == TypeKind.Time))
+
+        // A time of day: of a timestamp (F191), or of a time at another precision.
+        var timeOfDay = target.Kind == TypeKind.Time
+            && source.Kind is TypeKind.Time or TypeKind.Timestamp or TypeKind.TimestampTz;
+        if (temporalPair || timeOfDay)
         {
             return new FixedCastExpr(target, operand, failure);
         }

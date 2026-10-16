@@ -50,6 +50,41 @@ public sealed class CurrentTimeTests(SharedSidecar sidecar) : IClassFixture<Shar
     }
 
     /// <summary>
+    /// <c>CURRENT_TIME</c> and <c>LOCALTIME</c> are the instant's time of day, as a UTC wall clock: a
+    /// time of precision 6 unless one is written, and the time of day of <c>CURRENT_TIMESTAMP</c>
+    /// within one execution (F191). Before, both were refused.
+    /// </summary>
+    [Theory]
+    [InlineData(ExecutionEngine.Vectorised)]
+    [InlineData(ExecutionEngine.Reference)]
+    public async Task The_time_of_day_is_the_instants_as_a_UTC_wall_clock(ExecutionEngine executor)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var engine = await CreateEngineAsync(new Clock(Instant), executor);
+        var prepared = await engine.PrepareAsync(
+            "SELECT CURRENT_TIME AS standard, LOCALTIME AS wall, CURRENT_TIME(0) AS coarse, "
+            + "CAST(CURRENT_TIME AS VARCHAR) AS text, CURRENT_TIME = CAST(CURRENT_TIMESTAMP AS TIME(6)) AS same "
+            + "FROM trades WHERE id = 0");
+
+        Assert.Equal(TimeUnit.Microsecond, ((Time64Type)prepared.OutputSchema.GetFieldByName("standard").DataType).Unit);
+        await using var execution = await engine.ExecuteAsync(prepared, (IReadOnlyList<object?>)[]);
+        var rows = new List<object?[]>();
+        await foreach (var batch in execution.Batches)
+        {
+            rows.AddRange(BatchReader.ToRows(batch));
+            batch.Dispose();
+        }
+
+        var row = Assert.Single(rows);
+        var micros = new TimeOnly(22, 34, 56).Ticks / TimeSpan.TicksPerMicrosecond;
+        Assert.Equal(new TimeOnly((micros + 123_456) * 10), row[0]);
+        Assert.Equal(new TimeOnly((micros + 123_456) * 10), row[1]);
+        Assert.Equal(new TimeOnly(22, 34, 56), row[2]);
+        Assert.Equal("22:34:56.123456", row[3]);
+        Assert.Equal(true, row[4]);
+    }
+
+    /// <summary>
     /// A clock that moves on every reading: every row of one execution, across batches and
     /// operators, still reads one value, and the next execution reads a later one.
     /// </summary>
