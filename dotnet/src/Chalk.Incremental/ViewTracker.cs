@@ -20,8 +20,12 @@ public readonly struct ViewUpdate
     public TimeSpan Elapsed { get; }
 
     /// <summary>
-    /// The bytes allocated in the process while the update ran: the update's, and any other thread's
-    /// meanwhile. Counted for the process because an update that awaits may go on on another thread.
+    /// The bytes allocated in the process while the update ran, approximately: the update's, and any
+    /// other thread's meanwhile. Counted for the process because an update that awaits may go on on
+    /// another thread, and counted cheaply, without the precision
+    /// <see cref="GC.GetTotalAllocatedBytes(bool)"/> would cost, so it moves in steps of a thread's
+    /// allocation context, about 8 KB. Read it as an upper bound on what the update allocated, and
+    /// compare it over many updates rather than one.
     /// </summary>
     public long AllocatedBytes { get; }
 

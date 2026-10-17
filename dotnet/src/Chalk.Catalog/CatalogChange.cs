@@ -28,12 +28,15 @@ internal sealed class CatalogChange
         JoinPolicyMoved = joinPolicyMoved;
         Tables = tables;
         var countsOnly = !structural;
+        var numbersOnly = !structural;
         foreach (var table in tables)
         {
             countsOnly &= table.CountOnly;
+            numbersOnly &= table.NumbersOnly;
         }
 
         CountsOnly = countsOnly;
+        NumbersOnly = numbersOnly;
     }
 
     /// <summary>
@@ -58,6 +61,14 @@ internal sealed class CatalogChange
     public bool CountsOnly { get; }
 
     /// <summary>
+    /// Nothing moved but tables' numbers and the join policy (F243): each table that moved has a new
+    /// row count, or columns that are the ones it had but for their statistics, and every other part
+    /// of the catalog is the object it was. What a refresh moves when it computes a table's statistics
+    /// again.
+    /// </summary>
+    public bool NumbersOnly { get; }
+
+    /// <summary>
     /// The members of each descriptor this reads, by name: a test holds them to the descriptors' own,
     /// so a member added to a descriptor is read here or the test says it is not.
     /// </summary>
@@ -75,6 +86,12 @@ internal sealed class CatalogChange
         nameof(SchemaDescriptor.DialectProfile), nameof(SchemaDescriptor.CostProfile),
         nameof(SchemaDescriptor.Tables), nameof(SchemaDescriptor.Functions),
         nameof(SchemaDescriptor.TrustSourceRowLevelSecurity), nameof(SchemaDescriptor.Zone),
+    ];
+
+    /// <inheritdoc cref="CatalogMembers"/>
+    internal static readonly IReadOnlyList<string> ColumnMembers =
+    [
+        nameof(ColumnDescriptor.Name), nameof(ColumnDescriptor.Type), nameof(ColumnDescriptor.Statistics),
     ];
 
     /// <inheritdoc cref="CatalogMembers"/>
@@ -177,4 +194,29 @@ internal readonly record struct TableChange(int Schema, int Table, TableDescript
     /// columns, and the statistics they carry, are to be read again.
     /// </summary>
     public bool CountOnly => ReferenceEquals(Before.Columns, After.Columns);
+
+    /// <summary>
+    /// Nothing but its numbers moved (F243): its columns are the list they were, or as many columns,
+    /// each with the name and the type it had, so only their statistics can differ. Otherwise a column
+    /// was renamed, retyped, added or taken away, and the catalog is to be validated whole.
+    /// </summary>
+    public bool NumbersOnly => CountOnly || SameColumns(Before.Columns, After.Columns);
+
+    private static bool SameColumns(IReadOnlyList<ColumnDescriptor> was, IReadOnlyList<ColumnDescriptor> now)
+    {
+        if (was.Count != now.Count)
+        {
+            return false;
+        }
+
+        for (var c = 0; c < now.Count; c++)
+        {
+            if (!string.Equals(was[c].Name, now[c].Name, StringComparison.Ordinal) || was[c].Type != now[c].Type)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }

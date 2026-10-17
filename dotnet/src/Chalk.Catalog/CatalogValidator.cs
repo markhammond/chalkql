@@ -130,19 +130,21 @@ public static class CatalogValidator
 
     /// <summary>
     /// Validates what <paramref name="change"/> moved since a catalog that passed
-    /// <see cref="Validate(CatalogContext, CatalogOptions)"/>, and nothing else (F205): the row count
-    /// of every table where nothing else moved, and the join policy where it moved. Every other part
-    /// is the object that passed, so it passes still. A change that moved more is validated whole.
+    /// <see cref="Validate(CatalogContext, CatalogOptions)"/>, and nothing else (F205, F243): the row
+    /// count of every table that moved, the statistics of its columns where they moved, and the join
+    /// policy where it moved. Every other part is the object that passed, or, for a column whose
+    /// statistics moved, has the name and type that passed, so it passes still. A change that moved
+    /// more is validated whole.
     /// </summary>
     internal static void ValidateChange(CatalogContext catalog, CatalogChange change)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(change);
-        if (!change.CountsOnly)
+        if (!change.NumbersOnly)
         {
             throw new ArgumentException(
-                "only a change that moved nothing but row counts and the join policy is validated by part; "
-                + "validate any other whole.",
+                "only a change that moved nothing but tables' numbers and the join policy is validated by "
+                + "part; validate any other whole.",
                 nameof(change));
         }
 
@@ -155,8 +157,12 @@ public static class CatalogValidator
         foreach (var table in change.Tables)
         {
             var schema = catalog.Schemas[table.Schema];
-            ValidateRowCount(
-                table.After, $"schemas[{table.Schema}] ({schema.Name}).tables[{table.Table}] ({table.After.Name})");
+            var path = $"schemas[{table.Schema}] ({schema.Name}).tables[{table.Table}] ({table.After.Name})";
+            ValidateRowCount(table.After, path);
+            if (!table.CountOnly)
+            {
+                ValidateColumnStatistics(table.After, path);
+            }
         }
 
         if (change.JoinPolicyMoved)
@@ -1659,25 +1665,35 @@ public static class CatalogValidator
             ValidatePrefix(table, index, indexPath);
         }
 
+        ValidateColumnStatistics(table, path);
+        ValidateEntitlement(table, path, catalog);
+    }
+
+    /// <summary>
+    /// The statistics of each of <paramref name="table"/>'s columns: what a refresh moves when it
+    /// computes them again, so a change of numbers alone is validated here too (F243). A column's
+    /// path is written only for a refusal.
+    /// </summary>
+    private static void ValidateColumnStatistics(TableDescriptor table, string path)
+    {
         for (var c = 0; c < table.Columns.Count; c++)
         {
-            var statistics = table.Columns[c].Statistics;
-            if (table.Columns[c].Type.Kind == TypeKind.Composite && !ReferenceEquals(statistics, ColumnStatistics.Unknown)
+            var column = table.Columns[c];
+            var statistics = column.Statistics;
+            if (column.Type.Kind == TypeKind.Composite && !ReferenceEquals(statistics, ColumnStatistics.Unknown)
                 && (statistics.Level != StatisticsLevel.Unknown || statistics.DistinctCount >= 0
                     || statistics.NullCount >= 0 || statistics.Min is not null || statistics.Max is not null
                     || statistics.Histogram.Count > 0 || statistics.FrequentValues.Count > 0))
             {
                 throw new CatalogValidationException(
                     ChalkErrorCodes.UnsupportedType,
-                    $"{path}.columns[{c}] ({table.Columns[c].Name})",
-                    $"column '{table.Columns[c].Name}' is a COMPOSITE and declares statistics; a composite "
+                    $"{path}.columns[{c}] ({column.Name})",
+                    $"column '{column.Name}' is a COMPOSITE and declares statistics; a composite "
                     + "column carries none, because none of its values compares with another");
             }
 
-            ValidateStatistics(statistics, $"{path}.columns[{c}] ({table.Columns[c].Name})");
+            ValidateStatistics(statistics, path, c, column.Name);
         }
-
-        ValidateEntitlement(table, path, catalog);
     }
 
     /// <summary>
@@ -2050,20 +2066,20 @@ public static class CatalogValidator
     /// Statistics are claims the cost model acts on, so the shape is checked; the *values* are the
     /// source's word and are never second-guessed. -1 is the one legitimate "unknown" (D36).
     /// </summary>
-    private static void ValidateStatistics(ColumnStatistics statistics, string path)
+    private static void ValidateStatistics(ColumnStatistics statistics, string table, int column, string name)
     {
         if (statistics.DistinctCount < -1)
         {
             throw new CatalogValidationException(
                 ChalkErrorCodes.ValueOutOfRange,
-                path, $"distinct_count is {statistics.DistinctCount}; it must be >= -1 (-1 means unknown)");
+                Path(), $"distinct_count is {statistics.DistinctCount}; it must be >= -1 (-1 means unknown)");
         }
 
         if (statistics.NullCount < -1)
         {
             throw new CatalogValidationException(
                 ChalkErrorCodes.ValueOutOfRange,
-                path, $"null_count is {statistics.NullCount}; it must be >= -1 (-1 means unknown)");
+                Path(), $"null_count is {statistics.NullCount}; it must be >= -1 (-1 means unknown)");
         }
 
         for (var b = 0; b < statistics.Histogram.Count; b++)
@@ -2072,14 +2088,14 @@ public static class CatalogValidator
             {
                 throw new CatalogValidationException(
                     ChalkErrorCodes.ValueOutOfRange,
-                    $"{path}.histogram[{b}]", $"the bucket count is {statistics.Histogram[b].Count}; it must be >= 0");
+                    $"{Path()}.histogram[{b}]", $"the bucket count is {statistics.Histogram[b].Count}; it must be >= 0");
             }
 
             if (statistics.Histogram[b].DistinctCount < -1)
             {
                 throw new CatalogValidationException(
                     ChalkErrorCodes.ValueOutOfRange,
-                    $"{path}.histogram[{b}]",
+                    $"{Path()}.histogram[{b}]",
                     $"distinct_count is {statistics.Histogram[b].DistinctCount}; it must be >= -1");
             }
         }
@@ -2090,10 +2106,12 @@ public static class CatalogValidator
             {
                 throw new CatalogValidationException(
                     ChalkErrorCodes.ValueOutOfRange,
-                    $"{path}.frequent_values[{v}]",
+                    $"{Path()}.frequent_values[{v}]",
                     $"the value count is {statistics.FrequentValues[v].Count}; it must be >= 0");
             }
         }
+
+        string Path() => $"{table}.columns[{column}] ({name})";
     }
 
     /// <summary>
