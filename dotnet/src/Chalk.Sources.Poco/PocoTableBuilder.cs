@@ -753,6 +753,29 @@ public sealed class PocoTableBuilder<T>
     private TableEntitlementDescriptor? _entitlement;
 
     /// <summary>
+    /// The pool this table's row arrays come from and go back to (F245): the arrays it grows into as
+    /// rows are appended, the ones a keyed refresh or a prepared replacement builds, and the arrays the
+    /// host hands over with <c>ChalkEngine.PrepareReplaceAsync(table, rows, count, …)</c>. An array goes
+    /// back to the pool once no snapshot reads it, cleared when the rows hold references.
+    /// </summary>
+    /// <remarks>
+    /// Without one, the table keeps a pool of its own, and an array the host handed over is reported
+    /// through <see cref="PocoSource.SnapshotReleased"/>, as a list a <c>Replace</c> took over is. A host
+    /// that rents its compactions' arrays from the pool it gives here, and hands them over, has them back
+    /// in that pool: a compaction and the appends after it then allocate no row arrays once the pool
+    /// holds what they need. The pool must not hand out again an array it was not given back, as any
+    /// <see cref="System.Buffers.ArrayPool{T}"/> does not.
+    /// </remarks>
+    public PocoTableBuilder<T> ArrayPool(System.Buffers.ArrayPool<T> pool)
+    {
+        ArgumentNullException.ThrowIfNull(pool);
+        _arrayPool = pool;
+        return this;
+    }
+
+    private System.Buffers.ArrayPool<T>? _arrayPool;
+
+    /// <summary>
     /// How much this table tells the planner about its values (D36). <see cref="StatisticsLevel.Basic"/>
     /// is the default and is computed for free in the pass <c>Build()</c> already makes;
     /// <see cref="StatisticsLevel.Histogram"/> adds equi-height histograms and a most-common-value
@@ -994,7 +1017,8 @@ public sealed class PocoTableBuilder<T>
         RefuseCompositeKeys(built, collations, uniqueKeys, foreignKeys, hostIndexes, statistics);
         var plans = PlanIndexes(built, byMember, collations, rows.RandomAccess, hostIndexes);
         var factory = new PocoSnapshotFactory<T>(
-            _table, rows, built, collations, uniqueKeys, plans, hostIndexes, _indexScratch, _verify);
+            _table, rows, built, collations, uniqueKeys, plans, hostIndexes, _indexScratch, _verify,
+            new PocoRowArrays<T>(_arrayPool));
 
         var runtime = new PocoTableRuntime<T>(
             _table, factory, factory.FromRegistration(), built, uniqueKeys, collations, statistics,

@@ -531,7 +531,8 @@ mem.SnapshotReleased += r => Recycle(r.Table, r.Collection);
 **Your one duty is never to change a collection you have given to Chalk.** Give it a new
 one instead. The zero-copy paths read your own arrays, and this rule is what keeps a
 running query's view of the data whole. `SnapshotReleased` tells you when a replaced
-collection is no longer being read.
+collection is no longer being read, and so is an array you handed over for a prepared
+replacement, when the table has no pool (below).
 
 **An append copies its rows** into an array Chalk owns while the refresh runs, so its list is
 yours again once `RefreshAsync` returns. Until then, leave it alone. If other threads go on
@@ -585,6 +586,13 @@ await engine.RefreshAsync(refresh => refresh.Commit(prepared), ct);
   [Leaving statistics and plans to the background](#leaving-statistics-and-plans-to-the-background).
 - **The rows are copied**, as an append's are, so your list is yours again as soon as
   `PrepareReplaceAsync` returns. It is never reported released.
+- **Or hand the array over.** `PrepareReplaceAsync(mem, "ticks", rows, count, through: cut, ct)`
+  takes an array whose first `count` rows are the rewrite, and does not copy them. The rest of
+  the array is room for the rows appended since the cut, which the commit writes there; when they
+  do not fit, the rows move into a larger array from the table's pool. The array is Chalk's until
+  no snapshot reads it. It then goes back to the pool the table was declared with, or, without
+  one, is reported through `SnapshotReleased`. A replacement you dispose gives its array back the
+  same way, and a prepare that is refused takes nothing.
 - **A commit is refused**, and the refresh changes nothing, when the table was replaced
   after the prepare, and when the rows since the cut do not follow the rewrite in the table's
   declared order. Prepare again from the rows the table holds now.
@@ -593,6 +601,25 @@ await engine.RefreshAsync(refresh => refresh.Commit(prepared), ct);
 - **A timed table's frontier** never moves back at a commit: the rows since the cut were
   admitted against it.
 - A replacement is committed once. Dispose one you will not commit.
+
+A table can be given an `ArrayPool<T>` when it is declared:
+
+```csharp
+// Sized for the table: a pool keeps no array longer than its maxArrayLength.
+var pool = ArrayPool<Tick>.Create(maxArrayLength: 1 << 24, maxArraysPerBucket: 4);
+var mem = new PocoSourceBuilder("mem")
+    .AddTable("ticks", ticks, t => t.AppendOnly(x => x.Ts).ArrayPool(pool))
+    .Build();
+```
+
+- **Its row arrays come from the pool and go back to it**: the arrays the table grows into as
+  rows are appended, the ones a keyed change or a prepared replacement builds, and the arrays you
+  hand over. One goes back once no snapshot reads it, cleared when the rows hold references.
+- **Rent your compactions' arrays from the same pool**, and hand them over. A compaction and the
+  appends after it then allocate no row arrays, once the pool holds what they need. What is held is
+  bounded by the snapshots still read.
+- **Without a pool**, the table keeps one of its own, from which its appends, its keyed changes
+  and its prepared replacements take their arrays all the same.
 
 #### Leaving statistics and plans to the background
 
