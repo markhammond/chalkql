@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Reflection;
 using Chalk.Catalog;
 using Chalk.Ir;
 using Chalk.Sources.Poco;
@@ -170,9 +172,17 @@ public sealed class AllocationTests
     /// time, as it was at every update of a maintained plan; so sixteen more of them cost a run
     /// nothing more.
     /// </summary>
+    /// <remarks>
+    /// It holds for code built with optimisation. A Debug build makes each async method's state machine
+    /// a class, allocated at every call, even one that completes at once.
+    /// </remarks>
     [Fact]
     public async Task A_warm_tree_runs_again_without_an_iterator_per_operator()
     {
+        Assert.SkipWhen(
+            typeof(PlanCompiler).Assembly.GetCustomAttribute<DebuggableAttribute>()?.IsJITOptimizerDisabled == true,
+            "a Debug build allocates each async method's state machine at every call");
+
         var bars = new Bar[100];
         for (var i = 0; i < bars.Length; i++)
         {
