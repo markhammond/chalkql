@@ -294,7 +294,10 @@ internal sealed class ResultState
     private readonly KeyEncoder _keyEncoder = new();
     private readonly ByteMap _slots = new();
     private readonly Dictionary<byte[], List<int>> _byKey = new(ByteKeys.Instance);
-    private readonly Dictionary<byte[], List<int>> _before = new(ByteKeys.Instance);
+
+    // The row each key the update touches held before it, or -1 for none or more than one: all an
+    // update's end reads of what the key held. Kept between updates, its storage reused (F244).
+    private readonly ByteMap _before = new();
     private readonly List<int> _removed = [];
     private long[] _counts = [];
     private int[] _key = [];
@@ -335,7 +338,7 @@ internal sealed class ResultState
     public long Bytes =>
         _rows.Bytes + HeapSizes.Array(_counts.Length, sizeof(long)) + _slots.Bytes
         + HeapSizes.Of(_byKey, HeapSizes.ReferenceEntry) + _keyBytes
-        + HeapSizes.Of(_before, HeapSizes.ReferenceEntry) + HeapSizes.Of(_removed, sizeof(int))
+        + _before.Bytes + HeapSizes.Of(_removed, sizeof(int))
         + (_now?.Bytes ?? 0) + (_was?.Bytes ?? 0)
         + (_nowColumns is null ? 0 : HeapSizes.Batch(_types.Count)) + (_wasColumns is null ? 0 : HeapSizes.Batch(_types.Count));
 
@@ -361,7 +364,7 @@ internal sealed class ResultState
     /// </summary>
     public void Trim()
     {
-        _before.TrimExcess();
+        _before.Trim();
         _removed.TrimExcess();
         _now?.Trim();
         _was?.Trim();
@@ -401,12 +404,10 @@ internal sealed class ResultState
                     _keyColumns.Encode(_keyEncoder, _rows, _stored, slot, normalise: false);
                     var members = _byKey.GetAlternateLookup<ReadOnlySpan<byte>>();
                     members.TryGetValue(_keyEncoder.Span, out var list);
+
+                    // A key left with no row keeps its entry until the update ends, so that a row put in
+                    // its place in the same update finds it rather than making another (F244).
                     list!.Remove(slot);
-                    if (list.Count == 0)
-                    {
-                        members.Remove(_keyEncoder.Span);
-                        _keyBytes -= KeyBytes(_keyEncoder.Span.Length, list.Capacity);
-                    }
 
                     // Kept until the update ends: the view reads the row the key held before.
                     _removed.Add(slot);
@@ -459,26 +460,37 @@ internal sealed class ResultState
         var before = _was ??= new ChangeWriter(_types, int.MaxValue);
         now.Clear();
         before.Clear();
+        var byKey = _byKey.GetAlternateLookup<ReadOnlySpan<byte>>();
         if (whole)
         {
             foreach (var (_, slots) in _byKey)
             {
+                if (slots.Count == 0)
+                {
+                    continue;
+                }
+
                 Check(slots);
                 now.Write(_rows, slots[0], 1);
             }
         }
         else
         {
-            foreach (var (key, previous) in _before)
+            for (var entry = 0; entry < _before.Entries; entry++)
             {
-                var current = _byKey.TryGetValue(key, out var slots) ? slots : null;
+                if (!_before.IsLive(entry))
+                {
+                    continue;
+                }
+
+                var current = byKey.TryGetValue(_before.Key(entry), out var slots) ? slots : null;
                 if (current is not null)
                 {
                     Check(current);
                 }
 
                 var after = current is { Count: 1 } ? current[0] : -1;
-                var was = previous.Count == 1 ? previous[0] : -1;
+                var was = _before.Value(entry);
                 if (was == after)
                 {
                     continue;
@@ -493,6 +505,16 @@ internal sealed class ResultState
                 {
                     now.Write(_rows, after, 1);
                 }
+            }
+        }
+
+        // The keys the update left with no row go now. Only a key the update touched can be one.
+        for (var entry = 0; entry < _before.Entries; entry++)
+        {
+            if (_before.IsLive(entry) && byKey.TryGetValue(_before.Key(entry), out var emptied) && emptied.Count == 0)
+            {
+                _keyBytes -= KeyBytes(_before.Key(entry).Length, emptied.Capacity);
+                byKey.Remove(_before.Key(entry));
             }
         }
 
@@ -537,19 +559,21 @@ internal sealed class ResultState
         return string.Join(", ", parts);
     }
 
-    /// <summary>Records the rows a key held before this update, the first time the update touches it.</summary>
+    /// <summary>
+    /// Records the row a key held before this update, the first time the update touches it: -1 when it
+    /// held none, or more than one, which its end reads alike.
+    /// </summary>
     private void BeforeOf(ReadOnlySpan<byte> key)
     {
-        var before = _before.GetAlternateLookup<ReadOnlySpan<byte>>();
-        if (before.ContainsKey(key))
+        ref var held = ref _before.GetOrAdd(key, out var added);
+        if (!added)
         {
             return;
         }
 
-        var held = _byKey.GetAlternateLookup<ReadOnlySpan<byte>>().TryGetValue(key, out var slots)
-            ? new List<int>(slots)
-            : [];
-        before[key] = held;
+        held = _byKey.GetAlternateLookup<ReadOnlySpan<byte>>().TryGetValue(key, out var slots) && slots.Count == 1
+            ? slots[0]
+            : -1;
     }
 
     private void Touch(int slot)
