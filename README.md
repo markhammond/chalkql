@@ -77,9 +77,17 @@ Where data sources are physically segregated by sovereign zone, hosts can model 
 
 ChalkQL favours a deliberately simple approach, using separate catalogues so that a single query can never cross a sovereign boundary by construction.
 
+### Make every last delta count.
+
+Standing queries, on the shoulders of giants, remain active as inputs change. With incremental view maintenance (experimental), ChalkQL propagates input changes through a supported query plan, updating the result without recomputing the entire query.
+
+This makes it possible to express live views over changing application and source state using SQL: streaming state and temporal joins and tenancy-aware access control. Oh my!
+
+Spend twice the memory budget and enjoy tighter tail latency with the optional low-jitter profile.
+
 ### Bring your own functions.
 
-SQL-defined, host-language and native functions can participate in the same plan, with pushdown where eligible.
+SQL-defined, host-language and native functions c   an participate in the same plan, with pushdown where eligible.
 
 Host-language functions are ordinary .NET delegates and can use familiar CLR types such as `decimal`, `DateOnly`, `DateTime`, `DateTimeOffset`, `TimeSpan` and `Guid`.
 
@@ -329,14 +337,13 @@ There’s a lot to consider.
 
 The tenacity required to see such an ambitious integration through is itself a source of motivation, and its evolution may offer ChalkQL a future path towards deeper in-process integration.
 
-## Project status
+## License
 
-ChalkQL is under active development. APIs, policy semantics and planner behaviour may change as the project evolves.
-
-Feedback, experiments, adversarial SQL and contributions are welcome.
+ChalkQL is source available under the Elastic License 2.0 (ELv2). Commercial use is permitted, including embedding ChalkQL in proprietary applications and SaaS products. The licence does not permit providing ChalkQL to third parties as a hosted or managed service that gives them access to a substantial set of ChalkQL's features or functionality.
 
 ## TL;DR
 
-_Technically_ sound, yes. Still, it was tempting to name the library _Derpinator_, in reference to preventing derpy agentic behaviour. **Read this far? Then ChalkQL may be for you!**
+_Technically_ sound, yes. Still, it was tempting to name the library _Derpinator_, in reference to preventing derpy agentic behaviour. **Read this far? Then ChalkQL may be for you!** 
+Feedback, experiments, adversarial SQL and contributions are welcome.
 
 <img width="56" height="56" alt="derp_smiley" src="docs/assets/derp_smiley.svg">

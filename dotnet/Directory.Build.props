@@ -17,7 +17,6 @@
     <CorpusDir>$(RepoRoot)corpus</CorpusDir>
     <Version>0.5.0</Version>
     <Authors>The Chalk Authors</Authors>
-    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/markhammond/chalkql</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>

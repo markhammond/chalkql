@@ -23,16 +23,17 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      ChalkQL 0.3 adds composite types, native CLR types for functions and aggregates,
-      borrowed UTF-8/BINARY spans, population-safe aggregates, repeated-expression reuse,
-      and corrected DECIMAL/floating-point semantics.
+      ChalkQL 0.5 introduces standing queries and experimental incremental view maintenance (IVM), alongside more responsive planning, improved temporal semantics and stricter policy enforcement.
 
-      Breaking changes include the borrowed-text API, PrepareOptions becoming a record,
-      explicit source row-level-security preconditions, and result changes for DECIMAL
-      rescaling and floating-point rounding.
-
+      - **Standing views:** Keep SQL results current as inputs change, with cursors that expose only changed rows. Experimental IVM propagates changes through supported query plans instead of recomputing entire results.
+      - **Planning and refresh:** Plan asynchronously off the refresh path, control when new plans take effect with `PlanAsync` and `PlanNow()`, and observe planning decisions.
+      - **SQL enhancements:** Add rollups, seek-based as-of joins, single-evaluation CTEs, `CURRENT_TIME` and `LOCALTIME`, and additional date/time/timestamp casts.
+      - **Correctness and security:** Improve temporal conformance, make zoned-timestamp parsing independent of the machine's time zone, inherit path visibility from parents by default, and tighten safeguards around statistical columns.
+      - **Compatibility:** Some query and entitlement configurations whose behaviour was unspecified in 0.4 are now explicitly supported or rejected. Query plans may change due to improved planner optimisations and source-pushdown conformance. Incremental floating-point aggregation does not yet use compensated summation, so results may differ slightly from full recomputation.
+      - **Licence:** Changed to Elastic License 2.0 (ELv2). See the README for permitted-use details.
+      
       Full release notes:
-      https://github.com/markhammond/chalkql/releases/tag/v0.3
+      https://github.com/markhammond/chalkql/releases/tag/v0.5
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>
@@ -44,12 +45,11 @@
 
     <Authors>Mark Hammond</Authors>
     <Description>
-      Zero-trust federated SQL + vectorised execution for .NET with query planning and optimisation powered by Apache Calcite.
+      Zero-trust federated SQL with vectorised execution for .NET. Query planning and optimisation powered by Apache Calcite.
     </Description>
     
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    
+    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 
     <!--
       Packaging projects deliberately opt out of Central Package Management. They synthesise the
@@ -71,6 +71,12 @@
     <None Include="README.md"
           Pack="true"
           PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="LICENSE.txt" 
+          Pack="true" 
+          PackagePath="" />
   </ItemGroup>
   
   <!-- Generated from the direct PackageReferences of the constituent projects. -->

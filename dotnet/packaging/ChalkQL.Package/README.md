@@ -100,6 +100,14 @@ Where data sources are physically segregated by sovereign zone, ChalkQL favours 
 
 Work that genuinely spans sovereign zones remains deliberate and visible: execute separate statements against the relevant engines and combine their results explicitly in application code.
 
+## Make every last delta count.
+
+Standing queries, on the shoulders of giants, remain active as inputs change. With incremental view maintenance (experimental), ChalkQL propagates input changes through a supported query plan, updating the result without recomputing the entire query.
+
+This makes it possible to express live views over changing application and source state using SQL: streaming state and temporal joins and tenancy-aware access control. Oh my!
+
+Spend twice the memory budget and enjoy tighter tail latency with the optional low-jitter profile.
+
 ## Bring your own functions
 
 SQL-defined, host-language and native functions can participate in the same plan, with pushdown where eligible.
@@ -278,8 +286,6 @@ The full project README, architecture notes, samples and source are in the [Chal
 
 ## Licence and attribution
 
-ChalkQL is licensed under the Apache License 2.0.
+ChalkQL is source available under the Elastic License 2.0 (ELv2). Commercial use is permitted, including embedding ChalkQL in proprietary applications and SaaS products. The licence does not permit providing ChalkQL to third parties as a hosted or managed service that gives them access to a substantial set of ChalkQL's features or functionality.
 
 Apache Calcite and its JVM dependencies are bundled into the planner artefact distributed with `ChalkQL`. Their licences and attribution are recorded in `THIRD-PARTY-NOTICES.txt`. The planner's statement driver is derived from Apache Calcite's own `PlannerImpl`, and the repository's `NOTICE` records it.
-
-ChalkQL is an independent project and is not affiliated with or endorsed by the Apache Software Foundation.

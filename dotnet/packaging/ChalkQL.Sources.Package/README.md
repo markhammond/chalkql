@@ -180,6 +180,7 @@ examples, and the
 The full project source and documentation are in the
 [ChalkQL repository](https://github.com/markhammond/chalkql).
 
-## Licence
+## License
 
-ChalkQL.Sources is licensed under the Apache License 2.0.
+ChalkQL.Sources is source available under the Elastic License 2.0 (ELv2). Commercial use is permitted, including embedding ChalkQL in proprietary applications and SaaS products. The licence does not permit providing ChalkQL to third parties as a hosted or managed service that gives them access to a substantial set of ChalkQL's features or functionality.
+
