@@ -63,6 +63,16 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     private PreparedQuery _prepared;
     private int[] _key;
     private bool _readsTime;
+
+    /// <summary>Whether the statement names the engine's clock as a parameter: worked out once per statement.</summary>
+    private bool _namesClock;
+
+    /// <summary>
+    /// The staging an update maps its rows into, kept between updates and emptied for each, so that a
+    /// maintained update stages its changes without allocating (F244); null while an update uses it.
+    /// Only an update, under its lock, takes it.
+    /// </summary>
+    private Staged? _staging;
     private long _epoch;
     private long _version;
     private long _generation = 1;
@@ -113,6 +123,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         _prepared = prepared;
         _key = key;
         _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
+        _namesClock = ViewBinding.NamesClock(prepared, engine.ClockName);
         _reads = options.DatabaseReads == ViewDatabaseReads.WhenRefreshed ? new ViewReads(engine) : null;
         ContextDigest = (options.Context ?? prepared.Context) is { IsEmpty: false } context ? context.CanonicalHash : null;
         if (options.RefreshQueryPlan is not null || options.PlanImprovementMargin is not null)
@@ -496,24 +507,14 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
             if (attempt >= 2)
             {
-                return await _engine.WithoutRefreshAsync(
-                    async () =>
-                    {
-                        var stamp = _engine.Stamp;
-                        if (stamp.Epoch != _epoch)
-                        {
-                            Take(await StageAsync(stamp, ct).ConfigureAwait(false), stamp);
-                        }
-
-                        return _version;
-                    },
-                    ct).ConfigureAwait(false);
+                return await CatchUpBetweenRefreshesAsync(ct).ConfigureAwait(false);
             }
 
             var at = _engine.Stamp;
             var staged = await StageAsync(at, ct).ConfigureAwait(false);
             if (_engine.Changes != changes)
             {
+                Keep(staged);
                 continue;
             }
 
@@ -522,12 +523,46 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         }
     }
 
-    /// <summary>Applies <paramref name="staged"/>, counting the keys it changes for the tracker.</summary>
+    /// <summary>
+    /// The update, staged with refreshes held off, after two attempts each overtaken by one. A method of
+    /// its own, so that the closure it hands the engine is made only when it runs.
+    /// </summary>
+    private ValueTask<long> CatchUpBetweenRefreshesAsync(CancellationToken ct) =>
+        _engine.WithoutRefreshAsync(
+            async () =>
+            {
+                var stamp = _engine.Stamp;
+                if (stamp.Epoch != _epoch)
+                {
+                    Take(await StageAsync(stamp, ct).ConfigureAwait(false), stamp);
+                }
+
+                return _version;
+            },
+            ct);
+
+    /// <summary>Applies <paramref name="staged"/>, counting the keys it changes for the tracker, and keeps its staging.</summary>
     private void Take(Staged staged, EpochStamp stamp)
     {
         var before = _table.Position;
         Apply(staged, stamp);
         _lastChanges = _table.Position - before;
+        Keep(staged);
+    }
+
+    /// <summary>The staging for this update: the one kept from the last, emptied.</summary>
+    private Staged Stage(bool delta)
+    {
+        var staged = _staging ?? new Staged();
+        _staging = null;
+        return staged.Begin(delta);
+    }
+
+    /// <summary>Keeps <paramref name="staged"/> for the next update, letting go of room a large one grew.</summary>
+    private void Keep(Staged staged)
+    {
+        staged.Trim();
+        _staging = staged;
     }
 
     /// <summary>
@@ -752,7 +787,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         await PreparedCurrentAsync(ct).ConfigureAwait(false);
         var prepared = _prepared;
 
-        if ((_readsTime || ViewBinding.NamesClock(prepared, _engine.ClockName)) && stamp.Clock is null)
+        if ((_readsTime || _namesClock) && stamp.Clock is null)
         {
             throw new StandingViewException(
                 ChalkErrorCodes.ClockRequired,
@@ -761,7 +796,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 + "before the view is updated.");
         }
 
-        var values = _binding.Values(prepared, _engine.ClockName, stamp.Clock);
+        var values = _binding.ValuesForUpdate(prepared, _engine.ClockName, stamp.Clock);
         if (_maintained is { } maintained)
         {
             // Until it is applied, this update leaves the view behind the statement (D343).
@@ -805,7 +840,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             execution.UseReads(_reads);
         }
 
-        var staged = new Staged();
+        var staged = Stage(delta: false);
         await foreach (var batch in execution.Batches.WithCancellation(ct).ConfigureAwait(false))
         {
             using (batch)
@@ -819,12 +854,19 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
     private void Map(RecordBatch batch, Staged staged, EpochStamp stamp)
     {
-        var columns = new IArrowArray[batch.ColumnCount];
-        for (var c = 0; c < columns.Length; c++)
+        var columns = staged.ColumnsOf(batch);
+        try
         {
-            columns[c] = batch.Column(c);
+            MapRows(batch, columns, staged, stamp);
         }
+        finally
+        {
+            staged.LetGoOfColumns();
+        }
+    }
 
+    private void MapRows(RecordBatch batch, IArrowArray[] columns, Staged staged, EpochStamp stamp)
+    {
         for (var i = 0; i < batch.Length; i++)
         {
             var row = new ViewRow(columns, batch.Schema, i);
@@ -855,7 +897,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// </summary>
     private Staged Changes(MaintainedUpdate update, EpochStamp stamp)
     {
-        var staged = new Staged { Delta = !update.Whole };
+        var staged = Stage(delta: !update.Whole);
         Map(update.Now, staged, stamp);
         if (update.Whole)
         {
@@ -865,17 +907,19 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         var before = update.Before;
         if (before.Length > 0)
         {
-            var columns = new IArrowArray[before.ColumnCount];
-            for (var c = 0; c < columns.Length; c++)
+            var columns = staged.ColumnsOf(before);
+            try
             {
-                columns[c] = before.Column(c);
+                for (var i = 0; i < before.Length; i++)
+                {
+                    var row = new ViewRow(columns, before.Schema, i);
+                    _options.Map(in row, out var key, out _);
+                    staged.Before.Add(key);
+                }
             }
-
-            for (var i = 0; i < before.Length; i++)
+            finally
             {
-                var row = new ViewRow(columns, before.Schema, i);
-                _options.Map(in row, out var key, out _);
-                staged.Before.Add(key);
+                staged.LetGoOfColumns();
             }
         }
 
@@ -940,7 +984,12 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// </summary>
     private void ApplyChanges(Staged staged, EpochStamp stamp)
     {
-        var freed = new HashSet<TKey>(staged.Before, Bytes<TKey>.Comparer);
+        var freed = staged.Freed;
+        for (var i = 0; i < staged.Before.Count; i++)
+        {
+            freed.Add(staged.Before[i]);
+        }
+
         var added = 0L;
         for (var i = 0; i < staged.Count; i++)
         {
@@ -1092,6 +1141,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 Volatile.Write(ref _prepared, prepared);
                 _key = key;
                 _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
+                _namesClock = ViewBinding.NamesClock(prepared, _engine.ClockName);
             }
 
             // The plan is a new one, and its reads are in new places: read them all again.
@@ -1254,6 +1304,15 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             return;
         }
 
+        _green = StartGreen();
+    }
+
+    /// <summary>
+    /// Starts <see cref="BuildBeside"/>'s build. A method of its own, so that the closure the build runs
+    /// in is made only when there is one to start, and not at the end of every update.
+    /// </summary>
+    private Green StartGreen()
+    {
         var prepared = _prepared;
         var key = _key;
         var clocked = _readsTime || ViewBinding.NamesClock(prepared, _engine.ClockName);
@@ -1291,7 +1350,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 }
             },
             CancellationToken.None);
-        _green = new Green(plannedFor, build, cancel);
+        return new Green(plannedFor, build, cancel);
     }
 
     /// <summary>
@@ -1339,6 +1398,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// <param name="Build">The instance, once built.</param>
     /// <param name="Cancel">Stops the build when the view lets the instance go.</param>
     private sealed record Green(object PlannedFor, Task<MaintainedQuery> Build, CancellationTokenSource Cancel);
+
+    /// <summary>For tests: the keys the kept staging has room for, or 0 while none is kept.</summary>
+    internal int StagingRoom => _staging?.Keys.Length ?? 0;
 
     /// <summary>Whether the view is maintained from the plans its statement runs now; true for a view that recomputes.</summary>
     internal bool MaintainsCurrentPlan => _maintained?.IsCurrent ?? true;
@@ -1403,24 +1465,106 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         return positions;
     }
 
-    /// <summary>One update's mapped rows, before they are the view's.</summary>
+    /// <summary>
+    /// One update's mapped rows, before they are the view's. The view keeps one between updates and
+    /// empties it for each (F244): its maps and arrays keep their room, so an update no larger than the
+    /// last stages its rows without allocating. Room an update much larger than the next grew is let go,
+    /// so a whole result is not kept twice beside the view's own rows.
+    /// </summary>
     private sealed class Staged
     {
+        /// <summary>Room kept whatever the updates: what an update of this many keys stages into without growing.</summary>
+        private const int Kept = 256;
+
+        private const int Smallest = 16;
+
         private readonly Dictionary<TKey, int> _seen = new(Bytes<TKey>.Comparer);
 
         /// <summary>
         /// Whether the rows are a maintained update's changes (D343): the rows changed keys hold now,
         /// with <see cref="Before"/> the host keys of the rows they held. Otherwise the whole result.
         /// </summary>
-        public bool Delta { get; init; }
+        public bool Delta { get; private set; }
 
         public List<TKey> Before { get; } = [];
 
-        public TKey[] Keys = new TKey[16];
-        public TRow[] Rows = new TRow[16];
-        public uint[] Hashes = new uint[16];
+        /// <summary>The host keys a maintained update takes out, as <c>ApplyChanges</c> works them out.</summary>
+        public HashSet<TKey> Freed { get; } = new(Bytes<TKey>.Comparer);
+
+        public TKey[] Keys = new TKey[Smallest];
+        public TRow[] Rows = new TRow[Smallest];
+        public uint[] Hashes = new uint[Smallest];
+
+        /// <summary>The columns of the batch being mapped; empty between batches.</summary>
+        private IArrowArray[] _columns = [];
 
         public int Count { get; private set; }
+
+        /// <summary>Empties the staging for an update, keeping its room.</summary>
+        public Staged Begin(bool delta)
+        {
+            _seen.Clear();
+            Before.Clear();
+            Freed.Clear();
+            Count = 0;
+            Delta = delta;
+            return this;
+        }
+
+        /// <summary>
+        /// Lets go of room beyond four times what this update used, past <see cref="Kept"/>: a whole
+        /// result, or a burst of changes, is not kept for the updates after it.
+        /// </summary>
+        public void Trim()
+        {
+            if (Keys.Length > Math.Max(Kept, 4 * Count))
+            {
+                var room = Math.Max(Smallest, 2 * Count);
+                Keys = new TKey[room];
+                Rows = new TRow[room];
+                Hashes = new uint[room];
+            }
+
+            if (_seen.EnsureCapacity(0) > Math.Max(Kept, 4 * Count))
+            {
+                _seen.Clear();
+                _seen.TrimExcess(Math.Max(Smallest, 2 * Count));
+            }
+
+            var before = Before.Count;
+            if (Before.Capacity > Math.Max(Kept, 4 * before))
+            {
+                Before.Clear();
+                Before.Capacity = Math.Max(Smallest, 2 * before);
+            }
+
+            var freed = Freed.Count;
+            if (Freed.EnsureCapacity(0) > Math.Max(Kept, 4 * freed))
+            {
+                Freed.Clear();
+                Freed.TrimExcess();
+                Freed.EnsureCapacity(Math.Max(Smallest, 2 * freed));
+            }
+        }
+
+        /// <summary>The columns of <paramref name="batch"/>, in an array kept between batches.</summary>
+        public IArrowArray[] ColumnsOf(RecordBatch batch)
+        {
+            if (_columns.Length != batch.ColumnCount)
+            {
+                _columns = new IArrowArray[batch.ColumnCount];
+            }
+
+            for (var c = 0; c < _columns.Length; c++)
+            {
+                _columns[c] = batch.Column(c);
+            }
+
+            return _columns;
+        }
+
+        /// <summary>Lets go of the mapped batch's columns, so the staging holds none of its buffers.</summary>
+        public void LetGoOfColumns() => System.Array.Clear(_columns);
 
         /// <summary>False, and the row the key came in, when the key is already staged.</summary>
         public bool Add(in TKey key, in TRow row, uint hash, out int earlier)
@@ -1453,6 +1597,14 @@ internal sealed class ViewBinding
 {
     private readonly IReadOnlyDictionary<string, object?>? _named;
     private readonly IReadOnlyList<object?>? _positional;
+
+    /// <summary>The statement <see cref="_bound"/> holds the values of, for the view's updates.</summary>
+    private PreparedQuery? _boundFor;
+
+    private object?[] _bound = [];
+
+    /// <summary>The slot of <see cref="_bound"/> the clock's time is written to, or -1.</summary>
+    private int _clockAt = -1;
 
     private ViewBinding(IReadOnlyDictionary<string, object?>? named, IReadOnlyList<object?>? positional)
     {
@@ -1520,6 +1672,30 @@ internal sealed class ViewBinding
     public static bool NamesClock(PreparedQuery prepared, string? clock) =>
         clock is not null && prepared.Parameters.Any(p => p.Name is { } name && Name(name) == Name(clock));
 
+    /// <summary>
+    /// The values an update executes with, in an array kept between updates (F244): the host's are bound
+    /// once per statement, as they stand for the view's life, and only the clock's slot is written again.
+    /// Only the view's update calls this, under its lock, and nothing it hands the array to keeps it; a
+    /// build beside binds its own with <see cref="Values"/>.
+    /// </summary>
+    public object?[] ValuesForUpdate(PreparedQuery prepared, string? clock, DateTimeOffset? time)
+    {
+        if (!ReferenceEquals(_boundFor, prepared))
+        {
+            _bound = Values(prepared, clock, time);
+            _clockAt = prepared.ParameterStyle is ParameterStyle.Named ? ClockIndex(prepared, clock) : -1;
+            _boundFor = prepared;
+            return _bound;
+        }
+
+        if (_clockAt >= 0)
+        {
+            _bound[_clockAt] = ClockValue(prepared.Parameters[_clockAt], time);
+        }
+
+        return _bound;
+    }
+
     /// <summary>The values to execute with: the host's, and the clock's time for its parameter.</summary>
     public object?[] Values(PreparedQuery prepared, string? clock, DateTimeOffset? time)
     {
@@ -1550,7 +1726,7 @@ internal sealed class ViewBinding
 
             if (clocked)
             {
-                values[Name(clock!)] = ClockValue(prepared, clock!, time);
+                values[Name(clock!)] = ClockValue(prepared.Parameters[ClockIndex(prepared, clock)], time);
             }
 
             return ParameterBinder.ResolveNamed(prepared.Parameters, values);
@@ -1567,15 +1743,14 @@ internal sealed class ViewBinding
         return [.. _positional ?? []];
     }
 
-    /// <summary>The clock's time, as the CLR value the parameter's type takes.</summary>
-    private static object? ClockValue(PreparedQuery prepared, string clock, DateTimeOffset? time)
+    /// <summary>The clock's time, as the CLR value <paramref name="parameter"/>'s type takes.</summary>
+    private static object? ClockValue(Chalk.Client.ParameterDescriptor parameter, DateTimeOffset? time)
     {
         if (time is not { } now)
         {
             return null;
         }
 
-        var parameter = prepared.Parameters.First(p => p.Name is { } name && Name(name) == Name(clock));
         // Boxed apart on purpose: as one conditional, the DateTime would widen to a DateTimeOffset.
         if (parameter.Type.Kind == Chalk.Ir.TypeKind.TimestampTz)
         {
