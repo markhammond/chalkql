@@ -13,7 +13,7 @@ namespace Chalk.Integration.Tests;
 /// after it, so a whole result is not kept twice.
 /// </summary>
 [Collection(SidecarCollection.Name)]
-public sealed class ViewAllocationTests(SharedSidecar sidecar)
+public sealed class ViewAllocationTests(SharedSidecar sidecar, ITestOutputHelper output)
 {
     private sealed record Fill(int Seq, int Book, long Qty);
 
@@ -37,6 +37,33 @@ public sealed class ViewAllocationTests(SharedSidecar sidecar)
     public async Task A_maintained_views_update_allocates_little_beside_its_statements()
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var (viewBytes, statementBytes) = await SteadyUpdatesAsync();
+
+        Assert.True(
+            viewBytes - statementBytes <= 512,
+            $"the view's update allocated {viewBytes} bytes, its statement's {statementBytes}");
+    }
+
+    /// <summary>
+    /// The statement's update of five keys allocates under 2 KB: its result keeps a key's entry for the
+    /// row that replaces another, and records what each key held without copying it; its operators
+    /// keep their iterations; and binding its values makes no strings. It allocated 3 KB before.
+    /// </summary>
+    [Fact]
+    public async Task A_maintained_statements_update_of_five_keys_allocates_under_two_kilobytes()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var (_, statementBytes) = await SteadyUpdatesAsync();
+
+        Assert.True(statementBytes <= 2_048, $"the statement's update allocated {statementBytes} bytes");
+    }
+
+    /// <summary>
+    /// A view and its statement maintained beside it, warmed on five fills a step over five desks, then
+    /// what each update allocates, the least of several steps; the view's rows checked against a run.
+    /// </summary>
+    private async Task<(long View, long Statement)> SteadyUpdatesAsync()
+    {
         await using var desk = await DeskAsync(Fills(3_000, books: 300), Books(300, desks: 30));
         await using var view = await desk.Engine.MaterializeAsync(ByDesk, Options(), Ct);
         var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
@@ -64,7 +91,7 @@ public sealed class ViewAllocationTests(SharedSidecar sidecar)
             await maintained.UpdateAsync([], default, desk.Engine.Version, whole: false, Ct);
         }
 
-        var (viewBytes, bareBytes) = await AllocationProbe.LeastAllocatingAsync(
+        var (viewBytes, statementBytes) = await AllocationProbe.LeastAllocatingAsync(
             async () =>
             {
                 await StepAsync();
@@ -78,10 +105,9 @@ public sealed class ViewAllocationTests(SharedSidecar sidecar)
             },
             measured => measured.viewUpdate - measured.statementUpdate);
 
-        Assert.True(
-            viewBytes - bareBytes <= 512,
-            $"the view's update allocated {viewBytes} bytes, its statement's {bareBytes}");
+        output.WriteLine($"the view's update allocated {viewBytes} bytes, its statement's {statementBytes}");
         Assert.Equal(await RowsAsync(desk.Engine, statement), await ViewRowsAsync(view));
+        return (viewBytes, statementBytes);
     }
 
     /// <summary>
