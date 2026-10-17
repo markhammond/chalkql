@@ -471,8 +471,8 @@ threads meanwhile is counted.
 
 ```
 -- what a row costs on the managed heap
-    17000 rows in one batch: 2640 bytes allocated
-    34000 rows in one batch: 2640 bytes allocated
+    17000 rows in one batch: 2136 bytes allocated
+    34000 rows in one batch: 2136 bytes allocated
     slope: 0.0000 bytes per row
     The allocation gates hold a POCO Utf8String column at 0.0000 bytes per row.
     Two sizes read in one batch each, because a slope taken with the batch count
