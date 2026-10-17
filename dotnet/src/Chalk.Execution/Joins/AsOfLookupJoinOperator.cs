@@ -114,6 +114,11 @@ internal sealed class AsOfSeekOperator : OperatorBase
     private readonly IReadOnlyDictionary<Chalk.Ir.Expr, Expressions.IVectorExpr> _computed;
     private readonly Expressions.EvalContext? _eval;
 
+    // Kept between executions (F244): the fixed values, the seek's bounds and its request.
+    private object?[] _fixedValues = [];
+    private SeekBound[] _bounds = [];
+    private ColumnarSeekRequest? _request;
+
     /// <summary>One of the index's leading key columns: a left field, or a value for the execution.</summary>
     internal sealed record SeekKey(int LeftField, IndexLookupOperator.BoundPlan? Fixed);
 
@@ -165,9 +170,10 @@ internal sealed class AsOfSeekOperator : OperatorBase
     protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
-        // The fixed values, once for the execution. One bound to NULL matches no row.
+        // The fixed values, once for the execution, in an array kept between executions. One bound to
+        // NULL matches no row.
         var held = _keys.Count;
-        var fixedValues = new object?[held];
+        var fixedValues = _fixedValues.Length == held ? _fixedValues : _fixedValues = new object?[held];
         for (var k = 0; k < held; k++)
         {
             if (_keys[k].Fixed is { } bound && !bound.TryBind(Context.Parameters, Compute, out fixedValues[k]))
@@ -343,7 +349,15 @@ internal sealed class AsOfSeekOperator : OperatorBase
     private (IColumnarScan? Scan, int[]? Rows) SeekTyped(
         IColumnarSeekSource seeker, JoinRows rows, object?[] fixedValues, int held)
     {
-        var bounds = new SeekBound[held + 1];
+        // The bounds and the request are kept between executions (F244): an execution seeks once, and
+        // only the rows it seeks for change from one to the next.
+        if (_bounds.Length != held + 1)
+        {
+            _bounds = new SeekBound[held + 1];
+            _request = null;
+        }
+
+        var bounds = _bounds;
         for (var k = 0; k < held; k++)
         {
             var key = _keys[k];
@@ -365,21 +379,22 @@ internal sealed class AsOfSeekOperator : OperatorBase
             selected[count++] = row;
         }
 
-        var scan = seeker.ColumnarSeek(
-            new ColumnarSeekRequest
-            {
-                Table = _table,
-                Index = _index,
-                Projection = _projection,
-                OutputSchema = Schema,
-                BatchSize = Context.Settings.BatchSize,
-                Bounds = bounds,
-                Rows = selected,
-                RowCount = count,
-                Backwards = _backwards,
-                Inclusive = _inclusive,
-            },
-            ScanContextFor(Context));
+        var request = _request ??= new ColumnarSeekRequest
+        {
+            Table = _table,
+            Index = _index,
+            Projection = _projection,
+            OutputSchema = Schema,
+            BatchSize = Context.Settings.BatchSize,
+            Bounds = bounds,
+            Rows = selected,
+            RowCount = count,
+            Backwards = _backwards,
+            Inclusive = _inclusive,
+        };
+        request.Rows = selected;
+        request.RowCount = count;
+        var scan = seeker.ColumnarSeek(request, ScanContextFor(Context));
         if (scan is null)
         {
             Context.Arena.Return(selected);

@@ -593,14 +593,24 @@ public sealed class PocoSource
         return Require(request.Table).ColumnarSeek(SourceId, request, context);
     }
 
-    private PocoTableRuntime Require(string name) =>
-        _tables.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))
-        ?? throw new SourceContractException(
+    /// <summary>The table named <paramref name="name"/>: found by a loop, as every scan and seek asks, with nothing allocated.</summary>
+    private PocoTableRuntime Require(string name)
+    {
+        foreach (var table in _tables)
+        {
+            if (string.Equals(table.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return table;
+            }
+        }
+
+        throw new SourceContractException(
             ChalkErrorCodes.SourceContract,
             SourceId,
             name,
             $"there is no such table in schema '{SchemaName}'. Known tables: "
             + string.Join(", ", _tables.Select(t => t.Name)) + ".");
+    }
 
     private static void RequireBatchSize(int batchSize)
     {
