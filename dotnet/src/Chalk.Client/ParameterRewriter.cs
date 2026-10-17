@@ -49,6 +49,14 @@ public sealed class ParameterDescriptor
     /// <summary>The parameter as the statement writes it, so an error message can be searched for.</summary>
     public override string ToString() =>
         Name is null ? "$" + Ordinal.ToString(CultureInfo.InvariantCulture) : "@" + Name;
+
+    private string? _subject;
+
+    /// <summary>
+    /// What a refusal to bind a value calls this parameter, <c>Parameter @amount</c>: made once for the
+    /// statement, not at every execution or update that binds it (F244).
+    /// </summary>
+    internal string Subject => _subject ??= $"Parameter {this}";
 }
 
 /// <summary>Which value a rendered <c>?</c> takes.</summary>

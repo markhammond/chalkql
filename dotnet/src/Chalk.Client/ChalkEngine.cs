@@ -2801,17 +2801,21 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
     private static bool Declares(CatalogContext catalog, TableKey table)
     {
-        foreach (var schema in catalog.Schemas)
+        // Indexed rather than enumerated, as a view asks at every update (F244).
+        var schemas = catalog.Schemas;
+        for (var i = 0; i < schemas.Count; i++)
         {
+            var schema = schemas[i];
             if (!string.Equals(schema.SourceId, table.SourceId, StringComparison.Ordinal)
                 || !string.Equals(schema.Name, table.Schema, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            foreach (var declared in schema.Tables)
+            var tables = schema.Tables;
+            for (var j = 0; j < tables.Count; j++)
             {
-                if (string.Equals(declared.Name, table.Table, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(tables[j].Name, table.Table, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
