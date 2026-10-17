@@ -233,6 +233,40 @@ public sealed class CatalogChangeTests
         CatalogValidator.ValidateChange(held, CatalogChange.Between(before, held));
     }
 
+    /// <summary>
+    /// A change of numbers that holds is validated without allocating (F243): every refresh that moves
+    /// a number validates its change, so neither a moved table's path nor an enumerator of the changes
+    /// is made. A path is written only when a check refuses.
+    /// </summary>
+    [Fact]
+    public void Validating_a_change_of_numbers_that_holds_allocates_nothing()
+    {
+        var before = Catalog(Schema(null, Table("bars", 100), Table("quotes", 50)));
+        var counted = new ColumnStatistics { Level = StatisticsLevel.Basic, DistinctCount = 7, NullCount = 0 };
+        var after = Catalog(Schema(
+            null,
+            Table("bars", 120, columns: [new() { Name = "symbol", Type = Columns[0].Type, Statistics = counted }, Columns[1]]),
+            Table("quotes", 55)));
+        var change = CatalogChange.Between(before, after);
+        Assert.True(change.NumbersOnly);
+        Assert.Equal([false, true], change.Tables.Select(t => t.CountOnly));
+        CatalogValidator.ValidateChange(after, change);
+
+        var least = long.MaxValue;
+        for (var run = 0; run < 5; run++)
+        {
+            var start = GC.GetAllocatedBytesForCurrentThread();
+            for (var i = 0; i < 100; i++)
+            {
+                CatalogValidator.ValidateChange(after, change);
+            }
+
+            least = Math.Min(least, GC.GetAllocatedBytesForCurrentThread() - start);
+        }
+
+        Assert.Equal(0, least);
+    }
+
     [Fact]
     public void Only_a_change_of_numbers_is_validated_by_part()
     {

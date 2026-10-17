@@ -154,10 +154,14 @@ public static class CatalogValidator
                 ChalkErrorCodes.ValueOutOfRange, "epoch", $"the epoch is {catalog.Epoch}; it must be >= 0");
         }
 
-        foreach (var table in change.Tables)
+        // Every refresh that moves a number validates its change, so a change that holds is validated
+        // without allocating: the changes are read by index rather than through their list's boxed
+        // enumerator, and a moved table's path is written only when a check refuses.
+        var tables = change.Tables;
+        for (var t = 0; t < tables.Count; t++)
         {
-            var schema = catalog.Schemas[table.Schema];
-            var path = $"schemas[{table.Schema}] ({schema.Name}).tables[{table.Table}] ({table.After.Name})";
+            var table = tables[t];
+            var path = new CheckPath(catalog.Schemas[table.Schema], table);
             ValidateRowCount(table.After, path);
             if (!table.CountOnly)
             {
@@ -252,14 +256,44 @@ public static class CatalogValidator
     }
 
     /// <summary>A row count is a count, or -1 for unknown.</summary>
-    private static void ValidateRowCount(TableDescriptor table, string path)
+    private static void ValidateRowCount(TableDescriptor table, CheckPath path)
     {
         if (table.RowCount < -1)
         {
             throw new CatalogValidationException(
                 ChalkErrorCodes.ValueOutOfRange,
-                path, $"row_count is {table.RowCount}; it must be >= -1 (-1 means unknown)");
+                path.ToString(), $"row_count is {table.RowCount}; it must be >= -1 (-1 means unknown)");
         }
+    }
+
+    /// <summary>
+    /// Where a check is, written out only when it refuses: a path already written, or a moved table's
+    /// place in the catalog, which a change validated by part passes without writing (F243).
+    /// </summary>
+    private readonly struct CheckPath
+    {
+        private readonly string? _path;
+        private readonly SchemaDescriptor? _schema;
+        private readonly TableChange _table;
+
+        private CheckPath(string path)
+        {
+            _path = path;
+            _schema = null;
+            _table = default;
+        }
+
+        public CheckPath(SchemaDescriptor schema, TableChange table)
+        {
+            _path = null;
+            _schema = schema;
+            _table = table;
+        }
+
+        public static implicit operator CheckPath(string path) => new(path);
+
+        public override string ToString() =>
+            _path ?? $"schemas[{_table.Schema}] ({_schema!.Name}).tables[{_table.Table}] ({_table.After.Name})";
     }
 
     /// <summary>The cross-source join policy's limits (D104): every one is zero or positive.</summary>
@@ -1670,7 +1704,7 @@ public static class CatalogValidator
     /// computes them again, so a change of numbers alone is validated here too (F243). A column's
     /// path is written only for a refusal.
     /// </summary>
-    private static void ValidateColumnStatistics(TableDescriptor table, string path)
+    private static void ValidateColumnStatistics(TableDescriptor table, CheckPath path)
     {
         for (var c = 0; c < table.Columns.Count; c++)
         {
@@ -2062,7 +2096,7 @@ public static class CatalogValidator
     /// Statistics are claims the cost model acts on, so the shape is checked; the *values* are the
     /// source's word and are never second-guessed. -1 is the one legitimate "unknown" (D36).
     /// </summary>
-    private static void ValidateStatistics(ColumnStatistics statistics, string table, int column, string name)
+    private static void ValidateStatistics(ColumnStatistics statistics, CheckPath table, int column, string name)
     {
         if (statistics.DistinctCount < -1)
         {
