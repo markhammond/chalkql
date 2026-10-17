@@ -197,37 +197,36 @@ internal sealed class SeekState : IMaintainedState
 }
 
 /// <summary>The left rows a maintained seek seeks for in this update: their keys, time and place, without weights.</summary>
-internal sealed class PendingRows : OperatorBase
+internal sealed class PendingRows : OperatorBase, IBatchesInHand
 {
     private readonly SeekState _state;
     private readonly ColumnarBatch _slot;
+    private readonly BatchesInHand _run;
 
     public PendingRows(OperatorContext context, string path, ArrowSchema schema, IReadOnlyList<ChalkType> types, SeekState state)
         : base(context, schema, types, path)
     {
         _state = state;
         _slot = NewOutput();
+        _run = new BatchesInHand(this);
     }
 
     protected override ValueTask DisposeCoreAsync() => default;
 
-    protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        await Task.CompletedTask.ConfigureAwait(false);
-        var pending = _state.Pending;
-        for (var i = 0; i < pending.BatchCount; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var batch = pending.Batch(i);
-            _slot.Begin(batch.RowCount);
-            for (var c = 0; c <= _state.Replayed.Length; c++)
-            {
-                _slot.Set(c, batch.Column(c));
-            }
+    protected override IAsyncEnumerator<ColumnarBatch> Begin(CancellationToken ct) => _run.Begin(ct);
 
-            yield return _slot;
+    ValueTask<int> IBatchesInHand.PrepareAsync(CancellationToken ct) => new(_state.Pending.BatchCount);
+
+    ColumnarBatch IBatchesInHand.Batch(int index)
+    {
+        var batch = _state.Pending.Batch(index);
+        _slot.Begin(batch.RowCount);
+        for (var c = 0; c <= _state.Replayed.Length; c++)
+        {
+            _slot.Set(c, batch.Column(c));
         }
+
+        return _slot;
     }
 }
 

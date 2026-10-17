@@ -38,10 +38,13 @@ internal sealed class ColumnarSeekRequest
     /// <summary>The leading key columns' bounds, in the index's order, then the time's.</summary>
     public required SeekBound[] Bounds { get; init; }
 
-    /// <summary>The left rows to seek for, in the first <see cref="RowCount"/> places.</summary>
-    public required int[] Rows { get; init; }
+    /// <summary>
+    /// The left rows to seek for, in the first <see cref="RowCount"/> places. Set again for each seek
+    /// of an operator that keeps its request, as the rest of it stands (F244).
+    /// </summary>
+    public required int[] Rows { get; set; }
 
-    public required int RowCount { get; init; }
+    public required int RowCount { get; set; }
 
     /// <summary>
     /// Rows at or before each time, the closest the last (<c>&gt;=</c>, <c>&gt;</c>); otherwise rows at

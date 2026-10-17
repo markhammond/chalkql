@@ -21,6 +21,7 @@ internal sealed class UnionAllOperator : OperatorBase
 {
     private readonly IBatchOperator[] _inputs;
     private readonly ColumnarBatch _output;
+    private readonly Concatenating _run;
 
     public UnionAllOperator(
         OperatorContext context,
@@ -32,6 +33,7 @@ internal sealed class UnionAllOperator : OperatorBase
     {
         _inputs = inputs;
         _output = NewOutput();
+        _run = new Concatenating(this);
     }
 
     protected override async ValueTask DisposeCoreAsync()
@@ -42,17 +44,68 @@ internal sealed class UnionAllOperator : OperatorBase
         }
     }
 
-    protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    protected override IAsyncEnumerator<ColumnarBatch> Begin(CancellationToken ct) => _run.Begin(ct);
+
+    /// <summary>The inputs one after another, each batch adopted and handed on, kept between executions (F244).</summary>
+    private sealed class Concatenating(UnionAllOperator owner) : KeptIteration
     {
-        foreach (var input in _inputs)
+        private int _input;
+        private bool _running;
+
+        protected override void Started()
         {
-            await foreach (var batch in input.ExecuteAsync(ct).ConfigureAwait(false))
+            _input = 0;
+            _running = false;
+        }
+
+        public override ValueTask<bool> MoveNextAsync()
+        {
+            var inputs = owner._inputs;
+            while (_input < inputs.Length)
             {
-                ct.ThrowIfCancellationRequested();
-                _output.Adopt(batch);
-                yield return _output;
+                var input = inputs[_input];
+                if (!_running)
+                {
+                    // Each input runs under this execution's token, as a body's await foreach would have it.
+                    _ = input.ExecuteAsync(Token);
+                    _running = true;
+                }
+
+                if (input.TryNext(out var batch))
+                {
+                    return new ValueTask<bool>(Adopted(batch!));
+                }
+
+                if (!input.IsDone)
+                {
+                    return WaitAsync(input);
+                }
+
+                _input++;
+                _running = false;
             }
+
+            return new ValueTask<bool>(false);
+        }
+
+        private async ValueTask<bool> WaitAsync(IBatchOperator input)
+        {
+            if (await input.WaitAsync(Token).ConfigureAwait(false))
+            {
+                return Adopted(input.Current!);
+            }
+
+            _input++;
+            _running = false;
+            return await MoveNextAsync().ConfigureAwait(false);
+        }
+
+        private bool Adopted(ColumnarBatch batch)
+        {
+            Token.ThrowIfCancellationRequested();
+            owner._output.Adopt(batch);
+            Current = owner._output;
+            return true;
         }
     }
 }

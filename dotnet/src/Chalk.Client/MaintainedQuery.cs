@@ -68,6 +68,9 @@ internal sealed class MaintainedQuery : IAsyncDisposable
     /// <summary>The statement's operators that keep scratch between updates, for a test to weigh.</summary>
     internal IReadOnlyList<IKeepsScratch> Scratch => _plan.Scratch;
 
+    /// <summary>The arena the statement's updates run in and write their batches in, for a test to weigh.</summary>
+    internal ExecutionArena Arena => _arena;
+
     /// <summary>
     /// Brings the statement to the epoch its tables are pinned at now, with <paramref name="values"/>
     /// bound as an execution binds them and <paramref name="now"/> its current time. A key that comes to
@@ -107,12 +110,17 @@ internal sealed class MaintainedQuery : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // The plan gives its last update's batches back to the arena first.
         await _plan.DisposeAsync().ConfigureAwait(false);
         _arena.Dispose();
     }
 }
 
-/// <summary>What one maintained update changed: as <see cref="MaintainedChanges"/>, in the client's terms.</summary>
+/// <summary>
+/// What one maintained update changed: as <see cref="MaintainedChanges"/>, in the client's terms. Its
+/// batches are valid until the query's next update or until it is disposed: changes are written in the
+/// query's arena, which the next update reuses.
+/// </summary>
 internal sealed class MaintainedUpdate
 {
     /// <summary>True when <see cref="Now"/> is the whole result: the first update, or one after a failure.</summary>

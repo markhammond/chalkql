@@ -17,9 +17,10 @@ namespace Chalk.Execution.Operators;
 /// Everything downstream accepts a selected batch, and a batch with a selection never leaves the
 /// pipeline: the root compacts.
 /// </remarks>
-internal sealed class FilterOperator : OperatorBase
+internal sealed class FilterOperator : OperatorBase, IStreams
 {
     private readonly IBatchOperator _input;
+    private readonly Streaming _run;
     private readonly IVectorExpr _condition;
     private readonly EvalContext _eval;
     private readonly ColumnCopier[] _copiers;
@@ -42,61 +43,60 @@ internal sealed class FilterOperator : OperatorBase
         _copiers = [.. columnTypes.Select(t => new ColumnCopier(t))];
         _output = NewOutput();
         _threshold = context.Settings.SelectionCompactionThreshold;
+        _run = new Streaming(this);
     }
 
     protected override ValueTask DisposeCoreAsync() => _input.DisposeAsync();
 
-    protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    protected override IAsyncEnumerator<ColumnarBatch> Begin(CancellationToken ct) => _run.Begin(ct);
+
+    IBatchOperator IStreams.Input => _input;
+
+    /// <summary>
+    /// The selection vector belongs to the execution, not to the operator: rented as it starts and
+    /// returned when its iteration ends, whether it runs out, throws or is abandoned (ADR 0012).
+    /// </summary>
+    void IStreams.Started() => _selection = Context.Arena.Rent<int>(Context.Settings.BatchSize);
+
+    void IStreams.Ended()
     {
-        // The selection vector belongs to this execution, not to the operator: rented here and
-        // returned below, whether the run ends, throws or is abandoned (ADR 0012).
-        var arena = Context.Arena;
-        _selection = arena.Rent<int>(Context.Settings.BatchSize);
-        try
+        Context.Arena.Return(_selection);
+        _selection = [];
+    }
+
+    ColumnarBatch? IStreams.Step(ColumnarBatch batch)
+    {
+        var length = batch.RowCount;
+        _eval.SetBatch(batch, length);
+        var mask = _condition.Evaluate(_eval);
+        var selected = Select(mask, batch);
+        if (selected == 0)
         {
-            await foreach (var batch in _input.ExecuteAsync(ct))
-            {
-                var length = batch.RowCount;
-                _eval.SetBatch(batch, length);
-                var mask = _condition.Evaluate(_eval);
-                var selected = Select(mask, batch);
-                if (selected == 0)
-                {
-                    continue;
-                }
-
-                // Everything survived and the input had nothing selected away: forward as it stands.
-                if (selected == batch.Count && !batch.HasSelection)
-                {
-                    _output.Adopt(batch);
-                    yield return _output;
-                    continue;
-                }
-
-                if (selected >= length * _threshold)
-                {
-                    _output.Begin(length);
-                    _output.SetAll(batch.Columns);
-                    _output.Select(_selection, selected);
-                    yield return _output;
-                    continue;
-                }
-
-                _output.Begin(selected);
-                for (var c = 0; c < _copiers.Length; c++)
-                {
-                    _output.Set(c, _copiers[c].Gather(batch.Column(c), _selection.AsSpan(0, selected)));
-                }
-
-                yield return _output;
-            }
+            return null;
         }
-        finally
+
+        // Everything survived and the input had nothing selected away: forward as it stands.
+        if (selected == batch.Count && !batch.HasSelection)
         {
-            arena.Return(_selection);
-            _selection = [];
+            _output.Adopt(batch);
+            return _output;
         }
+
+        if (selected >= length * _threshold)
+        {
+            _output.Begin(length);
+            _output.SetAll(batch.Columns);
+            _output.Select(_selection, selected);
+            return _output;
+        }
+
+        _output.Begin(selected);
+        for (var c = 0; c < _copiers.Length; c++)
+        {
+            _output.Set(c, _copiers[c].Gather(batch.Column(c), _selection.AsSpan(0, selected)));
+        }
+
+        return _output;
     }
 
     /// <summary>

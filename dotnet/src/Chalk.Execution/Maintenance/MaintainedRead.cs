@@ -109,6 +109,7 @@ internal sealed class ReadChanges : OperatorBase, IKeepsScratch
     private readonly bool _appendsOnly;
     private readonly ColumnarBatch _slot;
     private readonly int _weightColumn;
+    private readonly Reading _run;
     private byte[] _plus = [];
     private byte[] _minus = [];
 
@@ -125,6 +126,7 @@ internal sealed class ReadChanges : OperatorBase, IKeepsScratch
         _appendsOnly = appendsOnly;
         _slot = NewOutput();
         _weightColumn = types.Count - 1;
+        _run = new Reading(this);
         context.Scratch.Add(this);
     }
 
@@ -137,124 +139,216 @@ internal sealed class ReadChanges : OperatorBase, IKeepsScratch
 
     protected override ValueTask DisposeCoreAsync() => default;
 
-    protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var now = Context.ReadSet?.Pinned(_state.SourceId, _state.Table)
-            ?? throw new InvalidOperationException(
-                $"a maintained read of '{_state.Table}' found no state pinned for it in this update.");
-        var held = _state.Held;
-        _state.Rewritten = false;
+    protected override IAsyncEnumerator<ColumnarBatch> Begin(CancellationToken ct) => _run.Begin(ct);
 
-        if (held is null)
+    /// <summary>
+    /// The read of one update, kept from one update to the next (F244): the scans the table's change
+    /// calls for, worked out at the first move, then run one after another, each batch given with its
+    /// weight. Only a read that runs to its end holds the table's new state.
+    /// </summary>
+    private sealed class Reading(ReadChanges owner) : KeptIteration
+    {
+        /// <summary>The scans of this update: at most a diff's three.</summary>
+        private readonly Step[] _steps = new Step[3];
+        private int _count;
+        private int _next;
+        private bool _planned;
+        private object? _now;
+        private IColumnarScan? _scan;
+        private long _weight;
+
+        protected override void Started()
         {
-            _state.Rewritten = _appendsOnly;
-            if (!_appendsOnly)
+            _count = 0;
+            _next = 0;
+            _planned = false;
+            _now = null;
+            _scan = null;
+        }
+
+        public override ValueTask<bool> MoveNextAsync()
+        {
+            if (!_planned)
             {
-                await foreach (var batch in Scan(now, 0, +1, ct))
+                Plan();
+                _planned = true;
+            }
+
+            var slot = owner._slot;
+            while (true)
+            {
+                if (_scan is null)
                 {
-                    yield return batch;
+                    if (_next >= _count)
+                    {
+                        Finish();
+                        return new ValueTask<bool>(false);
+                    }
+
+                    Open(_steps[_next++]);
+                    if (_scan is null)
+                    {
+                        continue;
+                    }
+                }
+
+                Token.ThrowIfCancellationRequested();
+                if (_scan.TryNext(slot))
+                {
+                    return new ValueTask<bool>(Weighed(slot));
+                }
+
+                var waiting = _scan.WaitAsync(slot, Token);
+                if (!waiting.IsCompletedSuccessfully)
+                {
+                    return WaitedAsync(waiting);
+                }
+
+                if (waiting.Result)
+                {
+                    return new ValueTask<bool>(Weighed(slot));
+                }
+
+                var closing = Close();
+                if (!closing.IsCompletedSuccessfully)
+                {
+                    return ClosedAsync(closing);
                 }
             }
         }
-        else if (!ReferenceEquals(held, now))
+
+        /// <summary>The scan could not answer at once: waited for, and the read carried on.</summary>
+        private async ValueTask<bool> WaitedAsync(ValueTask<bool> waiting)
         {
-            var from = _state.Source.AppendedFrom(_state.Table, held, now);
-            if (from >= 0)
+            if (await waiting.ConfigureAwait(false))
             {
-                await foreach (var batch in Scan(now, from, +1, ct))
+                return Weighed(owner._slot);
+            }
+
+            await Close().ConfigureAwait(false);
+            return await MoveNextAsync().ConfigureAwait(false);
+        }
+
+        private async ValueTask<bool> ClosedAsync(ValueTask closing)
+        {
+            await closing.ConfigureAwait(false);
+            return await MoveNextAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>The scans the table's change calls for: what was appended, a diff's three, or the whole table.</summary>
+        private void Plan()
+        {
+            var state = owner._state;
+            var now = owner.Context.ReadSet?.Pinned(state.SourceId, state.Table)
+                ?? throw new InvalidOperationException(
+                    $"a maintained read of '{state.Table}' found no state pinned for it in this update.");
+            _now = now;
+            var held = state.Held;
+            state.Rewritten = false;
+
+            if (held is null)
+            {
+                state.Rewritten = owner._appendsOnly;
+                if (!owner._appendsOnly)
                 {
-                    yield return batch;
+                    Add(new Step(now, 0, null, +1));
                 }
             }
-            else if (!_state.WholeOnRewrite && _state.Diffs.DiffFrom(_state, held, now) is { } diff)
+            else if (!ReferenceEquals(held, now))
             {
-                // A replacement that kept the rest of the rows in their order, as a compaction does: the
-                // rows it took out, the rows a keyed refresh put in their places (D367), and the rows it
-                // appended.
-                await foreach (var batch in ScanAt(held, diff.Removed, -1, ct))
+                var from = state.Source.AppendedFrom(state.Table, held, now);
+                if (from >= 0)
                 {
-                    yield return batch;
+                    Add(new Step(now, from, null, +1));
                 }
-
-                await foreach (var batch in ScanAt(now, diff.Added, +1, ct))
+                else if (!state.WholeOnRewrite && state.Diffs.DiffFrom(state, held, now) is { } diff)
                 {
-                    yield return batch;
+                    // A replacement that kept the rest of the rows in their order, as a compaction does:
+                    // the rows it took out, the rows a keyed refresh put in their places (D367), and the
+                    // rows it appended.
+                    Add(new Step(held, 0, diff.Removed, -1));
+                    Add(new Step(now, 0, diff.Added, +1));
+                    Add(new Step(now, diff.AppendedFrom, null, +1));
                 }
-
-                await foreach (var batch in Scan(now, diff.AppendedFrom, +1, ct))
+                else
                 {
-                    yield return batch;
-                }
-            }
-            else
-            {
-                _state.Rewritten = true;
-                if (!_appendsOnly)
-                {
-                    if (!_state.NewRowsOnRewrite)
+                    state.Rewritten = true;
+                    if (!owner._appendsOnly)
                     {
-                        await foreach (var batch in Scan(held, 0, -1, ct))
+                        if (!state.NewRowsOnRewrite)
                         {
-                            yield return batch;
+                            Add(new Step(held, 0, null, -1));
                         }
-                    }
 
-                    await foreach (var batch in Scan(now, 0, +1, ct))
-                    {
-                        yield return batch;
+                        Add(new Step(now, 0, null, +1));
                     }
                 }
             }
         }
 
-        _state.Hold(now);
-    }
+        private void Add(Step step) => _steps[_count++] = step;
 
-    private async IAsyncEnumerable<ColumnarBatch> Scan(
-        object pinned, long from, long weight, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var scan = _state.Source.ScanFrom(_state.Table, pinned, from, _state.Request, ScanContextFor(Context));
-        await using (scan.ConfigureAwait(false))
+        /// <summary>Opens <paramref name="step"/>'s scan; none for positions there are none of.</summary>
+        private void Open(Step step)
         {
-            while (true)
+            var state = owner._state;
+            _weight = step.Weight;
+            if (step.At is { } positions)
             {
-                ct.ThrowIfCancellationRequested();
-                if (!scan.TryNext(_slot) && !await scan.WaitAsync(_slot, ct).ConfigureAwait(false))
-                {
-                    yield break;
-                }
-
-                _slot.Set(_weightColumn, Weight(weight, _slot.RowCount));
-                yield return _slot;
+                _scan = positions.Length == 0
+                    ? null
+                    : state.Source.ScanAt(state.Table, step.Pinned, positions, state.Request, ScanContextFor(owner.Context));
+                return;
             }
-        }
-    }
 
-    /// <summary>The rows of <paramref name="pinned"/> at <paramref name="positions"/>, each with <paramref name="weight"/>.</summary>
-    private async IAsyncEnumerable<ColumnarBatch> ScanAt(
-        object pinned, int[] positions, long weight, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        if (positions.Length == 0)
-        {
-            yield break;
+            _scan = state.Source.ScanFrom(state.Table, step.Pinned, step.From, state.Request, ScanContextFor(owner.Context));
         }
 
-        var scan = _state.Source.ScanAt(_state.Table, pinned, positions, _state.Request, ScanContextFor(Context));
-        await using (scan.ConfigureAwait(false))
+        private bool Weighed(ColumnarBatch slot)
         {
-            while (true)
+            slot.Set(owner._weightColumn, owner.Weight(_weight, slot.RowCount));
+            Current = slot;
+            return true;
+        }
+
+        private ValueTask Close()
+        {
+            var scan = _scan!;
+            _scan = null;
+            return scan.DisposeAsync();
+        }
+
+        /// <summary>The read ran to its end: the table's new state is held, and the steps' states let go.</summary>
+        private void Finish()
+        {
+            if (_now is { } now)
             {
-                ct.ThrowIfCancellationRequested();
-                if (!scan.TryNext(_slot) && !await scan.WaitAsync(_slot, ct).ConfigureAwait(false))
-                {
-                    yield break;
-                }
-
-                _slot.Set(_weightColumn, Weight(weight, _slot.RowCount));
-                yield return _slot;
+                owner._state.Hold(now);
             }
+
+            LetGo();
         }
+
+        /// <summary>No state of the table is kept past the update, so nothing here holds an old one alive.</summary>
+        private void LetGo()
+        {
+            System.Array.Clear(_steps);
+            _count = 0;
+            _now = null;
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            if (_scan is not null)
+            {
+                await Close().ConfigureAwait(false);
+            }
+
+            LetGo();
+        }
+
+        /// <summary>One scan of the read: of a pinned state from a position, or at positions, with a weight.</summary>
+        private readonly record struct Step(object Pinned, long From, int[]? At, long Weight);
     }
 
     /// <summary>A weight column of <paramref name="rows"/> rows, every one <paramref name="weight"/>.</summary>

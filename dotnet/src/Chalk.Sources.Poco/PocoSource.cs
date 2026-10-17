@@ -366,7 +366,7 @@ public sealed class PocoSource
     /// refreshes, and its commit is what checks that the table was not replaced meanwhile.
     /// </remarks>
     ValueTask<IPreparedReplacement> IPreparableSource.PrepareReplaceAsync(
-        string table, Type rowType, object rows, int through, CancellationToken ct)
+        string table, Type rowType, object rows, int through, int? owned, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(rows);
         ct.ThrowIfCancellationRequested();
@@ -382,7 +382,7 @@ public sealed class PocoSource
                 + "A replacement replaces a table's rows, not its shape.");
         }
 
-        return ValueTask.FromResult(runtime.PrepareReplacement(SourceId, rows, through));
+        return ValueTask.FromResult(runtime.PrepareReplacement(SourceId, rows, through, owned));
     }
 
     /// <inheritdoc />
@@ -593,14 +593,24 @@ public sealed class PocoSource
         return Require(request.Table).ColumnarSeek(SourceId, request, context);
     }
 
-    private PocoTableRuntime Require(string name) =>
-        _tables.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))
-        ?? throw new SourceContractException(
+    /// <summary>The table named <paramref name="name"/>: found by a loop, as every scan and seek asks, with nothing allocated.</summary>
+    private PocoTableRuntime Require(string name)
+    {
+        foreach (var table in _tables)
+        {
+            if (string.Equals(table.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return table;
+            }
+        }
+
+        throw new SourceContractException(
             ChalkErrorCodes.SourceContract,
             SourceId,
             name,
             $"there is no such table in schema '{SchemaName}'. Known tables: "
             + string.Join(", ", _tables.Select(t => t.Name)) + ".");
+    }
 
     private static void RequireBatchSize(int batchSize)
     {
@@ -693,9 +703,11 @@ internal abstract class PocoTableRuntime
 
     /// <summary>
     /// Builds a replacement from the host's rewrite of the rows before <paramref name="through"/>,
-    /// beside this table's refreshes, for a later refresh to commit (design 69 §3).
+    /// beside this table's refreshes, for a later refresh to commit (design 69 §3). With
+    /// <paramref name="owned"/>, <paramref name="rows"/> is an array whose first rows those are, which
+    /// the table takes over rather than copies (F245).
     /// </summary>
-    public abstract IPreparedReplacement PrepareReplacement(string sourceId, object rows, int through);
+    public abstract IPreparedReplacement PrepareReplacement(string sourceId, object rows, int through, int? owned);
 
     /// <summary>
     /// Statistics computed now over the snapshot this table serves, and the table described with
@@ -836,6 +848,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         _entitlement = entitlement;
         Name = name;
         _factory = factory;
+        _factory.Arrays.Report = array => Released?.Invoke(Name, array);
         _snapshot = snapshot;
         _snapshot.OnReleased = Report;
         _columns = columns;
@@ -1246,7 +1259,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
                 // The table built from its last snapshot, with what changed recorded for the views that
                 // read it (D367): the rows taken out, the rows put in their places, the rows appended.
                 var (changed, added) = PocoAppendedRows<T>.Assemble(
-                    current.Rows!, current.RowCount, keyed.Deleted, keyed.Replaced, keyed.Appended);
+                    current.Rows!, current.RowCount, keyed.Deleted, keyed.Replaced, keyed.Appended, _factory.Arrays);
                 next = Carry(_factory.Changed(current, changed, keyed, added, _keyColumns!), statistics, upserts.Count + deletes.Count);
                 int[] removed = [.. keyed.Deleted.Concat(keyed.Replaced.Select(r => r.Position)).Order()];
                 next.Change = new PocoRecordedChange(current.Sequence, removed, added, current.RowCount - keyed.Deleted.Length);
@@ -1276,10 +1289,29 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     }
 
     /// <inheritdoc />
-    public override IPreparedReplacement PrepareReplacement(string sourceId, object rows, int through)
+    public override IPreparedReplacement PrepareReplacement(string sourceId, object rows, int through, int? owned)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(through);
-        if (rows is not IReadOnlyList<T> given)
+        IReadOnlyList<T> given;
+        if (owned is { } count)
+        {
+            if (rows is not T[] array)
+            {
+                throw new SourceContractException(
+                    ChalkErrorCodes.SourceRefresh,
+                    sourceId,
+                    Name,
+                    $"the rows are {rows.GetType().Name}, which is not a {typeof(T).Name}[] to take over.");
+            }
+
+            // The rewrite is the array's first rows; the rest of it is room for the commit.
+            given = new ArraySegment<T>(array, 0, count);
+        }
+        else if (rows is IReadOnlyList<T> list)
+        {
+            given = list;
+        }
+        else
         {
             throw new SourceContractException(
                 ChalkErrorCodes.SourceRefresh,
@@ -1323,7 +1355,8 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         }
 
         var frontier = _changes is { HasTime: true } timed ? Latest(timed, given) : null;
-        return new PocoPreparedReplacement<T>(this, _factory.Prepared(given), through, current.Rewrites, frontier);
+        var snapshot = owned is { } taken ? _factory.Prepared((T[])rows, taken) : _factory.Prepared(given);
+        return new PocoPreparedReplacement<T>(this, snapshot, through, current.Rewrites, frontier);
     }
 
     /// <summary>
@@ -1586,7 +1619,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
                 }
             }
 
-            _committing?.Committed();
+            _committing?.Committed(_snapshot);
 
             if (_table._changes is { } changes)
             {
@@ -1621,6 +1654,13 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         if (snapshot.HostCollection is { } collection)
         {
             Released?.Invoke(Name, collection);
+        }
+
+        // The rows an append, a keyed change or a prepared replacement made: their array goes back once
+        // no snapshot reads it (F245), to the pool, or to the host when it handed the array over.
+        if (snapshot.Rows is PocoAppendedRows<T> rows)
+        {
+            rows.LetGo();
         }
     }
 

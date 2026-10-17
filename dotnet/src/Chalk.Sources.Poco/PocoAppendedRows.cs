@@ -14,19 +14,28 @@ namespace Chalk.Sources.Poco;
 /// one sees more. Nothing is allocated per row beyond the array itself.
 /// </para>
 /// <para>
-/// The buffer is Chalk's, not the host's, which is why a snapshot over one reports nothing released:
+/// The buffer is rented from the table's pool (F245), so a snapshot over one reports nothing released:
 /// the collection the host gave was copied out of at the first append, and <em>that</em> is what is
-/// reported released when the snapshot holding it retires.
+/// reported released when the snapshot holding it retires. The buffer itself goes back to the pool
+/// once no row set over it is read. The exception is an array a host handed over for a prepared
+/// replacement, which goes back to the host.
+/// </para>
+/// <para>
+/// Each row set holds its buffer from the moment it is made, so a buffer an append extends in place is
+/// held by the new rows before the old ones let go, and never goes back while it is read.
 /// </para>
 /// </remarks>
 internal sealed class PocoAppendedRows<T> : IReadOnlyList<T>
 {
+    private readonly PocoRowBuffer<T> _buffer;
     private readonly T[] _items;
 
-    private PocoAppendedRows(T[] items, int count)
+    private PocoAppendedRows(PocoRowBuffer<T> buffer, int count)
     {
-        _items = items;
+        _buffer = buffer;
+        _items = buffer.Items;
         Count = count;
+        buffer.Hold();
     }
 
     /// <summary>Rows this snapshot holds, which is a prefix of <see cref="Buffer"/>.</summary>
@@ -34,6 +43,15 @@ internal sealed class PocoAppendedRows<T> : IReadOnlyList<T>
 
     /// <summary>The array itself, so the next append can see whether it has room.</summary>
     public T[] Buffer => _items;
+
+    /// <summary>Whether the array is one the host handed over, rather than one the table rented.</summary>
+    public bool HostArray => _buffer.Host;
+
+    /// <summary>
+    /// This row set is read no more: called exactly once, when the snapshot over it is released, or
+    /// when a prepared replacement is let go. The last one out gives the buffer back.
+    /// </summary>
+    public void LetGo() => _buffer.LetGo();
 
     public T this[int index] =>
         (uint)index < (uint)Count
@@ -45,7 +63,8 @@ internal sealed class PocoAppendedRows<T> : IReadOnlyList<T>
     /// their positions, which is what lets the permutation and the clustered copy extend rather than
     /// be rebuilt.
     /// </summary>
-    public static PocoAppendedRows<T> Extend(IReadOnlyList<T> existing, int count, IReadOnlyList<T> added)
+    public static PocoAppendedRows<T> Extend(
+        IReadOnlyList<T> existing, int count, IReadOnlyList<T> added, PocoRowArrays<T> arrays)
     {
         var wanted = checked(count + added.Count);
 
@@ -55,12 +74,12 @@ internal sealed class PocoAppendedRows<T> : IReadOnlyList<T>
         if (existing is PocoAppendedRows<T> owned && owned.Count == count && owned._items.Length >= wanted)
         {
             Fill(owned._items, count, added);
-            return new PocoAppendedRows<T>(owned._items, wanted);
+            return new PocoAppendedRows<T>(owned._buffer, wanted);
         }
 
-        var buffer = new T[Math.Max(wanted, Math.Max(4, count * 2))];
-        Copy(existing, count, buffer);
-        Fill(buffer, count, added);
+        var buffer = arrays.Rent(Math.Max(wanted, Math.Max(4, count * 2)));
+        Copy(existing, count, buffer.Items);
+        Fill(buffer.Items, count, added);
         return new PocoAppendedRows<T>(buffer, wanted);
     }
 
@@ -69,13 +88,20 @@ internal sealed class PocoAppendedRows<T> : IReadOnlyList<T>
     /// replacement prepared before its refresh (design 69 §3). Its commit writes the rows appended
     /// since its cut into the room, rather than copying the replacement again under the lock.
     /// </summary>
-    public static PocoAppendedRows<T> Own(IReadOnlyList<T> rows)
+    public static PocoAppendedRows<T> Own(IReadOnlyList<T> rows, PocoRowArrays<T> arrays)
     {
         var count = rows.Count;
-        var buffer = new T[Math.Max(4, (int)Math.Min(Array.MaxLength, 2L * count))];
-        Copy(rows, count, buffer);
+        var buffer = arrays.Rent(Math.Max(4, (int)Math.Min(Array.MaxLength, 2L * count)));
+        Copy(rows, count, buffer.Items);
         return new PocoAppendedRows<T>(buffer, count);
     }
+
+    /// <summary>
+    /// The first <paramref name="count"/> rows of an array the host handed over, without a copy (F245):
+    /// the rest of the array is room the commit writes the rows appended since the cut into.
+    /// </summary>
+    public static PocoAppendedRows<T> Adopt(T[] array, int count, PocoRowArrays<T> arrays) =>
+        new(arrays.Adopt(array), count);
 
     /// <summary>
     /// A keyed table's next rows (D367): <paramref name="existing"/>'s first <paramref name="count"/>, with
@@ -86,11 +112,17 @@ internal sealed class PocoAppendedRows<T> : IReadOnlyList<T>
     /// </summary>
     /// <returns>The rows, and where each replaced row now stands, in <paramref name="replaced"/>'s order.</returns>
     public static (PocoAppendedRows<T> Rows, int[] Added) Assemble(
-        IReadOnlyList<T> existing, int count, int[] deleted, (int Position, T Row)[] replaced, T[] appended)
+        IReadOnlyList<T> existing,
+        int count,
+        int[] deleted,
+        (int Position, T Row)[] replaced,
+        T[] appended,
+        PocoRowArrays<T> arrays)
     {
         var kept = count - deleted.Length;
         var wanted = checked(kept + appended.Length);
-        var buffer = new T[(int)Math.Min(Array.MaxLength, wanted + Math.Max(16L, wanted / 8L))];
+        var rented = arrays.Rent((int)Math.Min(Array.MaxLength, wanted + Math.Max(16L, wanted / 8L)));
+        var buffer = rented.Items;
         var source = existing switch
         {
             T[] array => array,
@@ -142,7 +174,7 @@ internal sealed class PocoAppendedRows<T> : IReadOnlyList<T>
         }
 
         Array.Copy(appended, 0, buffer, kept, appended.Length);
-        return (new PocoAppendedRows<T>(buffer, wanted), added);
+        return (new PocoAppendedRows<T>(rented, wanted), added);
     }
 
     public IEnumerator<T> GetEnumerator()

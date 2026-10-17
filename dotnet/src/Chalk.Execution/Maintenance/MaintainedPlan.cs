@@ -20,6 +20,12 @@ namespace Chalk.Execution.Maintenance;
 /// An update that fails part way leaves the operators' state behind: it is discarded, and the next
 /// update computes the statement from nothing, as the first did, and gives the whole result (§7).
 /// </para>
+/// <para>
+/// The batches an update gives are valid until the next update or until the plan is disposed. The
+/// view that owns the plan reads them before it asks for the next update. An update's changes are
+/// written in its arena's memory, which the next update gives back for its own, so that steady updates
+/// reuse the same buffers; a whole result is written in the GC's, as a one-off.
+/// </para>
 /// </remarks>
 internal sealed class MaintainedPlan : IAsyncDisposable
 {
@@ -31,6 +37,9 @@ internal sealed class MaintainedPlan : IAsyncDisposable
     private readonly IReadOnlyList<ChalkType> _outputTypes;
     private Tree? _tree;
     private bool _restart = true;
+
+    // The batches the last update gave, valid until the next update lets go of them.
+    private MaintainedChanges? _given;
 
     private MaintainedPlan(CompiledPlan compiled, OperatorFactory root, List<IMaintainedState> states, TableDiffs diffs)
     {
@@ -147,6 +156,9 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         var bound = ParameterBinder.Bind(parameters, _compiled.BoundTypes);
         var tree = _tree ??= Build();
         var completed = false;
+
+        // The last update's batches have been read: the memory of its changes goes back for this update's.
+        LetGoOfGiven();
         arena.BeginExecution(stats);
         try
         {
@@ -183,7 +195,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
                     _result.Add(batch!);
                 }
 
-                var changes = _result.End(_restart || whole, _restart, tree.Output);
+                var changes = _given = _result.End(_restart || whole, _restart, tree.Output);
                 if (_restart)
                 {
                     // An update from nothing read every row of its tables, and the buffers its changes
@@ -229,9 +241,10 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         }
     }
 
-    /// <summary>Lets go of every table state the plan's reads hold.</summary>
+    /// <summary>Lets go of every table state the plan's reads hold, and of the last update's batches.</summary>
     public ValueTask DisposeAsync()
     {
+        LetGoOfGiven();
         foreach (var state in _states)
         {
             state.Discard();
@@ -239,6 +252,17 @@ internal sealed class MaintainedPlan : IAsyncDisposable
 
         _tree = null;
         return default;
+    }
+
+    /// <summary>Lets go of the batches the last update gave: the memory of its changes goes back to its arena.</summary>
+    private void LetGoOfGiven()
+    {
+        if (_given is { } given)
+        {
+            _given = null;
+            given.Now.Dispose();
+            given.Before.Dispose();
+        }
     }
 
     private Tree Build()
@@ -249,7 +273,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         using (new ScratchScope(context))
         {
             root = _root(context);
-            output = new OutputMaterialiser(context, _compiled.OutputSchema, _outputTypes, pooled: false);
+            output = new OutputMaterialiser(context, _compiled.OutputSchema, _outputTypes, pooled: true);
         }
 
         return new Tree(root, output, context);
@@ -274,10 +298,16 @@ internal sealed class MaintainedChanges
     /// </summary>
     public required bool Restarted { get; init; }
 
-    /// <summary>The rows keys hold now: those that changed, or every row when <see cref="Whole"/>.</summary>
+    /// <summary>
+    /// The rows keys hold now: those that changed, or every row when <see cref="Whole"/>. Valid until
+    /// the plan's next update.
+    /// </summary>
     public required RecordBatch Now { get; init; }
 
-    /// <summary>The rows the changed keys held before, of keys that hold no row now or hold another key's.</summary>
+    /// <summary>
+    /// The rows the changed keys held before, of keys that hold no row now or hold another key's. Valid
+    /// until the plan's next update.
+    /// </summary>
     public required RecordBatch Before { get; init; }
 }
 
@@ -294,7 +324,10 @@ internal sealed class ResultState
     private readonly KeyEncoder _keyEncoder = new();
     private readonly ByteMap _slots = new();
     private readonly Dictionary<byte[], List<int>> _byKey = new(ByteKeys.Instance);
-    private readonly Dictionary<byte[], List<int>> _before = new(ByteKeys.Instance);
+
+    // The row each key the update touches held before it, or -1 for none or more than one: all an
+    // update's end reads of what the key held. Kept between updates, its storage reused (F244).
+    private readonly ByteMap _before = new();
     private readonly List<int> _removed = [];
     private long[] _counts = [];
     private int[] _key = [];
@@ -335,7 +368,7 @@ internal sealed class ResultState
     public long Bytes =>
         _rows.Bytes + HeapSizes.Array(_counts.Length, sizeof(long)) + _slots.Bytes
         + HeapSizes.Of(_byKey, HeapSizes.ReferenceEntry) + _keyBytes
-        + HeapSizes.Of(_before, HeapSizes.ReferenceEntry) + HeapSizes.Of(_removed, sizeof(int))
+        + _before.Bytes + HeapSizes.Of(_removed, sizeof(int))
         + (_now?.Bytes ?? 0) + (_was?.Bytes ?? 0)
         + (_nowColumns is null ? 0 : HeapSizes.Batch(_types.Count)) + (_wasColumns is null ? 0 : HeapSizes.Batch(_types.Count));
 
@@ -361,7 +394,7 @@ internal sealed class ResultState
     /// </summary>
     public void Trim()
     {
-        _before.TrimExcess();
+        _before.Trim();
         _removed.TrimExcess();
         _now?.Trim();
         _was?.Trim();
@@ -401,12 +434,10 @@ internal sealed class ResultState
                     _keyColumns.Encode(_keyEncoder, _rows, _stored, slot, normalise: false);
                     var members = _byKey.GetAlternateLookup<ReadOnlySpan<byte>>();
                     members.TryGetValue(_keyEncoder.Span, out var list);
+
+                    // A key left with no row keeps its entry until the update ends, so that a row put in
+                    // its place in the same update finds it rather than making another (F244).
                     list!.Remove(slot);
-                    if (list.Count == 0)
-                    {
-                        members.Remove(_keyEncoder.Span);
-                        _keyBytes -= KeyBytes(_keyEncoder.Span.Length, list.Capacity);
-                    }
 
                     // Kept until the update ends: the view reads the row the key held before.
                     _removed.Add(slot);
@@ -459,26 +490,37 @@ internal sealed class ResultState
         var before = _was ??= new ChangeWriter(_types, int.MaxValue);
         now.Clear();
         before.Clear();
+        var byKey = _byKey.GetAlternateLookup<ReadOnlySpan<byte>>();
         if (whole)
         {
             foreach (var (_, slots) in _byKey)
             {
+                if (slots.Count == 0)
+                {
+                    continue;
+                }
+
                 Check(slots);
                 now.Write(_rows, slots[0], 1);
             }
         }
         else
         {
-            foreach (var (key, previous) in _before)
+            for (var entry = 0; entry < _before.Entries; entry++)
             {
-                var current = _byKey.TryGetValue(key, out var slots) ? slots : null;
+                if (!_before.IsLive(entry))
+                {
+                    continue;
+                }
+
+                var current = byKey.TryGetValue(_before.Key(entry), out var slots) ? slots : null;
                 if (current is not null)
                 {
                     Check(current);
                 }
 
                 var after = current is { Count: 1 } ? current[0] : -1;
-                var was = previous.Count == 1 ? previous[0] : -1;
+                var was = _before.Value(entry);
                 if (was == after)
                 {
                     continue;
@@ -496,6 +538,16 @@ internal sealed class ResultState
             }
         }
 
+        // The keys the update left with no row go now. Only a key the update touched can be one.
+        for (var entry = 0; entry < _before.Entries; entry++)
+        {
+            if (_before.IsLive(entry) && byKey.TryGetValue(_before.Key(entry), out var emptied) && emptied.Count == 0)
+            {
+                _keyBytes -= KeyBytes(_before.Key(entry).Length, emptied.Capacity);
+                byKey.Remove(_before.Key(entry));
+            }
+        }
+
         foreach (var slot in _removed)
         {
             _rows.Remove(slot);
@@ -503,13 +555,27 @@ internal sealed class ResultState
 
         _removed.Clear();
         _before.Clear();
-        return new MaintainedChanges
+
+        // Changes are written in the arena's memory, which the next update reuses. A whole result is
+        // written in the GC's, so that the arena does not keep room for every row once updates are small.
+        var pooled = !whole;
+        var rows = Arrow(now, _nowColumns ??= new ColumnarBatch(_types), output, pooled);
+        try
         {
-            Whole = whole,
-            Restarted = restarted,
-            Now = Arrow(now, _nowColumns ??= new ColumnarBatch(_types), output),
-            Before = Arrow(before, _wasColumns ??= new ColumnarBatch(_types), output),
-        };
+            return new MaintainedChanges
+            {
+                Whole = whole,
+                Restarted = restarted,
+                Now = rows,
+                Before = Arrow(before, _wasColumns ??= new ColumnarBatch(_types), output, pooled),
+            };
+        }
+        catch
+        {
+            // A batch in the arena's memory gives it back only when it is disposed.
+            rows.Dispose();
+            throw;
+        }
     }
 
     /// <summary>One row per key, held once (design 64 §6 a).</summary>
@@ -537,19 +603,21 @@ internal sealed class ResultState
         return string.Join(", ", parts);
     }
 
-    /// <summary>Records the rows a key held before this update, the first time the update touches it.</summary>
+    /// <summary>
+    /// Records the row a key held before this update, the first time the update touches it: -1 when it
+    /// held none, or more than one, which its end reads alike.
+    /// </summary>
     private void BeforeOf(ReadOnlySpan<byte> key)
     {
-        var before = _before.GetAlternateLookup<ReadOnlySpan<byte>>();
-        if (before.ContainsKey(key))
+        ref var held = ref _before.GetOrAdd(key, out var added);
+        if (!added)
         {
             return;
         }
 
-        var held = _byKey.GetAlternateLookup<ReadOnlySpan<byte>>().TryGetValue(key, out var slots)
-            ? new List<int>(slots)
-            : [];
-        before[key] = held;
+        held = _byKey.GetAlternateLookup<ReadOnlySpan<byte>>().TryGetValue(key, out var slots) && slots.Count == 1
+            ? slots[0]
+            : -1;
     }
 
     private void Touch(int slot)
@@ -558,7 +626,7 @@ internal sealed class ResultState
         BeforeOf(_keyEncoder.Span);
     }
 
-    private static RecordBatch Arrow(ChangeWriter rows, ColumnarBatch columns, OutputMaterialiser output)
+    private static RecordBatch Arrow(ChangeWriter rows, ColumnarBatch columns, OutputMaterialiser output, bool pooled)
     {
         if (rows.Rows == 0)
         {
@@ -568,7 +636,7 @@ internal sealed class ResultState
                 columns.Set(c, ColumnView.Empty(rows.Types[c]));
             }
 
-            return output.Materialise(columns);
+            return output.Materialise(columns, pooled);
         }
 
         // One batch: the writer was made with no row limit.
@@ -579,7 +647,7 @@ internal sealed class ResultState
             columns.Set(c, batch.Column(c));
         }
 
-        return output.Materialise(columns);
+        return output.Materialise(columns, pooled);
     }
 }
 

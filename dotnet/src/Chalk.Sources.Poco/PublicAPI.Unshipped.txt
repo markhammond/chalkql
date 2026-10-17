@@ -153,3 +153,4 @@ Chalk.Sources.Poco.PocoTableBuilder<T>.AppendOnly<TTime>(System.Linq.Expressions
 Chalk.Sources.Poco.PocoTableBuilder<T>.AsOf<TTime>(System.Linq.Expressions.Expression<System.Func<T, TTime>!>! time, System.TimeSpan lateness, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
 Chalk.Sources.Poco.PocoTableBuilder<T>.AsOf<TTime>(System.Linq.Expressions.Expression<System.Func<T, TTime>!>! time, params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
 Chalk.Sources.Poco.PocoTableBuilder<T>.Keyed(params System.Linq.Expressions.Expression<System.Func<T, object?>!>![]! keys) -> Chalk.Sources.Poco.PocoTableBuilder<T>!
+Chalk.Sources.Poco.PocoTableBuilder<T>.ArrayPool(System.Buffers.ArrayPool<T>! pool) -> Chalk.Sources.Poco.PocoTableBuilder<T>!

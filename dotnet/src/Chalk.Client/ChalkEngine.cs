@@ -1585,12 +1585,76 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     /// <param name="rows">The rewrite, of the type the table was built over.</param>
     /// <param name="through">The cut: how many of the table's rows the rewrite covers.</param>
     /// <param name="ct">Checked before the build starts.</param>
-    public async ValueTask<PreparedReplacement> PrepareReplaceAsync<T>(
+    public ValueTask<PreparedReplacement> PrepareReplaceAsync<T>(
         ISourceRuntime source, string table, IReadOnlyList<T> rows, int through, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        return PrepareAsync<T>(source, table, rows, through, owned: null, ct);
+    }
+
+    /// <summary>
+    /// Builds a replacement from the first <paramref name="count"/> rows of <paramref name="rows"/>,
+    /// taking the array over rather than copying it (F245): the rest of the array is room the commit
+    /// writes the rows appended since the cut into.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The array is Chalk's from this call until it is given back: leave it alone until then. It goes
+    /// back once no snapshot reads it, to the pool the table was declared with
+    /// (<c>PocoTableBuilder.ArrayPool</c>), or else reported through <c>PocoSource.SnapshotReleased</c>,
+    /// as a list a <c>Replace</c> took over is. A replacement disposed before a refresh commits it gives
+    /// its array back the same way. A prepare that is refused takes nothing: the array is the host's
+    /// again.
+    /// </para>
+    /// <para>
+    /// The commit writes the rows appended since the cut into the array's room; when they do not fit,
+    /// the rows move into a larger array from the table's pool, and the host's goes back once no
+    /// snapshot reads it. Otherwise this is <see cref="PrepareReplaceAsync{T}(ISourceRuntime, string, IReadOnlyList{T}, int, CancellationToken)"/>.
+    /// A host that rents its compactions' arrays from the pool the table was declared with, and hands
+    /// them over here, allocates no row arrays for a compaction or the appends after it once the pool
+    /// holds what they need.
+    /// </para>
+    /// </remarks>
+    /// <param name="source">A source this engine was built with.</param>
+    /// <param name="table">The table, as it is named in that source's schema.</param>
+    /// <param name="rows">The array the rewrite is the first rows of, of the type the table was built over.</param>
+    /// <param name="count">How many of its first rows are the rewrite.</param>
+    /// <param name="through">The cut: how many of the table's rows the rewrite covers.</param>
+    /// <param name="ct">Checked before the build starts.</param>
+    public ValueTask<PreparedReplacement> PrepareReplaceAsync<T>(
+        ISourceRuntime source, string table, T[] rows, int count, int through, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(count, rows.Length);
+        return PrepareAsync<T>(source, table, rows, through, owned: count, ct);
+    }
+
+    /// <summary>
+    /// The same, naming the table by its handle (D271 (h)): the source travels with the name, and the
+    /// row type is checked by the compiler.
+    /// </summary>
+    /// <param name="table">The handle a source builder yielded, or one looked up on the source.</param>
+    /// <param name="rows">The array the rewrite is the first rows of.</param>
+    /// <param name="count">How many of its first rows are the rewrite.</param>
+    /// <param name="through">The cut: how many of the table's rows the rewrite covers.</param>
+    /// <param name="ct">Checked before the build starts.</param>
+    public ValueTask<PreparedReplacement> PrepareReplaceAsync<T>(
+        ITableTarget<T> table, T[] rows, int count, int through, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        return PrepareReplaceAsync(table.Runtime, table.Table, rows, count, through, ct);
+    }
+
+    /// <summary>
+    /// A replacement's build, from a list it copies or, with <paramref name="owned"/>, an array it takes
+    /// over: both <c>PrepareReplaceAsync</c> forms.
+    /// </summary>
+    private async ValueTask<PreparedReplacement> PrepareAsync<T>(
+        ISourceRuntime source, string table, object rows, int through, int? owned, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(table);
-        ArgumentNullException.ThrowIfNull(rows);
         ArgumentOutOfRangeException.ThrowIfNegative(through);
 
         if (!_sources.TryGetValue(source.SourceId, out var held) || !ReferenceEquals(held, source))
@@ -1610,7 +1674,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 nameof(source));
         }
 
-        var prepared = await preparable.PrepareReplaceAsync(table, typeof(T), rows, through, ct)
+        var prepared = await preparable.PrepareReplaceAsync(table, typeof(T), rows, through, owned, ct)
             .ConfigureAwait(false);
         return new PreparedReplacement(source, prepared);
     }
@@ -2802,17 +2866,21 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
     private static bool Declares(CatalogContext catalog, TableKey table)
     {
-        foreach (var schema in catalog.Schemas)
+        // Indexed rather than enumerated, as a view asks at every update (F244).
+        var schemas = catalog.Schemas;
+        for (var i = 0; i < schemas.Count; i++)
         {
+            var schema = schemas[i];
             if (!string.Equals(schema.SourceId, table.SourceId, StringComparison.Ordinal)
                 || !string.Equals(schema.Name, table.Schema, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            foreach (var declared in schema.Tables)
+            var tables = schema.Tables;
+            for (var j = 0; j < tables.Count; j++)
             {
-                if (string.Equals(declared.Name, table.Table, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(tables[j].Name, table.Table, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }

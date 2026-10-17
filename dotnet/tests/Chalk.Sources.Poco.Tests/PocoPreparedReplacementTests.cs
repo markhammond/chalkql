@@ -91,7 +91,7 @@ public sealed class PocoPreparedReplacementTests
 
         var preparing = Task.Run(
             () => ((IPreparableSource)source).PrepareReplaceAsync(
-                "gated", typeof(Gated), (IReadOnlyList<Gated>)[new Gated(1, hold), new Gated(2, hold)], 20, ct).AsTask(),
+                "gated", typeof(Gated), (IReadOnlyList<Gated>)[new Gated(1, hold), new Gated(2, hold)], 20, null, ct).AsTask(),
             ct);
         Assert.True(hold.Entered.Wait(TimeSpan.FromSeconds(30), ct), "the prepare never reached its build");
 
@@ -214,7 +214,7 @@ public sealed class PocoPreparedReplacementTests
 
         var refused = await Assert.ThrowsAsync<SourceContractException>(
             async () => await ((IPreparableSource)source).PrepareReplaceAsync(
-                "positions", typeof(Position), (IReadOnlyList<Position>)[], 1, TestContext.Current.CancellationToken));
+                "positions", typeof(Position), (IReadOnlyList<Position>)[], 1, null, TestContext.Current.CancellationToken));
 
         Assert.Equal(ChalkErrorCodes.SourceRefresh, refused.Code);
         Assert.Contains("declares Keyed(Book, Asset), so its rows change by key", refused.Message, StringComparison.Ordinal);
@@ -240,7 +240,7 @@ public sealed class PocoPreparedReplacementTests
 
         var refused = await Assert.ThrowsAsync<SourceContractException>(
             async () => await ((IPreparableSource)source).PrepareReplaceAsync(
-                "ticks", typeof(Other), (IReadOnlyList<Other>)[new(1)], 5, TestContext.Current.CancellationToken));
+                "ticks", typeof(Other), (IReadOnlyList<Other>)[new(1)], 5, null, TestContext.Current.CancellationToken));
 
         Assert.Contains("the rows are Other, but this table was built over Tick", refused.Message, StringComparison.Ordinal);
     }
@@ -398,7 +398,7 @@ public sealed class PocoPreparedReplacementTests
 
     private static async Task<IPreparedReplacement> PrepareAsync(PocoSource source, IReadOnlyList<Tick> rows, int through) =>
         await ((IPreparableSource)source).PrepareReplaceAsync(
-            "ticks", typeof(Tick), rows, through, TestContext.Current.CancellationToken);
+            "ticks", typeof(Tick), rows, through, null, TestContext.Current.CancellationToken);
 
     private static SourceRefreshEntry Commit(IPreparedReplacement prepared) => new()
     {

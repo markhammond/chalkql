@@ -79,18 +79,32 @@ internal sealed class PocoPreparedReplacement<T> : IPreparedReplacement
     /// Marks this committed and lets go of the rewrite's snapshot, which now belongs to the table or
     /// to the snapshot that extended it. Called by the commit, which may not fail.
     /// </summary>
-    public void Committed()
+    /// <param name="published">The snapshot the commit published.</param>
+    public void Committed(PocoTableSnapshot<T>? published)
     {
+        var snapshot = Volatile.Read(ref _snapshot);
         Volatile.Write(ref _state, Done);
         Volatile.Write(ref _snapshot, null);
+
+        // A rewrite published as it was is the table's, and its rows go back when it is released. One
+        // the rows since its cut extended is read no more: the snapshot that extended it holds its own
+        // rows, over the same array or a larger one (F245).
+        if (snapshot is not null && !ReferenceEquals(snapshot, published) && snapshot.Rows is PocoAppendedRows<T> rows)
+        {
+            rows.LetGo();
+        }
     }
 
-    /// <summary>Lets the replacement go, when no refresh has committed it.</summary>
+    /// <summary>
+    /// Lets the replacement go, when no refresh has committed it: its rows' array goes back, to the
+    /// pool, or to the host when it handed the array over.
+    /// </summary>
     public void Dispose()
     {
-        if (Interlocked.CompareExchange(ref _state, Dropped, Ready) == Ready)
+        if (Interlocked.CompareExchange(ref _state, Dropped, Ready) == Ready
+            && Interlocked.Exchange(ref _snapshot, null)?.Rows is PocoAppendedRows<T> rows)
         {
-            Volatile.Write(ref _snapshot, null);
+            rows.LetGo();
         }
     }
 }

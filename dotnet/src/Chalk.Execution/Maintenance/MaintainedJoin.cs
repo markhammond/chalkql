@@ -219,6 +219,10 @@ internal sealed class JoinChanges : MaintainedOperator, IKeepsScratch
     private readonly Dictionary<int, long> _touched = [];
     private long[] _changeMatches = new long[64];
 
+    // The two ways a candidate is counted, made once rather than as a delegate at every update (F244).
+    private readonly Action<int> _countA;
+    private readonly Action<int> _countB;
+
     public JoinChanges(
         OperatorContext context,
         string path,
@@ -235,6 +239,8 @@ internal sealed class JoinChanges : MaintainedOperator, IKeepsScratch
         _right = right;
         _condition = condition;
         _eval = condition is null ? null : context.NewEvalContext();
+        _countA = CountA;
+        _countB = CountB;
         context.Scratch.Add(this);
     }
 
@@ -291,7 +297,7 @@ internal sealed class JoinChanges : MaintainedOperator, IKeepsScratch
             }
         }
 
-        FlushCandidates(countInto: CountA);
+        FlushCandidates(countInto: _countA);
 
         // The left rows that stopped or started meeting the right side, as they were held: a left join
         // pads or unpads them, a semi join gives or takes them back, an anti join the other way round.
@@ -370,7 +376,7 @@ internal sealed class JoinChanges : MaintainedOperator, IKeepsScratch
             }
         }
 
-        FlushCandidates(countInto: CountB);
+        FlushCandidates(countInto: _countB);
 
         for (var l = 0; l < leftChanges.Count; l++)
         {

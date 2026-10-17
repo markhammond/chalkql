@@ -14,11 +14,18 @@ internal interface IPreparableSource
     /// </summary>
     /// <param name="table">The table, as it is named in the source's schema.</param>
     /// <param name="rowType">The CLR row type the caller wrote, which the table must have been built over.</param>
-    /// <param name="rows">The rows, as an <c>IReadOnlyList&lt;T&gt;</c> of <paramref name="rowType"/>.</param>
+    /// <param name="rows">
+    /// The rows, as an <c>IReadOnlyList&lt;T&gt;</c> of <paramref name="rowType"/>; or, with
+    /// <paramref name="owned"/>, an array of it the source takes over.
+    /// </param>
     /// <param name="through">The cut: how many of the table's rows the rewrite covers.</param>
+    /// <param name="owned">
+    /// How many of the array's first rows are the rewrite, when the source takes the array over rather
+    /// than copying the rows (F245); null for a list it copies.
+    /// </param>
     /// <param name="ct">Checked before the build starts.</param>
     ValueTask<IPreparedReplacement> PrepareReplaceAsync(
-        string table, Type rowType, object rows, int through, CancellationToken ct);
+        string table, Type rowType, object rows, int through, int? owned, CancellationToken ct);
 }
 
 /// <summary>

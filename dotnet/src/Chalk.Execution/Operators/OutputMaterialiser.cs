@@ -93,7 +93,19 @@ internal sealed class OutputMaterialiser
         _pooled;
 
     public RecordBatch Materialise(
-        ColumnarBatch batch)
+        ColumnarBatch batch) =>
+        Materialise(
+            batch,
+            _pooled);
+
+    /// <summary>
+    /// As <see cref="Materialise(ColumnarBatch)"/>, in the arena's memory when
+    /// <paramref name="pooled"/> and in the GC's otherwise, whichever mode this
+    /// materialiser was made in.
+    /// </summary>
+    public RecordBatch Materialise(
+        ColumnarBatch batch,
+        bool pooled)
     {
         ArgumentNullException.ThrowIfNull(
             batch);
@@ -106,7 +118,7 @@ internal sealed class OutputMaterialiser
                 + $"the compiled output expects {_copiers.Length}.");
         }
 
-        return _pooled
+        return pooled
             ? MaterialisePooled(batch)
             : MaterialiseManaged(batch);
     }

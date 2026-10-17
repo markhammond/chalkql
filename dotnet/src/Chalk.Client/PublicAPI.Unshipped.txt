@@ -1721,3 +1721,5 @@ Chalk.Client.StatementPrepared.StatementPrepared() -> void
 Chalk.Client.ChalkEngine.PlanAsync(System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 Chalk.Client.ChalkEngine.RefreshAsync<TState>(TState state, System.Action<Chalk.Client.RefreshBuilder!, TState>! plan, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<long>
 Chalk.Client.RefreshBuilder.PlanNow() -> Chalk.Client.RefreshBuilder!
+Chalk.Client.ChalkEngine.PrepareReplaceAsync<T>(Chalk.Sources.ISourceRuntime! source, string! table, T[]! rows, int count, int through, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PreparedReplacement!>
+Chalk.Client.ChalkEngine.PrepareReplaceAsync<T>(Chalk.Sources.ITableTarget<T>! table, T[]! rows, int count, int through, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PreparedReplacement!>

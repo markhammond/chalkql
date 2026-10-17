@@ -67,8 +67,10 @@ internal sealed class PocoSnapshotFactory<T>
         PocoIndexPlan<T>[] indexes,
         PocoHostIndex<T>[] hostIndexes,
         PermutationIndexScratch scratch,
-        bool verify)
+        bool verify,
+        PocoRowArrays<T> arrays)
     {
+        Arrays = arrays;
         _table = table;
         _registration = registration;
         _columns = columns;
@@ -92,6 +94,9 @@ internal sealed class PocoSnapshotFactory<T>
 
     /// <summary>What the registration reports now — the <c>Func</c>, re-read.</summary>
     public IReadOnlyCollection<T> Registration() => _registration.Read();
+
+    /// <summary>Where the table's row arrays come from and go back to (F245).</summary>
+    public PocoRowArrays<T> Arrays { get; }
 
     /// <summary>A snapshot of whatever the registration reports now.</summary>
     public PocoTableSnapshot<T> FromRegistration() => From(Registration());
@@ -123,7 +128,7 @@ internal sealed class PocoSnapshotFactory<T>
                 $"table '{_table}' was registered as a collection that only enumerates, so its rows "
                 + "have no positions to append after.");
 
-        var rows = PocoAppendedRows<T>.Extend(existing, previous.RowCount, added);
+        var rows = PocoAppendedRows<T>.Extend(existing, previous.RowCount, added, Arrays);
         lock (_gate)
         {
             return Build(rows, hostCollection: null, rows, previous, _scratch, unique);
@@ -310,17 +315,38 @@ internal sealed class PocoSnapshotFactory<T>
 
     /// <summary>
     /// A replacement prepared before its refresh (design 69 §3): a snapshot over a copy of
-    /// <paramref name="rows"/> in an array Chalk owns, built beside the table's refreshes rather than
-    /// after them. The host's list is not held afterwards and is never reported released, as an
+    /// <paramref name="rows"/> in an array the table rents, built beside the table's refreshes rather
+    /// than after them. The host's list is not held afterwards and is never reported released, as an
     /// append's rows are not.
     /// </summary>
-    public PocoTableSnapshot<T> Prepared(IReadOnlyList<T> rows)
+    public PocoTableSnapshot<T> Prepared(IReadOnlyList<T> rows) => Prepared(PocoAppendedRows<T>.Own(rows, Arrays));
+
+    /// <summary>
+    /// The same over the first <paramref name="count"/> rows of an array the host handed over, without a
+    /// copy (F245). The array goes back to the host, or its pool, once no snapshot reads it.
+    /// </summary>
+    public PocoTableSnapshot<T> Prepared(T[] array, int count) => Prepared(PocoAppendedRows<T>.Adopt(array, count, Arrays));
+
+    private PocoTableSnapshot<T> Prepared(PocoAppendedRows<T> owned)
     {
-        var owned = PocoAppendedRows<T>.Own(rows);
-        lock (_preparing)
+        try
         {
-            _preparingScratch ??= new PermutationIndexScratch();
-            return Build(owned, hostCollection: null, RandomAccess ? owned : null, previous: null, _preparingScratch);
+            lock (_preparing)
+            {
+                _preparingScratch ??= new PermutationIndexScratch();
+                return Build(owned, hostCollection: null, RandomAccess ? owned : null, previous: null, _preparingScratch);
+            }
+        }
+        catch
+        {
+            // Nothing will read rows a refused replacement holds. A rented array goes back to the pool
+            // now; an array the host handed over is simply the host's again, with nothing reported.
+            if (!owned.HostArray)
+            {
+                owned.LetGo();
+            }
+
+            throw;
         }
     }
 

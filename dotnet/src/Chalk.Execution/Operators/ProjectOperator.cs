@@ -17,9 +17,10 @@ namespace Chalk.Execution.Operators;
 /// because a computed column is evaluated over every lane and read through the selection downstream
 /// (D62).
 /// </remarks>
-internal sealed class ProjectOperator : OperatorBase
+internal sealed class ProjectOperator : OperatorBase, IStreams
 {
     private readonly IBatchOperator _input;
+    private readonly Streaming _run;
     private readonly IVectorExpr[] _exprs;
     private readonly ColumnCopier?[] _copiers;
     private readonly EvalContext _eval;
@@ -56,47 +57,48 @@ internal sealed class ProjectOperator : OperatorBase
             _forwarded[i] = -1;
             _copiers[i] = new ColumnCopier(exprs[i].Type);
         }
+
+        _run = new Streaming(this);
     }
 
     protected override ValueTask DisposeCoreAsync() => _input.DisposeAsync();
 
-    protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    protected override IAsyncEnumerator<ColumnarBatch> Begin(CancellationToken ct) => _run.Begin(ct);
+
+    IBatchOperator IStreams.Input => _input;
+
+    ColumnarBatch? IStreams.Step(ColumnarBatch batch)
     {
-        await foreach (var batch in _input.ExecuteAsync(ct))
+        var length = batch.RowCount;
+        _eval.SetBatch(batch, length);
+        _output.Begin(length);
+        for (var i = 0; i < _exprs.Length; i++)
         {
-            var length = batch.RowCount;
-            _eval.SetBatch(batch, length);
-            _output.Begin(length);
-            for (var i = 0; i < _exprs.Length; i++)
+            if (_forwarded[i] >= 0)
             {
-                if (_forwarded[i] >= 0)
-                {
-                    var source =
-                        batch.Column(_forwarded[i]);
+                var source =
+                    batch.Column(_forwarded[i]);
 
-                    _output.Set(i, source);
+                _output.Set(i, source);
 
-                    var projected =
-                        _output.Column(i);
+                var projected =
+                    _output.Column(i);
 
-                    System.Diagnostics.Debug.Assert(
-                        ReferenceEquals(
-                            projected.ManagedPublisher,
-                            source.ManagedPublisher));
+                System.Diagnostics.Debug.Assert(
+                    ReferenceEquals(
+                        projected.ManagedPublisher,
+                        source.ManagedPublisher));
 
-                    continue;
-                }
-
-                var value = _exprs[i].Evaluate(_eval);
-                _output.Set(i, value.IsScalar
-                    ? _copiers[i]!.CopyAll(value, length)
-                    : value.View);
+                continue;
             }
 
-            _output.ShareSelection(batch);
-
-            yield return _output;
+            var value = _exprs[i].Evaluate(_eval);
+            _output.Set(i, value.IsScalar
+                ? _copiers[i]!.CopyAll(value, length)
+                : value.View);
         }
+
+        _output.ShareSelection(batch);
+        return _output;
     }
 }
