@@ -167,27 +167,25 @@ internal sealed class HeldRows
 }
 
 /// <summary>Replays the rows a clocked node hands its own operator in this update.</summary>
-internal sealed class ReplayChanges : OperatorBase
+internal sealed class ReplayChanges : OperatorBase, IBatchesInHand
 {
     private readonly ClockedState _state;
+    private readonly BatchesInHand _run;
 
     public ReplayChanges(OperatorContext context, string path, ArrowSchema schema, IReadOnlyList<ChalkType> types, ClockedState state)
         : base(context, schema, types, path)
     {
         _state = state;
+        _run = new BatchesInHand(this);
     }
 
     protected override ValueTask DisposeCoreAsync() => default;
 
-    protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        await Task.CompletedTask.ConfigureAwait(false);
-        for (var i = 0; i < _state.Replay.BatchCount; i++)
-        {
-            yield return _state.Replay.Batch(i);
-        }
-    }
+    protected override IAsyncEnumerator<ColumnarBatch> Begin(CancellationToken ct) => _run.Begin(ct);
+
+    ValueTask<int> IBatchesInHand.PrepareAsync(CancellationToken ct) => new(_state.Replay.BatchCount);
+
+    ColumnarBatch IBatchesInHand.Batch(int index) => _state.Replay.Batch(index);
 }
 
 internal sealed class ClockedChanges : MaintainedOperator, IKeepsScratch

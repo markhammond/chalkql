@@ -23,11 +23,12 @@ namespace Chalk.Execution.Operators;
 /// above it is an ordinary pipeline operator and expects ordinary batches.
 /// </para>
 /// </remarks>
-internal sealed class MaterialisedInputOperator : OperatorBase
+internal sealed class MaterialisedInputOperator : OperatorBase, IBatchesInHand
 {
     private readonly Materialisation _materialisation;
     private readonly ColumnarBatch _output;
     private readonly ColumnCopier[] _copiers;
+    private readonly BatchesInHand _run;
     private int[] _rows = [];
 
     public MaterialisedInputOperator(
@@ -41,48 +42,54 @@ internal sealed class MaterialisedInputOperator : OperatorBase
         _materialisation = materialisation;
         _output = NewOutput();
         _copiers = [.. columnTypes.Select(t => new ColumnCopier(t))];
+        _run = new BatchesInHand(this);
     }
 
     protected override ValueTask DisposeCoreAsync() => default;
 
-    protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    protected override IAsyncEnumerator<ColumnarBatch> Begin(CancellationToken ct) => _run.Begin(ct);
+
+    /// <summary>The buffer in slices of a batch; the row numbers of one are rented for the run.</summary>
+    ValueTask<int> IBatchesInHand.PrepareAsync(CancellationToken ct)
     {
-        await Task.CompletedTask.ConfigureAwait(false);
-        var rows = _materialisation.Rows;
-        if (rows.Count == 0)
+        var rows = _materialisation.Rows.Count;
+        if (rows == 0)
         {
-            yield break;
+            return new(0);
         }
 
-        var arena = Context.Arena;
         var batchSize = Context.Settings.BatchSize;
-        _rows = arena.Rent<int>(batchSize);
-        try
+        _rows = Context.Arena.Rent<int>(batchSize);
+        return new((rows + batchSize - 1) / batchSize);
+    }
+
+    ColumnarBatch IBatchesInHand.Batch(int index)
+    {
+        var rows = _materialisation.Rows;
+        var batchSize = Context.Settings.BatchSize;
+        var start = index * batchSize;
+        var count = Math.Min(batchSize, rows.Count - start);
+        for (var i = 0; i < count; i++)
         {
-            for (var start = 0; start < rows.Count; start += batchSize)
-            {
-                ct.ThrowIfCancellationRequested();
-                var count = Math.Min(batchSize, rows.Count - start);
-                for (var i = 0; i < count; i++)
-                {
-                    _rows[i] = start + i;
-                }
-
-                _output.Begin(count);
-                for (var c = 0; c < _copiers.Length; c++)
-                {
-                    _copiers[c].Begin();
-                    _copiers[c].AppendGather(rows.Column(c), _rows.AsSpan(0, count));
-                    _output.Set(c, _copiers[c].FinishView());
-                }
-
-                yield return _output;
-            }
+            _rows[i] = start + i;
         }
-        finally
+
+        _output.Begin(count);
+        for (var c = 0; c < _copiers.Length; c++)
         {
-            arena.Return(_rows);
+            _copiers[c].Begin();
+            _copiers[c].AppendGather(rows.Column(c), _rows.AsSpan(0, count));
+            _output.Set(c, _copiers[c].FinishView());
+        }
+
+        return _output;
+    }
+
+    void IBatchesInHand.Ended()
+    {
+        if (_rows.Length > 0)
+        {
+            Context.Arena.Return(_rows);
             _rows = [];
         }
     }

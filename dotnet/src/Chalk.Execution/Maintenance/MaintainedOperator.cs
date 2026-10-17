@@ -23,25 +23,32 @@ internal interface IKeepsScratch
 /// inputs' changes, brings its state up to date, and then gives its own changes, as batches whose last
 /// column is the weight.
 /// </summary>
-internal abstract class MaintainedOperator : OperatorBase
+internal abstract class MaintainedOperator : OperatorBase, IBatchesInHand
 {
+    private readonly BatchesInHand _run;
+    private ChangeWriter? _output;
+
     protected MaintainedOperator(OperatorContext context, string path, ArrowSchema schema, IReadOnlyList<ChalkType> types)
         : base(context, schema, types, path)
     {
+        _run = new BatchesInHand(this);
     }
 
     /// <summary>Computes the update's changes, which the run then gives batch by batch.</summary>
     protected abstract ValueTask<ChangeWriter> ComputeAsync(CancellationToken ct);
 
-    protected override async IAsyncEnumerable<ColumnarBatch> RunAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    /// <summary>The update's run, kept from one update to the next (F244): its changes computed, then given.</summary>
+    protected sealed override IAsyncEnumerator<ColumnarBatch> Begin(CancellationToken ct) => _run.Begin(ct);
+
+    async ValueTask<int> IBatchesInHand.PrepareAsync(CancellationToken ct)
     {
-        var output = await ComputeAsync(ct).ConfigureAwait(false);
-        for (var i = 0; i < output.BatchCount; i++)
-        {
-            yield return output.Batch(i);
-        }
+        _output = await ComputeAsync(ct).ConfigureAwait(false);
+        return _output.BatchCount;
     }
+
+    ColumnarBatch IBatchesInHand.Batch(int index) => _output!.Batch(index);
+
+    void IBatchesInHand.Ended() => _output = null;
 
     /// <summary>Reads every change an input gives in this update, added up.</summary>
     protected static async ValueTask DrainAsync(IBatchOperator input, ChangeSet into, CancellationToken ct)
