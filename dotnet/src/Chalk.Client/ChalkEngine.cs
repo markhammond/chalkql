@@ -1939,10 +1939,11 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             _options.JoinPolicy);
         // What moved since the published catalog, read by reference (F205). A refresh that changed
         // rows and nothing else leaves every other part of the catalog the object it was: only the row
-        // counts and the join policy it moved are validated, and the shape is taken from the last one
-        // with only the moved tables read. Anything more is validated and taken whole, as before.
+        // counts, the statistics computed again (F243) and the join policy it moved are validated, and
+        // the shape is taken from the last one with only the moved tables read. Anything more is
+        // validated and taken whole, as before.
         var change = CatalogChange.Between(current, next);
-        if (change.CountsOnly)
+        if (change.NumbersOnly)
         {
             CatalogValidator.ValidateChange(next, change);
         }
