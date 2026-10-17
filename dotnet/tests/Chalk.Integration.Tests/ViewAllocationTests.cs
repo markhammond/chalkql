@@ -70,23 +70,9 @@ public sealed class ViewAllocationTests(SharedSidecar sidecar, ITestOutputHelper
         await using var maintained = await statement.MaintainAsync([], -1, [0], Ct);
         await maintained.UpdateAsync([], default, desk.Engine.Version, whole: false, Ct);
         var seq = 3_000;
-
-        // Five fills a step, on five books of five desks: each update stages five keys.
-        async Task StepAsync()
-        {
-            var fills = new Fill[5];
-            for (var i = 0; i < fills.Length; i++)
-            {
-                seq++;
-                fills[i] = new Fill(seq, (seq * 7) % 300, 1 + (seq % 5));
-            }
-
-            await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", fills), Ct);
-        }
-
         for (var warm = 0; warm < 20; warm++)
         {
-            await StepAsync();
+            seq = await StepAsync(desk, seq);
             await view.UpdateAsync(Ct);
             await maintained.UpdateAsync([], default, desk.Engine.Version, whole: false, Ct);
         }
@@ -94,7 +80,7 @@ public sealed class ViewAllocationTests(SharedSidecar sidecar, ITestOutputHelper
         var (viewBytes, statementBytes) = await AllocationProbe.LeastAllocatingAsync(
             async () =>
             {
-                await StepAsync();
+                seq = await StepAsync(desk, seq);
                 var window = AllocationWindow.Open();
                 await view.UpdateAsync(Ct);
                 window.TryClose(out var viewUpdate, out _);
@@ -108,6 +94,54 @@ public sealed class ViewAllocationTests(SharedSidecar sidecar, ITestOutputHelper
         output.WriteLine($"the view's update allocated {viewBytes} bytes, its statement's {statementBytes}");
         Assert.Equal(await RowsAsync(desk.Engine, statement), await ViewRowsAsync(view));
         return (viewBytes, statementBytes);
+    }
+
+    /// <summary>
+    /// A maintained statement's update gives its changes in its arena's memory, and the next update gives
+    /// that memory back before it writes its own: once warm, the arena serves every update from what it
+    /// keeps, with no new array, and holds one update's batches between updates. Disposing the statement
+    /// gives the last of them back. A whole result, the first update's, is the GC's, as every update's
+    /// batches were before.
+    /// </summary>
+    [Fact]
+    public async Task A_maintained_statements_update_writes_its_changes_in_the_last_ones_memory()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync(Fills(3_000, books: 300), Books(300, desks: 30));
+        var statement = await desk.Engine.PrepareAsync(ByDesk, ct: Ct);
+        var maintained = await statement.MaintainAsync([], -1, [0], Ct);
+        var arena = maintained.Arena;
+        var fresh = new List<long>();
+        var held = new List<long>();
+        try
+        {
+            var first = await maintained.UpdateAsync([], default, desk.Engine.Version, whole: false, Ct);
+            Assert.Equal(30, first.Now.Length);
+            Assert.Equal(0, arena.OutstandingBytes);
+            var seq = 3_000;
+            for (var step = 0; step < 70; step++)
+            {
+                seq = await StepAsync(desk, seq);
+                var fallbacks = arena.HeapFallbacks;
+                var update = await maintained.UpdateAsync([], default, desk.Engine.Version, whole: false, Ct);
+                Assert.Equal((5, 5), (update.Before.Length, update.Now.Length));
+                if (step >= 20)
+                {
+                    // Warm: twenty updates have rented what a step of five keys needs.
+                    fresh.Add(arena.HeapFallbacks - fallbacks);
+                    held.Add(arena.OutstandingBytes);
+                }
+            }
+        }
+        finally
+        {
+            await maintained.DisposeAsync();
+        }
+
+        Assert.All(fresh, arrays => Assert.Equal(0, arrays));
+        Assert.True(held[0] > 0, "an update's batches are the arena's memory");
+        Assert.All(held, bytes => Assert.Equal(held[0], bytes));
+        Assert.Equal(0, arena.OutstandingBytes);
     }
 
     /// <summary>
@@ -144,6 +178,20 @@ public sealed class ViewAllocationTests(SharedSidecar sidecar, ITestOutputHelper
         },
         ResetWhen = double.PositiveInfinity,
     };
+
+    /// <summary>Five fills, on five books of five desks: the update after them changes five keys.</summary>
+    private static async Task<int> StepAsync(Desk desk, int seq)
+    {
+        var fills = new Fill[5];
+        for (var i = 0; i < fills.Length; i++)
+        {
+            seq++;
+            fills[i] = new Fill(seq, (seq * 7) % 300, 1 + (seq % 5));
+        }
+
+        await desk.Engine.RefreshAsync(r => r.Append(desk.Source, "fills", fills), Ct);
+        return seq;
+    }
 
     private static IReadOnlyList<Fill> Fills(int count, int books) =>
         [.. Enumerable.Range(1, count).Select(i => new Fill(i, i % books, (i % 7) + 1))];

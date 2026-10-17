@@ -20,6 +20,12 @@ namespace Chalk.Execution.Maintenance;
 /// An update that fails part way leaves the operators' state behind: it is discarded, and the next
 /// update computes the statement from nothing, as the first did, and gives the whole result (§7).
 /// </para>
+/// <para>
+/// The batches an update gives are valid until the next update or until the plan is disposed. The
+/// view that owns the plan reads them before it asks for the next update. An update's changes are
+/// written in its arena's memory, which the next update gives back for its own, so that steady updates
+/// reuse the same buffers; a whole result is written in the GC's, as a one-off.
+/// </para>
 /// </remarks>
 internal sealed class MaintainedPlan : IAsyncDisposable
 {
@@ -31,6 +37,9 @@ internal sealed class MaintainedPlan : IAsyncDisposable
     private readonly IReadOnlyList<ChalkType> _outputTypes;
     private Tree? _tree;
     private bool _restart = true;
+
+    // The batches the last update gave, valid until the next update lets go of them.
+    private MaintainedChanges? _given;
 
     private MaintainedPlan(CompiledPlan compiled, OperatorFactory root, List<IMaintainedState> states, TableDiffs diffs)
     {
@@ -147,6 +156,9 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         var bound = ParameterBinder.Bind(parameters, _compiled.BoundTypes);
         var tree = _tree ??= Build();
         var completed = false;
+
+        // The last update's batches have been read: the memory of its changes goes back for this update's.
+        LetGoOfGiven();
         arena.BeginExecution(stats);
         try
         {
@@ -183,7 +195,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
                     _result.Add(batch!);
                 }
 
-                var changes = _result.End(_restart || whole, _restart, tree.Output);
+                var changes = _given = _result.End(_restart || whole, _restart, tree.Output);
                 if (_restart)
                 {
                     // An update from nothing read every row of its tables, and the buffers its changes
@@ -229,9 +241,10 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         }
     }
 
-    /// <summary>Lets go of every table state the plan's reads hold.</summary>
+    /// <summary>Lets go of every table state the plan's reads hold, and of the last update's batches.</summary>
     public ValueTask DisposeAsync()
     {
+        LetGoOfGiven();
         foreach (var state in _states)
         {
             state.Discard();
@@ -239,6 +252,17 @@ internal sealed class MaintainedPlan : IAsyncDisposable
 
         _tree = null;
         return default;
+    }
+
+    /// <summary>Lets go of the batches the last update gave: the memory of its changes goes back to its arena.</summary>
+    private void LetGoOfGiven()
+    {
+        if (_given is { } given)
+        {
+            _given = null;
+            given.Now.Dispose();
+            given.Before.Dispose();
+        }
     }
 
     private Tree Build()
@@ -249,7 +273,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         using (new ScratchScope(context))
         {
             root = _root(context);
-            output = new OutputMaterialiser(context, _compiled.OutputSchema, _outputTypes, pooled: false);
+            output = new OutputMaterialiser(context, _compiled.OutputSchema, _outputTypes, pooled: true);
         }
 
         return new Tree(root, output, context);
@@ -274,10 +298,16 @@ internal sealed class MaintainedChanges
     /// </summary>
     public required bool Restarted { get; init; }
 
-    /// <summary>The rows keys hold now: those that changed, or every row when <see cref="Whole"/>.</summary>
+    /// <summary>
+    /// The rows keys hold now: those that changed, or every row when <see cref="Whole"/>. Valid until
+    /// the plan's next update.
+    /// </summary>
     public required RecordBatch Now { get; init; }
 
-    /// <summary>The rows the changed keys held before, of keys that hold no row now or hold another key's.</summary>
+    /// <summary>
+    /// The rows the changed keys held before, of keys that hold no row now or hold another key's. Valid
+    /// until the plan's next update.
+    /// </summary>
     public required RecordBatch Before { get; init; }
 }
 
@@ -525,13 +555,27 @@ internal sealed class ResultState
 
         _removed.Clear();
         _before.Clear();
-        return new MaintainedChanges
+
+        // Changes are written in the arena's memory, which the next update reuses. A whole result is
+        // written in the GC's, so that the arena does not keep room for every row once updates are small.
+        var pooled = !whole;
+        var rows = Arrow(now, _nowColumns ??= new ColumnarBatch(_types), output, pooled);
+        try
         {
-            Whole = whole,
-            Restarted = restarted,
-            Now = Arrow(now, _nowColumns ??= new ColumnarBatch(_types), output),
-            Before = Arrow(before, _wasColumns ??= new ColumnarBatch(_types), output),
-        };
+            return new MaintainedChanges
+            {
+                Whole = whole,
+                Restarted = restarted,
+                Now = rows,
+                Before = Arrow(before, _wasColumns ??= new ColumnarBatch(_types), output, pooled),
+            };
+        }
+        catch
+        {
+            // A batch in the arena's memory gives it back only when it is disposed.
+            rows.Dispose();
+            throw;
+        }
     }
 
     /// <summary>One row per key, held once (design 64 §6 a).</summary>
@@ -582,7 +626,7 @@ internal sealed class ResultState
         BeforeOf(_keyEncoder.Span);
     }
 
-    private static RecordBatch Arrow(ChangeWriter rows, ColumnarBatch columns, OutputMaterialiser output)
+    private static RecordBatch Arrow(ChangeWriter rows, ColumnarBatch columns, OutputMaterialiser output, bool pooled)
     {
         if (rows.Rows == 0)
         {
@@ -592,7 +636,7 @@ internal sealed class ResultState
                 columns.Set(c, ColumnView.Empty(rows.Types[c]));
             }
 
-            return output.Materialise(columns);
+            return output.Materialise(columns, pooled);
         }
 
         // One batch: the writer was made with no row limit.
@@ -603,7 +647,7 @@ internal sealed class ResultState
             columns.Set(c, batch.Column(c));
         }
 
-        return output.Materialise(columns);
+        return output.Materialise(columns, pooled);
     }
 }
 
