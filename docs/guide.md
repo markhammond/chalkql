@@ -620,6 +620,9 @@ var mem = new PocoSourceBuilder("mem")
   bounded by the snapshots still read.
 - **Without a pool**, the table keeps one of its own, from which its appends, its keyed changes
   and its prepared replacements take their arrays all the same.
+- **A collection you give the table stays yours**, pool or none: the one it was declared with, and
+  one a `Replace` takes over, even an array. It never goes to a pool, and is reported through
+  `SnapshotReleased` once no snapshot reads it, as before.
 
 #### Leaving statistics and plans to the background
 
