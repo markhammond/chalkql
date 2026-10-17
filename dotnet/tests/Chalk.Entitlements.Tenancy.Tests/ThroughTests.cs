@@ -96,12 +96,24 @@ public sealed class ThroughTests
     /// The thread that carries the tenancy, and the message whose own restriction the caller writes
     /// — the default being §3.13's, that a message is visible when its thread is.
     /// </summary>
-    private static Declaration Policy(Action<Declaration>? messages = null)
+    private static Declaration Policy(
+        Action<Declaration>? messages = null,
+        Func<Declaration, Role[]>? threads = null,
+        Func<Declaration, Scope[]>? threadScopes = null)
     {
         var declaration = new Declaration();
         declaration.Threads
             .Tenancy(r => r.Direct(declaration.Org, declaration.Threads.Column("org_id")))
             .Realm(declaration.Pii, declaration.Threads.Column("member_id"));
+        if (threads is not null)
+        {
+            declaration.Threads.Visible(new VisibilityRule
+            {
+                Roles = threads(declaration),
+                Scopes = threadScopes?.Invoke(declaration) ?? [],
+            });
+        }
+
         (messages ?? DefaultMessages)(declaration);
         return declaration;
 
@@ -311,5 +323,95 @@ public sealed class ThroughTests
             .Through(d.Messages.Column("thread_id"))
             .Through(d.Messages.Column("id"), d.Threads, d.Threads.Column("id"))))
             .Compile();
+    }
+
+    // ------------------------------------------------------------------ the child's own rule (D359)
+
+    /// <summary>
+    /// A message entitled through its thread is visible whenever the thread is, so a rule of its own
+    /// that leaves out a role the thread admits could not keep that role out, and is refused.
+    /// </summary>
+    [Fact]
+    public void A_rule_leaving_out_a_role_its_parent_admits_is_refused()
+    {
+        var refused = Refused(Policy(
+            threads: d => [d.Manager, d.Agent],
+            messages: d => d.Messages
+                .Tenancy(r => r.Through(d.Messages.Column("thread_id")))
+                .Visible(new VisibilityRule { Roles = [d.Manager] })));
+
+        Assert.Equal(ChalkErrorCodes.InvalidPolicy, refused.Code);
+        Assert.Contains(
+            "'messages' is entitled through 'threads', and its visibility rule leaves out 'agent', which "
+            + "'threads' admits. A row entitled through its parent is visible whenever the parent row is, "
+            + "so the rule cannot keep 'agent' from it. Admit 'agent' on 'messages', or entitle "
+            + "'messages' with Inherited paths, which read both rules.",
+            refused.Message,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// So is a rule that holds in fewer scopes than the thread's: in every scope where the thread holds
+    /// in every one, and naming the scopes the thread holds in beyond it where it names some.
+    /// </summary>
+    [Fact]
+    public void A_rule_holding_in_fewer_scopes_than_its_parent_is_refused()
+    {
+        var everywhere = Refused(Policy(
+            threads: d => [d.Manager],
+            messages: d => d.Messages
+                .Tenancy(r => r.Through(d.Messages.Column("thread_id")))
+                .Visible(new VisibilityRule { Roles = [d.Manager], Scopes = [d.Policy.Scope("batch")] })));
+        Assert.Contains(
+            "its visibility rule holds in 'batch' alone, where 'threads' holds in every scope. A row "
+            + "entitled through its parent is visible whenever the parent row is, so the rule cannot keep "
+            + "it to 'batch'. Remove the scopes from the visibility rule of 'messages', or entitle "
+            + "'messages' with Inherited paths, which read both rules.",
+            everywhere.Message,
+            StringComparison.Ordinal);
+
+        var beyond = Refused(Policy(
+            threads: d => [d.Manager],
+            threadScopes: d => [d.Policy.Scope("interactive"), d.Policy.Scope("batch")],
+            messages: d => d.Messages
+                .Tenancy(r => r.Through(d.Messages.Column("thread_id")))
+                .Visible(new VisibilityRule { Roles = [d.Manager], Scopes = [d.Policy.Scope("batch")] })));
+        Assert.Contains(
+            "where 'threads' holds in 'interactive' as well. A row entitled through its parent is visible "
+            + "whenever the parent row is, so the rule cannot keep it to 'batch'. Name 'interactive' on "
+            + "'messages' too",
+            beyond.Message,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A rule that narrows nothing compiles: one naming the thread's roles, one naming more — a role the
+    /// thread leaves out reads nothing through it — and one holding in every scope the thread holds in.
+    /// </summary>
+    [Fact]
+    public void A_rule_that_narrows_nothing_compiles()
+    {
+        Policy(
+            threads: d => [d.Manager, d.Agent],
+            messages: d => d.Messages
+                .Tenancy(r => r.Through(d.Messages.Column("thread_id")))
+                .Visible(new VisibilityRule { Roles = [d.Agent, d.Manager] })).Compile();
+
+        Policy(
+            threads: d => [d.Manager],
+            messages: d => d.Messages
+                .Tenancy(r => r.Through(d.Messages.Column("thread_id")))
+                .Visible(new VisibilityRule { Roles = [d.Manager, d.Agent] })).Compile();
+
+        Policy(
+            threads: d => [d.Manager],
+            threadScopes: d => [d.Policy.Scope("batch")],
+            messages: d => d.Messages
+                .Tenancy(r => r.Through(d.Messages.Column("thread_id")))
+                .Visible(new VisibilityRule
+                {
+                    Roles = [d.Manager],
+                    Scopes = [d.Policy.Scope("batch"), d.Policy.Scope("interactive")],
+                })).Compile();
     }
 }

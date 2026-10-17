@@ -10,10 +10,12 @@ namespace Chalk.Execution.Operators;
 /// (§6.7), and the adapter from the operator's own iteration to the pull path of §3.
 /// </summary>
 /// <remarks>
-/// An operator body stays an <c>async IAsyncEnumerable</c>, which is how it reads best; the pull
-/// path takes the fast exit whenever <c>MoveNextAsync</c> completes synchronously, which is every
-/// time for an in-process source. The enumerator itself is allocated once per execution, so the
-/// steady-state cost of the whole arrangement is zero bytes per batch (D63).
+/// An operator body is an <c>async IAsyncEnumerable</c>, which is how it reads best; the pull path
+/// takes the fast exit whenever <c>MoveNextAsync</c> completes synchronously, which is every time for
+/// an in-process source. The enumerator itself is allocated once per execution, so the steady-state
+/// cost of the whole arrangement is zero bytes per batch (D63). An operator a maintained plan runs at
+/// every update keeps its iteration instead (<see cref="KeptIteration"/>), so an update allocates no
+/// enumerator either (F244).
 /// </remarks>
 internal abstract class OperatorBase : IBatchOperator, IAsyncEnumerable<ColumnarBatch>,
     IAsyncEnumerator<ColumnarBatch>
@@ -229,11 +231,21 @@ internal abstract class OperatorBase : IBatchOperator, IAsyncEnumerable<Columnar
     /// <summary>What this operator holds beyond its own iteration — usually its input.</summary>
     protected abstract ValueTask DisposeCoreAsync();
 
-    /// <summary>The operator's own iteration. Failures are wrapped by the pull path.</summary>
-    protected abstract IAsyncEnumerable<ColumnarBatch> RunAsync(CancellationToken ct);
+    /// <summary>
+    /// The operator's own iteration, for an operator that does not keep one (<see cref="Begin"/>).
+    /// Failures are wrapped by the pull path.
+    /// </summary>
+    protected virtual IAsyncEnumerable<ColumnarBatch> RunAsync(CancellationToken ct) =>
+        throw new NotSupportedException($"the operator at {Path} keeps its iteration and has no body to run.");
 
-    private IAsyncEnumerator<ColumnarBatch> Start(CancellationToken ct) =>
+    /// <summary>
+    /// The iteration of one execution: by default <see cref="RunAsync"/>'s, made anew; an operator that
+    /// keeps a <see cref="KeptIteration"/> begins it again instead.
+    /// </summary>
+    protected virtual IAsyncEnumerator<ColumnarBatch> Begin(CancellationToken ct) =>
         RunAsync(ct).GetAsyncEnumerator(ct);
+
+    private IAsyncEnumerator<ColumnarBatch> Start(CancellationToken ct) => Begin(ct);
 
     /// <summary>
     /// Points a reused operator at the next execution. A warm tree is handed on between executions

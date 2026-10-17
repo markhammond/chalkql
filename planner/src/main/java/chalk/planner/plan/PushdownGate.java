@@ -65,6 +65,9 @@ public final class PushdownGate {
   /** Whether this profile's dialect writes an {@code OFFSET} (F121); measured on first use. */
   private @org.checkerframework.checker.nullness.qual.Nullable Boolean rendersOffset;
 
+  /** This profile's dialect, built on first use: building one resolves a product reflectively. */
+  private org.apache.calcite.sql.@org.checkerframework.checker.nullness.qual.Nullable SqlDialect dialect;
+
   public PushdownGate(
       SourceCapabilities capabilities, DialectProfile profile, Set<DisabledCapability> disabled) {
     this(capabilities, profile, disabled, "");
@@ -471,6 +474,29 @@ public final class PushdownGate {
     return false;
   }
 
+  /**
+   * F193: a date, a time or a timestamp written as text is Chalk's text, the same whichever source
+   * holds the value. A source writes its own: SQLite gives back the text it stored, SQL Server pads
+   * the fraction to its precision, PostgreSQL and DuckDB trim it. So the cast stays with Chalk.
+   */
+  private static boolean writesDatetimeAsText(RexCall cast) {
+    return org.apache.calcite.sql.type.SqlTypeUtil.isCharacter(cast.getType())
+        && org.apache.calcite.sql.type.SqlTypeUtil.isDatetime(cast.getOperands().get(0).getType());
+  }
+
+  /**
+   * F240: text read as a date, a time or a timestamp is read as Chalk reads it, the same whichever
+   * source holds the text: a zone the text writes is applied for an instant and dropped for a wall
+   * clock, as DuckDB and PostgreSQL read it, and text without one is UTC. A source reads its own
+   * way: SQLite has no such types and reads the text as a number, and an engine with a session time
+   * zone reads text without a zone in it. So the cast stays with Chalk. A date or a time written as
+   * a literal is not this cast: the planner has already made it a value of its type.
+   */
+  private static boolean readsDatetimeFromText(RexCall cast) {
+    return org.apache.calcite.sql.type.SqlTypeUtil.isDatetime(cast.getType())
+        && org.apache.calcite.sql.type.SqlTypeUtil.isCharacter(cast.getOperands().get(0).getType());
+  }
+
   private boolean truncates(RelDataType type) {
     SqlTypeName name = type.getSqlTypeName();
     if (name == SqlTypeName.DECIMAL) {
@@ -508,6 +534,13 @@ public final class PushdownGate {
    * needs {@code supports_parameters}; a call needs its function declared and its operands pushable.
    */
   public boolean pushable(RexNode node) {
+    if (org.apache.calcite.sql.type.SqlTypeUtil.isInterval(node.getType())
+        && !dialect().supportsDataType(node.getType())) {
+      // F238: an interval the source's dialect has no type for stays in Chalk, and with it the
+      // arithmetic it stands in, whose operands are each asked this. SQLite has neither the type
+      // nor its literal, so `ts + INTERVAL '6' HOUR` sent there is a syntax error.
+      return false;
+    }
     if (node instanceof RexInputRef || node instanceof RexLiteral) {
       return true;
     }
@@ -554,7 +587,8 @@ public final class PushdownGate {
       case AND, OR, NOT, EQUALS, NOT_EQUALS, LESS_THAN, LESS_THAN_OR_EQUAL, GREATER_THAN,
               GREATER_THAN_OR_EQUAL, IS_NULL, IS_NOT_NULL ->
           predicate(call);
-      case CAST -> !truncates(call.getType());
+      case CAST ->
+          !truncates(call.getType()) && !writesDatetimeAsText(call) && !readsDatetimeFromText(call);
       case CASE -> supportsCase() && !truncates(call.getType());
       default -> function(call);
     };
@@ -669,10 +703,19 @@ public final class PushdownGate {
   private boolean dialectWritesAnOffset() {
     Boolean answer = rendersOffset;
     if (answer == null) {
-      answer = SourceDialects.rendersOffset(SourceDialects.of(profile));
+      answer = SourceDialects.rendersOffset(dialect());
       rendersOffset = answer;
     }
     return answer;
+  }
+
+  private org.apache.calcite.sql.SqlDialect dialect() {
+    org.apache.calcite.sql.SqlDialect built = dialect;
+    if (built == null) {
+      built = SourceDialects.of(profile);
+      dialect = built;
+    }
+    return built;
   }
 
   public boolean supportsGroupBy() {

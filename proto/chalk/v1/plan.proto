@@ -311,6 +311,11 @@ message Fetch {
   DynamicParam count_param = 4;
   // The offset as a parameter, in place of `offset`, on the same terms.
   DynamicParam offset_param = 5;
+  // The ORDER BY whose first rows this keeps, which the input already delivers, so an executor need
+  // not sort. Empty for a LIMIT the statement gave no order, whatever order the input happens to
+  // arrive in. A reader that must know the rows were chosen by an order, a standing view, reads it
+  // here (design 73).
+  repeated SortField order = 6;
 }
 
 message Join {

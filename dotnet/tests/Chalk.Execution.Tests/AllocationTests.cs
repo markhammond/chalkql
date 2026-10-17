@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Reflection;
 using Chalk.Catalog;
 using Chalk.Ir;
 using Chalk.Sources.Poco;
@@ -162,6 +164,73 @@ public sealed class AllocationTests
         Assert.True(
             perRow < 16.0,
             $"bars JOIN symbols allocated {allocated} bytes for {Rows} rows ({perRow:0.###} per row).");
+    }
+
+    /// <summary>
+    /// A warm tree run again makes nothing per filter or projection (F244). Their iterations are kept
+    /// with the operators and begun again at each run, where an async iterator was made anew every
+    /// time, as it was at every update of a maintained plan; so sixteen more of them cost a run
+    /// nothing more.
+    /// </summary>
+    /// <remarks>
+    /// It holds for code built with optimisation. A Debug build makes each async method's state machine
+    /// a class, allocated at every call, even one that completes at once.
+    /// </remarks>
+    [Fact]
+    public async Task A_warm_tree_runs_again_without_an_iterator_per_operator()
+    {
+        Assert.SkipWhen(
+            typeof(PlanCompiler).Assembly.GetCustomAttribute<DebuggableAttribute>()?.IsJITOptimizerDisabled == true,
+            "a Debug build allocates each async method's state machine at every call");
+
+        var bars = new Bar[100];
+        for (var i = 0; i < bars.Length; i++)
+        {
+            bars[i] = new Bar(i % 3 == 0 ? "AAA" : "BBB", i, i * 1.5d);
+        }
+
+        var source = new PocoSourceBuilder("mem").AddTable("bars", bars).Build();
+        var schema = source.DescribeSchema();
+        var catalog = new CatalogContext { ContextId = "test", Epoch = 1, Schemas = [schema] };
+        var sources = new Dictionary<string, ISourceRuntime> { ["mem"] = source };
+        var settings = new ExecutionSettings { BatchSize = 4096, PooledOutput = true };
+        var shallow = PlanCompiler.Compile(Layered(schema.Tables[0], layers: 1), catalog, sources, settings);
+        var deep = PlanCompiler.Compile(Layered(schema.Tables[0], layers: 9), catalog, sources, settings);
+
+        using var arena = new ExecutionArena();
+        Assert.Equal(bars.Length, await ConsumeAsync(shallow, arena));
+        Assert.Equal(bars.Length, await ConsumeAsync(deep, arena));
+
+        var (shallowBytes, _) = await AllocationProbe.SteadyStateAsync(() => ConsumeAsync(shallow, arena));
+        var (deepBytes, _) = await AllocationProbe.SteadyStateAsync(() => ConsumeAsync(deep, arena));
+
+        Assert.Equal(0, arena.OutstandingBytes);
+        _output.WriteLine($"one layer: {shallowBytes} bytes a run; nine layers: {deepBytes} bytes a run.");
+        Assert.True(
+            deepBytes - shallowBytes <= 64,
+            $"eight more filters and projections cost a run {deepBytes - shallowBytes} bytes more ({shallowBytes} and {deepBytes}).");
+    }
+
+    /// <summary>Read, then <paramref name="layers"/> times a filter that keeps every row and a projection of every column.</summary>
+    private static Plan Layered(TableDescriptor table, int layers)
+    {
+        var row = RowOf(table);
+        var rel = IrBuilder.Read("bars", row);
+        for (var i = 0; i < layers; i++)
+        {
+            rel = IrBuilder.Filter(
+                rel,
+                IrBuilder.Call(FunctionId.Ge, IrBuilder.Bool(), IrBuilder.Ref(row, 1), IrBuilder.Lit(0L)));
+            rel = IrBuilder.Project(
+                rel,
+                [
+                    ("symbol", IrBuilder.Ref(row, 0)),
+                    ("volume", IrBuilder.Ref(row, 1)),
+                    ("close", IrBuilder.Ref(row, 2)),
+                ]);
+        }
+
+        return IrBuilder.Plan(rel);
     }
 
     private sealed record SymbolRow(string Symbol, string Base);

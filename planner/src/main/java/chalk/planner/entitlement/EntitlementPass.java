@@ -198,15 +198,21 @@ public final class EntitlementPass {
     // The sibling disclosure columns (§3.12, D207): the leaves computed what each row disclosed, and
     // this is where it reaches the root — exactly as far as the statement's shape allows it to.
     DisclosureColumns.Carried carried =
-        DisclosureColumns.pullUp(rewritten, pass.carriers, pass.rexBuilder);
+        DisclosureColumns.pullUp(rewritten, pass.carriers, pass.emitted, pass.rexBuilder);
     Disclosed[] wide = DisclosureFlow.of(carried.rel(), pass.emitted);
+    // Every column an entitled column reaches has a sibling, carried or not: behind a node the carry
+    // cannot pass, it is the column's constant label, and never absent (§3.12).
+    boolean[] entitled = DisclosureFlow.fromLeaves(carried.rel(), pass.emitted);
     int width = rewritten.getRowType().getFieldCount();
     Disclosed[] flow = new Disclosed[width * 2];
     boolean[] present = new boolean[width];
     for (int f = 0; f < width; f++) {
       flow[f] = wide[carried.originals()[f]];
       flow[width + f] = Disclosed.FULL;
-      present[f] = !carried.sources().get(f).isEmpty() || flow[f] != Disclosed.FULL;
+      present[f] =
+          !carried.sources().get(f).isEmpty()
+              || flow[f] != Disclosed.FULL
+              || entitled[carried.originals()[f]];
     }
     return new Result(
         DisclosureColumns.siblings(
@@ -221,7 +227,7 @@ public final class EntitlementPass {
 
   /**
    * The aggregate form's own guards (§2, D261): a permitted aggregate whose FILTER is a lifted test
-   * is guarded over the population that filter leaves, which is the population it reports on.
+   * is guarded over the population that filter leaves, which is the population it reports on (D364).
    */
   private void guardLiftedFilters() {
     for (Map.Entry<org.apache.calcite.rel.core.Aggregate, List<TestLift.FilteredGuard>> entry :
@@ -231,7 +237,9 @@ public final class EntitlementPass {
       for (TestLift.FilteredGuard guard : entry.getValue()) {
         // COUNT(*) is the guarding count: §3.6 guards on COUNT(c), which for a NOT NULL column is
         // COUNT(*) by the time the converter is done with it (F43), and a filtered count reads no
-        // column of the aggregate's input for a COUNT(c) to be formed over. ADR 0042.
+        // column of the aggregate's input for a COUNT(c) to be formed over. The guard counts it
+        // under the call's own FILTER, so the rows the test selects are what the floor counts
+        // (D364, revising ADR 0042's count of the whole group).
         here.add(new PopulationTrace.Guard(guard.callIndex(), /* argument= */ -1, guard.floor()));
       }
     }
@@ -1251,13 +1259,17 @@ public final class EntitlementPass {
               : new VerdictColumns.Projection(entry.block(), path.projected()));
     }
 
+    // Whether this table makes a row visible by itself, a direct dimension or a resource owner, so
+    // that a row may be read though no side reached it (F219).
+    boolean ownRoute = own != null && !own.isAlwaysFalse();
+
     // First pass, to learn how wide a parent side is: the expressions it builds are thrown away and
     // only the shape survives, because a verdict's position depends on that width and the width
     // depends on the verdicts.
     int verdicts =
         VerdictColumns.of(
                 descriptor, childWidth, blocks, zero, rexBuilder, simplify, underParent,
-                projections, -1)
+                projections, -1, null)
             .width();
 
     if (verdicts == 0) {
@@ -1289,22 +1301,16 @@ public final class EntitlementPass {
       }
     }
 
-    VerdictColumns.Plan plan =
-        VerdictColumns.of(
-            descriptor, childWidth, blocks, offsets, rexBuilder, simplify, underParent,
-            projections, verdicts);
-
-    // Filter_R: any path grants (D226). An elided entry contributes TRUE, so the OR folds away and
-    // the leaf is unfiltered; a kept one contributes its marker.
-    List<RexNode> terms = new ArrayList<>(layout.entries().size() + 1);
+    // What it is for each emitted side to reach a row: its marker, and the decider of a path that
+    // carries one (D279 §4). The decider of a cross-row confinement says whether the target's own
+    // row is the one a confined grant was confined to, the chain having reached an endpoint row it
+    // could admit; the target's columns are read plain and the endpoint's off the chain's
+    // projection.
+    List<@Nullable RexNode> reach = new ArrayList<>(layout.entries().size());
     boolean anyDecider = false;
     for (int k = 0; k < layout.entries().size(); k++) {
-      if (dropped[k]) {
-        terms.add(rexBuilder.makeLiteral(false));
-        continue;
-      }
-      if (elided[k]) {
-        terms.add(rexBuilder.makeLiteral(true));
+      if (dropped[k] || elided[k]) {
+        reach.add(null);
         continue;
       }
       RexNode matched =
@@ -1315,23 +1321,39 @@ public final class EntitlementPass {
                       typeFactory.createSqlType(org.apache.calcite.sql.type.SqlTypeName.BOOLEAN),
                       true),
                   offsets.get(k) + 1));
-
-      // The decider of a cross-row confinement (D279 §4): the chain reached an endpoint row a
-      // confined grant could admit, and this says whether the target's own row is the one it was
-      // confined to. The target's columns are read plain and the endpoint's off the chain's
-      // projection.
       PathPlan path = layout.entries().get(k).path();
       if (path == null || path.pathPredicate() == null) {
-        terms.add(matched);
+        reach.add(matched);
         continue;
       }
       anyDecider = true;
-      terms.add(
+      reach.add(
           rexBuilder.makeCall(
               SqlStdOperatorTable.AND,
               matched,
               overTheJoinedRow(
                   path, offsets.get(k) + VerdictColumns.FIXED + verdicts, childWidth)));
+    }
+
+    // Where a row may be visible though no emitted side reached it — by this table's own route, or
+    // by a side elided as TRUE — a verdict that folds to a constant on the one emitted side holds
+    // where that side reached the row, and not on every row (F219).
+    boolean reachedOtherwise = ownRoute;
+    for (boolean gone : elided) {
+      reachedOtherwise |= gone;
+    }
+
+    VerdictColumns.Plan plan =
+        VerdictColumns.of(
+            descriptor, childWidth, blocks, offsets, rexBuilder, simplify, underParent,
+            projections, verdicts, reachedOtherwise ? reach : null);
+
+    // Filter_R: any path grants (D226). An elided entry contributes TRUE, so the OR folds away and
+    // the leaf is unfiltered; a kept one contributes what it is for it to reach the row.
+    List<RexNode> terms = new ArrayList<>(layout.entries().size() + 1);
+    for (int k = 0; k < layout.entries().size(); k++) {
+      RexNode reached = reach.get(k);
+      terms.add(reached != null ? reached : rexBuilder.makeLiteral(elided[k]));
     }
     if (descriptor.rowPredicate() != null) {
       terms.add(simplify.simplifyUnknownAsFalse(descriptor.rowPredicate()));
@@ -3074,7 +3096,10 @@ public final class EntitlementPass {
           condition = settled;
         }
       }
-      if (condition.isAlwaysFalse()) {
+      // A rule whose folded condition is one an earlier rule's already folded to can never be the
+      // first to match, as when a resource owner and an explicit owner rule both name the owner:
+      // it is not reachable, and neither the sanitiser nor the explanation repeats it (F227).
+      if (condition.isAlwaysFalse() || conditions.contains(condition)) {
         continue;
       }
       rules.add(i);

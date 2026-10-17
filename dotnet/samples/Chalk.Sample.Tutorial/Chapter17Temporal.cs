@@ -97,8 +97,8 @@ public static class Chapter17Temporal
         await Live.EachPrincipalAsync(engine, entitled, entitlements, perspectives, Live.Valuation);
 
         Console.WriteLine();
-        Console.WriteLine("    Three chapters, one pivot clause. In §15 it summed a position the host");
-        Console.WriteLine("    replaced; in §16 a position the host derived from a batch it appended;");
+        Console.WriteLine("    Three chapters, one pivot clause. In 15 it summed a position the host");
+        Console.WriteLine("    replaced; in 16 a position the host derived from a batch it appended;");
         Console.WriteLine("    here a valuation of that same ledger at the prices a second feed");
         Console.WriteLine("    delivered. The four principals never changed, and neither did what");
         Console.WriteLine("    each of them is allowed to see.");

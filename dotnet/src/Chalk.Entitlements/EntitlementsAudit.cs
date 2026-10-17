@@ -1,8 +1,8 @@
 namespace Chalk.Entitlements;
 
 /// <summary>
-/// One execution of a statement the entitlement rewrite touched
-/// (<c>docs/design/16-entitlements.md</c> §3.12, D157, D205).
+/// One execution of a statement the entitlement rewrite touched, or one update of a standing view of
+/// it (<c>docs/design/16-entitlements.md</c> §3.12, D157, D205, D361).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -17,6 +17,11 @@ namespace Chalk.Entitlements;
 /// the execution runs with: the one it binds, where the statement was prepared for a context's
 /// shape, or the one it was prepared with, where it folded its values. One plan prepared for a shape
 /// and run for many principals is audited as each of them in turn.
+/// </para>
+/// <para>
+/// A standing view's update is audited as an execution, whether it runs the statement again or keeps
+/// its result by maintenance: one event per update, with the context the statement was prepared with
+/// and the <see cref="Version"/> the update brings the view to (D361).
 /// </para>
 /// </remarks>
 public sealed class EntitlementsAuditEvent
@@ -47,6 +52,13 @@ public sealed class EntitlementsAuditEvent
 
     /// <summary>Who the host says is running this execution (D205). Empty when it said nothing.</summary>
     public required string Actor { get; init; }
+
+    /// <summary>
+    /// For an update of a standing view, the version of the data it read: the epoch the update brings
+    /// the view to, as the host numbered its refresh (D361). It says which grants a table of grants
+    /// held. Null for any other execution, whose reads are not pinned to one epoch.
+    /// </summary>
+    public long? Version { get; init; }
 }
 
 /// <summary>
@@ -58,7 +70,8 @@ public interface IEntitlementsAudit
 {
     /// <summary>
     /// Called once per execution of a statement whose plan the rewrite touched, before the first
-    /// batch is produced. It runs on the caller's thread: a slow observer is a slow query.
+    /// batch is produced, and once per update of a standing view of one, before the update runs. It
+    /// runs on the caller's thread: a slow observer is a slow query, or a slow update.
     /// </summary>
     void Executed(EntitlementsAuditEvent audited);
 }

@@ -15,7 +15,7 @@ principal the statement is a `POLICY` refusal for, and one header this family ad
 ## What runs them
 
 - **In process, against the oracle and a golden** — `TenancyCorpusTests`, theory
-  `Every_subversion_is_held_to_the_oracle_and_the_golden`, as every one of the fifteen principals
+  `Every_subversion_is_held_to_the_oracle_and_the_golden`, as every one of the twenty principals
   `TenancyFixture` names. The rows must be the rows `TenancyOracle` — §8's model stated naively in
   C#, with no descriptor, no planner and no pass — discloses to that principal, and they must be
   what `corpus/plans/m7-adversarial/` records.
@@ -65,12 +65,12 @@ half of D253: not defended, and not measured.
 
 A successful attack is the point of the family, not a failure of it. A statement whose rows differ
 from the oracle's, or which fails where the policy requires no refusal, is registered as an F-number
-in `docs/design/07-decisions.md` and named in the `KnownLeaks` set the theories carry; the statement
+in `docs/design/07-decisions.md` and named in the `KnownDefects` set the theories carry; the statement
 stays exactly as written and the fix is its own run. Eight defects are registered, F58–F65, and only
 one of them — F58 — is a principal receiving an answer the oracle says they may not have; the other
 six fail **closed**, with a refusal, an unsupported feature or a plan the client's own invariant
 check rejects. **F58 is fixed** (ADR 0038), in its own run as the rule says: statements 08, 17 and 18
-are out of `KnownLeaks` and held to the oracle as every principal like any other. **F61 and F65 are
+are out of `KnownDefects` and held to the oracle as every principal like any other. **F61 and F65 are
 closed** by the F66 fix (ADR 0050) and their statements, 23 and 49, are out of `NotPlanned` from
 2026-09-16: both are run as every principal, both agree with the oracle, the detector reports
 nothing of either, and both carry a golden. The statements themselves are untouched, this note

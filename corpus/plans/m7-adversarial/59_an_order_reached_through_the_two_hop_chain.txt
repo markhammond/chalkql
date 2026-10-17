@@ -54,3 +54,18 @@ Acme|1|1
 Acme|5|<null>
 Acme|7|<null>
 
+-- u16-a-manager-in-two-orgs
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:Some, orders:Some
+
+-- u17-an-agent-in-two-orgs
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:Some, orders:Some
+
+-- u18-a-keeper
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:None, orders:Some
+
+-- u19-a-vendor-in-a-region
+report name:Full, id:Full, org_id:Full, vendors:Some, items:None, order_items:None, orders:Some
+
+-- u20-a-picker
+report name:Full, id:Full, org_id:Full, vendors:None, items:None, order_items:Some, orders:Some
+

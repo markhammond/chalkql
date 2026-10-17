@@ -171,6 +171,14 @@ public sealed class TenancyPolicyFixture
         var support = p.Role("support");
         var counter = p.Role("counter");
         var vendorRole = p.Role("vendor");
+        // A role `orders` does not admit (F100): admitted on every other table, so the corpus holds
+        // per-table admission to the oracle — and a line, which admits it, to reaching none of the
+        // lines of orders it cannot see, since the order's visibility rule holds along the line's
+        // path to it (D358). Its route through the item stays open.
+        p.Role("keeper");
+        // The keeper's twin, which the line's path to its order names exempt from the order's rule
+        // (D358): it reads a line by its order's organisation, as a marking, and no order.
+        var picker = p.Role("picker");
 
         p.Scope("interactive");
         p.Scope("batch");
@@ -277,6 +285,12 @@ public sealed class TenancyPolicyFixture
                 // entitlement is never consulted, which is what keeps this acyclic where the line is
                 // itself entitled through the order.
                 .Related(vendor).Through(orderItems).Through(items))
+            // Every role but the keeper (F100): the seven that reached an order before it was named
+            // still do, so no answer of theirs moves.
+            .Visible(new VisibilityRule
+            {
+                Roles = [manager, agent, auditor, self, support, counter, vendorRole],
+            })
             .Realm(pii, orders.Column("note"))
             .Access(new AccessRule { Roles = [manager, self], Realm = pii, Grants = Verdict.Full })
             .Access(new AccessRule { Roles = [agent, auditor], Realm = pii, Grants = Verdict.Mask })
@@ -373,11 +387,16 @@ public sealed class TenancyPolicyFixture
         // bridge inherits each of its order's perspectives *by kind* — so a vendor sees the lines
         // that carry its own goods and no other line of an order it can see, which the kind-less
         // `Through` of §3.13 would not have given.
-        vendors.Tenancy(t => t.Direct(vendor, vendors.Column("id")));
+        // A vendor's home region (F100): the one table holding vendor beside a second kind, so a
+        // vendor grant may be confined to a region. Not on `items`, the endpoint of the orders'
+        // Related path, where a confined perspective would have to be borne by the path's marker.
+        vendors.Tenancy(t => t
+            .Direct(vendor, vendors.Column("id"))
+            .Direct(region, vendors.Column("region_id")));
         items.Tenancy(t => t.Direct(vendor, items.Column("vendor_id")));
         orderItems
             .Tenancy(t => t
-                .Inherited(org).Through(orders)
+                .Inherited(org).Through(orders).ExemptFromParentVisibility(picker)
                 .Inherited(member).Through(orders)
                 .Inherited(vendor).Through(items))
             .Access(new AccessRule
@@ -646,7 +665,7 @@ public sealed class TenancyPolicyFixture
         PrincipalsOf(Handles);
 
     /// <summary>
-    /// The same fifteen principals, in the same order, as the handles of <paramref name="handles"/>
+    /// The same twenty principals, in the same order, as the handles of <paramref name="handles"/>
     /// — a grant carries the kind and the role it was declared as, and a handle of another policy is
     /// refused by identity rather than matched by spelling (D270 §1). A second layout of the same
     /// model is a second policy, so it declares its principals from its own handles and the two
@@ -667,6 +686,8 @@ public sealed class TenancyPolicyFixture
         var support = handles.Role("support");
         var counter = handles.Role("counter");
         var vendorRole = handles.Role("vendor");
+        var keeper = handles.Role("keeper");
+        var picker = handles.Role("picker");
 
         return
         [
@@ -697,6 +718,18 @@ public sealed class TenancyPolicyFixture
                 15,
                 Grant.ForTenancy(vendor, 1, vendorRole),
                 Grant.ForTenancy(org, 1, manager))),
+            // F98: one role in two organisations, so a thread is reached in two tenancies whose
+            // rules answer alike.
+            ("u16-a-manager-in-two-orgs", Principal(
+                16, Grant.ForTenancy(org, 1, manager), Grant.ForTenancy(org, 2, manager))),
+            ("u17-an-agent-in-two-orgs", Principal(
+                17, Grant.ForTenancy(org, 1, agent), Grant.ForTenancy(org, 2, agent))),
+            // F100: a role `orders` does not admit, and a vendor grant confined to a region.
+            ("u18-a-keeper", Principal(18, Grant.ForTenancy(org, 1, keeper))),
+            ("u19-a-vendor-in-a-region", Principal(
+                19, Grant.ForTenancy(vendor, 1, vendorRole).Within(region, 1))),
+            // D358: the keeper's twin, exempt from the order's rule along the line's path.
+            ("u20-a-picker", Principal(20, Grant.ForTenancy(org, 1, picker))),
         ];
     }
 

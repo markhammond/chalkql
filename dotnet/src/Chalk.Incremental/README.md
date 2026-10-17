@@ -1,13 +1,19 @@
 # Chalk.Incremental: standing views
 
+> **Experimental: incremental maintenance.** `ViewMaintenance.Incremental` carries the diagnostic
+> `CHALK003`, which a project acknowledges before it can ask for it: `<NoWarn>$(NoWarn);CHALK003</NoWarn>`
+> in the project, or `#pragma warning disable CHALK003` where it asks. Until it is declared stable,
+> its behaviour and its API may change in any release; check what a maintained view gives against its
+> statement before relying on it. A view that recomputes carries no such mark.
+
 A standing view is a statement kept current as one row per key. A reader drains it from a cursor and
 gets the latest row of each key that changed since, never a queue of every change. Deletes arrive as
 deletes, and a reader that falls too far behind gets the whole result again, marked as a reset.
 
-> **As of writing, only the delivery is incremental.** Each update recomputes the statement in full
-> and compares the result with the rows the view already holds. Support for computing only what
-> changed, in the manner of Differential Dataflow, is aspirational: the API is shaped so that it could
-> be added without changing anything a host writes, but it is not built.
+By default each update recomputes the statement in full and compares the result with the rows the
+view already holds. A view made with `Maintenance = ViewMaintenance.Incremental` computes only what
+changed instead: its statement's plan runs on the changes to its tables, and its joins, as-of joins
+and aggregates keep state between updates (see [Incremental maintenance](#incremental-maintenance)).
 
 The view keeps the rows the host maps them to, so a drain copies the host's own structs into the
 host's own sink, and keeps a checksum of them as they change.
@@ -92,6 +98,52 @@ So a view refuses, when it is made, what would make that untrue or unstable:
   load what the view needs into an in-process table and refresh it in epochs.
 
 A key the result gives twice faults the view, naming the key, until the view is disposed.
+
+## Incremental maintenance
+
+```csharp
+await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKey, Cell>
+{
+    Key = ["row_key", "column_key"],
+    LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
+    Maintenance = ViewMaintenance.Incremental,  // compute only what changed
+    Map = Cells.Map,
+});
+```
+
+- A table gives the rows appended since the last update. A `Replace` that keeps the rest of the rows,
+  the same objects in their order, gives the rows it took out and appended, as a compaction does; any
+  other change gives its old rows out and its new rows in. A replacement prepared off the refresh lock
+  and committed later reaches the view the same way, and a compaction that takes out only rows no
+  as-of join matches moves no match.
+- A plan the background made under `DeferPlanning()` is taken at the view's first update after a
+  refresh, whether that refresh, `ChalkEngine.PlanAsync` or a refresh's `PlanNow()` run swapped it
+  in, and maintained from the start; a plan the view cannot maintain is declined, as the one it
+  keeps answers the same rows.
+- A view may be built with a tracker of what its updates cost (`ViewOptions.Tracker`), and with a
+  host callback that may veto requesting a new plan for drift (`ViewOptions.RefreshQueryPlan`): the
+  statement keeps its plan, and the next refresh that defers its planning asks again.
+- A view may set the fraction of its plan's cost a new plan must save
+  (`ViewOptions.PlanImprovementMargin`): the planner holds back a plan that saves less.
+- A view may build a new plan beside the one it runs, from the moment its statement takes the plan,
+  and swap it in once built (`ViewOptions.PlanSwap = ViewPlanSwap.LowJitter`), so that no update
+  computes it from nothing.
+- Joins (inner and left), as-of joins, aggregates with grouping sets, filters, projections,
+  `UNION ALL`, `VALUES` and `WITH` subtrees are maintained, the clock in a filter or a projection,
+  and an index lookup pinned to keys, as a constant key or an `IN` list makes, which is read as its
+  table is, kept to those keys.
+- An as-of join that seeks an index keeps only its left rows and the rows they match, never the
+  table's, so its state does not grow with the table's history; it keeps each key's last row too,
+  so a row at the clock needs no seek.
+- A `DOUBLE` or `REAL` sum is kept exactly and rounded once, so it never drifts; a recompute adds in
+  input order, so the two may differ in the last bits.
+- What the statement keeps counts in `StateBytes`, against `StateBudget`.
+- An update that fails part way leaves the next to start from nothing; readers get only the keys
+  that differ.
+- A statement maintenance does not keep — window functions, `LIMIT`, set operations but `UNION ALL`,
+  right, full, semi and anti joins, `DISTINCT` and ordered aggregates, an index lookup over a range
+  of keys, the reference executor — is refused when the view is made, with `UnsupportedInView`,
+  naming it.
 
 ## Inputs
 

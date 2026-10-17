@@ -93,3 +93,34 @@ Chalk.Incremental.ViewOptions<TKey, TRow>.ResetWhen.get -> double
 Chalk.Incremental.ViewOptions<TKey, TRow>.ResetWhen.init -> void
 Chalk.Incremental.PreparedViews
 static Chalk.Incremental.PreparedViews.MaterializeAsync<TKey, TRow>(this Chalk.Client.ChalkEngine! engine, Chalk.Client.PreparedQuery! prepared, Chalk.Incremental.ViewOptions<TKey, TRow>! options, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Incremental.StandingView<TKey, TRow>!>
+Chalk.Incremental.StandingView<TKey, TRow>.Maintenance.get -> Chalk.Incremental.ViewMaintenance
+Chalk.Incremental.ViewMaintenance
+[CHALK003]Chalk.Incremental.ViewMaintenance.Incremental = 1 -> Chalk.Incremental.ViewMaintenance
+Chalk.Incremental.ViewMaintenance.Recompute = 0 -> Chalk.Incremental.ViewMaintenance
+Chalk.Incremental.ViewOptions<TKey, TRow>.Maintenance.get -> Chalk.Incremental.ViewMaintenance
+Chalk.Incremental.ViewOptions<TKey, TRow>.Maintenance.init -> void
+Chalk.Incremental.IViewCostTracker
+Chalk.Incremental.IViewCostTracker.Updated(in Chalk.Incremental.ViewUpdate update) -> void
+Chalk.Incremental.ViewUpdate
+Chalk.Incremental.ViewUpdate.AllocatedBytes.get -> long
+Chalk.Incremental.ViewUpdate.Changes.get -> long
+Chalk.Incremental.ViewUpdate.Elapsed.get -> System.TimeSpan
+Chalk.Incremental.ViewUpdate.PlanDigest.get -> ulong
+Chalk.Incremental.ViewUpdate.Version.get -> long
+Chalk.Incremental.ViewUpdate.ViewUpdate() -> void
+Chalk.Incremental.ViewUpdate.Whole.get -> bool
+Chalk.Incremental.ViewOptions<TKey, TRow>.Tracker.get -> Chalk.Incremental.IViewCostTracker?
+Chalk.Incremental.ViewOptions<TKey, TRow>.Tracker.init -> void
+Chalk.Incremental.ViewOptions<TKey, TRow>.RefreshQueryPlan.get -> System.Func<bool>?
+Chalk.Incremental.ViewOptions<TKey, TRow>.RefreshQueryPlan.init -> void
+Chalk.Incremental.ViewOptions<TKey, TRow>.PlanImprovementMargin.get -> double?
+Chalk.Incremental.ViewOptions<TKey, TRow>.PlanImprovementMargin.init -> void
+Chalk.Incremental.ViewPlanSwap
+Chalk.Incremental.ViewPlanSwap.AtNextUpdate = 0 -> Chalk.Incremental.ViewPlanSwap
+Chalk.Incremental.ViewPlanSwap.LowJitter = 1 -> Chalk.Incremental.ViewPlanSwap
+Chalk.Incremental.ViewOptions<TKey, TRow>.PlanSwap.get -> Chalk.Incremental.ViewPlanSwap
+Chalk.Incremental.ViewOptions<TKey, TRow>.PlanSwap.init -> void
+Chalk.Incremental.StandingView<TKey, TRow>.Statement.get -> Chalk.Client.PreparedQuery!
+Chalk.Incremental.StandingView<TKey, TRow>.ContextDigest.get -> string?
+Chalk.Incremental.ViewOptions<TKey, TRow>.Context.get -> Chalk.Client.RequestContext?
+Chalk.Incremental.ViewOptions<TKey, TRow>.Context.init -> void

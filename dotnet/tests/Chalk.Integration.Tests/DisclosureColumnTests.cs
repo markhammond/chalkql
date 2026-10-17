@@ -158,6 +158,106 @@ public sealed class DisclosureColumnTests(SharedSidecar sidecar)
         Assert.Equal(folded, shared);
     }
 
+    /// <summary>
+    /// A list past the fold ceiling stays a relation, and inside the row predicate's OR the leaf is
+    /// split over it into a semi-join branch and an anti-join branch under a <c>UNION ALL</c>. Each
+    /// row keeps the siblings it has with the list folded: the row's own disclosure, and one for
+    /// every column with an entitled origin.
+    /// </summary>
+    [Fact]
+    public async Task A_list_past_the_fold_ceiling_gives_the_siblings_it_gives_folded()
+    {
+        var folded = TenancyFixture.Principal(
+            user: 1, managerOrgs: [1], agentOrgs: [2, 3], auditorOrgs: [], subjectPairs: []);
+        var unfolded = new RequestContext
+        {
+            Scalars = folded.Scalars,
+            ScalarTypes = folded.ScalarTypes,
+            Lists = folded.Lists,
+            Relations = folded.Relations,
+            FoldMaxRows = 1,
+        };
+        const string sql = "SELECT id, first_name FROM members ORDER BY id";
+
+        var rows = await RowsAsync(sql, folded, Siblings);
+        Assert.Equal(rows, await RowsAsync(sql, unfolded, Siblings));
+        Assert.DoesNotContain(rows, row => row.Contains("PER_ROW", StringComparison.Ordinal));
+    }
+
+    /// <summary>Every row of a <c>UNION ALL</c> is one input's row, and keeps the siblings it had there.</summary>
+    [Fact]
+    public async Task A_union_all_keeps_each_rows_siblings()
+    {
+        var whole = await RowsAsync(
+            "SELECT id, first_name FROM members ORDER BY id", TenancyFixture.U1, Siblings);
+        var halves = await RowsAsync(
+            "SELECT id, first_name FROM members WHERE id <= 2 "
+            + "UNION ALL SELECT id, first_name FROM members WHERE id > 2 ORDER BY id",
+            TenancyFixture.U1,
+            Siblings);
+
+        Assert.Equal(whole, halves);
+    }
+
+    /// <summary>
+    /// A grouped key whose column is constant keeps its sibling as that constant label; a count of
+    /// rows reads no entitled column and has none.
+    /// </summary>
+    [Fact]
+    public async Task A_grouped_key_keeps_its_sibling_and_a_count_of_rows_has_none()
+    {
+        await using var engine = await EngineAsync();
+        var prepared = await engine.WithEntitlements(Siblings).PrepareAsync(
+            "SELECT org_id, COUNT(*) AS n FROM members GROUP BY org_id ORDER BY org_id", TenancyFixture.U1);
+
+        Assert.Equal(["org_id", "org_id__disclosure", "n"], prepared.OutputSchema.FieldsList.Select(f => f.Name));
+        Assert.Equal(["1|FULL|2", "2|FULL|3"], await ReadAsync(engine, prepared.Query, executeWith: null));
+    }
+
+    /// <summary>
+    /// A group discloses the least of what its rows disclosed (F224, D363). A message's content is
+    /// decided by its thread's organisation, which u1 manages in O1 and is an agent in in O2, so the
+    /// content is reported <c>PerRow</c>. Grouped by thread, O1's threads read <c>FULL</c> and O2's
+    /// <c>MASKED</c>, as their rows do. Kept to O1's threads, every row is full and the report still
+    /// says <c>PerRow</c>, since the fold cannot see a thread's organisation from a message: each
+    /// group then says <c>FULL</c>.
+    /// </summary>
+    [Fact]
+    public async Task A_group_takes_the_least_disclosure_of_its_rows()
+    {
+        const string Sql =
+            "SELECT thread_id, MIN(content) AS earliest FROM messages GROUP BY thread_id ORDER BY thread_id";
+
+        await using var engine = await EngineAsync();
+        var prepared = await engine.WithEntitlements(Siblings).PrepareAsync(Sql, TenancyFixture.U1);
+        Assert.Equal(
+            ReportedDisclosure.PerRow,
+            Assert.Single(prepared.Columns, c => c.Name == "earliest").Disclosure);
+        Assert.Equal(
+            ["1|FULL", "2|FULL", "3|MASKED"],
+            KeyAndSibling(await ReadAsync(engine, prepared.Query, executeWith: null)));
+
+        // Each row ungrouped reads as its group does.
+        Assert.Equal(
+            ["1|FULL", "1|FULL", "2|FULL", "3|MASKED"],
+            KeyAndSibling(await RowsAsync(
+                "SELECT thread_id, content FROM messages ORDER BY id", TenancyFixture.U1, Siblings)));
+
+        // Every row full, the report PerRow all the same: every group says FULL.
+        var o1 = await engine.WithEntitlements(Siblings).PrepareAsync(
+            "SELECT thread_id, MIN(content) AS earliest FROM messages WHERE thread_id IN (1, 2) "
+            + "GROUP BY thread_id ORDER BY thread_id",
+            TenancyFixture.U1);
+        Assert.Equal(ReportedDisclosure.PerRow, Assert.Single(o1.Columns, c => c.Name == "earliest").Disclosure);
+        Assert.Equal(
+            ["1|FULL", "2|FULL"],
+            KeyAndSibling(await ReadAsync(engine, o1.Query, executeWith: null)));
+    }
+
+    /// <summary>Each grouped row as its key and the measure's sibling: the first and last fields.</summary>
+    private static string[] KeyAndSibling(string[] rows) =>
+        [.. rows.Select(row => row.Split('|')).Select(fields => $"{fields[0]}|{fields[^1]}")];
+
     // ---------------------------------------------------------------- the harness
 
     /// <summary>A member's row, so a protected value is read off the fixture and never restated.</summary>

@@ -145,15 +145,19 @@ public final class ThroughParents {
       }
 
       TableEntitlement parentEntitlement = parent.getEntitlement();
+      // A path restricts the parent's rows as a predicate does: the pass joins it into the parent's
+      // own entitled scan, which is what the child's join reads.
       if (parentEntitlement.getRowPredicate().isBlank()
-          && parentEntitlement.getThroughCount() == 0) {
+          && parentEntitlement.getThroughCount() == 0
+          && parentEntitlement.getInheritedCount() == 0) {
         throw new InvalidCatalogException(
             ErrorCode.INVALID_TENANCY_PATH,
             field,
             "on " + where + ", visibility derives through '" + parentSchemaName + "."
-                + parent.getName() + "', whose entitlement restricts no row — it has neither a row"
-                + " predicate nor a `through` of its own. Through an unrestricted parent restricts"
-                + " nothing; declare the child unrestricted or restrict the parent.");
+                + parent.getName() + "', whose entitlement restricts no row — it has no row"
+                + " predicate, no `through` and no `inherited` path of its own. Through an"
+                + " unrestricted parent restricts nothing; declare the child unrestricted or"
+                + " restrict the parent.");
       }
 
       RelDataType parentRow = new ChalkTable(parent, parentSchema).getRowType(typeFactory);

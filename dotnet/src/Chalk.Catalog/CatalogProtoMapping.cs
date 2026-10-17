@@ -324,7 +324,11 @@ internal static class CatalogProtoMapping
         Functions = message.Functions.Select(FromProto).ToArray(),
     };
 
-    private static Table ToProto(TableDescriptor table)
+    /// <summary>
+    /// One table as the planner reads it: what the engine converts alone when a refresh moved that
+    /// table's columns and nothing else of the catalog (F205).
+    /// </summary>
+    internal static Table ToProto(TableDescriptor table)
     {
         var message = new Table
         {

@@ -1494,13 +1494,18 @@ internal static class AdoArrays
         _ => throw Cast(value, "BINARY"),
     };
 
-    /// <summary>Days since the epoch — Arrow's DATE32, and what the executor's kernels read.</summary>
+    /// <summary>
+    /// Days since the epoch — Arrow's DATE32, and what the executor's kernels read. Text that writes a
+    /// time and a zone is the date of that instant in UTC, as SQLite's own <c>date()</c> reads it, and
+    /// as a timestamp's text is read below; never the date on the machine's clock (F240).
+    /// </summary>
     private static int ToDays(object value) => value switch
     {
         DateTime d => (int)(d.Date - DateTime.UnixEpoch.Date).TotalDays,
         DateOnly d => d.DayNumber - DateOnly.FromDateTime(DateTime.UnixEpoch).DayNumber,
         DateTimeOffset o => (int)(o.UtcDateTime.Date - DateTime.UnixEpoch.Date).TotalDays,
-        string s => ToDays(DateTime.Parse(s, CultureInfo.InvariantCulture)),
+        string s => ToDays(DateTime.Parse(
+            s, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal)),
         _ => throw Cast(value, "DATE"),
     };
 

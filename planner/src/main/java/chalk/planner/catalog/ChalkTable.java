@@ -15,7 +15,10 @@ import chalk.planner.ErrorCode;
 import chalk.planner.types.TypeMapper;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import org.apache.calcite.DataContext;
 import org.apache.calcite.linq4j.Enumerable;
 import org.apache.calcite.plan.RelOptTable;
@@ -110,8 +113,9 @@ public final class ChalkTable extends AbstractTable implements ScannableTable, T
 
   /** What the source says about one column's values (D36). Never null; may say nothing. */
   public ColumnStatistics statistics(int column) {
-    return column >= 0 && column < descriptor.getColumnsCount()
-        ? descriptor.getColumns(column).getStatistics()
+    Table numbers = numbers();
+    return column >= 0 && column < numbers.getColumnsCount()
+        ? numbers.getColumns(column).getStatistics()
         : ColumnStatistics.getDefaultInstance();
   }
 
@@ -121,10 +125,85 @@ public final class ChalkTable extends AbstractTable implements ScannableTable, T
 
   /** Rows, or null when the source says it does not know. */
   public Double rowCount() {
-    if (descriptor.getRowCountKind() == RowCountKind.ROW_COUNT_KIND_UNKNOWN) {
+    Table numbers = numbers();
+    if (numbers.getRowCountKind() == RowCountKind.ROW_COUNT_KIND_UNKNOWN) {
       return null;
     }
-    return descriptor.getRowCount() < 0 ? null : (double) descriptor.getRowCount();
+    return numbers.getRowCount() < 0 ? null : (double) numbers.getRowCount();
+  }
+
+  /**
+   * The tables a kept plan is priced against (design 70 §3), by source, schema and name: set on the
+   * pricing's thread for as long as it prices, and nowhere else. A table answers its row count and its
+   * statistics from these when they hold it, so a plan made on older numbers is priced on newer ones
+   * without anything in it being rebuilt.
+   */
+  private static final ThreadLocal<Map<String, Table>> PRICED_ON = new ThreadLocal<>();
+
+  /** A pricing's numbers, in force until it is closed. */
+  public interface PricingScope extends AutoCloseable {
+    @Override
+    void close();
+  }
+
+  /**
+   * Prices with {@code catalog}'s numbers until the scope is closed: every table answers its row count
+   * and statistics from the table of {@code catalog} with its source, schema and name.
+   */
+  public static PricingScope pricedOn(chalk.ir.v1.CatalogContext catalog) {
+    Map<String, Table> tables = new HashMap<>();
+    for (Schema schema : catalog.getSchemasList()) {
+      for (Table table : schema.getTablesList()) {
+        tables.put(key(schema.getSourceId(), schema.getName(), table.getName()), table);
+      }
+    }
+
+    Map<String, Table> previous = PRICED_ON.get();
+    PRICED_ON.set(tables);
+    return () -> {
+      if (previous == null) {
+        PRICED_ON.remove();
+      } else {
+        PRICED_ON.set(previous);
+      }
+    };
+  }
+
+  private static String key(String sourceId, String schema, String table) {
+    return sourceId
+        + '\u0000'
+        + schema.toUpperCase(Locale.ROOT)
+        + '\u0000'
+        + table.toUpperCase(Locale.ROOT);
+  }
+
+  /**
+   * {@code table}'s rows, as a scan's estimate reads them: the count Calcite took when it resolved the
+   * table, except while a kept plan is priced (design 70 §3), when it is the pricing's count for the
+   * table. Calcite's table reference keeps the count it was created with, so a scan priced on newer
+   * numbers asks the table itself.
+   */
+  public static double rowsOf(RelOptTable table) {
+    if (PRICED_ON.get() != null) {
+      ChalkTable chalk = table.unwrap(ChalkTable.class);
+      Double rows = chalk == null ? null : chalk.rowCount();
+      if (rows != null) {
+        return rows;
+      }
+    }
+
+    return table.getRowCount();
+  }
+
+  /** The table whose numbers this one answers: its own, or a pricing's when one is in force. */
+  private Table numbers() {
+    Map<String, Table> priced = PRICED_ON.get();
+    if (priced == null) {
+      return descriptor;
+    }
+
+    Table current = priced.get(key(sourceId(), schemaName(), descriptor.getName()));
+    return current == null ? descriptor : current;
   }
 
   /**
@@ -350,7 +429,8 @@ public final class ChalkTable extends AbstractTable implements ScannableTable, T
    */
   @Override
   public Statistic getStatistic() {
-    Double rowCount = descriptor.getRowCount() < 0 ? null : (double) descriptor.getRowCount();
+    Table numbers = numbers();
+    Double rowCount = numbers.getRowCount() < 0 ? null : (double) numbers.getRowCount();
 
     List<ImmutableBitSet> keys = new ArrayList<>(descriptor.getUniqueKeysCount());
     for (chalk.ir.v1.UniqueKey key : descriptor.getUniqueKeysList()) {

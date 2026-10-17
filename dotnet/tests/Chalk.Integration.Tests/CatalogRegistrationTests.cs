@@ -160,7 +160,9 @@ public sealed class CatalogRegistrationTests(SharedSidecar sidecar, ITestOutputH
 
     /// <summary>
     /// A micro-batch append publishes one statistics message naming one table and nothing else: no
-    /// catalog registration, because no shape moved, and no other table's numbers.
+    /// catalog registration, because no shape moved, and no other table's numbers. Seven orders and
+    /// one more is past the tenth a table's numbers may move by unsent (D351); the next test appends
+    /// within it.
     /// </summary>
     [Fact]
     public async Task A_micro_batch_append_publishes_one_statistics_message_naming_one_table()
@@ -188,6 +190,44 @@ public sealed class CatalogRegistrationTests(SharedSidecar sidecar, ITestOutputH
         Assert.Equal(1, counter.StatisticsRegistrations);
         Assert.Equal(["m.orders"], counter.StatisticsTables);
     }
+
+    /// <summary>
+    /// An append within a tenth of the table publishes nothing (D351): its statistics stand and its
+    /// row count is within the tenth the planner's may trail by, though the catalog's is exact. The
+    /// append that takes it past the tenth publishes one message.
+    /// </summary>
+    [Fact]
+    public async Task An_append_within_a_tenth_publishes_nothing()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+
+        var source = new PocoSourceBuilder("mem", "m")
+            .AddTable("ticks", (IReadOnlyList<Tick>)[.. Enumerable.Range(1, 100).Select(i => new Tick(i))], out var ticks)
+            .Build();
+
+        var counter = new CountingPlanner(sidecar.Sidecar.CreatePlanner());
+        await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+        {
+            ContextId = $"d351-tenth-{Guid.NewGuid():n}",
+            Sources = [source],
+            Planner = counter,
+        });
+        counter.Reset();
+
+        await engine.RefreshAsync(r => r.Append(ticks, [new Tick(101)]), TestContext.Current.CancellationToken);
+        Assert.Equal(0, counter.CatalogRegistrations);
+        Assert.Equal(0, counter.StatisticsRegistrations);
+        Assert.Equal(101, engine.Catalog.FindTable("m", "ticks")!.Value.Table.RowCount);
+
+        await engine.RefreshAsync(
+            r => r.Append(ticks, [.. Enumerable.Range(102, 9).Select(i => new Tick(i))]),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(0, counter.CatalogRegistrations);
+        Assert.Equal(1, counter.StatisticsRegistrations);
+        Assert.Equal(["m.ticks"], counter.StatisticsTables);
+    }
+
+    private sealed record Tick(int Seq);
 
     /// <summary>And nothing at all under <c>Defer</c>: the row count moved, so a message goes.</summary>
     /// <remarks>
@@ -221,6 +261,71 @@ public sealed class CatalogRegistrationTests(SharedSidecar sidecar, ITestOutputH
         Assert.Equal(2, epoch);
         Assert.Equal(0, counter.CatalogRegistrations);
         Assert.Equal(0, counter.StatisticsRegistrations);
+    }
+
+    /// <summary>
+    /// A refresh that changes rows publishes the shape a whole reading of its catalog would (F205),
+    /// though it reads only the tables it changed: appended to, deferred, upserted, replaced, and
+    /// given statistics computed in the background. A table no refresh touched is the descriptor it
+    /// was, and so is its schema when none of its tables moved.
+    /// </summary>
+    [Fact]
+    public async Task A_refresh_of_rows_publishes_the_shape_a_whole_reading_would()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        var ct = TestContext.Current.CancellationToken;
+
+        var source = new PocoSourceBuilder("mem", "m")
+            .AddTable("orders", TenancyFixture.Orders, out var orders)
+            .AddTable("notes", TenancyFixture.Notes)
+            .Build();
+        var marks = new PocoSourceBuilder("marks", "k")
+            .AddTable("prices", (IReadOnlyList<Price>)[.. Enumerable.Range(1, 50).Select(i => new Price(i, i))], out var prices, t => t.Keyed(x => x.Id))
+            .Build();
+
+        await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+        {
+            ContextId = $"f205-{Guid.NewGuid():n}",
+            Sources = [source, marks],
+            Planner = sidecar.Sidecar.CreatePlanner(),
+        }, ct);
+        AssertWhole(engine);
+
+        var notes = engine.Catalog.FindTable("m", "notes")!.Value.Table;
+        await engine.RefreshAsync(r => r.Append(orders, [Micro()]), ct);
+        AssertWhole(engine);
+        Assert.Same(notes, engine.Catalog.FindTable("m", "notes")!.Value.Table);
+
+        var schema = engine.Catalog.Schemas.Single(s => s.SourceId == "mem");
+        await engine.RefreshAsync(r => r.Upsert(prices, [new Price(3, 300)]).DeferPlanning(), ct);
+        AssertWhole(engine);
+        Assert.Same(schema, engine.Catalog.Schemas.Single(s => s.SourceId == "mem"));
+
+        await engine.BackgroundPlanningSettledAsync();
+        await engine.RefreshAsync(r => r.DeferPlanning(), ct);
+        AssertWhole(engine);
+
+        await engine.RefreshAsync(r => r.Replace(prices, [new Price(1, 1)]), ct);
+        AssertWhole(engine);
+        Assert.Equal(1, engine.Catalog.FindTable("k", "prices")!.Value.Table.RowCount);
+    }
+
+    private sealed record Price(int Id, long Cents);
+
+    /// <summary>The engine's shape of its catalog, table by table, against the shape taken whole.</summary>
+    private static void AssertWhole(ChalkEngine engine)
+    {
+        var held = engine.PublishedShape;
+        var whole = CatalogShape.Of(engine.Catalog);
+        Assert.Equal(whole.Tables.Count, held.Tables.Count);
+        foreach (var (key, shape) in whole.Tables)
+        {
+            Assert.Equal(shape, held.Tables[key]);
+            Assert.Equal(whole.Statistics[key].RowCount, held.Statistics[key].RowCount);
+            Assert.Equal(whole.Statistics[key].Rest, held.Statistics[key].Rest);
+        }
+
+        Assert.Equal(whole.Policies, held.Policies);
     }
 
     // ------------------------------------------------------------------ §8, figure 3

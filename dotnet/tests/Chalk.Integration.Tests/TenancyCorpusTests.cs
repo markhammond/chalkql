@@ -47,16 +47,17 @@ public sealed partial class TenancyCorpusTests(SharedSidecar sidecar)
     /// The pattern <c>NotAboutBindingTime</c> already uses, and the rule D251 states: a successful
     /// attack is an F-number and an exclusion, never a fix to the planner or the executor in this
     /// run and never a weakened statement. A weakened statement would be the pass testing itself.
-    /// The seven that remain fail <em>closed</em> — a refusal, an unsupported feature or a plan the
-    /// client's own validator rejects. F58, the one principal receiving an answer the oracle said
-    /// they may not have, is fixed (ADR 0038): statements 08, 17 and 18 are held to the oracle as
-    /// every principal like any other, and are named here no longer. So is F78 (ADR 0058 §3), which
-    /// takes <c>39_orders_join_the_lines</c> off this list the same way, and F79 (ADR 0062 §2),
-    /// which takes <c>54_a_correlated_count_of_the_lines_of_an_order</c> off it: a correlate whose
-    /// right side no longer reads the left row is a join on TRUE, and the two principals who reach
-    /// no line count zero rather than being refused.
+    /// None of the six that remain leaks: each fails <em>closed</em> for the principals it fails
+    /// for — a refusal, an unsupported feature or a plan the client's own validator rejects — and
+    /// the detector reads everything any principal gets. F58, the one principal receiving an
+    /// answer the oracle said they may not have, is fixed (ADR 0038): statements 08, 17 and 18 are
+    /// held to the oracle as every principal like any other, and are named here no longer. So is
+    /// F78 (ADR 0058 §3), which takes <c>39_orders_join_the_lines</c> off this list the same way,
+    /// and F79 (ADR 0062 §2), which takes <c>54_a_correlated_count_of_the_lines_of_an_order</c> off
+    /// it: a correlate whose right side no longer reads the left row is a join on TRUE, and the two
+    /// principals who reach no line count zero rather than being refused.
     /// </remarks>
-    internal static readonly IReadOnlyDictionary<string, string> KnownLeaks =
+    internal static readonly IReadOnlyDictionary<string, string> KnownDefects =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["14_probe_string_agg"] = "F59",
@@ -283,7 +284,7 @@ public sealed partial class TenancyCorpusTests(SharedSidecar sidecar)
             string[] rows;
             string report;
             string[] columns;
-            if (KnownLeaks.TryGetValue(name, out var registered))
+            if (KnownDefects.TryGetValue(name, out var registered))
             {
                 // A registered defect: what this principal got is recorded rather than asserted, and
                 // the detector still reads every word of it. Every one of them fails closed, so
@@ -326,7 +327,7 @@ public sealed partial class TenancyCorpusTests(SharedSidecar sidecar)
 
             recorded.AppendLine();
 
-            if (!guarded && !KnownLeaks.ContainsKey(name))
+            if (!guarded && !KnownDefects.ContainsKey(name))
             {
                 Assert.Equal(await OracleRowsAsync(query, context, fixture), rows);
             }

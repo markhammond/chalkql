@@ -37,6 +37,13 @@ internal sealed class OperatorContext
     public ExecutionStats Stats { get; private set; } = new();
 
     /// <summary>
+    /// The operators of a maintained plan built in this context's tree that keep scratch from one
+    /// update to the next, for the plan to have them let it go after an update from nothing (F236).
+    /// Empty for every other tree.
+    /// </summary>
+    internal List<Maintenance.IKeepsScratch> Scratch { get; } = [];
+
+    /// <summary>
     /// This execution's memory: Arrow buffers through <see cref="Allocator"/>, scratch through
     /// <c>Rent</c> / <c>Return</c>. Only valid between <see cref="Begin"/> and the end of the run.
     /// </summary>

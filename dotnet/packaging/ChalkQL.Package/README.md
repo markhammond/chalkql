@@ -71,9 +71,11 @@ Results arrive as Apache Arrow record batches. A prepared statement's `OutputSch
 
 ## Standing views
 
+Incremental maintenance is **experimental**: `ViewMaintenance.Incremental` carries the diagnostic `CHALK003`, which a project acknowledges with `<NoWarn>$(NoWarn);CHALK003</NoWarn>` before it can ask for it, and its behaviour and API may change in any release. Check what a maintained view gives against its statement before relying on it. A view that recomputes carries no such mark.
+
 `engine.MaterializeAsync(sql, options)` keeps a statement's answer current as one row per key, mapped to the host's own structs. A reader drains it from a cursor and gets the latest row of each key that changed since it last read, never a queue of every change, with a checksum at each commit. Inputs say how they change — append-only logs with a lateness, logs read by key and time, tables changed by key — and the host numbers each refresh as an epoch.
 
-As of writing, only the delivery is incremental: each update recomputes the statement in full. Support for computing only what changed, in the manner of Differential Dataflow, is aspirational.
+By default each update recomputes the statement in full. With `Maintenance = ViewMaintenance.Incremental`, a view computes only what changed: its statement's plan runs on the changes to its tables, and its joins, as-of joins and aggregates keep state between updates.
 
 ## Federation for (almost) everyone
 

@@ -73,3 +73,32 @@ report id:Full, content:PerRow, org_id:Full, messages:Some, threads:Some
 2|northwind reply CANARY-CONTENT-02|1
 3|northwind second thread CANARY-CONTENT-03|1
 
+-- u16-a-manager-in-two-orgs
+report id:Full, content:PerRow, org_id:Full, messages:Some, threads:Some
+1|northwind opening CANARY-CONTENT-01|1
+2|northwind reply CANARY-CONTENT-02|1
+3|northwind second thread CANARY-CONTENT-03|1
+4|southerly opening CANARY-CONTENT-04|2
+
+-- u17-an-agent-in-two-orgs
+report id:Full, content:PerRow, org_id:Full, messages:Some, threads:Some
+1|northwind|1
+2|northwind|1
+3|northwind|1
+4|southerly|2
+
+-- u18-a-keeper
+report id:Full, content:PerRow, org_id:Full, messages:Some, threads:Some
+1|<null>|1
+2|<null>|1
+3|<null>|1
+
+-- u19-a-vendor-in-a-region
+report id:Full, content:PerRow, org_id:Full, messages:Some, threads:Some
+
+-- u20-a-picker
+report id:Full, content:PerRow, org_id:Full, messages:Some, threads:Some
+1|<null>|1
+2|<null>|1
+3|<null>|1
+

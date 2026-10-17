@@ -248,8 +248,18 @@ public sealed class Grant
 /// </remarks>
 public sealed class TenancyPrincipal
 {
-    /// <summary>The caller's own identifier, bound as the scalar <c>user</c>.</summary>
-    public required object User { get; init; }
+    /// <summary>
+    /// The caller's own identifier, bound as the scalar <c>user</c>, or null for a principal that
+    /// owns no rows.
+    /// </summary>
+    /// <remarks>
+    /// A class principal — one identity for many people — owns nothing, and its id would only be a
+    /// value no owner column holds. Null says so: <c>user</c> is bound as NULL and folded, so every
+    /// owner test the policy writes (a resource owner's rows, the owner's rules, the owner role's
+    /// scope) comes out of the plan, the column labels and the explanation, and what remains is the
+    /// principal's roles alone. It is required all the same, so a principal says which it is.
+    /// </remarks>
+    public required object? User { get; init; }
 
     /// <summary>The grants this caller holds.</summary>
     public IReadOnlyList<Grant> Grants { get; init; } = [];

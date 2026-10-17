@@ -68,6 +68,52 @@ public enum ViewExactness
     EqualUpToRounding = 1,
 }
 
+/// <summary>How a view computes an update (D343, <c>docs/design/68-incremental-maintenance.md</c>).</summary>
+public enum ViewMaintenance
+{
+    /// <summary>Every update runs the statement in full and compares the result with the view's rows.</summary>
+    Recompute = 0,
+
+    /// <summary>
+    /// Every update computes only what changed since the last: the statement's plan runs on the
+    /// changes to its tables, and its joins, as-of joins and aggregates keep state between updates. A
+    /// statement that cannot be maintained so is refused when the view is made, naming what and why.
+    /// A <c>DOUBLE</c> or <c>REAL</c> sum is kept exactly and rounded once, so it may differ from a
+    /// recompute's sum, which adds in input order, in the last bits.
+    /// </summary>
+    /// <remarks>
+    /// Experimental under <c>CHALK003</c>: a host acknowledges it to ask for incremental maintenance,
+    /// in its project with <c>&lt;NoWarn&gt;$(NoWarn);CHALK003&lt;/NoWarn&gt;</c> or where it asks with
+    /// <c>#pragma warning disable CHALK003</c>. Until it is declared stable, its behaviour and its API may
+    /// change in any release; check what a maintained view gives against its statement before relying
+    /// on it. A view that recomputes carries no such mark.
+    /// </remarks>
+    [System.Diagnostics.CodeAnalysis.Experimental("CHALK003")]
+    Incremental = 1,
+}
+
+/// <summary>
+/// How an incremental view moves to a plan its statement takes after the view is made (design 70 §2).
+/// </summary>
+public enum ViewPlanSwap
+{
+    /// <summary>
+    /// The view's next update computes the new plan's state from nothing, as its first update did: the
+    /// slowest update the view has.
+    /// </summary>
+    AtNextUpdate = 0,
+
+    /// <summary>
+    /// A second instance of the view is built on the new plan in the background, from the moment the
+    /// statement swaps the plan in, while the view keeps updating the one it has, so that no update
+    /// stalls on the new plan: low jitter, paid for in memory. The first update after the build swaps
+    /// the new instance in: it catches up to that update's epoch, and readers keep their place, sent
+    /// only the keys whose rows differ. Until then the view holds both instances' state. Refused for a
+    /// view that recomputes, which takes a new plan at no extra cost.
+    /// </summary>
+    LowJitter = 1,
+}
+
 /// <summary>
 /// Whether a view may read a source over a database, whose rows change outside the engine's
 /// refreshes (D340, design 65).
@@ -146,9 +192,9 @@ public sealed class ViewOptions<TKey, TRow>
     public ViewRowHash? RowHash { get; init; }
 
     /// <summary>
-    /// The most the view may hold, in bytes: its keyed table, and what it keeps of its reads of
-    /// databases (D340). An update that would hold more fails, and the view keeps its last epoch.
-    /// 64 MB by default.
+    /// The most the view may hold, in bytes: its keyed table, what it keeps of its reads of databases
+    /// (D340), and what incremental maintenance keeps, as <c>StateBytes</c> estimates it. An update that
+    /// would hold more fails, and the view keeps its last epoch. 64 MB by default.
     /// </summary>
     public long StateBudget { get; init; } = 64L << 20;
 
@@ -183,6 +229,59 @@ public sealed class ViewOptions<TKey, TRow>
     public ViewExactness Exactness { get; init; } = ViewExactness.Exact;
 
     /// <summary>
+    /// How the view computes an update (D343): <see cref="ViewMaintenance.Recompute"/>, the default,
+    /// runs the statement in full; <see cref="ViewMaintenance.Incremental"/> computes only what changed.
+    /// </summary>
+    public ViewMaintenance Maintenance { get; init; } = ViewMaintenance.Recompute;
+
+    /// <summary>
+    /// Told of each update that moves the view (design 70 §1): how long it took, the bytes allocated in
+    /// the process meanwhile, whether it computed the view's rows from nothing, the keys it changed,
+    /// and the plan it ran. Null, the default, tells nothing.
+    /// </summary>
+    public IViewCostTracker? Tracker { get; init; }
+
+    /// <summary>
+    /// Asked before a new plan is requested for the view's statement because the numbers it was planned
+    /// on have drifted (design 70 §1): true requests one; false leaves the statement on its plan for now,
+    /// and a later run asks again. So a host vetoes a new plan while it cannot afford the view's move to
+    /// one, and refreshes when it can. Null, the default, requests a plan whenever the numbers drift.
+    /// </summary>
+    /// <remarks>
+    /// Asked by the background run that would plan the statement again: one a refresh that defers its
+    /// planning starts, and one the view asks for while a tenfold drift leaves its statement stale
+    /// (§2). A statement the background cannot plan again is prepared anew for such a drift on the
+    /// update's thread, and asks there. So it must be quick, safe on any thread, and leave the view
+    /// alone. One that throws says not now, and is logged. A change in the shape of a table the
+    /// statement reads requests a plan without asking: the plan the view runs no longer fits. A
+    /// statement keeps one view's: a second view with one over a statement the host prepared is
+    /// refused while the first exists.
+    /// </remarks>
+    public Func<bool>? RefreshQueryPlan { get; init; }
+
+    /// <summary>
+    /// The fraction of the cost of the plan the view runs that a new plan must save to be taken, both
+    /// priced by the planner on the new plan's numbers (design 70 §3). The planner applies it: a plan
+    /// that saves less is held back, never sent, and the statement keeps the plan it runs. 0.25 takes a
+    /// plan that costs at most three quarters of the one the view runs; zero takes any that costs less.
+    /// Null, the default, takes every plan.
+    /// </summary>
+    /// <remarks>
+    /// From zero up to, not including, one; anything else is refused when the view is made. The
+    /// planner keeps the plan the view runs in order to price it; one it no longer keeps, after an
+    /// eviction or a restart, cannot be priced, and the new plan is taken.
+    /// </remarks>
+    public double? PlanImprovementMargin { get; init; }
+
+    /// <summary>
+    /// How an incremental view moves to a plan its statement takes (design 70 §2):
+    /// <see cref="ViewPlanSwap.AtNextUpdate"/>, the default, computes it at the next update;
+    /// <see cref="ViewPlanSwap.LowJitter"/> builds it beside the plan the view runs, and swaps it in once
+    /// built. <see cref="ViewPlanSwap.LowJitter"/> is refused for a view that recomputes.
+    /// </summary>
+    public ViewPlanSwap PlanSwap { get; init; } = ViewPlanSwap.AtNextUpdate;
+
+    /// <summary>
     /// Admit only a host function registered with <c>Immutable()</c>, rather than any function
     /// whose volatility is <c>IMMUTABLE</c>, today's default included.
     /// </summary>
@@ -197,6 +296,22 @@ public sealed class ViewOptions<TKey, TRow>
 
     /// <summary>How the statement is prepared: its parameter types, its pushdown, its options.</summary>
     public PrepareOptions? Prepare { get; init; }
+
+    /// <summary>
+    /// The values the view binds to a statement prepared for a request context's shape, for the life of
+    /// the view (design 74 §3 c). One statement, prepared once from the shape, then serves every
+    /// principal's view, each with its own values, and each update's audit event carries this
+    /// context's purpose and actor. Null, the default, binds nothing: a statement prepared with its
+    /// context's values carries them.
+    /// </summary>
+    /// <remarks>
+    /// The values must fit the statement's shape as an execution's must: the same names, kinds and
+    /// types, and for a statement that folded some names (a tenant's plan), the same values for those.
+    /// A view whose values do not fit, or that gives none to a statement prepared for a shape, is
+    /// refused when it is made. A view made from a statement's text prepares it with no context, so it
+    /// refuses one too.
+    /// </remarks>
+    public RequestContext? Context { get; init; }
 }
 
 /// <summary>A standing view refused, or failed, saying what to do (D339).</summary>

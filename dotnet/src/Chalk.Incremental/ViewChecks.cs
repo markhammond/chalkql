@@ -159,51 +159,94 @@ internal static class ViewChecks
 
     /// <summary>
     /// A keyed result has no order, so a statement that ends in an <c>ORDER BY</c> without a
-    /// <c>LIMIT</c> is refused; and a <c>LIMIT</c> is admitted only where its order is total — the
-    /// statement's last step, ordered by every key column — since otherwise the input's order would
-    /// choose which tied rows it keeps.
+    /// <c>LIMIT</c> is refused. A <c>LIMIT</c> is admitted where its order is total, and only as the
+    /// statement's last step, through the projections above it (D360, <c>docs/design/73-what-a-limit-keeps.md</c>):
+    /// a <c>TOPN</c>, or a <c>FETCH</c> whose recorded order is the statement's <c>ORDER BY</c>,
+    /// ordering by every key column, since otherwise the input's order would choose which tied rows
+    /// it keeps. A query pushed to a database is judged by its own last step.
     /// </summary>
     private static void Order(Rel root, IReadOnlyList<string> key, int[] keyColumns)
     {
-        var last = root;
-        while (last.KindCase == Rel.KindOneofCase.Project)
+        var (last, keys) = Beneath(root, keyColumns);
+        if (last.KindCase == Rel.KindOneofCase.RemoteQuery && last.RemoteQuery.PushedPlan is { } pushed)
         {
-            last = last.Project.Input;
+            (last, keys) = Beneath(pushed, keys);
         }
 
-        if (last.KindCase == Rel.KindOneofCase.Sort)
+        switch (last.KindCase)
         {
-            throw new StandingViewException(
-                ChalkErrorCodes.UnsupportedInView,
-                "The view's statement ends in an ORDER BY with no LIMIT, and a view's rows have no "
-                + "order: a reader is sent them by key. Drop the ORDER BY.");
+            case Rel.KindOneofCase.Sort:
+                throw new StandingViewException(
+                    ChalkErrorCodes.UnsupportedInView,
+                    "The view's statement ends in an ORDER BY with no LIMIT, and a view's rows have no "
+                    + "order: a reader is sent them by key. Drop the ORDER BY.");
+            case Rel.KindOneofCase.Fetch when last.Fetch.Order.Count == 0:
+                throw new StandingViewException(
+                    ChalkErrorCodes.UnsupportedInView,
+                    "The view's statement takes a LIMIT or OFFSET with no ORDER BY, so the input's "
+                    + "order would choose its rows. Order by the view's key, or drop the LIMIT.");
+            case Rel.KindOneofCase.Fetch:
+                Total(last.Fetch.Order, keys, key);
+                break;
+            case Rel.KindOneofCase.TopN:
+                Total(last.TopN.Fields, keys, key);
+                break;
         }
 
         ViewPlan.Walk(root, message =>
         {
-            if (message is not Rel rel)
+            if (message is Rel { KindCase: Rel.KindOneofCase.Fetch or Rel.KindOneofCase.TopN } rel
+                && !ReferenceEquals(rel, last))
             {
-                return;
-            }
-
-            switch (rel.KindCase)
-            {
-                case Rel.KindOneofCase.Fetch:
-                    throw new StandingViewException(
-                        ChalkErrorCodes.UnsupportedInView,
-                        "The view's statement takes a LIMIT or OFFSET with no ORDER BY, so the input's "
-                        + "order would choose its rows. Order by the view's key, or drop the LIMIT.");
-                case Rel.KindOneofCase.TopN
-                    when !ReferenceEquals(rel, root)
-                        || !keyColumns.All(column => rel.TopN.Fields.Any(
-                            field => field.Expr.FieldRef is { } reference && (int)reference.Index == column)):
-                    throw new StandingViewException(
-                        ChalkErrorCodes.UnsupportedInView,
-                        $"The view's statement takes a LIMIT whose ORDER BY does not order by the view's "
-                        + $"key ({string.Join(", ", key)}) as its last step, so ties would let the input's "
-                        + "order choose its rows. Order by every key column too, or drop the LIMIT.");
+                throw new StandingViewException(
+                    ChalkErrorCodes.UnsupportedInView,
+                    "The view's statement takes a LIMIT before its last step, and a view keeps a LIMIT "
+                    + "only as its statement's last step, where the rows it keeps are the view's. Move "
+                    + "the LIMIT to the end of the statement, or drop it.");
             }
         });
+    }
+
+    /// <summary>
+    /// The first step beneath <paramref name="rel"/>'s projections, and where each key column comes
+    /// from there: its position, or -1 where a projection computes it rather than passes it through.
+    /// </summary>
+    private static (Rel Last, int[] Keys) Beneath(Rel rel, int[] keyColumns)
+    {
+        var keys = keyColumns.ToArray();
+        while (rel.KindCase == Rel.KindOneofCase.Project)
+        {
+            var exprs = rel.Project.Exprs;
+            for (var i = 0; i < keys.Length; i++)
+            {
+                keys[i] = keys[i] >= 0
+                    && keys[i] < exprs.Count
+                    && exprs[keys[i]].KindCase == Expr.KindOneofCase.FieldRef
+                        ? (int)exprs[keys[i]].FieldRef.Index
+                        : -1;
+            }
+
+            rel = rel.Project.Input;
+        }
+
+        return (rel, keys);
+    }
+
+    /// <summary>A LIMIT's order is total where it orders by every key column: ties are then the same row.</summary>
+    private static void Total(IReadOnlyList<SortField> order, int[] keys, IReadOnlyList<string> key)
+    {
+        var ordered = order
+            .Where(field => field.Expr.KindCase == Expr.KindOneofCase.FieldRef)
+            .Select(field => (int)field.Expr.FieldRef.Index)
+            .ToHashSet();
+        if (!keys.All(column => column >= 0 && ordered.Contains(column)))
+        {
+            throw new StandingViewException(
+                ChalkErrorCodes.UnsupportedInView,
+                $"The view's statement takes a LIMIT whose ORDER BY does not order by the view's key "
+                + $"({string.Join(", ", key)}), so ties would let the input's order choose its rows. "
+                + "Order by every key column too, or drop the LIMIT.");
+        }
     }
 
     /// <summary>

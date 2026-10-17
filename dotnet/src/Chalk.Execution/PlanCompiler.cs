@@ -153,8 +153,32 @@ internal static class PlanCompiler
         return compiled;
     }
 
+    /// <summary>
+    /// A compilation a maintained plan builds its operators through (D343,
+    /// <c>docs/design/68-incremental-maintenance.md</c> §1): the ordinary operators for the nodes it
+    /// runs as they are, and its own, through <see cref="IPlanCompilation.Substitute"/>, for the nodes
+    /// it keeps state for.
+    /// </summary>
+    internal static IPlanCompilation Begin(
+        Plan plan,
+        CatalogContext catalog,
+        IReadOnlyDictionary<string, ISourceRuntime> sourcesBySourceId,
+        ExecutionSettings settings)
+    {
+        var boundScalars = Chalk.Ir.BoundScalars.Of(plan);
+        var boundSlots = BoundSlots.Of(boundScalars, plan.ParameterTypes.Count);
+        var compilation = new Compilation(
+            catalog,
+            sourcesBySourceId,
+            settings.Functions,
+            boundSlots,
+            settings.ForceBufferedWindows);
+        compilation.Share(plan.Shared);
+        return compilation;
+    }
+
     /// <summary>Compilation state: the catalog, the sources and the one expression compiler.</summary>
-    private sealed class Compilation
+    private sealed class Compilation : IPlanCompilation
     {
         private readonly CatalogContext _catalog;
         private readonly IReadOnlyDictionary<string, ISourceRuntime> _sources;
@@ -262,9 +286,20 @@ internal static class PlanCompiler
         /// </summary>
         private Materialisation? _materialisation;
 
+        /// <inheritdoc />
+        public Func<Rel, string, OperatorFactory?>? Substitute { get; set; }
+
+        /// <inheritdoc />
+        public ExpressionCompiler ExpressionsAt(string path) => Expressions(path);
+
         public OperatorFactory Node(Rel rel, string parentPath)
         {
             var path = $"{parentPath}/{rel.KindCase}";
+            if (Substitute?.Invoke(rel, path) is { } substituted)
+            {
+                return substituted;
+            }
+
             if (!Registry.TryGetValue(rel.KindCase, out var factory))
             {
                 throw new UnsupportedFeatureException(
@@ -1061,6 +1096,19 @@ internal static class PlanCompiler
             return context => new TopNOperator(
                 context, path, schema, types, input(context), ordering, offset, count);
         }
+
+        public (RowBound Offset, RowBound? Count) Bounds(Rel rel, string path) => rel.KindCase switch
+        {
+            Rel.KindOneofCase.TopN => (
+                Bound(rel.TopN.OffsetParam, rel.TopN.OffsetParam is not null, rel.TopN.Offset, rel.TopN.Offset != 0, "OFFSET", path),
+                Bound(rel.TopN.CountParam, rel.TopN.CountParam is not null, rel.TopN.Count, rel.TopN.Count != 0, "LIMIT", path)),
+            Rel.KindOneofCase.Fetch => (
+                Bound(rel.Fetch.OffsetParam, rel.Fetch.OffsetParam is not null, rel.Fetch.Offset, rel.Fetch.Offset != 0, "OFFSET", path),
+                rel.Fetch.CountParam is not null || rel.Fetch.HasCount
+                    ? Bound(rel.Fetch.CountParam, rel.Fetch.CountParam is not null, rel.Fetch.Count, rel.Fetch.HasCount, "LIMIT", path)
+                    : null),
+            _ => throw new InvalidPlanException("I-IR-5", path, $"{rel.KindCase} has no LIMIT bounds"),
+        };
 
         /// <summary>
         /// A <c>LIMIT</c> or <c>OFFSET</c> bound: the parameter when the plan carries one, else the
@@ -1972,4 +2020,26 @@ internal static class IrBuilders
 {
     public static Expr FieldRef(int index, Ir.Type type) =>
         new() { Type = type, FieldRef = new FieldRef { Index = (uint)index } };
+}
+
+/// <summary>A plan's compilation, opened to a maintained plan (D343): its nodes, its expressions, and a hook.</summary>
+internal interface IPlanCompilation
+{
+    /// <summary>
+    /// Asked first for every node: a factory of the caller's own to build in its place, or null for the
+    /// ordinary one.
+    /// </summary>
+    Func<Rel, string, OperatorFactory?>? Substitute { get; set; }
+
+    /// <summary>The factory for <paramref name="rel"/>, under <paramref name="parentPath"/>.</summary>
+    OperatorFactory Node(Rel rel, string parentPath);
+
+    /// <summary>The expression compiler of the operator at <paramref name="path"/>.</summary>
+    ExpressionCompiler ExpressionsAt(string path);
+
+    /// <summary>
+    /// A <c>TOPN</c>'s or a <c>FETCH</c>'s bounds as an execution reads them (D285): the offset, and
+    /// the count or null for none, each the parameter the plan carries or the number it wrote down.
+    /// </summary>
+    (RowBound Offset, RowBound? Count) Bounds(Rel rel, string path);
 }

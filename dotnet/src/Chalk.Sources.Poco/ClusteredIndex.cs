@@ -69,10 +69,12 @@ public sealed class ClusteredIndex<T> : IPositionalPocoIndex<T>, IReversiblePoco
             previous?._keys, appendedFrom, [.. descriptor.Columns.Select(c => columns[c])]);
 
         var covered = CoveredColumns(descriptor, columns.Length);
+        // Appended in key order, the new rows' positions are their own, in the order they came: the copy
+        // takes them as they are, after the rows it holds.
         _copy = previous is not null && appendedFrom > 0 && _keys.ExtendedInOrder
             ? ClusteredColumnCopy.Append(
-                columns, covered, rows, _keys.Permutation, previous._copy, appendedFrom)
-            : ClusteredColumnCopy.Extract(columns, covered, rows, _keys.Permutation);
+                columns, covered, rows, permutation: null, previous._copy, appendedFrom)
+            : ClusteredColumnCopy.Extract(columns, covered, rows, _keys.Positions?.ToArray());
     }
 
     /// <inheritdoc />
@@ -137,6 +139,9 @@ public sealed class ClusteredIndex<T> : IPositionalPocoIndex<T>, IReversiblePoco
     /// <summary>Whether the rows this index was built over are still the ones the table reports.</summary>
     internal bool Describes(IReadOnlyList<T> rows) =>
         _keys.Describes(rows);
+
+    /// <summary>The order the copy is in: what a positional lookup walks.</summary>
+    internal PermutationIndex<T> Keys => _keys;
 
     /// <inheritdoc cref="PermutationIndex{T}.ExtendedInOrder"/>
     internal bool ExtendedInOrder =>

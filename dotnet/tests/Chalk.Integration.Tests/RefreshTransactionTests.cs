@@ -224,6 +224,56 @@ public sealed class RefreshTransactionTests(SharedSidecar sidecar)
     }
 
     /// <summary>
+    /// The form that passes its plan a state records the same transaction: a <c>static</c> lambda that
+    /// reads its sources from the state replaces both tables under one epoch. A plan that throws, or
+    /// none, is refused before anything changes.
+    /// </summary>
+    [Fact]
+    public async Task A_transaction_reads_its_sources_from_a_state()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+
+        var bars = Bars();
+        var symbols = Symbols();
+        await using var engine = await EngineAsync(bars, symbols);
+
+        var ct = TestContext.Current.CancellationToken;
+        var prepared = await engine.PrepareAsync(
+            "SELECT b.seq, s.sector FROM mem.bars AS b JOIN book.symbols AS s "
+            + "ON s.ticker = b.symbol ORDER BY b.seq");
+
+        var epoch = await engine.RefreshAsync(
+            (bars, symbols),
+            static (refresh, sources) =>
+            {
+                refresh.Replace(sources.bars, "bars", SecondBars);
+                refresh.Replace(sources.symbols, "symbols", SecondSymbols);
+            },
+            ct);
+
+        Assert.Equal(2, epoch);
+        var replaced = await RowsAsync(engine, prepared);
+        Assert.Equal([4, 5], replaced);
+
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await engine.RefreshAsync(bars, (Action<RefreshBuilder, PocoSource>)null!, ct));
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await engine.RefreshAsync(
+                bars,
+                static (refresh, source) =>
+                {
+                    refresh.Replace(source, "bars", FirstBars);
+                    throw new InvalidOperationException("the host's plan failed");
+                },
+                ct));
+
+        Assert.Equal("the host's plan failed", thrown.Message);
+        Assert.Equal(2, engine.Catalog.Epoch);
+        var kept = await RowsAsync(engine, prepared);
+        Assert.Equal([4, 5], kept);
+    }
+
+    /// <summary>
     /// The simple form re-reads every source's registrations and moves the epoch once, and a
     /// prepared query survives it for the same reason a transaction's rows do.
     /// </summary>

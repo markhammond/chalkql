@@ -73,3 +73,32 @@ report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:S
 2|1|northwind reply CANARY-CONTENT-02|<null>
 3|2|northwind second thread CANARY-CONTENT-03|<null>
 
+-- u16-a-manager-in-two-orgs
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+1|1|northwind opening CANARY-CONTENT-01|01/01/2024 09:00:00
+2|1|northwind reply CANARY-CONTENT-02|<null>
+3|2|northwind second thread CANARY-CONTENT-03|<null>
+4|3|southerly opening CANARY-CONTENT-04|02/02/2024 10:00:00
+
+-- u17-an-agent-in-two-orgs
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+1|1|northwind|01/01/2024 09:00:00
+2|1|northwind|<null>
+3|2|northwind|<null>
+4|3|southerly|02/02/2024 10:00:00
+
+-- u18-a-keeper
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+1|1|<null>|01/01/2024 09:00:00
+2|1|<null>|<null>
+3|2|<null>|<null>
+
+-- u19-a-vendor-in-a-region
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+
+-- u20-a-picker
+report id:Full, thread_id:Full, content:PerRow, first_viewed_at:Full, messages:Some, threads:Some
+1|1|<null>|01/01/2024 09:00:00
+2|1|<null>|<null>
+3|2|<null>|<null>
+

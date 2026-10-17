@@ -242,6 +242,18 @@ table's own row or along the same path.
 
 **What to do:** Declare the kind on the table, or hold the grant unconfined.
 
+### ParentVisibilityLeavesRoleOut
+
+A path takes a kind from a parent, and the parent's visibility rule leaves out a role the table
+admits. By default the role then reads nothing along that path. The policy is refused where that
+leaves the role with no way into the table at all, and, in a policy that requires explicit parent
+visibility, wherever the path does not name the role.
+
+**What to do:** If the role should read the table by the parent's value of the kind, as a marking,
+declare `.ExemptFromParentVisibility(role)` on the path. If the parent's rule should keep it out,
+remove the role from the table's visibility rule (giving the table a rule of its own if it has
+none), or, where the policy requires it, declare `.BoundByParentVisibility(role)` on the path.
+
 ## Principals and grants
 
 Raised when a principal's grants are bound to a policy, before the statement is planned.
@@ -592,10 +604,14 @@ takes a `LIMIT` whose order is not total — not its last step, or not ordered b
 so the input's order would choose which tied rows it keeps. Or, in a view that reads databases
 when they are refreshed, a database read takes values from the rest of the statement — a lookup,
 broadcast or adaptive join, or a scan pruned by keys — so it could not be kept between refreshes.
+Or a view asks for incremental maintenance, and its statement has something maintenance does not
+keep: the message names it, and where it is in the plan.
 
 **What to do:** Drop the `ORDER BY`; order a `LIMIT` by every key column, as the statement's last
 step, or drop it. For a database read, let the join be local: drop the rule in
-`ViewOptions.Prepare.JoinPolicy` that asks otherwise for the pair of sources.
+`ViewOptions.Prepare.JoinPolicy` that asks otherwise for the pair of sources. For incremental
+maintenance, make the view with `ViewMaintenance.Recompute`, or write the statement without what
+the message names.
 
 ### SourceOutsideEpochs
 

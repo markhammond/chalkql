@@ -104,6 +104,79 @@ class DisclosureColumnsTest {
   }
 
   @Test
+  void a_union_all_keeps_each_rows_disclosure() throws Exception {
+    // Every row of a UNION ALL is one input's row, so its sibling is what that row disclosed, not the
+    // column's label for the whole result.
+    PlannerPipeline.Result result =
+        plan(
+            "SELECT id, first_name FROM members UNION ALL SELECT id, first_name FROM members",
+            TenancyCatalogs.managerAndAgent(1, 2));
+    assertThat(names(result))
+        .containsExactly("id", "id__disclosure", "first_name", "first_name__disclosure");
+    assertThat(result.physicalPlanText())
+        .contains("'FULL'")
+        .contains("'MASKED'")
+        // A carried sibling maps the row's ordinal to its name; the fallback is a constant label.
+        .doesNotContain("['PER_ROW'");
+  }
+
+  @Test
+  void a_list_past_the_fold_ceiling_keeps_each_rows_disclosure() throws Exception {
+    // Past fold_max_rows the manager's list stays a relation, and inside the row predicate's OR the
+    // leaf is split over it into a semi-join branch and an anti-join branch under a UNION ALL (F36).
+    RequestContext context =
+        TenancyCatalogs.managerAndAgentLists(new int[] {1, 2}, new int[] {3}).toBuilder()
+            .setFoldMaxRows(1)
+            .build();
+    PlannerPipeline.Result result = plan("SELECT id, first_name FROM members", context);
+    assertThat(names(result))
+        .containsExactly("id", "id__disclosure", "first_name", "first_name__disclosure");
+    assertThat(result.physicalPlanText())
+        .contains("'FULL'")
+        .contains("'MASKED'")
+        // A carried sibling maps the row's ordinal to its name; the fallback is a constant label.
+        .doesNotContain("['PER_ROW'");
+  }
+
+  @Test
+  void a_column_behind_an_aggregate_keeps_its_sibling_as_a_constant() throws Exception {
+    // A constant label already says what every group discloses, so the key's sibling is the
+    // report's constant label and nothing is carried; a count of rows reads no entitled column and
+    // has none.
+    PlannerPipeline.Result result =
+        plan("SELECT id, COUNT(*) AS n FROM members GROUP BY id", TenancyCatalogs.agent(1));
+    assertThat(names(result)).containsExactly("id", "id__disclosure", "n");
+  }
+
+  /**
+   * A column decided row by row keeps its group's disclosure through an aggregate (F224, D363): the
+   * least of what the group's rows disclosed, carried as a MAX of their ordinals. A manager in O1 and
+   * an agent in O2 reads first names in full in O1 and masked in O2, so grouped by organisation, each
+   * group's sibling is its rows' own name rather than the statement's PER_ROW.
+   */
+  @Test
+  void a_group_keeps_the_least_disclosure_of_its_rows() throws Exception {
+    PlannerPipeline.Result result =
+        plan(
+            "SELECT org_id, MIN(first_name) AS earliest FROM members GROUP BY org_id",
+            TenancyCatalogs.managerAndAgent(1, 2));
+    assertThat(names(result))
+        .containsExactly("org_id", "org_id__disclosure", "earliest", "earliest__disclosure");
+    assertThat(result.columnDisclosures())
+        .containsExactly(
+            ReportedDisclosure.REPORTED_DISCLOSURE_FULL,
+            ReportedDisclosure.REPORTED_DISCLOSURE_FULL,
+            ReportedDisclosure.REPORTED_DISCLOSURE_PER_ROW,
+            ReportedDisclosure.REPORTED_DISCLOSURE_FULL);
+    assertThat(result.physicalPlanText())
+        .contains("MAX(")
+        .contains("'FULL'")
+        .contains("'MASKED'")
+        // The carried sibling maps the group's ordinal to its name: no constant PER_ROW fallback.
+        .doesNotContain("['PER_ROW'");
+  }
+
+  @Test
   void a_column_of_an_unentitled_table_has_no_sibling() throws Exception {
     PlannerPipeline.Result result = plan("SELECT symbol FROM symbols", TenancyCatalogs.agent(1));
     assertThat(names(result)).containsExactly("symbol");

@@ -1,6 +1,7 @@
 using Chalk.Entitlements;
 using Chalk.Ir;
 using Disclosure = Chalk.Entitlements.Disclosure;
+using StepDirection = Chalk.Entitlements.StepDirection;
 
 namespace Chalk.Catalog.Tests;
 
@@ -13,13 +14,24 @@ public sealed class ParentVisibilityTests
 {
     private static ColumnDescriptor Col(string name, ChalkType type) => new() { Name = name, Type = type };
 
-    private static TableDescriptor Threads(TableEntitlementDescriptor? entitlement) => new()
+    private static TableDescriptor Threads(TableEntitlementDescriptor? entitlement, bool orgKey = false) => new()
     {
         Name = "threads",
         RowCount = 20,
         Entitlement = entitlement,
         UniqueKeys = [new UniqueKeyDescriptor { Columns = [0] }],
+        ForeignKeys = orgKey
+            ? [new ForeignKeyDescriptor { Name = "fk_thread_org", Columns = [1], ParentTable = "orgs", ParentColumns = [0] }]
+            : [],
         Columns = [Col("id", ChalkType.Int32()), Col("org_id", ChalkType.Int32())],
+    };
+
+    private static TableDescriptor Orgs() => new()
+    {
+        Name = "orgs",
+        RowCount = 3,
+        UniqueKeys = [new UniqueKeyDescriptor { Columns = [0] }],
+        Columns = [Col("id", ChalkType.Int32()), Col("name", ChalkType.String())],
     };
 
     private static TableDescriptor Messages(TableEntitlementDescriptor entitlement) => new()
@@ -168,6 +180,39 @@ public sealed class ParentVisibilityTests
             () => CatalogValidator.Validate(Example(threads: unrestricted)));
 
         Assert.Contains("restricts no row", refusal.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A parent whose rows a path restricts, and nothing else, is restricted: the planner joins the
+    /// path into the parent's entitled scan, which is what a child's Through reads.
+    /// </summary>
+    [Fact]
+    public void A_parent_restricted_only_along_a_path_validates()
+    {
+        var alongAPath = new TableEntitlementDescriptor
+        {
+            Inherited =
+            [
+                new InheritedVisibilityDescriptor
+                {
+                    Kind = "org",
+                    Steps =
+                    [
+                        new VisibilityStepDescriptor
+                        {
+                            Table = "orgs",
+                            FromColumn = 1,
+                            ToColumn = 0,
+                            Direction = StepDirection.ToParent,
+                        },
+                    ],
+                    EndpointPredicate = "id IN (@ctx.manager_orgs)",
+                    EndpointTable = "orgs",
+                },
+            ],
+        };
+
+        CatalogValidator.Validate(Catalog(Orgs(), Threads(alongAPath, orgKey: true), Messages(Through())));
     }
 
     [Fact]

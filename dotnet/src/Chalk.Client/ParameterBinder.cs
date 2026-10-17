@@ -370,7 +370,8 @@ internal static class ParameterBinder
             return [];
         }
 
-        var elements = new List<object?>?[parameters.Count];
+        // A list parameter's elements, made only for a statement that has one.
+        List<object?>?[]? elements = null;
         var flat = new object?[slots.Count];
 
         for (var i = 0; i < slots.Count; i++)
@@ -392,6 +393,7 @@ internal static class ParameterBinder
                     break;
 
                 default:
+                    elements ??= new List<object?>?[parameters.Count];
                     elements[slot.ParameterIndex] ??=
                         [.. ((IEnumerable)values[slot.ParameterIndex]!).Cast<object?>()];
                     value = elements[slot.ParameterIndex]![slot.ElementIndex];
@@ -416,11 +418,11 @@ internal static class ParameterBinder
             return type.Nullable
                 ? null
                 : throw new ParameterBindingException(
-                    $"Parameter {parameter}",
+                    parameter.Subject,
                     $"NULL was bound to parameter {parameter}, whose type {type} is not nullable. "
                     + "Bind a value, or declare the parameter's type nullable.");
         }
 
-        return binding.Bind(value, type, $"Parameter {parameter}");
+        return binding.Bind(value, type, parameter.Subject);
     }
 }

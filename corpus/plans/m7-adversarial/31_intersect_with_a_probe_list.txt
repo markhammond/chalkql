@@ -43,3 +43,18 @@ report n:PerRow, members:None
 -- u15-a-vendor-and-an-org
 report n:Full, members:Some
 
+-- u16-a-manager-in-two-orgs
+report n:Full, members:Some
+
+-- u17-an-agent-in-two-orgs
+F64 InvalidPlanException: Invalid plan at root/Sort/SetOp.inputs[0]: every SetOp input has the output row type up to nullability, but field 0 is STRING? against an output field of STRING (invariant I-IR-4).
+
+-- u18-a-keeper
+F64 InvalidPlanException: Invalid plan at root/Sort/SetOp.inputs[0]: every SetOp input has the output row type up to nullability, but field 0 is STRING? against an output field of STRING (invariant I-IR-4).
+
+-- u19-a-vendor-in-a-region
+report n:PerRow, members:None
+
+-- u20-a-picker
+F64 InvalidPlanException: Invalid plan at root/Sort/SetOp.inputs[0]: every SetOp input has the output row type up to nullability, but field 0 is STRING? against an output field of STRING (invariant I-IR-4).
+

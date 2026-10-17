@@ -336,6 +336,7 @@ public sealed class TenancyAdoFixture : IDisposable
                 [
                     new ColumnDescriptor { Name = "id", Type = ChalkType.Int32() },
                     new ColumnDescriptor { Name = "name", Type = ChalkType.String() },
+                    new ColumnDescriptor { Name = "region_id", Type = ChalkType.Int32() },
                 ],
                 configure: t => t.UniqueKey("id"));
             builder.AddTable(
@@ -578,7 +579,8 @@ public sealed class TenancyAdoFixture : IDisposable
         {
             Execute(
                 connection,
-                $"CREATE TABLE \"vendors\" (\"id\" INTEGER NOT NULL PRIMARY KEY, \"name\" {text} NOT NULL)");
+                $"CREATE TABLE \"vendors\" (\"id\" INTEGER NOT NULL PRIMARY KEY, \"name\" {text} NOT NULL, "
+                + "\"region_id\" INTEGER NOT NULL)");
             Execute(
                 connection,
                 "CREATE TABLE \"items\" (\"id\" INTEGER NOT NULL PRIMARY KEY, "
@@ -589,7 +591,7 @@ public sealed class TenancyAdoFixture : IDisposable
                     connection,
                     string.Create(
                         CultureInfo.InvariantCulture,
-                        $"INSERT INTO \"vendors\" VALUES ({vendor.Id}, {Literal(vendor.Name)})"));
+                        $"INSERT INTO \"vendors\" VALUES ({vendor.Id}, {Literal(vendor.Name)}, {vendor.RegionId})"));
             }
 
             foreach (var item in TenancyFixture.Items)

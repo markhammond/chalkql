@@ -77,6 +77,47 @@ public sealed class PocoDeferredStatisticsTests
         Assert.Equal(7L, QtyMax(source));
     }
 
+    /// <summary>
+    /// A deferred append that leaves the table within its growth policy is not due: a background run
+    /// computes nothing for it, as a refresh that did not defer would have computed nothing. Once the
+    /// table is a tenth larger than the statistics it carries, it is due (D351).
+    /// </summary>
+    [Fact]
+    public async Task A_deferral_within_the_growth_policy_is_not_due()
+    {
+        var source = Source(Ticks(1, 100, qty: 5));
+
+        await AppendAsync(source, Ticks(101, 9, qty: 50), StatisticsRefresh.Defer);
+        Assert.False(Background(source).StatisticsDue);
+        Assert.Empty(Background(source).ComputeDeferredStatistics(TestContext.Current.CancellationToken));
+
+        await AppendAsync(source, Ticks(110, 1, qty: 50), StatisticsRefresh.Defer);
+        Assert.True(Background(source).StatisticsDue);
+        var computed = Assert.Single(Background(source).ComputeDeferredStatistics(TestContext.Current.CancellationToken));
+        Assert.Equal(110, computed.RowCount);
+
+        Background(source).AdmitStatistics([computed]);
+        Assert.False(Background(source).StatisticsDue);
+        Assert.Equal(50L, QtyMax(source));
+    }
+
+    /// <summary>Under a policy of zero every deferral is due, however few the rows.</summary>
+    [Fact]
+    public async Task Under_a_policy_of_zero_every_deferral_is_due()
+    {
+        var source = new PocoSourceBuilder("mem")
+            .AddTable(
+                "ticks",
+                Ticks(1, 100, qty: 5),
+                t => t.Statistics(Chalk.Ir.StatisticsLevel.Basic, refreshWhenGrownBy: 0))
+            .Build();
+
+        await AppendAsync(source, Ticks(101, 1, qty: 50), StatisticsRefresh.Defer);
+
+        Assert.True(Background(source).StatisticsDue);
+        Assert.Single(Background(source).ComputeDeferredStatistics(TestContext.Current.CancellationToken));
+    }
+
     // ---- the scaffolding ----
 
     private static PocoSource Source(IReadOnlyList<Tick> rows) =>

@@ -114,6 +114,13 @@ public static class ChalkErrorCodes
     /// <summary>A dimension the table cannot be confined by.</summary>
     public const string ConfinementUnavailable = nameof(ConfinementUnavailable);
 
+    /// <summary>
+    /// A parent's visibility rule leaves out a role the table admits, where the policy has to say
+    /// what that means: the role would reach the table along no route, or the policy requires every
+    /// path to name such a role exempt or bound.
+    /// </summary>
+    public const string ParentVisibilityLeavesRoleOut = nameof(ParentVisibilityLeavesRoleOut);
+
     // Principals and grants.
 
     /// <summary>

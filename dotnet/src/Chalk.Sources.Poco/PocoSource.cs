@@ -18,7 +18,7 @@ namespace Chalk.Sources.Poco;
 /// </summary>
 public sealed class PocoSource
     : ISourceRuntime, IColumnarBatchSource, IRefreshableSource, IPinnableSource, IPreparableSource,
-        IDeferredStatisticsSource
+        IDeferredStatisticsSource, ITrackedSource, IColumnarSeekSource
 {
     private readonly PocoTableRuntime[] _tables;
     private readonly string _zone;
@@ -223,6 +223,42 @@ public sealed class PocoSource
     }
 
     /// <inheritdoc />
+    long ITrackedSource.AppendedFrom(string table, object earlier, object later) =>
+        Require(table).AppendedFrom(earlier, later);
+
+    /// <inheritdoc />
+    object ITrackedSource.Retain(string table, object pinned) => Require(table).Retain(pinned);
+
+    /// <inheritdoc />
+    IColumnarScan ITrackedSource.ScanFrom(
+        string table, object pinned, long from, ScanRequest request, ScanContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+        RequireBatchSize(request.BatchSize);
+        return Require(table).ScanFrom(SourceId, pinned, from, request, context);
+    }
+
+    /// <inheritdoc />
+    TableDiff? ITrackedSource.DiffFrom(string table, object earlier, object later) =>
+        Require(table).DiffFrom(earlier, later);
+
+    /// <inheritdoc />
+    IColumnarScan ITrackedSource.ScanAt(
+        string table, object pinned, int[] positions, ScanRequest request, ScanContext context)
+    {
+        ArgumentNullException.ThrowIfNull(positions);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+        RequireBatchSize(request.BatchSize);
+        return Require(table).ScanAt(SourceId, pinned, positions, request, context);
+    }
+
+    /// <inheritdoc />
+    bool ITrackedSource.OrdersTiesByPlace(string table, string index) =>
+        Require(table).OrdersTiesByPlace(index);
+
+    /// <inheritdoc />
     /// <remarks>
     /// One refresh says once what each table becomes. A table takes rows given whole, appended or
     /// prepared before the refresh (design 69 §3), or upserts and deletes by key, and beside any of
@@ -330,7 +366,7 @@ public sealed class PocoSource
     /// refreshes, and its commit is what checks that the table was not replaced meanwhile.
     /// </remarks>
     ValueTask<IPreparedReplacement> IPreparableSource.PrepareReplaceAsync(
-        string table, Type rowType, object rows, int through, CancellationToken ct)
+        string table, Type rowType, object rows, int through, int? owned, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(rows);
         ct.ThrowIfCancellationRequested();
@@ -346,7 +382,7 @@ public sealed class PocoSource
                 + "A replacement replaces a table's rows, not its shape.");
         }
 
-        return ValueTask.FromResult(runtime.PrepareReplacement(SourceId, rows, through));
+        return ValueTask.FromResult(runtime.PrepareReplacement(SourceId, rows, through, owned));
     }
 
     /// <inheritdoc />
@@ -363,6 +399,23 @@ public sealed class PocoSource
         }
 
         return computed;
+    }
+
+    /// <inheritdoc />
+    bool IDeferredStatisticsSource.StatisticsDue
+    {
+        get
+        {
+            foreach (var table in _tables)
+            {
+                if (table.StatisticsDue)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 
     /// <inheritdoc />
@@ -402,16 +455,42 @@ public sealed class PocoSource
     /// refresh moves them. Statistics are computed once per snapshot, so calling this repeatedly
     /// costs nothing.
     /// </remarks>
-    public SchemaDescriptor DescribeSchema() => new()
+    /// <remarks>
+    /// A schema whose tables all describe as the very descriptors they did is the schema described
+    /// last, the same object, which is how the engine sees that nothing here moved (F205).
+    /// </remarks>
+    public SchemaDescriptor DescribeSchema()
     {
-        SourceId = SourceId,
-        Name = SchemaName,
-        Zone = _zone,
-        Kind = SourceKind.Local,
-        Capabilities = SourceCapabilities.None,
-        Tables = Array.ConvertAll(_tables, t => t.Describe()),
-        Functions = _functions,
-    };
+        var last = Volatile.Read(ref _described);
+        var tables = new TableDescriptor[_tables.Length];
+        var same = last is not null;
+        for (var i = 0; i < _tables.Length; i++)
+        {
+            tables[i] = _tables[i].Describe();
+            same = same && ReferenceEquals(tables[i], last!.Tables[i]);
+        }
+
+        if (same)
+        {
+            return last!;
+        }
+
+        var described = new SchemaDescriptor
+        {
+            SourceId = SourceId,
+            Name = SchemaName,
+            Zone = _zone,
+            Kind = SourceKind.Local,
+            Capabilities = SourceCapabilities.None,
+            Tables = tables,
+            Functions = _functions,
+        };
+        Volatile.Write(ref _described, described);
+        return described;
+    }
+
+    /// <summary>The schema <see cref="DescribeSchema"/> last gave.</summary>
+    private SchemaDescriptor? _described;
 
     /// <summary>
     /// A declared index by name, for a host that wants to inspect one or run
@@ -505,14 +584,33 @@ public sealed class PocoSource
         return Require(request.Table).ColumnarLookup(SourceId, request, context);
     }
 
-    private PocoTableRuntime Require(string name) =>
-        _tables.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))
-        ?? throw new SourceContractException(
+    /// <inheritdoc />
+    IColumnarScan? IColumnarSeekSource.ColumnarSeek(ColumnarSeekRequest request, ScanContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+        RequireBatchSize(request.BatchSize);
+        return Require(request.Table).ColumnarSeek(SourceId, request, context);
+    }
+
+    /// <summary>The table named <paramref name="name"/>: found by a loop, as every scan and seek asks, with nothing allocated.</summary>
+    private PocoTableRuntime Require(string name)
+    {
+        foreach (var table in _tables)
+        {
+            if (string.Equals(table.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return table;
+            }
+        }
+
+        throw new SourceContractException(
             ChalkErrorCodes.SourceContract,
             SourceId,
             name,
             $"there is no such table in schema '{SchemaName}'. Known tables: "
             + string.Join(", ", _tables.Select(t => t.Name)) + ".");
+    }
 
     private static void RequireBatchSize(int batchSize)
     {
@@ -569,6 +667,35 @@ internal abstract class PocoTableRuntime
     public abstract void Unpin(object pinned);
 
     /// <summary>
+    /// Where <paramref name="later"/> continues <paramref name="earlier"/> (D343): the first row an
+    /// append added after it, or -1 when the table was rewritten in between.
+    /// </summary>
+    public abstract long AppendedFrom(object earlier, object later);
+
+    /// <summary>Another reader's reference on a snapshot the caller already holds.</summary>
+    public abstract object Retain(object pinned);
+
+    /// <summary>A scan of a pinned snapshot's rows from position <paramref name="from"/> on (D343).</summary>
+    public abstract IColumnarScan ScanFrom(
+        string sourceId, object pinned, long from, ScanRequest request, ScanContext context);
+
+    /// <summary>
+    /// The rows a replacement took out of <paramref name="earlier"/> and where its appended rows begin,
+    /// when it kept the rest in their order; null otherwise (design 68 §15).
+    /// </summary>
+    public abstract TableDiff? DiffFrom(object earlier, object later);
+
+    /// <summary>A scan of a pinned snapshot's rows at the given positions (design 68 §15).</summary>
+    public abstract IColumnarScan ScanAt(
+        string sourceId, object pinned, int[] positions, ScanRequest request, ScanContext context);
+
+    /// <summary>
+    /// Whether an index hands over rows with equal keys in their order in the table: one this source
+    /// builds does, and a host's promises only its key order (design 68 §19).
+    /// </summary>
+    public abstract bool OrdersTiesByPlace(string index);
+
+    /// <summary>
     /// Builds what this table's entries ask for, without publishing it: one that says what the rows
     /// are, or upserts and deletes by key, and an advance of the frontier beside either (D339).
     /// </summary>
@@ -576,9 +703,11 @@ internal abstract class PocoTableRuntime
 
     /// <summary>
     /// Builds a replacement from the host's rewrite of the rows before <paramref name="through"/>,
-    /// beside this table's refreshes, for a later refresh to commit (design 69 §3).
+    /// beside this table's refreshes, for a later refresh to commit (design 69 §3). With
+    /// <paramref name="owned"/>, <paramref name="rows"/> is an array whose first rows those are, which
+    /// the table takes over rather than copies (F245).
     /// </summary>
-    public abstract IPreparedReplacement PrepareReplacement(string sourceId, object rows, int through);
+    public abstract IPreparedReplacement PrepareReplacement(string sourceId, object rows, int through, int? owned);
 
     /// <summary>
     /// Statistics computed now over the snapshot this table serves, and the table described with
@@ -586,6 +715,12 @@ internal abstract class PocoTableRuntime
     /// §4); null otherwise.
     /// </summary>
     public abstract DeferredStatistics? ComputeDeferredStatistics();
+
+    /// <summary>
+    /// Whether <see cref="ComputeDeferredStatistics"/> would compute statistics now: a refresh deferred
+    /// them and the table's rows have since moved past its growth policy (D351).
+    /// </summary>
+    public abstract bool StatisticsDue { get; }
 
     /// <summary>Takes statistics computed in the background, when this table still awaits them.</summary>
     public abstract void AdmitStatistics(DeferredStatistics statistics);
@@ -608,6 +743,10 @@ internal abstract class PocoTableRuntime
     /// <summary>The index lookup as a slot-filling one.</summary>
     public abstract IColumnarScan ColumnarLookup(
         string sourceId, IndexLookupRequest request, ScanContext context);
+
+    /// <summary>An as-of seek's lookups read from the left rows' columns, or null when this index cannot answer them so.</summary>
+    public abstract IColumnarScan? ColumnarSeek(
+        string sourceId, ColumnarSeekRequest request, ScanContext context);
 
     /// <summary>The foreign keys as declared, before the parent's columns have been resolved (F14).</summary>
     public abstract IReadOnlyList<PocoForeignKey> DeclaredForeignKeys { get; }
@@ -709,6 +848,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         _entitlement = entitlement;
         Name = name;
         _factory = factory;
+        _factory.Arrays.Report = array => Released?.Invoke(Name, array);
         _snapshot = snapshot;
         _snapshot.OnReleased = Report;
         _columns = columns;
@@ -738,7 +878,8 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             return;
         }
 
-        var next = Carry(_factory.From(collection), StatisticsRefresh.Now);
+        var reread = _factory.From(collection);
+        var next = Carry(reread, StatisticsRefresh.Now, Replacing(reread));
         var frontier = _changes is { HasTime: true } timed ? Latest(timed, Values(next)) : null;
         Publish(next, rewrites: true);
         if (_changes is not null)
@@ -750,11 +891,160 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     /// <summary>The change kind this table declares (D339), or null for none.</summary>
     private PocoChanges<T>? _changes;
 
+    /// <summary>
+    /// Where each key of a keyed table stands (D367): what its upserts and deletes find their rows by.
+    /// Null for a table that does not change by key.
+    /// </summary>
+    private PocoKeyPositions<T>? _keyPositions;
+
+    /// <summary>The columns of a keyed table's key, which its refreshes keep unique by construction (D367).</summary>
+    private int[]? _keyColumns;
+
     /// <inheritdoc />
     public override object Pin() => Acquire();
 
     /// <inheritdoc />
     public override void Unpin(object pinned) => ((PocoTableSnapshot<T>)pinned).Release();
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Equal rewrite counts mean only appends were published between the two, and an append leaves
+    /// every row before it where it was (§3), so the later snapshot's rows from the earlier one's count
+    /// on are exactly what was added.
+    /// </remarks>
+    public override long AppendedFrom(object earlier, object later)
+    {
+        var before = (PocoTableSnapshot<T>)earlier;
+        var after = (PocoTableSnapshot<T>)later;
+        if (ReferenceEquals(before, after))
+        {
+            return before.RowCount;
+        }
+
+        return after.Rewrites == before.Rewrites && after.RowCount >= before.RowCount && after.RandomAccess
+            ? before.RowCount
+            : -1;
+    }
+
+    /// <inheritdoc />
+    public override object Retain(object pinned)
+    {
+        var snapshot = (PocoTableSnapshot<T>)pinned;
+        return snapshot.TryAcquire()
+            ? snapshot
+            : throw new InvalidOperationException(
+                $"table '{Name}': a snapshot can be retained only while its holder still holds it.");
+    }
+
+    /// <inheritdoc />
+    public override IColumnarScan ScanFrom(
+        string sourceId, object pinned, long from, ScanRequest request, ScanContext context)
+    {
+        CheckProjection(sourceId, request.Projection, request.OutputSchema);
+        var snapshot = (PocoTableSnapshot<T>)pinned;
+        if (from >= snapshot.RowCount)
+        {
+            return PocoEmptyScan.Instance;
+        }
+
+        if (from > 0 && !snapshot.RandomAccess)
+        {
+            throw new InvalidOperationException(
+                $"table '{Name}' only enumerates, so its rows have no positions to scan from.");
+        }
+
+        return new PocoScan<T>(
+            this, snapshot, request.Projection, request.OutputSchema, request.BatchSize, request.RowGoal,
+            context, CancellationToken.None, (int)from).Columnar();
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A snapshot holds the host's rows, and the host never changes what it gave Chalk, which scans read
+    /// in place (design 35 §1), so a row the later snapshot holds is one the earlier held, values and
+    /// all, when it is the same object. One walk of
+    /// the two in step finds the rows taken out: a row of the earlier the later does not hold next is
+    /// taken out, and what is left of the later once the earlier ends was appended. A replacement that
+    /// took out more rows than it kept, or that did not keep the rest in their order — which the walk
+    /// sees as most rows taken out — is read whole instead, which then costs no more.
+    /// </remarks>
+    public override TableDiff? DiffFrom(object earlier, object later)
+    {
+        var before = (PocoTableSnapshot<T>)earlier;
+        var after = (PocoTableSnapshot<T>)later;
+
+        // A keyed refresh said what it changed (D367): taken as it is, rather than found by walking.
+        if (after.Change is { } recorded && recorded.From == before.Sequence)
+        {
+            return new TableDiff(recorded.Removed, recorded.AppendedFrom) { Added = recorded.Added };
+        }
+
+        if (typeof(T).IsValueType || before.Rows is not { } old || after.Rows is not { } rows)
+        {
+            return null;
+        }
+
+        var count = before.RowCount;
+        var limit = count / 2;
+        var removed = new List<int>();
+        var i = 0;
+        var j = 0;
+        while (i < count && j < after.RowCount)
+        {
+            if (ReferenceEquals(old[i], rows[j]))
+            {
+                i++;
+                j++;
+                continue;
+            }
+
+            removed.Add(i++);
+            if (removed.Count > limit)
+            {
+                return null;
+            }
+        }
+
+        if (removed.Count + (count - i) > limit)
+        {
+            return null;
+        }
+
+        for (; i < count; i++)
+        {
+            removed.Add(i);
+        }
+
+        return new TableDiff([.. removed], j);
+    }
+
+    /// <inheritdoc />
+    public override IColumnarScan ScanAt(
+        string sourceId, object pinned, int[] positions, ScanRequest request, ScanContext context)
+    {
+        CheckProjection(sourceId, request.Projection, request.OutputSchema);
+        var snapshot = (PocoTableSnapshot<T>)pinned;
+        if (positions.Length == 0)
+        {
+            return PocoEmptyScan.Instance;
+        }
+
+        var rows = snapshot.Rows
+            ?? throw new InvalidOperationException(
+                $"table '{Name}' only enumerates, so its rows have no positions to scan at.");
+        var gathered = new T[positions.Length];
+        for (var i = 0; i < positions.Length; i++)
+        {
+            gathered[i] = rows[positions[i]];
+        }
+
+        return PocoScan<T>.Gathered(
+            this, snapshot, gathered, request.Projection, request.OutputSchema, request.BatchSize, request.RowGoal,
+            context);
+    }
+
+    /// <inheritdoc />
+    public override bool OrdersTiesByPlace(string index) => _factory.Builds(index);
 
     /// <summary>
     /// The snapshot a scan of one execution reads (F188): the one the execution pinned when it began,
@@ -771,6 +1061,12 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     public void Declare(PocoChanges<T> changes)
     {
         _changes = changes;
+        if (changes.Kind == PocoChangeKind.Keyed)
+        {
+            _keyPositions = new PocoKeyPositions<T>(changes);
+            _keyColumns = Array.ConvertAll(changes.KeyMembers, member => _byMember[member]);
+        }
+
         if (changes.HasTime)
         {
             changes.Frontier = Latest(changes, Values(Current));
@@ -906,6 +1202,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         PocoTableSnapshot<T>? next = null;
         PocoPreparedReplacement<T>? committing = null;
         var replaces = false;
+        PocoKeyedChange<T>? keyed = null;
 
         if (rows is { Kind: SourceRefreshKind.Replace })
         {
@@ -915,13 +1212,15 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
                 frontier = Latest(timed, given);
             }
 
-            next = Carry(_factory.From(given), rows.Statistics);
+            var replacement = _factory.From(given);
+            next = Carry(replacement, rows.Statistics, Replacing(replacement));
             replaces = true;
         }
         else if (rows is { Kind: SourceRefreshKind.Commit })
         {
             committing = (PocoPreparedReplacement<T>)rows.Rows;
-            next = Carry(Rebase(sourceId, committing), rows.Statistics);
+            var rebased = Rebase(sourceId, committing);
+            next = Carry(rebased, rows.Statistics, Replacing(rebased));
             replaces = true;
 
             // The rows since the cut were admitted against the frontier as it stands, so a commit
@@ -939,21 +1238,33 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
                 (given, frontier) = Admit(timed, given, before);
             }
 
-            next = Carry(_factory.Appended(Current, given), rows.Statistics);
+            next = Carry(_factory.Appended(Current, given), rows.Statistics, given.Count);
         }
         else if (upsert is not null || delete is not null)
         {
-            var changed = ByKey(
-                sourceId,
-                _changes!,
-                Current.Rows!,
-                (IReadOnlyList<T>?)upsert?.Rows ?? [],
-                (IReadOnlyList<T>?)delete?.Rows ?? []);
+            var upserts = (IReadOnlyList<T>?)upsert?.Rows ?? [];
+            var deletes = (IReadOnlyList<T>?)delete?.Rows ?? [];
+            var current = Current;
+            keyed = ByKey(sourceId, _changes!, current, upserts, deletes);
             var statistics = upsert?.Statistics == StatisticsRefresh.Now || delete?.Statistics == StatisticsRefresh.Now
                 ? StatisticsRefresh.Now
                 : StatisticsRefresh.Defer;
-            next = Carry(_factory.Owned(changed), statistics);
-            replaces = true;
+            if (keyed.OnlyAppends)
+            {
+                // Only keys the table did not hold: an append, every earlier row where it was (D367).
+                next = Carry(_factory.Appended(current, keyed.Appended, _keyColumns), statistics, upserts.Count + deletes.Count);
+            }
+            else
+            {
+                // The table built from its last snapshot, with what changed recorded for the views that
+                // read it (D367): the rows taken out, the rows put in their places, the rows appended.
+                var (changed, added) = PocoAppendedRows<T>.Assemble(
+                    current.Rows!, current.RowCount, keyed.Deleted, keyed.Replaced, keyed.Appended, _factory.Arrays);
+                next = Carry(_factory.Changed(current, changed, keyed, added, _keyColumns!), statistics, upserts.Count + deletes.Count);
+                int[] removed = [.. keyed.Deleted.Concat(keyed.Replaced.Select(r => r.Position)).Order()];
+                next.Change = new PocoRecordedChange(current.Sequence, removed, added, current.RowCount - keyed.Deleted.Length);
+                replaces = true;
+            }
         }
 
         if (advance is not null)
@@ -974,14 +1285,33 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             frontier = frontier is { } reached ? Math.Max(reached, to) : to;
         }
 
-        return new PreparedChange(this, next, frontier, replaces, committing);
+        return new PreparedChange(this, next, frontier, replaces, committing, keyed);
     }
 
     /// <inheritdoc />
-    public override IPreparedReplacement PrepareReplacement(string sourceId, object rows, int through)
+    public override IPreparedReplacement PrepareReplacement(string sourceId, object rows, int through, int? owned)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(through);
-        if (rows is not IReadOnlyList<T> given)
+        IReadOnlyList<T> given;
+        if (owned is { } count)
+        {
+            if (rows is not T[] array)
+            {
+                throw new SourceContractException(
+                    ChalkErrorCodes.SourceRefresh,
+                    sourceId,
+                    Name,
+                    $"the rows are {rows.GetType().Name}, which is not a {typeof(T).Name}[] to take over.");
+            }
+
+            // The rewrite is the array's first rows; the rest of it is room for the commit.
+            given = new ArraySegment<T>(array, 0, count);
+        }
+        else if (rows is IReadOnlyList<T> list)
+        {
+            given = list;
+        }
+        else
         {
             throw new SourceContractException(
                 ChalkErrorCodes.SourceRefresh,
@@ -1025,7 +1355,8 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         }
 
         var frontier = _changes is { HasTime: true } timed ? Latest(timed, given) : null;
-        return new PocoPreparedReplacement<T>(this, _factory.Prepared(given), through, current.Rewrites, frontier);
+        var snapshot = owned is { } taken ? _factory.Prepared((T[])rows, taken) : _factory.Prepared(given);
+        return new PocoPreparedReplacement<T>(this, snapshot, through, current.Rewrites, frontier);
     }
 
     /// <summary>
@@ -1130,14 +1461,15 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     private static IReadOnlyCollection<T> Values(PocoTableSnapshot<T> snapshot) => snapshot.Values;
 
     /// <summary>
-    /// A keyed table's next rows: the current ones in their order with each upserted key's row in its
-    /// place and each deleted key's row gone, then the rows of keys it did not hold, in the order they
-    /// were given.
+    /// What a refresh of upserts and deletes does to a keyed table (D367): each upserted key's row in the
+    /// place of the row it replaces, each deleted key's row gone, and the rows of keys the table did not
+    /// hold after the rest, in the order they were given. The rows are found by their keys' positions,
+    /// not by reading the key of every row.
     /// </summary>
-    private List<T> ByKey(
+    private PocoKeyedChange<T> ByKey(
         string sourceId,
         PocoChanges<T> keyed,
-        IReadOnlyList<T> current,
+        PocoTableSnapshot<T> current,
         IReadOnlyList<T> upserts,
         IReadOnlyList<T> deletes)
     {
@@ -1151,7 +1483,6 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             }
         }
 
-        var deleted = new HashSet<object?[]>(PocoChanges<T>.KeyComparer);
         foreach (var row in deletes)
         {
             var key = keyed.KeyOf(row);
@@ -1164,54 +1495,65 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
                     $"the key {PocoChanges<T>.Render(key)} is both upserted and deleted in one refresh. "
                     + "Say once what each key becomes; nothing in the refresh was applied.");
             }
-
-            deleted.Add(key);
         }
 
-        var next = new List<T>(current.Count + upserts.Count);
-        var placed = new bool[upserts.Count];
-        foreach (var row in current)
+        var positions = _keyPositions!;
+        if (!positions.Describes(current))
         {
-            var key = keyed.KeyOf(row);
-            if (deleted.Contains(key))
-            {
-                continue;
-            }
+            positions.Build(current);
+        }
 
-            if (upserted.TryGetValue(key, out var replacement))
+        var replaced = new List<(int Position, T Row)>();
+        var appended = new List<T>();
+        foreach (var row in upserts)
+        {
+            var at = positions.PositionOf(row);
+            if (at >= 0)
             {
-                next.Add(upserts[replacement]);
-                placed[replacement] = true;
+                replaced.Add((at, row));
             }
             else
             {
-                next.Add(row);
+                appended.Add(row);
             }
         }
 
-        for (var i = 0; i < upserts.Count; i++)
+        var deleted = new SortedSet<int>();
+        foreach (var row in deletes)
         {
-            if (!placed[i])
+            var at = positions.PositionOf(row);
+            if (at >= 0)
             {
-                next.Add(upserts[i]);
+                deleted.Add(at);
             }
         }
 
-        return next;
+        var rows = current.Rows!;
+        int[] gone = [.. deleted];
+        return new PocoKeyedChange<T>
+        {
+            Deleted = gone,
+            DeletedRows = Array.ConvertAll(gone, at => rows[at]),
+            Replaced = [.. replaced.OrderBy(r => r.Position)],
+            Appended = [.. appended],
+        };
     }
 
     /// <summary>
     /// Hands the next snapshot whatever statistics the current one has in force, and says whether
-    /// this operation deferred them (D271 (g), §7). A snapshot that carries nothing computes its own,
-    /// which is what a table with no freshness policy and no deferred operation behind it always
-    /// does.
+    /// this operation deferred them (D271 (g), §7), and counts the <paramref name="changed"/> rows
+    /// the operation moved onto the table's changes (D351). A snapshot that carries nothing computes
+    /// its own, which is what a table with no freshness policy and no deferred operation behind it
+    /// always does.
     /// </summary>
-    private PocoTableSnapshot<T> Carry(PocoTableSnapshot<T> next, StatisticsRefresh statistics)
+    private PocoTableSnapshot<T> Carry(PocoTableSnapshot<T> next, StatisticsRefresh statistics, long changed)
     {
-        var (carried, computedOver, computedOn, wasDeferred) = Current.Carryable;
+        var current = Current;
+        next.Changes = current.Changes + changed;
+        var (carried, computedOver, computedOn, computedChanges, wasDeferred) = current.Carryable;
         if (statistics == StatisticsRefresh.Defer)
         {
-            next.Carry(carried, computedOver, computedOn, deferred: true);
+            next.Carry(carried, computedOver, computedOn, computedChanges, deferred: true);
             return next;
         }
 
@@ -1224,9 +1566,15 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             return next;
         }
 
-        next.Carry(carried, computedOver, computedOn, deferred: false);
+        next.Carry(carried, computedOver, computedOn, computedChanges, deferred: false);
         return next;
     }
+
+    /// <summary>
+    /// The rows a replacement moves (D351): every row the table had and every row
+    /// <paramref name="next"/> brings, since none of either is known to be the other.
+    /// </summary>
+    private long Replacing(PocoTableSnapshot<T> next) => (long)Current.RowCount + next.RowCount;
 
     /// <summary>
     /// What a transaction built for this table, waiting for the engine to say when: a snapshot, a
@@ -1239,19 +1587,22 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         private readonly long? _frontier;
         private readonly bool _replaces;
         private readonly PocoPreparedReplacement<T>? _committing;
+        private readonly PocoKeyedChange<T>? _keyed;
 
         public PreparedChange(
             PocoTableRuntime<T> table,
             PocoTableSnapshot<T>? snapshot,
             long? frontier,
             bool replaces,
-            PocoPreparedReplacement<T>? committing)
+            PocoPreparedReplacement<T>? committing,
+            PocoKeyedChange<T>? keyed)
         {
             _table = table;
             _snapshot = snapshot;
             _frontier = frontier;
             _replaces = replaces;
             _committing = committing;
+            _keyed = keyed;
         }
 
         public void Commit()
@@ -1259,9 +1610,16 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             if (_snapshot is not null)
             {
                 _table.Publish(_snapshot, _replaces);
+
+                // The key positions move on with the snapshot they now describe, and only when it is
+                // published: a refresh that is not committed leaves them describing the one served.
+                if (_keyed is not null)
+                {
+                    _table._keyPositions!.Apply(_snapshot, _keyed);
+                }
             }
 
-            _committing?.Committed();
+            _committing?.Committed(_snapshot);
 
             if (_table._changes is { } changes)
             {
@@ -1296,6 +1654,13 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         if (snapshot.HostCollection is { } collection)
         {
             Released?.Invoke(Name, collection);
+        }
+
+        // The rows an append, a keyed change or a prepared replacement made: their array goes back once
+        // no snapshot reads it (F245), to the pool, or to the host when it handed the array over.
+        if (snapshot.Rows is PocoAppendedRows<T> rows)
+        {
+            rows.LetGo();
         }
     }
 
@@ -1452,7 +1817,15 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         var snapshot = Acquire();
         try
         {
-            return Describe(snapshot, snapshot.Statistics(_columns, _collations, _statisticsPlan));
+            var statistics = snapshot.Statistics(_columns, _collations, _statisticsPlan);
+            var last = Volatile.Read(ref _described);
+            var described = Describe(snapshot, statistics, last);
+            if (!ReferenceEquals(described, last?.Descriptor))
+            {
+                Volatile.Write(ref _described, new Described(described, statistics));
+            }
+
+            return described;
         }
         finally
         {
@@ -1460,23 +1833,75 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         }
     }
 
-    private TableDescriptor Describe(PocoTableSnapshot<T> snapshot, ColumnStatistics[] statistics) => new()
+    /// <summary>
+    /// The table as <paramref name="snapshot"/> serves it with <paramref name="statistics"/>, sharing
+    /// what it can of <paramref name="last"/> (F205): its columns when the statistics are the ones it
+    /// was given, its indexes when they are the same descriptors, and the whole descriptor when the
+    /// row count is the same too. A table a refresh appended to then describes as a new row count over
+    /// the parts it had, and one no refresh touched as the descriptor it was.
+    /// </summary>
+    private TableDescriptor Describe(PocoTableSnapshot<T> snapshot, ColumnStatistics[] statistics, Described? last)
     {
-        Name = Name,
-        Columns = [.. _columns.Select((c, i) => new ColumnDescriptor
+        var columns = last is not null && ReferenceEquals(last.Statistics, statistics)
+            ? last.Descriptor.Columns
+            : [.. _columns.Select((c, i) => new ColumnDescriptor
+            {
+                Name = c.Name,
+                Type = c.Type,
+                Statistics = statistics[i],
+            })];
+        var indexes = last is not null && SameIndexes(last.Descriptor.Indexes, snapshot.Indexes)
+            ? last.Descriptor.Indexes
+            : [.. snapshot.Indexes.Select(i => i.Descriptor)];
+        if (last is not null
+            && ReferenceEquals(columns, last.Descriptor.Columns)
+            && ReferenceEquals(indexes, last.Descriptor.Indexes)
+            && last.Descriptor.RowCount == snapshot.RowCount)
         {
-            Name = c.Name,
-            Type = c.Type,
-            Statistics = statistics[i],
-        })],
-        RowCount = snapshot.RowCount,
-        RowCountKind = RowCountKind.Exact,
-        UniqueKeys = _uniqueKeys,
-        Collations = _collations,
-        Indexes = [.. snapshot.Indexes.Select(i => i.Descriptor)],
-        ForeignKeys = _foreignKeys,
-        Entitlement = _entitlement,
-    };
+            return last.Descriptor;
+        }
+
+        return new TableDescriptor
+        {
+            Name = Name,
+            Columns = columns,
+            RowCount = snapshot.RowCount,
+            RowCountKind = RowCountKind.Exact,
+            UniqueKeys = _uniqueKeys,
+            Collations = _collations,
+            Indexes = indexes,
+            ForeignKeys = _foreignKeys,
+            Entitlement = _entitlement,
+        };
+    }
+
+    /// <summary>Whether a snapshot's indexes are described by the very descriptors a list holds.</summary>
+    private static bool SameIndexes(IReadOnlyList<IndexDescriptor> described, IPocoIndex<T>[] indexes)
+    {
+        if (described.Count != indexes.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < indexes.Length; i++)
+        {
+            if (!ReferenceEquals(described[i], indexes[i].Descriptor))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The descriptor <see cref="Describe()"/> last gave, and the statistics it was given with: what
+    /// the next shares where it can (F205). One object, so a reader never pairs one call's descriptor
+    /// with another's statistics.
+    /// </summary>
+    private Described? _described;
+
+    private sealed record Described(TableDescriptor Descriptor, ColumnStatistics[] Statistics);
 
     /// <inheritdoc />
     public override DeferredStatistics? ComputeDeferredStatistics()
@@ -1484,7 +1909,7 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
         var snapshot = Acquire();
         try
         {
-            if (!snapshot.AwaitsStatistics)
+            if (!snapshot.StatisticsDue(_statisticsPlan))
             {
                 return null;
             }
@@ -1493,8 +1918,8 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             return new DeferredStatistics
             {
                 Table = Name,
-                Descriptor = Describe(snapshot, statistics),
-                Statistics = new ComputedStatistics(snapshot.Sequence, statistics),
+                Descriptor = Describe(snapshot, statistics, Volatile.Read(ref _described)),
+                Statistics = new ComputedStatistics(snapshot.Sequence, snapshot.Changes, statistics),
                 RowCount = snapshot.RowCount,
             };
         }
@@ -1505,16 +1930,22 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
     }
 
     /// <inheritdoc />
+    public override bool StatisticsDue => Current.StatisticsDue(_statisticsPlan);
+
+    /// <inheritdoc />
     public override void AdmitStatistics(DeferredStatistics statistics)
     {
         if (statistics.Statistics is ComputedStatistics computed)
         {
-            Current.Admit(computed.Columns, statistics.RowCount, computed.Snapshot);
+            Current.Admit(computed.Columns, statistics.RowCount, computed.Snapshot, computed.Changes);
         }
     }
 
-    /// <summary>Statistics a background run computed, and the snapshot they were computed over.</summary>
-    private sealed record ComputedStatistics(long Snapshot, ColumnStatistics[] Columns);
+    /// <summary>
+    /// Statistics a background run computed, and the snapshot they were computed over with its
+    /// <see cref="PocoTableSnapshot{T}.Changes"/>.
+    /// </summary>
+    private sealed record ComputedStatistics(long Snapshot, long Changes, ColumnStatistics[] Columns);
 
     public override IEnumerable<(string Index, long BytesPerRow)> IndexSizes() =>
         Current.Indexes.Select(i => (i.Descriptor.Name, i.BytesPerRow));
@@ -1547,6 +1978,44 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
             PocoIndexScan<T> positional => positional.Columnar(),
             var rows => ((PocoIndexRowScan<T>)rows).Columnar(),
         };
+
+    /// <summary>
+    /// An as-of seek over a permutation index this table built, its bounds compared straight from the
+    /// left rows' columns: a position a seek, each once, and nothing allocated for any of them. Any other
+    /// index, or a bound of a type its key reads boxed, is asked as ranges instead.
+    /// </summary>
+    public override IColumnarScan? ColumnarSeek(
+        string sourceId, ColumnarSeekRequest request, ScanContext context)
+    {
+        CheckProjection(sourceId, request.Projection, request.OutputSchema);
+        var snapshot = Serving(sourceId, context);
+        var indexes = snapshot.Indexes;
+        for (var ordinal = 0; ordinal < indexes.Length; ordinal++)
+        {
+            if (!string.Equals(indexes[ordinal].Descriptor.Name, request.Index, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (indexes[ordinal] is not PermutationIndex<T> index || !snapshot.RandomAccess || !index.CanSeek(request.Bounds))
+            {
+                return null;
+            }
+
+            var shape = new IndexLookupRequest
+            {
+                Table = request.Table,
+                Index = request.Index,
+                Ranges = [],
+                Projection = request.Projection,
+                OutputSchema = request.OutputSchema,
+                BatchSize = request.BatchSize,
+            };
+            return new PocoIndexScan<T>(this, snapshot, ordinal, shape, context, CancellationToken.None, request).Columnar();
+        }
+
+        return null;
+    }
 
     public override IAsyncEnumerable<RecordBatch> Lookup(
         string sourceId, IndexLookupRequest request, ScanContext context, CancellationToken ct) =>
@@ -1650,7 +2119,11 @@ internal sealed class PocoTableRuntime<T> : PocoTableRuntime
                 }
             }
 
-            return new PocoIndexRowScan<T>(this, snapshot, ordinal, request, context, ct);
+            // A window walked from its end costs what it does from its start (D283), so an index that
+            // answers in positions is read backwards by position, and nothing is allocated per range.
+            return index is IPositionalPocoIndex<T> && snapshot.RandomAccess
+                ? new PocoIndexScan<T>(this, snapshot, ordinal, request, context, ct)
+                : new PocoIndexRowScan<T>(this, snapshot, ordinal, request, context, ct);
         }
 
         if (index is IPositionalPocoIndex<T> && snapshot.RandomAccess)
@@ -1870,6 +2343,9 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
 {
     private readonly PocoTableRuntime<T> _table;
     private readonly PocoTableSnapshot<T> _snapshot;
+
+    /// <summary>The first row read: zero, or where a maintained view's last read ended (D343).</summary>
+    private readonly int _from;
     private readonly IReadOnlyList<int> _projection;
     private readonly ArrowSchema _schema;
     private readonly int _batchSize;
@@ -1885,10 +2361,12 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
         int batchSize,
         long? rowGoal,
         ScanContext context,
-        CancellationToken ct)
+        CancellationToken ct,
+        int from = 0)
     {
         _table = table;
         _snapshot = snapshot;
+        _from = from;
         _projection = projection;
         _schema = schema;
         _batchSize = batchSize;
@@ -1900,16 +2378,34 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
     public IAsyncEnumerator<RecordBatch> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
         _snapshot.RandomAccess
             ? new ListEnumerator(
-                _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct, cancellationToken)
+                _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct, cancellationToken, _from)
             : new CollectionEnumerator(
                 _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct, cancellationToken);
+
+    /// <summary>
+    /// A scan of rows a snapshot holds, gathered by a maintained view from where a replacement took
+    /// them out (design 68 §15), read as the snapshot's own would be. Built here rather than by the
+    /// scan above so that a plain scan carries nothing for it.
+    /// </summary>
+    public static IColumnarScan Gathered(
+        PocoTableRuntime<T> table,
+        PocoTableSnapshot<T> snapshot,
+        IReadOnlyList<T> rows,
+        IReadOnlyList<int> projection,
+        ArrowSchema schema,
+        int batchSize,
+        long? rowGoal,
+        ScanContext context) =>
+        new ListEnumerator(
+            table, snapshot, projection, schema, batchSize, rowGoal, context, CancellationToken.None,
+            CancellationToken.None, gathered: rows);
 
     /// <summary>The same scan as an <see cref="IColumnarScan"/>, which fills the caller's slot (§1).</summary>
     public IColumnarScan Columnar() =>
         _snapshot.RandomAccess
             ? new ListEnumerator(
                 _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct,
-                CancellationToken.None)
+                CancellationToken.None, _from)
             : new CollectionEnumerator(
                 _table, _snapshot, _projection, _schema, _batchSize, _rowGoal, _context, _ct,
                 CancellationToken.None);
@@ -1939,21 +2435,24 @@ internal sealed class PocoScan<T> : IAsyncEnumerable<RecordBatch>
             long? rowGoal,
             ScanContext context,
             CancellationToken scanToken,
-            CancellationToken enumerationToken)
+            CancellationToken enumerationToken,
+            int from = 0,
+            IReadOnlyList<T>? gathered = null)
         {
             _stats = context.Stats;
             _scanToken = scanToken;
             _enumerationToken = enumerationToken;
             _batchSize = batchSize;
             _rowGoal = rowGoal;
+            _position = from;
 
             // No lock and no copy: this snapshot's rows are immutable for as long as this reference
             // is counted, so the batching walks a collection nothing can change under it (D260 §1).
             // The row count is the snapshot's rather than the collection's, which is what lets an
             // append share a buffer with the snapshot before it and still leave this scan its prefix.
             _snapshot = table.Lease(captured);
-            _rows = _snapshot.Rows!;
-            _rowCount = _snapshot.RowCount;
+            _rows = gathered ?? _snapshot.Rows!;
+            _rowCount = gathered?.Count ?? _snapshot.RowCount;
 
             try
             {
@@ -2210,14 +2709,17 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
     private readonly IndexLookupRequest _request;
     private readonly ScanContext _context;
     private readonly CancellationToken _ct;
+    private readonly ColumnarSeekRequest? _seek;
 
+    /// <param name="seek">An as-of seek's lookups, read by position in place of the ranges, or null.</param>
     public PocoIndexScan(
         PocoTableRuntime<T> table,
         PocoTableSnapshot<T> snapshot,
         int ordinal,
         IndexLookupRequest request,
         ScanContext context,
-        CancellationToken ct)
+        CancellationToken ct,
+        ColumnarSeekRequest? seek = null)
     {
         _table = table;
         _snapshot = snapshot;
@@ -2225,14 +2727,15 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
         _request = request;
         _context = context;
         _ct = ct;
+        _seek = seek;
     }
 
     public IAsyncEnumerator<RecordBatch> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
-        new Enumerator(_table, _snapshot, _ordinal, _request, _context, _ct, cancellationToken);
+        new Enumerator(_table, _snapshot, _ordinal, _request, _seek, _context, _ct, cancellationToken);
 
     /// <summary>The same lookup as an <see cref="IColumnarScan"/>, which fills the caller's slot (§1).</summary>
     public IColumnarScan Columnar() =>
-        new Enumerator(_table, _snapshot, _ordinal, _request, _context, _ct, CancellationToken.None);
+        new Enumerator(_table, _snapshot, _ordinal, _request, _seek, _context, _ct, CancellationToken.None);
 
     private sealed class Enumerator : IAsyncEnumerator<RecordBatch>, IColumnarScan
     {
@@ -2256,6 +2759,7 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
             PocoTableSnapshot<T> captured,
             int ordinal,
             IndexLookupRequest request,
+            ColumnarSeekRequest? seek,
             ScanContext context,
             CancellationToken scanToken,
             CancellationToken enumerationToken)
@@ -2268,8 +2772,15 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
             _arena = context.Arena;
             _batchSize = request.BatchSize;
             _rowGoal = request.RowGoal;
-            _positions = Positions(
-                    (IPositionalPocoIndex<T>)_snapshot.Indexes[ordinal], request.Ranges, request.RowsPerRange)
+            _positions = (seek is null
+                    ? Positions(
+                        (IPositionalPocoIndex<T>)_snapshot.Indexes[ordinal],
+                        request.Ranges,
+                        request.Reverse,
+                        request.RowsPerRange,
+                        _rows.Count,
+                        context.Arena)
+                    : Seeks((PermutationIndex<T>)_snapshot.Indexes[ordinal], seek, _rows.Count, context.Arena))
                 .GetEnumerator();
             _buffer = context.Arena.Rent<int>(Math.Max(1, request.BatchSize));
             try
@@ -2394,50 +2905,158 @@ internal sealed class PocoIndexScan<T> : IAsyncEnumerable<RecordBatch>
     }
 
     /// <summary>
-    /// The positions the ranges match, de-duplicated once there is more than one range. The planner
-    /// emits sorted, non-overlapping ranges; the bitmap is the cheap insurance §3 asks for, and it
-    /// keeps the union in index order.
+    /// The positions of a window's ordinals, in index order or from its end: a built-in index walks its
+    /// leaves (F202), and any other is asked ordinal by ordinal.
     /// </summary>
-    /// <summary>
-    /// The positions the ranges cover, in index order and each once; only the first
-    /// <paramref name="perRange"/> of each range's where a number is given (D338).
-    /// </summary>
-    private static IEnumerable<int> Positions(
-        IPositionalPocoIndex<T> index,
-        IReadOnlyList<IndexKeyRange> ranges,
-        int? perRange)
+    private static IEnumerable<int> Walk(IPositionalPocoIndex<T> index, int from, int to, bool reverse)
     {
-        if (ranges.Count == 1)
+        var keys = index switch
         {
-            var range = ranges[0];
+            PermutationIndex<T> permutation => permutation,
+            ClusteredIndex<T> clustered => clustered.Keys,
+            _ => null,
+        };
 
-            index.GetWindow(range, out var from, out var to);
-            to = Limited(from, to, perRange);
+        if (keys is not null)
+        {
+            return keys.PositionsBetween(from, to, reverse);
+        }
+
+        return Ordinals(index, from, to, reverse);
+
+        static IEnumerable<int> Ordinals(IPositionalPocoIndex<T> index, int from, int to, bool reverse)
+        {
+            if (reverse)
+            {
+                for (var ordinal = to - 1; ordinal >= from; ordinal--)
+                {
+                    yield return index.GetPosition(ordinal);
+                }
+
+                yield break;
+            }
 
             for (var ordinal = from; ordinal < to; ordinal++)
             {
                 yield return index.GetPosition(ordinal);
             }
+        }
+    }
+
+    /// <summary>Marks a position in the bitmap, and says whether it was not marked yet.</summary>
+    private static bool Mark(ulong[] seen, int position)
+    {
+        ref var word = ref seen[position >> 6];
+        var bit = 1UL << (position & 63);
+        if ((word & bit) != 0)
+        {
+            return false;
+        }
+
+        word |= bit;
+        return true;
+    }
+
+    /// <summary>
+    /// The positions the ranges cover, each once: range by range, each in index order, or from its end
+    /// for a reversed lookup (D283); only the first <paramref name="perRange"/> of each range's where a
+    /// number is given (D338). The planner emits non-overlapping ranges; more than one is de-duplicated
+    /// by a bitmap rented from the execution's arena, the cheap insurance §3 asks for.
+    /// </summary>
+    private static IEnumerable<int> Positions(
+        IPositionalPocoIndex<T> index,
+        IReadOnlyList<IndexKeyRange> ranges,
+        bool reverse,
+        int? perRange,
+        int rows,
+        ExecutionArena arena)
+    {
+        if (ranges.Count == 1)
+        {
+            index.GetWindow(ranges[0], out var from, out var to);
+            if (reverse)
+            {
+                // The last rows of the window, from its end (D283).
+                var stop = perRange is { } count ? Math.Max(from, to - Math.Max(count, 0)) : from;
+                foreach (var position in Walk(index, stop, to, reverse: true))
+                {
+                    yield return position;
+                }
+
+                yield break;
+            }
+
+            foreach (var position in Walk(index, from, Limited(from, to, perRange), reverse: false))
+            {
+                yield return position;
+            }
 
             yield break;
         }
 
-        var seen = new HashSet<int>();
-
-        for (var r = 0; r < ranges.Count; r++)
+        // Each position once, marked in a bitmap rented for the lookup rather than a set grown for it.
+        var words = (rows + 63) / 64;
+        var seen = arena.Rent<ulong>(Math.Max(1, words));
+        try
         {
-            index.GetWindow(ranges[r], out var from, out var to);
-            to = Limited(from, to, perRange);
-
-            for (var ordinal = from; ordinal < to; ordinal++)
+            Array.Clear(seen, 0, Math.Max(1, words));
+            for (var r = 0; r < ranges.Count; r++)
             {
-                var position = index.GetPosition(ordinal);
+                index.GetWindow(ranges[r], out var from, out var to);
+                var (first, last) = reverse
+                    ? (perRange is { } count ? Math.Max(from, to - Math.Max(count, 0)) : from, to)
+                    : (from, Limited(from, to, perRange));
 
-                if (seen.Add(position))
+                foreach (var position in Walk(index, first, last, reverse))
                 {
+                    if (Mark(seen, position))
+                    {
+                        yield return position;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            arena.Return(seen);
+        }
+    }
+
+    /// <summary>
+    /// The rows an as-of seek's lookups find: a position for each seek that finds one, each once, in the
+    /// order the seeks first reach them, as the ranges they stand for would give them.
+    /// </summary>
+    private static IEnumerable<int> Seeks(
+        PermutationIndex<T> index,
+        ColumnarSeekRequest seek,
+        int rows,
+        ExecutionArena arena)
+    {
+        var words = Math.Max(1, (rows + 63) / 64);
+        var seen = arena.Rent<ulong>(words);
+        try
+        {
+            Array.Clear(seen, 0, words);
+            for (var i = 0; i < seek.RowCount; i++)
+            {
+                var position = index.Seek(seek.Bounds, seek.Rows[i], seek.Backwards, seek.Inclusive);
+                if (position < 0)
+                {
+                    continue;
+                }
+
+                ref var word = ref seen[position >> 6];
+                var bit = 1UL << (position & 63);
+                if ((word & bit) == 0)
+                {
+                    word |= bit;
                     yield return position;
                 }
             }
+        }
+        finally
+        {
+            arena.Return(seen);
         }
     }
 

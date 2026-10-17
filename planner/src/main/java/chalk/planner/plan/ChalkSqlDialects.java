@@ -160,6 +160,17 @@ public final class ChalkSqlDialects {
       return chalk != null ? chalk : super.getCastSpec(type);
     }
 
+    /**
+     * No interval (F238). SQLite has no interval type and no interval literal: it does date
+     * arithmetic with {@code datetime(ts, '+6 hours')} over text, so {@code ts + INTERVAL '6' HOUR}
+     * is a syntax error there. The pushdown gate asks this before it hands a source an interval, and
+     * the arithmetic stays in Chalk.
+     */
+    @Override
+    public boolean supportsDataType(RelDataType type) {
+      return !org.apache.calcite.sql.type.SqlTypeUtil.isInterval(type) && super.supportsDataType(type);
+    }
+
     @Override
     public String toString() {
       return "ChalkSqliteSqlDialect";

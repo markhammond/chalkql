@@ -55,3 +55,24 @@ report id:Full, org_id:Full, created_by:Full, body:PerRow, notes:Some
 1|1|5|first CANARY-BODY-01
 2|1|5|second CANARY-BODY-02
 
+-- u16-a-manager-in-two-orgs
+report id:Full, org_id:Full, created_by:Full, body:PerRow, notes:Some
+1|1|5|first CANARY-BODY-01
+2|1|5|second CANARY-BODY-02
+3|2|1|third CANARY-BODY-03
+
+-- u17-an-agent-in-two-orgs
+report id:Full, org_id:Full, created_by:Full, body:PerRow, notes:Some
+1|1|5|<null>
+2|1|5|<null>
+3|2|1|<null>
+
+-- u18-a-keeper
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+
+-- u19-a-vendor-in-a-region
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+
+-- u20-a-picker
+report id:Full, org_id:Full, created_by:Full, body:Full, notes:Some
+

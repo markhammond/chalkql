@@ -391,7 +391,16 @@ soon as the load lands, and runs its empty-table plan until it is prepared again
 
 A host whose refreshes [defer their planning](#leaving-statistics-and-plans-to-the-background)
 need not do this itself: Chalk plans the statements it holds again in the background, once a
-table they read has moved twofold, and swaps the new plans in at a refresh.
+table they read has moved twofold, and swaps the new plans in at a refresh. Such a host prepares
+again only when `ChangedShape` is true, the half of `IsStale` after which the statement no
+longer runs:
+
+```csharp
+if (cached.ChangedShape)
+{
+    cached = await engine.PrepareAsync(sql, options, ct);
+}
+```
 
 Two digests name a statement:
 
@@ -404,6 +413,20 @@ Two digests name a statement:
 Both are the same however a statement is spaced or its keywords cased. Both move for
 other values, names, windows, tables or policy. A plan served by `RecordedPlanner` has no
 logical digest, and reads zero.
+
+`LogicalDigest` is a statement's identity in its catalog. Every engine and every planner that
+holds the same catalog gives a statement the same digest, whatever the sizes of its tables
+and whichever plan each chose. It covers what the statement reads: every column of every
+table it reads, by name, type and nullability, whether the statement uses the column or not,
+and the policy over them. A change to any of those moves it, and a change to a table the
+statement does not read leaves it as it was. It has two limits:
+
+- **It does not name the catalog.** Two catalogs whose tables share names and columns give a
+  statement the same digest, whatever rows they hold. A key that spans catalogs should add
+  the catalog, such as its `ContextId`, and a cache of results the data's `Version`.
+- **It holds within a ChalkQL version.** It is the planner's own digest of its logical plan,
+  so an upgrade that writes the plan's parts differently moves it. Keep it across upgrades
+  only for something you can rebuild.
 
 
 ## Sources
@@ -436,6 +459,17 @@ on the declared key but reads nothing from the parent, and the key is unique in 
 parent. Then the key promises that the join changes nothing, so the planner *deletes*
 it. If the key is wrong, the answer is wrong.
 
+A declared unique key, and a declared order (`OrderedBy`), are checked against the rows at
+`Build()` and at every refresh after it; `Verify(false)` opts a table out. An append is
+checked where it joins. Its rows are checked against the order from the first of them on,
+and against a unique key where the table already vouches for the rest:
+
+- a key the table is ordered by, its first `OrderedBy` columns, puts equal keys side by
+  side, so each appended row is compared with the row before it;
+- a key a `UniqueIndex` covers is checked by the index, as it takes the appended rows;
+- a key with neither is checked over every row, at every append. On a table of millions
+  that is about a second each time, so declare a `UniqueIndex` on it.
+
 An index serves a comparison on its leading columns. The value compared with may be a
 literal, a parameter, or an expression of them that is the same for the whole execution,
 such as `CURRENT_TIMESTAMP - INTERVAL '5' MINUTE`. Such an expression is computed once,
@@ -463,7 +497,10 @@ becomes, and how to change a published set safely.
 Some indexes answer prefixes rather than ranges; a trie is one example. Such an index
 declares `IndexKind.Prefix`, and `WHERE name LIKE 'p%'` then becomes a lookup on it
 rather than a filter. An ordered string index serves the same query as the plain range
-`[p, next(p))`, with no change to the adapter at all.
+`[p, next(p))`, with no change to the adapter at all. The planner estimates the rows
+such a lookup reads from the column's statistics: the share of its texts that start with
+the prefix, read from the histogram where there is one, and never less than one value's
+share or the frequent values that start with it.
 
 An index that can also be walked backwards, from its last matching row to its first,
 implements `IReversiblePocoIndex<T>`. That lets `ORDER BY ts DESC LIMIT 1` be one walk
@@ -511,7 +548,20 @@ mem.SnapshotReleased += r => Recycle(r.Table, r.Collection);
 **Your one duty is never to change a collection you have given to Chalk.** Give it a new
 one instead. The zero-copy paths read your own arrays, and this rule is what keeps a
 running query's view of the data whole. `SnapshotReleased` tells you when a replaced
-collection is no longer being read.
+collection is no longer being read, and so is an array you handed over for a prepared
+replacement, when the table has no pool (below).
+
+**An append copies its rows** into an array Chalk owns while the refresh runs, so its list is
+yours again once `RefreshAsync` returns. Until then, leave it alone. If other threads go on
+adding to it, append a copy instead.
+
+A refresh made many times a second, as a feed's appends are, can hand its plan what it reads as
+a state. With a `static` lambda the plan captures nothing, so the call allocates no closure:
+
+```csharp
+await engine.RefreshAsync(
+    (mem, batch), static (refresh, s) => refresh.Append(s.mem, "ticks", s.batch), ct);
+```
 
 A table's *shape* is its columns, keys, collations, indexes and foreign keys.
 (Statistics and row counts are not part of it.) A refresh that changes no table's shape
@@ -553,6 +603,13 @@ await engine.RefreshAsync(refresh => refresh.Commit(prepared), ct);
   [Leaving statistics and plans to the background](#leaving-statistics-and-plans-to-the-background).
 - **The rows are copied**, as an append's are, so your list is yours again as soon as
   `PrepareReplaceAsync` returns. It is never reported released.
+- **Or hand the array over.** `PrepareReplaceAsync(mem, "ticks", rows, count, through: cut, ct)`
+  takes an array whose first `count` rows are the rewrite, and does not copy them. The rest of
+  the array is room for the rows appended since the cut, which the commit writes there; when they
+  do not fit, the rows move into a larger array from the table's pool. The array is Chalk's until
+  no snapshot reads it. It then goes back to the pool the table was declared with, or, without
+  one, is reported through `SnapshotReleased`. A replacement you dispose gives its array back the
+  same way, and a prepare that is refused takes nothing.
 - **A commit is refused**, and the refresh changes nothing, when the table was replaced
   after the prepare, and when the rows since the cut do not follow the rewrite in the table's
   declared order. Prepare again from the rows the table holds now.
@@ -562,10 +619,39 @@ await engine.RefreshAsync(refresh => refresh.Commit(prepared), ct);
   admitted against it.
 - A replacement is committed once. Dispose one you will not commit.
 
+A table can be given an `ArrayPool<T>` when it is declared:
+
+```csharp
+// Sized for the table: a pool keeps no array longer than its maxArrayLength.
+var pool = ArrayPool<Tick>.Create(maxArrayLength: 1 << 24, maxArraysPerBucket: 4);
+var mem = new PocoSourceBuilder("mem")
+    .AddTable("ticks", ticks, t => t.AppendOnly(x => x.Ts).ArrayPool(pool))
+    .Build();
+```
+
+- **Its row arrays come from the pool and go back to it**: the arrays the table grows into as
+  rows are appended, the ones a keyed change or a prepared replacement builds, and the arrays you
+  hand over. One goes back once no snapshot reads it, cleared when the rows hold references.
+- **Rent your compactions' arrays from the same pool**, and hand them over. A compaction and the
+  appends after it then allocate no row arrays, once the pool holds what they need. What is held is
+  bounded by the snapshots still read.
+- **Without a pool**, the table keeps one of its own, from which its appends, its keyed changes
+  and its prepared replacements take their arrays all the same.
+- **A collection you give the table stays yours**, pool or none: the one it was declared with, and
+  one a `Replace` takes over, even an array. It never goes to a pool, and is reported through
+  `SnapshotReleased` once no snapshot reads it, as before.
+
 #### Leaving statistics and plans to the background
 
-A refresh computes the statistics of the tables it changed, and sends them to the planner,
-before it returns. `DeferPlanning()` leaves both to the background:
+A refresh computes the statistics of the tables it changed, and sends the planner the
+numbers that moved, before it returns. A POCO table keeps its statistics until a tenth of its
+rows have moved since they were computed: each row appended, upserted or deleted counts, and
+a replacement counts every row it replaced and every row it brought.
+`Statistics(level, refreshWhenGrownBy: …)` sets another fraction, and zero recomputes at
+every refresh. The planner is sent a row count once it is a tenth away from the one it holds,
+and any other number as soon as it moves. The catalog you read always has exact row counts.
+
+`DeferPlanning()` leaves both to the background:
 
 ```csharp
 await engine.RefreshAsync(refresh => refresh.Append(mem, "ticks", batch).DeferPlanning(), ct);
@@ -573,15 +659,26 @@ await engine.RefreshAsync(refresh => refresh.Append(mem, "ticks", batch).DeferPl
 
 - **Under the refresh lock**, nothing is computed and nothing is sent. The tables keep the
   statistics they had, and their row counts are exact, so `IsStale` still sees a drift.
-- **After it, one run in the background** computes the statistics over the rows just
-  published, and sends them to the planner. Then it plans again every statement whose tables'
-  rows have moved twofold since it was planned: a standing view's, and every prepared
-  statement you still hold. A refresh that defers while a run is busy asks for one more run,
-  over whatever is published when it starts.
+- **After it, one run in the background** computes the statistics that are due over the rows
+  just published, and sends the planner the numbers that moved. Then it plans again every
+  statement whose tables' rows have moved twofold since it was planned: a standing view's,
+  and every prepared statement you still hold. A refresh that defers while a run is busy asks
+  for one more run, over whatever is published when it starts.
+- **A statement prepared before the run has sent the numbers** is planned on the ones the planner
+  held before the refresh, and its drift is measured from them, so a later run plans it again once
+  its tables have moved twofold from them. Before you serve anything, as after seeding at startup,
+  await `PlanAsync`, and prepare after it.
+- **A refresh that leaves nothing new asks for no run.** It asks for one when some table's
+  numbers have moved past what the planner holds, when a POCO table's statistics are due,
+  when a refresh that did not defer has sent numbers since the last run, or when the last run
+  could not plan a statement again.
 - **At the next refresh**, deferred or not, the run's statistics enter the catalog and its
   plans swap in. So a plan changes only at a refresh you make, never underneath one. A
   statement then runs its new plan, and an execution already running keeps the one it began
   with. `PlanDigest` moves, `LogicalDigest` does not, and the rows are the same.
+- **The newest numbers win.** Each plan records the numbers it was made on. A plan made on
+  older numbers never replaces one made on newer, and when a later run comes back to the plan
+  a statement runs, what an earlier run left for it is dropped.
 - **An entitled statement** takes a new plan only when it passes the checks its first plan
   passed, and comes with the same entitlements report. Its labels and audit events then stay
   true, and an audit event names the plan that ran. A plan whose report differs, as when a
@@ -599,6 +696,109 @@ await engine.RefreshAsync(refresh => refresh.Append(mem, "ticks", batch).DeferPl
 Compacting with a prepared replacement, in a refresh that defers its planning, holds the lock
 for about as long as an append does.
 
+`PlanAsync` plans now. Its task completes once the new plans are in effect, true when a plan
+changed. Await it only where nothing is being served yet, such as after seeding at startup, or
+in tests:
+
+```csharp
+await engine.RefreshAsync(refresh => refresh.Replace(mem, "ticks", rows).DeferPlanning(), ct);
+await engine.PlanAsync(ct); // before serving
+```
+
+- **It is true** when some statement you held when you called it runs another plan once it
+  returns. **It is false** when none does: nothing was due, or the planner came back to the
+  plan each statement runs. The planner says so without sending the plan again, since each
+  request names the plan the statement runs, and nothing swaps in.
+- **It waits for a run that begins after the call**, so the run sees every refresh you made
+  before it. A run already going is followed by one more. Then that run's plans swap in, under
+  the refresh lock, as a refresh would swap them in.
+- **It publishes nothing.** The rows, the epoch and `Version` stay as they are. The run's
+  statistics reach the planner at once, so a statement you prepare next is planned on them,
+  and they enter the catalog at the next refresh.
+- **A standing view** moves to its statement's new plan at its first update to an epoch it
+  does not hold yet, usually the one after the next refresh. Under `ViewPlanSwap.LowJitter` it
+  starts building the new plan beside the old one as soon as the plan swaps in, so that update
+  can take it.
+- **It works without `DeferPlanning()` too.** A refresh that does not defer sends the planner
+  its numbers, but plans nothing again. `PlanAsync` plans again each statement you hold whose
+  tables have moved twofold since it was planned.
+- **It fails when the run fails**, with what failed, such as `PlannerUnavailableException`, and
+  the plans stay as they were. When the planner cannot plan one statement again, that statement
+  keeps its plan, the others' new plans swap in, and the task fails with the planner's error. A
+  statement whose view's host said not now (`RefreshQueryPlan`) is not a failure.
+- **Cancelling** stops the wait, not the run. What the run plans swaps in at the next refresh.
+
+While you serve, ask for the same run in the refresh instead, with `PlanNow()`. Nothing waits
+for the plans, and they swap in as soon as they are made:
+
+```csharp
+await engine.RefreshAsync(refresh => refresh.Replace(mem, "ticks", rows).PlanNow(), ct);
+```
+
+- **It defers the refresh's planning**, and asks for a run whatever the refresh moved, even
+  less than a tenth. `DeferPlanning()` beside it changes nothing.
+- **The engine starts the run once the refresh has published**, so the run reads what the
+  refresh brought whether you await the refresh or not.
+- **The run's plans swap in as soon as it ends**, as `PlanAsync`'s do. Nothing more is
+  published: the epoch and `Version` stay the refresh's own, and the statistics enter the
+  catalog at the next refresh.
+- **Nothing waits for the run**, so nothing throws when it fails. A run that fails is logged
+  under `Chalk.Client.Planning`, and so is a statement it could not plan again, which the
+  planning observer is told of too. The plans stay as they were.
+- **A statement prepared while the run is still going** may be planned on the numbers from before
+  the refresh, and is planned again later. So seed at startup with `DeferPlanning()` and await
+  `PlanAsync` before preparing or serving; keep `PlanNow()` for refreshes made while serving.
+- **It cannot re-read** a source or table (`refresh.Refresh(…)`), as a refresh that defers
+  cannot.
+
+#### Watching planning
+
+The engine logs its planning under its own category, `Chalk.Client.Planning`: each background
+run, what came of each statement whose numbers drifted, and the plans a refresh takes in. Keep that
+category at `Debug` and the rest higher. The line for each execution, and each prepare's SQL, are
+at `Trace`.
+
+A host that would rather decide what to log, count or show binds an observer:
+
+```csharp
+await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+{
+    // …
+    PlanningObserver = new Planning(),
+});
+
+sealed class Planning : IPlanningObserver
+{
+    public void Judged(in StatementJudged judged)
+    {
+        if (judged.Verdict is not PlanVerdict.Unchanged)
+        {
+            // …
+        }
+    }
+}
+```
+
+- **`Judged`** tells of each statement a background run found drifted:
+  - the plan it runs, and the plan the run came to;
+  - the verdict: planned anew, unchanged, held back by a margin, vetoed by a host, not the same
+    statement, or failed;
+  - both plans' costs, under a margin;
+  - whether a tenfold drift had made it stale.
+- **`Ran`** tells of each run's totals: the tables whose numbers it sent, the drifted statements
+  and their verdicts, and how long it took.
+- **`TookIn`** tells of each refresh that took a run's work in, once it has published: its epoch
+  and version, the plans it swapped in, and the tables whose statistics entered. A view numbers
+  its updates by version (`ViewUpdate.Version`), so match a view's update to its take-in by
+  version: the epoch counts apart. `PlanAsync`, and a refresh that plans now, are told of once
+  the run's plans are in, at the epoch and version current then, with no statistics.
+- **`Prepared`** tells of each prepare, and why: the host's own, or a view's in place of its
+  statement, after a change of shape or a drift the background cannot plan.
+- **Each method does nothing** unless you override it, so implement only the ones you want.
+- **They are called on the engine's threads:** a background run's, a prepare's, and a refresh's
+  once it has let go of its lock. Keep them quick and leave the engine alone. One that throws is
+  logged once, and changes nothing the engine does.
+
 ### ADO.NET — a real database
 
 `Chalk.Sources.Ado` works with any `DbProviderFactory`. Give it a connection, pick a
@@ -613,7 +813,9 @@ var source = new AdoSourceBuilder("sales", SqliteFactory.Instance, connectionStr
 ```
 
 Presets ship for **SQLite**, **DuckDB**, **PostgreSQL** and **ANSI**. Each has its own
-dialect subclass, and a conformance-kit run behind it.
+dialect subclass, and a conformance-kit run behind it. SQLite has no interval type, so
+arithmetic with an interval, such as `ts + INTERVAL '6' HOUR`, is never sent to it: Chalk
+evaluates it on the rows SQLite returns. The other presets are sent it as written.
 
 You can also name any other Calcite `SqlDialect.DatabaseProduct`, such as `oracle`,
 `mssql` or `big_query`. Case does not matter, and `-` and `_` are both accepted. This
@@ -1001,12 +1203,14 @@ list gives no rows for `IN`, and all rows for `NOT IN`.
 ### What a value binds to
 
 A parameter's type comes from the statement: the column it is compared with, or the
-function it is passed to. Or you declare it, in `PrepareOptions.ParameterTypes`, one type
-for each parameter in order. A declared type holds when the statement is checked, so
-`ts >= ? - INTERVAL '60' SECOND` works with the parameter declared `TIMESTAMP(9)`. Left
-to itself, the parameter would take the interval's type, and the comparison would be
-refused. A declared type's nullability holds too. A row count in `LIMIT` or `OFFSET`
-keeps the type it has always had, and must be declared an integer type.
+function it is passed to. Beside an interval, it is the date or timestamp its arithmetic
+is compared with: in `ts >= ? - INTERVAL '60' SECOND` the parameter is `ts`'s type. With
+nothing to compare with, as in `SELECT ? - INTERVAL '1' HOUR`, it could as well be an
+interval, and is typed as one. Or you declare it, in `PrepareOptions.ParameterTypes`, one
+type for each parameter in order. A declared type holds when the statement is checked,
+over whatever the statement would give it. A declared type's nullability holds too. A
+row count in `LIMIT` or `OFFSET` keeps the type it has always had, and must be declared
+an integer type.
 
 A value binds only if the parameter's type holds it
 **exactly**. Anything else is refused by `ExecuteAsync` with a `ParameterBindingException`,
@@ -1368,9 +1572,10 @@ memory budget, `ArenaOptions.MaxBytes`.
 
 ### The current time
 
-`CURRENT_TIMESTAMP`, `LOCALTIMESTAMP` and `CURRENT_DATE` read one instant for each
-execution. It is taken from `ExecutionOptions.TimeProvider` when the execution starts, so
-every row and every operator see the same value, and the next execution reads its own:
+`CURRENT_TIMESTAMP`, `LOCALTIMESTAMP`, `CURRENT_DATE`, `CURRENT_TIME` and `LOCALTIME` read
+one instant for each execution. It is taken from `ExecutionOptions.TimeProvider` when the
+execution starts, so every row and every operator see the same value, and the next
+execution reads its own:
 
 ```sql
 SELECT symbol, price FROM trades
@@ -1378,10 +1583,43 @@ WHERE ts >= CURRENT_TIMESTAMP - INTERVAL '5' MINUTE
 ```
 
 ChalkQL has no session time zone, so the instant is read as a UTC wall clock.
-`CURRENT_TIMESTAMP` and `LOCALTIMESTAMP` are the same `TIMESTAMP`, and `CURRENT_DATE` is
-the date in UTC. A timestamp has precision 6, microseconds, unless you write one, up to
-9: `CURRENT_TIMESTAMP(9)`. A remote source is never sent the current time, so it cannot
-use a "now" of its own. A comparison with it is made in the host.
+`CURRENT_TIMESTAMP` and `LOCALTIMESTAMP` are the same `TIMESTAMP`, `CURRENT_DATE` is the
+date in UTC, and `CURRENT_TIME` and `LOCALTIME` are the same `TIME`, the timestamp's time
+of day. A timestamp or a time has precision 6, microseconds, unless you write one: up to 9
+for a timestamp, `CURRENT_TIMESTAMP(9)`, and up to 6 for a time, `CURRENT_TIME(0)`. A remote
+source is never sent the current time, so it cannot use a "now" of its own. A comparison
+with it is made in the host.
+
+### Dates and times as text
+
+`CAST` of a `DATE`, a `TIME` or a `TIMESTAMP` to `VARCHAR` writes it as PostgreSQL and
+DuckDB do: `2026-01-08`, `12:34:56`, `2026-01-08 12:34:56`. A fraction of a second follows a
+point, with its trailing zeros trimmed, and a whole second has none: `12:34:56.5`, and a
+timestamp to the nanosecond where its precision holds one. Cast back, the text is the same
+value. ChalkQL writes this text whichever source holds the value, so the cast is never sent
+to a source, which would write its own: SQLite gives back the text it stored. A year
+outside 1 to 9999 has no such text, and fails the cast. A `TIMESTAMP WITH LOCAL TIME ZONE` is
+written as its wall clock in UTC and the zone, `2026-01-08 10:00:00+00`, as PostgreSQL and
+DuckDB write one in a session at UTC, and reads back as the same instant.
+
+`CAST` of a timestamp to `TIME` gives its time of day, cut to the time's precision. A `TIME`
+with no precision written has none, so `CAST(ts AS TIME)` is a time to the second, and
+`CAST(ts AS TIME(6))` keeps the microseconds.
+
+`CAST` of text to a timestamp reads it as PostgreSQL and DuckDB do, whatever the machine's
+time zone. A zone the text writes, an offset such as `+02:00` or a `Z`, names an instant:
+
+- A `TIMESTAMP` is the wall clock as written, with the zone dropped, so
+  `'2026-01-08 12:00:00+02:00'` is `2026-01-08 12:00:00`.
+- A `TIMESTAMP WITH LOCAL TIME ZONE` is the instant, so the same text is 10:00 UTC.
+- Text that writes no zone is read as written, which for an instant is UTC.
+
+ChalkQL reads the text whichever source holds it, so a cast from text to a date, a time or a
+timestamp is never sent to a source either: SQLite has no such types, and would read
+`'2026-01-08'` as the number 2026. A date or a timestamp written in the statement, such as
+`CAST('2026-01-08' AS DATE)`, is a value before any source sees it, so a comparison with one
+is still sent. Where a SQLite column declared `DATE` holds text that writes a time and a
+zone, it is the date of that instant in UTC, as SQLite's own `date()` reads it.
 
 ### DECIMAL arithmetic
 
@@ -1481,6 +1719,13 @@ Console.WriteLine(query.PlanningState);               // Converged after 184 eva
 Every field defaults to today's behaviour, so a prepare that sets none of them installs
 no listener and samples no costs.
 
+With `PrepareOptions.IncludePlanText`, the plan text begins with a line saying how the
+search ended: `-- planning: converged after 184 evaluations`. The costs it sampled
+(`first …, best …, ratio …`) are added to that line only with
+`PrepareOptions.VerbosePlanText`. Whether a sample lands before the search converges
+depends on the clock, so a plan text without them is the same on every run.
+`PlanningState` always carries the costs.
+
 - The interval is a **count of rule evaluations, never a duration**. That is what makes
   a plan that stopped on convergence the same plan on every machine.
 - The time budget is the one control that can give different plans on different runs. A
@@ -1520,10 +1765,17 @@ cursor and gets the latest row of each key that changed since it last read — n
 change — and a key the answer no longer has as a delete. Views live in `Chalk.Incremental`, and the
 tutorial's chapter 19 walks through one.
 
-> **As of writing, only the delivery is incremental.** Each update runs the statement in full and
-> compares the result with the rows the view holds. Computing only what changed, in the manner of
-> Differential Dataflow, is aspirational: the API leaves room for it, so a host would not change,
-> but it is not built.
+Incremental maintenance is **experimental**. `ViewMaintenance.Incremental` carries the diagnostic
+`CHALK003`, which a project acknowledges before it can ask for it: `<NoWarn>$(NoWarn);CHALK003</NoWarn>`
+in the project, or `#pragma warning disable CHALK003` where it asks. Until it is declared stable, its
+behaviour and its API may change in any release; check what a maintained view gives against its
+statement before relying on it. A view that recomputes carries no such mark.
+
+A view computes an update one of two ways, which `ViewOptions.Maintenance` chooses. By default
+each update runs the statement in full and compares the result with the rows the view holds. With
+`ViewMaintenance.Incremental`, each update computes only what changed since the last: see
+[Incremental maintenance](#incremental-maintenance). Either way, a reader is sent only the keys that
+changed.
 
 ### Inputs that say how they change
 
@@ -1535,6 +1787,12 @@ is applied.
 | `AppendOnly(t => t.Ts, lateness)` | `Append` | a log, read by time |
 | `AsOf(t => t.Ts, lateness, t => t.Key…)` | `Append` | a log read by key and time; indexed on the keys, then the time |
 | `Keyed(t => t.Key…)` | `Upsert`, `Delete`, `Replace` | rows that change by key; the key is a unique key |
+
+A keyed table's refresh finds the rows it upserts and deletes by key, and costs about what it changes
+rather than what the table holds: it copies the table's rows once, in bulk, and checks only the rows
+it changed against the table's declarations, its key unique by construction. An index whose key
+values the change kept is extended rather than built again; a delete, or a change to a row's value in
+an index's key, builds that index again. An upsert of keys the table does not hold is an append.
 
 A log's **frontier** is the greatest time it has been given. A row older than the frontier, less the
 table's lateness, refuses the whole refresh it came in, naming the row; the lateness is zero unless
@@ -1556,9 +1814,9 @@ await engine.RefreshAsync(epoch => epoch
 
 `ChalkEngineOptions.Clock` names the clock, and on that engine every query reads it, a view or not:
 
-- `CURRENT_TIMESTAMP`, `LOCALTIMESTAMP` and `CURRENT_DATE` read the clock as of the refresh the
-  query's tables are read at, taken in one step with them, so a query's rows and its time are of one
-  refresh. A view reads it as of the view's epoch.
+- `CURRENT_TIMESTAMP`, `LOCALTIMESTAMP`, `CURRENT_DATE`, `CURRENT_TIME` and `LOCALTIME` read the
+  clock as of the refresh the query's tables are read at, taken in one step with them, so a query's
+  rows and its time are of one refresh. A view reads it as of the view's epoch.
 - The parameter named after the clock, `@now`, is the clock when the host binds none, and the host's
   value when it binds one.
 - Before any refresh sets the clock, a query that reads the time is refused with
@@ -1604,12 +1862,19 @@ var outcome = view.Drain(ref cursor, sink, 4096); // copies what changed since t
   prepared statement that reads a database needs the statement planned with the view's
   `LocalJoinMaxRows`. Two plans of one statement can sum `DOUBLE`s in different orders, and so
   differ in the last bits; one plan, run twice over the same rows, does not.
-- **A statement prepared again.** Once its statement is stale (see
-  [Preparing again](#preparing-again)), a view prepares it again at its next update. If the
-  result keeps its columns and key, the readers keep their place, and the next drain sends only
-  what changed; if not, they are reset. After a view of a prepared statement does this, the
-  host's statement is stale too, and one prepared in its place on the same catalog runs the
-  view's new plan.
+- **A statement prepared again.** Once a table its statement reads has changed shape (see
+  [Preparing again](#preparing-again)), a view prepares the statement again at its next update. If
+  the result keeps its columns and key, the readers keep their place, and the next drain sends only
+  what changed; if not, they are reset. After a view of a prepared statement does this, the host's
+  statement is stale too: the host takes the view's from `view.Statement`, which runs the view's plan
+  exactly, rather than prepare its own.
+- **A statement planned again.** A statement a tenfold drift has made stale still runs correctly, so
+  a view does not prepare it anew on its update's thread. It asks for a background run that plans
+  the statement again in place, and keeps running it meanwhile. A plan that comes back the same is
+  kept, and nothing is rebuilt; another is swapped in at the next refresh, and the view moves to it
+  as to any new plan (see [Plans a view takes](#plans-a-view-takes)). Only a statement the background
+  cannot plan again, one an extension decorated without a check on later plans, is prepared anew for
+  a drift.
 - **The local-join cap** is required of every view: `LocalJoinMaxRows`, the most rows a
   cross-source join may fetch to join locally, by the planner's estimate. A statement whose plan
   would fetch more is refused when the view is made, and zero or less is refused outright.
@@ -1647,6 +1912,325 @@ await view.UpdateAsync(); // reads instruments again, and replays what else it r
   filters what the view kept. The clock's parameter can be pushed, and a read compared with it is
   read again when the clock moves.
 
+### Incremental maintenance
+
+A view's update costs what its statement costs, however little changed — unless the view asks for
+incremental maintenance:
+
+```csharp
+await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKey, Cell>
+{
+    Key = ["row_key", "column_key"],
+    LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
+    Exactness = ViewExactness.EqualUpToRounding,   // the statement sums DOUBLE
+    Maintenance = ViewMaintenance.Incremental,
+    Map = Cells.Map,
+});
+```
+
+The view keeps the statement's own plan and runs it on **changes**: the rows each refresh added or
+took out. Filters, projections and `UNION ALL` run on the changes as they would on the rows. Joins,
+as-of joins and aggregates keep state between updates — a join both its sides, an as-of join its
+left rows and its right rows by key, an aggregate its groups — so an update reads no table whole.
+
+- **What a table gives.** The rows an append added since the view's last update. After a `Replace`
+  whose rows are the old ones — the same objects, in their order — with some taken out and rows
+  appended after them, as a compaction of a log makes them, the rows it took out and the rows it
+  appended. A replacement prepared off the refresh lock and committed later (`PrepareReplaceAsync`,
+  `Commit`) reaches the view the same way, the rows appended since its cut included. A keyed table's
+  upserts and deletes give the rows they changed: a row replaced is one row out and one row in, where
+  it stands, and a new key's row is appended. The table records them, so a view a refresh behind reads
+  them from the record; one further behind finds them by comparing the table's two states. After any
+  other change, such as another `Replace`, every old row is out and every new row is in, which costs
+  about what a recompute does, in that update only. An aggregate over a table, through filters and
+  projections, then takes the new rows only and builds its groups again from them.
+- **Plans made in the background.** Under `DeferPlanning()`, a plan the background made swaps into the
+  view's statement at a refresh, at `PlanAsync`, or as a refresh's `PlanNow()` run ends. The view is
+  maintained from it from its first update after a refresh, which gives the whole result once;
+  readers keep their place, sent only the keys that differ. A new plan the view cannot maintain is
+  declined: the plan it keeps answers the same rows.
+- **The clock.** A filter or a projection that reads the clock runs on its changes while the clock
+  stands, and on every row it holds when the clock moves. A filter whose every read of the clock is a
+  cut-off a column is compared with, such as `ts > CURRENT_TIMESTAMP - INTERVAL '2' HOUR`, reads again
+  only the rows between its old cut-off and its new one. That holds under `AND`, `OR` and `NOT`, for a
+  column of a whole-number type: a number, a date, a time or a timestamp. A part of the statement
+  that reads no table at all, such as the days a report is computed for, is computed whole when the
+  clock moves.
+- **Aggregate filters.** An aggregate's `FILTER (WHERE …)` is maintained, and so is a `CASE` inside
+  an aggregate, such as `SUM(CASE WHEN keep THEN x END)`, which the planner writes as one. A row the
+  filter does not keep counts towards its group and towards no measure, so a group whose rows all
+  fail the filter stays, with its sum NULL and its count 0, as a recompute gives it.
+- **Exact sums.** A `DOUBLE` or `REAL` sum is kept exactly and rounded once when read: it is the
+  correctly rounded sum of the group's rows, whatever order they arrived and left in, so it never
+  drifts. A recompute adds in input order, so the two may differ in the last bits, which is what
+  `EqualUpToRounding` admits. Integer and `DECIMAL` sums are exact either way.
+- **As-of seeks.** An as-of join the planner chose to seek an index keeps none of its table: only its
+  left rows, each with the values of the row it matches. The left rows that arrive, those under a key
+  a row was appended to, those whose match a compaction took out, and, after any other change to the
+  table, every one are matched again; a compaction that takes out only rows nothing matches moves no
+  match. Its
+  state does not grow with the table's history. Most need no seek: a row that leaves hands its match
+  to a row arriving with the same key and time, and a seek back from a time keeps each key's last
+  row, which a row at or after it matches — at the clock, in the usual case. The statement's own seek
+  finds the rest, and each key's last row once a row is appended under the key.
+- **Ties** break as the executor breaks them: an as-of join's right rows keep their places in their
+  table, and an as-of seek's ties are the seek's own.
+- **Lookups.** An index lookup pinned to keys, as a constant key or an `IN` list makes, is read as
+  its table is: the table's changes, kept to those keys. Under an as-of join, such as one keyed
+  `ON r.symbol = 'EUR'`, it is maintained when it looks up one key, forwards, through an ordered index
+  the table builds whose later columns are the join's keys or its time: that index keeps rows with
+  one key and time in their order in the table, so the ties are the table's. Otherwise key the join
+  on both sides. Which the planner chooses, a seek or a lookup, depends on the tables' sizes.
+- **`ORDER BY … LIMIT`** at the statement's end is maintained, in whichever form the planner wrote
+  it, and so is an `OFFSET`. The step holds rows in the `LIMIT`'s order, compared as the executor's
+  sort compares them, and sends readers only the rows that crossed into or out of the window.
+  - Over an aggregate, a join or an as-of join it holds every row its input gives: over an aggregate,
+    one per group.
+  - Over a table read through filters and projections it holds the first `offset + count` rows and
+    a margin of as many again. When removals leave the window short of rows it no longer holds, it
+    reads the table again in the same update. So a feed of a table's newest rows holds a few hundred
+    rows, never the table, and an append-only table never makes it read again.
+  - A `LIMIT ?` binds once, when the view is made, as every parameter of a view does.
+  - Two rows that tie under the whole order have one key, so the key does not hold before the
+    `LIMIT`: the view is faulted with `DeclarationNotHeld`, saying so.
+- **Right joins.** The planner may write a statement's `LEFT JOIN` as a `RIGHT JOIN` with its sides
+  swapped, where building on the other side is cheaper, and a policy's joins make that more likely as
+  the tables grow. Such a join is maintained as the left join it mirrors, so the same view is
+  maintained whichever side the planner chose.
+- **Semi and anti joins.** An `EXISTS` or an `IN` over a subquery, which the planner writes as a
+  semi join, is maintained. A left row is given while at least one right row matches it, so a right
+  row's change moves it in or out only when the count of its matches crosses zero. An anti join gives
+  a left row while none does.
+- **Joins that seek a table under a policy.** A join whose left side is a table under an access
+  policy, read through filters and projections, holds its right side alone when the join has no
+  condition but its keys and an index of the table begins with them: a right row that arrives or
+  leaves finds the left rows of its key through the index. So a view under a policy holds its
+  reader's share, not the table ([A view under an access policy](#a-view-under-an-access-policy)).
+- **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's
+  `StateBudget`: a budget tuned for a recompute may need raising. The count is an estimate, made from
+  counts the statement keeps as rows come and go, and comes within a few percent of what the heap
+  holds; reading it costs the same however large the view. It leaves out the statement's plan and
+  the buffers its operators work in, which the batch size bounds rather than the data: about a
+  megabyte a view in the shapes measured. The first update computes everything, and
+  takes longer than a recompute. The buffers its rows passed through are let go when it ends, so the
+  view then holds its state and not the first update's rows.
+- **A failed update** — a fault, a cancellation, the budget — leaves the view at the epoch it held.
+  The next computes the statement from nothing, and a reader is sent only the keys that differ from
+  what it holds.
+- **What is not maintained.** A statement with any of these is refused when the view is made, with
+  `UnsupportedInView`, naming the operator and where it is in the plan:
+  - window functions;
+  - a `LIMIT` before the statement's last step;
+  - set operations but `UNION ALL`;
+  - full joins;
+  - `DISTINCT`, ordered, holistic and host aggregates;
+  - an as-of join whose right input is not a table read, or a lookup of one key in the table's
+    order, through filters and projections;
+  - an as-of seek whose key has one type in its table and another on its left;
+  - an index lookup over a range of keys;
+  - the clock in a join's condition;
+  - a source outside the engine's epochs;
+  - a `LIST`, composite or `BINARY` value in what an operator keeps;
+  - the reference executor.
+
+  A view that recomputes takes all of them.
+
+### Plans a view takes
+
+Under `DeferPlanning()`, a view's statement is planned again in the background once a table it reads
+has moved twofold, and the new plan is taken at a refresh, at `PlanAsync`, or as a refresh's
+`PlanNow()` run ends. An incremental view then builds its state again on the new plan, which makes
+that update its slowest. A host can say when that may happen and how much better a new plan must be,
+and be told what each update cost:
+
+```csharp
+var options = new ViewOptions<Key, Row>
+{
+    // …
+    RefreshQueryPlan = () => !market.Busy,
+    PlanImprovementMargin = 0.25,
+    Tracker = tracker,
+};
+```
+
+- **`RefreshQueryPlan`** is asked before a new plan is requested because the numbers have drifted.
+  - True requests one.
+  - False leaves the statement on its plan, and asks the planner for nothing. The next refresh that
+    defers its planning asks again, so a host can say no while it is busy, and refresh when it is not.
+  - A tenfold drift that makes the statement stale asks it too: the view has the statement planned
+    again by a background run, which asks as any run does.
+  - A change in a table's shape requests a plan without asking: the old plan no longer fits.
+  - It runs on a background thread, so keep it quick and leave the view alone. One that throws says
+    no, and is logged.
+- **`PlanImprovementMargin`** takes a new plan only when it costs at least that fraction less than the
+  plan the view runs. The planner prices both plans on the new numbers. 0.25 takes a plan that costs
+  at most three quarters of the one the view runs; zero takes any plan that costs less.
+  - The planner applies the margin. A plan that saves less is never sent, so there is nothing to
+    compile. The statement then measures drift from the new numbers, so it is planned again only
+    once they move twofold more.
+  - To price the plan the view runs, the planner keeps it. After an eviction or a restart, the
+    planner no longer has it, so the margin cannot apply, and the new plan is taken.
+  - A fraction below 0, or of 1 or more, is refused when the view is made.
+- **The tracker** (`IViewCostTracker`) is told of each update that moves the view, on the update's
+  thread. It hears:
+  - the update's time;
+  - the bytes allocated in the process meanwhile;
+  - whether the update was whole;
+  - the keys it changed;
+  - the plan it ran.
+
+  Something that reads it on another thread, such as `RefreshQueryPlan`, needs its figures kept where
+  both can read them.
+- **A view over a statement you prepared** is asked about that statement's plans. A statement carries
+  one view's `RefreshQueryPlan` and margin, so a second view with either over it is refused while the
+  first exists.
+
+### Swapping plans without a stall
+
+An incremental view can build a new plan beside the one it runs, so that no update pays for building
+it:
+
+```csharp
+var options = new ViewOptions<Key, Row>
+{
+    // …
+    Maintenance = ViewMaintenance.Incremental,
+    PlanSwap = ViewPlanSwap.LowJitter,
+};
+```
+
+`LowJitter` trades memory for steady update times:
+
+- **The running instance** keeps serving readers, and its updates go on as usual.
+- **The new instance**, on the new plan, computes its state from nothing in its first update, which
+  is the slow part. It runs in the background, over the tables as they were when it began. It
+  begins as soon as the statement takes the new plan: at a refresh, at `PlanAsync`, or as a
+  `PlanNow()` run ends.
+- **The first update after the new instance is built swaps it in.** It catches up to that update's
+  tables, and the view compares its whole result with its rows. Readers keep their place, and are
+  sent only the keys whose rows differ. The running instance is let go.
+- **Until the swap, the view holds both instances' state.** `StateBytes` counts the new instance once
+  it is built. `StateBudget` is checked against the instance that serves, since the swap lets one go.
+- **A newer plan while the new instance builds** stops the build, and starts one on the newest plan.
+- **A build that fails** is logged, and the view keeps the running instance on its plan, as it does
+  with a plan it cannot maintain.
+- **A tenfold drift** does not prepare the statement anew: it is planned again in the background, in
+  place, and the view builds the new plan beside its own, or keeps its plan, nothing rebuilt, when
+  the plan comes back the same.
+- **A statement prepared again**, after a change of shape, lets the new instance go. The view
+  computes the new statement whole, as before.
+- **The tracker** hears the swap as an update that is not whole, and that ran the new plan. Until the
+  swap, the updates it hears of ran blue's plan.
+- **A view that recomputes refuses the option**: it takes a new plan at its next update at no extra
+  cost.
+
+The build uses the host's spare time. Where updates run back to back, it competes with them.
+
+### Changing what a view reads, without a pause
+
+A host can compact the tables under its views, or replace them whole, while the views go on
+serving:
+
+```csharp
+// Steady changes: appends that leave their planning to the background, with no closure.
+await engine.RefreshAsync(
+    (mem, batch), static (refresh, s) => refresh.Append(s.mem, "fills", s.batch).DeferPlanning(), ct);
+
+// The cutover: one refresh replaces the tables, and plans now.
+await engine.RefreshAsync(
+    refresh => refresh.Replace(mem, "fills", fills).Replace(mem, "books", books).PlanNow(), ct);
+```
+
+- **The views** are incremental, with `PlanSwap = ViewPlanSwap.LowJitter`.
+- **Steady changes** are appends, in refreshes that defer their planning, so each costs what it
+  adds.
+- **A compaction** is a replacement prepared off the refresh lock (`PrepareReplaceAsync`) while
+  the appends go on, and committed in the next refresh. When it keeps the old rows in their
+  order, a view takes it as the rows it took out and the rows appended since its cut. One
+  prepared before a whole replacement can no longer commit: dispose it.
+- **A whole replacement** goes in one refresh that plans now (`PlanNow()`). The engine starts its
+  run once the refresh has published, so the cutover is the same whether you await the refresh
+  or not, and whatever the views' `PlanSwap`.
+- **Every version is answered** by the plan each view runs, which gives the same rows as the new
+  one. The new plan is built beside it from the moment it swaps in, and takes over at the first
+  update after the build, with the view's state kept and its readers in place, since the result's
+  columns and key are the same.
+- **Name what readers subscribe to** by the statement's `LogicalDigest`, which a new plan does
+  not move.
+- **To see each swap**, read the view's tracker: the update that first runs the new plan
+  reports it in `ViewUpdate.PlanDigest`. The observer's `PlansTakenIn.Version` says when it was
+  taken in.
+
+### A view under an access policy
+
+A statement prepared through `EntitledEngine` makes a view as any other does, recomputed or
+incremental. The view's rows are what the statement returns, at each epoch, to the principal it
+was prepared for:
+
+```csharp
+var entitled = engine.WithEntitlements(new EntitlementsOptions(), audit);
+var feed = await entitled.PrepareAsync(sql, entitlements.Bind(principal));
+await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions<Key, Row>
+{
+    // …
+    Maintenance = ViewMaintenance.Incremental,
+});
+```
+
+- **The policy's steps are kept as the statement's.** A row filter is a filter; a mask, a
+  placeholder or a group-size floor is a projection; a path is a join to the keys its grants name.
+  Incremental maintenance runs them on the changes as it runs them on rows. When the view is made,
+  its maintained plan is checked to keep every filter and projection over a table under the policy
+  exactly as the statement's plan has it, and refused if it would not.
+- **Grants that change belong in a table**, reached along a path. Sharing is then a row added in a
+  refresh, and withdrawing a row deleted: the view gives or drops the rows they govern at its next
+  update. Grants folded into the statement when it was prepared stand for the view's life: to revoke
+  one, dispose of the view and make another. `view.ContextDigest` says which binding a view stands
+  on, as `RequestContext.CanonicalHash` (no purpose or actor), so the views a changed grant touches
+  are those whose digest is no longer `entitlements.Bind(principal).CanonicalHash`.
+- **An index on the table keeps a view to its reader's share.** A path joins the table to the keys
+  its grants name, and a maintained join holds both its sides, so without an index every view holds
+  a copy of the table. Where an index of the table begins with the column the path joins on — for
+  grants that name rows, the table's key — the join holds the reader's keys alone. A grant that
+  arrives or is withdrawn finds the rows of its key through the index, at the update's epoch, and a
+  row that changes is matched against the keys held. `Keyed(…)` on an in-process table says how its
+  rows change and does not index them: declare the index too, as `t.UniqueIndex(x => x.Seq)`.
+- **Lists too long to fold** stay relations, as they do for an execution, and every update binds
+  them from the view's context, or else from the one the statement was prepared with. The statement reads them through a
+  membership test, or splits its rows over them with a semi and an anti join; both are maintained.
+- **Every update is audited.** An `IEntitlementsAudit` hears one event per update that runs, before
+  it runs, whether the view recomputes or is maintained. The event carries the purpose and actor of
+  the context the view binds, or else of the one the statement was prepared with, the digest of the
+  plan the update runs, and the
+  `Version` the update brings the view to, which says which grants a table of grants held. An update
+  at the epoch the view already holds runs nothing and raises nothing. Any refresh moves the epoch,
+  though, even one that touches no table the view reads: the next update then runs, and is audited.
+  An execution's event has no version.
+- **A change of shape keeps the policy.** When a table the statement reads changes shape, the view
+  prepares the statement again through the policy, with the same context, and its updates go on
+  being audited.
+- **One statement serves every principal's view.** Prepare the statement once for the shape of a
+  context, and give each view its principal's values in `ViewOptions.Context`:
+
+  ```csharp
+  var feed = await entitled.PrepareAsync(sql, entitlements.Bind(anyone).Shape());
+  await using var view = await engine.MaterializeAsync(feed.Query, new ViewOptions<Key, Row>
+  {
+      // …
+      Maintenance = ViewMaintenance.Incremental,
+      Context = entitlements.Bind(principal),
+  });
+  ```
+
+  - The view binds those values for its life, at every update, recomputed or maintained, as an
+    execution binds them. Its rows are what the statement returns for that principal, and each
+    update's audit event carries that context's purpose and actor.
+  - The values must fit the statement's shape as an execution's must: the same names, kinds and
+    types, and for a tenant's plan, prepared with `Bind(principal, fold: …)`, the same values for
+    what it folded. A view whose values do not fit is refused when it is made, and so is a view of a
+    statement prepared for a shape that is given none.
+  - A view made from a statement's text prepares it with no context, so it refuses one.
+
 ### What a view refuses
 
 A view's rows are exactly what its statement returns at each epoch, so it refuses, when it is made,
@@ -1658,16 +2242,24 @@ what would make that untrue or unstable:
 | a host function declared `Stable()` or `Volatile()` | `NondeterministicFunction` | declare `Immutable()`, or join what it reads |
 | one that does not say `Immutable()`, under `RequireExplicitImmutable` | `NondeterministicFunction` | declare `Immutable()` |
 | the current time on an engine without a clock | `ClockRequired` | name `ChalkEngineOptions.Clock` |
-| `ORDER BY` without `LIMIT`; a `LIMIT` not ordered by the key | `UnsupportedInView` | drop it, or order by every key column |
+| `ORDER BY` without `LIMIT`; a `LIMIT` not ordered by the key, or before the statement's last step | `UnsupportedInView` | drop it, order by every key column, or move it to the end |
 | a source over a database, without the opt-in | `SourceOutsideEpochs` | `DatabaseReads = WhenRefreshed`, or load it into an in-process table |
 | with it, a database read the rest of the statement binds: a lookup, broadcast or adaptive join | `UnsupportedInView` | let the join be local |
+| under `Maintenance = Incremental`, what incremental maintenance does not keep | `UnsupportedInView` | `ViewMaintenance.Recompute` |
+
+An `ORDER BY … LIMIT` is kept as the statement's last step, in whichever form the planner writes it:
+a `TOPN`, or a `FETCH` over a read already in that order or over a sort. Each records the order whose
+first rows it keeps. The `ORDER BY` must include every key column, so that no two rows tie and the
+input's order never chooses between them. The statement may still filter or order by a column it
+does not select.
 
 A key the result gives twice faults the view with `DeclarationNotHeld`, naming the key, until the
-view is disposed. A view's rows, with what it keeps of its databases, past its `StateBudget` fail
-the update with `MemoryBudgetExceeded`, and the view keeps the epoch it held.
+view is disposed. A view's rows, with what it keeps of its databases or by incremental
+maintenance, past its `StateBudget` fail the update with `MemoryBudgetExceeded`, and the view keeps
+the epoch it held.
 
-Not in this release: a view through `EntitledEngine`, reading a view as of an earlier epoch, and a
-source that another engine also refreshes, whose changes a view sees only at its next update.
+Not in this release: reading a view as of an earlier epoch, and a source that another engine also
+refreshes, whose changes a view sees only at its next update.
 
 ## Logging a statement safely
 
@@ -2240,13 +2832,37 @@ policy anywhere in sight.
 
 **A table with no tenancy column of its own.** A chat message belongs to a thread, a
 line item to an order, a comment to a post — and the row itself says nothing about who
-may read it. `Restriction.Through("thread_id")` declares the relationship once, and
-reads the parent table and its key from the declared foreign key. The planner compiles
-it into one join with the parent's own entitled scan. What the child's columns disclose
-is decided on the *parent's* side of that join: once per parent row, not once per child
-row. Where the parent's whole chain is visible, over a NOT NULL declared key, the join
-is left out altogether, and the visibility is ALL. Tutorial chapter 11 shows three
-principals running one statement over such a table.
+may read it. `messages.Tenancy(t => t.Through(messages.Column("thread_id")))` declares
+the relationship once, and reads the parent table and its key from the declared foreign
+key. The planner compiles it into one join with the parent's own entitled scan, so the
+child is exactly as visible as its parent, by every way into the parent: its tenancy
+grants, its resource owner, its host predicates. The parent must restrict its rows, by a
+row predicate, a `Through` of its own or a path: through an unrestricted parent restricts
+nothing, and is refused with `InvalidTenancyPath`. A visibility rule of the child's own
+that would admit fewer roles, or hold in fewer scopes, than the parent's is refused,
+because the join cannot hold it. To make a child narrower than its parent, take the
+parent's kinds along `Inherited` paths, where the parent's rule and the child's own both
+hold. A reader holds on a child row the roles it holds on the parent row, so what the
+child's columns disclose is decided once per parent row, on the parent's side of the
+join, not once per child row. A rule for a role held along a declared path decides only
+the rows the path reaches: a row reached by a direct dimension beside it takes the rule
+that holds there. Where the parent's whole chain is visible, over a NOT NULL
+declared key, the join is left out altogether, and the visibility is ALL. Tutorial
+chapter 11 shows three principals running one statement over such a table.
+
+**`Through` or paths.** Take orders visible to managers, agents and suppliers, each
+placed by a customer (its `ResourceOwner`) and related to the vendors of the items its
+lines carry. Order 1 has line 1, an item of vendor 1's, and line 2, one of vendor 2's.
+
+- **Entitled `Through` its order,** a line is read by every way into the order. The
+  customer who placed order 1 reads both its lines. Vendor 2's supplier reads order 1
+  because line 2 carries its item, and so reads line 1 too.
+- **Along paths,** `Inherited(org).Through(orders)` and `Inherited(vendor).Through(items)`,
+  each kind is its own route. The supplier reads line 2 alone, and the customer, whom no
+  kind names, reads neither line.
+
+So use `Through` for a child that is part of its parent, like a message in its thread,
+and paths for a child whose readers differ from its parent's.
 
 **A column that says what each row disclosed.** The per-column report is one label for
 the whole result. That is all a caller needs — until a principal is a manager in one
@@ -2279,6 +2895,11 @@ bound in one of two ways:
 For example, fold a tenant's grants and leave the principal open. The plan is then the
 *tenant's*: one plan and one digest, shared by every principal of that tenant, with the
 tenancy filter in the plan's leaf, where a source can be asked to apply it.
+
+With the tenancy package that is `Bind(principal, fold: ["org"])`. The named dimensions'
+grants fold, and so do the flags that say which roles the principal holds everywhere,
+because they are part of the role set the plan is for. The subject lists and the
+principal's own scalars, such as `user`, stay open.
 
 **One plan for many principals.** Usually you prepare a query with one principal's full
 context, and the planner writes that principal's values straight into the plan. The plan
@@ -2361,21 +2982,28 @@ source for.
   user-defined
   aggregate counts only when its declaration says `.Population()` (see *Composite
   results*). Where the host asks for a floor, each aggregate that uses the column is
-  guarded: `CASE WHEN COUNT(c) >= k THEN agg ELSE NULL END`. No floor ships, so a
+  guarded: `CASE WHEN COUNT(c) >= k THEN agg ELSE NULL END`. The count takes the
+  aggregate's own `FILTER`, so a filtered aggregate is guarded over the rows its filter
+  keeps, and a `FILTER` cannot single out rows the floor withholds. No floor ships, so a
   catalog with population-only columns and no small-group rule pays nothing. A host that
   wants a floor gives it at planning, through `PrepareOptions.DefaultMinGroupSize`, or
   per column on the descriptor.
 - **Statistical columns.** A host may decide that a column is protected by
   *query-set-size control* rather than by a mask: `ColumnEntitlement.Statistical`. The
-  raw value may then reach filters, join conditions, an aggregate's `FILTER`, and
-  grouping keys, but only in a statement where:
+  raw value may then decide which rows an aggregate reports on, in filters, join
+  conditions, an aggregate's `FILTER`, and grouping keys, but only in a statement where:
   - every output column is an aggregate or a group key;
   - there is no window anywhere;
   - no individual is pinned or excluded. (A comparison on, or a grouping by, a declared
-    unique key is refused.)
+    unique key is refused, wherever the statement writes it, an aggregate's `FILTER`
+    included.)
 
   A group smaller than the floor is then **dropped**, rather than set to NULL, because
-  with a raw grouping key, the key itself is the disclosure. Outside such a statement,
+  with a raw grouping key, the key itself is the disclosure. An aggregate whose `FILTER`
+  reads the column is held to the floor over the rows its filter keeps: below it, a
+  count of none included, the aggregate is NULL while its group stands. An aggregate's
+  argument computed from the column, such as `SUM(CASE WHEN … THEN 1 ELSE 0 END)`, is
+  refused; write the condition as the aggregate's `FILTER`. Outside such a statement,
   the opt-in does not apply, and the column keeps its mask.
 - **Two kernels.**
   - `FINGERPRINT(value, key)` is a keyed, stable pseudonym: HMAC-SHA-256, with the first
@@ -2399,7 +3027,9 @@ source for.
     sees the digest, the hashes, and, from the context that execution runs with, the row
     counts of its lists and its `Purpose` and `Actor` — and no value. For a plan prepared
     with `context.Shape()`, that is the context bound at execution, so one plan run for
-    many principals is audited as each of them in turn.
+    many principals is audited as each of them in turn. Each update of a standing view of
+    the statement is audited too, with the `Version` it reads: see
+    [A view under an access policy](#a-view-under-an-access-policy).
   - A statement that is refused is told what was refused and what its result would have
     been: see [When a statement is refused](#when-a-statement-is-refused).
 - **Fail closed, twice.** Chalk proves the model for every plan, rather than assuming
@@ -2566,6 +3196,40 @@ takes one or more *restrictions*, OR-ed together:
 Unrestricted means every row is visible. The column rules still apply, so a reference
 table with one sensitive column belongs here too.
 
+A visibility rule, `Visible(new VisibilityRule { Roles = […] })`, names the roles that
+may see a table's rows; a table without one admits every role. A path holds its
+parents' rules too. A row that takes a kind from another along `Inherited` or `Related`
+reaches a role only where every table along the path admits it, in a scope their rules
+allow; a `Related` path's bridge is the exception, since the path only passes through
+it. A role a parent's rule leaves out reads nothing along the path, and its grants
+along the path do not count in the child's column rules either. The child's own rule,
+scopes included, also holds on every row a path admits.
+
+Sometimes a child should be read by its parent's *value* of a kind, as a marking, by
+roles that may not read the parent: a tasking carries its asset's classification, and
+tasking readers may not read the assets. The path names those roles:
+
+```csharp
+tasking.Tenancy(t => t
+    .Direct(mission, tasking.Column("MissionId"))
+    .Inherited(classification).Through(assets)
+        .ExemptFromParentVisibility(taskingReader));
+```
+
+An exemption covers the whole path, and `TenancyEntitlements.Exemptions` lists every
+one a policy makes, for a review to read. One that would change nothing is refused.
+
+A policy is refused when it compiles if a parent's rule would leave a role the child
+admits with no way into the child at all; the message names the role, the parent and
+the clause to add. The compiler cannot always see that. If the role keeps another way
+in, and the policy declares no combinations, the compiler cannot know which kinds the
+role's grants will hold together; then a grant that would reach nothing is refused when
+it is bound. To ask the question at every path instead, call
+`RequireExplicitParentVisibility()` on the policy. Each role a parent leaves out must
+then be named on the path, either `ExemptFromParentVisibility` or
+`BoundByParentVisibility`, which states the default out loud: the parent's rule holds
+for that role.
+
 Sometimes a path has to leave its source. `Column.References(Column)` declares a link
 that a foreign key cannot state, because a foreign key is one source's claim about a
 table in *its own* schema. The link travels on the catalog, and a path step follows it
@@ -2580,6 +3244,13 @@ There are four kinds of grant, and no fifth:
 - `Grant.Global`, which is refused at binding unless the policy opts in;
 - the resource-owner fail-safe, which is not a grant at all, but a row the principal
   owns.
+
+A principal that owns nothing, such as a class principal that stands for many people,
+says so with `User = null`. Its `user` is bound as NULL and folded, so every owner test
+comes out of its plans, its column labels and its explanation, and what is left is its
+roles alone. An id of its own that no row holds would give the same rows, but it leaves
+each owner test in the plan, and a column the roles show in full is then decided row by
+row. `User` is required either way, so a principal says which it is.
 
 **The list is the priority.** Rules are read in the order you wrote them. A rule matches
 a row when the principal holds one of the rule's roles in that row's tenancy, and the

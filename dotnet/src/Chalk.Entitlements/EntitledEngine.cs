@@ -74,6 +74,19 @@ public sealed class EntitledEngine
     }
 
     /// <summary>
+    /// A statement prepared again in a view's place, as <see cref="PrepareAsync"/> prepares it, for
+    /// <paramref name="reason"/> (D361).
+    /// </summary>
+    internal async ValueTask<EntitledQuery> PrepareAgainAsync(
+        string sql, RequestContext? context, PrepareOptions? options, PrepareReason reason, CancellationToken ct)
+    {
+        var prepared = await Engine
+            .PrepareAgainAsync(sql, context, With(options), reason, ct)
+            .ConfigureAwait(false);
+        return new EntitledQuery(this, sql, prepared, options, _audit);
+    }
+
+    /// <summary>
     /// What this principal's policy resolves to for a statement, without executing it and without
     /// the caller needing a plan (<c>docs/design/16-entitlements.md</c> §3.12, D207).
     /// </summary>
@@ -146,8 +159,20 @@ public sealed class EntitledQuery
         // say leaves the compiler's own schema by reference.
         prepared.Decorate(
             schema => Disclosures.Decorate(schema, Entitlements.Columns),
-            audit is null || Entitlements.Tables.Count == 0 ? null : (q, context) => Audit(audit, q, context),
-            Check);
+            audit is null || Entitlements.Tables.Count == 0 ? null : run => Audit(audit, run),
+            Check,
+            PrepareAgainAsync);
+    }
+
+    /// <summary>
+    /// This statement prepared again in a view's place (D361): a table it reads changed shape, or its
+    /// plan drifted past what the background plans again. Through the policy, with the context it was
+    /// prepared with, so that the new statement is labelled, audited and checked as this one is.
+    /// </summary>
+    private async ValueTask<PreparedQuery> PrepareAgainAsync(PrepareReason reason, CancellationToken ct)
+    {
+        var again = await _engine.PrepareAgainAsync(_sql, Query.Context, _options, reason, ct).ConfigureAwait(false);
+        return again.Query;
     }
 
     /// <summary>The report the planner sent with the plan this statement was prepared with.</summary>
@@ -283,19 +308,21 @@ public sealed class EntitledQuery
     public PreparedQuery ToPreparedQuery() => Query;
 
     /// <summary>
-    /// One event per execution, before anything runs (D157, D205). It carries what identifies the
-    /// policy and the request and never a context value: the digest, the descriptor hashes, the row
-    /// counts of the bound lists and the host's own purpose and actor.
+    /// One event per execution, and per update of a standing view, before anything runs (D157, D205,
+    /// D361). It carries what identifies the policy and the request and never a context value: the
+    /// digest, the descriptor hashes, the row counts of the bound lists, the host's own purpose and
+    /// actor, and a view's version.
     /// </summary>
     /// <remarks>
-    /// The request is the execution's: <paramref name="context"/> is the context it runs with — the
-    /// one it binds, for a plan prepared with shapes, or the one it was prepared with, for a plan that
-    /// folded its values. Read off the prepared query instead, a plan prepared once for a shape and run
-    /// for many principals was audited with the preparer's purpose and actor, and with every list it
-    /// binds at execution counted as empty (F166).
+    /// The request is the run's: its context is the one it runs with — the one it binds, for a plan
+    /// prepared with shapes, or the one it was prepared with, for a plan that folded its values. Read
+    /// off the prepared query instead, a plan prepared once for a shape and run for many principals
+    /// was audited with the preparer's purpose and actor, and with every list it binds at execution
+    /// counted as empty (F166).
     /// </remarks>
-    private void Audit(IEntitlementsAudit observer, PreparedQuery query, RequestContext? context)
+    private void Audit(IEntitlementsAudit observer, StatementRun run)
     {
+        var context = run.Context;
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         if (context is not null)
         {
@@ -312,12 +339,13 @@ public sealed class EntitledQuery
 
         observer.Executed(new EntitlementsAuditEvent
         {
-            PlanDigest = query.PlanDigest,
+            PlanDigest = run.PlanDigest,
             DescriptorHashes = Entitlements.DescriptorHashes,
             Tables = Entitlements.Tables,
             ContextListRowCounts = counts,
             Purpose = context?.Purpose ?? "",
             Actor = context?.Actor ?? "",
+            Version = run.Version,
         });
     }
 }

@@ -133,7 +133,9 @@ public static class PlanExtensions
         Rel.KindOneofCase.HashAggregate => "HashAggregate " + Describe(rel.HashAggregate.Aggregate),
         Rel.KindOneofCase.StreamAggregate => "StreamAggregate " + Describe(rel.StreamAggregate.Aggregate),
         Rel.KindOneofCase.Sort => $"Sort [{string.Join(", ", rel.Sort.Fields.Select(Describe))}]",
-        Rel.KindOneofCase.Fetch => "Fetch offset=" + rel.Fetch.Offset.ToString(CultureInfo.InvariantCulture)
+        Rel.KindOneofCase.Fetch => "Fetch"
+            + (rel.Fetch.Order.Count == 0 ? "" : $" order=[{string.Join(", ", rel.Fetch.Order.Select(Describe))}]")
+            + " offset=" + rel.Fetch.Offset.ToString(CultureInfo.InvariantCulture)
             + (rel.Fetch.HasCount ? " count=" + rel.Fetch.Count.ToString(CultureInfo.InvariantCulture) : " count=all"),
         Rel.KindOneofCase.TopN => $"TopN [{string.Join(", ", rel.TopN.Fields.Select(Describe))}]"
             + string.Create(CultureInfo.InvariantCulture, $" offset={rel.TopN.Offset} count={rel.TopN.Count}"),

@@ -46,3 +46,21 @@ report id:Full, members:None
 -- u15-a-vendor-and-an-org
 report id:Full, members:Some
 
+-- u16-a-manager-in-two-orgs
+report id:Full, members:Some
+
+-- u17-an-agent-in-two-orgs
+report id:Full, members:Some
+1
+3
+7
+
+-- u18-a-keeper
+report id:Full, members:Some
+
+-- u19-a-vendor-in-a-region
+report id:Full, members:None
+
+-- u20-a-picker
+report id:Full, members:Some
+

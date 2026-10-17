@@ -223,6 +223,24 @@ message PlanRequest {
   // parameter with no hint is estimated as it always was — and additive, so a request that carries
   // none sends no bytes at all.
   repeated ParameterHint parameter_hints = 16;
+  // The digest of a plan the caller already holds for this statement, or zero. A planner that comes
+  // to a plan with this digest answers `plan_unchanged` and leaves the plan out: a statement planned
+  // again in the background, on numbers that moved, then costs its caller nothing to parse, check or
+  // compile when the numbers did not change its plan. Zero — every other request — sends no bytes.
+  uint64 known_plan_digest = 17;
+  // Keep the plan this request is answered with, and price the one `known_plan_digest` names when
+  // this planner keeps it (design 70 §3): the costs a standing view's plan check compares. False —
+  // every other request — keeps nothing and prices nothing.
+  bool price_plans = 18;
+  // With `price_plans`: how much less than the known plan another plan must cost to be sent, as a
+  // fraction of the known plan's cost, both on this request's numbers (design 70 §3). A plan that
+  // saves less is held back and the response says `plan_held`, so the caller keeps the plan it runs
+  // and has nothing to parse, check or compile. 0.25 sends a plan that costs at most three quarters
+  // of the known one; zero sends any that costs less. From zero up to, not including, one; refused
+  // otherwise, and without `price_plans`. Applies only while this planner keeps the known plan: one
+  // it no longer keeps cannot be priced, and the new plan is sent. Absent — every other request —
+  // sends the plan the planner came to.
+  optional double cheaper_by = 19;
 }
 
 // One parameter's expected value, for estimation.
@@ -458,6 +476,11 @@ message PlannerOptions {
   PushdownLevel pushdown = 1;
   // Populate PlanResponse.plan_text (RelOptUtil.toString of the logical and physical plans).
   bool include_plan_text = 2;
+  // With include_plan_text: add what varies from one run to the next. The planning line then carries
+  // the search governor's sampled costs (first, best, ratio), which it has only when a sample landed
+  // before the search converged, and that depends on the clock. Without it the line says how the
+  // search ended and how many evaluations it took, the same on every run (F195).
+  bool verbose_plan_text = 11;
   // Plan as if no index existed.
   bool disable_index_lookup = 3;
   // Numbered enums until 0.4 (D318).
@@ -534,6 +557,20 @@ message PlanResponse {
   // conversion and the entitlement rewrite left it, before any rule. `plan.plan_digest` is the
   // identity of the plan that runs, and moves when statistics change its operators.
   uint64 logical_digest = 9;
+  // The plan came out with the request's `known_plan_digest`, so `plan` and `plan_text` are left out.
+  // False for a request that named no digest, or whose plan differs from it.
+  bool plan_unchanged = 10;
+  // For a request that set `price_plans`: this plan's cumulative cost, the row work the optimiser
+  // compares plans by, on the request's numbers.
+  optional double plan_cost = 11;
+  // For a request that set `price_plans` and named a `known_plan_digest` this planner keeps: that
+  // plan's cost on the request's numbers, so the two compare like with like. Absent when the planner
+  // no longer keeps it.
+  optional double known_plan_cost = 12;
+  // The planner came to another plan than the request's `known_plan_digest`, but it does not cost
+  // less than the known plan by the request's `cheaper_by`, so the known plan stands: `plan` and
+  // `plan_text` are left out, as for `plan_unchanged`, and the two costs say why. False otherwise.
+  bool plan_held = 13;
   // Moved into `PlanResponse.extensions` as `chalk.v1.EntitlementsReport` and
   // `chalk.v1.EntitlementsExplain`.
   reserved 4, 5;

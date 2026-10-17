@@ -72,6 +72,24 @@ final class DisclosureFlow {
     return new DisclosureFlow(leaves).at(root);
   }
 
+  /**
+   * Which of {@code root}'s output columns derive from a column of an emitted leaf: the same walk,
+   * with every leaf column read as varying, so a column reads other than FULL exactly where an
+   * entitled column reaches it, through whatever the statement's shape is.
+   */
+  static boolean[] fromLeaves(RelNode root, Map<RelNode, Disclosed[]> leaves) {
+    Map<RelNode, Disclosed[]> varying = new IdentityHashMap<>();
+    for (Map.Entry<RelNode, Disclosed[]> leaf : leaves.entrySet()) {
+      varying.put(leaf.getKey(), filled(leaf.getValue().length, Disclosed.PER_ROW));
+    }
+    Disclosed[] flow = of(root, varying);
+    boolean[] out = new boolean[flow.length];
+    for (int i = 0; i < flow.length; i++) {
+      out[i] = flow[i] != Disclosed.FULL;
+    }
+    return out;
+  }
+
   // ------------------------------------------------------------------ the cases
 
   /** What one case does with a node whose width is {@code width}. */

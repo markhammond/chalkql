@@ -32,7 +32,7 @@ internal sealed class ScalarValue
 
     public string? Text { get; init; }
 
-    /// <summary>BINARY payload, the 16 UUID bytes, or the 16 unscaled DECIMAL bytes.</summary>
+    /// <summary>BINARY payload, the 16 UUID bytes, the 16 unscaled DECIMAL bytes, or a STRING's UTF-8 bytes.</summary>
     public byte[]? Bytes { get; init; }
 
     /// <summary>A LIST constant's elements, in order (D58). Empty for every other kind.</summary>
@@ -65,10 +65,13 @@ internal sealed class ScalarValue
                 new ScalarValue { Type = type, Integer = column.Lanes<long>()[row] },
             TypeKind.Fp32 => new ScalarValue { Type = type, Single = column.Lanes<float>()[row] },
             TypeKind.Fp64 => new ScalarValue { Type = type, Double = column.Lanes<double>()[row] },
+            // A STRING scalar carries its bytes beside its text, as a literal's does: the bytes are
+            // what an output column is written from (F239).
             TypeKind.String => new ScalarValue
             {
                 Type = type,
                 Text = System.Text.Encoding.UTF8.GetString(column.VarValue(row)),
+                Bytes = column.VarValue(row).ToArray(),
             },
             TypeKind.Binary or TypeKind.Uuid or TypeKind.Decimal =>
                 new ScalarValue { Type = type, Bytes = BytesOf(column, row, type) },
@@ -77,6 +80,32 @@ internal sealed class ScalarValue
                 $"a lookup key of type {IrTypes.Describe(type.ToProto())}",
                 "A lookup join binds its keys into a source's query, and this type has no value the "
                 + "boundary can carry. Plan the join as LOCAL, or narrow the key column."),
+        };
+    }
+
+    /// <summary>
+    /// The lane's value as <see cref="ToClr"/> gives it, read without a <see cref="ScalarValue"/> on the
+    /// way: what an as-of seek's bounds are made of, once for each left row.
+    /// </summary>
+    public static object? ClrAt(in ColumnView column, int row, ChalkType type)
+    {
+        if (!column.IsValid(row))
+        {
+            return null;
+        }
+
+        return type.Kind switch
+        {
+            TypeKind.Bool => (byte)(column.BoolAt(row) ? 1 : 0),
+            TypeKind.I8 => column.Lanes<sbyte>()[row],
+            TypeKind.I16 => column.Lanes<short>()[row],
+            TypeKind.I32 or TypeKind.Date or TypeKind.IntervalYear => column.Lanes<int>()[row],
+            TypeKind.I64 or TypeKind.Time or TypeKind.Timestamp or TypeKind.TimestampTz
+                or TypeKind.IntervalDay => column.Lanes<long>()[row],
+            TypeKind.Fp32 => column.Lanes<float>()[row],
+            TypeKind.Fp64 => column.Lanes<double>()[row],
+            TypeKind.String => System.Text.Encoding.UTF8.GetString(column.VarValue(row)),
+            _ => FromLane(column, row, type).ToClr(),
         };
     }
 

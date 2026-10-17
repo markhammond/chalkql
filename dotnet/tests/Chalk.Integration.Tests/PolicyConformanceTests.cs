@@ -28,7 +28,7 @@ public sealed class PolicyConformanceTests(SharedSidecar sidecar)
 {
     /// <summary>
     /// Every statement the corpus holds to the oracle. One it only <em>records</em>, because the
-    /// defect it found is registered (<see cref="TenancyCorpusTests.KnownLeaks"/>), has no answer
+    /// defect it found is registered (<see cref="TenancyCorpusTests.KnownDefects"/>), has no answer
     /// for this harness to check a plan against.
     /// </summary>
     public static TheoryData<string> Queries()
@@ -36,7 +36,7 @@ public sealed class PolicyConformanceTests(SharedSidecar sidecar)
         var data = new TheoryData<string>();
         foreach (var query in CorpusQueries.LoadM7Tenancy())
         {
-            if (!TenancyCorpusTests.KnownLeaks.ContainsKey(query.Name))
+            if (!TenancyCorpusTests.KnownDefects.ContainsKey(query.Name))
             {
                 data.Add(query.Name);
             }
@@ -54,7 +54,7 @@ public sealed class PolicyConformanceTests(SharedSidecar sidecar)
         var data = new TheoryData<string>();
         foreach (var query in CorpusQueries.LoadM7Tenancy())
         {
-            if (!TenancyCorpusTests.KnownLeaks.ContainsKey(query.Name)
+            if (!TenancyCorpusTests.KnownDefects.ContainsKey(query.Name)
                 && !TenancyCorpusTests.RefusedUnderOpenBinding.ContainsKey(query.Name))
             {
                 data.Add(query.Name);

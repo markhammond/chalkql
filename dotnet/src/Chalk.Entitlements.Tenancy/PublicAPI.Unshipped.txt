@@ -211,7 +211,7 @@ Chalk.Entitlements.Tenancy.TenancyPrincipal.Purpose.init -> void
 Chalk.Entitlements.Tenancy.TenancyPrincipal.Scope.get -> Chalk.Entitlements.Tenancy.Scope?
 Chalk.Entitlements.Tenancy.TenancyPrincipal.Scope.init -> void
 Chalk.Entitlements.Tenancy.TenancyPrincipal.TenancyPrincipal() -> void
-Chalk.Entitlements.Tenancy.TenancyPrincipal.User.get -> object!
+Chalk.Entitlements.Tenancy.TenancyPrincipal.User.get -> object?
 Chalk.Entitlements.Tenancy.TenancyPrincipal.User.init -> void
 Chalk.Entitlements.Tenancy.TenancyReconciliation
 Chalk.Entitlements.Tenancy.TenancyReconciliation.Agrees.get -> bool
@@ -316,3 +316,21 @@ static Chalk.Entitlements.Tenancy.TenancyPolicy.Declare(Chalk.Catalog.CatalogCon
 ~override Chalk.Entitlements.Tenancy.Sql.Equals(object obj) -> bool
 ~override Chalk.Entitlements.Tenancy.SubjectKind.Equals(object obj) -> bool
 ~override Chalk.Entitlements.Tenancy.Table.Equals(object obj) -> bool
+Chalk.Entitlements.Tenancy.TenancyPath.BoundByParentVisibility(params Chalk.Entitlements.Tenancy.Role[]! roles) -> Chalk.Entitlements.Tenancy.TenancyPath!
+Chalk.Entitlements.Tenancy.TenancyPath.ExemptFromParentVisibility(params Chalk.Entitlements.Tenancy.Role[]! roles) -> Chalk.Entitlements.Tenancy.TenancyPath!
+Chalk.Entitlements.Tenancy.TenancyPolicy.RequireExplicitParentVisibility(bool require = true) -> Chalk.Entitlements.Tenancy.TenancyPolicy!
+Chalk.Entitlements.Tenancy.TenancyPolicy.RequiresExplicitParentVisibility.get -> bool
+Chalk.Entitlements.Tenancy.TenancyEntitlements.Exemptions.get -> System.Collections.Generic.IReadOnlyList<Chalk.Entitlements.Tenancy.TenancyExemption!>!
+Chalk.Entitlements.Tenancy.TenancyExemption
+Chalk.Entitlements.Tenancy.TenancyExemption.Endpoint.get -> string!
+Chalk.Entitlements.Tenancy.TenancyExemption.Endpoint.init -> void
+Chalk.Entitlements.Tenancy.TenancyExemption.Kind.get -> string!
+Chalk.Entitlements.Tenancy.TenancyExemption.Kind.init -> void
+Chalk.Entitlements.Tenancy.TenancyExemption.Roles.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Entitlements.Tenancy.TenancyExemption.Roles.init -> void
+Chalk.Entitlements.Tenancy.TenancyExemption.Source.get -> string!
+Chalk.Entitlements.Tenancy.TenancyExemption.Source.init -> void
+Chalk.Entitlements.Tenancy.TenancyExemption.Table.get -> string!
+Chalk.Entitlements.Tenancy.TenancyExemption.Table.init -> void
+Chalk.Entitlements.Tenancy.TenancyExemption.TenancyExemption() -> void
+override Chalk.Entitlements.Tenancy.TenancyExemption.ToString() -> string!

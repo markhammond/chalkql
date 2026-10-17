@@ -404,6 +404,10 @@ public final class SqlBodyInliner extends SqlShuttle {
               : call.getOperator() == chalk.planner.plan.ChalkOperatorTable.LEAST
                       || call.getOperator() == chalk.planner.plan.ChalkOperatorTable.GREATEST
                   ? ExtremumConvertlet.INSTANCE
+              // F191: CURRENT_TIME and LOCALTIME as the time of day of CURRENT_TIMESTAMP.
+              : call.getOperator() == chalk.planner.plan.ChalkOperatorTable.CURRENT_TIME
+                      || call.getOperator() == chalk.planner.plan.ChalkOperatorTable.LOCALTIME
+                  ? TimeOfDayConvertlet.INSTANCE
               // D337: TIMESTAMPDIFF stays the call the IR has a function for.
               : call.getKind() == org.apache.calcite.sql.SqlKind.TIMESTAMP_DIFF
                       && TimestampDiffConvertlet.unitOf(call) != null

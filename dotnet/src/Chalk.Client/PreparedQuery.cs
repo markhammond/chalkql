@@ -5,6 +5,7 @@ using Chalk.Client.Rpc;
 using Chalk.Execution;
 using Chalk.Ir;
 using Chalk.Sources;
+using Microsoft.Extensions.Logging;
 using ArrowSchema = Apache.Arrow.Schema;
 
 namespace Chalk.Client;
@@ -161,16 +162,16 @@ public sealed class PreparedQuery
 
     /// <summary>
     /// Lets one extension decorate the schema every batch of this query carries, hear about each
-    /// execution before it runs (step 26c, D213), and check each plan the query takes after its
+    /// run before it starts (step 26c, D213), and check each plan the query takes after its
     /// prepare. The one seam the core keeps for a feature it does not itself know: today the
     /// entitlement wrapper puts <c>chalk.disclosure</c> on the fields, raises its audit event and
     /// checks plans against its report through it, and nothing in this package names any of them.
     /// </summary>
     /// <param name="decorateSchema">What every batch's schema becomes.</param>
-    /// <param name="beforeExecute">
-    /// Heard before each execution, with the context that execution runs with: the one it binds, for
-    /// a query prepared with shapes, or the one it was prepared with, for a query that folded its
-    /// values (F166). Never the prepare's shape, which holds no values and belongs to no request.
+    /// <param name="beforeRun">
+    /// Heard before each execution, and before each update of a standing view of the query,
+    /// recomputed or maintained (D361), with what the run binds and the epoch it reads
+    /// (<see cref="StatementRun"/>).
     /// </param>
     /// <param name="checkPlan">
     /// Shown each plan the query takes after its prepare, before it is used: one for another length of
@@ -178,14 +179,21 @@ public sealed class PreparedQuery
     /// throws to refuse one: the execution is then refused, or the background plan is not taken. A
     /// query decorated without one is never planned again in the background.
     /// </param>
+    /// <param name="prepareAgain">
+    /// Prepares the query again in a view's place, decorated as this one is (D361): a table it reads
+    /// changed shape, or its plan drifted past what the background plans again. Without one, the
+    /// query is prepared again with its context, undecorated.
+    /// </param>
     internal void Decorate(
         Func<ArrowSchema, ArrowSchema>? decorateSchema,
-        Action<PreparedQuery, RequestContext?>? beforeExecute,
-        Action<PlanResult>? checkPlan = null)
+        Action<StatementRun>? beforeRun,
+        Action<PlanResult>? checkPlan = null,
+        Func<PrepareReason, CancellationToken, ValueTask<PreparedQuery>>? prepareAgain = null)
     {
         _decorateSchema = decorateSchema;
-        _beforeExecute = beforeExecute;
+        _beforeRun = beforeRun;
         _checkPlan = checkPlan;
+        _prepareAgain = prepareAgain;
         if (decorateSchema is null)
         {
             return;
@@ -204,8 +212,9 @@ public sealed class PreparedQuery
     }
 
     private Func<ArrowSchema, ArrowSchema>? _decorateSchema;
-    private Action<PreparedQuery, RequestContext?>? _beforeExecute;
+    private Action<StatementRun>? _beforeRun;
     private Action<PlanResult>? _checkPlan;
+    private Func<PrepareReason, CancellationToken, ValueTask<PreparedQuery>>? _prepareAgain;
     private readonly IReadOnlyList<int> _prepareShape;
 
     /// <summary>The output columns, named. A column discloses nothing beyond its name to this package.</summary>
@@ -240,6 +249,12 @@ public sealed class PreparedQuery
     /// <see cref="PlanDigest"/>, the identity of the plan that runs, it does not move when new
     /// statistics change the plan's operators, so it is what to name shared work by. Zero when the
     /// plan came from a planner that computes none, such as <see cref="RecordedPlanner"/>.
+    /// <para>
+    /// It is the statement's identity in its catalog: the same on every engine and planner that holds
+    /// the catalog. It covers every column of every table the statement reads, used or not, and the
+    /// policy over them, and no other table. It does not name the catalog, so a key that spans
+    /// catalogs adds one; and it is the planner's own digest, so a ChalkQL upgrade may move it.
+    /// </para>
     /// </remarks>
     public ulong LogicalDigest { get; }
 
@@ -489,7 +504,9 @@ public sealed class PreparedQuery
     /// — one made on empty tables scans and loops where one made on loaded tables seeks and hashes —
     /// so this is also true once a table the query reads has drifted tenfold, either way, since it was
     /// planned (D342). A table whose row count is unknown is not judged. The query still runs, and runs
-    /// correctly; preparing it again finds the plan for the numbers there are now.
+    /// correctly; preparing it again finds the plan for the numbers there are now. Under
+    /// <c>DeferPlanning()</c> a background run plans it again in place instead, and
+    /// <see cref="ChangedShape"/> tells the two halves apart.
     /// </para>
     /// <para>
     /// So does a shape change in a table this query does not read: since D271 (d) the comparison is
@@ -555,7 +572,7 @@ public sealed class PreparedQuery
     internal bool MayPlanAgain =>
         LogicalDigest != 0
         && (_checkPlan is not null
-            || (_options.Extensions.Count == 0 && _decorateSchema is null && _beforeExecute is null))
+            || (_options.Extensions.Count == 0 && _decorateSchema is null && _beforeRun is null))
         && !_notTheSame
         && _engine.IsCurrent(Volatile.Read(ref _state).Plan, Volatile.Read(ref _state).TablesRead);
 
@@ -574,22 +591,61 @@ public sealed class PreparedQuery
         Drifted(Volatile.Read(ref _state), catalog, PlanAgainDrift);
 
     /// <summary>
-    /// This statement planned and compiled again, on the numbers the planner holds now (design 69
-    /// §4), ready to swap in; null when what came back is not the same statement: another logical
-    /// plan, or other parameters or context to bind. Every plan of a statement answers the same rows,
-    /// so the one that comes back differs only in what it costs.
+    /// The same, judged from the numbers <paramref name="waiting"/> was made on: a plan a background
+    /// run made for this statement, which no refresh has swapped in yet.
     /// </summary>
-    internal async ValueTask<PlanState?> PlanAgainAsync(CancellationToken ct)
+    internal static bool DriftedFrom(PlanState waiting, Chalk.Catalog.CatalogContext catalog) =>
+        Drifted(waiting, catalog, PlanAgainDrift);
+
+    /// <summary>
+    /// This statement planned and compiled again, on the numbers the planner holds now (design 69
+    /// §4), ready to swap in, and what the planning came to: no plan when the planner came to the one
+    /// the statement runs, held back one that saves less than its view's margin (design 70 §3), or
+    /// sent another statement — another logical plan, or other parameters or context to bind. Every
+    /// plan of a statement answers the same rows, so the one that comes back differs only in what it
+    /// costs.
+    /// </summary>
+    internal async ValueTask<PlanAgain> PlanAgainAsync(CancellationToken ct)
     {
         var current = Volatile.Read(ref _state);
+        var margin = Choice?.ImprovementMargin;
         var result = await _engine
-            .PlanAsync(_prepared.Sql, _options, Context, _hints, ct)
+            .PlanAgainAsync(
+                _prepared.Sql,
+                _options,
+                Context,
+                _hints,
+                current.Plan.PlanDigest,
+                pricePlans: margin is not null,
+                cheaperBy: margin,
+                ct)
             .ConfigureAwait(false);
+        if (result.Unchanged || result.Held || result.Plan.PlanDigest == current.Plan.PlanDigest)
+        {
+            // The planner came to the plan this statement runs, on the numbers it holds now, or to one
+            // that does not save the margin a view set on it (design 70 §3): nothing to compile or
+            // swap in, so a view kept from the plan keeps on, and drift is judged from these numbers
+            // from now on.
+            if (result.Held)
+            {
+                _engine.PlanningLog.LogDebug(
+                    "the planner held back a plan of {Digest:x16} that costs {Next} against {Held} for the plan it runs",
+                    LogicalDigest,
+                    result.PlanCost,
+                    result.KnownPlanCost);
+            }
+
+            current.Rebase(PlannedRows(result.PlannedOn ?? _engine.Catalog, current.TablesRead), result.PlannedOnVersion);
+            return result.Held
+                ? new PlanAgain(null, PlanAgainOutcome.Held, 0, result.PlanCost, result.KnownPlanCost)
+                : new PlanAgain(null, PlanAgainOutcome.Unchanged, current.Plan.PlanDigest, result.PlanCost, result.KnownPlanCost);
+        }
+
         if (result.LogicalDigest != LogicalDigest
             || !RequiredNames(result.Plan, Context).SequenceEqual(RequiredContext, StringComparer.Ordinal))
         {
             _notTheSame = true;
-            return null;
+            return new PlanAgain(null, PlanAgainOutcome.NotTheSame, result.Plan.PlanDigest, result.PlanCost, result.KnownPlanCost);
         }
 
         // The extension's check, as at prepare; a refusal keeps the plan this statement has, and a
@@ -600,7 +656,7 @@ public sealed class PreparedQuery
         if (!compiled.ParameterTypes.SequenceEqual(current.Compiled.ParameterTypes))
         {
             _notTheSame = true;
-            return null;
+            return new PlanAgain(null, PlanAgainOutcome.NotTheSame, result.Plan.PlanDigest, result.PlanCost, result.KnownPlanCost);
         }
 
         if (_decorateSchema is { } decorate)
@@ -612,14 +668,150 @@ public sealed class PreparedQuery
             }
         }
 
+        // Under a margin, what the planner priced the plan it sent at, beside the plan it replaces: or
+        // that it no longer kept that plan, so no margin applied.
+        if (margin is not null)
+        {
+            if (result.KnownPlanCost is { } held)
+            {
+                _engine.PlanningLog.LogDebug(
+                    "the planner sent a plan of {Digest:x16} that costs {Next} against {Held} for the plan it runs",
+                    LogicalDigest,
+                    result.PlanCost,
+                    held);
+            }
+            else
+            {
+                _engine.PlanningLog.LogDebug(
+                    "the planner sent a plan of {Digest:x16} that costs {Next}; it no longer keeps the plan it runs, so no margin applied",
+                    LogicalDigest,
+                    result.PlanCost);
+            }
+        }
+
         var names = result.RedactedSql is null ? null : _rewriter.SlotNames(_prepared);
-        return PlanState.Of(_engine, result, compiled, Key(_prepareShape), _prepared, names);
+        var next = PlanState.Of(_engine, result, compiled, Key(_prepareShape), _prepared, names);
+        return new PlanAgain(next, PlanAgainOutcome.New, result.Plan.PlanDigest, result.PlanCost, result.KnownPlanCost);
     }
 
     /// <summary>
-    /// Runs <paramref name="next"/> from now on, when it is still current: a refresh may have changed
-    /// a table it reads since it was planned, and then neither plan runs. Called under the refresh
-    /// lock, at the refresh that takes a background run's work in. An execution already running keeps
+    /// What planning a statement again came to: the new plan, when there is one; the planner's word;
+    /// the digest of the plan it came to, zero when none came back; and both plans' costs where a
+    /// margin had them priced.
+    /// </summary>
+    internal readonly record struct PlanAgain(
+        PlanState? Next, PlanAgainOutcome Outcome, ulong NewPlan, double? NewCost, double? RunningCost);
+
+    /// <summary>What planning a statement again came to (design 69 §4, design 70 §3).</summary>
+    internal enum PlanAgainOutcome
+    {
+        /// <summary>Another plan, ready to swap in.</summary>
+        New,
+
+        /// <summary>The plan the statement runs: drift is judged from the new numbers from now on.</summary>
+        Unchanged,
+
+        /// <summary>Another plan that does not save its view's margin, which the planner held back.</summary>
+        Held,
+
+        /// <summary>Another statement, neither swapped in nor planned again.</summary>
+        NotTheSame,
+    }
+
+    /// <summary>
+    /// What a standing view asks of the plans its statement takes after the view is made (design 70).
+    /// Null — every statement but a view's whose host set it — requests a plan whenever the numbers
+    /// drift, takes every plan, and asks for no prices.
+    /// </summary>
+    internal PlanChoice? Choice { get; set; }
+
+    /// <summary>
+    /// Raised when a plan made in the background swaps in (<see cref="Adopt"/>), under the refresh
+    /// lock: for a view that builds a new plan beside its own to start as the plan swaps in (design 70
+    /// §2). A handler queues its work, and neither blocks nor throws.
+    /// </summary>
+    internal event Action? PlanSwapped;
+
+    /// <summary>A view's say on its statement's plans (design 70).</summary>
+    /// <param name="RefreshQueryPlan">
+    /// The host's veto on requesting a new plan for drift (§1): asked before one is requested, and
+    /// false leaves the statement on its plan for now. Null requests one whenever the numbers drift.
+    /// </param>
+    /// <param name="ImprovementMargin">
+    /// The fraction of the held plan's cost a new plan must save, both on the new plan's numbers (§3):
+    /// the planner holds back one that saves less, and sends none. Null takes every plan.
+    /// </param>
+    internal sealed record PlanChoice(Func<bool>? RefreshQueryPlan, double? ImprovementMargin);
+
+    /// <summary>
+    /// Asks the planner to keep the plan this statement runs, so that the next background run can price
+    /// it on newer numbers (design 70 §3): what a view with a margin does when it puts its say on the
+    /// statement. A plan that comes back other than the one held, on numbers that moved since it was
+    /// made, is not taken here: the next background run plans it again, as it would have, and since the
+    /// plan held was not kept, no margin holds that run's plan back.
+    /// </summary>
+    internal async ValueTask KeepPlanAsync(CancellationToken ct)
+    {
+        var current = Volatile.Read(ref _state);
+        await _engine
+            .PlanAgainAsync(
+                _prepared.Sql, _options, Context, _hints, current.Plan.PlanDigest, pricePlans: true, cheaperBy: null, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Whether a new plan may be requested for this statement now, for drift (design 70 §1): its view's
+    /// host says, and a host's callback that throws says not now, logged. True when no host says.
+    /// </summary>
+    internal bool MayRefreshPlan()
+    {
+        if (Choice?.RefreshQueryPlan is not { } refresh)
+        {
+            return true;
+        }
+
+        try
+        {
+            return refresh();
+        }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            _engine.PlanningLog.LogWarning(
+                failure,
+                "a view's RefreshQueryPlan threw for statement {Digest:x16}; no plan is requested for it now",
+                LogicalDigest);
+            return false;
+        }
+    }
+
+    /// <summary>The statistics version the running plan was made on, or last judged right on (F241).</summary>
+    internal string PlannedOnVersion => Volatile.Read(ref _state).PlannedOnVersion;
+
+    /// <summary>
+    /// Whether a table this statement reads has changed shape since it was planned: the half of
+    /// <see cref="IsStale"/> after which the statement no longer runs, throwing
+    /// <see cref="Chalk.Sources.StalePlanException"/>, and must be prepared again.
+    /// </summary>
+    /// <remarks>
+    /// The other half, a tenfold drift, leaves the statement running correctly on a plan made for other
+    /// numbers. Under <c>DeferPlanning()</c> a background run plans such a statement again in place, so
+    /// a host prepares it again only when this is true. Without deferred planning nothing plans it
+    /// again, and a host prepares it again on <see cref="IsStale"/>, as before.
+    /// </remarks>
+    public bool ChangedShape
+    {
+        get
+        {
+            var state = Volatile.Read(ref _state);
+            return !_engine.IsCurrent(state.Plan, state.TablesRead);
+        }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="next"/> from now on, when it is still current, as a refresh may have
+    /// changed a table it reads since it was planned and then neither plan runs; and when it was made
+    /// on numbers no older than the running plan's. Called under the refresh lock, by the refresh or
+    /// the <c>PlanAsync</c> that takes a background run's work in. An execution already running keeps
     /// the plan it read when it began.
     /// </summary>
     internal bool Adopt(PlanState next)
@@ -629,7 +821,24 @@ public sealed class PreparedQuery
             return false;
         }
 
+        // A plan made on older numbers than the ones the running plan was last judged right on is
+        // stale (F241): a later planning kept the running plan on newer numbers, which win.
+        var current = Volatile.Read(ref _state);
+        if (next.OlderThan(current.PlannedOnVersion))
+        {
+            return false;
+        }
+
+        // The plan this statement runs, planned again on newer numbers: nothing to swap in, so a view
+        // kept from it keeps on, and drift is judged from the newer numbers.
+        if (current.Plan.PlanDigest == next.Plan.PlanDigest)
+        {
+            current.Rebase(next.PlannedRows, next.PlannedOnVersion);
+            return false;
+        }
+
         Volatile.Write(ref _state, next);
+        PlanSwapped?.Invoke();
         return true;
     }
 
@@ -702,13 +911,18 @@ public sealed class PreparedQuery
     /// <summary>
     /// The same, with the values a query prepared under execute-time binding still needs (D209).
     /// </summary>
+    /// <param name="version">
+    /// For an update of a standing view, the version of the epoch it reads, which the run is heard
+    /// with (D361); null for any other execution.
+    /// </param>
     internal async ValueTask<QueryExecution> ExecuteAsync(
         object?[] values,
         RequestContext? context,
         ExecutionArena? arena,
         CancellationToken ct,
         ArenaPool? pool = null,
-        int clockParameter = -1)
+        int clockParameter = -1,
+        long? version = null)
     {
         // An execution's own context is checked as a prepare's is, once, here (D317, D323).
         var bindings = Bindings(context?.Bound(_engine.Binding));
@@ -717,34 +931,11 @@ public sealed class PreparedQuery
             throw new ContextRequiredException(RequiredContext);
         }
         
-        _beforeExecute?.Invoke(this, bindings);
-
-        var shape = ParameterBinder.ShapeOf(Parameters, values);
-        var key = Key(shape);
+        _beforeRun?.Invoke(new StatementRun(bindings, PlanDigest, version));
 
         // One read: this execution runs the plan it finds here, whatever swaps in while it runs.
         var state = Volatile.Read(ref _state);
-        if (!state.Shapes.TryGetValue(key, out var plan))
-        {
-            var rendered = _rewriter.Render(shape);
-            var result =
-                await _engine.PlanAsync(rendered.Sql, _options, Context, ct).ConfigureAwait(false);
-
-            // A plan the prepare never saw is checked as the prepare's was, and refuses the execution
-            // when it fails.
-            _checkPlan?.Invoke(result);
-            var compiled = await _engine.CompileAsync(result.Plan, _options, Context, ct).ConfigureAwait(false);
-            if (_decorateSchema is { } decorate)
-            {
-                var decorated = decorate(compiled.OutputSchema);
-                if (!ReferenceEquals(decorated, compiled.OutputSchema))
-                {
-                    compiled = compiled.WithOutputSchema(decorated);
-                }
-            }
-
-            plan = state.Shapes.GetOrAdd(key, new ShapePlan(compiled, rendered));
-        }
+        var plan = await ShapePlanAsync(state, values, ct).ConfigureAwait(false);
 
         if (_options.RequireCurrentCatalog)
         {
@@ -775,6 +966,145 @@ public sealed class PreparedQuery
         }
 
         return execution;
+    }
+
+    /// <summary>
+    /// The plan for the shape of <paramref name="values"/>: a list parameter's length, say, which the
+    /// statement is planned for once and then keeps.
+    /// </summary>
+    private async ValueTask<ShapePlan> ShapePlanAsync(PlanState state, object?[] values, CancellationToken ct)
+    {
+        var shape = ParameterBinder.ShapeOf(Parameters, values);
+        var key = Key(shape);
+        if (state.Shapes.TryGetValue(key, out var plan))
+        {
+            return plan;
+        }
+
+        var rendered = _rewriter.Render(shape);
+        var result = await _engine.PlanAsync(rendered.Sql, _options, Context, ct).ConfigureAwait(false);
+
+        // A plan the prepare never saw is checked as the prepare's was, and refuses the execution
+        // when it fails.
+        _checkPlan?.Invoke(result);
+        var compiled = await _engine.CompileAsync(result.Plan, _options, Context, ct).ConfigureAwait(false);
+        if (_decorateSchema is { } decorate)
+        {
+            var decorated = decorate(compiled.OutputSchema);
+            if (!ReferenceEquals(decorated, compiled.OutputSchema))
+            {
+                compiled = compiled.WithOutputSchema(decorated);
+            }
+        }
+
+        return state.Shapes.GetOrAdd(key, new ShapePlan(compiled, rendered));
+    }
+
+    /// <summary>
+    /// This statement kept by incremental maintenance for a standing view (D343,
+    /// <c>docs/design/68-incremental-maintenance.md</c>), its parameters of the shape of
+    /// <paramref name="values"/>, the parameter at <paramref name="clockParameter"/> (or none, -1) the
+    /// engine's clock, and its result keyed by the output columns <paramref name="key"/>. A statement
+    /// that cannot be maintained is refused with <see cref="NotMaintainableException"/>, naming why.
+    /// </summary>
+    internal async ValueTask<MaintainedQuery> MaintainAsync(
+        object?[] values, int clockParameter, int[] key, CancellationToken ct, RequestContext? context = null)
+    {
+        // A statement prepared with values carries them, and each update binds them as an execution
+        // does (D361); one prepared for a shape binds the values the view gives it, which must fit
+        // the shape as an execution's must (design 74 §3 c).
+        if (context is null && PreparedForShape)
+        {
+            throw new NotMaintainableException(
+                "the statement was prepared for a request context's shape, and the view gives it no values to "
+                + "bind: give them in ViewOptions.Context.",
+                "root");
+        }
+
+        if (context is not null)
+        {
+            CheckBinding(context);
+        }
+
+        var state = Volatile.Read(ref _state);
+        var plan = await ShapePlanAsync(state, values, ct).ConfigureAwait(false);
+        var clockSlots = clockParameter >= 0 ? ClockSlots(plan.Rendered.Slots, clockParameter) : [];
+        Chalk.Execution.Maintenance.MaintainedPlan maintained;
+        try
+        {
+            maintained = Chalk.Execution.Maintenance.MaintainedPlan.Create(plan.Compiled, clockSlots);
+        }
+        catch (Chalk.Execution.Maintenance.NotMaintainedException refusal)
+        {
+            throw new NotMaintainableException(refusal.Message, refusal.Path ?? "root");
+        }
+
+        maintained.Key = key;
+        return new MaintainedQuery(
+            this, maintained, plan.Rendered.Slots, plan.Compiled.ParameterTypes, plan.Compiled.BoundScalars, state, context);
+    }
+
+    /// <summary>
+    /// Whether this statement was prepared for a context's shape, wholly or partly, and so binds values
+    /// at each run (D209, D232): the ones an execution, or a view, gives it.
+    /// </summary>
+    internal bool PreparedForShape => RequiredContext.Count > 0 || Context is { ShapeNames.Count: > 0 };
+
+    /// <summary>
+    /// Refuses <paramref name="context"/> as the values of every run of this statement, as an execution
+    /// would refuse them: values for a statement that folded its own, a shape, another shape, or other
+    /// values for what the statement folded (D209, D232). Checked when a view is made, so that a view
+    /// whose values do not fit is never made.
+    /// </summary>
+    internal void CheckBinding(RequestContext context) => _ = Bindings(context);
+
+    /// <summary>
+    /// This statement prepared again in a view's place, for <paramref name="reason"/>: by the extension
+    /// that decorated it, which decorates the new one as it did this one, or else from
+    /// <paramref name="sql"/> and <paramref name="options"/> with the context this one was prepared
+    /// with (D361).
+    /// </summary>
+    internal ValueTask<PreparedQuery> PrepareAgainAsync(
+        string sql, PrepareOptions options, PrepareReason reason, CancellationToken ct) =>
+        _prepareAgain is { } again
+            ? again(reason, ct)
+            : _engine.PrepareAgainAsync(sql, Context, options, reason, ct);
+
+    /// <summary>
+    /// The plans this statement runs, as an object that is another once plans the background made
+    /// swap in (design 69 §4): what a maintained query compares the plans it was made from with.
+    /// </summary>
+    internal object Plans => Volatile.Read(ref _state);
+
+    /// <summary>
+    /// What an update of a maintained view of this statement binds, as an execution binds it, and the
+    /// update heard first, as an execution is (D361). The context is the one the statement was
+    /// prepared with, which a view runs with: its scalars the plan reads as parameters go after the
+    /// view's values, and its relations, such as a list too long to fold, are bound by name.
+    /// </summary>
+    /// <param name="values">The view's parameter values.</param>
+    /// <param name="slots">The placeholders of the plan the update runs.</param>
+    /// <param name="types">Their types.</param>
+    /// <param name="boundScalars">The context's scalars that plan reads as parameters.</param>
+    /// <param name="planDigest">The digest of that plan.</param>
+    /// <param name="version">The version of the epoch the update brings the view to.</param>
+    /// <param name="context">
+    /// The values the view binds to a statement prepared for a shape (design 74 §3 c), or null for one
+    /// that carries its own.
+    /// </param>
+    internal (object?[] Values, IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>>? Relations) BindUpdate(
+        object?[] values,
+        IReadOnlyList<PlaceholderSlot> slots,
+        IReadOnlyList<ChalkType> types,
+        IReadOnlyList<BoundScalar> boundScalars,
+        ulong planDigest,
+        long version,
+        RequestContext? context)
+    {
+        var bindings = Bindings(context);
+        _beforeRun?.Invoke(new StatementRun(bindings, planDigest, version));
+        var flat = ParameterBinder.Flatten(Parameters, values, slots, types, _engine.Binding);
+        return (WithBoundScalars(flat, boundScalars, bindings), BoundRelations(bindings));
     }
 
     /// <summary>The placeholders the parameter at <paramref name="parameter"/> fills: one for each time the text names it.</summary>
@@ -1001,7 +1331,7 @@ public sealed class PreparedQuery
             CompiledPlan compiled,
             ConcurrentDictionary<string, ShapePlan> shapes,
             IReadOnlyList<TableKey>? tablesRead,
-            (TableKey Table, long Rows)[] plannedRows)
+            Basis basis)
         {
             Plan = plan;
             PlanText = planText;
@@ -1010,7 +1340,7 @@ public sealed class PreparedQuery
             Compiled = compiled;
             Shapes = shapes;
             TablesRead = tablesRead;
-            PlannedRows = plannedRows;
+            _basis = basis;
         }
 
         public Plan Plan { get; }
@@ -1037,7 +1367,29 @@ public sealed class PreparedQuery
         /// The row count of each table this plan reads, as the numbers it was made on gave it, for the
         /// tables whose count was known (D342): what drift is judged against.
         /// </summary>
-        public (TableKey Table, long Rows)[] PlannedRows { get; }
+        public (TableKey Table, long Rows)[] PlannedRows => Volatile.Read(ref _basis).Rows;
+
+        /// <summary>
+        /// The statistics version of the numbers this plan was made on, or last judged right on: what
+        /// orders it against another plan of the statement, the newest numbers winning (F241).
+        /// </summary>
+        public string PlannedOnVersion => Volatile.Read(ref _basis).Version;
+
+        private Basis _basis;
+
+        /// <summary>
+        /// Judges drift from <paramref name="rows"/> from now on: the planner came to this same plan on
+        /// them, numbered <paramref name="version"/>, so the plan is as current as one made on them
+        /// would be.
+        /// </summary>
+        public void Rebase((TableKey Table, long Rows)[] rows, string version) =>
+            Volatile.Write(ref _basis, new Basis(rows, version));
+
+        /// <summary>Whether this plan was made on numbers older than <paramref name="version"/>.</summary>
+        public bool OlderThan(string version) => string.CompareOrdinal(PlannedOnVersion, version) < 0;
+
+        /// <summary>The numbers a plan was made on, replaced whole so that no reader sees half of them.</summary>
+        private sealed record Basis((TableKey Table, long Rows)[] Rows, string Version);
 
         /// <summary>
         /// The state of a plan the engine returned: <paramref name="names"/>, when the prepare asked
@@ -1067,7 +1419,7 @@ public sealed class PreparedQuery
                 compiled,
                 shapes,
                 tablesRead,
-                PlannedRows(result.PlannedOn ?? engine.Catalog, tablesRead));
+                new Basis(PlannedRows(result.PlannedOn ?? engine.Catalog, tablesRead), result.PlannedOnVersion));
         }
 
         /// <summary>The same plan with the prepare shape's compiled plan replaced, as a decoration does.</summary>
@@ -1077,7 +1429,7 @@ public sealed class PreparedQuery
             {
                 [key] = new ShapePlan(compiled, rendered),
             };
-            return new PlanState(Plan, PlanText, Stats, PlanningState, compiled, shapes, TablesRead, PlannedRows);
+            return new PlanState(Plan, PlanText, Stats, PlanningState, compiled, shapes, TablesRead, Volatile.Read(ref _basis));
         }
     }
 }
@@ -1202,9 +1554,11 @@ public sealed class QueryExecution : IAsyncDisposable
 
             Stats.Elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started);
 
-            // One structured event per execution (04-client.md §11). The counters come first
-            // because they are the ones that stay comparable when the hardware changes.
-            Microsoft.Extensions.Logging.LoggerExtensions.LogDebug(
+            // One structured event per execution (04-client.md §11), at Trace: dozens a second under
+            // load, it would bury the planning a host reads at Debug, and the result carries its
+            // ExecutionStats for a host that wants them. The counters come first because they are
+            // the ones that stay comparable when the hardware changes.
+            Microsoft.Extensions.Logging.LoggerExtensions.LogTrace(
                 _log,
                 "executed {Digest:x16}: {RowsProduced} rows produced, {RowsScanned} scanned, "
                 + "{BatchesProduced} batches, {PeakPooledBytes} peak pooled bytes, {ElapsedMs}ms",

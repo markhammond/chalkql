@@ -250,6 +250,29 @@ public sealed class PlanRequest
     /// default — sends no bytes and estimates every parameter exactly as it always did.
     /// </summary>
     public IReadOnlyList<ParameterValueHint> ParameterHints { get; init; } = [];
+
+    /// <summary>
+    /// The digest of a plan the caller holds for this statement, or zero, the default, which sends no
+    /// bytes. A planner that comes to a plan with this digest answers <see cref="PlanResult.Unchanged"/>
+    /// and leaves the plan out; one that ignores it returns the plan, as any planner may.
+    /// </summary>
+    public ulong KnownPlanDigest { get; init; }
+
+    /// <summary>
+    /// Keep the plan this request is answered with, and price the one <see cref="KnownPlanDigest"/>
+    /// names when the planner keeps it (design 70 §3): the costs a standing view's plan check
+    /// compares. False, the default, keeps and prices nothing.
+    /// </summary>
+    public bool PricePlans { get; init; }
+
+    /// <summary>
+    /// With <see cref="PricePlans"/>: how much less than the plan <see cref="KnownPlanDigest"/> names
+    /// another plan must cost to be sent, as a fraction of the known plan's cost, both on the
+    /// request's numbers (design 70 §3). A plan that saves less is held back, and the result says
+    /// <see cref="PlanResult.Held"/>. From zero up to, not including, one. Applies only while the
+    /// planner keeps the known plan. Null, the default, sends the plan the planner came to.
+    /// </summary>
+    public double? CheaperBy { get; init; }
 }
 
 /// <summary>
@@ -279,6 +302,12 @@ public sealed class PlannerOptions
 
     /// <summary>Ask for <c>RelOptUtil.toString</c> of both plans, and the list of rules that fired.</summary>
     public bool IncludePlanText { get; init; }
+
+    /// <summary>
+    /// With <see cref="IncludePlanText"/>, add to the plan text what varies from run to run: the search
+    /// governor's sampled costs on its planning line (F195).
+    /// </summary>
+    public bool VerbosePlanText { get; init; }
 
     /// <summary>M2+: plan as if no index existed. Plumbed end to end now; M1 ignores it.</summary>
     public bool DisableIndexLookup { get; init; }
@@ -331,7 +360,39 @@ public sealed class PlanResult
     /// </summary>
     internal Chalk.Catalog.CatalogContext? PlannedOn { get; set; }
 
+    /// <summary>
+    /// The statistics version the plan was made on, as the request named it: what orders two plans of
+    /// one statement, the newest numbers winning (F241). Empty from a planner called directly.
+    /// </summary>
+    internal string PlannedOnVersion { get; set; } = string.Empty;
+
     public ulong PlanDigest => Plan.PlanDigest;
+
+    /// <summary>
+    /// The plan came out with the request's <see cref="PlanRequest.KnownPlanDigest"/>, so
+    /// <see cref="Plan"/> is empty: the caller runs the plan it holds.
+    /// </summary>
+    public bool Unchanged { get; init; }
+
+    /// <summary>
+    /// For a request that set <see cref="PlanRequest.PricePlans"/>: this plan's cost, the row work
+    /// the optimiser compares plans by, on the request's numbers. Null otherwise.
+    /// </summary>
+    public double? PlanCost { get; init; }
+
+    /// <summary>
+    /// For a request that set <see cref="PlanRequest.PricePlans"/> and named a
+    /// <see cref="PlanRequest.KnownPlanDigest"/> the planner keeps: that plan's cost on the request's
+    /// numbers, to compare with <see cref="PlanCost"/>. Null when the planner no longer keeps it.
+    /// </summary>
+    public double? KnownPlanCost { get; init; }
+
+    /// <summary>
+    /// The planner came to another plan than <see cref="PlanRequest.KnownPlanDigest"/>, but one that
+    /// does not save <see cref="PlanRequest.CheaperBy"/> on it, so the known plan stands:
+    /// <see cref="Plan"/> is empty, as when <see cref="Unchanged"/>, and the two costs say why.
+    /// </summary>
+    public bool Held { get; init; }
 
     /// <summary>
     /// The statement's identity, which statistics do not move (D342): a digest of its logical plan,

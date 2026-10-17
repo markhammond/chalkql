@@ -122,7 +122,7 @@ public static class Chapter16Streaming
     {
         Tutorial.Step("Bootstrapping a stream");
         Console.WriteLine("    The ledger so far, split where the feed took over: everything up to");
-        Console.WriteLine("    movement §16 was loaded from the warehouse, and everything after it");
+        Console.WriteLine("    movement 16 was loaded from the warehouse, and everything after it");
         Console.WriteLine("    arrived on the wire. Two physical tables, in two kinds of source, and");
         Console.WriteLine("    one logical table over them.");
 

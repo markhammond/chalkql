@@ -13,7 +13,7 @@ PASS PredicateShape.Or: declared pushable with Chalk's semantics, observed the s
 PASS PredicateShape.Like: declared pushable with Chalk's semantics, observed the same 2 rows the scan gives
 PASS PredicateShape.LikePrefix: declared pushable with Chalk's semantics, observed the same 1 rows the scan gives
 PASS SupportsProject: declared the source projects columns, observed 16 rows of 2 columns, as the scan has
-PASS SupportsCase: declared pushable with Chalk's semantics, observed the same 8 rows the scan gives
+PASS SupportsCase: declared the source evaluates CASE as Chalk does, observed the same 8 rows the scan gives
 PASS SupportsLimit: declared the source honours LIMIT, observed 3 rows for LIMIT 3
 PASS SupportsGroupBy: declared the source groups as Chalk does, observed 4 groups, as the scan has
 PASS string collation: declared Binary, observed 'alpha' matched only itself, which is code-point comparison

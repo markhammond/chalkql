@@ -346,14 +346,22 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
             StatisticsVersion = request.StatisticsVersion,
             ClientIrVersion = request.ClientIrVersion,
             NarrowFrom = request.NarrowFrom,
+            KnownPlanDigest = request.KnownPlanDigest,
+            PricePlans = request.PricePlans,
             Options = new Rpc.PlannerOptions
             {
                 Pushdown = (Rpc.PushdownLevel)request.Options.Pushdown,
                 IncludePlanText = request.Options.IncludePlanText,
+                VerbosePlanText = request.Options.VerbosePlanText,
                 DisableIndexLookup = request.Options.DisableIndexLookup,
                 Conformance = request.Options.Conformance.Name,
             },
         };
+        if (request.CheaperBy is { } cheaperBy)
+        {
+            message.CheaperBy = cheaperBy;
+        }
+
         message.Options.Libraries.AddRange(request.Options.Libraries.Select(l => l.Name));
         message.Options.DisabledCapabilities.AddRange(
             request.Options.DisabledCapabilities.Select(c => (Rpc.DisabledCapability)c));
@@ -477,7 +485,11 @@ public sealed class GrpcQueryPlanner : IQueryPlanner
 
         return new PlanResult
         {
-            Plan = response.Plan,
+            Plan = response.Plan ?? new Chalk.Ir.Plan(),
+            Unchanged = response.PlanUnchanged,
+            PlanCost = response.HasPlanCost ? response.PlanCost : null,
+            KnownPlanCost = response.HasKnownPlanCost ? response.KnownPlanCost : null,
+            Held = response.PlanHeld,
             LogicalDigest = response.LogicalDigest,
             PlanText = response.PlanText.Length == 0 ? null : response.PlanText,
             RedactedSql = response.RedactedSql.Length == 0 ? null : response.RedactedSql,

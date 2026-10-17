@@ -465,12 +465,14 @@ Console.WriteLine(Encoding.UTF8.GetString(bytes));       // the host deciding to
 
 The measurement asks the only question worth asking: what does a row cost on the managed
 heap? Two sizes, each read in one batch, because a slope taken with the batch count growing
-is a per-batch cost in disguise.
+is a per-batch cost in disguise. Each size is read three times after a warm-up, counted on
+the thread that reads it, and the least is shown, so nothing the runtime does on its other
+threads meanwhile is counted.
 
 ```
 -- what a row costs on the managed heap
-    17000 rows in one batch: 2712 bytes allocated
-    34000 rows in one batch: 2712 bytes allocated
+    17000 rows in one batch: 2136 bytes allocated
+    34000 rows in one batch: 2136 bytes allocated
     slope: 0.0000 bytes per row
     The allocation gates hold a POCO Utf8String column at 0.0000 bytes per row.
     Two sizes read in one batch each, because a slope taken with the batch count
@@ -2389,9 +2391,12 @@ host that wants to send each screen only what changed then has to work that out 
 drains it from a cursor, getting the latest row of each key that changed since it last read —
 never a queue of every change. A key the answer no longer has arrives as a delete.
 
-As of writing, only the delivery is incremental. Each update runs the statement in full and
-compares the result with the rows the view already holds; computing only what changed is not
-built. The views live in `Chalk.Incremental`.
+This view runs the statement in full at each update and compares the result with the rows it
+already holds; a view made with `Maintenance = ViewMaintenance.Incremental` computes only what
+changed instead (the guide's *Incremental maintenance*). The views live in `Chalk.Incremental`.
+Incremental maintenance is experimental: `ViewMaintenance.Incremental` carries the diagnostic
+`CHALK003`, which a project acknowledges before it can ask for it. This chapter's view recomputes,
+and needs none.
 
 The inputs say how they change. The ledger is a log: `AppendOnly(m => m.Ts)` lets it take only
 appends, none older than the newest time it has already been given. The engine names a clock,

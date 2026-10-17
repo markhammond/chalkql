@@ -1190,6 +1190,9 @@ internal sealed class ReferenceInterpreter
                 return value switch
                 {
                     bool flag => flag ? "true" : "false",
+                    long temporal when source.Kind is TypeKind.Date or TypeKind.Time or TypeKind.Timestamp
+                        or TypeKind.TimestampTz =>
+                        TemporalText(temporal, source),
                     long integer => integer.ToString(CultureInfo.InvariantCulture),
                     float single => single.ToString("R", CultureInfo.InvariantCulture),
                     double real => real.ToString("R", CultureInfo.InvariantCulture),
@@ -1214,7 +1217,7 @@ internal sealed class ReferenceInterpreter
                     TypeKind.Time => TimeOnly.Parse(text, CultureInfo.InvariantCulture).Ticks
                         / TimeSpan.TicksPerMicrosecond,
                     TypeKind.Timestamp or TypeKind.TimestampTz => TimestampUnits(
-                        DateTime.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.NoCurrentDateDefault),
+                        ReadTimestamp(text, instant: target.Kind == TypeKind.TimestampTz),
                         target),
                     _ => CheckRange(long.Parse(text, CultureInfo.InvariantCulture), target),
                 };
@@ -1295,8 +1298,68 @@ internal sealed class ReferenceInterpreter
                 : throw new OverflowException($"{value} is outside {target}.");
         }
 
+        /// <summary>
+        /// F193: a date, a time or a timestamp as PostgreSQL and DuckDB write one, through .NET's own
+        /// calendar: the second's fraction after a point, trailing zeros trimmed, none when it is whole.
+        /// A timestamp with a time zone is its UTC wall clock and the zone, <c>+00</c>, as both write one
+        /// in a session at UTC.
+        /// </summary>
+        private static string TemporalText(long value, ChalkType source)
+        {
+            switch (source.Kind)
+            {
+                case TypeKind.Date:
+                    return Day(value).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                case TypeKind.Time:
+                    return new TimeOnly(value * (TimeSpan.TicksPerSecond / 1_000_000L))
+                        .ToString("HH:mm:ss.FFFFFF", CultureInfo.InvariantCulture);
+                default:
+                    var units = IrTypes.TimestampUnitsPerSecond((uint)source.Precision);
+                    var seconds = value >= 0 ? value / units : ((value + 1) / units) - 1;
+                    var fraction = value - (seconds * units);
+                    var days = seconds >= 0 ? seconds / 86_400L : ((seconds + 1) / 86_400L) - 1;
+                    var clock = TimeOnly.FromTimeSpan(TimeSpan.FromSeconds(seconds - (days * 86_400L)));
+                    var digits = units.ToString(CultureInfo.InvariantCulture).Length - 1;
+                    var text = fraction.ToString(CultureInfo.InvariantCulture).PadLeft(digits, '0').TrimEnd('0');
+                    return Day(days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                        + " " + clock.ToString("HH:mm:ss", CultureInfo.InvariantCulture)
+                        + (text.Length == 0 ? string.Empty : "." + text)
+                        + (source.Kind == TypeKind.TimestampTz ? "+00" : string.Empty);
+            }
+        }
+
+        /// <summary>A day number since 1970, refused where its year has no four digits.</summary>
+        private static DateOnly Day(long days)
+        {
+            var number = days + 719_162L;
+            return number is >= 0 and <= 3_652_058L
+                ? DateOnly.FromDayNumber((int)number)
+                : throw new FormatException($"The day {days} after 1970 falls outside the years 1 to 9999.");
+        }
+
         private static long TemporalCast(long raw, ChalkType source, ChalkType target)
         {
+            if (target.Kind == TypeKind.Time)
+            {
+                // TIME is microseconds since midnight at every precision: a timestamp's time of day, or a
+                // time, cut to the target's digits (F191).
+                long micros;
+                if (source.Kind == TypeKind.Time)
+                {
+                    micros = raw;
+                }
+                else
+                {
+                    var units = IrTypes.TimestampUnitsPerSecond((uint)source.Precision);
+                    var perDay = 86_400L * units;
+                    var ofDay = ((raw % perDay) + perDay) % perDay;
+                    micros = units >= 1_000_000L ? ofDay / (units / 1_000_000L) : ofDay * (1_000_000L / units);
+                }
+
+                var cut = (long)Math.Pow(10, 6 - Math.Clamp(target.Precision, 0, 6));
+                return micros - (micros % cut);
+            }
+
             if (source.Kind == TypeKind.Date && target.Kind != TypeKind.Date)
             {
                 return raw * 86_400L * IrTypes.TimestampUnitsPerSecond((uint)target.Precision);
@@ -1323,6 +1386,30 @@ internal sealed class ReferenceInterpreter
 
             var divisor = from / to;
             return raw >= 0 ? raw / divisor : ((raw + 1) / divisor) - 1;
+        }
+
+        /// <summary>
+        /// Text as a timestamp, in no machine's time zone (F240), as DuckDB and PostgreSQL read it: for
+        /// a timestamp with a time zone, the instant a written zone names, and UTC where none is
+        /// written; for one without, the wall clock as written, its zone dropped.
+        /// </summary>
+        private static DateTime ReadTimestamp(string text, bool instant)
+        {
+            var utc = DateTime.Parse(
+                text,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.NoCurrentDateDefault | DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+            if (instant)
+            {
+                return utc;
+            }
+
+            // The zone as written: zero where the text writes none, so the wall clock is the text's.
+            var written = DateTimeOffset.TryParse(
+                text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var stamped)
+                ? stamped.Offset
+                : TimeSpan.Zero;
+            return utc + written;
         }
 
         private static long TimestampUnits(DateTime value, ChalkType target)

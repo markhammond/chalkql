@@ -11,24 +11,41 @@ namespace Chalk.Client;
 public sealed partial class ChalkEngine
 {
     /// <summary>
-    /// Guards <see cref="_plannedNumbers"/>, <see cref="_plannerCatalog"/> and the statistics version
-    /// together. Held only to read or replace them, never across a call to the planner.
+    /// Guards <see cref="_plannedNumbers"/>, <see cref="_plannerCatalog"/>, the statistics version,
+    /// <see cref="_judgedStatisticsVersion"/> and <see cref="_planningOwed"/> together. Held only to
+    /// read or replace them, never across a call to the planner.
     /// </summary>
     private readonly Lock _plannedGate = new();
 
     /// <summary>
     /// Every table's numbers as the planner holds them: what the last registration of each sent. A
     /// refresh that defers its planning sends nothing, so the catalog's numbers can run ahead of these
-    /// until a background run, or a refresh that does not defer, sends the difference.
+    /// until a background run, or a refresh that does not defer, sends the difference. A row count
+    /// that has drifted by less than a tenth is not a difference (D351).
     /// </summary>
-    private IReadOnlyDictionary<TableKey, byte[]> _plannedNumbers;
+    private IReadOnlyDictionary<TableKey, TableNumbers> _plannedNumbers;
 
     /// <summary>
-    /// A catalog whose numbers are the planner's: what a plan is made on, and so what a prepared
-    /// statement judges drift against (D342). The published catalog itself whenever planning is not
-    /// deferred.
+    /// A catalog whose numbers are the planner's, row counts within the tenth they may drift by
+    /// (D351): what a plan is made on, and so what a prepared statement judges drift against (D342).
+    /// The published catalog itself whenever planning is not deferred.
     /// </summary>
     private CatalogContext _plannerCatalog;
+
+    /// <summary>
+    /// The statistics version the last background run judged the held statements against (D351):
+    /// numbers sent since — by a refresh that did not defer — are a reason for a run of their own,
+    /// because a statement may now plan differently on them.
+    /// </summary>
+    private string _judgedStatisticsVersion;
+
+    /// <summary>
+    /// The last background run left some drifted statement on its plan — the planner failed, an
+    /// extension refused what it brought, or its view's host vetoed a new plan for now (design 70 §1)
+    /// — so the next refresh that defers its planning asks for another, as every such refresh did
+    /// before D351, until one plans it.
+    /// </summary>
+    private bool _planningOwed;
 
     /// <summary>The prepared statements this engine made, held weakly: what a background run plans again.</summary>
     private readonly Lock _statementsGate = new();
@@ -41,6 +58,14 @@ public sealed partial class ChalkEngine
     private bool _planningWanted;
     private readonly CancellationTokenSource _planningStop = new();
     private int _planningRuns;
+
+    /// <summary>
+    /// The callers of <see cref="PlanAsync"/>, and refreshes that plan now, waiting on a run, each with
+    /// the count of requests made when it asked. A run answers those that asked before it began, with
+    /// how it ended.
+    /// </summary>
+    private readonly List<(long Asked, TaskCompletionSource<RunEnded> Ran)> _planningWaiters = [];
+    private long _planningAsked;
 
     /// <summary>What finished runs produced, waiting for the next refresh to take it in.</summary>
     private BackgroundPlanning? _planned;
@@ -149,6 +174,62 @@ public sealed partial class ChalkEngine
     }
 
     /// <summary>
+    /// Whether a refresh that deferred its planning left a background run anything to do (D351): some
+    /// table's numbers ahead of the planner's (<paramref name="behind"/>), numbers sent since the
+    /// last run that no run has judged the statements against, a source's deferred statistics past
+    /// its own policy, or a statement the last run left on its plan. A refresh that moved none of
+    /// them asks for no run, where each used to ask for one; a statement is planned again only on
+    /// numbers the planner did not have, so a run without any would plan nothing new.
+    /// </summary>
+    private bool BackgroundPlanningDue(bool behind)
+    {
+        if (behind)
+        {
+            return true;
+        }
+
+        lock (_plannedGate)
+        {
+            if (_planningOwed
+                || !string.Equals(_judgedStatisticsVersion, _statisticsVersion, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        foreach (var registration in _sourceRegistrations)
+        {
+            if (registration.Source is IDeferredStatisticsSource { StatisticsDue: true })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Asks for a background run that plans <paramref name="statement"/> again (design 70 §2): what a
+    /// view does with a statement a drift has made stale, rather than prepare it anew on its update's
+    /// thread. The run judges it as it judges any statement whose numbers drifted, its view's host
+    /// asked and its margin applied, and a refresh swaps a new plan in. Nothing is asked while a run is
+    /// in flight, or a plan for it waits to be swapped in.
+    /// </summary>
+    internal void PlanAgainInBackground(PreparedQuery statement)
+    {
+        lock (_planningGate)
+        {
+            // A run in flight judges it, or a refresh that deferred meanwhile has asked for the next.
+            if (_planning is not null || _planned?.Plans.ContainsKey(statement) == true)
+            {
+                return;
+            }
+        }
+
+        RequestBackgroundPlanning();
+    }
+
+    /// <summary>
     /// Asks for a background run after a refresh that deferred its planning: one starts now when none
     /// is running, and otherwise the one running is followed by one more, over whatever is published
     /// when it starts.
@@ -169,6 +250,7 @@ public sealed partial class ChalkEngine
     {
         while (true)
         {
+            long asked;
             lock (_planningGate)
             {
                 if (!_planningWanted || _planningStop.IsCancellationRequested)
@@ -178,32 +260,233 @@ public sealed partial class ChalkEngine
                 }
 
                 _planningWanted = false;
+                asked = _planningAsked;
             }
 
+            RunEnded ended;
             try
             {
-                await PlanInBackgroundAsync(_planningStop.Token).ConfigureAwait(false);
+                ended = new RunEnded(null, await PlanInBackgroundAsync(_planningStop.Token).ConfigureAwait(false));
             }
             catch (OperationCanceledException) when (_planningStop.IsCancellationRequested)
             {
-                // The engine is being disposed.
+                // The engine is being disposed: its waiters are told so as it stops.
+                continue;
             }
             catch (Exception failure)
             {
                 // The plans stay as they were; the next refresh that defers its planning tries again.
-                _log.LogWarning(failure, "planning in the background failed; the plans stay as they were");
+                PlanningLog.LogWarning(failure, "planning in the background failed; the plans stay as they were");
+                ended = new RunEnded(failure, []);
             }
+
+            Answer(asked, ended);
         }
     }
 
     /// <summary>
+    /// Plans now what deferred planning leaves to the background (design 69 §4), and completes when
+    /// the new plans are in effect. A run computes the statistics that refreshes deferred and sends
+    /// the planner the numbers that moved, then plans again each statement whose tables' rows have
+    /// moved twofold since it was planned. Its plans swap in here, under the refresh lock, rather than
+    /// at the next refresh.
+    /// </summary>
+    /// <returns>
+    /// Whether a plan changed: true when some statement this engine held when it was called runs
+    /// another plan once it completes, and false when none does. Nothing was due, or the planner came
+    /// back to the plan each statement runs, which it says without sending the plan again.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// The run begins after this call, so it sees every refresh published before it. One already
+    /// running is followed by it. A statement runs its new plan from its next execution; one already
+    /// running keeps the plan it began with. A standing view moves to the new plan at its first update
+    /// over a later epoch, as after a refresh that swaps one in; under a low-jitter swap, it starts
+    /// building the plan beside its own as the plan swaps in, so that update can take it.
+    /// </para>
+    /// <para>
+    /// Nothing is published: the rows, the epoch and the <see cref="Version"/> stay as they are, and
+    /// the statistics the run computed enter the catalog at the next refresh. The planner holds them
+    /// already, so a statement prepared meanwhile is planned on them.
+    /// </para>
+    /// <para>
+    /// It works whether or not refreshes deferred their planning. After refreshes that did not, the
+    /// planner already holds every table's numbers, and the run plans again the statements whose
+    /// tables have moved twofold since they were planned, which those refreshes never do.
+    /// </para>
+    /// <para>
+    /// The task faults when the run fails, with what failed, a
+    /// <see cref="PlannerUnavailableException"/> when the planner cannot be reached; and when a
+    /// statement cannot be planned again. That statement keeps the plan it has, and the others' new
+    /// plans swap in even so. The task holds every failure, and an await throws the first. A statement
+    /// whose view's host says not now, or whose new plan saves less than its view's margin, keeps its
+    /// plan without a fault. Cancelling stops the wait and not the run, whose plans then swap in at the
+    /// next refresh or the next call. A disposed engine throws <see cref="ObjectDisposedException"/>.
+    /// </para>
+    /// </remarks>
+    public Task<bool> PlanAsync(CancellationToken ct = default)
+    {
+        var planned = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _ = PlanAndTakeInAsync(planned, ct);
+        return planned.Task;
+    }
+
+    /// <summary>The body of <see cref="PlanAsync"/>, which ends <paramref name="planned"/> however it ends.</summary>
+    private async Task PlanAndTakeInAsync(TaskCompletionSource<bool> planned, CancellationToken ct)
+    {
+        try
+        {
+            // The plan each held statement runs as the call begins: what the answer is judged by.
+            var before = HeldStatements().ConvertAll(statement => (Statement: statement, statement.PlanDigest));
+            var ended = await AskForRun().WaitAsync(ct).ConfigureAwait(false);
+            await TakeInPlansAsync(ct).ConfigureAwait(false);
+            IReadOnlyList<Exception> failed = ended.Failure is { } failure ? [failure] : ended.Statements;
+            if (failed.Count == 0)
+            {
+                planned.SetResult(before.Exists(held => held.Statement.PlanDigest != held.PlanDigest));
+            }
+            else
+            {
+                planned.SetException(failed);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            planned.SetCanceled(ct);
+        }
+        catch (Exception failure)
+        {
+            planned.SetException(failure);
+        }
+    }
+
+    /// <summary>
+    /// The planning a refresh asked for with <see cref="RefreshBuilder.PlanNow"/>, started once it has
+    /// published: a run that begins after the publish, its plans swapped in as soon as it ends. Nothing
+    /// awaits it, so what fails is logged here, beside what the run's own log and the observer say.
+    /// </summary>
+    private void PlanNowInBackground()
+    {
+        Task<RunEnded> ran;
+        try
+        {
+            ran = AskForRun();
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        Volatile.Write(ref _plannedNow, TakeInWhenRunAsync(ran));
+    }
+
+    private Task _plannedNow = Task.CompletedTask;
+
+    /// <summary>For tests: the take-in of the last refresh that planned now, which never faults.</summary>
+    internal Task PlannedNow => Volatile.Read(ref _plannedNow);
+
+    /// <summary>Waits for the run a refresh that plans now asked for, swaps its plans in, and logs what failed.</summary>
+    private async Task TakeInWhenRunAsync(Task<RunEnded> ran)
+    {
+        try
+        {
+            var ended = await ran.ConfigureAwait(false);
+            await TakeInPlansAsync(CancellationToken.None).ConfigureAwait(false);
+            if (ended.Statements.Count > 0)
+            {
+                PlanningLog.LogWarning(
+                    ended.Statements[0],
+                    "planning asked for by a refresh could not plan {Count} statements again; they keep their plans",
+                    ended.Statements.Count);
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // The engine was disposed before the plans could swap in.
+        }
+        catch (Exception failure)
+        {
+            PlanningLog.LogWarning(failure, "planning asked for by a refresh failed; the plans stay as they were");
+        }
+    }
+
+    /// <summary>
+    /// Swaps in, under the refresh lock, the plans background runs staged, as <see cref="PlanAsync"/> and a
+    /// refresh that plans now take them in: the statistics stay staged for the next refresh, which
+    /// publishes them.
+    /// </summary>
+    private async Task TakeInPlansAsync(CancellationToken ct)
+    {
+        TakenIn? taken;
+        EpochStamp stamp;
+        await _refreshing.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            taken = AdmitBackgroundPlanning(statistics: false);
+            stamp = Stamp;
+        }
+        finally
+        {
+            _refreshing.Release();
+        }
+
+        ObserveTakenIn(taken, stamp.Epoch, stamp.Version);
+    }
+
+    /// <summary>
+    /// Asks for a background run, and returns how the first run to begin after the ask ended: whether
+    /// it failed, and what failed in it.
+    /// </summary>
+    private Task<RunEnded> AskForRun()
+    {
+        var ran = new TaskCompletionSource<RunEnded>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_planningGate)
+        {
+            ObjectDisposedException.ThrowIf(_planningStop.IsCancellationRequested, this);
+            _planningWaiters.Add((++_planningAsked, ran));
+        }
+
+        RequestBackgroundPlanning();
+        return ran.Task;
+    }
+
+    /// <summary>Tells the callers that asked before the run began, by <paramref name="asked"/>, how it ended.</summary>
+    private void Answer(long asked, RunEnded ended)
+    {
+        List<TaskCompletionSource<RunEnded>> answered = [];
+        lock (_planningGate)
+        {
+            _planningWaiters.RemoveAll(waiter =>
+            {
+                if (waiter.Asked > asked)
+                {
+                    return false;
+                }
+
+                answered.Add(waiter.Ran);
+                return true;
+            });
+        }
+
+        foreach (var ran in answered)
+        {
+            ran.TrySetResult(ended);
+        }
+    }
+
+    /// <summary>How a background run ended: the failure that ended it, or why each statement it could not plan again failed.</summary>
+    private sealed record RunEnded(Exception? Failure, IReadOnlyList<Exception> Statements);
+
+    /// <summary>
     /// One background run (design 69 §4): the statistics deferred refreshes left, computed over the
     /// rows published now and sent to the planner; then every held statement whose tables have moved
-    /// twofold since it was planned, planned again. Nothing of it takes effect until the next refresh.
+    /// twofold since it was planned, planned again. Nothing of it takes effect until the next refresh,
+    /// or <see cref="PlanAsync"/>. Returns why each statement it could not plan again failed.
     /// </summary>
-    private async Task PlanInBackgroundAsync(CancellationToken ct)
+    private async Task<IReadOnlyList<Exception>> PlanInBackgroundAsync(CancellationToken ct)
     {
         Interlocked.Increment(ref _planningRuns);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
 
         var computed = new List<(IDeferredStatisticsSource Source, string SourceId, IReadOnlyList<DeferredStatistics> Tables)>();
         foreach (var registration in _sourceRegistrations)
@@ -218,8 +501,11 @@ public sealed partial class ChalkEngine
             }
         }
 
-        var catalog = WithStatistics(Catalog, computed);
-        var shape = CatalogShape.Of(catalog);
+        // The shape taken from the published one, reading only the tables whose statistics were
+        // computed (F205); whole, when a refresh published another catalog meanwhile.
+        var published = Catalog;
+        var catalog = WithStatistics(published, computed);
+        var shape = Volatile.Read(ref _shape).Next(published, catalog) ?? CatalogShape.Of(catalog);
         var sent = 0;
         await _registering.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -241,35 +527,157 @@ public sealed partial class ChalkEngine
             _registering.Release();
         }
 
+        string judged;
+        lock (_plannedGate)
+        {
+            judged = _statisticsVersion;
+        }
+
         var plans = new List<(PreparedQuery Statement, PreparedQuery.PlanState Plan)>();
+        var kept = new List<(PreparedQuery Statement, string Version)>();
+        var failures = new List<Exception>();
+        var owed = false;
+        int drifted = 0, unchanged = 0, held = 0, vetoed = 0, notTheSame = 0, failed = 0;
         foreach (var statement in HeldStatements())
         {
             ct.ThrowIfCancellationRequested();
-            if (!statement.MayPlanAgain || !statement.DriftedFrom(catalog))
+
+            // A statement whose plan from an earlier run waits for a refresh to swap it in is judged
+            // from that plan's numbers: planning it again on numbers that have not moved twofold since
+            // would only plan the waiting plan a second time.
+            PreparedQuery.PlanState? waiting;
+            lock (_planningGate)
             {
+                waiting = _planned?.Plans.GetValueOrDefault(statement);
+            }
+
+            if (!statement.MayPlanAgain
+                || !(waiting is null ? statement.DriftedFrom(catalog) : PreparedQuery.DriftedFrom(waiting, catalog)))
+            {
+                continue;
+            }
+
+            drifted++;
+            var running = statement.PlanDigest;
+            var stale = _observer is not null && statement.IsStale;
+            if (!statement.MayRefreshPlan())
+            {
+                // Its view's host vetoed a new plan for now (design 70 §1): nothing is requested, and
+                // the next refresh that defers asks for a run that asks the host again.
+                vetoed++;
+                owed = true;
+                if (_observer is not null)
+                {
+                    Observe(new StatementJudged(statement.LogicalDigest, running, 0, PlanVerdict.Vetoed, null, null, stale));
+                }
+
                 continue;
             }
 
             try
             {
-                if (await statement.PlanAgainAsync(ct).ConfigureAwait(false) is { } plan)
+                var again = await statement.PlanAgainAsync(ct).ConfigureAwait(false);
+                var verdict = again.Outcome switch
                 {
-                    plans.Add((statement, plan));
+                    PreparedQuery.PlanAgainOutcome.New => PlanVerdict.PlannedAnew,
+                    PreparedQuery.PlanAgainOutcome.Unchanged => PlanVerdict.Unchanged,
+                    PreparedQuery.PlanAgainOutcome.Held => PlanVerdict.HeldByMargin,
+                    _ => PlanVerdict.NotTheSame,
+                };
+                switch (verdict)
+                {
+                    case PlanVerdict.PlannedAnew:
+                        plans.Add((statement, again.Next!));
+                        break;
+                    case PlanVerdict.Unchanged:
+                        unchanged++;
+                        kept.Add((statement, statement.PlannedOnVersion));
+                        break;
+                    case PlanVerdict.HeldByMargin:
+                        held++;
+                        kept.Add((statement, statement.PlannedOnVersion));
+                        break;
+                    default:
+                        notTheSame++;
+                        break;
+                }
+
+                if (_observer is not null)
+                {
+                    Observe(new StatementJudged(
+                        statement.LogicalDigest, running, again.NewPlan, verdict, again.NewCost, again.RunningCost, stale));
                 }
             }
             catch (Exception failure) when (failure is not OperationCanceledException)
             {
-                // A statement that cannot be planned now keeps the plan it has.
-                _log.LogDebug(failure, "planning {Digest:x16} again in the background failed", statement.LogicalDigest);
+                // A statement that cannot be planned now keeps the plan it has, and the next refresh
+                // that defers asks for a run that tries again.
+                PlanningLog.LogDebug(failure, "planning {Digest:x16} again in the background failed", statement.LogicalDigest);
+                failures.Add(failure);
+                failed++;
+                owed = true;
+                if (_observer is not null)
+                {
+                    Observe(new StatementJudged(statement.LogicalDigest, running, 0, PlanVerdict.Failed, null, null, stale));
+                }
             }
         }
 
-        Stage(computed.Select(c => (c.Source, c.Tables)), plans);
-        _log.LogDebug(
-            "planned in the background: statistics of {Tables} tables sent, {Statements} statements planned again",
+        Stage(computed.Select(c => (c.Source, c.Tables)), plans, kept);
+        lock (_plannedGate)
+        {
+            _judgedStatisticsVersion = judged;
+            _planningOwed = owed;
+        }
+
+        // What became of every statement whose numbers drifted, so that none passes unseen: a run
+        // that planned none anew still says whether any drifted.
+        var counts = new BackgroundPlans(drifted, plans.Count, unchanged, held, vetoed, notTheSame, failed);
+        Volatile.Write(ref _lastBackgroundPlans, counts);
+        if (_observer is not null)
+        {
+            Observe(new PlanningRun(
+                sent,
+                drifted,
+                plans.Count,
+                unchanged,
+                held,
+                vetoed,
+                notTheSame,
+                failed,
+                System.Diagnostics.Stopwatch.GetElapsedTime(started)));
+        }
+
+        PlanningLog.LogDebug(
+            "planned in the background: statistics of {Tables} tables sent; {Drifted} statements drifted: "
+            + "{New} planned anew, {Unchanged} unchanged, {Held} held back by a margin, {Vetoed} vetoed by "
+            + "a host, {NotTheSame} not the same statement, {Failed} failed",
             sent,
-            plans.Count);
+            counts.Drifted,
+            counts.New,
+            counts.Unchanged,
+            counts.Held,
+            counts.Vetoed,
+            counts.NotTheSame,
+            counts.Failed);
+        return failures;
     }
+
+    /// <summary>What became of the statements a background run found drifted (design 70): for its log, and tests.</summary>
+    /// <param name="Drifted">Statements whose numbers drifted twofold since their plans were made.</param>
+    /// <param name="New">Planned anew, and staged for the next refresh to swap in.</param>
+    /// <param name="Unchanged">Planned to the plans they run.</param>
+    /// <param name="Held">Planned to plans that save less than their views' margins, which the planner held back.</param>
+    /// <param name="Vetoed">Not planned: their views' hosts said not now.</param>
+    /// <param name="NotTheSame">Planned to another statement, so neither swapped nor planned again.</param>
+    /// <param name="Failed">Not planned: the planner failed, or an extension refused what it brought.</param>
+    internal sealed record BackgroundPlans(
+        int Drifted, int New, int Unchanged, int Held, int Vetoed, int NotTheSame, int Failed);
+
+    private BackgroundPlans? _lastBackgroundPlans;
+
+    /// <summary>What the last background run did with the statements it found drifted, if one ran: for tests.</summary>
+    internal BackgroundPlans? LastBackgroundPlans => Volatile.Read(ref _lastBackgroundPlans);
 
     /// <summary>
     /// <paramref name="catalog"/> with the tables background statistics were computed for described
@@ -330,11 +738,14 @@ public sealed partial class ChalkEngine
 
     /// <summary>
     /// Keeps what a run produced for the next refresh, over whatever an earlier run left that no
-    /// refresh has taken in yet: per table and per statement, the later run's word stands.
+    /// refresh has taken in yet: per table, the later run's word stands; per statement, the plan made
+    /// on the newest numbers (F241). A plan staged on older numbers gives way to a newer one, and to
+    /// the plan the statement runs when <paramref name="kept"/> says a later planning came back to it.
     /// </summary>
     private void Stage(
         IEnumerable<(IDeferredStatisticsSource Source, IReadOnlyList<DeferredStatistics> Tables)> statistics,
-        List<(PreparedQuery Statement, PreparedQuery.PlanState Plan)> plans)
+        List<(PreparedQuery Statement, PreparedQuery.PlanState Plan)> plans,
+        List<(PreparedQuery Statement, string Version)> kept)
     {
         lock (_planningGate)
         {
@@ -349,7 +760,18 @@ public sealed partial class ChalkEngine
 
             foreach (var (statement, plan) in plans)
             {
-                staged.Plans[statement] = plan;
+                if (!staged.Plans.TryGetValue(statement, out var waiting) || !plan.OlderThan(waiting.PlannedOnVersion))
+                {
+                    staged.Plans[statement] = plan;
+                }
+            }
+
+            foreach (var (statement, version) in kept)
+            {
+                if (staged.Plans.TryGetValue(statement, out var waiting) && waiting.OlderThan(version))
+                {
+                    staged.Plans.Remove(statement);
+                }
             }
 
             _planned = staged.Statistics.Count == 0 && staged.Plans.Count == 0 ? null : staged;
@@ -357,26 +779,34 @@ public sealed partial class ChalkEngine
     }
 
     /// <summary>
-    /// Takes in what background runs produced (design 69 §4): the statistics enter their tables and
-    /// the plans swap in. Called under the refresh lock, as a refresh begins, deferred or not.
+    /// Takes in what background runs produced (design 69 §4): the plans swap in, and with
+    /// <paramref name="statistics"/> the statistics enter their tables. Called under the refresh lock:
+    /// by a refresh as it begins, deferred or not, whose publish carries the statistics into the
+    /// catalog; and by <see cref="PlanAsync"/>, or a refresh that plans now once its run ends, which
+    /// publish nothing, so they wait for the next refresh.
     /// </summary>
-    private void AdmitBackgroundPlanning()
+    private TakenIn? AdmitBackgroundPlanning(bool statistics = true)
     {
         BackgroundPlanning? staged;
         lock (_planningGate)
         {
             staged = _planned;
-            _planned = null;
+            if (staged is null || (!statistics && staged.Plans.Count == 0))
+            {
+                return null;
+            }
+
+            // Statistics a source held and the published catalog did not would have the next run
+            // send the planner the catalog's older numbers back, so they stay until a refresh.
+            _planned = statistics || staged.Statistics.Count == 0 ? null : staged.WithoutPlans();
         }
 
-        if (staged is null)
+        if (statistics)
         {
-            return;
-        }
-
-        foreach (var group in staged.Statistics.GroupBy(entry => entry.Key.Source, entry => entry.Value))
-        {
-            group.Key.AdmitStatistics([.. group]);
+            foreach (var group in staged.Statistics.GroupBy(entry => entry.Key.Source, entry => entry.Value))
+            {
+                group.Key.AdmitStatistics([.. group]);
+            }
         }
 
         var swapped = 0;
@@ -388,13 +818,104 @@ public sealed partial class ChalkEngine
             }
         }
 
-        _log.LogDebug(
+        PlanningLog.LogDebug(
             "background planning taken in: statistics of {Tables} tables, {Statements} plans swapped in",
-            staged.Statistics.Count,
+            statistics ? staged.Statistics.Count : 0,
             swapped);
+        return new TakenIn(swapped, staged.Plans.Count - swapped, statistics ? staged.Statistics.Count : 0);
     }
 
-    /// <summary>Stops background planning, for disposal: a run in flight is cancelled and awaited.</summary>
+    /// <summary>
+    /// What a refresh, <see cref="PlanAsync"/> or a refresh that plans now took in of the background's
+    /// work, told to the host's observer once it lets go of the lock.
+    /// </summary>
+    private readonly record struct TakenIn(int Swapped, int Unchanged, int Statistics);
+
+    /// <summary>
+    /// Tells the host's observer what the refresh that published <paramref name="epoch"/> and
+    /// <paramref name="version"/> took in, after its lock; or <see cref="PlanAsync"/>, or a refresh that
+    /// plans now, at the epoch and version current as the plans were taken in.
+    /// </summary>
+    private void ObserveTakenIn(TakenIn? taken, long epoch, long version)
+    {
+        if (taken is { } t && _observer is not null)
+        {
+            Observe(new PlansTakenIn(epoch, version, t.Swapped, t.Unchanged, t.Statistics));
+        }
+    }
+
+    /// <summary>Tells the host's observer of a drifted statement a run judged; one that throws is logged once.</summary>
+    private void Observe(in StatementJudged judged)
+    {
+        try
+        {
+            _observer?.Judged(in judged);
+        }
+        catch (Exception failure)
+        {
+            // Whatever a host's observer throws, a cancellation of its own included, is its own.
+            ObserverThrew(failure);
+        }
+    }
+
+    /// <summary>Tells the host's observer of a run, over.</summary>
+    private void Observe(in PlanningRun run)
+    {
+        try
+        {
+            _observer?.Ran(in run);
+        }
+        catch (Exception failure)
+        {
+            // Whatever a host's observer throws, a cancellation of its own included, is its own.
+            ObserverThrew(failure);
+        }
+    }
+
+    /// <summary>Tells the host's observer of a refresh that took a run's work in.</summary>
+    private void Observe(in PlansTakenIn takenIn)
+    {
+        try
+        {
+            _observer?.TookIn(in takenIn);
+        }
+        catch (Exception failure)
+        {
+            // Whatever a host's observer throws, a cancellation of its own included, is its own.
+            ObserverThrew(failure);
+        }
+    }
+
+    /// <summary>Tells the host's observer of a statement prepared.</summary>
+    private void Observe(in StatementPrepared prepared)
+    {
+        try
+        {
+            _observer?.Prepared(in prepared);
+        }
+        catch (Exception failure)
+        {
+            // Whatever a host's observer throws, a cancellation of its own included, is its own.
+            ObserverThrew(failure);
+        }
+    }
+
+    /// <summary>An observer that throws is told on, and logged the first time only.</summary>
+    private void ObserverThrew(Exception failure)
+    {
+        if (Interlocked.Exchange(ref _observerThrew, 1) == 0)
+        {
+            PlanningLog.LogWarning(
+                failure, "the host's planning observer threw; it is told on, and what it throws again is not logged");
+        }
+    }
+
+    private int _observerThrew;
+
+    /// <summary>
+    /// Stops background planning, for disposal: a run in flight is cancelled and awaited, and a caller
+    /// of <see cref="PlanAsync"/> still waiting is told the engine is disposed.
+    /// </summary>
     private async ValueTask StopBackgroundPlanningAsync()
     {
         Task? planning;
@@ -409,11 +930,27 @@ public sealed partial class ChalkEngine
             await planning.ConfigureAwait(false);
         }
 
+        List<(long Asked, TaskCompletionSource<RunEnded> Ran)> waiting;
+        lock (_planningGate)
+        {
+            waiting = [.. _planningWaiters];
+            _planningWaiters.Clear();
+        }
+
+        foreach (var (_, ran) in waiting)
+        {
+            ran.TrySetException(new ObjectDisposedException(
+                GetType().FullName, "The engine was disposed before a planning run could answer PlanAsync."));
+        }
+
         _planningStop.Dispose();
     }
 
     /// <summary>How many background runs have started: for a test of their coalescing.</summary>
     internal int BackgroundPlanningRuns => Volatile.Read(ref _planningRuns);
+
+    /// <summary>The shape of the published catalog, as publishes took it: for a test that it is the whole one's.</summary>
+    internal CatalogShape PublishedShape => Volatile.Read(ref _shape);
 
     /// <summary>Whether a background run's work waits for the next refresh to take it in.</summary>
     internal bool BackgroundPlanningStaged
@@ -454,5 +991,17 @@ public sealed partial class ChalkEngine
 
         public Dictionary<PreparedQuery, PreparedQuery.PlanState> Plans { get; } =
             new(ReferenceEqualityComparer.Instance);
+
+        /// <summary>The statistics alone: what waits for a refresh once the plans have swapped in.</summary>
+        public BackgroundPlanning WithoutPlans()
+        {
+            var kept = new BackgroundPlanning();
+            foreach (var (table, statistics) in Statistics)
+            {
+                kept.Statistics[table] = statistics;
+            }
+
+            return kept;
+        }
     }
 }

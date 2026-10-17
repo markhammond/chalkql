@@ -16,6 +16,13 @@ internal interface IDeferredStatisticsSource
     IReadOnlyList<DeferredStatistics> ComputeDeferredStatistics(CancellationToken ct);
 
     /// <summary>
+    /// Whether <see cref="ComputeDeferredStatistics"/> would compute any now: what decides whether a
+    /// refresh that deferred its planning asks for a background run on this source's account (D351).
+    /// Cheap, and called after every such refresh.
+    /// </summary>
+    bool StatisticsDue { get; }
+
+    /// <summary>
     /// Takes statistics computed in the background as each table's own, where the table still
     /// carries deferred ones; a table a refresh has since given statistics of its own keeps those.
     /// Called under the engine's refresh lock.

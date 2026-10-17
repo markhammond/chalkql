@@ -52,3 +52,22 @@ report id:Full, last_name:Redacted, members:Some
 report id:Full, last_name:PerRow, members:Some
 2|Ito CANARY-LAST-02
 
+-- u16-a-manager-in-two-orgs
+report id:Full, last_name:PerRow, members:Some
+3|Ek CANARY-LAST-03
+
+-- u17-an-agent-in-two-orgs
+report id:Full, last_name:PerRow, members:Some
+3|E
+
+-- u18-a-keeper
+report id:Full, last_name:Redacted, members:Some
+1|<null>
+
+-- u19-a-vendor-in-a-region
+report id:Full, last_name:Redacted, members:Some
+
+-- u20-a-picker
+report id:Full, last_name:Redacted, members:Some
+1|<null>
+

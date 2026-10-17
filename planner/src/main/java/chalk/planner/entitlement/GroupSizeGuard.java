@@ -27,6 +27,10 @@ import org.apache.calcite.util.ImmutableBitSet;
  * default. Positions are unchanged, so a {@code HAVING} or {@code ORDER BY} above keeps its
  * references, and the added count never reaches the caller.
  *
+ * <p>The count takes the guarded call's own {@code FILTER}: it counts the rows the call reports on,
+ * which is the population the floor is about. A filter selects from the group as a {@code WHERE}
+ * would, and a count of the whole group would let one isolate a row the floor withholds (D364).
+ *
  * <p>A projection rather than a filter, deliberately: a pushed aggregate carries the extra
  * {@code COUNT} into the source and the guard stays local. {@code COUNT(*)} is not over the column
  * and is not guarded; {@code COUNT(c)} is, its own count included.
@@ -64,7 +68,7 @@ final class GroupSizeGuard {
     Map<Counted, Integer> countOf = new LinkedHashMap<>();
     for (PopulationTrace.Guard guard : guards) {
       countOf.computeIfAbsent(
-          new Counted(guard.argument()),
+          Counted.of(guard, aggregate),
           counted -> {
             int existing = indexOfCount(calls, counted);
             if (existing >= 0) {
@@ -121,7 +125,7 @@ final class GroupSizeGuard {
         projects.add(value);
         continue;
       }
-      int countAt = countOf.get(new Counted(guard.argument()));
+      int countAt = countOf.get(Counted.of(guard, aggregate));
       RexNode enough =
           rexBuilder.makeCall(
               SqlStdOperatorTable.GREATER_THAN_OR_EQUAL,
@@ -161,13 +165,19 @@ final class GroupSizeGuard {
   }
 
   /**
-   * What one guarding count counts: a column, or nothing at all.
+   * What one guarding count counts: a column, or nothing at all, over the rows a filter keeps.
    *
-   * @param argument the column, or -1 for {@code COUNT(*)} — the group's own size, which is what
+   * @param argument the column, or -1 for {@code COUNT(*)} — the rows themselves, which is what
    *     §3.6's {@code COUNT(c)} is for a NOT NULL c (F43) and what D261's aggregate form guards on
+   * @param filter the guarded call's {@code FILTER}, an input column, or -1 for none
    */
-  private record Counted(int argument) {
-    static final Counted STAR = new Counted(-1);
+  private record Counted(int argument, int filter) {
+    static final Counted STAR = new Counted(-1, -1);
+
+    /** The count a guard takes: over its column, under the guarded call's own filter (D364). */
+    static Counted of(PopulationTrace.Guard guard, Aggregate aggregate) {
+      return new Counted(guard.argument(), aggregate.getAggCallList().get(guard.callIndex()).filterArg);
+    }
 
     List<Integer> arguments() {
       return argument < 0 ? List.of() : List.of(argument);
@@ -181,7 +191,7 @@ final class GroupSizeGuard {
       if (call.getAggregation().getKind() == org.apache.calcite.sql.SqlKind.COUNT
           && !call.isDistinct()
           && !call.isApproximate()
-          && call.filterArg < 0
+          && call.filterArg == counted.filter()
           && call.getArgList().equals(counted.arguments())) {
         return i;
       }
@@ -198,7 +208,7 @@ final class GroupSizeGuard {
         /* ignoreNulls= */ false,
         List.of(),
         counted.arguments(),
-        /* filterArg= */ -1,
+        counted.filter(),
         (ImmutableBitSet) null,
         org.apache.calcite.rel.RelCollations.EMPTY,
         aggregate.getGroupCount(),

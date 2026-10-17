@@ -49,8 +49,11 @@ public enum SourceRefreshKind
 public enum StatisticsRefresh
 {
     /// <summary>
-    /// Recompute now, at the level the table declares. The default, and what every refresh did
-    /// before D271.
+    /// Recompute now, at the level the table declares, unless the table's own freshness policy says
+    /// the statistics in force still stand. The default. A POCO table's policy, unless the host sets
+    /// another, keeps them until a tenth of its rows have moved since they were computed — appended,
+    /// upserted, deleted or replaced (D351); a policy of zero recomputes at every refresh, as every
+    /// refresh did before D271.
     /// </summary>
     Now = 0,
 

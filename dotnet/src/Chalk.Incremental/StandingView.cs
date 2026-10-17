@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using Apache.Arrow;
 using Chalk.Catalog;
 using Chalk.Client;
+using Microsoft.Extensions.Logging;
 
 namespace Chalk.Incremental;
 
@@ -11,14 +13,19 @@ namespace Chalk.Incremental;
 /// <remarks>
 /// <para>
 /// <see cref="UpdateAsync"/> brings the view to the engine's latest epoch, and is the only thing
-/// that computes: as of writing it runs the statement in full and compares the result with the rows
-/// the view holds, so only the delivery is incremental. <see cref="Drain"/> copies what changed into
-/// a sink, and never computes. A view computes only when asked, so epochs nobody reads cost nothing.
+/// that computes: it runs the statement in full and compares the result with the rows the view
+/// holds, or, under <see cref="ViewMaintenance.Incremental"/> (D343), computes only what changed since
+/// the last update and applies the keys whose rows changed. <see cref="Drain"/> copies what changed
+/// into a sink, and never computes. A view computes only when asked, so epochs nobody reads cost nothing.
 /// </para>
 /// <para>
 /// An update reads one epoch whole: should a refresh land while it runs, it runs again, and holds
 /// refreshes off on its third attempt. Updates are taken one at a time; drains may run beside them
 /// and see each update whole or not at all.
+/// </para>
+/// <para>
+/// Incremental maintenance is experimental under <c>CHALK003</c>, which
+/// <see cref="ViewMaintenance.Incremental"/> carries: a view that recomputes carries no such mark.
 /// </para>
 /// </remarks>
 public sealed class StandingView<TKey, TRow> : IAsyncDisposable
@@ -44,15 +51,60 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// <summary>What the view keeps of its reads of databases (D340); null without the opt-in.</summary>
     private readonly ViewReads? _reads;
 
+    /// <summary>The statement kept by incremental maintenance (D343); null for a view that recomputes.</summary>
+    private MaintainedQuery? _maintained;
+
+    /// <summary>
+    /// Whether the view's rows may lag what the maintained statement holds — before its first update,
+    /// and after one the view did not apply — so that the next update takes the whole result.
+    /// </summary>
+    private bool _resync = true;
+
     private PreparedQuery _prepared;
     private int[] _key;
     private bool _readsTime;
+
+    /// <summary>Whether the statement names the engine's clock as a parameter: worked out once per statement.</summary>
+    private bool _namesClock;
+
+    /// <summary>
+    /// The staging an update maps its rows into, kept between updates and emptied for each, so that a
+    /// maintained update stages its changes without allocating (F244); null while an update uses it.
+    /// Only an update, under its lock, takes it.
+    /// </summary>
+    private Staged? _staging;
     private long _epoch;
     private long _version;
     private long _generation = 1;
     private long _updates;
     private Exception? _fault;
     private bool _disposed;
+
+    /// <summary>
+    /// The host's say on the view's plans — its veto on new plans and its margin — as the view puts it
+    /// on its statement (design 70 §1, §3); null when it set neither.
+    /// </summary>
+    private readonly PreparedQuery.PlanChoice? _choice;
+
+    /// <summary>Whether the last update computed the view's rows from nothing, and how many keys it changed.</summary>
+    private bool _lastWhole;
+    private long _lastChanges;
+
+    /// <summary>
+    /// The instance a low-jitter swap builds on the statement's new plan, beside the one the view updates
+    /// (design 70 §2); null when none is building or waiting to be swapped in. It is built blue/green:
+    /// this is the green one, and the one the view updates is blue.
+    /// </summary>
+    private Green? _green;
+
+    /// <summary>Instances let go while their builds ran, each disposed once its build has stopped.</summary>
+    private readonly List<Task> _lettingGo = [];
+
+    /// <summary>
+    /// Starts building a plan beside the view's own as its statement swaps the plan in (design 70 §2),
+    /// for a view that swaps with low jitter; null for any other.
+    /// </summary>
+    private readonly Action? _buildAtSwap;
 
     private StandingView(
         ChalkEngine engine,
@@ -71,17 +123,50 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         _prepared = prepared;
         _key = key;
         _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
+        _namesClock = ViewBinding.NamesClock(prepared, engine.ClockName);
         _reads = options.DatabaseReads == ViewDatabaseReads.WhenRefreshed ? new ViewReads(engine) : null;
+        ContextDigest = (options.Context ?? prepared.Context) is { IsEmpty: false } context ? context.CanonicalHash : null;
+        if (options.RefreshQueryPlan is not null || options.PlanImprovementMargin is not null)
+        {
+            _choice = new PreparedQuery.PlanChoice(options.RefreshQueryPlan, options.PlanImprovementMargin);
+        }
+
+        if (options.PlanSwap == ViewPlanSwap.LowJitter)
+        {
+            _buildAtSwap = BuildAtSwap;
+        }
     }
 
     /// <summary>The result's key columns.</summary>
     public IReadOnlyList<string> Key => _options.Key;
 
+    /// <summary>How the view computes an update (D343): as the host asked in its options.</summary>
+    public ViewMaintenance Maintenance => _options.Maintenance;
+
+    /// <summary>
+    /// The digest of the context the view binds (<see cref="ViewOptions{TKey, TRow}.Context"/>), or of
+    /// the one its statement folded when it was prepared with values; null when it has neither
+    /// (design 74 §3 a).
+    /// </summary>
+    /// <remarks>
+    /// It is <see cref="RequestContext.CanonicalHash"/>: every name, kind, type and value, and no purpose
+    /// or actor. The grants a view was made with stand for its life, so a host that changes a grant finds
+    /// the views it touches by comparing this with the digest of the principal's binding now, and makes
+    /// those again. Grants kept in a table need none of this: a refresh revokes them.
+    /// </remarks>
+    public string? ContextDigest { get; }
+
     /// <summary>The result's columns, as a <see cref="ViewRow"/> reads them.</summary>
     public Schema Columns => Volatile.Read(ref _prepared).OutputSchema;
 
-    /// <summary>The statement the view runs now; for tests that watch it prepared again.</summary>
-    internal PreparedQuery Statement => Volatile.Read(ref _prepared);
+    /// <summary>
+    /// The statement the view runs now: the host's, for a view made from a prepared statement, until a
+    /// table it reads changes shape; then the one the view prepared in its place, with the same text
+    /// and options (D341). A drift does not replace it: the view has it planned again in place (design
+    /// 70 §2). A host that keeps the statement, to run it in full, show its plan or hand it on, takes
+    /// this one after an update rather than prepare its own: it runs the view's plan exactly.
+    /// </summary>
+    public PreparedQuery Statement => Volatile.Read(ref _prepared);
 
     /// <summary>The version of the epoch the view was last updated to.</summary>
     public long Version
@@ -109,7 +194,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
     /// <summary>
     /// What the view holds, in bytes, against <see cref="ViewOptions{TKey, TRow}.StateBudget"/>: its
-    /// rows, and what it keeps of its reads of databases (D340).
+    /// rows, what it keeps of its reads of databases (D340), what its incremental maintenance keeps, and
+    /// an instance built beside it and waiting to be swapped in (design 70 §2), which the budget
+    /// does not count, since the swap lets one of the two go.
     /// </summary>
     public long StateBytes
     {
@@ -117,7 +204,10 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         {
             lock (_gate)
             {
-                return _table.Bytes + (_reads?.Bytes ?? 0);
+                return _table.Bytes
+                    + (_reads?.Bytes ?? 0)
+                    + (_maintained?.StateBytes ?? 0)
+                    + (_green is { Build.IsCompletedSuccessfully: true } built ? built.Build.Result.StateBytes : 0);
             }
         }
     }
@@ -150,6 +240,13 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
         Validate(engine, binding, options);
+        if (options.Context is not null)
+        {
+            throw new ArgumentException(
+                "a view made from a statement's text prepares it with no context, so ViewOptions.Context has "
+                + "nothing to bind. Prepare the statement for the context's shape, and make the view from it.",
+                nameof(options));
+        }
 
         var prepare = ViewPrepare.For(options);
         var prepared = await engine.PrepareAsync(sql, prepare, ct).ConfigureAwait(false);
@@ -183,6 +280,31 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             throw new ArgumentException(
                 "the statement is prepared already, so ViewOptions.Prepare has nothing to prepare. Leave it "
                 + "unset, or make the view from the statement's text.",
+                nameof(options));
+        }
+
+        // A statement prepared for a context's shape binds a principal's values at each run: the view
+        // gives them, for its life, and they must fit the shape as an execution's must (design 74 §3 c).
+        if (options.Context is { } context)
+        {
+            try
+            {
+                prepared.CheckBinding(context);
+            }
+            catch (ArgumentException misfit)
+            {
+                var reason = misfit.ParamName is { } name
+                    ? misfit.Message.Replace($" (Parameter '{name}')", string.Empty, StringComparison.Ordinal)
+                    : misfit.Message;
+                throw new ArgumentException($"ViewOptions.Context does not fit the statement: {reason}", nameof(options), misfit);
+            }
+        }
+        else if (prepared.PreparedForShape)
+        {
+            throw new ArgumentException(
+                "the statement was prepared for a request context's shape, so each run binds a principal's "
+                + "values: give the view them in ViewOptions.Context. One statement prepared for the shape then "
+                + "serves every principal's view.",
                 nameof(options));
         }
 
@@ -230,6 +352,40 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 + "changes are no fewer than the rows, and infinity never resets one for size.");
         }
 
+        if (!Enum.IsDefined(options.Maintenance))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.Maintenance,
+                "a view's Maintenance is Recompute or Incremental.");
+        }
+
+        if (options.PlanImprovementMargin is { } margin && !(margin >= 0 && margin < 1))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                margin,
+                "a view's PlanImprovementMargin is a fraction of the cost of the plan it runs, from 0 up to, not "
+                + "including, 1: 1 or more would never take a plan, and less than 0 would take one that costs more.");
+        }
+
+        if (!Enum.IsDefined(options.PlanSwap))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.PlanSwap,
+                "a view's PlanSwap is AtNextUpdate or LowJitter.");
+        }
+
+        if (options.PlanSwap == ViewPlanSwap.LowJitter && options.Maintenance == ViewMaintenance.Recompute)
+        {
+            throw new ArgumentException(
+                "a view that recomputes takes a new plan at its next update at no extra cost, so PlanSwap = "
+                + "LowJitter would do nothing: make the view with ViewMaintenance.Incremental, or leave PlanSwap "
+                + "at AtNextUpdate.",
+                nameof(options));
+        }
+
         if (options.LocalJoinMaxRows <= 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -255,9 +411,24 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     {
         var key = KeyOf(prepared, options.Key);
         ViewChecks.Check(engine, prepared, key, options);
+        if ((options.RefreshQueryPlan is not null || options.PlanImprovementMargin is not null)
+            && prepared.Choice is not null)
+        {
+            throw new ArgumentException(
+                "the statement carries another view's RefreshQueryPlan or PlanImprovementMargin already, and a "
+                + "statement keeps one view's: make this view from the statement's text, or without either.",
+                nameof(prepared));
+        }
+
         var view = new StandingView<TKey, TRow>(engine, sql, prepare, options, binding, prepared, key);
         try
         {
+            await view.AttachAsync(prepared, ct).ConfigureAwait(false);
+            if (options.Maintenance == ViewMaintenance.Incremental)
+            {
+                view._maintained = await view.MaintainAsync(prepared, key, ct).ConfigureAwait(false);
+            }
+
             await view.UpdateAsync(ct).ConfigureAwait(false);
         }
         catch
@@ -281,50 +452,27 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     {
         Usable();
         await _updating.WaitAsync(ct).ConfigureAwait(false);
+        var tracker = _options.Tracker;
+        var started = tracker is null ? 0L : Stopwatch.GetTimestamp();
+        var allocated = tracker is null ? 0L : GC.GetTotalAllocatedBytes();
+        var taken = _updates;
         try
         {
-            Usable();
-            for (var attempt = 0; ; attempt++)
+            var version = await CatchUpAsync(ct).ConfigureAwait(false);
+            if (tracker is not null && _updates != taken)
             {
-                var changes = _engine.Changes;
-                if ((changes & 1) == 1)
-                {
-                    await _engine.WhenQuietAsync(ct).ConfigureAwait(false);
-                    continue;
-                }
-
-                if (_engine.Stamp.Epoch == _epoch)
-                {
-                    _reads?.Abandon();
-                    return _version;
-                }
-
-                if (attempt >= 2)
-                {
-                    return await _engine.WithoutRefreshAsync(
-                        async () =>
-                        {
-                            var stamp = _engine.Stamp;
-                            if (stamp.Epoch != _epoch)
-                            {
-                                Apply(await StageAsync(stamp, ct).ConfigureAwait(false), stamp);
-                            }
-
-                            return _version;
-                        },
-                        ct).ConfigureAwait(false);
-                }
-
-                var at = _engine.Stamp;
-                var staged = await StageAsync(at, ct).ConfigureAwait(false);
-                if (_engine.Changes != changes)
-                {
-                    continue;
-                }
-
-                Apply(staged, at);
-                return _version;
+                var update = new ViewUpdate(
+                    version,
+                    Stopwatch.GetElapsedTime(started),
+                    GC.GetTotalAllocatedBytes() - allocated,
+                    _lastWhole,
+                    _lastChanges,
+                    _maintained?.PlanDigest ?? Volatile.Read(ref _prepared).PlanDigest);
+                tracker.Updated(in update);
             }
+
+            BuildBeside();
+            return version;
         }
         catch
         {
@@ -335,6 +483,123 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         finally
         {
             _updating.Release();
+        }
+    }
+
+    /// <summary>The body of <see cref="UpdateAsync"/>, under its lock: the view brought to the latest epoch.</summary>
+    private async ValueTask<long> CatchUpAsync(CancellationToken ct)
+    {
+        Usable();
+        for (var attempt = 0; ; attempt++)
+        {
+            var changes = _engine.Changes;
+            if ((changes & 1) == 1)
+            {
+                await _engine.WhenQuietAsync(ct).ConfigureAwait(false);
+                continue;
+            }
+
+            if (_engine.Stamp.Epoch == _epoch)
+            {
+                _reads?.Abandon();
+                return _version;
+            }
+
+            if (attempt >= 2)
+            {
+                return await CatchUpBetweenRefreshesAsync(ct).ConfigureAwait(false);
+            }
+
+            var at = _engine.Stamp;
+            var staged = await StageAsync(at, ct).ConfigureAwait(false);
+            if (_engine.Changes != changes)
+            {
+                Keep(staged);
+                continue;
+            }
+
+            Take(staged, at);
+            return _version;
+        }
+    }
+
+    /// <summary>
+    /// The update, staged with refreshes held off, after two attempts each overtaken by one. A method of
+    /// its own, so that the closure it hands the engine is made only when it runs.
+    /// </summary>
+    private ValueTask<long> CatchUpBetweenRefreshesAsync(CancellationToken ct) =>
+        _engine.WithoutRefreshAsync(
+            async () =>
+            {
+                var stamp = _engine.Stamp;
+                if (stamp.Epoch != _epoch)
+                {
+                    Take(await StageAsync(stamp, ct).ConfigureAwait(false), stamp);
+                }
+
+                return _version;
+            },
+            ct);
+
+    /// <summary>Applies <paramref name="staged"/>, counting the keys it changes for the tracker, and keeps its staging.</summary>
+    private void Take(Staged staged, EpochStamp stamp)
+    {
+        var before = _table.Position;
+        Apply(staged, stamp);
+        _lastChanges = _table.Position - before;
+        Keep(staged);
+    }
+
+    /// <summary>The staging for this update: the one kept from the last, emptied.</summary>
+    private Staged Stage(bool delta)
+    {
+        var staged = _staging ?? new Staged();
+        _staging = null;
+        return staged.Begin(delta);
+    }
+
+    /// <summary>Keeps <paramref name="staged"/> for the next update, letting go of room a large one grew.</summary>
+    private void Keep(Staged staged)
+    {
+        staged.Trim();
+        _staging = staged;
+    }
+
+    /// <summary>
+    /// Puts the host's say on the view's plans on <paramref name="prepared"/> (design 70 §1, §3), where a
+    /// background run asks it; with a margin, asks the planner too to keep the plan the statement runs,
+    /// so the first plan a background run makes can be priced against it. A statement keeps one view's:
+    /// <c>MakeAsync</c> refuses a host's statement that carries another view's. Under a low-jitter swap,
+    /// the view also listens for the statement's new plans, to build each beside its own as it swaps in.
+    /// </summary>
+    private async ValueTask AttachAsync(PreparedQuery prepared, CancellationToken ct)
+    {
+        if (_buildAtSwap is not null)
+        {
+            prepared.PlanSwapped += _buildAtSwap;
+        }
+
+        if (_choice is not null)
+        {
+            prepared.Choice = _choice;
+            if (_choice.ImprovementMargin is not null)
+            {
+                await prepared.KeepPlanAsync(ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>Stops listening to <paramref name="prepared"/>, and takes the host's say off it when it is the view's.</summary>
+    private void Detach(PreparedQuery prepared)
+    {
+        if (_buildAtSwap is not null)
+        {
+            prepared.PlanSwapped -= _buildAtSwap;
+        }
+
+        if (_choice is not null && ReferenceEquals(prepared.Choice, _choice))
+        {
+            prepared.Choice = null;
         }
     }
 
@@ -482,7 +747,21 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         try
         {
             _disposed = true;
+            Detach(_prepared);
             _reads?.Dispose();
+            if (_maintained is { } maintained)
+            {
+                _maintained = null;
+                await maintained.DisposeAsync().ConfigureAwait(false);
+            }
+
+            if (_green is { } green)
+            {
+                LetGo(green);
+            }
+
+            await Task.WhenAll(_lettingGo).ConfigureAwait(false);
+            _lettingGo.Clear();
         }
         finally
         {
@@ -508,7 +787,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         await PreparedCurrentAsync(ct).ConfigureAwait(false);
         var prepared = _prepared;
 
-        if ((_readsTime || ViewBinding.NamesClock(prepared, _engine.ClockName)) && stamp.Clock is null)
+        if ((_readsTime || _namesClock) && stamp.Clock is null)
         {
             throw new StandingViewException(
                 ChalkErrorCodes.ClockRequired,
@@ -517,8 +796,37 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 + "before the view is updated.");
         }
 
-        var values = _binding.Values(prepared, _engine.ClockName, stamp.Clock);
-        await using var execution = await prepared.ExecuteAsync(values, context: null, arena: null, ct).ConfigureAwait(false);
+        var values = _binding.ValuesForUpdate(prepared, _engine.ClockName, stamp.Clock);
+        if (_maintained is { } maintained)
+        {
+            // Until it is applied, this update leaves the view behind the statement (D343).
+            var whole = _resync;
+            _resync = true;
+            MaintainedUpdate update;
+            try
+            {
+                update = await maintained.UpdateAsync(values, stamp.Clock ?? default, stamp.Version, whole, ct).ConfigureAwait(false);
+            }
+            catch (MaintainedKeyFault duplicate)
+            {
+                var fault = new StandingViewException(
+                    ChalkErrorCodes.DeclarationNotHeld,
+                    $"The view's key ({string.Join(", ", _options.Key)}) = ({duplicate.Key}) is given by two rows "
+                    + $"{duplicate.Where} at version {stamp.Version}. A view keeps one row per key: correct the "
+                    + "statement's key, or the Map that builds the host's key from it. The view keeps this fault "
+                    + "until it is disposed.");
+                _fault = fault;
+                throw fault;
+            }
+
+            // Whole for the tracker only when computed from nothing: a low-jitter swap catches up.
+            _lastWhole = update.Restarted;
+            return Changes(update, stamp);
+        }
+
+        _lastWhole = true;
+        await using var execution = await prepared.ExecuteAsync(
+            values, context: _options.Context, arena: null, ct, version: stamp.Version).ConfigureAwait(false);
         if (_readsTime)
         {
             _clock.Now = stamp.Clock!.Value;
@@ -532,7 +840,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             execution.UseReads(_reads);
         }
 
-        var staged = new Staged();
+        var staged = Stage(delta: false);
         await foreach (var batch in execution.Batches.WithCancellation(ct).ConfigureAwait(false))
         {
             using (batch)
@@ -546,12 +854,19 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
     private void Map(RecordBatch batch, Staged staged, EpochStamp stamp)
     {
-        var columns = new IArrowArray[batch.ColumnCount];
-        for (var c = 0; c < columns.Length; c++)
+        var columns = staged.ColumnsOf(batch);
+        try
         {
-            columns[c] = batch.Column(c);
+            MapRows(batch, columns, staged, stamp);
         }
+        finally
+        {
+            staged.LetGoOfColumns();
+        }
+    }
 
+    private void MapRows(RecordBatch batch, IArrowArray[] columns, Staged staged, EpochStamp stamp)
+    {
         for (var i = 0; i < batch.Length; i++)
         {
             var row = new ViewRow(columns, batch.Schema, i);
@@ -575,9 +890,52 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// A maintained update's rows, mapped (D343): every row, after a restart or when the view asked for
+    /// the whole result; otherwise the rows each changed key holds now, and the host keys of the rows
+    /// they held before.
+    /// </summary>
+    private Staged Changes(MaintainedUpdate update, EpochStamp stamp)
+    {
+        var staged = Stage(delta: !update.Whole);
+        Map(update.Now, staged, stamp);
+        if (update.Whole)
+        {
+            return staged;
+        }
+
+        var before = update.Before;
+        if (before.Length > 0)
+        {
+            var columns = staged.ColumnsOf(before);
+            try
+            {
+                for (var i = 0; i < before.Length; i++)
+                {
+                    var row = new ViewRow(columns, before.Schema, i);
+                    _options.Map(in row, out var key, out _);
+                    staged.Before.Add(key);
+                }
+            }
+            finally
+            {
+                staged.LetGoOfColumns();
+            }
+        }
+
+        return staged;
+    }
+
     /// <summary>Makes the staged rows the view's, whole, under the lock drains take.</summary>
     private void Apply(Staged staged, EpochStamp stamp)
     {
+        if (staged.Delta)
+        {
+            ApplyChanges(staged, stamp);
+            _resync = false;
+            return;
+        }
+
         var added = 0L;
         for (var i = 0; i < staged.Count; i++)
         {
@@ -587,14 +945,16 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             }
         }
 
-        var kept = _reads?.BytesKept ?? 0;
+        var kept = (_reads?.BytesKept ?? 0) + (_maintained?.StateBytes ?? 0);
         var bytes = _table.BytesWith(added) + kept;
         if (bytes > _options.StateBudget)
         {
             throw new StandingViewException(
                 ChalkErrorCodes.MemoryBudgetExceeded,
                 $"The view would hold about {bytes} bytes at version {stamp.Version}"
-                + (kept > 0 ? $", {kept} of them kept from its databases," : string.Empty)
+                + (_maintained is not null
+                    ? $", {kept} of them kept by its incremental maintenance,"
+                    : kept > 0 ? $", {kept} of them kept from its databases," : string.Empty)
                 + $" past its StateBudget of {_options.StateBudget}. It keeps the epoch it held; raise "
                 + "ViewOptions.StateBudget, or narrow the statement's result.");
         }
@@ -613,25 +973,160 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             _epoch = stamp.Epoch;
             _version = stamp.Version;
         }
+
+        _resync = false;
     }
 
     /// <summary>
-    /// Prepares the statement anew when it is stale: a table it reads changed shape, or drifted tenfold
-    /// in its row count (D342). The view's readers reset only when the result's columns or key changed;
-    /// otherwise they keep their place. A statement that no longer prepares faults the view.
+    /// Applies a maintained update's changes (D343): a key whose row is gone is deleted, and each row a
+    /// changed key holds now is put. A host key another unchanged row holds faults the view, as two
+    /// rows mapped to one key in a recompute do.
+    /// </summary>
+    private void ApplyChanges(Staged staged, EpochStamp stamp)
+    {
+        var freed = staged.Freed;
+        for (var i = 0; i < staged.Before.Count; i++)
+        {
+            freed.Add(staged.Before[i]);
+        }
+
+        var added = 0L;
+        for (var i = 0; i < staged.Count; i++)
+        {
+            ref readonly var key = ref staged.Keys[i];
+            if (!_table.Contains(in key))
+            {
+                added++;
+            }
+            else if (_table.IsLive(in key) && !freed.Contains(key))
+            {
+                var fault = new StandingViewException(
+                    ChalkErrorCodes.DeclarationNotHeld,
+                    $"Two keys of the view's result, ({string.Join(", ", _options.Key)}), are mapped to one host "
+                    + $"key at version {stamp.Version}. A view keeps one row per key: correct the Map that builds "
+                    + "the host's key from the row. The view keeps this fault until it is disposed.");
+                _fault = fault;
+                throw fault;
+            }
+        }
+
+        var bytes = _table.BytesWith(added) + (_maintained?.StateBytes ?? 0);
+        if (bytes > _options.StateBudget)
+        {
+            throw new StandingViewException(
+                ChalkErrorCodes.MemoryBudgetExceeded,
+                $"The view would hold about {bytes} bytes at version {stamp.Version}, what its incremental "
+                + $"maintenance keeps included, past its StateBudget of {_options.StateBudget}. It keeps the epoch "
+                + "it held; raise ViewOptions.StateBudget, or narrow the statement's result.");
+        }
+
+        // A key put again is not deleted first: a row put equal to the one it holds is no change.
+        for (var i = 0; i < staged.Count; i++)
+        {
+            freed.Remove(staged.Keys[i]);
+        }
+
+        lock (_gate)
+        {
+            var seen = ++_updates;
+            foreach (var key in freed)
+            {
+                _table.Delete(in key, seen);
+            }
+
+            for (var i = 0; i < staged.Count; i++)
+            {
+                _table.Put(in staged.Keys[i], in staged.Rows[i], staged.Hashes[i], seen);
+            }
+
+            _table.Compact();
+            _epoch = stamp.Epoch;
+            _version = stamp.Version;
+        }
+    }
+
+    /// <summary>
+    /// Keeps the prepared statement by incremental maintenance (D343), or refuses the view naming what
+    /// in it cannot be kept so.
+    /// </summary>
+    private async ValueTask<MaintainedQuery> MaintainAsync(PreparedQuery prepared, int[] key, CancellationToken ct)
+    {
+        try
+        {
+            return await prepared.MaintainAsync(
+                _binding.Values(prepared, _engine.ClockName, time: null),
+                ViewBinding.ClockIndex(prepared, _engine.ClockName),
+                key,
+                ct,
+                _options.Context).ConfigureAwait(false);
+        }
+        catch (NotMaintainableException refusal)
+        {
+            throw new StandingViewException(
+                ChalkErrorCodes.UnsupportedInView,
+                $"The view asks for incremental maintenance, and its statement cannot be maintained: "
+                + $"{refusal.Message} The operator is at {refusal.Path} in the plan. Make the view with "
+                + "ViewMaintenance.Recompute, or write the statement without it.");
+        }
+    }
+
+    /// <summary>
+    /// Prepares the statement anew when a table it reads changed shape, which its plan no longer fits.
+    /// A statement a tenfold drift has made stale (D342) is planned again in the background instead,
+    /// in place (design 70 §2): the view keeps running it meanwhile, and moves to a new plan as it moves
+    /// to any. Only one the background cannot plan again is prepared anew for drift, and only when the
+    /// host's <see cref="ViewOptions{TKey, TRow}.RefreshQueryPlan"/> allows it. The view's readers reset
+    /// only when the result's columns or key changed; otherwise they keep their place. A statement that
+    /// no longer prepares faults the view.
     /// </summary>
     private async ValueTask PreparedCurrentAsync(CancellationToken ct)
     {
         if (!_prepared.IsStale)
         {
+            await MaintainedCurrentAsync(ct).ConfigureAwait(false);
             return;
+        }
+
+        // A statement stale for drift alone runs correctly on the plan it has. It is planned again in
+        // place, off this thread, as one whose numbers moved twofold is: the run asks the host, the
+        // planner applies the margin, and a plan that comes back the same is kept with nothing rebuilt.
+        if (!_prepared.ChangedShape)
+        {
+            if (_prepared.MayPlanAgain)
+            {
+                _engine.PlanAgainInBackground(_prepared);
+                await MaintainedCurrentAsync(ct).ConfigureAwait(false);
+                return;
+            }
+
+            if (!_prepared.MayRefreshPlan())
+            {
+                await MaintainedCurrentAsync(ct).ConfigureAwait(false);
+                return;
+            }
         }
 
         try
         {
-            var prepared = await _engine.PrepareAsync(_sql, _prepare, ct).ConfigureAwait(false);
+            var reason = _prepared.ChangedShape ? PrepareReason.ChangedShape : PrepareReason.Drift;
+            var prepared = await _prepared.PrepareAgainAsync(_sql, _prepare, reason, ct).ConfigureAwait(false);
             var key = KeyOf(prepared, _options.Key);
             ViewChecks.Check(_engine, prepared, key, _options);
+            if (_maintained is { } kept)
+            {
+                // The plan is a new one: it is maintained from the start, and its first update is whole.
+                // An instance built beside the old one is of a statement that is no more.
+                if (_green is { } green)
+                {
+                    LetGo(green);
+                }
+
+                _maintained = null;
+                await kept.DisposeAsync().ConfigureAwait(false);
+                _maintained = await MaintainAsync(prepared, key, ct).ConfigureAwait(false);
+                _resync = true;
+            }
+
             lock (_gate)
             {
                 // A result with the columns and key it had keeps its readers where they are: the next
@@ -642,13 +1137,16 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                     _generation++;
                 }
 
+                Detach(_prepared);
                 Volatile.Write(ref _prepared, prepared);
                 _key = key;
                 _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
+                _namesClock = ViewBinding.NamesClock(prepared, _engine.ClockName);
             }
 
             // The plan is a new one, and its reads are in new places: read them all again.
             _reads?.Clear();
+            await AttachAsync(prepared, ct).ConfigureAwait(false);
         }
         catch (Exception failure) when (failure is ChalkException or ArgumentException)
         {
@@ -656,6 +1154,256 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             throw;
         }
     }
+
+    /// <summary>
+    /// Takes the plan the background made for the statement, once it has swapped in (design 69 §4):
+    /// the view is maintained from it from the start, and its next update is whole, as after the
+    /// statement is prepared again; readers keep their place, as the result's columns and key are the
+    /// same. A new plan that cannot be maintained is declined: the plan the view keeps answers the same
+    /// rows. Under <see cref="ViewPlanSwap.LowJitter"/>, the new plan is built beside the one the view
+    /// keeps instead (design 70 §2).
+    /// </summary>
+    private async ValueTask MaintainedCurrentAsync(CancellationToken ct)
+    {
+        if (_maintained is not { IsCurrent: false } kept)
+        {
+            // An instance built for a plan the view no longer moves to waits for nothing.
+            if (_green is { } stale)
+            {
+                LetGo(stale);
+            }
+
+            return;
+        }
+
+        if (_options.PlanSwap == ViewPlanSwap.LowJitter)
+        {
+            await SwapBesideAsync(kept).ConfigureAwait(false);
+            return;
+        }
+
+        MaintainedQuery next;
+        try
+        {
+            next = await MaintainAsync(_prepared, _key, ct).ConfigureAwait(false);
+        }
+        catch (StandingViewException refusal) when (refusal.Code == ChalkErrorCodes.UnsupportedInView)
+        {
+            kept.PlannedWith = _prepared.Plans;
+            return;
+        }
+
+        _maintained = next;
+        await kept.DisposeAsync().ConfigureAwait(false);
+        _resync = true;
+    }
+
+    /// <summary>
+    /// Moves the view to the plan its statement swapped in, without computing it from nothing at an
+    /// update (design 70 §2). An instance on the new plan is built in the background, from the moment
+    /// the statement swaps the plan in, while the view keeps updating <paramref name="blue"/>
+    /// (<see cref="BuildBeside"/>). The first update after the build swaps the new instance in: it
+    /// catches up to that update's epoch and gives its whole result, which the view compares with its
+    /// rows, so readers keep their place. A newer plan meanwhile abandons the build, and its swap starts
+    /// one on that plan; a plan that cannot be maintained, or a build that fails, keeps
+    /// <paramref name="blue"/> on its plan, as a plan the view cannot maintain is declined.
+    /// </summary>
+    private async ValueTask SwapBesideAsync(MaintainedQuery blue)
+    {
+        if (_green is not { } green)
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(green.PlannedFor, _prepared.Plans))
+        {
+            // A newer plan swapped in while this one was built.
+            LetGo(green);
+            return;
+        }
+
+        if (!green.Build.IsCompleted)
+        {
+            return;
+        }
+
+        if (green.Build.IsCompletedSuccessfully)
+        {
+            // Built: it takes blue's place at this update, caught up and compared whole.
+            _green = null;
+            green.Cancel.Dispose();
+            _maintained = green.Build.Result;
+            await blue.DisposeAsync().ConfigureAwait(false);
+            _resync = true;
+            return;
+        }
+
+        if (green.Build.Exception?.GetBaseException() is not StandingViewException { Code: var code }
+            || code != ChalkErrorCodes.UnsupportedInView)
+        {
+            _engine.Log.LogWarning(
+                green.Build.Exception?.GetBaseException(),
+                "a view's build of a new plan beside plan {Kept:x16} failed; it keeps that plan",
+                blue.PlanDigest);
+        }
+
+        LetGo(green);
+        blue.PlannedWith = green.PlannedFor;
+    }
+
+    /// <summary>
+    /// Starts building the plan its statement just swapped in beside the one the view runs (design 70
+    /// §2), rather than at the end of the view's next update, so that the update after a swap can take
+    /// it. The statement raises this under the engine's refresh lock, which an update may wait for while
+    /// it holds the view's own: the build is started off this thread, under the update lock.
+    /// </summary>
+    private void BuildAtSwap() => Volatile.Write(ref _buildingAtSwap, Task.Run(BuildAtSwapAsync));
+
+    private Task _buildingAtSwap = Task.CompletedTask;
+
+    /// <summary>For tests: the start of the last build at a swap, done once the build has begun or was found not needed.</summary>
+    internal Task BuildingAtSwap => Volatile.Read(ref _buildingAtSwap);
+
+    private async Task BuildAtSwapAsync()
+    {
+        await _updating.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_disposed || _fault is not null)
+            {
+                return;
+            }
+
+            // An instance building for a plan swapped out since would be let go at the next update.
+            if (_green is { } stale && !ReferenceEquals(stale.PlannedFor, _prepared.Plans))
+            {
+                LetGo(stale);
+            }
+
+            BuildBeside();
+        }
+        finally
+        {
+            _updating.Release();
+        }
+    }
+
+    /// <summary>
+    /// Starts building the plan the statement runs beside the one the view runs (design 70 §2), when
+    /// the view builds new plans beside its own, runs another plan, and builds nothing yet. Called as
+    /// the statement swaps a plan in, and at the end of an update, so that the build runs in the time
+    /// before the next: the instance is made and computed from nothing off the update's thread, over the
+    /// epoch current when the build begins.
+    /// </summary>
+    private void BuildBeside()
+    {
+        if (_options.PlanSwap != ViewPlanSwap.LowJitter
+            || _green is not null
+            || _maintained is not { IsCurrent: false })
+        {
+            return;
+        }
+
+        _green = StartGreen();
+    }
+
+    /// <summary>
+    /// Starts <see cref="BuildBeside"/>'s build. A method of its own, so that the closure the build runs
+    /// in is made only when there is one to start, and not at the end of every update.
+    /// </summary>
+    private Green StartGreen()
+    {
+        var prepared = _prepared;
+        var key = _key;
+        var clocked = _readsTime || ViewBinding.NamesClock(prepared, _engine.ClockName);
+        var plannedFor = prepared.Plans;
+        var hold = HoldGreenBuild;
+        var cancel = new CancellationTokenSource();
+        var stop = cancel.Token;
+        var build = Task.Run(
+            async () =>
+            {
+                if (hold is not null)
+                {
+                    await hold(stop).ConfigureAwait(false);
+                }
+
+                var next = await MaintainAsync(prepared, key, stop).ConfigureAwait(false);
+                try
+                {
+                    var stamp = _engine.Stamp;
+                    if (clocked && stamp.Clock is null)
+                    {
+                        throw new InvalidOperationException(
+                            "the engine's clock has not been set, and the statement reads it.");
+                    }
+
+                    // Its rows are not read: the update that swaps it in gives them whole.
+                    var values = _binding.Values(prepared, _engine.ClockName, stamp.Clock);
+                    await next.UpdateAsync(values, stamp.Clock ?? default, stamp.Version, whole: false, stop).ConfigureAwait(false);
+                    return next;
+                }
+                catch
+                {
+                    await next.DisposeAsync().ConfigureAwait(false);
+                    throw;
+                }
+            },
+            CancellationToken.None);
+        return new Green(plannedFor, build, cancel);
+    }
+
+    /// <summary>
+    /// Lets an instance built beside go: its build is stopped, and what it built disposed once the build
+    /// has stopped, off the update's thread.
+    /// </summary>
+    private void LetGo(Green green)
+    {
+        if (ReferenceEquals(_green, green))
+        {
+            _green = null;
+        }
+
+        green.Cancel.Cancel();
+        _lettingGo.RemoveAll(static release => release.IsCompleted);
+        _lettingGo.Add(ReleaseAsync(green));
+    }
+
+    private static async Task ReleaseAsync(Green green)
+    {
+        // Stopped, failed or done, the build is over: what it threw is the view's to log, not to throw.
+        // A build that failed disposed what it made itself.
+        await ((Task)green.Build).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        _ = green.Build.Exception;
+        if (green.Build.IsCompletedSuccessfully)
+        {
+            await green.Build.Result.DisposeAsync().ConfigureAwait(false);
+        }
+
+        green.Cancel.Dispose();
+    }
+
+    /// <summary>The build of an instance beside, for tests that wait for it; null when none is building or built.</summary>
+    internal Task? GreenBuild => _green?.Build;
+
+    /// <summary>For tests: awaited by a build beside before it begins, with the token that stops it.</summary>
+    internal Func<CancellationToken, Task>? HoldGreenBuild { get; set; }
+
+    /// <summary>
+    /// An instance of the view on a new plan, built in the background (design 70 §2): made, and its
+    /// first update, which computes from nothing, run off the update's thread over the epoch current
+    /// when the build began.
+    /// </summary>
+    /// <param name="PlannedFor">The statement's plans the instance is built on (<see cref="PreparedQuery.Plans"/>).</param>
+    /// <param name="Build">The instance, once built.</param>
+    /// <param name="Cancel">Stops the build when the view lets the instance go.</param>
+    private sealed record Green(object PlannedFor, Task<MaintainedQuery> Build, CancellationTokenSource Cancel);
+
+    /// <summary>For tests: the keys the kept staging has room for, or 0 while none is kept.</summary>
+    internal int StagingRoom => _staging?.Keys.Length ?? 0;
+
+    /// <summary>Whether the view is maintained from the plans its statement runs now; true for a view that recomputes.</summary>
+    internal bool MaintainsCurrentPlan => _maintained?.IsCurrent ?? true;
 
     /// <summary>Whether two results have the same columns: names, types and nullability, in order.</summary>
     private static bool SameResult(Schema before, Schema after)
@@ -717,16 +1465,106 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         return positions;
     }
 
-    /// <summary>One update's mapped rows, before they are the view's.</summary>
+    /// <summary>
+    /// One update's mapped rows, before they are the view's. The view keeps one between updates and
+    /// empties it for each (F244): its maps and arrays keep their room, so an update no larger than the
+    /// last stages its rows without allocating. Room an update much larger than the next grew is let go,
+    /// so a whole result is not kept twice beside the view's own rows.
+    /// </summary>
     private sealed class Staged
     {
+        /// <summary>Room kept whatever the updates: what an update of this many keys stages into without growing.</summary>
+        private const int Kept = 256;
+
+        private const int Smallest = 16;
+
         private readonly Dictionary<TKey, int> _seen = new(Bytes<TKey>.Comparer);
 
-        public TKey[] Keys = new TKey[16];
-        public TRow[] Rows = new TRow[16];
-        public uint[] Hashes = new uint[16];
+        /// <summary>
+        /// Whether the rows are a maintained update's changes (D343): the rows changed keys hold now,
+        /// with <see cref="Before"/> the host keys of the rows they held. Otherwise the whole result.
+        /// </summary>
+        public bool Delta { get; private set; }
+
+        public List<TKey> Before { get; } = [];
+
+        /// <summary>The host keys a maintained update takes out, as <c>ApplyChanges</c> works them out.</summary>
+        public HashSet<TKey> Freed { get; } = new(Bytes<TKey>.Comparer);
+
+        public TKey[] Keys = new TKey[Smallest];
+        public TRow[] Rows = new TRow[Smallest];
+        public uint[] Hashes = new uint[Smallest];
+
+        /// <summary>The columns of the batch being mapped; empty between batches.</summary>
+        private IArrowArray[] _columns = [];
 
         public int Count { get; private set; }
+
+        /// <summary>Empties the staging for an update, keeping its room.</summary>
+        public Staged Begin(bool delta)
+        {
+            _seen.Clear();
+            Before.Clear();
+            Freed.Clear();
+            Count = 0;
+            Delta = delta;
+            return this;
+        }
+
+        /// <summary>
+        /// Lets go of room beyond four times what this update used, past <see cref="Kept"/>: a whole
+        /// result, or a burst of changes, is not kept for the updates after it.
+        /// </summary>
+        public void Trim()
+        {
+            if (Keys.Length > Math.Max(Kept, 4 * Count))
+            {
+                var room = Math.Max(Smallest, 2 * Count);
+                Keys = new TKey[room];
+                Rows = new TRow[room];
+                Hashes = new uint[room];
+            }
+
+            if (_seen.EnsureCapacity(0) > Math.Max(Kept, 4 * Count))
+            {
+                _seen.Clear();
+                _seen.TrimExcess(Math.Max(Smallest, 2 * Count));
+            }
+
+            var before = Before.Count;
+            if (Before.Capacity > Math.Max(Kept, 4 * before))
+            {
+                Before.Clear();
+                Before.Capacity = Math.Max(Smallest, 2 * before);
+            }
+
+            var freed = Freed.Count;
+            if (Freed.EnsureCapacity(0) > Math.Max(Kept, 4 * freed))
+            {
+                Freed.Clear();
+                Freed.TrimExcess();
+                Freed.EnsureCapacity(Math.Max(Smallest, 2 * freed));
+            }
+        }
+
+        /// <summary>The columns of <paramref name="batch"/>, in an array kept between batches.</summary>
+        public IArrowArray[] ColumnsOf(RecordBatch batch)
+        {
+            if (_columns.Length != batch.ColumnCount)
+            {
+                _columns = new IArrowArray[batch.ColumnCount];
+            }
+
+            for (var c = 0; c < _columns.Length; c++)
+            {
+                _columns[c] = batch.Column(c);
+            }
+
+            return _columns;
+        }
+
+        /// <summary>Lets go of the mapped batch's columns, so the staging holds none of its buffers.</summary>
+        public void LetGoOfColumns() => System.Array.Clear(_columns);
 
         /// <summary>False, and the row the key came in, when the key is already staged.</summary>
         public bool Add(in TKey key, in TRow row, uint hash, out int earlier)
@@ -759,6 +1597,14 @@ internal sealed class ViewBinding
 {
     private readonly IReadOnlyDictionary<string, object?>? _named;
     private readonly IReadOnlyList<object?>? _positional;
+
+    /// <summary>The statement <see cref="_bound"/> holds the values of, for the view's updates.</summary>
+    private PreparedQuery? _boundFor;
+
+    private object?[] _bound = [];
+
+    /// <summary>The slot of <see cref="_bound"/> the clock's time is written to, or -1.</summary>
+    private int _clockAt = -1;
 
     private ViewBinding(IReadOnlyDictionary<string, object?>? named, IReadOnlyList<object?>? positional)
     {
@@ -803,9 +1649,52 @@ internal sealed class ViewBinding
         }
     }
 
+    /// <summary>The position of the parameter the statement names the engine's clock by, or -1.</summary>
+    public static int ClockIndex(PreparedQuery prepared, string? clock)
+    {
+        if (clock is null)
+        {
+            return -1;
+        }
+
+        for (var i = 0; i < prepared.Parameters.Count; i++)
+        {
+            if (prepared.Parameters[i].Name is { } name && Name(name) == Name(clock))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
     /// <summary>Whether the statement names the engine's clock as a parameter.</summary>
     public static bool NamesClock(PreparedQuery prepared, string? clock) =>
         clock is not null && prepared.Parameters.Any(p => p.Name is { } name && Name(name) == Name(clock));
+
+    /// <summary>
+    /// The values an update executes with, in an array kept between updates (F244): the host's are bound
+    /// once per statement, as they stand for the view's life, and only the clock's slot is written again.
+    /// Only the view's update calls this, under its lock, and nothing it hands the array to keeps it; a
+    /// build beside binds its own with <see cref="Values"/>.
+    /// </summary>
+    public object?[] ValuesForUpdate(PreparedQuery prepared, string? clock, DateTimeOffset? time)
+    {
+        if (!ReferenceEquals(_boundFor, prepared))
+        {
+            _bound = Values(prepared, clock, time);
+            _clockAt = prepared.ParameterStyle is ParameterStyle.Named ? ClockIndex(prepared, clock) : -1;
+            _boundFor = prepared;
+            return _bound;
+        }
+
+        if (_clockAt >= 0)
+        {
+            _bound[_clockAt] = ClockValue(prepared.Parameters[_clockAt], time);
+        }
+
+        return _bound;
+    }
 
     /// <summary>The values to execute with: the host's, and the clock's time for its parameter.</summary>
     public object?[] Values(PreparedQuery prepared, string? clock, DateTimeOffset? time)
@@ -837,7 +1726,7 @@ internal sealed class ViewBinding
 
             if (clocked)
             {
-                values[Name(clock!)] = ClockValue(prepared, clock!, time);
+                values[Name(clock!)] = ClockValue(prepared.Parameters[ClockIndex(prepared, clock)], time);
             }
 
             return ParameterBinder.ResolveNamed(prepared.Parameters, values);
@@ -854,15 +1743,14 @@ internal sealed class ViewBinding
         return [.. _positional ?? []];
     }
 
-    /// <summary>The clock's time, as the CLR value the parameter's type takes.</summary>
-    private static object? ClockValue(PreparedQuery prepared, string clock, DateTimeOffset? time)
+    /// <summary>The clock's time, as the CLR value <paramref name="parameter"/>'s type takes.</summary>
+    private static object? ClockValue(Chalk.Client.ParameterDescriptor parameter, DateTimeOffset? time)
     {
         if (time is not { } now)
         {
             return null;
         }
 
-        var parameter = prepared.Parameters.First(p => p.Name is { } name && Name(name) == Name(clock));
         // Boxed apart on purpose: as one conditional, the DateTime would widen to a DateTimeOffset.
         if (parameter.Type.Kind == Chalk.Ir.TypeKind.TimestampTz)
         {

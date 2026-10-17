@@ -219,30 +219,32 @@ public sealed class ConfinementTests
 
     /// <summary>
     /// <b>F80.</b> The policy may permit the pair and still have nowhere to answer it: a vendor
-    /// grant confined within a region is permitted by §2 — a tenancy kind is confinable by any other
-    /// declared tenancy kind — and no table of the fixture resolves a vendor and a region on one
-    /// row, so no list of that group exists and the grant would bind, reach nothing and say nothing.
+    /// grant confined within an organisation is permitted by §2 — a tenancy kind is confinable by
+    /// any other declared tenancy kind — and no table of the fixture resolves a vendor and an
+    /// organisation on one row, so no list of that group exists and the grant would bind, reach
+    /// nothing and say nothing.
     /// </summary>
     /// <remarks>
     /// This is the other half of §3, asked at binding rather than at compilation: the three refusals
     /// above are about what the <em>policy</em> declares, and this one is about what a <em>table</em>
     /// resolves. It names what the dimension can be confined along instead, which for the vendor is
-    /// nothing at all.
+    /// the region its own row holds (F100) — the pair this test asked about before the fixture had a
+    /// table answering it.
     /// </remarks>
     [Fact]
     public void A_grant_confined_along_kinds_no_table_resolves_together_is_refused()
     {
         var error = RefusedAtBind(
             Grant.ForTenancy(TenancyPolicyFixture.Vendor, 1, TenancyPolicyFixture.VendorRole)
-                .Within(Region, 1));
+                .Within(Org, 1));
 
         Assert.Contains(
-            "the grant holds {vendor, region} in role 'vendor', and no table of this policy answers "
+            "the grant holds {vendor, org} in role 'vendor', and no table of this policy answers "
             + "those kinds together — on one row, or on one path's endpoint read beside the row",
             error.Message,
             StringComparison.Ordinal);
         Assert.Contains(
-            "What this policy answers for 'vendor' with 'vendor' among them is: {vendor}",
+            "What this policy answers for 'vendor' with 'vendor' among them is: {vendor}; {region, vendor}",
             error.Message,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -720,20 +722,43 @@ public sealed class ConfinementTests
     }
 
     /// <summary>
-    /// And the near miss along a <c>Related</c> path is named too: the fixture's own
-    /// vendor-within-region refusal (F80 above) reaches the vendor one step up through a bridge and
-    /// holds the region on the order's own row, which is exactly the shape F101 was reported for,
-    /// so the message says which path, why it cannot carry the conjunction, and the two ways out.
+    /// And the near miss along a <c>Related</c> path is named too: a vendor grant confined within a
+    /// region, where the order reaches the vendor one step up through a bridge and holds the region on
+    /// its own row, which is exactly the shape F101 was reported for, so the message says which path,
+    /// why it cannot carry the conjunction, and the two ways out.
     /// </summary>
+    /// <remarks>
+    /// The policy is the shared fixture's shape before F100 gave a vendor's row its home region,
+    /// which is what lets the same grant bind there now.
+    /// </remarks>
     [Fact]
     public void A_confinement_along_a_related_path_names_the_near_miss()
     {
+        var policy = TenancyPolicy.Declare(Catalog);
+        var source = policy.Source(TenancyPolicyFixture.SourceName);
+        var vendorRole = policy.Role("vendor");
+        var org = policy.Tenancy("org");
+        var region = policy.Tenancy("region");
+        var vendor = policy.Tenancy("vendor");
+
+        var items = source.Table("items");
+        items.Tenancy(r => r.Direct(vendor, items.Column("vendor_id")));
+        var orders = source.Table("orders");
+        orders.Tenancy(r => r
+            .Direct(org, orders.Column("org_id"))
+            .Direct(region, orders.Column("region_id"))
+            .Related(vendor).Through(source.Table("order_items")).Through(items));
+
+        var compiled = policy.Compile([Schema]);
+
         // The shape F101 was reported for: the confining kind on the target's own row, the grant's
         // kind reached along a Related path. Refused, since a marker-borne confinement is a later
         // decision — and refused by name, saying which path and which way out.
-        var error = RefusedAtBind(
-            Grant.ForTenancy(TenancyPolicyFixture.Vendor, 1, TenancyPolicyFixture.VendorRole)
-                .Within(Region, 1));
+        var error = Assert.Throws<CatalogValidationException>(() => compiled.Bind(new TenancyPrincipal
+        {
+            User = 1,
+            Grants = [Grant.ForTenancy(vendor, 1, vendorRole).Within(region, 1)],
+        }));
 
         Assert.Contains("comes closest", error.Message, StringComparison.Ordinal);
         Assert.Contains("along a Related path whose endpoint is 'items'", error.Message, StringComparison.Ordinal);

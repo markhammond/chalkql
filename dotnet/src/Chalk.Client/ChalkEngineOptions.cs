@@ -215,6 +215,19 @@ public sealed class ChalkEngineOptions
     public ILoggerFactory? LoggerFactory { get; init; }
 
     /// <summary>
+    /// Told of the engine's planning as it happens: each drifted statement a background run judges,
+    /// each run, each refresh that takes a run's work in, and each prepare. Null, the default, tells
+    /// nothing and costs nothing. Its methods are called on the engine's threads, so they must be
+    /// quick, safe on any thread, and leave the engine alone; one that throws is logged once and
+    /// otherwise ignored.
+    /// </summary>
+    /// <remarks>
+    /// The engine logs its planning under its own category, <c>Chalk.Client.Planning</c>, apart from
+    /// the rest; this is for a host that would rather decide what to log, count or show of it.
+    /// </remarks>
+    public IPlanningObserver? PlanningObserver { get; init; }
+
+    /// <summary>
     /// The client-bodied function implementations this engine serves (D79,
     /// <c>docs/design/17-user-defined-functions.md</c> §3). Called once during
     /// <c>ChalkEngine.CreateAsync</c> with a registry to fill in; every client-bodied function the
@@ -286,6 +299,14 @@ public sealed record PrepareOptions
 
     /// <summary>Ask the planner for its plan text and the rules that fired. Diagnostics only.</summary>
     public bool IncludePlanText { get; init; }
+
+    /// <summary>
+    /// With <see cref="IncludePlanText"/>, ask for a verbose plan text: its planning line then carries
+    /// the costs the search governor sampled (first, best, ratio). They are left out otherwise, as a
+    /// sample lands before the search converges or not as the clock has it, so the plan text is the
+    /// same from one run to the next (F195). Diagnostics only.
+    /// </summary>
+    public bool VerbosePlanText { get; init; }
 
     /// <summary>
     /// Ask the planner for this statement's literals as keyed pseudonyms, so the text can be logged

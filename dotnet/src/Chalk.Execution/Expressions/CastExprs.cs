@@ -142,7 +142,10 @@ internal sealed class FixedCastExpr : CastExprBase
     }
 }
 
-/// <summary>A cast whose target is STRING: the numeric and boolean spellings of <c>02-ir.md</c> §6.</summary>
+/// <summary>
+/// A cast whose target is STRING: the numeric and boolean spellings of <c>02-ir.md</c> §6, and a date,
+/// a time or a timestamp, with a time zone or without, as <see cref="TemporalText"/> writes one (F193).
+/// </summary>
 internal sealed class CastToStringExpr : CastExprBase
 {
     private byte[] _buffer = new byte[64];
@@ -165,7 +168,17 @@ internal sealed class CastToStringExpr : CastExprBase
                 continue;
             }
 
-            var written = Format(operand, i);
+            int written;
+            try
+            {
+                written = Format(operand, i);
+            }
+            catch (Exception exception) when (Recover(exception))
+            {
+                Scratch.AppendNull();
+                continue;
+            }
+
             Scratch.AppendValue(_buffer.AsSpan(0, written));
         }
 
@@ -174,6 +187,19 @@ internal sealed class CastToStringExpr : CastExprBase
 
     private int Format(in Vector operand, int row)
     {
+        switch (Source.Kind)
+        {
+            // A buffer of 64 holds the longest of these, so none is written twice.
+            case TypeKind.Date:
+                return TemporalText.WriteDate(_buffer, NumberLanes.ReadInteger(operand, row, Source));
+            case TypeKind.Time:
+                return TemporalText.WriteTime(_buffer, NumberLanes.ReadInteger(operand, row, Source));
+            case TypeKind.Timestamp:
+                return TemporalText.WriteTimestamp(_buffer, NumberLanes.ReadInteger(operand, row, Source), Source.Precision);
+            case TypeKind.TimestampTz:
+                return TemporalText.WriteInstant(_buffer, NumberLanes.ReadInteger(operand, row, Source), Source.Precision);
+        }
+
         while (true)
         {
             var span = _buffer.AsSpan();
@@ -318,8 +344,7 @@ internal sealed class CastFromStringExpr : CastExprBase
             case TypeKind.Timestamp:
             case TypeKind.TimestampTz:
             {
-                var parsed = DateTime.Parse(
-                    trimmed, CultureInfo.InvariantCulture, DateTimeStyles.NoCurrentDateDefault);
+                var parsed = Timestamp(trimmed, instant: Type.Kind == TypeKind.TimestampTz);
                 var days = CivilTime.FromCivil(parsed.Year, parsed.Month, parsed.Day);
                 var secondOfDay = (parsed.Hour * 3600L) + (parsed.Minute * 60L) + parsed.Second;
                 var unitsPerSecond = IrTypes.TimestampUnitsPerSecond((uint)Type.Precision);
@@ -337,6 +362,27 @@ internal sealed class CastFromStringExpr : CastExprBase
                     Kind, Type, long.Parse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture), lane);
                 return;
         }
+    }
+
+    /// <summary>
+    /// The timestamp <paramref name="text"/> writes, read in no machine's time zone (F240), as DuckDB
+    /// and PostgreSQL read it. A zone written in the text, an offset or a <c>Z</c>, names an instant.
+    /// A timestamp with a time zone is that instant, so <c>12:00+02:00</c> is 10:00 UTC. A timestamp
+    /// without one is the wall clock as written, the zone dropped, so the same text is 12:00. Text
+    /// that writes no zone is read as written, which for an instant is UTC.
+    /// </summary>
+    private static DateTime Timestamp(ReadOnlySpan<char> text, bool instant)
+    {
+        // Adjusting to UTC applies the offset the text writes, and never the machine's: a parse is
+        // UTC exactly when the text writes a zone.
+        var utc = DateTime.Parse(
+            text, CultureInfo.InvariantCulture, DateTimeStyles.NoCurrentDateDefault | DateTimeStyles.AdjustToUniversal);
+        if (instant || utc.Kind != DateTimeKind.Utc)
+        {
+            return utc;
+        }
+
+        return utc + DateTimeOffset.Parse(text, CultureInfo.InvariantCulture).Offset;
     }
 }
 
@@ -464,6 +510,16 @@ internal static class TemporalConversions
 {
     public static long Convert(long raw, ChalkType source, ChalkType target)
     {
+        if (target.Kind == TypeKind.Time)
+        {
+            // TIME is microseconds since midnight at every precision (02-ir.md §3): a timestamp's time
+            // of day, or a time, cut to the target's digits (F191).
+            var micros = source.Kind == TypeKind.Time
+                ? raw
+                : MicrosOfDay(raw, IrTypes.TimestampUnitsPerSecond((uint)source.Precision));
+            return target.Precision >= 6 ? micros : micros - (micros % Cut(target.Precision));
+        }
+
         if (source.Kind == TypeKind.Date && target.Kind != TypeKind.Date)
         {
             return raw * CivilTime.SecondsPerDay * IrTypes.TimestampUnitsPerSecond((uint)target.Precision);
@@ -489,5 +545,24 @@ internal static class TemporalConversions
 
         // Rescaling truncates, which for a negative instant means towards the past, not towards zero.
         return to > from ? raw * (to / from) : CivilTime.FloorDiv(raw, from / to);
+    }
+
+    /// <summary>A timestamp's microseconds since its midnight, before 1970 as after.</summary>
+    private static long MicrosOfDay(long raw, long unitsPerSecond)
+    {
+        var ofDay = CivilTime.FloorMod(raw, CivilTime.SecondsPerDay * unitsPerSecond);
+        return unitsPerSecond >= 1_000_000L ? ofDay / (unitsPerSecond / 1_000_000L) : ofDay * (1_000_000L / unitsPerSecond);
+    }
+
+    /// <summary>The microseconds below a TIME's last digit at <paramref name="precision"/>.</summary>
+    private static long Cut(int precision)
+    {
+        var cut = 1L;
+        for (var digit = Math.Max(0, precision); digit < 6; digit++)
+        {
+            cut *= 10;
+        }
+
+        return cut;
     }
 }

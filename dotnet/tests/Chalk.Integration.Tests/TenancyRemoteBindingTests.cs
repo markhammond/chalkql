@@ -535,7 +535,7 @@ public sealed class TenancyRemoteBindingTests(SharedSidecar sidecar)
             return ([], refused.Message);
         }
         catch (Exception failed)
-            when (TenancyCorpusTests.KnownLeaks.ContainsKey(query.Name)
+            when (TenancyCorpusTests.KnownDefects.ContainsKey(query.Name)
                 && TenancyCorpusTests.IsRegistered(failed))
         {
             // A registered defect (D251): both engines are expected to fail the same way, and the

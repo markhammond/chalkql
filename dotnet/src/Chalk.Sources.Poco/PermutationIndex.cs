@@ -13,7 +13,11 @@ namespace Chalk.Sources.Poco;
 /// Construction materialises each key into a strongly-typed temporary column.
 /// The typed columns are used by sorting, prefix-cardinality calculation and
 /// uniqueness verification, then discarded. Consequently the persistent index
-/// still costs one int per row, or nothing when backed by a declared collation.
+/// still costs about one int per row, or nothing when backed by a declared collation.
+///
+/// The permutation is held in leaves (F202), so an append reads only the rows it
+/// appends, places them by a search of the order before, and rewrites only the
+/// leaves they land in.
 /// </summary>
 public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePocoIndex<T>
 {
@@ -22,14 +26,25 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
     private readonly SortDirection[] _directions;
 
     /// <summary>
-    /// Row positions in key order, or null when the collection is already in that order.
+    /// Row positions in key order, or null when the collection is already in that order: in leaves, so
+    /// that an append extends them by what it appends (F202).
     /// </summary>
-    private readonly int[]? _permutation;
+    private readonly PositionLeaves? _positions;
 
-    /// <summary>Exact distinct count for each key prefix.</summary>
-    private readonly long[] _prefixDistinct;
+    /// <summary>
+    /// Exact distinct count for each key prefix: counted when the index is built whole, and when first
+    /// asked for after an append, since an append no longer reads every row (F202).
+    /// </summary>
+    private long[]? _prefixDistinct;
+
+    private readonly Lock _distinctGate = new();
 
     private readonly int _rowCount;
+
+    /// <summary>The key accessors and columns, kept to count distinct prefixes when asked.</summary>
+    private readonly Func<T, object?>[] _accessors;
+
+    private readonly PocoColumn<T>[]? _keyColumns;
 
     internal PermutationIndex(IndexDescriptor descriptor,
         IReadOnlyList<T> rows,
@@ -63,6 +78,25 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         Descriptor = descriptor;
         _rows = rows;
         _rowCount = rows.Count;
+        _accessors = keys;
+        _keyColumns = keyColumns;
+
+        // An append extends the order of the index it follows (F202): only the appended rows are read,
+        // put in order among themselves, and placed by a search of that index, so the work is what
+        // was appended rather than the table.
+        if (!collationBacked
+            && previous?._positions is not null
+            && appendedFrom > 0
+            && appendedFrom == previous._rowCount
+            && appendedFrom <= _rowCount
+            && previous.Extended(rows, keys, keyColumns, appendedFrom, scratch, table, keyColumnNames) is { } extended)
+        {
+            _directions = previous._directions;
+            _searchKeys = previous._searchKeys;
+            _positions = extended.Positions;
+            ExtendedInOrder = extended.InOrder;
+            return;
+        }
 
         var keyCount = keys.Length;
 
@@ -88,21 +122,13 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     out _searchKeys[k]);
         }
 
+        int[]? order = null;
         if (collationBacked)
         {
             // The collection is already in key order, so appending rows that keep it appends to the
             // index too — which is what the D17 verification has just been asked to confirm.
-            _permutation = null;
+            _positions = null;
             ExtendedInOrder = true;
-        }
-        else if (previous?._permutation is { } existing
-            && appendedFrom > 0
-            && appendedFrom == previous._rowCount
-            && appendedFrom <= _rowCount)
-        {
-            _permutation = MergeAppended(
-                existing, appendedFrom, _rowCount, materialised, out var inOrder);
-            ExtendedInOrder = inOrder;
         }
         else
         {
@@ -113,12 +139,13 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                 permutation[i] = i;
 
             Sort(permutation, materialised, scratch);
-            _permutation = permutation;
+            order = permutation;
+            _positions = PositionLeaves.FromSorted(permutation);
             ExtendedInOrder = previous is null && appendedFrom == 0;
         }
 
         _prefixDistinct =
-            CountPrefixDistinct(materialised);
+            CountPrefixDistinct(materialised, order);
 
         if (descriptor.Unique)
         {
@@ -126,76 +153,121 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                 materialised,
                 keys,
                 table,
-                keyColumnNames);
+                keyColumnNames,
+                order);
         }
     }
 
     /// <summary>
-    /// The permutation of an appended index, from the one it extends (D260 §3). Keys that arrived in
-    /// order — a time-series table appended in timestamp order — are already where they belong, so
-    /// the two runs are copied end to end and nothing is sorted; otherwise the appended tail alone
-    /// is sorted and the two runs are merged.
+    /// This index's order with the rows from <paramref name="appendedFrom"/> on put in it (F202), or
+    /// null when they must be indexed whole: when they bring the first value to a key that held only
+    /// NULLs, whose search reads no type. The appended rows' keys alone are read and put in order;
+    /// each is placed after the last row whose key is not greater, which is where a whole sort puts it,
+    /// since equal keys are in row order and the appended rows come after every row before them. A
+    /// unique index refuses an appended key equal to its neighbour there, as a whole check would.
     /// </summary>
-    private static int[] MergeAppended(
-        int[] existing,
-        int from,
-        int total,
-        IMaterialisedKey[] keys,
-        out bool inOrder)
+    private (PositionLeaves Positions, bool InOrder)? Extended(
+        IReadOnlyList<T> rows,
+        Func<T, object?>[] keys,
+        PocoColumn<T>[]? keyColumns,
+        int appendedFrom,
+        PermutationIndexScratch scratch,
+        string table,
+        IReadOnlyList<string> keyColumnNames)
     {
-        var comparer = new CompositeComparer(keys);
-        var added = total - from;
+        var added = rows.Count - appendedFrom;
+        var appended = new Appended(rows, appendedFrom, added);
+        var materialised = new IMaterialisedKey[keys.Length];
+        for (var k = 0; k < keys.Length; k++)
+        {
+            materialised[k] = MaterialiseKey(
+                appended, keys[k], keyColumns?[k], _directions[k], k, scratch, out _);
+            if (_searchKeys[k] is AllNullSearchKey && !ReferenceEquals(materialised[k], AllNullKey.Instance))
+            {
+                return null;
+            }
+        }
 
-        var tail = GC.AllocateUninitializedArray<int>(added);
+        var order = GC.AllocateUninitializedArray<int>(added);
         for (var i = 0; i < added; i++)
         {
-            tail[i] = from + i;
+            order[i] = i;
         }
 
-        inOrder = true;
-        for (var i = 1; i < added && inOrder; i++)
+        Sort(order, materialised, scratch);
+
+        var ordinals = GC.AllocateUninitializedArray<int>(added);
+        var positions = GC.AllocateUninitializedArray<int>(added);
+        var values = new object?[keys.Length];
+        var low = 0;
+        var inOrder = true;
+        for (var i = 0; i < added; i++)
         {
-            inOrder = comparer.Compare(tail[i - 1], tail[i]) <= 0;
+            var at = order[i];
+            var row = rows[appendedFrom + at];
+            for (var k = 0; k < keys.Length; k++)
+            {
+                values[k] = keys[k](row);
+            }
+
+            var bound = new BoundView(values);
+            var ordinal = Search(in bound, atLeast: 1, low);
+            if (Descriptor.Unique)
+            {
+                if (i > 0 && ordinal == ordinals[i - 1])
+                {
+                    if (Equal(materialised, order[i - 1], at))
+                    {
+                        throw Duplicate(
+                            rows, positions[i - 1], appendedFrom + at, keys, table, keyColumnNames);
+                    }
+                }
+                else if (ordinal > 0 && CompareAt(ordinal - 1, in bound) == 0)
+                {
+                    throw Duplicate(
+                        rows, GetPosition(ordinal - 1), appendedFrom + at, keys, table, keyColumnNames);
+                }
+            }
+
+            ordinals[i] = ordinal;
+            positions[i] = appendedFrom + at;
+            inOrder &= ordinal == appendedFrom && at == i;
+            low = ordinal;
         }
 
-        if (inOrder && added > 0 && existing.Length > 0)
+        return (_positions!.Insert(ordinals, positions), inOrder);
+    }
+
+    /// <summary>Whether two of the materialised rows have equal keys in every column.</summary>
+    private static bool Equal(IMaterialisedKey[] keys, int first, int second)
+    {
+        for (var k = 0; k < keys.Length; k++)
         {
-            inOrder = comparer.Compare(existing[^1], tail[0]) <= 0;
+            if (!keys[k].EqualRows(first, second))
+            {
+                return false;
+            }
         }
 
-        var merged = GC.AllocateUninitializedArray<int>(total);
+        return true;
+    }
 
-        if (inOrder)
+    /// <summary>The rows from <c>from</c> on, as a list of their own: what an append's keys are read from.</summary>
+    private sealed class Appended(IReadOnlyList<T> rows, int from, int count) : IReadOnlyList<T>
+    {
+        public T this[int index] => rows[from + index];
+
+        public int Count => count;
+
+        public IEnumerator<T> GetEnumerator()
         {
-            existing.AsSpan().CopyTo(merged);
-            tail.AsSpan().CopyTo(merged.AsSpan(existing.Length));
-            return merged;
+            for (var i = 0; i < count; i++)
+            {
+                yield return rows[from + i];
+            }
         }
 
-        tail.AsSpan().Sort(comparer);
-
-        var left = 0;
-        var right = 0;
-        var at = 0;
-
-        while (left < existing.Length && right < added)
-        {
-            merged[at++] = comparer.Compare(existing[left], tail[right]) <= 0
-                ? existing[left++]
-                : tail[right++];
-        }
-
-        while (left < existing.Length)
-        {
-            merged[at++] = existing[left++];
-        }
-
-        while (right < added)
-        {
-            merged[at++] = tail[right++];
-        }
-
-        return merged;
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     private static void Sort(
@@ -396,18 +468,49 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
     public IndexDescriptor Descriptor { get; }
 
     public bool IsCollationBacked =>
-        _permutation is null;
+        _positions is null;
 
     public long BytesPerRow =>
-        _permutation is null
+        _positions is not { Count: > 0 } positions
             ? 0
-            : sizeof(int);
+            : (positions.Bytes + positions.Count - 1) / positions.Count;
 
-    public long? DistinctCount(int keyPositions) =>
-        keyPositions >= 1 &&
-        keyPositions <= _prefixDistinct.Length
-            ? _prefixDistinct[keyPositions - 1]
-            : null;
+    public long? DistinctCount(int keyPositions)
+    {
+        var distinct = Volatile.Read(ref _prefixDistinct) ?? CountPrefixDistinctNow();
+        return keyPositions >= 1 &&
+            keyPositions <= distinct.Length
+                ? distinct[keyPositions - 1]
+                : null;
+    }
+
+    /// <summary>
+    /// The distinct prefixes of an index an append extended, counted the first time they are asked for
+    /// (F202): its keys are read over every row once, as a build reads them, with buffers of its own,
+    /// since an append may be building the next index meanwhile.
+    /// </summary>
+    private long[] CountPrefixDistinctNow()
+    {
+        lock (_distinctGate)
+        {
+            if (_prefixDistinct is { } counted)
+            {
+                return counted;
+            }
+
+            var scratch = new PermutationIndexScratch();
+            var materialised = new IMaterialisedKey[_accessors.Length];
+            for (var k = 0; k < _accessors.Length; k++)
+            {
+                materialised[k] = MaterialiseKey(
+                    _rows, _accessors[k], _keyColumns?[k], _directions[k], k, scratch, out _);
+            }
+
+            counted = CountPrefixDistinct(materialised, _positions?.ToArray());
+            Volatile.Write(ref _prefixDistinct, counted);
+            return counted;
+        }
+    }
 
     public IEnumerable<T> Lookup(IndexKeyRange range)
     {
@@ -469,11 +572,73 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int GetPosition(int ordinal)
     {
-        var permutation = _permutation;
+        var positions = _positions;
 
-        return permutation is null
+        return positions is null
             ? ordinal
-            : permutation[ordinal];
+            : positions[ordinal];
+    }
+
+    /// <summary>
+    /// The positions of the ordinals from <paramref name="from"/> to <paramref name="to"/>, in key
+    /// order or, <paramref name="reverse"/>, from the last: walked leaf by leaf (F202), where
+    /// <see cref="GetPosition"/> finds each ordinal's leaf.
+    /// </summary>
+    internal IEnumerable<int> PositionsBetween(int from, int to, bool reverse)
+    {
+        if (from >= to)
+        {
+            yield break;
+        }
+
+        if (_positions is not { } leaves)
+        {
+            if (reverse)
+            {
+                for (var ordinal = to - 1; ordinal >= from; ordinal--)
+                {
+                    yield return ordinal;
+                }
+            }
+            else
+            {
+                for (var ordinal = from; ordinal < to; ordinal++)
+                {
+                    yield return ordinal;
+                }
+            }
+
+            yield break;
+        }
+
+        if (reverse)
+        {
+            for (var leaf = leaves.LeafOf(to - 1); leaf >= 0 && leaves.StartOf(leaf + 1) > from; leaf--)
+            {
+                var array = leaves.ArrayOf(leaf);
+                var start = leaves.StartOf(leaf);
+                var offset = leaves.OffsetOf(leaf) - start;
+                var last = Math.Max(from, start);
+                for (var ordinal = Math.Min(to, leaves.StartOf(leaf + 1)) - 1; ordinal >= last; ordinal--)
+                {
+                    yield return array[offset + ordinal];
+                }
+            }
+
+            yield break;
+        }
+
+        for (var leaf = leaves.LeafOf(from); leaf < leaves.LeafCount && leaves.StartOf(leaf) < to; leaf++)
+        {
+            var array = leaves.ArrayOf(leaf);
+            var start = leaves.StartOf(leaf);
+            var offset = leaves.OffsetOf(leaf) - start;
+            var end = Math.Min(to, leaves.StartOf(leaf + 1));
+            for (var ordinal = Math.Max(from, start); ordinal < end; ordinal++)
+            {
+                yield return array[offset + ordinal];
+            }
+        }
     }
 
     internal bool Describes(
@@ -483,11 +648,11 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
 
     /// <summary>
     /// Row positions in key order, or null when the collection is already in that order. Read by
-    /// <see cref="ClusteredIndex{T}"/>, which extracts its copy through exactly this permutation
-    /// (D257); nobody may write to it.
+    /// <see cref="ClusteredIndex{T}"/>, which extracts its copy through exactly this order (D257);
+    /// nobody may write to it.
     /// </summary>
-    internal int[]? Permutation =>
-        _permutation;
+    internal PositionLeaves? Positions =>
+        _positions;
 
     /// <summary>Rows the index was built over.</summary>
     internal int RowCount =>
@@ -525,18 +690,81 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
             return;
         }
 
-        var lower =
-            new BoundView(range.Lower);
+        Window(
+            new BoundView(range.Lower),
+            range.LowerInclusive,
+            new BoundView(range.Upper),
+            range.UpperInclusive,
+            bounded,
+            out from,
+            out to);
+    }
 
-        var upper =
-            new BoundView(range.Upper);
+    /// <summary>
+    /// Whether an as-of seek's bounds — the leading key columns' then the time's — can be compared with
+    /// this index's keys straight from their columns, which every key with a typed reader can.
+    /// </summary>
+    internal bool CanSeek(
+        SeekBound[] bounds)
+    {
+        if (bounds.Length == 0 || bounds.Length > _searchKeys.Length)
+            return false;
 
-        var lowerInclusive =
-            range.LowerInclusive;
+        for (var k = 0; k < bounds.Length; k++)
+        {
+            if (!_searchKeys[k].CanSeek(in bounds[k]))
+                return false;
+        }
 
-        var upperInclusive =
-            range.UpperInclusive;
+        return true;
+    }
 
+    /// <summary>
+    /// The one row an as-of seek finds for the left row <paramref name="row"/>, or -1: the range its keys
+    /// and time bound, as an <see cref="IndexKeyRange"/> of them would, read from its closest end.
+    /// </summary>
+    internal int Seek(
+        SeekBound[] bounds,
+        int row,
+        bool backwards,
+        bool inclusive)
+    {
+        var keys =
+            new BoundView(bounds, row, bounds.Length - 1);
+
+        var withTime =
+            new BoundView(bounds, row, bounds.Length);
+
+        // Backwards: from the keys, inclusive, to the keys and time; forwards: from the keys and time to
+        // the keys, inclusive. The time's own end is inclusive as the match is.
+        Window(
+            backwards ? keys : withTime,
+            backwards || inclusive,
+            backwards ? withTime : keys,
+            !backwards || inclusive,
+            bounds.Length,
+            out var from,
+            out var to);
+
+        if (from >= to)
+            return -1;
+
+        return GetPosition(
+            backwards
+                ? to - 1
+                : from);
+    }
+
+    /// <summary>The ordinals between two bounds over the first <paramref name="bounded"/> key columns.</summary>
+    private void Window(
+        BoundView lower,
+        bool lowerInclusive,
+        BoundView upper,
+        bool upperInclusive,
+        int bounded,
+        out int from,
+        out int to)
+    {
         var direction =
             _directions[bounded - 1];
 
@@ -545,12 +773,14 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                 SortDirection.AscNullsLast or
                 SortDirection.DescNullsLast;
 
+        var prefix =
+            (lower.Count >= upper.Count ? lower : upper)
+                .Prefix(bounded - 1);
+
         if (lower.Count < bounded)
         {
             lower =
-                Prefix(
-                    range,
-                    bounded - 1);
+                prefix;
 
             if (nullsLast)
             {
@@ -568,9 +798,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         if (upper.Count < bounded)
         {
             upper =
-                Prefix(
-                    range,
-                    bounded - 1);
+                prefix;
 
             if (nullsLast)
             {
@@ -602,27 +830,10 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         }
     }
 
-    private static BoundView Prefix(
-        IndexKeyRange range,
-        int count)
-    {
-        if (count == 0)
-            return default;
-
-        IReadOnlyList<object?> source =
-            range.Lower.Count >= count
-                ? range.Lower
-                : range.Upper;
-
-        return new BoundView(
-            source,
-            count,
-            appendNull: false);
-    }
-
     private int Search(
         in BoundView bound,
-        int atLeast)
+        int atLeast,
+        int low = 0)
     {
         if (bound.Count == 0)
         {
@@ -631,7 +842,6 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                 : _rowCount;
         }
 
-        var low = 0;
         var high = _rowCount;
 
         while (low < high)
@@ -666,9 +876,14 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         for (var k = 0; k < count; k++)
         {
             var comparison =
-                _searchKeys[k].Compare(
-                    row,
-                    bound[k]);
+                bound.IsTypedAt(k)
+                    ? _searchKeys[k].Compare(
+                        row,
+                        in bound.Seek(k),
+                        bound.Row)
+                    : _searchKeys[k].Compare(
+                        row,
+                        bound[k]);
 
             if (comparison != 0)
                 return comparison;
@@ -678,7 +893,8 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
     }
 
     private long[] CountPrefixDistinct(
-        IMaterialisedKey[] keys)
+        IMaterialisedKey[] keys,
+        int[]? permutation)
     {
         var distinct =
             new long[keys.Length];
@@ -689,8 +905,6 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         Array.Fill(
             distinct,
             1L);
-
-        var permutation = _permutation;
 
         for (var ordinal = 1;
              ordinal < _rowCount;
@@ -735,17 +949,9 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         IMaterialisedKey[] keys,
         Func<T, object?>[] accessors,
         string table,
-        IReadOnlyList<string> keyColumnNames)
+        IReadOnlyList<string> keyColumnNames,
+        int[]? permutation)
     {
-        var declaration =
-            "unique index '" +
-            Descriptor.Name +
-            "' (" +
-            string.Join(", ", keyColumnNames) +
-            ")";
-
-        var permutation = _permutation;
-
         for (var ordinal = 1;
              ordinal < _rowCount;
              ordinal++)
@@ -760,36 +966,44 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     ? ordinal
                     : permutation[ordinal];
 
-            var equal = true;
-
-            for (var k = 0; k < keys.Length; k++)
+            if (Equal(keys, previous, current))
             {
-                if (!keys[k].EqualRows(previous, current))
-                {
-                    equal = false;
-                    break;
-                }
+                throw Duplicate(_rows, previous, current, accessors, table, keyColumnNames);
             }
-
-            if (!equal)
-                continue;
-
-            var rendered = new string[keys.Length];
-            var row = _rows[current];
-
-            for (var k = 0; k < keys.Length; k++)
-                rendered[k] = Render(accessors[k](row));
-
-            var first = Math.Min(previous, current);
-            var second = Math.Max(previous, current);
-
-            throw new CatalogVerificationException(
-                table,
-                declaration,
-                second,
-                $"rows {first} and {second} share the key "
-                + $"({string.Join(", ", rendered)})");
         }
+    }
+
+    /// <summary>The refusal of two rows of a unique index that share its key, naming both and the key.</summary>
+    private CatalogVerificationException Duplicate(
+        IReadOnlyList<T> rows,
+        int previous,
+        int current,
+        Func<T, object?>[] accessors,
+        string table,
+        IReadOnlyList<string> keyColumnNames)
+    {
+        var declaration =
+            "unique index '" +
+            Descriptor.Name +
+            "' (" +
+            string.Join(", ", keyColumnNames) +
+            ")";
+
+        var rendered = new string[accessors.Length];
+        var row = rows[current];
+
+        for (var k = 0; k < accessors.Length; k++)
+            rendered[k] = Render(accessors[k](row));
+
+        var first = Math.Min(previous, current);
+        var second = Math.Max(previous, current);
+
+        return new CatalogVerificationException(
+            table,
+            declaration,
+            second,
+            $"rows {first} and {second} share the key "
+            + $"({string.Join(", ", rendered)})");
     }
 
     // ------------------------------------------------------------------
@@ -1165,6 +1379,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     TLogicalOrder>
                 .Create(
                     accessor,
+                    typed,
                     direction);
 
         return CreateEncodedKey(
@@ -1899,6 +2114,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     TOrder>
                 .Create(
                     accessor,
+                    typed,
                     direction);
 
         if (!symbolCandidate)
@@ -2123,6 +2339,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                     TOrder>
                 .Create(
                     accessor,
+                    typed,
                     direction);
 
         return KeyColumnFactory<
@@ -2706,7 +2923,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         public static int Compare(
             string left,
             string right) =>
-            string.CompareOrdinal(
+            TextOrder.Compare(
                 left,
                 right);
     }
@@ -2863,6 +3080,22 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         int Compare(
             T row,
             object? bound);
+
+        /// <summary>Whether a seek's bound is compared without boxing: a fixed value always is, as it was boxed once.</summary>
+        bool CanSeek(in SeekBound bound) =>
+            bound.IsFixed;
+
+        /// <summary>The row's key compared with a seek's bound for the left row <paramref name="laneRow"/>.</summary>
+        int Compare(
+            T row,
+            in SeekBound bound,
+            int laneRow) =>
+            bound.IsFixed
+                ? Compare(
+                    row,
+                    bound.Value)
+                : throw new InvalidOperationException(
+                    "a key with no typed reader was asked to compare a column's value.");
     }
 
     private static class SearchKeyFactory<
@@ -2874,16 +3107,23 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
     {
         public static ISearchKey Create(
             Func<T, object?> accessor,
+            PocoValueReader<T, TValue>? typed,
             SortDirection direction) =>
             new SearchKey<
                 TValue,
                 TOrder>(
                 accessor,
+                typed,
                 direction);
     }
 
+    /// <summary>
+    /// One key column compared with a bound. A column with a typed reader is read through it, as the
+    /// index's keys were built (design 69 §5), so a search boxes nothing; any other is read boxed.
+    /// </summary>
     private sealed class SearchKey<TValue, TOrder>(
         Func<T, object?> accessor,
+        PocoValueReader<T, TValue>? typed,
         SortDirection direction)
         : ISearchKey
         where TOrder :
@@ -2907,6 +3147,13 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
             T row,
             object? bound)
         {
+            if (typed is not null)
+            {
+                return CompareTyped(
+                    row,
+                    bound);
+            }
+
             var boxed =
                 accessor(row);
 
@@ -2952,6 +3199,85 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
                 bound,
                 _direction);
         }
+
+        private int CompareTyped(
+            T row,
+            object? bound)
+        {
+            if (!typed!(row, out var value))
+            {
+                if (bound is null)
+                    return 0;
+
+                return _nullsFirst
+                    ? -1
+                    : 1;
+            }
+
+            if (bound is null)
+            {
+                return _nullsFirst
+                    ? 1
+                    : -1;
+            }
+
+            var comparison =
+                CompareBound<TValue, TOrder>(
+                    value,
+                    bound);
+
+            return _descending
+                ? -comparison
+                : comparison;
+        }
+
+        public bool CanSeek(in SeekBound bound) =>
+            bound.IsFixed ||
+            (typed is not null &&
+             LaneHolds<TValue>(bound.Type));
+
+        public int Compare(
+            T row,
+            in SeekBound bound,
+            int laneRow)
+        {
+            if (bound.IsFixed)
+            {
+                return Compare(
+                    row,
+                    bound.Value);
+            }
+
+            var given =
+                bound.Column.IsValid(laneRow);
+
+            if (!typed!(row, out var value))
+            {
+                if (!given)
+                    return 0;
+
+                return _nullsFirst
+                    ? -1
+                    : 1;
+            }
+
+            if (!given)
+            {
+                return _nullsFirst
+                    ? 1
+                    : -1;
+            }
+
+            var comparison =
+                CompareLane<TValue, TOrder>(
+                    value,
+                    bound.Column,
+                    laneRow);
+
+            return _descending
+                ? -comparison
+                : comparison;
+        }
     }
 
     private sealed class AllNullSearchKey(
@@ -2988,6 +3314,134 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         }
     }
 
+    /// <summary>
+    /// Whether a column of <paramref name="type"/> holds <typeparamref name="TValue"/> as its lanes, as a
+    /// range bound read from it would: the types a seek compares straight from the column.
+    /// </summary>
+    private static bool LaneHolds<TValue>(
+        ChalkType type) =>
+        type.Kind switch
+        {
+            Chalk.Ir.TypeKind.I64 or Chalk.Ir.TypeKind.Time or Chalk.Ir.TypeKind.Timestamp
+                or Chalk.Ir.TypeKind.TimestampTz or Chalk.Ir.TypeKind.IntervalDay =>
+                typeof(TValue) == typeof(long),
+            Chalk.Ir.TypeKind.I32 or Chalk.Ir.TypeKind.Date or Chalk.Ir.TypeKind.IntervalYear =>
+                typeof(TValue) == typeof(int),
+            Chalk.Ir.TypeKind.I16 => typeof(TValue) == typeof(short),
+            Chalk.Ir.TypeKind.I8 => typeof(TValue) == typeof(sbyte),
+            Chalk.Ir.TypeKind.Fp64 => typeof(TValue) == typeof(double),
+            Chalk.Ir.TypeKind.Fp32 => typeof(TValue) == typeof(float),
+            Chalk.Ir.TypeKind.String => typeof(TValue) == typeof(string),
+            _ => false,
+        };
+
+    /// <summary>
+    /// A key compared with a column's lane as <see cref="CompareBound{TValue,TOrder}"/> compares it with
+    /// the value read from the lane, for the types <see cref="LaneHolds{TValue}"/> accepts.
+    /// </summary>
+    private static int CompareLane<
+        TValue,
+        TOrder>(
+        TValue left,
+        in ColumnView lane,
+        int row)
+        where TOrder :
+        struct,
+        IValueOrder<TValue>
+    {
+        if (typeof(TValue) == typeof(string))
+        {
+            return CompareText(
+                (string)(object)left!,
+                lane.VarValue(row));
+        }
+
+        if (typeof(TValue) == typeof(double))
+        {
+            return CompareReal(
+                (double)(object)left!,
+                lane.Lanes<double>()[row]);
+        }
+
+        if (typeof(TValue) == typeof(float))
+        {
+            return CompareReal(
+                (float)(object)left!,
+                lane.Lanes<float>()[row]);
+        }
+
+        if (typeof(TValue) == typeof(long))
+        {
+            var other = lane.Lanes<long>()[row];
+            return TOrder.Compare(left, Unsafe.As<long, TValue>(ref other));
+        }
+
+        if (typeof(TValue) == typeof(int))
+        {
+            var other = lane.Lanes<int>()[row];
+            return TOrder.Compare(left, Unsafe.As<int, TValue>(ref other));
+        }
+
+        if (typeof(TValue) == typeof(short))
+        {
+            var other = lane.Lanes<short>()[row];
+            return TOrder.Compare(left, Unsafe.As<short, TValue>(ref other));
+        }
+
+        if (typeof(TValue) == typeof(sbyte))
+        {
+            var other = lane.Lanes<sbyte>()[row];
+            return TOrder.Compare(left, Unsafe.As<sbyte, TValue>(ref other));
+        }
+
+        throw new InvalidOperationException(
+            $"a {typeof(TValue).Name} key was asked to compare a column's lane.");
+    }
+
+    /// <summary>
+    /// <see cref="TextOrder.Compare(string, string)"/> of a string and the text whose UTF-8 bytes are
+    /// given, by sign, without making a string of them: the bytes are read as UTF-16 code units, and
+    /// the first two that differ are ranked as the index ranks them, by code point. Comparing the units
+    /// as they are would put a supplementary code point below U+E000, out of the index's order.
+    /// </summary>
+    private static int CompareText(
+        string text,
+        ReadOnlySpan<byte> utf8)
+    {
+        Span<char> units = stackalloc char[2];
+        var at = 0;
+        while (!utf8.IsEmpty)
+        {
+            System.Text.Rune.DecodeFromUtf8(
+                utf8,
+                out var rune,
+                out var consumed);
+
+            var count =
+                rune.EncodeToUtf16(units);
+
+            for (var u = 0; u < count; u++)
+            {
+                if (at == text.Length)
+                    return -1;
+
+                var difference =
+                    TextOrder.Rank(text[at]) - TextOrder.Rank(units[u]);
+
+                if (difference != 0)
+                    return difference;
+
+                at++;
+            }
+
+            utf8 = utf8[consumed..];
+        }
+
+        return at == text.Length
+            ? 0
+            : 1;
+    }
+
     private static int CompareBound<
         TValue,
         TOrder>(
@@ -3005,7 +3459,7 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
             return right switch
             {
                 string other =>
-                    string.CompareOrdinal(
+                    TextOrder.Compare(
                         text,
                         other),
 
@@ -3317,9 +3771,14 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
     // Allocation-free range-bound view
     // ------------------------------------------------------------------
 
+    /// <summary>
+    /// A range's bound over the first <see cref="Count"/> key columns: values a range holds, or a seek's
+    /// bounds read from their columns at one left row; with a NULL after them, where a prefix needs one.
+    /// </summary>
     private readonly struct BoundView
     {
         private readonly IReadOnlyList<object?>? _source;
+        private readonly SeekBound[]? _seek;
         private readonly int _sourceCount;
         private readonly bool _appendNull;
 
@@ -3327,17 +3786,36 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
             IReadOnlyList<object?> source)
             : this(
                 source,
+                null,
+                0,
                 source.Count,
                 appendNull: false)
         {
         }
 
         public BoundView(
+            SeekBound[] seek,
+            int row,
+            int count)
+            : this(
+                null,
+                seek,
+                row,
+                count,
+                appendNull: false)
+        {
+        }
+
+        private BoundView(
             IReadOnlyList<object?>? source,
+            SeekBound[]? seek,
+            int row,
             int sourceCount,
             bool appendNull)
         {
             _source = source;
+            _seek = seek;
+            Row = row;
             _sourceCount = sourceCount;
             _appendNull = appendNull;
         }
@@ -3346,20 +3824,45 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
             _sourceCount +
             (_appendNull ? 1 : 0);
 
+        /// <summary>The left row a seek's bounds are read at.</summary>
+        public int Row { get; }
+
         public object? this[int index]
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get =>
-                index < _sourceCount
-                    ? _source![index]
+                index < _sourceCount && _source is not null
+                    ? _source[index]
                     : null;
         }
+
+        /// <summary>Whether key column <paramref name="index"/> is bounded by a seek's bound rather than a value.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool IsTypedAt(int index) =>
+            _seek is not null &&
+            index < _sourceCount;
+
+        public ref readonly SeekBound Seek(int index) =>
+            ref _seek![index];
 
         public BoundView AppendNull() =>
             new(
                 _source,
+                _seek,
+                Row,
                 _sourceCount,
                 appendNull: true);
+
+        /// <summary>The bound over its first <paramref name="count"/> columns only.</summary>
+        public BoundView Prefix(int count) =>
+            count == 0
+                ? default
+                : new(
+                    _source,
+                    _seek,
+                    Row,
+                    count,
+                    appendNull: false);
     }
 
     private static string Render(

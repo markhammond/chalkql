@@ -1,5 +1,8 @@
+using Chalk.Catalog;
 using Chalk.Client;
 using Chalk.Entitlements;
+using Chalk.Entitlements.Tenancy;
+using Chalk.Sources.Poco;
 using Chalk.TestKit;
 
 namespace Chalk.Integration.Tests;
@@ -78,6 +81,103 @@ public sealed class ExplainEntitlementsTests(SharedSidecar sidecar)
             c => c.Column == "amount");
         Assert.Equal(TenancyFixture.MinGroupSize, amount.MinGroupSize);
         Assert.Contains("AGGREGATE", amount.Disclosure, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A floor is reported only to a principal it guards (F228): an agent reads the amount, which only
+    /// an auditor's rule makes population-only, so the agent is told no floor.
+    /// </summary>
+    [Fact]
+    public async Task A_principal_the_floor_does_not_guard_is_told_none()
+    {
+        await using var engine = await EngineAsync();
+
+        var explained = await engine.WithEntitlements().ExplainAsync(
+            "SELECT id, amount FROM orders", TenancyFixture.U2);
+
+        var amount = Assert.Single(
+            Assert.Single(explained.Tables, t => t.Table == "orders").Columns,
+            c => c.Column == "amount");
+        Assert.DoesNotContain("AGGREGATE", amount.Disclosure, StringComparison.Ordinal);
+        Assert.Equal(0, amount.MinGroupSize);
+    }
+
+    /// <summary>
+    /// A resource owner and an explicit owner rule both name the owner, so both fold to the same
+    /// condition. The explanation shows it once (F227): the second can never be the first to match.
+    /// </summary>
+    [Fact]
+    public async Task An_owner_named_twice_is_explained_once()
+    {
+        var (source, policy) = OwnedNotes();
+        await using var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
+        {
+            ContextId = "explained-owner",
+            Sources = [source],
+            Planner = sidecar.CreatePlanner(),
+        });
+
+        // A viewer of team 1 and the author of note 2: the body is decided per row.
+        var reader = new TenancyPrincipal
+        {
+            User = 7,
+            Grants = [Grant.ForTenancy(policy.Policy.Tenancy("team"), 1, policy.Policy.Role("viewer"))],
+        };
+        var explained = await engine.WithEntitlements().ExplainAsync(
+            "SELECT seq, body FROM desk.notes", policy.Bind(reader));
+
+        var body = Assert.Single(
+            Assert.Single(explained.Tables, t => t.Table == "notes").Columns, c => c.Column == "body");
+        var branches = body.Disclosure.Split("; ").Where(b => b.StartsWith("WHEN", StringComparison.Ordinal)).ToList();
+        Assert.Contains(branches, b => b.Contains(" THEN FULL", StringComparison.Ordinal));
+        Assert.Equal(branches.Count, branches.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    private sealed record Note(long Seq, int TeamId, int AuthorId, string Body);
+
+    private sealed record Team(int Id);
+
+    /// <summary>Notes kept by team and by author, the author named twice: as resource owner and by an owner rule.</summary>
+    private static (PocoSource Source, TenancyEntitlements Policy) OwnedNotes()
+    {
+        PocoSource Source(TenancyEntitlements? policy) =>
+            new PocoSourceBuilder("mem", "desk")
+                .NamingPolicy(PocoNamingPolicy.SnakeCase)
+                .AddTable("teams", (IReadOnlyList<Team>)[new(1), new(2)], t =>
+                {
+                    t.Keyed(x => x.Id);
+                    if (policy?.For("desk", "teams") is { } descriptor)
+                    {
+                        t.Entitlement(descriptor);
+                    }
+                })
+                .AddTable("notes", (IReadOnlyList<Note>)[new(1, 1, 5, "one"), new(2, 1, 7, "two")], t =>
+                {
+                    t.Keyed(x => x.Seq);
+                    t.ForeignKey(x => x.TeamId).References<Team>(x => x.Id, verify: true);
+                    if (policy?.For("desk", "notes") is { } descriptor)
+                    {
+                        t.Entitlement(descriptor);
+                    }
+                })
+                .Build();
+
+        var bare = new CatalogContext { ContextId = "explained-owner", Epoch = 1, Schemas = [Source(null).DescribeSchema()] };
+        var declared = TenancyPolicy.Declare(bare);
+        var desk = declared.Source("desk");
+        var team = declared.Tenancy("team");
+        var viewer = declared.Role("viewer");
+        var pii = declared.Realm("pii");
+        var teams = desk.Table("teams");
+        var notes = desk.Table("notes");
+        teams.Tenancy(t => t.Direct(team, teams.Column("id")));
+        notes
+            .Tenancy(t => t.Direct(team, notes.Column("team_id")).ResourceOwner(notes.Column("author_id")))
+            .Realm(pii, notes.Column("body"))
+            .Access(new AccessRule { Roles = [Roles.Owner], Grants = Verdict.Full })
+            .Access(new AccessRule { Roles = [viewer], Realm = pii, Grants = Verdict.None });
+        var policy = declared.Compile(bare);
+        return (Source(policy), policy);
     }
 
     /// <summary>A catalog without entitlements explains nothing, and costs nothing to ask.</summary>
