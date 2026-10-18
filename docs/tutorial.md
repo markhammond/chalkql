@@ -2383,7 +2383,7 @@ the table it is on, and a source a table is obtained from rather than guessed at
 
 ---
 
-## 19. Standing views
+## 19. Incremental views
 
 Chapters 16 and 17 keep a pivot live by running its statement again after every batch, and a
 host that wants to send each screen only what changed then has to work that out itself. A
@@ -2391,12 +2391,12 @@ host that wants to send each screen only what changed then has to work that out 
 drains it from a cursor, getting the latest row of each key that changed since it last read —
 never a queue of every change. A key the answer no longer has arrives as a delete.
 
-This view runs the statement in full at each update and compares the result with the rows it
-already holds; a view made with `Maintenance = ViewMaintenance.Incremental` computes only what
-changed instead (the guide's *Incremental maintenance*). The views live in `Chalk.Incremental`.
-Incremental maintenance is experimental: `ViewMaintenance.Incremental` carries the diagnostic
-`CHALK003`, which a project acknowledges before it can ask for it. This chapter's view recomputes,
-and needs none.
+The chapter's first view runs the statement in full at each update and compares the result with
+the rows it already holds. Its second, made with `Maintenance = ViewMaintenance.Incremental`,
+computes only what changed instead (the guide's *Incremental maintenance*). The views live in
+`Chalk.Incremental`. Incremental maintenance is experimental: `ViewMaintenance.Incremental`
+carries the diagnostic `CHALK003`, which a project acknowledges before it can ask for it, as the
+chapter does with `#pragma warning disable CHALK003` where it asks.
 
 The inputs say how they change. The ledger is a log: `AppendOnly(m => m.Ts)` lets it take only
 appends, none older than the newest time it has already been given. The engine names a clock,
@@ -2469,12 +2469,64 @@ And a view refuses, when it is made, a statement whose rows it could not keep:
 -- a view refuses what it could not keep, such as an order its rows do not have
     The view's statement ends in an ORDER BY with no LIMIT, and a view's rows have no order:
     a reader is sent them by key. Drop the ORDER BY. [UnsupportedInView]
+```
+
+The same statement can be maintained rather than recomputed, with no change to its SQL. The
+second view says so with `Maintenance = ViewMaintenance.Incremental`: an update reads the rows
+that changed since the last and works out what they did to the answer, here to each group's sum
+and to which groups the `HAVING` keeps, and to which rows the clock in the `WHERE` admits. It also
+asks for `PlanSwap = ViewPlanSwap.LowJitter`: when the statement is planned again as its tables
+grow, the view builds the new plan beside the one it runs and swaps it in once built, so no update
+waits on the build. Its first drain is a reset, and its checksum is the recomputing view's:
+
+```
+-- the same statement, maintained: an update computes only what changed,
+   and a new plan is built beside the one it runs before it swaps in
+    reset
+    upsert North · gadget = 6
+    upsert South · widget = 7
+    upsert South · gadget = 3
+    commit version 3, checksum ce272d25
+```
+
+A refresh made with `DeferPlanning()` computes no statistics and plans nothing under its lock: one
+run in the background does that after it, and any plan it changes swaps in at a later refresh,
+never underneath one. Both views take the epoch, and their readers, here one of each view that
+started together, are sent the same changes and the same checksum:
+
+```
+-- refreshes leave statistics and plans to the background; both views take the epoch
+    recomputed:
+    upsert North · widget = 4
+    delete South · widget
+    commit version 4, checksum b6817ca6
+    maintained:
+    delete South · widget
+    upsert North · widget = 4
+    commit version 4, checksum b6817ca6
+```
+
+`PlanAsync` waits for that background run and completes once its plans are in effect. A host
+awaits it after seeding, before it serves anything; while views are served it lets them move on
+their own, each at its next update.
+
+```
+-- PlanAsync waits for the background's plans, which a host awaits only before it serves;
+   a view takes a new plan at its next update, and under LowJitter builds it first
+    recomputed:
+    upsert South · gadget = 5
+    commit version 5, checksum 71443ae8
+    maintained:
+    upsert South · gadget = 5
+    commit version 5, checksum 71443ae8
 
 Done. docs/tutorial.md walks through this output.
 ```
 
 **Why this matters.** A screen that shows a statement's answer wants the answer's changes, at
 its own pace. The view does the comparing once, for every reader, and each reader asks only for
-what it has not seen — so a slow one is never sent more than the whole result.
+what it has not seen — so a slow one is never sent more than the whole result. Maintained, the
+view's work follows what changed rather than what the tables hold, and with planning deferred and
+new plans built beside, neither a refresh nor an update waits on the planner.
 
 ---
