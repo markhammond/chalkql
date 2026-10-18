@@ -8,11 +8,12 @@ using Chalk.Sources.Poco;
 namespace Chalk.Sample.Tutorial;
 
 /// <summary>
-/// Chapter 19 — standing views. A statement kept current as one row per key, and a reader sent only
-/// what changed since it last read: the latest row of each key, never a queue of every change. As of
-/// writing only the delivery is incremental; each update recomputes the statement in full.
+/// Chapter 19 — incremental views. A statement kept current as one row per key, and a reader sent
+/// only what changed since it last read: the latest row of each key, never a queue of every change.
+/// A view recomputes its statement at each update, or, experimentally, maintains its answer from the
+/// rows that changed, with its planning left to the background and new plans built beside it.
 /// </summary>
-public static class Chapter19StandingViews
+public static class Chapter19IncrementalViews
 {
     private sealed record Movement(int Id, string Warehouse, string Product, int Delta, DateTime Ts);
 
@@ -54,10 +55,10 @@ public static class Chapter19StandingViews
     {
         Tutorial.Chapter(
             19,
-            "Standing views",
+            "Incremental views",
             "Keep a statement's answer current as one row per key, and send each reader only what\n"
             + "changed since it last read: the latest row of each key, never a queue of every change.\n"
-            + "As of writing only the delivery is incremental; each update recomputes the statement.");
+            + "Recompute the statement at each update, or maintain its answer from what changed.");
 
         IReadOnlyList<Movement> ledger =
         [
@@ -150,6 +151,61 @@ public static class Chapter19StandingViews
         {
             Console.WriteLine(Wrap(refused.Message));
         }
+
+        Tutorial.Step("the same statement, maintained: an update computes only what changed,\n"
+            + "   and a new plan is built beside the one it runs before it swaps in");
+#pragma warning disable CHALK003 // incremental maintenance is experimental
+        await using var maintained = await engine.MaterializeAsync(OnHand, new ViewOptions<StockKey, Stock>
+        {
+            Key = ["warehouse", "product"],
+            LocalJoinMaxRows = StandingViews.DefaultLocalJoinMaxRows,
+            Map = Map,
+            RowHash = Hash,
+            Maintenance = ViewMaintenance.Incremental,
+            PlanSwap = ViewPlanSwap.LowJitter,
+        });
+#pragma warning restore CHALK003
+        var desk = new Printer();
+        var deskCursor = ViewCursor.Start;
+        maintained.Drain(ref deskCursor, desk);
+
+        // A reader of the recomputing view that starts beside the maintained view's, so the two drains
+        // below send the same changes.
+        var screen = new Printer();
+        var screenCursor = ViewCursor.Start;
+        view.Drain(ref screenCursor, new Quiet());
+
+        Tutorial.Step("refreshes leave statistics and plans to the background; both views take the epoch");
+        await engine.RefreshAsync(epoch => epoch
+            .Version(4)
+            .Append(stock, "movements", (IReadOnlyList<Movement>)
+            [
+                new(8, "South", "widget", -7, Morning.AddMinutes(10)),
+                new(9, "North", "widget", 4, Morning.AddMinutes(10)),
+            ])
+            .AdvanceClock(Utc(Morning.AddMinutes(11)))
+            .DeferPlanning());
+        await view.UpdateAsync();
+        await maintained.UpdateAsync();
+        Console.WriteLine("    recomputed:");
+        view.Drain(ref screenCursor, screen);
+        Console.WriteLine("    maintained:");
+        maintained.Drain(ref deskCursor, desk);
+
+        Tutorial.Step("PlanAsync waits for the background's plans, which a host awaits only before it serves;\n"
+            + "   a view takes a new plan at its next update, and under LowJitter builds it first");
+        await engine.PlanAsync();
+        await engine.RefreshAsync(epoch => epoch
+            .Version(5)
+            .Append(stock, "movements", (IReadOnlyList<Movement>)[new(10, "South", "gadget", 2, Morning.AddMinutes(12))])
+            .AdvanceClock(Utc(Morning.AddMinutes(13)))
+            .DeferPlanning());
+        await view.UpdateAsync();
+        await maintained.UpdateAsync();
+        Console.WriteLine("    recomputed:");
+        view.Drain(ref screenCursor, screen);
+        Console.WriteLine("    maintained:");
+        maintained.Drain(ref deskCursor, desk);
     }
 
     private static DateTimeOffset Utc(DateTime time) => new(time, TimeSpan.Zero);
