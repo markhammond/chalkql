@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Apache.Arrow;
 using Chalk.Catalog;
 using Chalk.Client;
+using Chalk.Sources;
 using Microsoft.Extensions.Logging;
 
 namespace Chalk.Incremental;
@@ -46,6 +47,15 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
     /// <summary>True while a rebind's update runs: it stages at the epoch the view holds, as the values moved.</summary>
     private bool _rebound;
+
+    /// <summary>How many rebinds the view has taken (design 78 §3): its stamp's generation.</summary>
+    private long _rebinds;
+
+    /// <summary>The tables the view's statement reads, for the one it was worked out for (design 78 §2).</summary>
+    private (PreparedQuery For, HashSet<(string SourceId, string Table)> Tables)? _readSet;
+
+    /// <summary>How many times a refresh that wrote nothing the view reads moved its version without an update: for a test.</summary>
+    internal int Relabels { get; private set; }
     private readonly Lock _gate = new();
     private readonly SemaphoreSlim _updating = new(1, 1);
     private readonly KeyedTable<TKey, TRow> _table = new();
@@ -77,6 +87,15 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// </summary>
     private Staged? _staging;
     private long _epoch;
+
+    /// <summary>The engine's count of commits as of the epoch the view holds (design 78 §1).</summary>
+    private long _commit = -1;
+
+    /// <summary>
+    /// The refreshes the engine holds until the view has published them (design 78 §4, §5): barriers, and
+    /// every refresh for a view that publishes every version. Null for a view that reads a database.
+    /// </summary>
+    private readonly EpochRetainer? _retainer;
     private long _version;
     private long _generation = 1;
     private long _updates;
@@ -128,6 +147,12 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
         _namesClock = ViewBinding.NamesClock(prepared, engine.ClockName);
         _reads = options.DatabaseReads == ViewDatabaseReads.WhenRefreshed ? new ViewReads(engine) : null;
+        if (_reads is null)
+        {
+            _retainer = engine.Retain(Held(engine, prepared), options.Versions == ViewVersions.Every, options.MaxBacklog);
+            _commit = _retainer.From;
+        }
+
         ContextDigest = (options.Context ?? prepared.Context) is { IsEmpty: false } context ? context.CanonicalHash : null;
         if (options.RefreshQueryPlan is not null || options.PlanImprovementMargin is not null)
         {
@@ -389,6 +414,32 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 nameof(options));
         }
 
+        if (!Enum.IsDefined(options.Versions))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.Versions,
+                "a view's Versions is Latest or Every.");
+        }
+
+        if (options.MaxBacklog < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.MaxBacklog,
+                "a view's MaxBacklog is a number of refreshes, at least one: the most the engine holds for a view "
+                + "that publishes every version while it has yet to publish them.");
+        }
+
+        if (options.Versions == ViewVersions.Every && options.DatabaseReads != ViewDatabaseReads.None)
+        {
+            throw new ArgumentException(
+                "a view that reads a database cannot publish every version: its rows from the database are read "
+                + "when it updates, and no refresh holds them. Make the view with Versions = Latest, or over "
+                + "in-process tables only.",
+                nameof(options));
+        }
+
         if (options.LocalJoinMaxRows <= 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -465,14 +516,61 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// A name the view did not declare, or a list it cannot take, is refused before anything moves. An
     /// update with the new values that fails leaves the view with the values and the epoch it held.
     /// </remarks>
-    public ValueTask<long> RebindAsync(object parameters, CancellationToken ct = default)
+    public async ValueTask<ViewStamp> RebindAsync(object parameters, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         Usable();
         var binding = ViewBinding.Of(parameters);
-        return RunUpdateAsync(binding.Named ?? throw new ArgumentException(
+        await RunUpdateAsync(binding.Named ?? throw new ArgumentException(
             "a rebind binds parameters by name: give a dictionary, or an object whose properties name them.",
-            nameof(parameters)), ct);
+            nameof(parameters)), ct).ConfigureAwait(false);
+        return Stamp;
+    }
+
+    /// <summary>Where the view's rows stand: its version, and how many times it has been rebound (design 78 §3).</summary>
+    public ViewStamp Stamp
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return new ViewStamp(_version, _rebinds);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Brings the view at least to <paramref name="atLeast"/> (design 78 §3), and returns where it stands:
+    /// a host that changed what the view reads, by a refresh (whose version it numbered, or found with
+    /// <see cref="ChalkEngine.VersionOf"/>) or a rebind (whose stamp it was returned), waits here until
+    /// the view shows the change. A version the engine has not published yet is waited for.
+    /// </summary>
+    /// <exception cref="ArgumentException">The stamp's generation is one the view has not been rebound to.</exception>
+    public async ValueTask<ViewStamp> UpdateToAsync(ViewStamp atLeast, CancellationToken ct = default)
+    {
+        while (true)
+        {
+            var published = _engine.NextPublished;
+            await UpdateAsync(ct).ConfigureAwait(false);
+            var stamp = Stamp;
+            if (stamp >= atLeast)
+            {
+                return stamp;
+            }
+
+            if (stamp.Version >= atLeast.Version)
+            {
+                throw new ArgumentException(
+                    $"the view stands at generation {stamp.Generation}, and the stamp names generation "
+                    + $"{atLeast.Generation}: it has not been rebound that far.",
+                    nameof(atLeast));
+            }
+
+            if (_engine.Version < atLeast.Version)
+            {
+                await published.WaitAsync(ct).ConfigureAwait(false);
+            }
+        }
     }
 
     /// <summary>An update, with <paramref name="rebind"/>'s values bound first when it is a rebind.</summary>
@@ -496,6 +594,13 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             }
 
             var version = await CatchUpAsync(ct).ConfigureAwait(false);
+            if (rebound)
+            {
+                lock (_gate)
+                {
+                    _rebinds++;
+                }
+            }
             if (tracker is not null && _updates != taken)
             {
                 var update = new ViewUpdate(
@@ -529,10 +634,33 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         }
     }
 
-    /// <summary>The body of <see cref="UpdateAsync"/>, under its lock: the view brought to the latest epoch.</summary>
+    /// <summary>How many times an update catches up at once with refreshes that committed while it ran.</summary>
+    private const int Settles = 3;
+
+    /// <summary>
+    /// The body of <see cref="UpdateAsync"/>, under its lock: the view brought to the latest epoch.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// What an update reads is named by its pin (design 78 §1): the count of commits read in the same hold
+    /// of the gate as its tables. Where it is the count the stamp noted before staging recorded, the update
+    /// read that epoch's tables whatever has committed since, and the view takes it at that stamp: no
+    /// refresh is held off, and nothing staged is thrown away. A refresh that committed while it ran is then
+    /// caught up at once, a few times at most, rather than at the next update, which a quiet feed may never
+    /// send. Only a refresh that committed between noting the stamp and pinning makes it read again.
+    /// </para>
+    /// <para>
+    /// The count is this engine's: another engine's commit to a source they share changes the rows without
+    /// moving it, as it moves no epoch here. An update that pinned nothing, which a plan of no table may,
+    /// is taken only when no refresh ran through it, and after two attempts it is staged with refreshes
+    /// held off.
+    /// </para>
+    /// </remarks>
     private async ValueTask<long> CatchUpAsync(CancellationToken ct)
     {
         Usable();
+        var settled = 0;
+        var named = true;
         for (var attempt = 0; ; attempt++)
         {
             var changes = _engine.Changes;
@@ -542,35 +670,181 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 continue;
             }
 
-            if (_engine.Stamp.Epoch == _epoch && !_rebound)
+            var at = _engine.Stamp;
+            if (_retainer is { } retainer)
+            {
+                if (retainer.Overrun)
+                {
+                    Overrun(retainer);
+                }
+
+                // Asked after the stamp is read: every refresh held up to it is stamped by then (design 78 §4).
+                if (retainer.Next(_commit) is { } held)
+                {
+                    if (await TakeHeldAsync(retainer, held, ct).ConfigureAwait(false))
+                    {
+                        return _version;
+                    }
+
+                    continue;
+                }
+            }
+
+            if (at.Epoch == _epoch && !_rebound)
             {
                 _reads?.Abandon();
                 return _version;
             }
 
-            if (attempt >= 2)
+            if (!_rebound && Relabel(at))
+            {
+                return _version;
+            }
+
+            if (!named && attempt >= 2)
             {
                 return await CatchUpBetweenRefreshesAsync(ct).ConfigureAwait(false);
             }
 
-            var at = _engine.Stamp;
             var staged = await StageAsync(at, ct).ConfigureAwait(false);
-            if (_engine.Changes != changes)
+            named = staged.Commit >= 0;
+            var read = named
+                ? staged.Commit == at.Commit
+                : _engine.Changes == changes;
+            if (!read)
             {
+                // What was read is not the stamp noted: read again, once the refresh has published.
                 Keep(staged);
                 continue;
             }
 
             Take(staged, at);
+            _rebound = false;
+            if (named && _engine.Stamp.Epoch != _epoch && ++settled < Settles && _options.Versions == ViewVersions.Latest)
+            {
+                continue;
+            }
+
             return _version;
         }
+    }
+
+    /// <summary>
+    /// Publishes a refresh held for the view (design 78 §4, §5), at its stamp: by a relabel where nothing it
+    /// wrote is read, or else by staging the view at the states it committed. True where the update stops
+    /// there — at a barrier, or at a change of a view that publishes every version — so that a reader that
+    /// drains after the update is sent it.
+    /// </summary>
+    /// <remarks>
+    /// A statement prepared anew may read a table the refresh's states were not held for: it is pinned as it
+    /// stands, which names another refresh, and the held one is let go unpublished. A failed update keeps it
+    /// held for the next.
+    /// </remarks>
+    private async ValueTask<bool> TakeHeldAsync(EpochRetainer retainer, HeldEpoch held, CancellationToken ct)
+    {
+        var stamp = held.Stamp!;
+        if (!_rebound && Relabel(stamp))
+        {
+            retainer.Taken(held);
+            return held.Barrier;
+        }
+
+        var staged = await StageAsync(stamp, ct, held.Tables).ConfigureAwait(false);
+        if (staged.Commit != stamp.Commit)
+        {
+            Keep(staged);
+            retainer.Taken(held);
+            return false;
+        }
+
+        Take(staged, stamp);
+        _rebound = false;
+        retainer.Taken(held);
+        return true;
+    }
+
+    /// <summary>Faults a view that publishes every version and fell further behind than its MaxBacklog.</summary>
+    private void Overrun(EpochRetainer retainer)
+    {
+        var fault = new StandingViewException(
+            ChalkErrorCodes.MemoryBudgetExceeded,
+            $"The view publishes every version, and the engine held {retainer.MaxBacklog} refreshes it had yet to "
+            + $"publish, its MaxBacklog, when another came: it was updated more slowly than the engine refreshed. "
+            + "What was held has been let go, and the view keeps this fault until it is disposed. Make it again, "
+            + "update it more often, or raise ViewOptions.MaxBacklog.");
+        _fault = fault;
+        throw fault;
+    }
+
+    /// <summary>The tables of <paramref name="prepared"/> whose states the engine can hold for the view (design 78 §4).</summary>
+    private static (string SourceId, string Table, ITrackedSource Source)[] Held(ChalkEngine engine, PreparedQuery prepared)
+    {
+        var held = new List<(string SourceId, string Table, ITrackedSource Source)>();
+        foreach (var (sourceId, table) in prepared.TablesRead)
+        {
+            if (engine.SourceById(sourceId) is ITrackedSource tracked)
+            {
+                held.Add((sourceId, table, tracked));
+            }
+        }
+
+        return [.. held];
+    }
+
+    /// <summary>
+    /// Moves the view's version to the engine's when every refresh since its own wrote nothing it reads
+    /// (design 78 §2): none of its tables, and not the clock where it reads the clock. Its rows are then
+    /// the statement's rows at the new version too, so nothing is computed, and readers are sent a commit
+    /// at it. Not for a view that reads a database, whose rows a refresh is a reason to read again, nor for
+    /// one with a new plan to take or a statement to prepare again.
+    /// </summary>
+    private bool Relabel(EpochStamp stamp)
+    {
+        // A view whose statement has a plan it does not run yet takes it at an update, and a stale one is
+        // prepared again there: neither is only a version.
+        if (_reads is not null || _maintained is { IsCurrent: false } || _prepared.IsStale || _prepared.ChangedShape)
+        {
+            return false;
+        }
+
+        var prepared = _prepared;
+        if (_readSet is not { } known || !ReferenceEquals(known.For, prepared))
+        {
+            known = (prepared, prepared.TablesRead.ToHashSet(TableNames.Instance));
+            _readSet = known;
+        }
+
+        var tables = known.Tables;
+        if (!_engine.Untouched(_epoch, stamp.Epoch, tables.Contains, _readsTime || _namesClock))
+        {
+            return false;
+        }
+
+        lock (_gate)
+        {
+            _epoch = stamp.Epoch;
+            _version = stamp.Version;
+        }
+
+        _commit = stamp.Commit;
+        Relabels++;
+        return true;
     }
 
     /// <summary>
     /// The update, staged with refreshes held off, after two attempts each overtaken by one. A method of
     /// its own, so that the closure it hands the engine is made only when it runs.
     /// </summary>
-    private ValueTask<long> CatchUpBetweenRefreshesAsync(CancellationToken ct) =>
+    private ValueTask<long> CatchUpBetweenRefreshesAsync(CancellationToken ct)
+    {
+        HeldRefreshes++;
+        return CatchUpHoldingRefreshesAsync(ct);
+    }
+
+    /// <summary>How many updates have held refreshes off: for a test, which expects none where pins are named.</summary>
+    internal int HeldRefreshes { get; private set; }
+
+    private ValueTask<long> CatchUpHoldingRefreshesAsync(CancellationToken ct) =>
         _engine.WithoutRefreshAsync(
             async () =>
             {
@@ -589,6 +863,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     {
         var before = _table.Position;
         Apply(staged, stamp);
+        _commit = stamp.Commit;
         _lastChanges = _table.Position - before;
         Keep(staged);
     }
@@ -766,10 +1041,11 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 sent++;
             }
 
-            if (sent > 0 || reset || cursor.ResetFrom > 0 || cursor.Committed != _version)
+            if (sent > 0 || reset || cursor.ResetFrom > 0 || cursor.Committed != _version || cursor.CommittedGeneration != _rebinds)
             {
-                sink.Commit(_version, _table.Checksum);
+                sink.Commit(new ViewStamp(_version, _rebinds), _table.Checksum);
                 cursor.Committed = _version;
+                cursor.CommittedGeneration = _rebinds;
             }
 
             cursor.ResetFrom = 0;
@@ -792,6 +1068,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             _disposed = true;
             Detach(_prepared);
             _reads?.Dispose();
+            _retainer?.Dispose();
             if (_maintained is { } maintained)
             {
                 _maintained = null;
@@ -825,7 +1102,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// Runs the statement at <paramref name="stamp"/>'s epoch and maps every row, refusing a key the
     /// result gives twice. The view's rows are untouched until <see cref="Apply"/>.
     /// </summary>
-    private async ValueTask<Staged> StageAsync(EpochStamp stamp, CancellationToken ct)
+    private async ValueTask<Staged> StageAsync(EpochStamp stamp, CancellationToken ct, RetainedTables? at = null)
     {
         await PreparedCurrentAsync(ct).ConfigureAwait(false);
         var prepared = _prepared;
@@ -848,7 +1125,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             MaintainedUpdate update;
             try
             {
-                update = await maintained.UpdateAsync(values, stamp.Clock ?? default, stamp.Version, whole, ct).ConfigureAwait(false);
+                update = await maintained.UpdateAsync(values, stamp.Clock ?? default, stamp.Version, whole, ct, at).ConfigureAwait(false);
             }
             catch (MaintainedKeyFault duplicate)
             {
@@ -864,7 +1141,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
             // Whole for the tracker only when computed from nothing: a low-jitter swap catches up.
             _lastWhole = update.Restarted;
-            return Changes(update, stamp);
+            var changed = Changes(update, stamp);
+            changed.Commit = update.Commit;
+            return changed;
         }
 
         _lastWhole = true;
@@ -874,6 +1153,11 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         {
             _clock.Now = stamp.Clock!.Value;
             execution.UseClock(_clock);
+        }
+
+        if (at is not null)
+        {
+            execution.ReadAt(at);
         }
 
         if (_reads is not null)
@@ -892,6 +1176,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             }
         }
 
+        staged.Commit = execution.PinnedCommit;
         return staged;
     }
 
@@ -1183,6 +1468,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
                 Detach(_prepared);
                 Volatile.Write(ref _prepared, prepared);
+                _retainer?.Reads(Held(_engine, prepared));
                 _key = key;
                 _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
                 _namesClock = ViewBinding.NamesClock(prepared, _engine.ClockName);
@@ -1552,8 +1838,12 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             Freed.Clear();
             Count = 0;
             Delta = delta;
+            Commit = -1;
             return this;
         }
+
+        /// <summary>How many refreshes the engine had committed when the staging pinned its tables (design 78 §1), or -1.</summary>
+        public long Commit { get; set; } = -1;
 
         /// <summary>
         /// Lets go of room beyond four times what this update used, past <see cref="Kept"/>: a whole

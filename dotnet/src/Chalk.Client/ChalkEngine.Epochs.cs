@@ -11,6 +11,129 @@ public sealed partial class ChalkEngine
     /// <summary>The version and clock published with the current catalog. Replaced whole.</summary>
     private EpochStamp _stamp = EpochStamp.First;
 
+    /// <summary>How many refreshes this engine has committed, which each stamp records (design 78 §1).</summary>
+    private readonly EngineCommits _engineCommits = new();
+
+    /// <summary>
+    /// What the refresh being published wrote, set by it before it publishes and taken by
+    /// <see cref="Stamped"/> (design 78 §2): null, as for a re-introspection, where it is not known.
+    /// </summary>
+    private (IReadOnlySet<(string SourceId, string Table)> Tables, bool MovesClock)? _writing;
+
+    /// <summary>The last stamps published, each at its epoch's place, for a view to see what they wrote (design 78 §2).</summary>
+    private readonly EpochStamp?[] _recent = new EpochStamp?[RecentStamps];
+
+    private const int RecentStamps = 256;
+
+    /// <summary>The version epoch <paramref name="epoch"/> was published at, while it is recent; null otherwise.</summary>
+    public long? VersionOf(long epoch)
+    {
+        var stamp = Volatile.Read(ref _recent[epoch % RecentStamps]);
+        return stamp?.Epoch == epoch ? stamp.Version : null;
+    }
+
+    /// <summary>
+    /// Whether every epoch after <paramref name="from"/>, up to <paramref name="to"/>, wrote nothing a reader
+    /// of <paramref name="reads"/> reads (design 78 §2): not one of its tables, and not the clock where it
+    /// reads the clock. False where an epoch is no longer recent, or did not say what it wrote.
+    /// </summary>
+    internal bool Untouched(long from, long to, Func<(string SourceId, string Table), bool> reads, bool readsClock)
+    {
+        if (to - from >= RecentStamps)
+        {
+            return false;
+        }
+
+        for (var epoch = from + 1; epoch <= to; epoch++)
+        {
+            var stamp = Volatile.Read(ref _recent[epoch % RecentStamps]);
+            if (stamp?.Epoch != epoch || stamp.Writes is not { } writes || (readsClock && stamp.MovesClock))
+            {
+                return false;
+            }
+
+            foreach (var table in writes)
+            {
+                if (reads(table))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Completes when the next epoch is published.</summary>
+    internal Task NextPublished => Volatile.Read(ref _published).Task;
+
+    /// <summary>The views' holds on refreshes they have yet to publish (design 78 §4, §5). Replaced whole.</summary>
+    private EpochRetainer[] _retainers = [];
+
+    private readonly Lock _retainersGate = new();
+
+    /// <summary>
+    /// Holds, for a standing view, each later barrier and, with <paramref name="every"/>, each later refresh
+    /// (design 78 §4, §5): the states each commits of <paramref name="tables"/>, until the view has published
+    /// it. Under the gate, so that every refresh after <see cref="EpochRetainer.From"/> is held as it must be.
+    /// </summary>
+    internal EpochRetainer Retain(
+        (string SourceId, string Table, ITrackedSource Source)[] tables, bool every, int maxBacklog)
+    {
+        var retainer = new EpochRetainer(this, tables, every, maxBacklog);
+        lock (ExecutionReadSet.Gate)
+        {
+            retainer.From = _engineCommits.Committed;
+            lock (_retainersGate)
+            {
+                _retainers = [.. _retainers, retainer];
+            }
+        }
+
+        return retainer;
+    }
+
+    /// <summary>Stops holding refreshes for <paramref name="retainer"/>.</summary>
+    internal void LetGo(EpochRetainer retainer)
+    {
+        lock (_retainersGate)
+        {
+            _retainers = [.. _retainers.Where(r => !ReferenceEquals(r, retainer))];
+        }
+    }
+
+    /// <summary>
+    /// Holds the refresh that has just committed for each view that must publish it itself: every view for a
+    /// barrier, and a view that publishes every version for any. The caller holds the gate.
+    /// </summary>
+    private void HoldCommitted(bool barrier)
+    {
+        var retainers = Volatile.Read(ref _retainers);
+        if (retainers.Length == 0)
+        {
+            return;
+        }
+
+        var commit = _engineCommits.Committed;
+        var clock = _engineClock?.Committed;
+        foreach (var retainer in retainers)
+        {
+            if (barrier || retainer.Every)
+            {
+                retainer.Hold(commit, clock, barrier);
+            }
+        }
+    }
+
+    /// <summary>Lets go, after the gate, of what views that fell too far behind held.</summary>
+    private void LetGoOfOverrun()
+    {
+        foreach (var retainer in Volatile.Read(ref _retainers))
+        {
+            retainer.LetGoIfOverrun();
+        }
+    }
+
     /// <summary>
     /// Odd while a refresh is making new rows visible — swapping snapshots and publishing the next
     /// catalog — and even otherwise. A reader that saw one even value before it read and the same
@@ -119,9 +242,21 @@ public sealed partial class ChalkEngine
     private void Stamped(long epoch, long? version, DateTimeOffset? clock)
     {
         var current = Stamp;
-        Volatile.Write(
-            ref _stamp,
-            new EpochStamp(epoch, version ?? current.Version + 1, clock?.ToUniversalTime() ?? current.Clock));
+        var stamp = new EpochStamp(epoch, version ?? current.Version + 1, clock?.ToUniversalTime() ?? current.Clock, _engineCommits.Committed)
+        {
+            Writes = _writing?.Tables,
+            MovesClock = _writing?.MovesClock ?? true,
+        };
+        _writing = null;
+
+        // A held refresh is stamped first, so a view that reads this stamp finds it ready (design 78 §4).
+        foreach (var retainer in Volatile.Read(ref _retainers))
+        {
+            retainer.Published(stamp.Commit, stamp);
+        }
+
+        Volatile.Write(ref _stamp, stamp);
+        Volatile.Write(ref _recent[epoch % RecentStamps], stamp);
         Interlocked.Exchange(
             ref _published,
             new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
@@ -129,9 +264,21 @@ public sealed partial class ChalkEngine
 }
 
 /// <summary>One published epoch: the catalog's number, the host's version, and the clock.</summary>
-internal sealed class EpochStamp(long epoch, long version, DateTimeOffset? clock)
+internal sealed class EpochStamp(long epoch, long version, DateTimeOffset? clock, long commit = 0)
 {
     public static EpochStamp First { get; } = new(1, 0, null);
+
+    /// <summary>
+    /// How many refreshes the engine had committed when this epoch was published (design 78 §1): an
+    /// execution that pinned at this count read this epoch's tables, whatever was published since.
+    /// </summary>
+    public long Commit { get; } = commit;
+
+    /// <summary>The tables the epoch's refresh wrote, by source (design 78 §2); null where it is not known.</summary>
+    public IReadOnlySet<(string SourceId, string Table)>? Writes { get; init; }
+
+    /// <summary>Whether the epoch's refresh moved the clock.</summary>
+    public bool MovesClock { get; init; } = true;
 
     public long Epoch { get; } = epoch;
 

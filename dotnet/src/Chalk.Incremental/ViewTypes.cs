@@ -40,6 +40,36 @@ public interface IViewSink<TKey, TRow>
     /// sum to <paramref name="checksum"/>.
     /// </summary>
     void Commit(long version, uint checksum);
+
+    /// <summary>
+    /// The reader is level with the view as of <paramref name="stamp"/> (design 78 §3): the version, and
+    /// how many times the view has been rebound, which changes its rows without moving the version. By
+    /// default, the version alone, to <see cref="Commit(long, uint)"/>.
+    /// </summary>
+    void Commit(in ViewStamp stamp, uint checksum) => Commit(stamp.Version, checksum);
+}
+
+/// <summary>
+/// Where a view's rows stand (design 78 §3): the version of the epoch they are the statement's rows at,
+/// and the view's generation, how many times it has been rebound since it was made. A rebind changes the
+/// rows without moving the version, so the two together name one result. Stamps order by version, then
+/// generation.
+/// </summary>
+/// <param name="Version">The engine's version the rows are at.</param>
+/// <param name="Generation">How many times the view has been rebound.</param>
+public readonly record struct ViewStamp(long Version, long Generation) : IComparable<ViewStamp>
+{
+    /// <summary>Orders by version, then generation.</summary>
+    public int CompareTo(ViewStamp other) =>
+        Version != other.Version ? Version.CompareTo(other.Version) : Generation.CompareTo(other.Generation);
+
+    public static bool operator <(ViewStamp left, ViewStamp right) => left.CompareTo(right) < 0;
+
+    public static bool operator >(ViewStamp left, ViewStamp right) => left.CompareTo(right) > 0;
+
+    public static bool operator <=(ViewStamp left, ViewStamp right) => left.CompareTo(right) <= 0;
+
+    public static bool operator >=(ViewStamp left, ViewStamp right) => left.CompareTo(right) >= 0;
 }
 
 /// <summary>What a drain did.</summary>
@@ -66,6 +96,24 @@ public enum ViewExactness
     /// by rounding: a sum moves with the order its rows are added in.
     /// </summary>
     EqualUpToRounding = 1,
+}
+
+/// <summary>Which of the engine's versions a view publishes (design 78 §5).</summary>
+public enum ViewVersions
+{
+    /// <summary>
+    /// The latest at each update, and each barrier: a view that falls behind goes from the version it holds
+    /// to the latest, and a reader sees what changed between them.
+    /// </summary>
+    Latest = 0,
+
+    /// <summary>
+    /// Every version that changes what the view reads, in order: an update takes the next of them and
+    /// stops, so a reader that drains after each update is sent every one, and the same on every run of
+    /// the same refreshes. The engine holds each refresh's states of the view's tables until the view has
+    /// published it, at most <see cref="ViewOptions{TKey, TRow}.MaxBacklog"/> of them.
+    /// </summary>
+    Every = 1,
 }
 
 /// <summary>How a view computes an update (D343, <c>docs/design/68-incremental-maintenance.md</c>).</summary>
@@ -164,6 +212,7 @@ public struct ViewCursor
     internal long Position;
     internal long ResetFrom;
     internal long Committed;
+    internal long CommittedGeneration;
 
     /// <summary>A reader that has read nothing.</summary>
     public static ViewCursor Start => default;
@@ -233,6 +282,20 @@ public sealed class ViewOptions<TKey, TRow>
     /// runs the statement in full; <see cref="ViewMaintenance.Incremental"/> computes only what changed.
     /// </summary>
     public ViewMaintenance Maintenance { get; init; } = ViewMaintenance.Recompute;
+
+    /// <summary>
+    /// Which versions the view publishes (design 78 §5): <see cref="ViewVersions.Latest"/>, the default, or
+    /// <see cref="ViewVersions.Every"/>. <see cref="ViewVersions.Every"/> is refused for a view that reads a
+    /// database, whose rows no refresh holds.
+    /// </summary>
+    public ViewVersions Versions { get; init; } = ViewVersions.Latest;
+
+    /// <summary>
+    /// The most refreshes the engine holds for a view that publishes every version, while it has yet to
+    /// publish them (design 78 §5): one more faults the view, which the host makes again. 1,024 by default;
+    /// less than one is refused.
+    /// </summary>
+    public int MaxBacklog { get; init; } = 1024;
 
     /// <summary>
     /// Told of each update that moves the view (design 70 §1): how long it took, the bytes allocated in

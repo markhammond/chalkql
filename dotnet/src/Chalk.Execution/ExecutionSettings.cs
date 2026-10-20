@@ -51,6 +51,9 @@ internal sealed record ExecutionSettings
     /// </summary>
     public IEngineClock? EngineClock { get; init; }
 
+    /// <summary>The engine's count of commits, read with each pin (design 78 §1); null where none is kept.</summary>
+    public IEngineCommits? EngineCommits { get; init; }
+
     /// <summary>
     /// The parameter slots an execution writes the engine's clock into (D341): those of the parameter
     /// named as the clock, which the host left unbound. Null for every other plan.

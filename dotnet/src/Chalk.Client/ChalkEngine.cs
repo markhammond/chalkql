@@ -145,6 +145,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         _settings = new ExecutionSettings
         {
             EngineClock = _engineClock,
+            EngineCommits = _engineCommits,
             BatchSize = options.Execution.BatchSize,
             PlanNestingLimit = options.Planner.PlanNestingLimit,
             UseReferenceEngine = options.Execution.Engine == ExecutionEngine.Reference,
@@ -1361,6 +1362,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             && builder.Scopes.Count == 0
             && builder.VersionGiven is null
             && builder.ClockGiven is null
+            && !builder.BarrierGiven
             && !deferred)
         {
             return await RefreshAsync(ct).ConfigureAwait(false);
@@ -1540,13 +1542,24 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                         {
                             _engineClock?.Set(clock);
                         }
+
+                        // And the count of commits, which the epoch's stamp records (design 78 §1).
+                        _engineCommits.Advance();
+
+                        // And the refresh, for each view that must publish it itself (design 78 §4, §5).
+                        HoldCommitted(builder.BarrierGiven);
                     }
                 }
                 finally
                 {
                     replaced?.Unpin();
+                    LetGoOfOverrun();
                 }
 
+                // What the refresh wrote, for a view to tell whether it touched what it reads (design 78 §2).
+                _writing = (
+                    builder.Entries.Select(e => (e.Source.SourceId, e.Entry.Table)).ToHashSet(TableNames.Instance),
+                    builder.ClockGiven is not null);
                 var (epoch, behind) = await PublishAsync(builder.VersionGiven, builder.ClockGiven, deferred, ct)
                     .ConfigureAwait(false);
                 numbersBehind = behind;

@@ -1845,8 +1845,8 @@ var outcome = view.Drain(ref cursor, sink, 4096); // copies what changed since t
   UTF-8 spans — and returns the host's own unmanaged key and row, which the view keeps. A drain
   hands them to the sink by reference and allocates nothing.
 - **Updates** compute only when asked, so an epoch nobody reads costs nothing. An update at the
-  epoch the view holds does nothing; one that a refresh overtakes runs again, so a view always
-  reads one epoch whole.
+  epoch the view holds does nothing. Every update reads one epoch whole, and is published at the
+  version of the epoch it read (see [Views and refreshes](#views-and-refreshes)).
 - **Drains** send each changed key once, with its latest row, then commit the view's version and
   checksum. Out of budget a drain returns `Partial` and carries on at the next call. A reader whose
   changes are no fewer than the view's rows, or who needs a delete the view has dropped, is reset:
@@ -1881,6 +1881,153 @@ var outcome = view.Drain(ref cursor, sink, 4096); // copies what changed since t
   `StandingViews.DefaultLocalJoinMaxRows`, a million rows, is the planner's assumption for a table
   of unknown size.
 
+### Views and refreshes
+
+Refreshes and view updates run side by side, and neither waits for the other.
+
+- **An update is published at the epoch it read.** An update pins its tables when it begins, and the
+  pin names the refresh it read. A refresh that commits while the update runs does not discard it:
+  the view publishes what it computed at that refresh's version, then updates again at once, a few
+  times at most, to reach the latest. So every commit a reader sees is a state the engine really
+  held, named by its version, and versions only increase. A refresh never waits for a view.
+- **A refresh that writes nothing a view reads** moves the view to its version without computing
+  anything: none of the view's tables, and not the clock where the view reads it. Readers are sent a
+  commit at the new version with the same checksum.
+- **Stamps.** A sink's `Commit(in ViewStamp stamp, uint checksum)` is called with the view's stamp:
+  its version and its generation, which counts its rebinds. A rebind changes the rows without moving
+  the engine's version, so the generation tells two commits at one version apart. A sink that
+  implements only `Commit(long version, uint checksum)` is called with the version. `view.Stamp` is
+  where the view stands.
+- **Waiting for a change.** `await view.UpdateToAsync(stamp)` returns once the view stands at the
+  stamp or after it, waiting for the engine to publish a version it has not yet. A host that numbers
+  its refreshes with `Version` waits for its own change with `new ViewStamp(version, 0)`; a rebind
+  returns its stamp. With the rule above, a view the change did not touch is there already.
+  `engine.VersionOf(epoch)` gives the version of a recent epoch, such as the one `RefreshAsync`
+  returns.
+- **Versions are this engine's.** Two engines number their epochs apart, so a stamp means something
+  only on the engine that made it, unless the host numbers every engine's refreshes from one
+  sequence of its own.
+
+```csharp
+await engine.RefreshAsync(r => r.Version(900).Barrier().Replace(closes, closing));
+```
+
+- **A barrier** is a refresh every view publishes itself, rather than going past it to a later one,
+  as a view that falls behind otherwise may. An update that reaches a barrier stops there, and the
+  next carries on from it. The engine holds the states the barrier committed of each view's tables
+  until the view has published it: little for a table only appended to since, the table's rows for
+  one replaced.
+- **Every version.** `ViewOptions.Versions = ViewVersions.Every` makes a view publish every refresh
+  that changes what it reads, in order: each update takes the next of them and stops, and refreshes
+  that change nothing it reads are passed over. The engine holds each refresh's states of the view's
+  tables until the view has published it, at most `MaxBacklog` of them (1,024 by default); one more
+  faults the view, by name, and the host makes it again.
+- **A reader still drains at its own pace.** A view keeps the latest row of each key, and a drain
+  sends what changed since the reader's cursor. A barrier, or a view of every version, makes the
+  view stop at a version; a reader is sent it only if it drains before the next update. So a host
+  that must show a row added in one refresh and taken out in the next updates and drains in turn:
+
+```csharp
+while (view.Version < engine.Version)
+{
+    await view.UpdateAsync();
+    view.Drain(ref cursor, sink);   // every reader, before the next update
+}
+```
+
+  Its readers are then sent the same changes, at the same versions, on every run of the same
+  refreshes.
+
+#### A pipe for a slow reader
+
+A drain only copies the host's structs into the sink, so it is quick; what is slow is what a reader
+does next, such as sending each change over a network. To keep the update loop from waiting on that
+work, drain each version into a batch of its own and hand the batch to the reader through a pipe.
+A fixed number of batches go round between the two, so the loop waits only when every batch is
+still with the reader:
+
+```csharp
+readonly record struct Change(CellKey Key, Cell Row, bool Deleted);
+
+/// <summary>One version's changes, in order, and the stamp they reach.</summary>
+sealed class Batch : IViewSink<CellKey, Cell>
+{
+    private Change[] _changes = new Change[256];
+
+    public int Count { get; private set; }
+    public bool IsReset { get; private set; }     // the whole result follows: start over
+    public bool Committed { get; private set; }
+    public ViewStamp Stamp { get; private set; }
+    public uint Checksum { get; private set; }
+    public ReadOnlySpan<Change> Changes => _changes.AsSpan(0, Count);
+
+    public void Clear() => (Count, IsReset, Committed) = (0, false, false);
+
+    void IViewSink<CellKey, Cell>.Reset() => (Count, IsReset) = (0, true);
+    public void Upsert(in CellKey key, in Cell row) => Add(new Change(key, row, Deleted: false));
+    public void Delete(in CellKey key) => Add(new Change(key, default, Deleted: true));
+    public void Commit(long version, uint checksum) => Commit(new ViewStamp(version, 0), checksum);
+    public void Commit(in ViewStamp stamp, uint checksum) => (Stamp, Checksum, Committed) = (stamp, checksum, true);
+
+    private void Add(in Change change)
+    {
+        if (Count == _changes.Length)
+        {
+            Array.Resize(ref _changes, Count * 2);
+        }
+
+        _changes[Count++] = change;
+    }
+}
+
+const int Batches = 8;
+var free = Channel.CreateBounded<Batch>(Batches);
+var full = Channel.CreateBounded<Batch>(Batches);
+for (var i = 0; i < Batches; i++)
+{
+    free.Writer.TryWrite(new Batch());
+}
+
+// The update loop: one version a batch, waiting only for a free one.
+while (view.Version < engine.Version)
+{
+    var batch = await free.Reader.ReadAsync();
+    await view.UpdateAsync();
+    view.Drain(ref cursor, batch);
+    if (batch.Committed)
+    {
+        await full.Writer.WriteAsync(batch);
+    }
+    else
+    {
+        free.Writer.TryWrite(batch);
+    }
+}
+
+// The reader, at its own pace, on another task.
+await foreach (var batch in full.Reader.ReadAllAsync())
+{
+    Send(batch);   // every change of one version, then its stamp
+    batch.Clear();
+    free.Writer.TryWrite(batch);
+}
+```
+
+- **Nothing is conflated.** The batch is taken before the update and the drain completes into it,
+  so each version's changes reach the reader whole and in order, ending with that version's stamp
+  and checksum.
+- **The pipe bounds how far the view runs ahead of the reader:** as many versions as there are
+  batches. Past that the loop waits for the reader, and the engine holds the refreshes the view has
+  yet to publish, up to the view's `MaxBacklog`. Size the two together.
+- **It reuses what it holds.** A batch grows to the largest version it has carried and keeps that
+  room, and the changes are the host's unmanaged structs, copied by value. A reset batch, which a
+  new or reset reader is sent, carries the whole result: the reader starts over from it.
+- **Several readers.** Give each its own cursor and pipe; the loop takes a free batch from every
+  pipe before it updates, then drains each cursor into its own batch. A reader's jitter is absorbed
+  by its batches, and the slowest reader sets the pace once its pipe is full.
+- **Not only for every version.** Over a view that publishes the latest, the same pipe carries one
+  batch per update, the versions between them conflated as they are for any reader.
+
 ### A view over a database
 
 A database changes outside the engine's refreshes, so a view over one — DuckDB, PostgreSQL, any
@@ -1911,6 +2058,10 @@ await view.UpdateAsync(); // reads instruments again, and replays what else it r
 - **The clock.** `CURRENT_TIMESTAMP` is never pushed into a database, so a comparison with it
   filters what the view kept. The clock's parameter can be pushed, and a read compared with it is
   read again when the clock moves.
+- **Versions.** The view is published at the version of the in-process tables it read; its
+  database rows are as of when it read them, which may be later. No refresh holds a database's rows,
+  so such a view goes past a barrier as past any refresh, and `Versions = ViewVersions.Every` is
+  refused for it.
 
 ### Incremental maintenance
 
@@ -2221,8 +2372,8 @@ await view.RebindAsync(new { level = 5_520.0 });
 ```
 
 - **A rebind is an update.** It binds the new values, brings the view to the latest epoch, and
-  returns the epoch's version, which is the one the view held when no refresh came between. The
-  planner is not asked for anything.
+  returns the view's stamp: the epoch's version, which is the one the view held when no refresh came
+  between, and a generation one higher. The planner is not asked for anything.
 - **Kept incrementally**, an operator that reads a rebindable parameter holds what it reads and
   runs again over it when the parameter moves, as one that reads the clock does when the clock
   moves. Readers get only the keys whose rows changed.
