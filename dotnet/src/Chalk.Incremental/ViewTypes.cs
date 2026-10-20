@@ -294,6 +294,21 @@ public sealed class ViewOptions<TKey, TRow>
     /// </summary>
     public object? Parameters { get; init; }
 
+    /// <summary>
+    /// The parameters <see cref="StandingView{TKey, TRow}.RebindAsync"/> may bind again, by name (design 77
+    /// §5); none by default, when every parameter binds once. The view keeps its plan across a rebind.
+    /// Kept incrementally, each operator that reads one holds what it reads and runs again over it when
+    /// one moves, as an operator that reads the clock does when the clock moves, so declaring one costs
+    /// what those operators hold. A list keeps the length it was bound with, unless it is given a
+    /// capacity.
+    /// </summary>
+    /// <remarks>
+    /// Kept incrementally, a parameter that a <c>LIMIT</c> reads, or that bounds an index seek (a list on
+    /// an indexed key column, say), is refused when the view is made: those are fixed when the maintained
+    /// plan starts.
+    /// </remarks>
+    public IReadOnlyList<RebindableParameter>? Rebindable { get; init; }
+
     /// <summary>How the statement is prepared: its parameter types, its pushdown, its options.</summary>
     public PrepareOptions? Prepare { get; init; }
 
@@ -327,3 +342,16 @@ public sealed class StandingViewException : ChalkException
     {
     }
 }
+
+/// <summary>
+/// A parameter a standing view may bind again with <see cref="StandingView{TKey, TRow}.RebindAsync"/>
+/// (design 77 §5), named as the statement writes it, with or without its <c>@</c>.
+/// </summary>
+/// <param name="Name">The parameter's name.</param>
+/// <param name="Capacity">
+/// For a parameter after <c>IN</c> or <c>NOT IN</c>: the most elements a list bound to it may hold. The
+/// view's plan then takes this many, and a shorter list is padded by repeating its first element, which
+/// changes neither <c>IN</c> nor <c>NOT IN</c>; so any list of one element up to the capacity binds into
+/// the same plan. Each row is compared with as many values as the capacity. Null keeps the list's length.
+/// </param>
+public sealed record RebindableParameter(string Name, int? Capacity = null);

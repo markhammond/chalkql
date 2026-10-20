@@ -43,6 +43,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
     private readonly ViewOptions<TKey, TRow> _options;
     private readonly ViewBinding _binding;
+
+    /// <summary>True while a rebind's update runs: it stages at the epoch the view holds, as the values moved.</summary>
+    private bool _rebound;
     private readonly Lock _gate = new();
     private readonly SemaphoreSlim _updating = new(1, 1);
     private readonly KeyedTable<TKey, TRow> _table = new();
@@ -411,6 +414,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     {
         var key = KeyOf(prepared, options.Key);
         ViewChecks.Check(engine, prepared, key, options);
+        binding.Declare(prepared, options.Rebindable, engine.ClockName);
         if ((options.RefreshQueryPlan is not null || options.PlanImprovementMargin is not null)
             && prepared.Choice is not null)
         {
@@ -448,7 +452,31 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// An update that fails leaves the view at the epoch it held. One that finds a key twice in the
     /// result faults it: every call then throws that fault until the view is disposed.
     /// </remarks>
-    public async ValueTask<long> UpdateAsync(CancellationToken ct = default)
+    public ValueTask<long> UpdateAsync(CancellationToken ct = default) => RunUpdateAsync(rebind: null, ct);
+
+    /// <summary>
+    /// Binds new values to parameters the view declared in <see cref="ViewOptions{TKey, TRow}.Rebindable"/>,
+    /// and brings the view to the engine's latest epoch with them (design 77 §5): a dictionary, or an
+    /// object whose properties name them. The view keeps its plan. Kept incrementally, it runs again only
+    /// the operators that read a moved value, over what they hold, and its readers get the keys whose rows
+    /// changed. Returns the epoch's version, which is the one the view held when no refresh came between.
+    /// </summary>
+    /// <remarks>
+    /// A name the view did not declare, or a list it cannot take, is refused before anything moves. An
+    /// update with the new values that fails leaves the view with the values and the epoch it held.
+    /// </remarks>
+    public ValueTask<long> RebindAsync(object parameters, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        Usable();
+        var binding = ViewBinding.Of(parameters);
+        return RunUpdateAsync(binding.Named ?? throw new ArgumentException(
+            "a rebind binds parameters by name: give a dictionary, or an object whose properties name them.",
+            nameof(parameters)), ct);
+    }
+
+    /// <summary>An update, with <paramref name="rebind"/>'s values bound first when it is a rebind.</summary>
+    private async ValueTask<long> RunUpdateAsync(IReadOnlyDictionary<string, object?>? rebind, CancellationToken ct)
     {
         Usable();
         await _updating.WaitAsync(ct).ConfigureAwait(false);
@@ -456,8 +484,17 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         var started = tracker is null ? 0L : Stopwatch.GetTimestamp();
         var allocated = tracker is null ? 0L : GC.GetTotalAllocatedBytes();
         var taken = _updates;
+        IReadOnlyDictionary<string, object?>? before = null;
+        var rebound = false;
         try
         {
+            if (rebind is not null)
+            {
+                before = _binding.Rebind(rebind);
+                rebound = true;
+                _rebound = true;
+            }
+
             var version = await CatchUpAsync(ct).ConfigureAwait(false);
             if (tracker is not null && _updates != taken)
             {
@@ -476,12 +513,18 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         }
         catch
         {
-            // A failed update keeps nothing new: the view keeps the epoch, and the reads, it held.
+            // A failed update keeps nothing new: the view keeps the epoch, the reads and the values it held.
             _reads?.Abandon();
+            if (rebound)
+            {
+                _binding.Restore(before);
+            }
+
             throw;
         }
         finally
         {
+            _rebound = false;
             _updating.Release();
         }
     }
@@ -499,7 +542,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 continue;
             }
 
-            if (_engine.Stamp.Epoch == _epoch)
+            if (_engine.Stamp.Epoch == _epoch && !_rebound)
             {
                 _reads?.Abandon();
                 return _version;
@@ -532,7 +575,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             async () =>
             {
                 var stamp = _engine.Stamp;
-                if (stamp.Epoch != _epoch)
+                if (stamp.Epoch != _epoch || _rebound)
                 {
                     Take(await StageAsync(stamp, ct).ConfigureAwait(false), stamp);
                 }
@@ -1058,7 +1101,8 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 ViewBinding.ClockIndex(prepared, _engine.ClockName),
                 key,
                 ct,
-                _options.Context).ConfigureAwait(false);
+                _options.Context,
+                _binding.RebindableIndexes(prepared)).ConfigureAwait(false);
         }
         catch (NotMaintainableException refusal)
         {
@@ -1592,11 +1636,25 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     }
 }
 
-/// <summary>A view's parameter values, bound once, and the clock it reads in place of one (D339).</summary>
+/// <summary>
+/// A view's parameter values, bound when it is made and bound again by a rebind (design 77 §5), and the
+/// clock it reads in place of one (D339).
+/// </summary>
 internal sealed class ViewBinding
 {
-    private readonly IReadOnlyDictionary<string, object?>? _named;
+    /// <summary>The named values: replaced whole by a rebind, so that a build beside reads one binding or the other.</summary>
+    private volatile IReadOnlyDictionary<string, object?>? _named;
+
     private readonly IReadOnlyList<object?>? _positional;
+
+    /// <summary>The parameters a rebind may move, by <see cref="Name"/>, each with its list's capacity or none.</summary>
+    private Dictionary<string, Rebindable> _rebindable = new(StringComparer.Ordinal);
+
+    /// <summary>A parameter a rebind may move: its name as the statement writes it, and what it takes.</summary>
+    /// <param name="Shown">The parameter as the statement writes it, <c>@name</c>, for a refusal.</param>
+    /// <param name="Capacity">The most elements a list bound to it holds, padded to this many; or null.</param>
+    /// <param name="Length">For a list with no capacity, the length it was bound with, which a rebind keeps; or null.</param>
+    private sealed record Rebindable(string Shown, int? Capacity, int? Length);
 
     /// <summary>The statement <see cref="_bound"/> holds the values of, for the view's updates.</summary>
     private PreparedQuery? _boundFor;
@@ -1636,6 +1694,228 @@ internal sealed class ViewBinding
             .GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
             .Where(p => p.CanRead && p.GetIndexParameters().Length == 0)
             .ToDictionary(p => p.Name, p => p.GetValue(values), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The values given by name, or null for values given by position.</summary>
+    public IReadOnlyDictionary<string, object?>? Named => _named;
+
+    /// <summary>Whether any parameter may be bound again.</summary>
+    public bool AnyRebindable => _rebindable.Count > 0;
+
+    /// <summary>
+    /// Declares the parameters a rebind may move (design 77 §5), refusing a declaration that cannot hold:
+    /// a statement whose parameters have no names, a name it does not have or the clock's, a name given
+    /// twice, a capacity on a parameter that takes no list or below the list given, or an empty list for
+    /// a capacity.
+    /// </summary>
+    public void Declare(PreparedQuery prepared, IReadOnlyList<RebindableParameter>? declared, string? clock)
+    {
+        if (declared is not { Count: > 0 })
+        {
+            return;
+        }
+
+        if (prepared.ParameterStyle is not ParameterStyle.Named)
+        {
+            throw new ArgumentException(
+                "ViewOptions.Rebindable names the parameters a rebind may move, and the statement's parameters "
+                + (prepared.ParameterStyle is ParameterStyle.None ? "are none" : "have no names")
+                + ": write them as @name.",
+                "options");
+        }
+
+        var rebindable = new Dictionary<string, Rebindable>(StringComparer.Ordinal);
+        foreach (var parameter in declared)
+        {
+            ArgumentNullException.ThrowIfNull(parameter, "options");
+            var name = Name(parameter.Name ?? string.Empty);
+            if (clock is not null && name == Name(clock))
+            {
+                throw new ArgumentException(
+                    $"ViewOptions.Rebindable names @{clock}, and in a view @{clock} is the engine's clock: it moves "
+                    + "with the clock, and takes no value.",
+                    "options");
+            }
+
+            var found = prepared.Parameters.FirstOrDefault(p => p.Name is { } n && Name(n) == name);
+            if (found is null)
+            {
+                throw new ArgumentException(
+                    $"ViewOptions.Rebindable names @{parameter.Name?.TrimStart('@')}, and the statement has no such "
+                    + $"parameter: it has {string.Join(", ", prepared.Parameters.Select(p => p.ToString()))}.",
+                    "options");
+            }
+
+            if (rebindable.ContainsKey(name))
+            {
+                throw new ArgumentException($"ViewOptions.Rebindable names {found} twice.", "options");
+            }
+
+            var value = Value(name);
+            int? length = ParameterBinder.IsList(value) ? Count(value) : null;
+            if (parameter.Capacity is { } capacity)
+            {
+                if (!found.AcceptsList)
+                {
+                    throw new ArgumentException(
+                        $"ViewOptions.Rebindable gives {found} a capacity, and it takes no list: only a parameter "
+                        + "whose every occurrence follows IN or NOT IN does.",
+                        "options");
+                }
+
+                if (capacity < 1)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        "options", capacity, $"the capacity of {found} is a number of elements, one or more.");
+                }
+
+                RefuseLength(found.ToString(), length ?? 1, capacity, "the view is made with");
+                length = null;
+            }
+
+            rebindable[name] = new Rebindable(found.ToString(), parameter.Capacity, length);
+        }
+
+        _rebindable = rebindable;
+        _boundFor = null;
+    }
+
+    /// <summary>
+    /// Binds <paramref name="values"/> in place of the values their names held, refusing, before anything
+    /// moves, a name that is not rebindable, a list where none was or none where one was, and a list of
+    /// another length than the one a list with no capacity was bound with, or beyond its capacity. Returns
+    /// the values held before, which <see cref="Restore"/> puts back.
+    /// </summary>
+    public IReadOnlyDictionary<string, object?>? Rebind(IReadOnlyDictionary<string, object?> values)
+    {
+        var next = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, value) in _named ?? new Dictionary<string, object?>())
+        {
+            next[Name(name)] = value;
+        }
+
+        foreach (var (given, value) in values)
+        {
+            var name = Name(given);
+            if (!_rebindable.TryGetValue(name, out var rebindable))
+            {
+                throw new ArgumentException(
+                    _rebindable.Count == 0
+                        ? "the view declares no rebindable parameters: name them in ViewOptions.Rebindable."
+                        : $"@{given.TrimStart('@')} is not rebindable: the view may bind again "
+                            + $"{string.Join(", ", _rebindable.Values.Select(r => r.Shown))}.",
+                    "parameters");
+            }
+
+            var list = ParameterBinder.IsList(value);
+            if (rebindable.Capacity is { } capacity)
+            {
+                RefuseLength(rebindable.Shown, list ? Count(value) : 1, capacity, "a rebind gives");
+            }
+            else if (rebindable.Length is { } length && (!list || Count(value) != length))
+            {
+                throw new ArgumentException(
+                    $"{rebindable.Shown} was bound to a list of {length}, and a rebind keeps its length: give a list of "
+                    + $"{length}, or declare the parameter with a capacity.",
+                    "parameters");
+            }
+            else if (rebindable.Length is null && list)
+            {
+                throw new ArgumentException(
+                    $"{rebindable.Shown} was bound to one value, and a rebind gives it a list: declare it with a capacity.",
+                    "parameters");
+            }
+
+            next[name] = value;
+        }
+
+        var before = _named;
+        _named = next;
+        _boundFor = null;
+        return before;
+    }
+
+    /// <summary>Puts back the values <see cref="Rebind"/> replaced, after an update with the new ones failed.</summary>
+    public void Restore(IReadOnlyDictionary<string, object?>? before)
+    {
+        _named = before;
+        _boundFor = null;
+    }
+
+    /// <summary>
+    /// Refuses a list of <paramref name="length"/> for a capacity: one longer than the capacity, which
+    /// another plan would be needed for, or an empty one. An empty list cannot be padded with one of its
+    /// elements, and padding it with NULL would make <c>NOT IN</c> unknown for every row.
+    /// </summary>
+    private static void RefuseLength(string shown, int length, int capacity, string what)
+    {
+        if (length > capacity)
+        {
+            throw new ArgumentException(
+                $"{what} {shown} a list of {length}, beyond its capacity of {capacity}: raise the capacity, or "
+                + "hold the list as rows of a table and read it with IN (SELECT …).",
+                "parameters");
+        }
+
+        if (length == 0)
+        {
+            throw new ArgumentException(
+                $"{what} {shown} an empty list, and a list with a capacity holds one element or more: an empty one "
+                + "cannot be padded to the capacity. To match nothing, hold the list as rows of a table and read "
+                + "it with IN (SELECT …).",
+                "parameters");
+        }
+    }
+
+    private static int Count(object? list) => ((System.Collections.IEnumerable)list!).Cast<object?>().Count();
+
+    /// <summary>The value bound under <paramref name="name"/>, or null.</summary>
+    private object? Value(string name)
+    {
+        foreach (var (key, value) in _named ?? new Dictionary<string, object?>())
+        {
+            if (Name(key) == name)
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>A list bound to a parameter with a capacity, padded to it by repeating its first element.</summary>
+    private static object?[] Padded(object? value, int capacity)
+    {
+        object?[] elements = ParameterBinder.IsList(value)
+            ? [.. ((System.Collections.IEnumerable)value!).Cast<object?>()]
+            : [value];
+        var padded = new object?[capacity];
+        for (var i = 0; i < capacity; i++)
+        {
+            padded[i] = elements[Math.Min(i, elements.Length - 1)];
+        }
+
+        return padded;
+    }
+
+    /// <summary>The positions of the rebindable parameters in <paramref name="prepared"/>'s.</summary>
+    public int[] RebindableIndexes(PreparedQuery prepared)
+    {
+        if (_rebindable.Count == 0)
+        {
+            return [];
+        }
+
+        var found = new List<int>();
+        for (var i = 0; i < prepared.Parameters.Count; i++)
+        {
+            if (prepared.Parameters[i].Name is { } name && _rebindable.ContainsKey(Name(name)))
+            {
+                found.Add(i);
+            }
+        }
+
+        return [.. found];
+    }
 
     /// <summary>Refuses a value for the clock: in a view, it reads the engine's clock.</summary>
     public void Refuse(string? clock)
@@ -1716,11 +1996,14 @@ internal sealed class ViewBinding
             }
 
             var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            if (_named is not null)
+            if (_named is { } named)
             {
-                foreach (var (name, value) in _named)
+                foreach (var (name, value) in named)
                 {
-                    values[Name(name)] = value;
+                    var key = Name(name);
+                    values[key] = _rebindable.TryGetValue(key, out var rebindable) && rebindable.Capacity is { } capacity
+                        ? Padded(value, capacity)
+                        : value;
                 }
             }
 
