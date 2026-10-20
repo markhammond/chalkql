@@ -63,8 +63,8 @@ internal sealed class WindowState : IMaintainedState
     /// <summary>For each comparison, which order holds its column's values.</summary>
     public int[] CutOrder { get; }
 
-    /// <summary>The clock the filter last ran at, or null before its first update.</summary>
-    public DateTimeOffset? RanAt { get; set; }
+    /// <summary>The clock and the bindings the filter last ran at, or null before its first update.</summary>
+    public Moment? RanAt { get; set; }
 
     /// <summary>The cut-offs it last ran with, one per comparison, or null where one of them was NULL.</summary>
     public long[]? Cuts { get; set; }
@@ -211,7 +211,7 @@ internal sealed class WindowChanges : MaintainedOperator, IKeepsScratch
         var state = _state;
         await DrainAsync(_input, state.InputChanges, ct).ConfigureAwait(false);
         var changes = state.InputChanges;
-        var moved = state.RanAt != Context.Now;
+        var moved = state.RanAt != Moment.Of(Context);
         var cuts = moved ? Cuts() : state.Cuts;
 
         // The rows held whose answer the clock may have changed: between each comparison's two
@@ -306,7 +306,7 @@ internal sealed class WindowChanges : MaintainedOperator, IKeepsScratch
 
         if (moved)
         {
-            state.RanAt = Context.Now;
+            state.RanAt = Moment.Of(Context);
             state.Cuts = cuts;
         }
 

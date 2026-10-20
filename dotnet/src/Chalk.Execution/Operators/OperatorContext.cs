@@ -80,6 +80,13 @@ internal sealed class OperatorContext
     public int Generation { get; private set; }
 
     /// <summary>
+    /// How many times a standing view's rebindable parameters have moved (design 77 §5): read with
+    /// <see cref="Now"/> by a maintained node that holds what it last gave, to tell whether a value it
+    /// reads has moved since. Zero for every execution that is not a maintained update.
+    /// </summary>
+    public long Bindings { get; private set; }
+
+    /// <summary>
     /// The plan-shaped scratch this tree holds — every expression node's <c>VectorScratch</c> and
     /// every operator's <c>ColumnCopier</c> — so it can be pointed at the execution's arena and
     /// released with it (D64).
@@ -112,12 +119,14 @@ internal sealed class OperatorContext
         ExecutionArena arena,
         IReadOnlyList<ScalarValue> parameters,
         DateTimeOffset now,
-        IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>>? relations = null)
+        IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>>? relations = null,
+        long bindings = 0)
     {
         Stats = stats;
         _arena = arena;
         Parameters = parameters;
         Now = now;
+        Bindings = bindings;
         _relations = relations ?? NoRelations;
         Generation++;
         foreach (var scratch in _scratch)

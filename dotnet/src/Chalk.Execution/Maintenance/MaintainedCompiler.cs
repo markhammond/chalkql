@@ -36,7 +36,11 @@ internal sealed class MaintainedCompiler
     private readonly CatalogContext _catalog;
     private readonly IReadOnlyDictionary<string, ISourceRuntime> _sources;
     private readonly ExecutionSettings _settings;
-    private readonly HashSet<uint> _clockSlots;
+    /// <summary>
+    /// The parameters that move between updates: the clock's, and those a view may bind again (design 77
+    /// §5). A node that reads one is kept as one that reads the clock is.
+    /// </summary>
+    private readonly HashSet<uint> _movingSlots;
     private readonly IPlanCompilation _compilation;
     private readonly Dictionary<string, OperatorFactory> _placeholders = new(StringComparer.Ordinal);
     private readonly Dictionary<uint, Rel> _sharedPlans = [];
@@ -57,13 +61,13 @@ internal sealed class MaintainedCompiler
         CatalogContext catalog,
         IReadOnlyDictionary<string, ISourceRuntime> sources,
         ExecutionSettings settings,
-        IReadOnlyCollection<int> clockSlots)
+        IReadOnlyCollection<int> movingSlots)
     {
         _plan = plan;
         _catalog = catalog;
         _sources = sources;
         _settings = settings;
-        _clockSlots = [.. clockSlots.Select(s => (uint)s)];
+        _movingSlots = [.. movingSlots.Select(s => (uint)s)];
         _compilation = PlanCompiler.Begin(plan, catalog, sources, settings);
         _compilation.Substitute = (rel, _) =>
             rel.KindCase == Rel.KindOneofCase.BoundTable
@@ -416,7 +420,7 @@ internal sealed class MaintainedCompiler
         }
 
         if (expr is { KindCase: Expr.KindOneofCase.Call, Call.Function: FunctionId.CurrentTimestamp or FunctionId.CurrentDate }
-            || (expr.KindCase == Expr.KindOneofCase.Param && _clockSlots.Contains(expr.Param.Index)))
+            || (expr.KindCase == Expr.KindOneofCase.Param && _movingSlots.Contains(expr.Param.Index)))
         {
             return false;
         }
@@ -1192,7 +1196,7 @@ internal sealed class MaintainedCompiler
         while (pending.Count > 0 && !found)
         {
             var next = pending.Pop();
-            if (next is Expr { KindCase: Expr.KindOneofCase.Param } param && _clockSlots.Contains(param.Param.Index))
+            if (next is Expr { KindCase: Expr.KindOneofCase.Param } param && _movingSlots.Contains(param.Param.Index))
             {
                 found = true;
             }

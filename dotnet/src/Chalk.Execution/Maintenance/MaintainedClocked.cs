@@ -42,8 +42,8 @@ internal sealed class ClockedState : IMaintainedState
 
     public ChangeWriter Output { get; }
 
-    /// <summary>The clock the node last ran at, or null before its first update.</summary>
-    public DateTimeOffset? RanAt { get; set; }
+    /// <summary>The clock and the bindings the node last ran at, or null before its first update.</summary>
+    public Moment? RanAt { get; set; }
 
     public long Bytes => Input.Bytes + Given.Bytes + InputChanges.Bytes + Replay.Bytes + Now.Bytes + Output.Bytes;
 
@@ -234,7 +234,7 @@ internal sealed class ClockedChanges : MaintainedOperator, IKeepsScratch
             state.Input.Add(changes.Columns, row, changes.Weight(row));
         }
 
-        var moved = state.RanAt != Context.Now;
+        var moved = state.RanAt != Moment.Of(Context);
         state.Replay.Clear();
         if (moved)
         {
@@ -313,7 +313,7 @@ internal sealed class ClockedChanges : MaintainedOperator, IKeepsScratch
             state.Given.Add(now.Columns, row, now.Weight(row));
         }
 
-        state.RanAt = Context.Now;
+        state.RanAt = Moment.Of(Context);
         return output;
     }
 }
