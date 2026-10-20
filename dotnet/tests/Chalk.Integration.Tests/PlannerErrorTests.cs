@@ -60,6 +60,35 @@ public sealed class PlannerErrorTests(SharedSidecar sidecar)
         Assert.Equal(1, error.Position!.Value.Column);
     }
 
+    /// <summary>
+    /// A reserved word used as a name is named, with how to quote it, before the parser's own message,
+    /// which names only the token it met and the many it expected. Quoted, the name plans.
+    /// </summary>
+    [Theory]
+    [InlineData("SELECT 1 AS at FROM bars")]
+    [InlineData("SELECT f.at FROM (SELECT 1 AS \"at\" FROM bars) f")]
+    public async Task A_reserved_word_used_as_a_name_is_named(string sql)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+
+        var error = await Assert.ThrowsAsync<PlanningException>(() => PlanAsync(sql).AsTask());
+
+        Assert.Equal(PlanErrorKinds.Parse, error.Kind);
+        Assert.Contains("'at' is a reserved word: to use it as a name, quote it as \"at\".", error.Message, StringComparison.Ordinal);
+        await PlanAsync("SELECT f.\"at\" FROM (SELECT 1 AS \"at\" FROM bars) f");
+    }
+
+    /// <summary>A parse error at a word that is not reserved reads as it did.</summary>
+    [Fact]
+    public async Task A_parse_error_at_an_unreserved_word_names_no_reserved_word()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+
+        var error = await Assert.ThrowsAsync<PlanningException>(() => PlanAsync("SELEC * FROM bars").AsTask());
+
+        Assert.DoesNotContain("reserved word", error.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task An_unknown_column_names_the_column()
     {

@@ -240,9 +240,49 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
     }
     ensure(State.STATE_2_READY);
     SqlParser parser = SqlParser.create(reader, parserConfig);
-    SqlNode sqlNode = parser.parseStmt();
+    SqlNode sqlNode;
+    try {
+      sqlNode = parser.parseStmt();
+    } catch (SqlParseException e) {
+      throw namingReservedWord(e);
+    }
     state = State.STATE_3_PARSED;
     return sqlNode;
+  }
+
+  private static final java.util.regex.Pattern ENCOUNTERED =
+      java.util.regex.Pattern.compile("Encountered \"(?:[^\"]*\\s)?([A-Za-z_][A-Za-z0-9_]*)\"");
+
+  /**
+   * A parse that stopped at a reserved word used as a name, as in {@code SELECT … AS at}, says so
+   * and how to quote it, before the parser's own message: the parser names only the token it met
+   * and the many it expected.
+   */
+  private SqlParseException namingReservedWord(SqlParseException e) {
+    String message = e.getMessage();
+    java.util.regex.Matcher encountered = message == null ? null : ENCOUNTERED.matcher(message);
+    if (encountered == null || !encountered.find()) {
+      return e;
+    }
+
+    String word = encountered.group(1);
+    boolean reserved =
+        parserConfig
+            .parserFactory()
+            .getParser(new java.io.StringReader(""))
+            .getMetadata()
+            .isReservedWord(word.toUpperCase(java.util.Locale.ROOT));
+    if (!reserved) {
+      return e;
+    }
+
+    return new SqlParseException(
+        "'" + word + "' is a reserved word: to use it as a name, quote it as \"" + word + "\". "
+            + message,
+        e.getPos(),
+        e.getExpectedTokenSequences(),
+        e.getTokenImages(),
+        e.getCause());
   }
 
   @Override
