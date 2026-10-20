@@ -50,6 +50,30 @@ public static class IrTypes
         _ => 1_000_000_000L,
     };
 
+    /// <summary>
+    /// A TIMESTAMP / TIMESTAMP_TZ value in its storage units, cut to the digits its precision keeps:
+    /// <c>TIMESTAMP(0)</c> counts milliseconds and keeps whole seconds. Cut towards the past, so an
+    /// instant before 1970 is cut as one after it is.
+    /// </summary>
+    public static long TruncateTimestamp(long units, uint precision)
+    {
+        var unitsPerSecond = TimestampUnitsPerSecond(precision);
+        var kept = 1L;
+        for (var digit = 0u; digit < precision && kept < unitsPerSecond; digit++)
+        {
+            kept *= 10;
+        }
+
+        var cut = unitsPerSecond / kept;
+        if (cut == 1)
+        {
+            return units;
+        }
+
+        var below = units % cut;
+        return below < 0 ? units - below - cut : units - below;
+    }
+
     /// <summary>Human-readable type, e.g. <c>DECIMAL(28,10)?</c>. <c>?</c> marks nullable.</summary>
     public static string Describe(Type? type)
     {

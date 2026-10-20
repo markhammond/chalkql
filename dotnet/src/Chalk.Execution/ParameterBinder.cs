@@ -95,7 +95,8 @@ internal static class ParameterBinder
 
     /// <summary>
     /// A wall-clock <see cref="DateTime"/> in the storage units the IR type declares (§3), truncated
-    /// below them — the one loss D317 tolerates.
+    /// below its precision — the one loss D317 tolerates. <c>TIMESTAMP(0)</c> counts milliseconds and
+    /// keeps whole seconds of them.
     /// </summary>
     private static long Units(DateTime value, ChalkType type)
     {
@@ -103,6 +104,7 @@ internal static class ParameterBinder
         var days = CivilTime.FromCivil(value.Year, value.Month, value.Day);
         var secondOfDay = (value.Hour * 3600L) + (value.Minute * 60L) + value.Second;
         var subSecond = value.Ticks % TimeSpan.TicksPerSecond * unitsPerSecond / TimeSpan.TicksPerSecond;
-        return (((days * CivilTime.SecondsPerDay) + secondOfDay) * unitsPerSecond) + subSecond;
+        return IrTypes.TruncateTimestamp(
+            (((days * CivilTime.SecondsPerDay) + secondOfDay) * unitsPerSecond) + subSecond, (uint)type.Precision);
     }
 }

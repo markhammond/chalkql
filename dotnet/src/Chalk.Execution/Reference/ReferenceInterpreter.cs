@@ -1374,18 +1374,25 @@ internal sealed class ReferenceInterpreter
 
             var from = IrTypes.TimestampUnitsPerSecond((uint)source.Precision);
             var to = IrTypes.TimestampUnitsPerSecond((uint)target.Precision);
+            long rescaled;
             if (from == to)
             {
-                return raw;
+                rescaled = raw;
             }
-
-            if (to > from)
+            else if (to > from)
             {
-                return raw * (to / from);
+                rescaled = raw * (to / from);
+            }
+            else
+            {
+                var divisor = from / to;
+                rescaled = raw >= 0 ? raw / divisor : ((raw + 1) / divisor) - 1;
             }
 
-            var divisor = from / to;
-            return raw >= 0 ? raw / divisor : ((raw + 1) / divisor) - 1;
+            // The target's digits only, as the vectorised cast keeps them.
+            return target.Precision < source.Precision
+                ? IrTypes.TruncateTimestamp(rescaled, (uint)target.Precision)
+                : rescaled;
         }
 
         /// <summary>
