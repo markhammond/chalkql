@@ -1240,6 +1240,9 @@ public sealed class PreparedQuery
         }
     }
 
+    /// <summary>The tables the statement's plan reads, by source (design 78 §2).</summary>
+    internal IReadOnlyList<(string SourceId, string Table)> TablesRead => Chalk.Execution.PlanTables.Of(Plan);
+
     /// <summary>The placeholders the parameter at <paramref name="parameter"/> fills: one for each time the text names it.</summary>
     private static int[] SlotsOf(IReadOnlyList<PlaceholderSlot> slots, int parameter)
     {

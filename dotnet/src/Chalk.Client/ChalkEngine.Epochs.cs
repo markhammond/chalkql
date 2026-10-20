@@ -14,6 +14,59 @@ public sealed partial class ChalkEngine
     /// <summary>How many refreshes this engine has committed, which each stamp records (design 78 §1).</summary>
     private readonly EngineCommits _engineCommits = new();
 
+    /// <summary>
+    /// What the refresh being published wrote, set by it before it publishes and taken by
+    /// <see cref="Stamped"/> (design 78 §2): null, as for a re-introspection, where it is not known.
+    /// </summary>
+    private (IReadOnlySet<(string SourceId, string Table)> Tables, bool MovesClock)? _writing;
+
+    /// <summary>The last stamps published, each at its epoch's place, for a view to see what they wrote (design 78 §2).</summary>
+    private readonly EpochStamp?[] _recent = new EpochStamp?[RecentStamps];
+
+    private const int RecentStamps = 256;
+
+    /// <summary>The version epoch <paramref name="epoch"/> was published at, while it is recent; null otherwise.</summary>
+    public long? VersionOf(long epoch)
+    {
+        var stamp = Volatile.Read(ref _recent[epoch % RecentStamps]);
+        return stamp?.Epoch == epoch ? stamp.Version : null;
+    }
+
+    /// <summary>
+    /// Whether every epoch after <paramref name="from"/>, up to <paramref name="to"/>, wrote nothing a reader
+    /// of <paramref name="reads"/> reads (design 78 §2): not one of its tables, and not the clock where it
+    /// reads the clock. False where an epoch is no longer recent, or did not say what it wrote.
+    /// </summary>
+    internal bool Untouched(long from, long to, Func<(string SourceId, string Table), bool> reads, bool readsClock)
+    {
+        if (to - from >= RecentStamps)
+        {
+            return false;
+        }
+
+        for (var epoch = from + 1; epoch <= to; epoch++)
+        {
+            var stamp = Volatile.Read(ref _recent[epoch % RecentStamps]);
+            if (stamp?.Epoch != epoch || stamp.Writes is not { } writes || (readsClock && stamp.MovesClock))
+            {
+                return false;
+            }
+
+            foreach (var table in writes)
+            {
+                if (reads(table))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Completes when the next epoch is published.</summary>
+    internal Task NextPublished => Volatile.Read(ref _published).Task;
+
 
 
     /// <summary>
@@ -126,7 +179,13 @@ public sealed partial class ChalkEngine
         var current = Stamp;
         Volatile.Write(
             ref _stamp,
-            new EpochStamp(epoch, version ?? current.Version + 1, clock?.ToUniversalTime() ?? current.Clock, _engineCommits.Committed));
+            new EpochStamp(epoch, version ?? current.Version + 1, clock?.ToUniversalTime() ?? current.Clock, _engineCommits.Committed)
+            {
+                Writes = _writing?.Tables,
+                MovesClock = _writing?.MovesClock ?? true,
+            });
+        _writing = null;
+        Volatile.Write(ref _recent[epoch % RecentStamps], Volatile.Read(ref _stamp));
         Interlocked.Exchange(
             ref _published,
             new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
@@ -143,6 +202,12 @@ internal sealed class EpochStamp(long epoch, long version, DateTimeOffset? clock
     /// execution that pinned at this count read this epoch's tables, whatever was published since.
     /// </summary>
     public long Commit { get; } = commit;
+
+    /// <summary>The tables the epoch's refresh wrote, by source (design 78 §2); null where it is not known.</summary>
+    public IReadOnlySet<(string SourceId, string Table)>? Writes { get; init; }
+
+    /// <summary>Whether the epoch's refresh moved the clock.</summary>
+    public bool MovesClock { get; init; } = true;
 
     public long Epoch { get; } = epoch;
 

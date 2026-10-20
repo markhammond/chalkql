@@ -40,6 +40,36 @@ public interface IViewSink<TKey, TRow>
     /// sum to <paramref name="checksum"/>.
     /// </summary>
     void Commit(long version, uint checksum);
+
+    /// <summary>
+    /// The reader is level with the view as of <paramref name="stamp"/> (design 78 §3): the version, and
+    /// how many times the view has been rebound, which changes its rows without moving the version. By
+    /// default, the version alone, to <see cref="Commit(long, uint)"/>.
+    /// </summary>
+    void Commit(in ViewStamp stamp, uint checksum) => Commit(stamp.Version, checksum);
+}
+
+/// <summary>
+/// Where a view's rows stand (design 78 §3): the version of the epoch they are the statement's rows at,
+/// and the view's generation, how many times it has been rebound since it was made. A rebind changes the
+/// rows without moving the version, so the two together name one result. Stamps order by version, then
+/// generation.
+/// </summary>
+/// <param name="Version">The engine's version the rows are at.</param>
+/// <param name="Generation">How many times the view has been rebound.</param>
+public readonly record struct ViewStamp(long Version, long Generation) : IComparable<ViewStamp>
+{
+    /// <summary>Orders by version, then generation.</summary>
+    public int CompareTo(ViewStamp other) =>
+        Version != other.Version ? Version.CompareTo(other.Version) : Generation.CompareTo(other.Generation);
+
+    public static bool operator <(ViewStamp left, ViewStamp right) => left.CompareTo(right) < 0;
+
+    public static bool operator >(ViewStamp left, ViewStamp right) => left.CompareTo(right) > 0;
+
+    public static bool operator <=(ViewStamp left, ViewStamp right) => left.CompareTo(right) <= 0;
+
+    public static bool operator >=(ViewStamp left, ViewStamp right) => left.CompareTo(right) >= 0;
 }
 
 /// <summary>What a drain did.</summary>
@@ -164,6 +194,7 @@ public struct ViewCursor
     internal long Position;
     internal long ResetFrom;
     internal long Committed;
+    internal long CommittedGeneration;
 
     /// <summary>A reader that has read nothing.</summary>
     public static ViewCursor Start => default;

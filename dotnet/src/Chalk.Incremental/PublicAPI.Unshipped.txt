@@ -133,7 +133,6 @@ Chalk.Incremental.RebindableParameter.Equals(Chalk.Incremental.RebindableParamet
 Chalk.Incremental.RebindableParameter.Name.get -> string!
 Chalk.Incremental.RebindableParameter.Name.init -> void
 Chalk.Incremental.RebindableParameter.RebindableParameter(string! Name, int? Capacity = null) -> void
-Chalk.Incremental.StandingView<TKey, TRow>.RebindAsync(object! parameters, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<long>
 Chalk.Incremental.ViewOptions<TKey, TRow>.Rebindable.get -> System.Collections.Generic.IReadOnlyList<Chalk.Incremental.RebindableParameter!>?
 Chalk.Incremental.ViewOptions<TKey, TRow>.Rebindable.init -> void
 override Chalk.Incremental.RebindableParameter.Equals(object? obj) -> bool
@@ -141,3 +140,26 @@ override Chalk.Incremental.RebindableParameter.GetHashCode() -> int
 override Chalk.Incremental.RebindableParameter.ToString() -> string!
 static Chalk.Incremental.RebindableParameter.operator !=(Chalk.Incremental.RebindableParameter? left, Chalk.Incremental.RebindableParameter? right) -> bool
 static Chalk.Incremental.RebindableParameter.operator ==(Chalk.Incremental.RebindableParameter? left, Chalk.Incremental.RebindableParameter? right) -> bool
+Chalk.Incremental.IViewSink<TKey, TRow>.Commit(in Chalk.Incremental.ViewStamp stamp, uint checksum) -> void
+Chalk.Incremental.StandingView<TKey, TRow>.RebindAsync(object! parameters, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Incremental.ViewStamp>
+Chalk.Incremental.StandingView<TKey, TRow>.Stamp.get -> Chalk.Incremental.ViewStamp
+Chalk.Incremental.StandingView<TKey, TRow>.UpdateToAsync(Chalk.Incremental.ViewStamp atLeast, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Incremental.ViewStamp>
+Chalk.Incremental.ViewStamp
+Chalk.Incremental.ViewStamp.CompareTo(Chalk.Incremental.ViewStamp other) -> int
+Chalk.Incremental.ViewStamp.Deconstruct(out long Version, out long Generation) -> void
+Chalk.Incremental.ViewStamp.Equals(Chalk.Incremental.ViewStamp other) -> bool
+Chalk.Incremental.ViewStamp.Generation.get -> long
+Chalk.Incremental.ViewStamp.Generation.init -> void
+Chalk.Incremental.ViewStamp.Version.get -> long
+Chalk.Incremental.ViewStamp.Version.init -> void
+Chalk.Incremental.ViewStamp.ViewStamp() -> void
+Chalk.Incremental.ViewStamp.ViewStamp(long Version, long Generation) -> void
+override Chalk.Incremental.ViewStamp.GetHashCode() -> int
+static Chalk.Incremental.ViewStamp.operator !=(Chalk.Incremental.ViewStamp left, Chalk.Incremental.ViewStamp right) -> bool
+static Chalk.Incremental.ViewStamp.operator <(Chalk.Incremental.ViewStamp left, Chalk.Incremental.ViewStamp right) -> bool
+static Chalk.Incremental.ViewStamp.operator <=(Chalk.Incremental.ViewStamp left, Chalk.Incremental.ViewStamp right) -> bool
+static Chalk.Incremental.ViewStamp.operator ==(Chalk.Incremental.ViewStamp left, Chalk.Incremental.ViewStamp right) -> bool
+static Chalk.Incremental.ViewStamp.operator >(Chalk.Incremental.ViewStamp left, Chalk.Incremental.ViewStamp right) -> bool
+static Chalk.Incremental.ViewStamp.operator >=(Chalk.Incremental.ViewStamp left, Chalk.Incremental.ViewStamp right) -> bool
+~override Chalk.Incremental.ViewStamp.Equals(object obj) -> bool
+~override Chalk.Incremental.ViewStamp.ToString() -> string

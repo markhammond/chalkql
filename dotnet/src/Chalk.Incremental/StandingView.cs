@@ -46,6 +46,15 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
     /// <summary>True while a rebind's update runs: it stages at the epoch the view holds, as the values moved.</summary>
     private bool _rebound;
+
+    /// <summary>How many rebinds the view has taken (design 78 §3): its stamp's generation.</summary>
+    private long _rebinds;
+
+    /// <summary>The tables the view's statement reads, for the one it was worked out for (design 78 §2).</summary>
+    private (PreparedQuery For, HashSet<(string SourceId, string Table)> Tables)? _readSet;
+
+    /// <summary>How many times a refresh that wrote nothing the view reads moved its version without an update: for a test.</summary>
+    internal int Relabels { get; private set; }
     private readonly Lock _gate = new();
     private readonly SemaphoreSlim _updating = new(1, 1);
     private readonly KeyedTable<TKey, TRow> _table = new();
@@ -465,14 +474,61 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// A name the view did not declare, or a list it cannot take, is refused before anything moves. An
     /// update with the new values that fails leaves the view with the values and the epoch it held.
     /// </remarks>
-    public ValueTask<long> RebindAsync(object parameters, CancellationToken ct = default)
+    public async ValueTask<ViewStamp> RebindAsync(object parameters, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         Usable();
         var binding = ViewBinding.Of(parameters);
-        return RunUpdateAsync(binding.Named ?? throw new ArgumentException(
+        await RunUpdateAsync(binding.Named ?? throw new ArgumentException(
             "a rebind binds parameters by name: give a dictionary, or an object whose properties name them.",
-            nameof(parameters)), ct);
+            nameof(parameters)), ct).ConfigureAwait(false);
+        return Stamp;
+    }
+
+    /// <summary>Where the view's rows stand: its version, and how many times it has been rebound (design 78 §3).</summary>
+    public ViewStamp Stamp
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return new ViewStamp(_version, _rebinds);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Brings the view at least to <paramref name="atLeast"/> (design 78 §3), and returns where it stands:
+    /// a host that changed what the view reads, by a refresh (whose version it numbered, or found with
+    /// <see cref="ChalkEngine.VersionOf"/>) or a rebind (whose stamp it was returned), waits here until
+    /// the view shows the change. A version the engine has not published yet is waited for.
+    /// </summary>
+    /// <exception cref="ArgumentException">The stamp's generation is one the view has not been rebound to.</exception>
+    public async ValueTask<ViewStamp> UpdateToAsync(ViewStamp atLeast, CancellationToken ct = default)
+    {
+        while (true)
+        {
+            var published = _engine.NextPublished;
+            await UpdateAsync(ct).ConfigureAwait(false);
+            var stamp = Stamp;
+            if (stamp >= atLeast)
+            {
+                return stamp;
+            }
+
+            if (stamp.Version >= atLeast.Version)
+            {
+                throw new ArgumentException(
+                    $"the view stands at generation {stamp.Generation}, and the stamp names generation "
+                    + $"{atLeast.Generation}: it has not been rebound that far.",
+                    nameof(atLeast));
+            }
+
+            if (_engine.Version < atLeast.Version)
+            {
+                await published.WaitAsync(ct).ConfigureAwait(false);
+            }
+        }
     }
 
     /// <summary>An update, with <paramref name="rebind"/>'s values bound first when it is a rebind.</summary>
@@ -496,6 +552,13 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             }
 
             var version = await CatchUpAsync(ct).ConfigureAwait(false);
+            if (rebound)
+            {
+                lock (_gate)
+                {
+                    _rebinds++;
+                }
+            }
             if (tracker is not null && _updates != taken)
             {
                 var update = new ViewUpdate(
@@ -571,6 +634,11 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 return _version;
             }
 
+            if (!_rebound && Relabel())
+            {
+                return _version;
+            }
+
             if (!named && attempt >= 2)
             {
                 return await CatchUpBetweenRefreshesAsync(ct).ConfigureAwait(false);
@@ -598,6 +666,46 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
             return _version;
         }
+    }
+
+    /// <summary>
+    /// Moves the view's version to the engine's when every refresh since its own wrote nothing it reads
+    /// (design 78 §2): none of its tables, and not the clock where it reads the clock. Its rows are then
+    /// the statement's rows at the new version too, so nothing is computed, and readers are sent a commit
+    /// at it. Not for a view that reads a database, whose rows a refresh is a reason to read again, nor for
+    /// one with a new plan to take or a statement to prepare again.
+    /// </summary>
+    private bool Relabel()
+    {
+        // A view whose statement has a plan it does not run yet takes it at an update, and a stale one is
+        // prepared again there: neither is only a version.
+        if (_reads is not null || _maintained is { IsCurrent: false } || _prepared.IsStale || _prepared.ChangedShape)
+        {
+            return false;
+        }
+
+        var prepared = _prepared;
+        if (_readSet is not { } known || !ReferenceEquals(known.For, prepared))
+        {
+            known = (prepared, prepared.TablesRead.ToHashSet(TableNames.Instance));
+            _readSet = known;
+        }
+
+        var stamp = _engine.Stamp;
+        var tables = known.Tables;
+        if (!_engine.Untouched(_epoch, stamp.Epoch, tables.Contains, _readsTime || _namesClock))
+        {
+            return false;
+        }
+
+        lock (_gate)
+        {
+            _epoch = stamp.Epoch;
+            _version = stamp.Version;
+        }
+
+        Relabels++;
+        return true;
     }
 
     /// <summary>
@@ -809,10 +917,11 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 sent++;
             }
 
-            if (sent > 0 || reset || cursor.ResetFrom > 0 || cursor.Committed != _version)
+            if (sent > 0 || reset || cursor.ResetFrom > 0 || cursor.Committed != _version || cursor.CommittedGeneration != _rebinds)
             {
-                sink.Commit(_version, _table.Checksum);
+                sink.Commit(new ViewStamp(_version, _rebinds), _table.Checksum);
                 cursor.Committed = _version;
+                cursor.CommittedGeneration = _rebinds;
             }
 
             cursor.ResetFrom = 0;
