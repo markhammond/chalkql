@@ -87,7 +87,9 @@ public sealed class PlannerErrorTests(SharedSidecar sidecar)
         var error = await Assert.ThrowsAsync<PlanningException>(() => PlanAsync("SELEC * FROM bars").AsTask());
 
         Assert.DoesNotContain("reserved word", error.Message, StringComparison.Ordinal);
+    }
 
+    /// <summary>
     /// A parameter nothing beside it gives a type, as the one column of a row, is refused saying how to
     /// type it: Calcite's own words say only that the parameter is illegal there.
     /// </summary>
