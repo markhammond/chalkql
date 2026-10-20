@@ -234,11 +234,10 @@ internal sealed class MaintainedCompiler
     private Rel Lookup(Rel rel, string path)
     {
         var lookup = rel.IndexLookup;
-        if (!lookup.Ranges.All(Pinned))
+        if (lookup.Ranges.Any(r => r.Prefix))
         {
             throw new NotMaintainedException(
-                "an index lookup over a range of keys is not maintained; a lookup pinned to keys, as a constant "
-                + "key or an IN list makes, is.");
+                "an index lookup by a LIKE prefix is not maintained; one pinned to keys, or over a range of them, is.");
         }
 
         var descriptor = _catalog.FindTable(lookup.Table.Schema, lookup.Table.Table)
@@ -249,9 +248,8 @@ internal sealed class MaintainedCompiler
         // The lookup's own columns, then the key columns it does not hand over, which the filter reads.
         var columns = lookup.Projection.Select(c => (int)c).ToList();
         var row = rel.RowType.Clone();
-        foreach (var bound in lookup.Ranges.SelectMany(r => r.Lower.Select((value, k) => (value, k))))
+        foreach (var bound in lookup.Ranges.SelectMany(r => r.Lower.Select((value, k) => (value, k)).Concat(r.Upper.Select((value, k) => (value, k)))))
         {
-            RefuseClock(bound.value, "an index lookup's key");
             var column = index.Columns[bound.k];
             if (!columns.Contains(column))
             {
@@ -263,9 +261,14 @@ internal sealed class MaintainedCompiler
 
         var read = new Rel { RowType = row, Read = new Ir.Read { Table = lookup.Table } };
         read.Read.Projection.AddRange(columns.Select(c => (uint)c));
+        // Each range as the condition it reads in the index's order: a pinned one its keys, any other its
+        // equal leading keys and the bounds of the next. A bound that reads the clock, or a parameter a view
+        // binds again, makes the filter one that holds what it reads, as any filter reading one does.
         var condition = lookup.Ranges.Count == 0
             ? new Expr { Type = ChalkType.Bool().ToProto(), Literal = new Literal { BoolValue = false } }
-            : AnyOf([.. lookup.Ranges.Select(range => AllOf([.. range.Lower.Select((value, k) => KeyEquals(row, columns.IndexOf(index.Columns[k]), value))]))]);
+            : AnyOf([.. lookup.Ranges.Select(range => Pinned(range)
+                ? AllOf([.. range.Lower.Select((value, k) => KeyEquals(row, columns.IndexOf(index.Columns[k]), value))])
+                : RangeCondition(range, row, columns, index))]);
         var kept = new Rel { RowType = row, Filter = new Ir.Filter { Input = read, Condition = condition } };
         if (columns.Count > lookup.Projection.Count)
         {
@@ -289,6 +292,58 @@ internal sealed class MaintainedCompiler
         range is { LowerInclusive: true, UpperInclusive: true, Prefix: false }
         && range.Lower.Count > 0
         && range.Lower.Equals(range.Upper);
+
+    /// <summary>
+    /// An index range that is not one key, as a condition on the rows it holds: its leading keys, where its
+    /// two bounds agree, equal; and the next key between its bounds, each side open or closed as the range
+    /// says. A descending key column reads its bounds the other way (D281). A range with neither bound holds
+    /// every row.
+    /// </summary>
+    private static Expr RangeCondition(IndexRange range, RowType row, List<int> columns, IndexDescriptor index)
+    {
+        var terms = new List<Expr>();
+        var shared = 0;
+        while (shared < range.Lower.Count && shared < range.Upper.Count && range.Lower[shared].Equals(range.Upper[shared])
+            && (shared < range.Lower.Count - 1 || shared < range.Upper.Count - 1))
+        {
+            terms.Add(KeyEquals(row, columns.IndexOf(index.Columns[shared]), range.Lower[shared]));
+            shared++;
+        }
+
+        if (range.Lower.Count > shared + 1 || range.Upper.Count > shared + 1)
+        {
+            throw new NotMaintainedException("an index lookup over a range bounded past its next key is not maintained.");
+        }
+
+        var slot = shared < index.Columns.Count ? columns.IndexOf(index.Columns[shared]) : -1;
+        var descending = shared < index.Columns.Count
+            && index.DirectionAt(shared) is SortDirection.DescNullsFirst or SortDirection.DescNullsLast;
+        if (range.Lower.Count > shared)
+        {
+            terms.Add(KeyCompared(row, slot, range.Lower[shared], descending
+                ? range.LowerInclusive ? FunctionId.Le : FunctionId.Lt
+                : range.LowerInclusive ? FunctionId.Ge : FunctionId.Gt));
+        }
+
+        if (range.Upper.Count > shared)
+        {
+            terms.Add(KeyCompared(row, slot, range.Upper[shared], descending
+                ? range.UpperInclusive ? FunctionId.Ge : FunctionId.Gt
+                : range.UpperInclusive ? FunctionId.Le : FunctionId.Lt));
+        }
+
+        return terms.Count == 0
+            ? new Expr { Type = ChalkType.Bool().ToProto(), Literal = new Literal { BoolValue = true } }
+            : AllOf([.. terms]);
+    }
+
+    /// <summary>A key column compared with a lookup's bound, the bound cast to the column's type if it has another.</summary>
+    private static Expr KeyCompared(RowType row, int slot, Expr bound, FunctionId comparison)
+    {
+        var equals = KeyEquals(row, slot, bound);
+        equals.Call.Function = comparison;
+        return equals;
+    }
 
     /// <summary>A key column equal to a lookup's bound, the bound cast to the column's type if it has another.</summary>
     private static Expr KeyEquals(RowType row, int slot, Expr bound)
@@ -884,9 +939,101 @@ internal sealed class MaintainedCompiler
                     : [];
             }
 
+            case Rel.KindOneofCase.HashJoin:
+                return JoinKeys(rel.HashJoin.Left, rel.HashJoin.Right, [.. rel.HashJoin.LeftKeys.Zip(rel.HashJoin.RightKeys, (l, r) => ((int)l, (int)r))], rel.HashJoin.Type);
+            case Rel.KindOneofCase.MergeJoin:
+                return JoinKeys(rel.MergeJoin.Left, rel.MergeJoin.Right, [.. rel.MergeJoin.LeftKeys.Zip(rel.MergeJoin.RightKeys, (l, r) => ((int)l, (int)r))], rel.MergeJoin.Type);
+            case Rel.KindOneofCase.NestedLoopJoin:
+                return JoinKeys(rel.NestedLoopJoin.Left, rel.NestedLoopJoin.Right, EquiPairs(rel.NestedLoopJoin.Condition, rel.NestedLoopJoin.Left.RowType.Fields.Count), rel.NestedLoopJoin.Type);
+            case Rel.KindOneofCase.Join:
+                return JoinKeys(rel.Join.Left, rel.Join.Right, EquiPairs(rel.Join.Condition, rel.Join.Left.RowType.Fields.Count), rel.Join.Type);
+            case Rel.KindOneofCase.AsOfJoin when rel.AsOfJoin.Type is JoinType.Inner or JoinType.Left:
+                // Each left row meets one right row at most, so the left's keys hold.
+                return UniqueKeys(rel.AsOfJoin.Left);
             default:
                 return [];
         }
+    }
+
+    /// <summary>
+    /// A join's unique keys: a side's keys hold where the other side meets each of its rows once at most,
+    /// being unique on its join keys or one row, as a lookup of a key or a join with a total does; a
+    /// semi or anti join keeps its left's; and an inner join's rows are unique on a key of each side together.
+    /// </summary>
+    private List<HashSet<int>> JoinKeys(Rel left, Rel right, (int Left, int Right)[] equal, JoinType type)
+    {
+        var leftKeys = UniqueKeys(left);
+        if (type is JoinType.Semi or JoinType.Anti)
+        {
+            return leftKeys;
+        }
+
+        var rightKeys = UniqueKeys(right);
+        var width = left.RowType.Fields.Count;
+        HashSet<int> leftJoined = [.. equal.Select(e => e.Left)];
+        HashSet<int> rightJoined = [.. equal.Select(e => e.Right)];
+        var keys = new List<HashSet<int>>();
+        if (type is JoinType.Inner or JoinType.Left && rightKeys.Any(k => k.IsSubsetOf(rightJoined)))
+        {
+            keys.AddRange(leftKeys);
+        }
+
+        if (type is JoinType.Inner or JoinType.Right && leftKeys.Any(k => k.IsSubsetOf(leftJoined)))
+        {
+            keys.AddRange(rightKeys.Select(k => k.Select(f => f + width).ToHashSet()));
+        }
+
+        if (type == JoinType.Inner)
+        {
+            foreach (var l in leftKeys)
+            {
+                foreach (var r in rightKeys)
+                {
+                    keys.Add([.. l, .. r.Select(f => f + width)]);
+                }
+            }
+        }
+
+        return keys;
+    }
+
+    /// <summary>The pairs of a left and a right field a join's condition holds equal, among its top-level conjuncts.</summary>
+    private static (int Left, int Right)[] EquiPairs(Expr? condition, int leftWidth)
+    {
+        var pairs = new List<(int, int)>();
+        var pending = new Stack<Expr>();
+        if (condition is not null)
+        {
+            pending.Push(condition);
+        }
+
+        while (pending.Count > 0)
+        {
+            var term = pending.Pop();
+            if (term is { KindCase: Expr.KindOneofCase.Call, Call.Function: FunctionId.And })
+            {
+                foreach (var arg in term.Call.Args)
+                {
+                    pending.Push(arg);
+                }
+            }
+            else if (term is { KindCase: Expr.KindOneofCase.Call, Call.Function: FunctionId.Eq, Call.Args.Count: 2 }
+                && term.Call.Args[0] is { KindCase: Expr.KindOneofCase.FieldRef } a
+                && term.Call.Args[1] is { KindCase: Expr.KindOneofCase.FieldRef } b)
+            {
+                var (x, y) = ((int)a.FieldRef.Index, (int)b.FieldRef.Index);
+                if (x < leftWidth && y >= leftWidth)
+                {
+                    pairs.Add((x, y - leftWidth));
+                }
+                else if (y < leftWidth && x >= leftWidth)
+                {
+                    pairs.Add((y, x - leftWidth));
+                }
+            }
+        }
+
+        return [.. pairs];
     }
 
     /// <summary>A table's unique keys and unique indexes, as the fields of a read that projects all their columns.</summary>

@@ -129,12 +129,12 @@ public sealed class RebindableParameterTests(SharedSidecar sidecar, ITestOutputH
     }
 
     /// <summary>
-    /// Kept incrementally, a parameter that a <c>LIMIT</c> reads, or that bounds an index seek, is fixed when
-    /// the maintained plan starts, and is refused when the view is made, by name. Recomputed, the same
-    /// <c>LIMIT</c> rebinds.
+    /// Kept incrementally, a parameter that a <c>LIMIT</c> reads is fixed when the maintained plan starts,
+    /// and is refused when the view is made, by name; recomputed, the same <c>LIMIT</c> rebinds. One that
+    /// bounds an index lookup is kept as a filter reads it, and rebinds.
     /// </summary>
     [Fact]
-    public async Task A_parameter_fixed_when_the_maintained_plan_starts_is_refused()
+    public async Task A_parameter_a_maintained_limit_reads_is_refused_and_a_seek_bound_rebinds()
     {
         var desk = await DeskAsync();
         await using var _ = desk.Engine;
@@ -143,10 +143,14 @@ public sealed class RebindableParameterTests(SharedSidecar sidecar, ITestOutputH
             limit, Options(ViewMaintenance.Incremental, Values(("n", 2)), [new("n")]), Ct).AsTask());
         Assert.Contains("@n is rebindable, and the statement's LIMIT reads it", refused.Message, StringComparison.Ordinal);
 
-        const string seek = Groups + "COUNT(*) AS n FROM indexed WHERE seq = @seq GROUP BY seq / 100";
-        var sought = await Assert.ThrowsAsync<StandingViewException>(() => desk.Engine.MaterializeAsync(
-            seek, Options(ViewMaintenance.Incremental, Values(("seq", 5L)), [new("seq")]), Ct).AsTask());
-        Assert.Contains("@seq is rebindable, and it bounds the seek of index", sought.Message, StringComparison.Ordinal);
+        // A bound of an index lookup is kept as a filter reads it, and rebinds.
+        const string seek = Groups + "COUNT(*) AS n FROM indexed WHERE seq >= @seq GROUP BY seq / 100";
+        await using var sought = await desk.Engine.MaterializeAsync(
+            seek, Options(ViewMaintenance.Incremental, Values(("seq", 1_500L)), [new("seq")]), Ct);
+        var (kept, at) = Drained(sought);
+        await sought.RebindAsync(Values(("seq", 1_250L)), Ct);
+        sought.Drain(ref at, kept);
+        Same(await StatementAsync(desk.Engine, seek, Values(("seq", 1_250L))), kept.Rows);
 
         await using var recomputed = await desk.Engine.MaterializeAsync(
             limit, Options(ViewMaintenance.Recompute, Values(("n", 2)), [new("n")]), Ct);

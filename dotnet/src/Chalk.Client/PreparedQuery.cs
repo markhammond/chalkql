@@ -1117,8 +1117,9 @@ public sealed class PreparedQuery
 
     /// <summary>
     /// Refuses a rebindable parameter (design 77 §5) the maintained plan fixes when it starts: the count or
-    /// offset of a <c>LIMIT</c>, which the maintained top-N binds once, and a bound of an index seek or of
-    /// an as-of seek's fixed key, which decides the rows read. Named as the statement writes it.
+    /// offset of a <c>LIMIT</c>, which the maintained top-N binds once, and an as-of seek's fixed key,
+    /// which decides the rows read. A bound of an index lookup is kept as a filter reads it. Named as the
+    /// statement writes it.
     /// </summary>
     private void RefuseFixedAtStart(Chalk.Ir.Plan plan, int[] slots, IReadOnlyList<PlaceholderSlot> placeholders)
     {
@@ -1147,16 +1148,6 @@ public sealed class PreparedQuery
                         break;
                     case Chalk.Ir.Rel.KindOneofCase.TopN:
                         Fixed(rel.TopN.CountParam, rel.TopN.OffsetParam, "the statement's LIMIT reads it, which a maintained LIMIT binds once");
-                        break;
-                    case Chalk.Ir.Rel.KindOneofCase.IndexLookup:
-                        foreach (var range in rel.IndexLookup.Ranges)
-                        {
-                            foreach (var bound in range.Lower.Concat(range.Upper))
-                            {
-                                Within(bound, $"it bounds the seek of index {rel.IndexLookup.Index} on {rel.IndexLookup.Table?.Table}, which decides the rows read");
-                            }
-                        }
-
                         break;
                     case Chalk.Ir.Rel.KindOneofCase.AsOfLookupJoin:
                         foreach (var value in rel.AsOfLookupJoin.FixedValues)

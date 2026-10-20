@@ -2007,6 +2007,10 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   condition but its keys and an index of the table begins with them: a right row that arrives or
   leaves finds the left rows of its key through the index. So a view under a policy holds its
   reader's share, not the table ([A view under an access policy](#a-view-under-an-access-policy)).
+- **Index lookups over a range** are kept as a filter over the table: the index's leading keys held
+  equal and the next one between its bounds. A bound that reads the clock or a rebindable parameter
+  makes it a filter that moves, as such a filter does: a cut-off on an indexed time reads again only
+  the rows between the old cut and the new.
 - **Window functions.** A window is maintained when one change can move only so many of its rows:
   every frame ends at the current row, a number of rows or a range before it, or a number of rows
   or a range after it, as `LAG`, `LEAD`, `ROW_NUMBER`, `RANK`, `DENSE_RANK`, `FIRST_VALUE` and every
@@ -2030,7 +2034,10 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   - A call whose value depends on which of two tied rows comes first — a `ROWS` frame, `LAG`,
     `LEAD`, `ROW_NUMBER`, `FIRST_VALUE` — is refused unless its partition and order keys cover a
     unique key its input declares: a table's `UniqueKey`, `Keyed` or unique index, or an
-    aggregate's groups. A `RANGE` frame, `RANK` and `DENSE_RANK` treat tied rows alike.
+    aggregate's groups. The key holds through filters and projections, and through a join that
+    meets each row once at most: an equi-join whose other side is unique on its join keys, a join
+    with one row, a semi or an anti join, an as-of join. A `RANGE` frame, `RANK` and `DENSE_RANK`
+    treat tied rows alike.
   - A call that reads the clock or a rebindable parameter computes every partition again when it
     moves.
 - **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's
@@ -2054,7 +2061,6 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   - an as-of join whose right input is not a table read, or a lookup of one key in the table's
     order, through filters and projections;
   - an as-of seek whose key has one type in its table and another on its left;
-  - an index lookup over a range of keys;
   - the clock in a join's condition;
   - a source outside the engine's epochs;
   - a `LIST`, composite or `BINARY` value in what an operator keeps;
@@ -2234,9 +2240,8 @@ await view.RebindAsync(new { level = 5_520.0 });
   rows of a table and read it with `IN (SELECT …)`.
 - **Refused when the view is made**, by name: a name the statement does not have, the clock's, a
   statement whose parameters have no names, a capacity on a parameter that takes no list or below
-  the list it is made with. Kept incrementally, a parameter a `LIMIT` reads, or one that bounds an
-  index seek (a list on an indexed key, say), is refused too: both are fixed when the maintained
-  plan starts. A view that recomputes rebinds them.
+  the list it is made with. Kept incrementally, a parameter a `LIMIT` reads is refused too: it is
+  fixed when the maintained plan starts. A view that recomputes rebinds it.
 - **Refused at a rebind**, before anything moves: a name the view did not declare, a list where it
   was bound to one value, a list of another length, or beyond its capacity. A rebind whose update
   fails leaves the view with the values and the rows it held.
