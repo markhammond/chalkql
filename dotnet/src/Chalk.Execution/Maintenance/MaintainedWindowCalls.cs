@@ -191,6 +191,34 @@ internal sealed class WindowCallsState : IMaintainedState
         return low;
     }
 
+    /// <summary>Where a held row is in its partition: found by its order key, then among its peers.</summary>
+    private int Locate(List<int> slots, int slot)
+    {
+        int low = 0, high = slots.Count;
+        while (low < high)
+        {
+            var middle = (low + high) >>> 1;
+            if (HeldOrder.Compare(Order, Input.Rows, slots[middle], Input.Rows, slot) < 0)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        while (slots[low] != slot)
+        {
+            low++;
+        }
+
+        return low;
+    }
+
+    /// <summary>How many rows the last update handed the batch window: those its changes could reach and those they read.</summary>
+    public int Read { get; set; }
+
     /// <summary>Whether two held rows are peers: equal in every order key.</summary>
     public bool Peers(int a, int b) => HeldOrder.Compare(Order, Input.Rows, a, Input.Rows, b) == 0;
 
@@ -263,7 +291,7 @@ internal sealed class WindowCallsState : IMaintainedState
         Leaving?.Invoke(slot);
         if (lookup.TryGetValue(_encoder.Span, out var held))
         {
-            var at = held.IndexOf(slot);
+            var at = Locate(held, slot);
             held.RemoveAt(at);
             if (held.Count == 0)
             {
@@ -311,8 +339,8 @@ internal sealed class WindowCallChanges : MaintainedOperator, IKeepsScratch
     private readonly IBatchOperator _body;
     private readonly int _inputWidth;
 
-    // The touched partitions and the positions their changes reach, from the first of their peers to the last.
-    private readonly Dictionary<byte[], (int First, int Last)> _touched = new(ByteKeys.Instance);
+    // The touched partitions and, for each change, the positions it falls on: the first of its peers to the last.
+    private readonly Dictionary<byte[], List<(int First, int Last)>> _touched = new(ByteKeys.Instance);
 
     // For each partition computed: its rows, the span whose values are taken, and the rows read before it.
     private readonly List<Span> _spans = [];
@@ -414,7 +442,7 @@ internal sealed class WindowCallChanges : MaintainedOperator, IKeepsScratch
         {
             foreach (var key in state.PartitionKeys)
             {
-                _touched[key] = (0, int.MaxValue);
+                _touched[key] = [(0, int.MaxValue)];
             }
         }
         else
@@ -430,9 +458,12 @@ internal sealed class WindowCallChanges : MaintainedOperator, IKeepsScratch
                 var slots = state.Partition(key);
                 var first = state.LowerBound(slots, changes.Columns, row);
                 var last = state.UpperBound(slots, changes.Columns, row) - 1;
-                _touched[key] = _touched.TryGetValue(key, out var was)
-                    ? (Math.Min(was.First, first), Math.Max(was.Last, last))
-                    : (first, last);
+                if (!_touched.TryGetValue(key, out var falls))
+                {
+                    _touched[key] = falls = [];
+                }
+
+                falls.Add((first, last));
             }
         }
 
@@ -493,7 +524,7 @@ internal sealed class WindowCallChanges : MaintainedOperator, IKeepsScratch
         var state = _state;
         var reach = state.Reach;
         _spans.Clear();
-        foreach (var (key, (first, last)) in _touched)
+        foreach (var (key, falls) in _touched)
         {
             var slots = state.Partition(key);
             if (slots.Count == 0)
@@ -501,23 +532,52 @@ internal sealed class WindowCallChanges : MaintainedOperator, IKeepsScratch
                 continue;
             }
 
+            // A span for each change, then those whose rows read overlap or meet, merged: an append at a
+            // partition's end and a row taken from its start are two small spans, not the partition. Spans
+            // of one partition are handed over in order, one after another, which a call reads as one run;
+            // a call whose values read past a gap between them, a running frame or a ranking, reaches the
+            // partition's end, so its spans always merge.
             var end = slots.Count - 1;
-            var from = PeerStart(slots, Clamp(Back(first, reach.Behind), end));
-            var to = reach.Ahead == WindowReach.Unbounded || last >= end ? end : PeerEnd(slots, Clamp(Forward(last, reach.Ahead), end));
-            if (to < from)
+            var spans = new List<(int From, int To, int ReadFrom, int ReadTo)>(falls.Count);
+            foreach (var (first, last) in falls)
             {
-                continue; // the changes took out the partition's last rows, and nothing after them moves
+                var from = PeerStart(slots, Clamp(Back(first, reach.Behind), end));
+                var to = reach.Ahead == WindowReach.Unbounded || last >= end ? end : PeerEnd(slots, Clamp(Forward(last, reach.Ahead), end));
+                if (to < from)
+                {
+                    continue; // the changes took out the partition's last rows, and nothing after them moves
+                }
+
+                spans.Add((from, to, PeerStart(slots, Clamp(Back(from, reach.Lookback), end)), PeerEnd(slots, Clamp(Forward(to, reach.Lookahead), end))));
             }
 
-            var readFrom = PeerStart(slots, Clamp(Back(from, reach.Lookback), end));
-            var readTo = PeerEnd(slots, Clamp(Forward(to, reach.Lookahead), end));
-            _spans.Add(new Span(key, slots, from, to, readFrom, readTo));
+            spans.Sort((a, b) => a.ReadFrom.CompareTo(b.ReadFrom));
+            for (var i = 0; i < spans.Count;)
+            {
+                var merged = spans[i];
+                var j = i + 1;
+                while (j < spans.Count && spans[j].ReadFrom <= merged.ReadTo + 1)
+                {
+                    merged = (Math.Min(merged.From, spans[j].From), Math.Max(merged.To, spans[j].To), merged.ReadFrom, Math.Max(merged.ReadTo, spans[j].ReadTo));
+                    j++;
+                }
+
+                _spans.Add(new Span(key, slots, merged.From, merged.To, merged.ReadFrom, merged.ReadTo));
+                i = j;
+            }
         }
 
         // The batch window wants its partitions in their keys' order, and their rows in theirs.
-        _spans.Sort((a, b) => HeldOrder.Compare(state.PartitionOrder, state.Input.Rows, a.Slots[0], state.Input.Rows, b.Slots[0]));
+        _spans.Sort((a, b) =>
+        {
+            var partition = ReferenceEquals(a.Slots, b.Slots)
+                ? 0
+                : HeldOrder.Compare(state.PartitionOrder, state.Input.Rows, a.Slots[0], state.Input.Rows, b.Slots[0]);
+            return partition != 0 ? partition : a.ReadFrom.CompareTo(b.ReadFrom);
+        });
         state.Replay.Clear();
         _replayed.Clear();
+        state.Read = 0;
         foreach (var span in _spans)
         {
             for (var position = span.ReadFrom; position <= span.ReadTo; position++)
@@ -527,6 +587,7 @@ internal sealed class WindowCallChanges : MaintainedOperator, IKeepsScratch
                 {
                     state.Replay.Write(state.Input.Rows, slot, 1);
                     _replayed.Add(copy == state.Input.Count(slot) ? slot : -1);
+                    state.Read++;
                 }
             }
         }
