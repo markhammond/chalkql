@@ -24,6 +24,7 @@ internal sealed class JoinHashTable
     private ExecutionArena? _arena;
     private int[] _slots = [];
     private int[] _next = [];
+    private int[] _tails = [];
     private ulong[] _hashes = [];
     private int _mask;
 
@@ -49,6 +50,7 @@ internal sealed class JoinHashTable
 
         _slots = arena.Rent<int>(slots);
         _next = arena.Rent<int>(Math.Max(rows, 1));
+        _tails = arena.Rent<int>(Math.Max(rows, 1));
         _hashes = arena.Rent<ulong>(Math.Max(rows, 1));
         _mask = slots - 1;
         Array.Fill(_slots, -1, 0, slots);
@@ -73,18 +75,16 @@ internal sealed class JoinHashTable
             if (_slots[slot] < 0)
             {
                 _slots[slot] = row;
+                _tails[row] = row;
             }
             else
             {
                 // Append to the tail so a bucket keeps the build input's order, which is what makes
-                // the ASOF tie-break and every multi-match join deterministic.
-                var tail = _slots[slot];
-                while (_next[tail] >= 0)
-                {
-                    tail = _next[tail];
-                }
-
-                _next[tail] = row;
+                // the ASOF tie-break and every multi-match join deterministic. The head keeps its
+                // bucket's tail, so a key with many rows is not walked again for each one.
+                var head = _slots[slot];
+                _next[_tails[head]] = row;
+                _tails[head] = row;
             }
         }
     }
@@ -133,9 +133,11 @@ internal sealed class JoinHashTable
 
         _arena.Return(_slots);
         _arena.Return(_next);
+        _arena.Return(_tails);
         _arena.Return(_hashes);
         _slots = [];
         _next = [];
+        _tails = [];
         _hashes = [];
         _mask = 0;
         BuildKeys = [];
