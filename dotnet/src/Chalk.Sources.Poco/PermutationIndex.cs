@@ -98,6 +98,23 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
             return;
         }
 
+        // An index the table's own order backs holds no positions, and its search keys read rows, not
+        // arrays, so an append that keeps the order (which the collation's check confirms) extends it
+        // as it is. Only the appended rows' keys are read, where they can change what the index knows.
+        if (collationBacked
+            && previous is { _positions: null }
+            && appendedFrom > 0
+            && appendedFrom == previous._rowCount
+            && appendedFrom <= _rowCount
+            && previous.ExtendsInOrder(rows, keys, keyColumns, appendedFrom, scratch, table, keyColumnNames))
+        {
+            _directions = previous._directions;
+            _searchKeys = previous._searchKeys;
+            _positions = null;
+            ExtendedInOrder = true;
+            return;
+        }
+
         var keyCount = keys.Length;
 
         _directions = new SortDirection[keyCount];
@@ -236,6 +253,62 @@ public sealed class PermutationIndex<T> : IPositionalPocoIndex<T>, IReversiblePo
         }
 
         return (_positions!.Insert(ordinals, positions), inOrder);
+    }
+
+    /// <summary>
+    /// Whether this index, backed by the table's order, extends to the rows from
+    /// <paramref name="appendedFrom"/> on as it is: not when they bring the first value to a key that
+    /// held only NULLs, whose search reads no type. A unique index refuses an appended key equal to the
+    /// one before it, as a whole check would, since equal keys are neighbours in the table's order.
+    /// </summary>
+    private bool ExtendsInOrder(
+        IReadOnlyList<T> rows,
+        Func<T, object?>[] keys,
+        PocoColumn<T>[]? keyColumns,
+        int appendedFrom,
+        PermutationIndexScratch scratch,
+        string table,
+        IReadOnlyList<string> keyColumnNames)
+    {
+        var added = rows.Count - appendedFrom;
+        for (var k = 0; k < keys.Length; k++)
+        {
+            if (_searchKeys[k] is not AllNullSearchKey)
+            {
+                continue;
+            }
+
+            for (var i = appendedFrom; i < rows.Count; i++)
+            {
+                if (keys[k](rows[i]) is not null)
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (!Descriptor.Unique)
+        {
+            return true;
+        }
+
+        // The last row before the append and the appended rows, in the table's order.
+        var joined = new Appended(rows, appendedFrom - 1, added + 1);
+        var materialised = new IMaterialisedKey[keys.Length];
+        for (var k = 0; k < keys.Length; k++)
+        {
+            materialised[k] = MaterialiseKey(joined, keys[k], keyColumns?[k], _directions[k], k, scratch, out _);
+        }
+
+        for (var i = 1; i <= added; i++)
+        {
+            if (Equal(materialised, i - 1, i))
+            {
+                throw Duplicate(rows, appendedFrom + i - 2, appendedFrom + i - 1, keys, table, keyColumnNames);
+            }
+        }
+
+        return true;
     }
 
     /// <summary>Whether two of the materialised rows have equal keys in every column.</summary>
