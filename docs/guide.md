@@ -1990,7 +1990,8 @@ left rows and its right rows by key, an aggregate its groups — so an update re
     a margin of as many again. When removals leave the window short of rows it no longer holds, it
     reads the table again in the same update. So a feed of a table's newest rows holds a few hundred
     rows, never the table, and an append-only table never makes it read again.
-  - A `LIMIT ?` binds once, when the view is made, as every parameter of a view does.
+  - A `LIMIT ?` binds once, when the view is made, and cannot be declared rebindable (see "Moving a
+    view's parameters").
   - Two rows that tie under the whole order have one key, so the key does not hold before the
     `LIMIT`: the view is faulted with `DeclarationNotHeld`, saying so.
 - **Right joins.** The planner may write a statement's `LEFT JOIN` as a `RIGHT JOIN` with its sides
@@ -2160,6 +2161,59 @@ await engine.RefreshAsync(
 - **To see each swap**, read the view's tracker: the update that first runs the new plan
   reports it in `ViewUpdate.PlanDigest`. The observer's `PlansTakenIn.Version` says when it was
   taken in.
+
+### Moving a view's parameters
+
+A view's parameters bind when it is made. Those it names in `ViewOptions.Rebindable` can be bound
+again, and the view keeps its plan:
+
+```csharp
+var view = await engine.MaterializeAsync(
+    "SELECT seq / 100 AS bucket, SUM(price) AS equity, " +
+    "CASE WHEN SUM(price) < @level THEN 1 ELSE 0 END AS breached " +
+    "FROM marks GROUP BY seq / 100",
+    new ViewOptions<PointKey, PointRow>
+    {
+        Key = ["bucket"],
+        Parameters = new { level = 5_500.0 },
+        Rebindable = [new("level")],
+        Maintenance = ViewMaintenance.Incremental,
+        // …
+    });
+
+await view.RebindAsync(new { level = 5_520.0 });
+```
+
+- **A rebind is an update.** It binds the new values, brings the view to the latest epoch, and
+  returns the epoch's version, which is the one the view held when no refresh came between. The
+  planner is not asked for anything.
+- **Kept incrementally**, an operator that reads a rebindable parameter holds what it reads and
+  runs again over it when the parameter moves, as one that reads the clock does when the clock
+  moves. Readers get only the keys whose rows changed.
+- **Where the parameter is read decides what a move costs.**
+  - Read over the groups, as above, a move runs over the groups.
+  - Read on a table, as in `WHERE price < @level`, the filter holds every row of the table it reads:
+    over 200,000 rows, about 60 MB where the same view bound once holds about 1 MB, and a move runs
+    over all of them.
+  - Compared with a column of a time, date or integer type, as in `WHERE ts >= @from`, a move reads
+    again only the rows between the old value and the new.
+- **A `WITH` of a parameter**, such as `WITH t AS (SELECT CAST(@level AS DOUBLE) AS level)` joined
+  to the statement, is the parameter itself once planned, so it is rebound the same way. Write the
+  `CAST`: a parameter with nothing beside it to say its type is refused, naming it.
+- **A list** after `IN` or `NOT IN` keeps the length it was bound with. Given a capacity,
+  `new("picks", Capacity: 32)`, it binds any list of one element up to the capacity into the same
+  plan, padded by repeating its first element, which changes neither `IN` nor `NOT IN`. Each row is
+  then compared with as many values as the capacity. An empty list is refused: it cannot be padded
+  with one of its own elements. For a list that may be empty, is long, or moves often, hold it as
+  rows of a table and read it with `IN (SELECT …)`.
+- **Refused when the view is made**, by name: a name the statement does not have, the clock's, a
+  statement whose parameters have no names, a capacity on a parameter that takes no list or below
+  the list it is made with. Kept incrementally, a parameter a `LIMIT` reads, or one that bounds an
+  index seek (a list on an indexed key, say), is refused too: both are fixed when the maintained
+  plan starts. A view that recomputes rebinds them.
+- **Refused at a rebind**, before anything moves: a name the view did not declare, a list where it
+  was bound to one value, a list of another length, or beyond its capacity. A rebind whose update
+  fails leaves the view with the values and the rows it held.
 
 ### A view under an access policy
 

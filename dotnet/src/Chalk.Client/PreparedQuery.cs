@@ -962,7 +962,7 @@ public sealed class PreparedQuery
             _engine.Log);
         if (clockParameter >= 0)
         {
-            execution.UseClockSlots(ClockSlots(plan.Rendered.Slots, clockParameter));
+            execution.UseClockSlots(SlotsOf(plan.Rendered.Slots, clockParameter));
         }
 
         return execution;
@@ -1004,11 +1004,17 @@ public sealed class PreparedQuery
     /// This statement kept by incremental maintenance for a standing view (D343,
     /// <c>docs/design/68-incremental-maintenance.md</c>), its parameters of the shape of
     /// <paramref name="values"/>, the parameter at <paramref name="clockParameter"/> (or none, -1) the
-    /// engine's clock, and its result keyed by the output columns <paramref name="key"/>. A statement
+    /// engine's clock, those at <paramref name="rebindableParameters"/> bound again between updates
+    /// (design 77 §5), and its result keyed by the output columns <paramref name="key"/>. A statement
     /// that cannot be maintained is refused with <see cref="NotMaintainableException"/>, naming why.
     /// </summary>
     internal async ValueTask<MaintainedQuery> MaintainAsync(
-        object?[] values, int clockParameter, int[] key, CancellationToken ct, RequestContext? context = null)
+        object?[] values,
+        int clockParameter,
+        int[] key,
+        CancellationToken ct,
+        RequestContext? context = null,
+        IReadOnlyCollection<int>? rebindableParameters = null)
     {
         // A statement prepared with values carries them, and each update binds them as an execution
         // does (D361); one prepared for a shape binds the values the view gives it, which must fit
@@ -1028,11 +1034,13 @@ public sealed class PreparedQuery
 
         var state = Volatile.Read(ref _state);
         var plan = await ShapePlanAsync(state, values, ct).ConfigureAwait(false);
-        var clockSlots = clockParameter >= 0 ? ClockSlots(plan.Rendered.Slots, clockParameter) : [];
+        var clockSlots = clockParameter >= 0 ? SlotsOf(plan.Rendered.Slots, clockParameter) : [];
+        int[] rebindableSlots = [.. (rebindableParameters ?? []).SelectMany(p => SlotsOf(plan.Rendered.Slots, p))];
+        RefuseFixedAtStart(plan.Compiled.Plan, rebindableSlots, plan.Rendered.Slots);
         Chalk.Execution.Maintenance.MaintainedPlan maintained;
         try
         {
-            maintained = Chalk.Execution.Maintenance.MaintainedPlan.Create(plan.Compiled, clockSlots);
+            maintained = Chalk.Execution.Maintenance.MaintainedPlan.Create(plan.Compiled, clockSlots, rebindableSlots);
         }
         catch (Chalk.Execution.Maintenance.NotMaintainedException refusal)
         {
@@ -1107,8 +1115,133 @@ public sealed class PreparedQuery
         return (WithBoundScalars(flat, boundScalars, bindings), BoundRelations(bindings));
     }
 
+    /// <summary>
+    /// Refuses a rebindable parameter (design 77 §5) the maintained plan fixes when it starts: the count or
+    /// offset of a <c>LIMIT</c>, which the maintained top-N binds once, and a bound of an index seek or of
+    /// an as-of seek's fixed key, which decides the rows read. Named as the statement writes it.
+    /// </summary>
+    private void RefuseFixedAtStart(Chalk.Ir.Plan plan, int[] slots, IReadOnlyList<PlaceholderSlot> placeholders)
+    {
+        if (slots.Length == 0)
+        {
+            return;
+        }
+
+        var moving = slots.Select(s => (uint)s).ToHashSet();
+        string Named(uint slot) => Parameters[placeholders[(int)slot].ParameterIndex].ToString();
+
+        void Refuse(uint slot, string what) => throw new NotMaintainableException(
+            $"{Named(slot)} is rebindable, and {what}. Leave it out of ViewOptions.Rebindable to bind it once.",
+            "root");
+
+        var pending = new Stack<Google.Protobuf.IMessage>([plan.Root, .. plan.Shared.Select(s => s.Rel)]);
+        while (pending.Count > 0)
+        {
+            var next = pending.Pop();
+            if (next is Chalk.Ir.Rel rel)
+            {
+                switch (rel.KindCase)
+                {
+                    case Chalk.Ir.Rel.KindOneofCase.Fetch:
+                        Fixed(rel.Fetch.CountParam, rel.Fetch.OffsetParam, "the statement's LIMIT reads it, which a maintained LIMIT binds once");
+                        break;
+                    case Chalk.Ir.Rel.KindOneofCase.TopN:
+                        Fixed(rel.TopN.CountParam, rel.TopN.OffsetParam, "the statement's LIMIT reads it, which a maintained LIMIT binds once");
+                        break;
+                    case Chalk.Ir.Rel.KindOneofCase.IndexLookup:
+                        foreach (var range in rel.IndexLookup.Ranges)
+                        {
+                            foreach (var bound in range.Lower.Concat(range.Upper))
+                            {
+                                Within(bound, $"it bounds the seek of index {rel.IndexLookup.Index} on {rel.IndexLookup.Table?.Table}, which decides the rows read");
+                            }
+                        }
+
+                        break;
+                    case Chalk.Ir.Rel.KindOneofCase.AsOfLookupJoin:
+                        foreach (var value in rel.AsOfLookupJoin.FixedValues)
+                        {
+                            Within(value, "it fixes a key of an as-of seek, which decides the rows read");
+                        }
+
+                        break;
+                }
+            }
+
+            // Every relation beneath, however deep its node holds it: an aggregate's input is a field of
+            // its Aggregate, a set operation's inputs a list.
+            foreach (var field in next.Descriptor.Fields.InDeclarationOrder())
+            {
+                if (field.FieldType != Google.Protobuf.Reflection.FieldType.Message)
+                {
+                    continue;
+                }
+
+                var held = field.Accessor.GetValue(next);
+                if (held is Google.Protobuf.IMessage message and not Chalk.Ir.Expr)
+                {
+                    pending.Push(message);
+                }
+                else if (held is System.Collections.IEnumerable list)
+                {
+                    foreach (var item in list)
+                    {
+                        if (item is Google.Protobuf.IMessage each and not Chalk.Ir.Expr)
+                        {
+                            pending.Push(each);
+                        }
+                    }
+                }
+            }
+        }
+
+        void Fixed(Chalk.Ir.DynamicParam? count, Chalk.Ir.DynamicParam? offset, string what)
+        {
+            foreach (var param in new[] { count, offset })
+            {
+                if (param is { BoundKey: "" } && moving.Contains(param.Index))
+                {
+                    Refuse(param.Index, what);
+                }
+            }
+        }
+
+        void Within(Chalk.Ir.Expr expr, string what)
+        {
+            var exprs = new Stack<Google.Protobuf.IMessage>([expr]);
+            while (exprs.Count > 0)
+            {
+                var next = exprs.Pop();
+                if (next is Chalk.Ir.Expr { KindCase: Chalk.Ir.Expr.KindOneofCase.Param, Param.BoundKey: "" } param
+                    && moving.Contains(param.Param.Index))
+                {
+                    Refuse(param.Param.Index, what);
+                }
+
+                foreach (var field in next.Descriptor.Fields.InDeclarationOrder())
+                {
+                    var held = field.Accessor.GetValue(next);
+                    if (held is Google.Protobuf.IMessage message)
+                    {
+                        exprs.Push(message);
+                    }
+                    else if (held is System.Collections.IEnumerable list and not string and not Google.Protobuf.ByteString)
+                    {
+                        foreach (var item in list)
+                        {
+                            if (item is Google.Protobuf.IMessage each)
+                            {
+                                exprs.Push(each);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// <summary>The placeholders the parameter at <paramref name="parameter"/> fills: one for each time the text names it.</summary>
-    private static int[] ClockSlots(IReadOnlyList<PlaceholderSlot> slots, int parameter)
+    private static int[] SlotsOf(IReadOnlyList<PlaceholderSlot> slots, int parameter)
     {
         var found = new List<int>();
         for (var i = 0; i < slots.Count; i++)

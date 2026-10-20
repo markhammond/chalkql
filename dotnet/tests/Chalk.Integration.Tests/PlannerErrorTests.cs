@@ -87,6 +87,22 @@ public sealed class PlannerErrorTests(SharedSidecar sidecar)
         var error = await Assert.ThrowsAsync<PlanningException>(() => PlanAsync("SELEC * FROM bars").AsTask());
 
         Assert.DoesNotContain("reserved word", error.Message, StringComparison.Ordinal);
+
+    /// A parameter nothing beside it gives a type, as the one column of a row, is refused saying how to
+    /// type it: Calcite's own words say only that the parameter is illegal there.
+    /// </summary>
+    [Fact]
+    public async Task A_parameter_nothing_types_says_how_to_type_it()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+
+        var error = await Assert.ThrowsAsync<PlanningException>(() => PlanAsync("SELECT ? AS level FROM bars").AsTask());
+
+        Assert.Equal(PlanErrorKinds.Validation, error.Kind);
+        Assert.Contains(
+            "Illegal use of dynamic parameter: nothing beside the parameter gives it a type. Write CAST(? AS DOUBLE)",
+            error.Message,
+            StringComparison.Ordinal);
     }
 
     [Fact]

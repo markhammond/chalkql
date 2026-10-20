@@ -124,3 +124,20 @@ Chalk.Incremental.StandingView<TKey, TRow>.Statement.get -> Chalk.Client.Prepare
 Chalk.Incremental.StandingView<TKey, TRow>.ContextDigest.get -> string?
 Chalk.Incremental.ViewOptions<TKey, TRow>.Context.get -> Chalk.Client.RequestContext?
 Chalk.Incremental.ViewOptions<TKey, TRow>.Context.init -> void
+Chalk.Incremental.RebindableParameter
+Chalk.Incremental.RebindableParameter.<Clone>$() -> Chalk.Incremental.RebindableParameter!
+Chalk.Incremental.RebindableParameter.Capacity.get -> int?
+Chalk.Incremental.RebindableParameter.Capacity.init -> void
+Chalk.Incremental.RebindableParameter.Deconstruct(out string! Name, out int? Capacity) -> void
+Chalk.Incremental.RebindableParameter.Equals(Chalk.Incremental.RebindableParameter? other) -> bool
+Chalk.Incremental.RebindableParameter.Name.get -> string!
+Chalk.Incremental.RebindableParameter.Name.init -> void
+Chalk.Incremental.RebindableParameter.RebindableParameter(string! Name, int? Capacity = null) -> void
+Chalk.Incremental.StandingView<TKey, TRow>.RebindAsync(object! parameters, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<long>
+Chalk.Incremental.ViewOptions<TKey, TRow>.Rebindable.get -> System.Collections.Generic.IReadOnlyList<Chalk.Incremental.RebindableParameter!>?
+Chalk.Incremental.ViewOptions<TKey, TRow>.Rebindable.init -> void
+override Chalk.Incremental.RebindableParameter.Equals(object? obj) -> bool
+override Chalk.Incremental.RebindableParameter.GetHashCode() -> int
+override Chalk.Incremental.RebindableParameter.ToString() -> string!
+static Chalk.Incremental.RebindableParameter.operator !=(Chalk.Incremental.RebindableParameter? left, Chalk.Incremental.RebindableParameter? right) -> bool
+static Chalk.Incremental.RebindableParameter.operator ==(Chalk.Incremental.RebindableParameter? left, Chalk.Incremental.RebindableParameter? right) -> bool

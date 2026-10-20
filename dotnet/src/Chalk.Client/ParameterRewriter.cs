@@ -103,6 +103,47 @@ internal sealed class ParameterRewriter
     /// <summary>How many <c>?</c> the planner sees in the one-element shape.</summary>
     public int OccurrenceCount => _occurrences.Count;
 
+    /// <summary>
+    /// Which <c>?</c> of <paramref name="sql"/>, a statement with positional placeholders such as a
+    /// rendered one, stands at 1-based <paramref name="line"/> and <paramref name="column"/>, counting
+    /// from 0; or -1 when none does. A planner reports a position in the statement it was sent.
+    /// </summary>
+    public static int PlaceholderAt(string sql, int line, int column)
+    {
+        var offset = 0;
+        for (var at = 1; at < line && offset >= 0; at++)
+        {
+            offset = sql.IndexOf('\n', offset);
+            offset = offset < 0 ? -1 : offset + 1;
+        }
+
+        if (offset < 0 || column < 1)
+        {
+            return -1;
+        }
+
+        offset += column - 1;
+        var parsed = Parse(sql);
+        var position = 0;
+        foreach (var segment in parsed._segments)
+        {
+            if (segment.Occurrence < 0)
+            {
+                position += segment.Text.Length;
+                continue;
+            }
+
+            if (position == offset)
+            {
+                return segment.Occurrence;
+            }
+
+            position++;
+        }
+
+        return -1;
+    }
+
     /// <summary>Parses a statement and returns its rewriter, or throws naming the problem.</summary>
     public static ParameterRewriter Parse(string sql)
     {

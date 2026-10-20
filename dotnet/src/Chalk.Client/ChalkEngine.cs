@@ -894,7 +894,16 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         var hints = ParameterBinder.ResolveHints(
             rewriter.Parameters, rendered.Slots, parameterValueHints ?? options.ParameterValueHints);
 
-        var result = await PlanAsync(rendered.Sql, options, context, hints, ct).ConfigureAwait(false);
+        PlanResult result;
+        try
+        {
+            result = await PlanAsync(rendered.Sql, options, context, hints, ct).ConfigureAwait(false);
+        }
+        catch (PlanningException untyped) when (Untyped(untyped, rewriter, rendered) is { } named)
+        {
+            throw named;
+        }
+
         var compiled = await CompileAsync(result.Plan, options, context, ct).ConfigureAwait(false);
 
         var prepared = new PreparedQuery(
@@ -912,6 +921,35 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         }
 
         return prepared;
+    }
+
+    /// <summary>
+    /// A planner's refusal of a parameter that nothing beside it gives a type, as in <c>SELECT @level AS
+    /// level</c>, said again naming the parameter as the statement writes it; null for any other.
+    /// </summary>
+    private static PlanningException? Untyped(PlanningException refusal, ParameterRewriter rewriter, RenderedStatement rendered)
+    {
+        if (rewriter.Style is not (ParameterStyle.Named or ParameterStyle.Ordinal)
+            || refusal.Position is not { Line: > 0 } position
+            || !refusal.Message.Contains("Illegal use of dynamic parameter", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var placeholder = ParameterRewriter.PlaceholderAt(rendered.Sql, position.Line, position.Column);
+        if (placeholder < 0 || placeholder >= rendered.Slots.Count)
+        {
+            return null;
+        }
+
+        var parameter = rewriter.Parameters[rendered.Slots[placeholder].ParameterIndex];
+        return new PlanningException(
+            refusal.Violations,
+            $"{parameter} has nothing beside it to give it a type. Write CAST({parameter} AS DOUBLE), say, or declare "
+            + "its type in PrepareOptions.ParameterTypes.",
+            position,
+            planningState: null,
+            refusal);
     }
 
     /// <summary>Binds <c>?</c> or <c>$n</c> parameters and returns a ready-to-enumerate execution.</summary>

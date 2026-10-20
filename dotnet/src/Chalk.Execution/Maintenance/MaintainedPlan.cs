@@ -41,6 +41,11 @@ internal sealed class MaintainedPlan : IAsyncDisposable
     // The batches the last update gave, valid until the next update lets go of them.
     private MaintainedChanges? _given;
 
+    // The rebindable slots, the values the last update bound them to, and how many times they have moved.
+    private int[] _rebindable = [];
+    private object?[]? _rebound;
+    private long _bindings;
+
     private MaintainedPlan(CompiledPlan compiled, OperatorFactory root, List<IMaintainedState> states, TableDiffs diffs)
     {
         _compiled = compiled;
@@ -53,15 +58,33 @@ internal sealed class MaintainedPlan : IAsyncDisposable
 
     /// <summary>
     /// The plan of <paramref name="compiled"/> rewritten to be maintained, or a refusal naming the first
-    /// thing in it that cannot be (§8). <paramref name="clockSlots"/> are the parameters bound to the clock.
+    /// thing in it that cannot be (§8). <paramref name="clockSlots"/> are the parameters bound to the clock,
+    /// and <paramref name="rebindableSlots"/> those a view may bind again between updates (design 77 §5).
+    /// Both move: a node that reads one holds what it reads, and runs over it again when one moves.
     /// </summary>
-    public static MaintainedPlan Create(CompiledPlan compiled, IReadOnlyCollection<int> clockSlots)
+    public static MaintainedPlan Create(
+        CompiledPlan compiled, IReadOnlyCollection<int> clockSlots, IReadOnlyCollection<int>? rebindableSlots = null)
     {
         ArgumentNullException.ThrowIfNull(compiled);
+        int[] rebindable = [.. (rebindableSlots ?? []).Distinct().Order()];
         var compiler = new MaintainedCompiler(
-            compiled.Plan, compiled.Catalog, compiled.Sources, compiled.Settings, clockSlots);
-        var root = compiler.Compile();
-        var plan = new MaintainedPlan(compiled, root, compiler.States, compiler.Diffs);
+            compiled.Plan, compiled.Catalog, compiled.Sources, compiled.Settings, [.. clockSlots.Union(rebindable)]);
+        OperatorFactory root;
+        try
+        {
+            root = compiler.Compile();
+        }
+        catch (NotMaintainedException refusal) when (rebindable.Length > 0 && refusal.Message.Contains("clock", StringComparison.Ordinal))
+        {
+            // A rebindable parameter is kept as the clock is, so a refusal of a read of the clock may be of one.
+            throw new NotMaintainedException(
+                refusal.Message + " A rebindable parameter is kept as the clock is, and is refused where the clock is.")
+            {
+                Path = refusal.Path,
+            };
+        }
+
+        var plan = new MaintainedPlan(compiled, root, compiler.States, compiler.Diffs) { _rebindable = rebindable };
 
         // Build a tree once, so that a kernel or a type the operators cannot take is refused now.
         plan._tree = plan.Build();
@@ -142,6 +165,33 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// How many times the rebindable slots have moved, counting this update's values: one more than
+    /// before when any differs from the last update's. A value that cannot be told equal, such as a byte
+    /// array, counts as moved, which only runs the nodes that read it again.
+    /// </summary>
+    private long Bindings(IReadOnlyList<object?> parameters)
+    {
+        if (_rebindable.Length == 0)
+        {
+            return 0;
+        }
+
+        var last = _rebound ??= new object?[_rebindable.Length];
+        var moved = false;
+        for (var i = 0; i < _rebindable.Length; i++)
+        {
+            var value = parameters[_rebindable[i]];
+            if (!Equals(value, last[i]) || value is Array)
+            {
+                moved = true;
+                last[i] = value;
+            }
+        }
+
+        return moved ? ++_bindings : _bindings;
+    }
+
     private async ValueTask<MaintainedChanges> UpdateOnceAsync(
         IReadOnlyList<object?> parameters,
         DateTimeOffset now,
@@ -154,6 +204,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentNullException.ThrowIfNull(arena);
         var bound = ParameterBinder.Bind(parameters, _compiled.BoundTypes);
+        var bindings = Bindings(parameters);
         var tree = _tree ??= Build();
         var completed = false;
 
@@ -164,7 +215,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         {
             tree.Context.ReadSet ??= _compiled.NewReadSet();
             CompiledPlan.Pin(tree.Context.ReadSet, arena);
-            tree.Context.Begin(stats, arena, bound, now, relations);
+            tree.Context.Begin(stats, arena, bound, now, relations, bindings);
             _ = tree.Root.ExecuteAsync(ct);
             try
             {

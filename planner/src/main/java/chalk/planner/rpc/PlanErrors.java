@@ -211,12 +211,22 @@ public final class PlanErrors {
   }
 
   /** A statement Calcite's validator refused, at the position it named. */
+  /** Calcite's words for a parameter that nothing around it gives a type, as in {@code SELECT ?}. */
+  static final String UNTYPED_PARAMETER = "Illegal use of dynamic parameter";
+
   private static StatusRuntimeException validation(CalciteContextException context) {
+    String message = message(context);
+    if (message.endsWith(UNTYPED_PARAMETER)) {
+      // Nothing beside the parameter says what it is, as in `SELECT ? AS level`: say how to tell it.
+      message +=
+          ": nothing beside the parameter gives it a type. Write CAST(? AS DOUBLE), say, or declare its"
+              + " type with the statement's parameter types.";
+    }
     return build(
         Status.INVALID_ARGUMENT,
         PlanErrorKind.VALIDATION,
         ErrorCode.SQL_VALIDATION,
-        message(context),
+        message,
         context.getPosLine(),
         context.getPosColumn(),
         context.getEndPosLine(),
