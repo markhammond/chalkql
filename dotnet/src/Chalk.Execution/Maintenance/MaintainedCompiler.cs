@@ -41,6 +41,9 @@ internal sealed class MaintainedCompiler
     /// §5). A node that reads one is kept as one that reads the clock is.
     /// </summary>
     private readonly HashSet<uint> _movingSlots;
+
+    /// <summary>The clock's parameters alone, which move only forward, unlike a parameter a view binds again.</summary>
+    private readonly HashSet<uint> _clockSlots;
     private readonly IPlanCompilation _compilation;
     private readonly Dictionary<string, OperatorFactory> _placeholders = new(StringComparer.Ordinal);
     private readonly Dictionary<uint, Rel> _sharedPlans = [];
@@ -61,13 +64,15 @@ internal sealed class MaintainedCompiler
         CatalogContext catalog,
         IReadOnlyDictionary<string, ISourceRuntime> sources,
         ExecutionSettings settings,
-        IReadOnlyCollection<int> movingSlots)
+        IReadOnlyCollection<int> movingSlots,
+        IReadOnlyCollection<int>? clockSlots = null)
     {
         _plan = plan;
         _catalog = catalog;
         _sources = sources;
         _settings = settings;
         _movingSlots = [.. movingSlots.Select(s => (uint)s)];
+        _clockSlots = [.. (clockSlots ?? []).Select(s => (uint)s)];
         _compilation = PlanCompiler.Begin(plan, catalog, sources, settings);
         _compilation.Substitute = (rel, _) =>
             rel.KindCase == Rel.KindOneofCase.BoundTable
@@ -432,7 +437,8 @@ internal sealed class MaintainedCompiler
             return null;
         }
 
-        var state = new WindowState(Types(input.RowType), [.. cuts.Select(c => c.Column)], _settings.BatchSize);
+        var state = new WindowState(
+            Types(input.RowType), [.. cuts.Select(c => c.Column)], _settings.BatchSize, Behind(rel.Filter.Condition, cuts));
         States.Add(state);
         var inputFactory = Node(Rewrite(input, path), path);
         var expressions = _compilation.ExpressionsAt(path);
@@ -445,6 +451,81 @@ internal sealed class MaintainedCompiler
         return Substituted(weighted, context => new WindowChanges(
             context, path, schema, types, state, inputFactory(context), condition, thresholds));
     }
+
+    /// <summary>
+    /// For each cut-off, whether a row behind it can never pass again, so the filter need not hold it: the
+    /// comparison is a lower bound, <c>column &gt;= cut</c> or <c>column &gt; cut</c>, of the condition's top
+    /// level, and the cut-off rises with the clock and reads nothing else that moves.
+    /// </summary>
+    private (bool LetsGo, bool Strict)[] Behind(Expr condition, List<(int Column, Expr Cut)> cuts)
+    {
+        var behind = new (bool, bool)[cuts.Count];
+        var conjuncts = new Stack<Expr>([condition]);
+        while (conjuncts.Count > 0)
+        {
+            var term = conjuncts.Pop();
+            if (term is { KindCase: Expr.KindOneofCase.Call, Call.Function: FunctionId.And })
+            {
+                foreach (var arg in term.Call.Args)
+                {
+                    conjuncts.Push(arg);
+                }
+
+                continue;
+            }
+
+            if (term is not { KindCase: Expr.KindOneofCase.Call, Call.Args.Count: 2 })
+            {
+                continue;
+            }
+
+            // `column >= cut` or `cut <= column`, and the strict forms.
+            var (left, right) = (term.Call.Args[0], term.Call.Args[1]);
+            var (cut, strict) = term.Call.Function switch
+            {
+                FunctionId.Ge when left.KindCase == Expr.KindOneofCase.FieldRef => (right, false),
+                FunctionId.Gt when left.KindCase == Expr.KindOneofCase.FieldRef => (right, true),
+                FunctionId.Le when right.KindCase == Expr.KindOneofCase.FieldRef => (left, false),
+                FunctionId.Lt when right.KindCase == Expr.KindOneofCase.FieldRef => (left, true),
+                _ => (null, false),
+            };
+
+            var at = cut is null ? -1 : cuts.FindIndex(c => ReferenceEquals(c.Cut, cut));
+            if (at >= 0 && RisesWithTheClock(cut!))
+            {
+                behind[at] = (true, strict);
+            }
+        }
+
+        return behind;
+    }
+
+    /// <summary>
+    /// Whether a cut-off rises with the clock and nothing else moves it: the clock, or the clock plus or
+    /// minus a constant, perhaps under a cast. A parameter a view binds again could move it back.
+    /// </summary>
+    private bool RisesWithTheClock(Expr cut) => cut.KindCase switch
+    {
+        Expr.KindOneofCase.Param => _clockSlots.Contains(cut.Param.Index),
+        Expr.KindOneofCase.Cast => RisesWithTheClock(cut.Cast.Input),
+        Expr.KindOneofCase.Call => cut.Call.Function switch
+        {
+            FunctionId.CurrentTimestamp or FunctionId.CurrentDate => true,
+            FunctionId.Add or FunctionId.Subtract or FunctionId.TimestampAdd when cut.Call.Args.Count == 2 =>
+                (RisesWithTheClock(cut.Call.Args[0]) && Constant(cut.Call.Args[1]))
+                || (cut.Call.Function != FunctionId.Subtract && Constant(cut.Call.Args[0]) && RisesWithTheClock(cut.Call.Args[1])),
+            _ => false,
+        },
+        _ => false,
+    };
+
+    /// <summary>A literal, or one under a cast.</summary>
+    private static bool Constant(Expr expr) => expr.KindCase switch
+    {
+        Expr.KindOneofCase.Literal => true,
+        Expr.KindOneofCase.Cast => Constant(expr.Cast.Input),
+        _ => false,
+    };
 
     /// <summary>
     /// Collects the comparisons of an input column with a cut-off that reads the clock, and says whether

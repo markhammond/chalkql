@@ -25,7 +25,7 @@ public sealed class WindowOverTheClockTests(SharedSidecar sidecar)
 
     /// <summary>
     /// Two thousand ticks a second apart, and a ten-minute window over them. Each move of the clock by
-    /// ten seconds reads again the ten or so ticks the cut-off passed, not the two thousand held, and
+    /// ten seconds reads again the ten or so ticks the cut-off passed, not the six hundred held, and
     /// the view is the statement after every move.
     /// </summary>
     [Fact]
@@ -39,8 +39,10 @@ public sealed class WindowOverTheClockTests(SharedSidecar sidecar)
         var window = Assert.Single(maintained.States.OfType<WindowState>());
         var held = new Dictionary<long, long>();
 
+        // The first update reads the ticks after the cut-off and lets the rest go: the clock moves only
+        // forward, so a tick behind a cut-off that rises with it can never pass again.
         Apply(await maintained.UpdateAsync([now], At(now), desk.Engine.Version, whole: false, Ct), held);
-        Assert.Equal(2_000, window.Read);
+        Assert.Equal(1_599, window.Read);
         Assert.Equal(await StatementAsync(desk.Engine, prepared, now), held);
 
         for (var step = 0; step < 20; step++)

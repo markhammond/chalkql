@@ -1953,9 +1953,13 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   stands, and on every row it holds when the clock moves. A filter whose every read of the clock is a
   cut-off a column is compared with, such as `ts > CURRENT_TIMESTAMP - INTERVAL '2' HOUR`, reads again
   only the rows between its old cut-off and its new one. That holds under `AND`, `OR` and `NOT`, for a
-  column of a whole-number type: a number, a date, a time or a timestamp. A part of the statement
-  that reads no table at all, such as the days a report is computed for, is computed whole when the
-  clock moves.
+  column of a whole-number type: a number, a date, a time or a timestamp. The clock moves only
+  forward, so where such a cut-off is a lower bound of the whole condition, as `ts > …` alone or
+  under `AND` is, and rises with the clock alone, the filter lets go of the rows behind it, and a
+  change behind it gives nothing: a two-hour window over a day of marks holds about a sixth of what
+  the whole log would. Beside an `OR`, or read from a parameter a view binds again, it holds every
+  row. A part of the statement that reads no table at all, such as the days a report is computed
+  for, is computed whole when the clock moves.
 - **Aggregate filters.** An aggregate's `FILTER (WHERE …)` is maintained, and so is a `CASE` inside
   an aggregate, such as `SUM(CASE WHEN keep THEN x END)`, which the planner writes as one. A row the
   filter does not keep counts towards its group and towards no measure, so a group whose rows all
