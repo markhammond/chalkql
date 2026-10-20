@@ -420,16 +420,23 @@ public sealed class MaintainedStatementTests(SharedSidecar sidecar)
     }
 
     /// <summary>
-    /// Lookups maintenance does not keep (design 68 §19): one over a range of keys; and one under an
-    /// as-of join whose index orders the rows of one key and time by a column the join does not read,
-    /// so its ties are not the table's order.
+    /// A lookup over a range of keys is kept as a filter over the table, its equal leading key and the
+    /// bounds of the next (design 77): it gives what the statement gives through every random step.
+    /// </summary>
+    [Fact]
+    public async Task A_lookup_over_a_range_of_keys_is_kept_as_a_filter()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await RunAsync(
+            "SELECT l.book * 1000 + l.asset AS k, l.lim FROM limits l WHERE l.book = 2 AND l.asset BETWEEN 5 AND 9",
+            [0], 5, initial: 1_500, "IndexLookup");
+    }
+
+    /// <summary>
+    /// A lookup maintenance does not keep (design 68 §19): one under an as-of join whose index orders the
+    /// rows of one key and time by a column the join does not read, so its ties are not the table's order.
     /// </summary>
     [Theory]
-    [InlineData(
-        "SELECT l.book * 1000 + l.asset AS k, l.lim FROM limits l WHERE l.book = 2 AND l.asset BETWEEN 5 AND 9",
-        "IndexLookup",
-        false,
-        "an index lookup over a range of keys")]
     [InlineData(
         "SELECT t.seq, m.px, m.tag FROM trades t ASOF JOIN marks m MATCH_CONDITION m.ts <= t.ts ON m.asset = 2",
         "AsOfJoin over IndexLookup",

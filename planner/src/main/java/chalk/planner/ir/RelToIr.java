@@ -1143,7 +1143,7 @@ public final class RelToIr {
     ir.addAllOrder(sortFields(group.orderKeys, inputRow));
     ir.setFrame(frame(group, inputRow));
     for (org.apache.calcite.rel.core.Window.RexWinAggCall call : group.aggCalls) {
-      ir.addCalls(windowCall(call, inputRow));
+      ir.addCalls(windowCall(call, inputRow, node.getInput()));
     }
     return ir.build();
   }
@@ -1228,7 +1228,7 @@ public final class RelToIr {
   }
 
   private WindowCall windowCall(
-      org.apache.calcite.rel.core.Window.RexWinAggCall call, RelDataType inputRow) {
+      org.apache.calcite.rel.core.Window.RexWinAggCall call, RelDataType inputRow, RelNode input) {
     SqlAggFunction function = (SqlAggFunction) call.getOperator();
     Type resultType = types.toIr(call.getType());
     WindowCall.Builder ir =
@@ -1252,7 +1252,9 @@ public final class RelToIr {
     for (int i = 0; i < operands.size(); i++) {
       Type constantType = constantArgumentType(windowFunction, i, resultType);
       ir.addArgs(
-          constantType == null ? rex.convert(operands.get(i)) : constant(operands.get(i), constantType));
+          constantType == null
+              ? rex.convert(operands.get(i))
+              : constant(computedBy(operands.get(i), input), constantType));
     }
 
     // WindowCall.order_by exists for a holistic aggregate over a frame, and stays empty here:
@@ -1286,6 +1288,40 @@ public final class RelToIr {
       case WINDOW_FUNCTION_ID_NTH_VALUE -> index == 1 ? i64 : null;
       default -> null;
     };
+  }
+
+  /**
+   * A window's constant argument where the projection beneath the window computes it (F259): Calcite
+   * resolves only literals into the window's constants, and computes any other constant, such as a
+   * parameter a {@code LAG} default reads, in the projection that feeds the window, leaving the call a
+   * reference to it. Read there, a parameter or a literal is the constant itself, and so is a parameter
+   * under a cast to the type it already has.
+   */
+  private static RexNode computedBy(RexNode node, RelNode input) {
+    // A sort or a filter between them keeps the projection's fields where they are.
+    while (input instanceof org.apache.calcite.rel.core.Sort || input instanceof org.apache.calcite.rel.core.Filter) {
+      input = input.getInput(0);
+    }
+
+    if (!(node instanceof RexInputRef ref)
+        || !(input instanceof org.apache.calcite.rel.core.Project project)
+        || ref.getIndex() >= project.getProjects().size()) {
+      return node;
+    }
+
+    RexNode computed = project.getProjects().get(ref.getIndex());
+    if (computed instanceof org.apache.calcite.rex.RexDynamicParam || computed instanceof RexLiteral) {
+      return computed;
+    }
+
+    // `CAST(? AS BIGINT)` types the parameter BIGINT, so the cast changes nothing the client binds.
+    if (computed.getKind() == SqlKind.CAST
+        && ((RexCall) computed).getOperands().get(0) instanceof org.apache.calcite.rex.RexDynamicParam param
+        && org.apache.calcite.sql.type.SqlTypeUtil.equalSansNullability(param.getType(), computed.getType())) {
+      return param;
+    }
+
+    return node;
   }
 
   /**

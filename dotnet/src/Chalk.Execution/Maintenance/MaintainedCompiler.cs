@@ -41,6 +41,9 @@ internal sealed class MaintainedCompiler
     /// §5). A node that reads one is kept as one that reads the clock is.
     /// </summary>
     private readonly HashSet<uint> _movingSlots;
+
+    /// <summary>The clock's parameters alone, which move only forward, unlike a parameter a view binds again.</summary>
+    private readonly HashSet<uint> _clockSlots;
     private readonly IPlanCompilation _compilation;
     private readonly Dictionary<string, OperatorFactory> _placeholders = new(StringComparer.Ordinal);
     private readonly Dictionary<uint, Rel> _sharedPlans = [];
@@ -61,13 +64,15 @@ internal sealed class MaintainedCompiler
         CatalogContext catalog,
         IReadOnlyDictionary<string, ISourceRuntime> sources,
         ExecutionSettings settings,
-        IReadOnlyCollection<int> movingSlots)
+        IReadOnlyCollection<int> movingSlots,
+        IReadOnlyCollection<int>? clockSlots = null)
     {
         _plan = plan;
         _catalog = catalog;
         _sources = sources;
         _settings = settings;
         _movingSlots = [.. movingSlots.Select(s => (uint)s)];
+        _clockSlots = [.. (clockSlots ?? []).Select(s => (uint)s)];
         _compilation = PlanCompiler.Begin(plan, catalog, sources, settings);
         _compilation.Substitute = (rel, _) =>
             rel.KindCase == Rel.KindOneofCase.BoundTable
@@ -174,6 +179,7 @@ internal sealed class MaintainedCompiler
                 Rel.KindOneofCase.StreamAggregate => Aggregate(rel, path, rel.StreamAggregate.Aggregate),
                 Rel.KindOneofCase.Aggregate => Aggregate(rel, path, rel.Aggregate),
                 Rel.KindOneofCase.SharedRef => Shared(rel, path),
+                Rel.KindOneofCase.Window => WindowCalls(rel, path),
                 _ => throw new NotMaintainedException(Unmaintained(rel)),
             };
         }
@@ -188,7 +194,6 @@ internal sealed class MaintainedCompiler
         Rel.KindOneofCase.Fetch or Rel.KindOneofCase.TopN =>
             "a LIMIT is maintained only as the statement's last step, ordered by its ORDER BY; here its rows "
             + "would depend on the input's order.",
-        Rel.KindOneofCase.Window => "a window function over a table is not maintained.",
         Rel.KindOneofCase.Hop or Rel.KindOneofCase.Session => "a hopping or session window is not maintained.",
         Rel.KindOneofCase.Unnest => "UNNEST over a table is not maintained.",
         Rel.KindOneofCase.RemoteQuery or Rel.KindOneofCase.LookupJoin or Rel.KindOneofCase.AdaptiveJoin
@@ -234,11 +239,10 @@ internal sealed class MaintainedCompiler
     private Rel Lookup(Rel rel, string path)
     {
         var lookup = rel.IndexLookup;
-        if (!lookup.Ranges.All(Pinned))
+        if (lookup.Ranges.Any(r => r.Prefix))
         {
             throw new NotMaintainedException(
-                "an index lookup over a range of keys is not maintained; a lookup pinned to keys, as a constant "
-                + "key or an IN list makes, is.");
+                "an index lookup by a LIKE prefix is not maintained; one pinned to keys, or over a range of them, is.");
         }
 
         var descriptor = _catalog.FindTable(lookup.Table.Schema, lookup.Table.Table)
@@ -249,9 +253,8 @@ internal sealed class MaintainedCompiler
         // The lookup's own columns, then the key columns it does not hand over, which the filter reads.
         var columns = lookup.Projection.Select(c => (int)c).ToList();
         var row = rel.RowType.Clone();
-        foreach (var bound in lookup.Ranges.SelectMany(r => r.Lower.Select((value, k) => (value, k))))
+        foreach (var bound in lookup.Ranges.SelectMany(r => r.Lower.Select((value, k) => (value, k)).Concat(r.Upper.Select((value, k) => (value, k)))))
         {
-            RefuseClock(bound.value, "an index lookup's key");
             var column = index.Columns[bound.k];
             if (!columns.Contains(column))
             {
@@ -263,9 +266,14 @@ internal sealed class MaintainedCompiler
 
         var read = new Rel { RowType = row, Read = new Ir.Read { Table = lookup.Table } };
         read.Read.Projection.AddRange(columns.Select(c => (uint)c));
+        // Each range as the condition it reads in the index's order: a pinned one its keys, any other its
+        // equal leading keys and the bounds of the next. A bound that reads the clock, or a parameter a view
+        // binds again, makes the filter one that holds what it reads, as any filter reading one does.
         var condition = lookup.Ranges.Count == 0
             ? new Expr { Type = ChalkType.Bool().ToProto(), Literal = new Literal { BoolValue = false } }
-            : AnyOf([.. lookup.Ranges.Select(range => AllOf([.. range.Lower.Select((value, k) => KeyEquals(row, columns.IndexOf(index.Columns[k]), value))]))]);
+            : AnyOf([.. lookup.Ranges.Select(range => Pinned(range)
+                ? AllOf([.. range.Lower.Select((value, k) => KeyEquals(row, columns.IndexOf(index.Columns[k]), value))])
+                : RangeCondition(range, row, columns, index))]);
         var kept = new Rel { RowType = row, Filter = new Ir.Filter { Input = read, Condition = condition } };
         if (columns.Count > lookup.Projection.Count)
         {
@@ -289,6 +297,58 @@ internal sealed class MaintainedCompiler
         range is { LowerInclusive: true, UpperInclusive: true, Prefix: false }
         && range.Lower.Count > 0
         && range.Lower.Equals(range.Upper);
+
+    /// <summary>
+    /// An index range that is not one key, as a condition on the rows it holds: its leading keys, where its
+    /// two bounds agree, equal; and the next key between its bounds, each side open or closed as the range
+    /// says. A descending key column reads its bounds the other way (D281). A range with neither bound holds
+    /// every row.
+    /// </summary>
+    private static Expr RangeCondition(IndexRange range, RowType row, List<int> columns, IndexDescriptor index)
+    {
+        var terms = new List<Expr>();
+        var shared = 0;
+        while (shared < range.Lower.Count && shared < range.Upper.Count && range.Lower[shared].Equals(range.Upper[shared])
+            && (shared < range.Lower.Count - 1 || shared < range.Upper.Count - 1))
+        {
+            terms.Add(KeyEquals(row, columns.IndexOf(index.Columns[shared]), range.Lower[shared]));
+            shared++;
+        }
+
+        if (range.Lower.Count > shared + 1 || range.Upper.Count > shared + 1)
+        {
+            throw new NotMaintainedException("an index lookup over a range bounded past its next key is not maintained.");
+        }
+
+        var slot = shared < index.Columns.Count ? columns.IndexOf(index.Columns[shared]) : -1;
+        var descending = shared < index.Columns.Count
+            && index.DirectionAt(shared) is SortDirection.DescNullsFirst or SortDirection.DescNullsLast;
+        if (range.Lower.Count > shared)
+        {
+            terms.Add(KeyCompared(row, slot, range.Lower[shared], descending
+                ? range.LowerInclusive ? FunctionId.Le : FunctionId.Lt
+                : range.LowerInclusive ? FunctionId.Ge : FunctionId.Gt));
+        }
+
+        if (range.Upper.Count > shared)
+        {
+            terms.Add(KeyCompared(row, slot, range.Upper[shared], descending
+                ? range.UpperInclusive ? FunctionId.Ge : FunctionId.Gt
+                : range.UpperInclusive ? FunctionId.Le : FunctionId.Lt));
+        }
+
+        return terms.Count == 0
+            ? new Expr { Type = ChalkType.Bool().ToProto(), Literal = new Literal { BoolValue = true } }
+            : AllOf([.. terms]);
+    }
+
+    /// <summary>A key column compared with a lookup's bound, the bound cast to the column's type if it has another.</summary>
+    private static Expr KeyCompared(RowType row, int slot, Expr bound, FunctionId comparison)
+    {
+        var equals = KeyEquals(row, slot, bound);
+        equals.Call.Function = comparison;
+        return equals;
+    }
 
     /// <summary>A key column equal to a lookup's bound, the bound cast to the column's type if it has another.</summary>
     private static Expr KeyEquals(RowType row, int slot, Expr bound)
@@ -377,7 +437,8 @@ internal sealed class MaintainedCompiler
             return null;
         }
 
-        var state = new WindowState(Types(input.RowType), [.. cuts.Select(c => c.Column)], _settings.BatchSize);
+        var state = new WindowState(
+            Types(input.RowType), [.. cuts.Select(c => c.Column)], _settings.BatchSize, Behind(rel.Filter.Condition, cuts));
         States.Add(state);
         var inputFactory = Node(Rewrite(input, path), path);
         var expressions = _compilation.ExpressionsAt(path);
@@ -390,6 +451,81 @@ internal sealed class MaintainedCompiler
         return Substituted(weighted, context => new WindowChanges(
             context, path, schema, types, state, inputFactory(context), condition, thresholds));
     }
+
+    /// <summary>
+    /// For each cut-off, whether a row behind it can never pass again, so the filter need not hold it: the
+    /// comparison is a lower bound, <c>column &gt;= cut</c> or <c>column &gt; cut</c>, of the condition's top
+    /// level, and the cut-off rises with the clock and reads nothing else that moves.
+    /// </summary>
+    private (bool LetsGo, bool Strict)[] Behind(Expr condition, List<(int Column, Expr Cut)> cuts)
+    {
+        var behind = new (bool, bool)[cuts.Count];
+        var conjuncts = new Stack<Expr>([condition]);
+        while (conjuncts.Count > 0)
+        {
+            var term = conjuncts.Pop();
+            if (term is { KindCase: Expr.KindOneofCase.Call, Call.Function: FunctionId.And })
+            {
+                foreach (var arg in term.Call.Args)
+                {
+                    conjuncts.Push(arg);
+                }
+
+                continue;
+            }
+
+            if (term is not { KindCase: Expr.KindOneofCase.Call, Call.Args.Count: 2 })
+            {
+                continue;
+            }
+
+            // `column >= cut` or `cut <= column`, and the strict forms.
+            var (left, right) = (term.Call.Args[0], term.Call.Args[1]);
+            var (cut, strict) = term.Call.Function switch
+            {
+                FunctionId.Ge when left.KindCase == Expr.KindOneofCase.FieldRef => (right, false),
+                FunctionId.Gt when left.KindCase == Expr.KindOneofCase.FieldRef => (right, true),
+                FunctionId.Le when right.KindCase == Expr.KindOneofCase.FieldRef => (left, false),
+                FunctionId.Lt when right.KindCase == Expr.KindOneofCase.FieldRef => (left, true),
+                _ => (null, false),
+            };
+
+            var at = cut is null ? -1 : cuts.FindIndex(c => ReferenceEquals(c.Cut, cut));
+            if (at >= 0 && RisesWithTheClock(cut!))
+            {
+                behind[at] = (true, strict);
+            }
+        }
+
+        return behind;
+    }
+
+    /// <summary>
+    /// Whether a cut-off rises with the clock and nothing else moves it: the clock, or the clock plus or
+    /// minus a constant, perhaps under a cast. A parameter a view binds again could move it back.
+    /// </summary>
+    private bool RisesWithTheClock(Expr cut) => cut.KindCase switch
+    {
+        Expr.KindOneofCase.Param => _clockSlots.Contains(cut.Param.Index),
+        Expr.KindOneofCase.Cast => RisesWithTheClock(cut.Cast.Input),
+        Expr.KindOneofCase.Call => cut.Call.Function switch
+        {
+            FunctionId.CurrentTimestamp or FunctionId.CurrentDate => true,
+            FunctionId.Add or FunctionId.Subtract or FunctionId.TimestampAdd when cut.Call.Args.Count == 2 =>
+                (RisesWithTheClock(cut.Call.Args[0]) && Constant(cut.Call.Args[1]))
+                || (cut.Call.Function != FunctionId.Subtract && Constant(cut.Call.Args[0]) && RisesWithTheClock(cut.Call.Args[1])),
+            _ => false,
+        },
+        _ => false,
+    };
+
+    /// <summary>A literal, or one under a cast.</summary>
+    private static bool Constant(Expr expr) => expr.KindCase switch
+    {
+        Expr.KindOneofCase.Literal => true,
+        Expr.KindOneofCase.Cast => Constant(expr.Cast.Input),
+        _ => false,
+    };
 
     /// <summary>
     /// Collects the comparisons of an input column with a cut-off that reads the clock, and says whether
@@ -557,6 +693,463 @@ internal sealed class MaintainedCompiler
         var types = Types(weighted);
         return Substituted(weighted, context => new ClockedChanges(
             context, path, schema, types, state, inputFactory(context), body(context)));
+    }
+
+    /// <summary>
+    /// A window rel's calls, maintained (design 77 §2, phase 1): each partition its input's changes touch
+    /// is computed again, whole, by the batch window over its rows in order, and what differs from what it
+    /// gave is given. Refused, naming the call, where one change could move every row of a partition (§1),
+    /// or where a call's value depends on which of two tied rows comes first and the order can tie (§4).
+    /// </summary>
+    private Rel WindowCalls(Rel rel, string path)
+    {
+        var window = rel.Window;
+        var input = window.Input;
+        var names = rel.RowType.Fields;
+        var inputWidth = input.RowType.Fields.Count;
+        for (var i = 0; i < window.Calls.Count; i++)
+        {
+            var call = window.Calls[i];
+            var name = inputWidth + i < names.Count ? names[inputWidth + i].Name : $"#{i}";
+            if (Unbounded(window, call) is { } why)
+            {
+                throw new NotMaintainedException(
+                    $"the window call '{name}' {why}, so one change to a partition would move every row of it.");
+            }
+
+            if (TieSensitive(window, call) && !OrderCannotTie(window, input))
+            {
+                throw new NotMaintainedException(
+                    $"the window call '{name}' gives a value that depends on which of two rows that tie in its order "
+                    + "comes first, and its partition and order keys cover no unique key the input declares. Declare "
+                    + "one (UniqueKey on the table), order by columns that cover one, or use a RANGE frame.");
+            }
+        }
+
+        var inputTypes = Types(input.RowType);
+        var callTypes = Types(rel.RowType)[inputWidth..];
+        var partitionOrder = new SortOrdering(
+            [.. window.PartitionKeys.Select(k => new SortField
+            {
+                Expr = new Expr { Type = input.RowType.Fields[(int)k].Type, FieldRef = new FieldRef { Index = k } },
+                Direction = SortDirection.AscNullsLast,
+            })],
+            input.RowType);
+        var state = new WindowCallsState(
+            inputTypes,
+            callTypes,
+            [.. window.PartitionKeys.Select(k => (int)k)],
+            new SortOrdering(window.Order, input.RowType),
+            partitionOrder,
+            Reach(window, callTypes),
+            ReadsClock(window),
+            _settings.BatchSize);
+        States.Add(state);
+        var inputFactory = Node(Rewrite(input, path), path);
+
+        // The batch window over the replay, which hands it each partition's rows in their order.
+        var replayRow = Weighted(input.RowType);
+        var replaySchema = ArrowTypeMapping.ToArrowSchema(replayRow);
+        var replayTypes = Types(replayRow);
+        var replay = Substituted(replayRow, context => new WindowReplay(context, path, replaySchema, replayTypes, state));
+        var calls = window.Clone();
+        calls.Input = replay;
+        var callsRow = replayRow.Clone();
+        for (var i = inputWidth; i < rel.RowType.Fields.Count; i++)
+        {
+            callsRow.Fields.Add(rel.RowType.Fields[i].Clone());
+        }
+
+        var body = Node(new Rel { RowType = callsRow, Window = calls }, path);
+        var weighted = Weighted(rel.RowType);
+        var schema = ArrowTypeMapping.ToArrowSchema(weighted);
+        var types = Types(weighted);
+        return Substituted(weighted, context => new WindowCallChanges(
+            context, path, schema, types, state, inputFactory(context), body(context), inputWidth));
+    }
+
+    /// <summary>
+    /// How far one change reaches in a window, in rows (design 77 §2): the rows after and before a changed
+    /// row whose values may move, and the rows before and after a row its value reads, over every call;
+    /// and how each call is resumed at a span that does not begin its partition. A RANGE or GROUPS offset,
+    /// and an IGNORE NULLS navigation, reach without a count: unbounded.
+    /// </summary>
+    private static WindowReach Reach(Ir.Window window, ChalkType[] callTypes)
+    {
+        const int all = WindowReach.Unbounded;
+        int ahead = 0, behind = 0, lookback = 0, lookahead = 0;
+        var seeds = new WindowSeed[window.Calls.Count];
+        var frame = window.Frame;
+        var rowsFrame = frame?.Mode == FrameMode.Rows;
+        var excludes = frame?.Exclusion is not (null or FrameExclusion.Unspecified or FrameExclusion.NoOthers);
+        for (var i = 0; i < window.Calls.Count; i++)
+        {
+            var call = window.Calls[i];
+            int a, b, back, forward;
+            var seed = WindowSeed.None;
+            if (call.FunctionCase == WindowCall.FunctionOneofCase.WindowFunction
+                && call.WindowFunction is WindowFunctionId.RowNumber or WindowFunctionId.Rank or WindowFunctionId.DenseRank
+                    or WindowFunctionId.Lag or WindowFunctionId.Lead)
+            {
+                switch (call.WindowFunction)
+                {
+                    case WindowFunctionId.Lag or WindowFunctionId.Lead:
+                    {
+                        var offset = call.Args.Count > 1 && Count(call.Args[1]) is { } n ? n : (call.Args.Count > 1 ? all : 1);
+                        if (call.IgnoreNulls)
+                        {
+                            offset = all;
+                        }
+
+                        var lag = call.WindowFunction == WindowFunctionId.Lag;
+                        (a, b, back, forward) = lag ? (offset, 0, offset, 0) : (0, offset, 0, offset);
+                        break;
+                    }
+
+                    default:
+                        (a, b, back, forward) = (all, 0, 0, 0);
+                        seed = call.WindowFunction switch
+                        {
+                            WindowFunctionId.DenseRank => WindowSeed.Plus,
+                            _ => WindowSeed.Rows,
+                        };
+                        break;
+                }
+            }
+            else
+            {
+                // A frame's lower bound reaches back, its upper bound forward; a frame from the partition's
+                // start reaches every later row.
+                var lower = frame?.Lower;
+                var upper = frame?.Upper;
+                (a, back) = lower?.Kind switch
+                {
+                    FrameBoundKind.UnboundedPreceding => (all, all),
+                    FrameBoundKind.Preceding when rowsFrame && Count(lower.Offset) is { } n => (n, n),
+                    FrameBoundKind.Preceding => (all, all),
+                    _ => (0, 0),
+                };
+                (b, forward) = upper?.Kind switch
+                {
+                    FrameBoundKind.Following when rowsFrame && Count(upper.Offset) is { } n => (n, n),
+                    FrameBoundKind.Following => (all, all),
+                    _ => (0, 0),
+                };
+
+                if (lower?.Kind == FrameBoundKind.UnboundedPreceding && !excludes && !call.Distinct
+                    && call.UserFunction.Length == 0)
+                {
+                    seed = Resumable(call, upper?.Kind == FrameBoundKind.CurrentRow, callTypes[i]);
+                    if (seed != WindowSeed.None)
+                    {
+                        back = 0;
+                    }
+                }
+
+                if (excludes || frame?.Mode == FrameMode.Groups)
+                {
+                    (a, b, back, forward) = (all, all, all, all);
+                }
+            }
+
+            seeds[i] = seed;
+            ahead = Math.Max(ahead, a);
+            behind = Math.Max(behind, b);
+            lookback = Math.Max(lookback, back);
+            lookahead = Math.Max(lookahead, forward);
+        }
+
+        return new WindowReach(ahead, behind, lookback, lookahead, seeds);
+    }
+
+    /// <summary>How a call over a frame from the partition's start resumes from the value before a span, if it can.</summary>
+    private static WindowSeed Resumable(WindowCall call, bool endsAtCurrentRow, ChalkType type)
+    {
+        if (call.FunctionCase == WindowCall.FunctionOneofCase.WindowFunction)
+        {
+            return call.WindowFunction == WindowFunctionId.FirstValue
+                ? call.IgnoreNulls ? WindowSeed.FirstIgnoringNulls : WindowSeed.First
+                : WindowSeed.None;
+        }
+
+        // Only a frame that ends at its row holds just the rows before it, which the row before the span's
+        // value is the aggregate of.
+        if (!endsAtCurrentRow || call.FunctionCase != WindowCall.FunctionOneofCase.Aggregate)
+        {
+            return WindowSeed.None;
+        }
+
+        var kind = type.Kind;
+        var summed = kind is TypeKind.I64 or TypeKind.I32 or TypeKind.Fp64 or TypeKind.Fp32;
+        var ordered = summed || kind is TypeKind.I8 or TypeKind.I16 or TypeKind.Date or TypeKind.Timestamp or TypeKind.TimestampTz;
+        return call.Aggregate switch
+        {
+            AggregateFunctionId.Sum or AggregateFunctionId.Sum0 or AggregateFunctionId.Count when summed => WindowSeed.Add,
+            AggregateFunctionId.Min when ordered => WindowSeed.Least,
+            AggregateFunctionId.Max when ordered => WindowSeed.Greatest,
+            _ => WindowSeed.None,
+        };
+    }
+
+    /// <summary>A literal count of rows, or null for a parameter or anything else.</summary>
+    private static int? Count(Expr? expr) => expr?.KindCase == Expr.KindOneofCase.Literal
+        ? expr.Literal.ValueCase switch
+        {
+            Literal.ValueOneofCase.I64Value => (int)Math.Min(expr.Literal.I64Value, int.MaxValue - 1),
+            Literal.ValueOneofCase.I32Value => expr.Literal.I32Value,
+            _ => null,
+        }
+        : null;
+
+    /// <summary>
+    /// Why one change could move every row of a call's partition, or null: a frame that reaches its end,
+    /// or a function that reads the partition's size (§1).
+    /// </summary>
+    private static string? Unbounded(Ir.Window window, WindowCall call)
+    {
+        if (call.FunctionCase == WindowCall.FunctionOneofCase.WindowFunction)
+        {
+            switch (call.WindowFunction)
+            {
+                case WindowFunctionId.Ntile:
+                    return "is an NTILE, which reads the partition's size";
+                case WindowFunctionId.PercentRank:
+                    return "is a PERCENT_RANK, which reads the partition's size";
+                case WindowFunctionId.CumeDist:
+                    return "is a CUME_DIST, which reads the partition's size";
+                case WindowFunctionId.RowNumber or WindowFunctionId.Rank or WindowFunctionId.DenseRank
+                    or WindowFunctionId.Lag or WindowFunctionId.Lead:
+                    return null;
+            }
+        }
+
+        return window.Frame?.Upper?.Kind == FrameBoundKind.UnboundedFollowing
+            ? "has a frame that reaches the end of its partition"
+            : null;
+    }
+
+    /// <summary>
+    /// Whether a call's value depends on which of two rows that tie in the order comes first: a ROWS or
+    /// GROUPS frame, or a function that counts or reads rows, where a RANGE frame, RANK and DENSE_RANK
+    /// treat tied rows alike (§4).
+    /// </summary>
+    private static bool TieSensitive(Ir.Window window, WindowCall call)
+    {
+        if (call.FunctionCase == WindowCall.FunctionOneofCase.WindowFunction)
+        {
+            return call.WindowFunction is not (WindowFunctionId.Rank or WindowFunctionId.DenseRank);
+        }
+
+        return window.Frame?.Mode is not FrameMode.Range;
+    }
+
+    /// <summary>Whether the window's partition and order keys cover a unique key of its input.</summary>
+    private bool OrderCannotTie(Ir.Window window, Rel input)
+    {
+        HashSet<int> keys = [.. window.PartitionKeys.Select(k => (int)k)];
+        foreach (var field in window.Order)
+        {
+            if (field.Expr is { KindCase: Expr.KindOneofCase.FieldRef } reference)
+            {
+                keys.Add((int)reference.FieldRef.Index);
+            }
+        }
+
+        return UniqueKeys(input).Any(unique => unique.IsSubsetOf(keys));
+    }
+
+    /// <summary>
+    /// Sets of a relation's fields that no two of its rows share: a table's declared unique keys and unique
+    /// indexes, carried through filters, projections, sorts and windows, and an aggregate's group keys.
+    /// </summary>
+    private List<HashSet<int>> UniqueKeys(Rel rel)
+    {
+        switch (rel.KindCase)
+        {
+            case Rel.KindOneofCase.Read:
+                return TableKeys(rel.Read.Table, rel.Read.Projection);
+            case Rel.KindOneofCase.IndexLookup:
+                return TableKeys(rel.IndexLookup.Table, rel.IndexLookup.Projection);
+            case Rel.KindOneofCase.Filter:
+                return UniqueKeys(rel.Filter.Input);
+            case Rel.KindOneofCase.Sort:
+                return UniqueKeys(rel.Sort.Input);
+            case Rel.KindOneofCase.Window:
+                return UniqueKeys(rel.Window.Input);
+            case Rel.KindOneofCase.SharedRef when _sharedPlans.TryGetValue(rel.SharedRef.Id, out var body):
+                return UniqueKeys(body);
+            case Rel.KindOneofCase.Project:
+            {
+                var mapped = new List<HashSet<int>>();
+                foreach (var key in UniqueKeys(rel.Project.Input))
+                {
+                    var fields = new HashSet<int>();
+                    foreach (var field in key)
+                    {
+                        var at = rel.Project.Exprs.ToList().FindIndex(
+                            e => e is { KindCase: Expr.KindOneofCase.FieldRef } r && r.FieldRef.Index == field);
+                        if (at < 0)
+                        {
+                            fields = null;
+                            break;
+                        }
+
+                        fields.Add(at);
+                    }
+
+                    if (fields is not null)
+                    {
+                        mapped.Add(fields);
+                    }
+                }
+
+                return mapped;
+            }
+
+            case Rel.KindOneofCase.HashAggregate or Rel.KindOneofCase.StreamAggregate or Rel.KindOneofCase.Aggregate:
+            {
+                var aggregate = rel.KindCase switch
+                {
+                    Rel.KindOneofCase.HashAggregate => rel.HashAggregate.Aggregate,
+                    Rel.KindOneofCase.StreamAggregate => rel.StreamAggregate.Aggregate,
+                    _ => rel.Aggregate,
+                };
+
+                return aggregate.Groupings.Count == 1
+                    ? [[.. Enumerable.Range(0, aggregate.Groupings[0].Keys.Count)]]
+                    : [];
+            }
+
+            case Rel.KindOneofCase.HashJoin:
+                return JoinKeys(rel.HashJoin.Left, rel.HashJoin.Right, [.. rel.HashJoin.LeftKeys.Zip(rel.HashJoin.RightKeys, (l, r) => ((int)l, (int)r))], rel.HashJoin.Type);
+            case Rel.KindOneofCase.MergeJoin:
+                return JoinKeys(rel.MergeJoin.Left, rel.MergeJoin.Right, [.. rel.MergeJoin.LeftKeys.Zip(rel.MergeJoin.RightKeys, (l, r) => ((int)l, (int)r))], rel.MergeJoin.Type);
+            case Rel.KindOneofCase.NestedLoopJoin:
+                return JoinKeys(rel.NestedLoopJoin.Left, rel.NestedLoopJoin.Right, EquiPairs(rel.NestedLoopJoin.Condition, rel.NestedLoopJoin.Left.RowType.Fields.Count), rel.NestedLoopJoin.Type);
+            case Rel.KindOneofCase.Join:
+                return JoinKeys(rel.Join.Left, rel.Join.Right, EquiPairs(rel.Join.Condition, rel.Join.Left.RowType.Fields.Count), rel.Join.Type);
+            case Rel.KindOneofCase.AsOfJoin when rel.AsOfJoin.Type is JoinType.Inner or JoinType.Left:
+                // Each left row meets one right row at most, so the left's keys hold.
+                return UniqueKeys(rel.AsOfJoin.Left);
+            default:
+                return [];
+        }
+    }
+
+    /// <summary>
+    /// A join's unique keys: a side's keys hold where the other side meets each of its rows once at most,
+    /// being unique on its join keys or one row, as a lookup of a key or a join with a total does; a
+    /// semi or anti join keeps its left's; and an inner join's rows are unique on a key of each side together.
+    /// </summary>
+    private List<HashSet<int>> JoinKeys(Rel left, Rel right, (int Left, int Right)[] equal, JoinType type)
+    {
+        var leftKeys = UniqueKeys(left);
+        if (type is JoinType.Semi or JoinType.Anti)
+        {
+            return leftKeys;
+        }
+
+        var rightKeys = UniqueKeys(right);
+        var width = left.RowType.Fields.Count;
+        HashSet<int> leftJoined = [.. equal.Select(e => e.Left)];
+        HashSet<int> rightJoined = [.. equal.Select(e => e.Right)];
+        var keys = new List<HashSet<int>>();
+        if (type is JoinType.Inner or JoinType.Left && rightKeys.Any(k => k.IsSubsetOf(rightJoined)))
+        {
+            keys.AddRange(leftKeys);
+        }
+
+        if (type is JoinType.Inner or JoinType.Right && leftKeys.Any(k => k.IsSubsetOf(leftJoined)))
+        {
+            keys.AddRange(rightKeys.Select(k => k.Select(f => f + width).ToHashSet()));
+        }
+
+        if (type == JoinType.Inner)
+        {
+            foreach (var l in leftKeys)
+            {
+                foreach (var r in rightKeys)
+                {
+                    keys.Add([.. l, .. r.Select(f => f + width)]);
+                }
+            }
+        }
+
+        return keys;
+    }
+
+    /// <summary>The pairs of a left and a right field a join's condition holds equal, among its top-level conjuncts.</summary>
+    private static (int Left, int Right)[] EquiPairs(Expr? condition, int leftWidth)
+    {
+        var pairs = new List<(int, int)>();
+        var pending = new Stack<Expr>();
+        if (condition is not null)
+        {
+            pending.Push(condition);
+        }
+
+        while (pending.Count > 0)
+        {
+            var term = pending.Pop();
+            if (term is { KindCase: Expr.KindOneofCase.Call, Call.Function: FunctionId.And })
+            {
+                foreach (var arg in term.Call.Args)
+                {
+                    pending.Push(arg);
+                }
+            }
+            else if (term is { KindCase: Expr.KindOneofCase.Call, Call.Function: FunctionId.Eq, Call.Args.Count: 2 }
+                && term.Call.Args[0] is { KindCase: Expr.KindOneofCase.FieldRef } a
+                && term.Call.Args[1] is { KindCase: Expr.KindOneofCase.FieldRef } b)
+            {
+                var (x, y) = ((int)a.FieldRef.Index, (int)b.FieldRef.Index);
+                if (x < leftWidth && y >= leftWidth)
+                {
+                    pairs.Add((x, y - leftWidth));
+                }
+                else if (y < leftWidth && x >= leftWidth)
+                {
+                    pairs.Add((y, x - leftWidth));
+                }
+            }
+        }
+
+        return [.. pairs];
+    }
+
+    /// <summary>A table's unique keys and unique indexes, as the fields of a read that projects all their columns.</summary>
+    private List<HashSet<int>> TableKeys(TableRef table, IList<uint> projection)
+    {
+        var keys = new List<HashSet<int>>();
+        if (_catalog.FindTable(table.Schema, table.Table)?.Table is not { } descriptor)
+        {
+            return keys;
+        }
+
+        IEnumerable<IReadOnlyList<int>> declared = descriptor.UniqueKeys.Select(k => k.Columns)
+            .Concat(descriptor.Indexes.Where(i => i.Unique).Select(i => i.Columns));
+        foreach (var columns in declared)
+        {
+            var fields = new HashSet<int>();
+            foreach (var column in columns)
+            {
+                var at = projection.IndexOf((uint)column);
+                if (at < 0)
+                {
+                    fields = null;
+                    break;
+                }
+
+                fields.Add(at);
+            }
+
+            if (fields is not null)
+            {
+                keys.Add(fields);
+            }
+        }
+
+        return keys;
     }
 
     private static Rel Project(Rel rel, Rel input)

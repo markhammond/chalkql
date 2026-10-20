@@ -68,7 +68,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(compiled);
         int[] rebindable = [.. (rebindableSlots ?? []).Distinct().Order()];
         var compiler = new MaintainedCompiler(
-            compiled.Plan, compiled.Catalog, compiled.Sources, compiled.Settings, [.. clockSlots.Union(rebindable)]);
+            compiled.Plan, compiled.Catalog, compiled.Sources, compiled.Settings, [.. clockSlots.Union(rebindable)], clockSlots);
         OperatorFactory root;
         try
         {

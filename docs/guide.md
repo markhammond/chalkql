@@ -1953,9 +1953,13 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   stands, and on every row it holds when the clock moves. A filter whose every read of the clock is a
   cut-off a column is compared with, such as `ts > CURRENT_TIMESTAMP - INTERVAL '2' HOUR`, reads again
   only the rows between its old cut-off and its new one. That holds under `AND`, `OR` and `NOT`, for a
-  column of a whole-number type: a number, a date, a time or a timestamp. A part of the statement
-  that reads no table at all, such as the days a report is computed for, is computed whole when the
-  clock moves.
+  column of a whole-number type: a number, a date, a time or a timestamp. The clock moves only
+  forward, so where such a cut-off is a lower bound of the whole condition, as `ts > …` alone or
+  under `AND` is, and rises with the clock alone, the filter lets go of the rows behind it, and a
+  change behind it gives nothing: a two-hour window over a day of marks holds about a sixth of what
+  the whole log would. Beside an `OR`, or read from a parameter a view binds again, it holds every
+  row. A part of the statement that reads no table at all, such as the days a report is computed
+  for, is computed whole when the clock moves.
 - **Aggregate filters.** An aggregate's `FILTER (WHERE …)` is maintained, and so is a `CASE` inside
   an aggregate, such as `SUM(CASE WHEN keep THEN x END)`, which the planner writes as one. A row the
   filter does not keep counts towards its group and towards no measure, so a group whose rows all
@@ -2007,6 +2011,39 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   condition but its keys and an index of the table begins with them: a right row that arrives or
   leaves finds the left rows of its key through the index. So a view under a policy holds its
   reader's share, not the table ([A view under an access policy](#a-view-under-an-access-policy)).
+- **Index lookups over a range** are kept as a filter over the table: the index's leading keys held
+  equal and the next one between its bounds. A bound that reads the clock or a rebindable parameter
+  makes it a filter that moves, as such a filter does: a cut-off on an indexed time reads again only
+  the rows between the old cut and the new.
+- **Window functions.** A window is maintained when one change can move only so many of its rows:
+  every frame ends at the current row, a number of rows or a range before it, or a number of rows
+  or a range after it, as `LAG`, `LEAD`, `ROW_NUMBER`, `RANK`, `DENSE_RANK`, `FIRST_VALUE` and every
+  aggregate over such a frame do.
+  - It holds its input rows, each partition in its order, and each row's values. An update computes
+    again, by the same window a recompute runs, only the rows whose values a change can reach, and
+    reads only the rows those values read: a `LAG(x, 2)` the two rows after a change, a running
+    call every row after it. A running `SUM`, `COUNT`, `MIN`, `MAX`, `ROW_NUMBER`, `RANK`,
+    `DENSE_RANK` or `FIRST_VALUE` resumes from the value it held at the row before, so it reads none
+    of the rows before. Readers are sent the rows whose values moved.
+  - So an append at a partition's end costs its own rows: a running sum over 128,000 rows in eight
+    partitions took 0.2 ms an update for a row appended to each, against 204 ms for a run. A change
+    in the past costs the rows from it to the partition's end for a running call. A `RANGE` frame
+    with an offset, such as an hour, reads from the partition's start.
+  - Resumed over DOUBLE, a running sum adds the value before to the rest, which can differ from a
+    recompute in the last bits: such a view is made with `ViewExactness.EqualUpToRounding`, as any
+    view with a sum over DOUBLE is.
+  - A frame that reaches the end of its partition, an aggregate `OVER (PARTITION BY …)` with no
+    `ORDER BY`, `NTILE`, `PERCENT_RANK` and `CUME_DIST` are refused: one change moves every row of
+    the partition.
+  - A call whose value depends on which of two tied rows comes first — a `ROWS` frame, `LAG`,
+    `LEAD`, `ROW_NUMBER`, `FIRST_VALUE` — is refused unless its partition and order keys cover a
+    unique key its input declares: a table's `UniqueKey`, `Keyed` or unique index, or an
+    aggregate's groups. The key holds through filters and projections, and through a join that
+    meets each row once at most: an equi-join whose other side is unique on its join keys, a join
+    with one row, a semi or an anti join, an as-of join. A `RANGE` frame, `RANK` and `DENSE_RANK`
+    treat tied rows alike.
+  - A call that reads the clock or a rebindable parameter computes every partition again when it
+    moves.
 - **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's
   `StateBudget`: a budget tuned for a recompute may need raising. The count is an estimate, made from
   counts the statement keeps as rows come and go, and comes within a few percent of what the heap
@@ -2020,7 +2057,7 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   what it holds.
 - **What is not maintained.** A statement with any of these is refused when the view is made, with
   `UnsupportedInView`, naming the operator and where it is in the plan:
-  - window functions;
+  - the window functions above that one change could move every row of, or that a tie decides;
   - a `LIMIT` before the statement's last step;
   - set operations but `UNION ALL`;
   - full joins;
@@ -2028,7 +2065,6 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   - an as-of join whose right input is not a table read, or a lookup of one key in the table's
     order, through filters and projections;
   - an as-of seek whose key has one type in its table and another on its left;
-  - an index lookup over a range of keys;
   - the clock in a join's condition;
   - a source outside the engine's epochs;
   - a `LIST`, composite or `BINARY` value in what an operator keeps;
@@ -2208,9 +2244,8 @@ await view.RebindAsync(new { level = 5_520.0 });
   rows of a table and read it with `IN (SELECT …)`.
 - **Refused when the view is made**, by name: a name the statement does not have, the clock's, a
   statement whose parameters have no names, a capacity on a parameter that takes no list or below
-  the list it is made with. Kept incrementally, a parameter a `LIMIT` reads, or one that bounds an
-  index seek (a list on an indexed key, say), is refused too: both are fixed when the maintained
-  plan starts. A view that recomputes rebinds them.
+  the list it is made with. Kept incrementally, a parameter a `LIMIT` reads is refused too: it is
+  fixed when the maintained plan starts. A view that recomputes rebinds it.
 - **Refused at a rebind**, before anything moves: a name the view did not declare, a list where it
   was bound to one value, a list of another length, or beyond its capacity. A rebind whose update
   fails leaves the view with the values and the rows it held.
