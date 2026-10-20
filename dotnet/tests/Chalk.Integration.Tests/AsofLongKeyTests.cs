@@ -13,6 +13,7 @@ namespace Chalk.Integration.Tests;
 /// key's chain now keeps its tail. Both tables here hold 160 000 marks, dealt to four keys or to
 /// 40 000, and each join probes them 40 000 times.
 /// </summary>
+[Collection(TimingCollection.Name)]
 public sealed class AsofLongKeyTests(SharedSidecar sidecar, ITestOutputHelper output) : IClassFixture<SharedSidecar>
 {
     private const int Rows = 160_000;

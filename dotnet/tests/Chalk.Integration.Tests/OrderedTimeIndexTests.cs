@@ -12,6 +12,7 @@ namespace Chalk.Integration.Tests;
 /// An append used to read the key of every row in the table again for that index, which over a long
 /// log cost each append milliseconds; it now reads only the appended rows.
 /// </summary>
+[Collection(TimingCollection.Name)]
 public sealed class OrderedTimeIndexTests(SharedSidecar sidecar, ITestOutputHelper output) : IClassFixture<SharedSidecar>
 {
     private static readonly DateTime Day = new(2026, 10, 12);
