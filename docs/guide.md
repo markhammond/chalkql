@@ -2007,6 +2007,24 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   condition but its keys and an index of the table begins with them: a right row that arrives or
   leaves finds the left rows of its key through the index. So a view under a policy holds its
   reader's share, not the table ([A view under an access policy](#a-view-under-an-access-policy)).
+- **Window functions.** A window is maintained when one change can move only so many of its rows:
+  every frame ends at the current row, a number of rows or a range before it, or a number of rows
+  or a range after it, as `LAG`, `LEAD`, `ROW_NUMBER`, `RANK`, `DENSE_RANK`, `FIRST_VALUE` and every
+  aggregate over such a frame do.
+  - It holds its input rows by partition and the rows it gave. Each partition an update's changes
+    touch is computed again, whole, by the same window a recompute runs, so its values are a
+    recompute's to the bit, and readers are sent the rows whose values moved. An append to one
+    partition of many costs that partition: a running sum over 128,000 rows in eight partitions
+    took about 100 ms an update for a row appended to each, against 127 ms for a run.
+  - A frame that reaches the end of its partition, an aggregate `OVER (PARTITION BY …)` with no
+    `ORDER BY`, `NTILE`, `PERCENT_RANK` and `CUME_DIST` are refused: one change moves every row of
+    the partition.
+  - A call whose value depends on which of two tied rows comes first — a `ROWS` frame, `LAG`,
+    `LEAD`, `ROW_NUMBER`, `FIRST_VALUE` — is refused unless its partition and order keys cover a
+    unique key its input declares: a table's `UniqueKey`, `Keyed` or unique index, or an
+    aggregate's groups. A `RANGE` frame, `RANK` and `DENSE_RANK` treat tied rows alike.
+  - A call that reads the clock or a rebindable parameter computes every partition again when it
+    moves.
 - **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's
   `StateBudget`: a budget tuned for a recompute may need raising. The count is an estimate, made from
   counts the statement keeps as rows come and go, and comes within a few percent of what the heap
@@ -2020,7 +2038,7 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   what it holds.
 - **What is not maintained.** A statement with any of these is refused when the view is made, with
   `UnsupportedInView`, naming the operator and where it is in the plan:
-  - window functions;
+  - the window functions above that one change could move every row of, or that a tie decides;
   - a `LIMIT` before the statement's last step;
   - set operations but `UNION ALL`;
   - full joins;

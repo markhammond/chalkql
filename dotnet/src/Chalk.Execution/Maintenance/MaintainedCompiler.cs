@@ -174,6 +174,7 @@ internal sealed class MaintainedCompiler
                 Rel.KindOneofCase.StreamAggregate => Aggregate(rel, path, rel.StreamAggregate.Aggregate),
                 Rel.KindOneofCase.Aggregate => Aggregate(rel, path, rel.Aggregate),
                 Rel.KindOneofCase.SharedRef => Shared(rel, path),
+                Rel.KindOneofCase.Window => WindowCalls(rel, path),
                 _ => throw new NotMaintainedException(Unmaintained(rel)),
             };
         }
@@ -188,7 +189,6 @@ internal sealed class MaintainedCompiler
         Rel.KindOneofCase.Fetch or Rel.KindOneofCase.TopN =>
             "a LIMIT is maintained only as the statement's last step, ordered by its ORDER BY; here its rows "
             + "would depend on the input's order.",
-        Rel.KindOneofCase.Window => "a window function over a table is not maintained.",
         Rel.KindOneofCase.Hop or Rel.KindOneofCase.Session => "a hopping or session window is not maintained.",
         Rel.KindOneofCase.Unnest => "UNNEST over a table is not maintained.",
         Rel.KindOneofCase.RemoteQuery or Rel.KindOneofCase.LookupJoin or Rel.KindOneofCase.AdaptiveJoin
@@ -557,6 +557,245 @@ internal sealed class MaintainedCompiler
         var types = Types(weighted);
         return Substituted(weighted, context => new ClockedChanges(
             context, path, schema, types, state, inputFactory(context), body(context)));
+    }
+
+    /// <summary>
+    /// A window rel's calls, maintained (design 77 §2, phase 1): each partition its input's changes touch
+    /// is computed again, whole, by the batch window over its rows in order, and what differs from what it
+    /// gave is given. Refused, naming the call, where one change could move every row of a partition (§1),
+    /// or where a call's value depends on which of two tied rows comes first and the order can tie (§4).
+    /// </summary>
+    private Rel WindowCalls(Rel rel, string path)
+    {
+        var window = rel.Window;
+        var input = window.Input;
+        var names = rel.RowType.Fields;
+        var inputWidth = input.RowType.Fields.Count;
+        for (var i = 0; i < window.Calls.Count; i++)
+        {
+            var call = window.Calls[i];
+            var name = inputWidth + i < names.Count ? names[inputWidth + i].Name : $"#{i}";
+            if (Unbounded(window, call) is { } why)
+            {
+                throw new NotMaintainedException(
+                    $"the window call '{name}' {why}, so one change to a partition would move every row of it.");
+            }
+
+            if (TieSensitive(window, call) && !OrderCannotTie(window, input))
+            {
+                throw new NotMaintainedException(
+                    $"the window call '{name}' gives a value that depends on which of two rows that tie in its order "
+                    + "comes first, and its partition and order keys cover no unique key the input declares. Declare "
+                    + "one (UniqueKey on the table), order by columns that cover one, or use a RANGE frame.");
+            }
+        }
+
+        var inputTypes = Types(input.RowType);
+        var state = new WindowCallsState(
+            inputTypes, Types(rel.RowType), [.. window.PartitionKeys.Select(k => (int)k)], ReadsClock(window), _settings.BatchSize);
+        States.Add(state);
+        var inputFactory = Node(Rewrite(input, path), path);
+
+        // The batch window over the replay: sorted by partition and order, the calls, and the weight moved
+        // back to the end, where every maintained row carries it.
+        var replayRow = Weighted(input.RowType);
+        var replaySchema = ArrowTypeMapping.ToArrowSchema(replayRow);
+        var replayTypes = Types(replayRow);
+        var replay = Substituted(replayRow, context => new WindowReplay(context, path, replaySchema, replayTypes, state));
+        var sort = new Sort { Input = replay };
+        foreach (var key in window.PartitionKeys)
+        {
+            sort.Fields.Add(new SortField
+            {
+                Expr = new Expr { Type = input.RowType.Fields[(int)key].Type, FieldRef = new FieldRef { Index = key } },
+                Direction = SortDirection.AscNullsLast,
+            });
+        }
+
+        sort.Fields.AddRange(window.Order);
+        var sorted = new Rel { RowType = replayRow, Sort = sort };
+        var calls = window.Clone();
+        calls.Input = sorted;
+        var callsRow = replayRow.Clone();
+        for (var i = inputWidth; i < rel.RowType.Fields.Count; i++)
+        {
+            callsRow.Fields.Add(rel.RowType.Fields[i].Clone());
+        }
+
+        var computed = new Rel { RowType = callsRow, Window = calls };
+        var weighted = Weighted(rel.RowType);
+        var reorder = new Ir.Project { Input = computed };
+        for (var i = 0; i < rel.RowType.Fields.Count; i++)
+        {
+            var at = i < inputWidth ? i : i + 1;
+            reorder.Exprs.Add(new Expr { Type = callsRow.Fields[at].Type, FieldRef = new FieldRef { Index = (uint)at } });
+        }
+
+        reorder.Exprs.Add(new Expr { Type = Weights.Type.ToProto(), FieldRef = new FieldRef { Index = (uint)inputWidth } });
+        var body = Node(new Rel { RowType = weighted, Project = reorder }, path);
+        var schema = ArrowTypeMapping.ToArrowSchema(weighted);
+        var types = Types(weighted);
+        return Substituted(weighted, context => new WindowCallChanges(
+            context, path, schema, types, state, inputFactory(context), body(context)));
+    }
+
+    /// <summary>
+    /// Why one change could move every row of a call's partition, or null: a frame that reaches its end,
+    /// or a function that reads the partition's size (§1).
+    /// </summary>
+    private static string? Unbounded(Ir.Window window, WindowCall call)
+    {
+        if (call.FunctionCase == WindowCall.FunctionOneofCase.WindowFunction)
+        {
+            switch (call.WindowFunction)
+            {
+                case WindowFunctionId.Ntile:
+                    return "is an NTILE, which reads the partition's size";
+                case WindowFunctionId.PercentRank:
+                    return "is a PERCENT_RANK, which reads the partition's size";
+                case WindowFunctionId.CumeDist:
+                    return "is a CUME_DIST, which reads the partition's size";
+                case WindowFunctionId.RowNumber or WindowFunctionId.Rank or WindowFunctionId.DenseRank
+                    or WindowFunctionId.Lag or WindowFunctionId.Lead:
+                    return null;
+            }
+        }
+
+        return window.Frame?.Upper?.Kind == FrameBoundKind.UnboundedFollowing
+            ? "has a frame that reaches the end of its partition"
+            : null;
+    }
+
+    /// <summary>
+    /// Whether a call's value depends on which of two rows that tie in the order comes first: a ROWS or
+    /// GROUPS frame, or a function that counts or reads rows, where a RANGE frame, RANK and DENSE_RANK
+    /// treat tied rows alike (§4).
+    /// </summary>
+    private static bool TieSensitive(Ir.Window window, WindowCall call)
+    {
+        if (call.FunctionCase == WindowCall.FunctionOneofCase.WindowFunction)
+        {
+            return call.WindowFunction is not (WindowFunctionId.Rank or WindowFunctionId.DenseRank);
+        }
+
+        return window.Frame?.Mode is not FrameMode.Range;
+    }
+
+    /// <summary>Whether the window's partition and order keys cover a unique key of its input.</summary>
+    private bool OrderCannotTie(Ir.Window window, Rel input)
+    {
+        HashSet<int> keys = [.. window.PartitionKeys.Select(k => (int)k)];
+        foreach (var field in window.Order)
+        {
+            if (field.Expr is { KindCase: Expr.KindOneofCase.FieldRef } reference)
+            {
+                keys.Add((int)reference.FieldRef.Index);
+            }
+        }
+
+        return UniqueKeys(input).Any(unique => unique.IsSubsetOf(keys));
+    }
+
+    /// <summary>
+    /// Sets of a relation's fields that no two of its rows share: a table's declared unique keys and unique
+    /// indexes, carried through filters, projections, sorts and windows, and an aggregate's group keys.
+    /// </summary>
+    private List<HashSet<int>> UniqueKeys(Rel rel)
+    {
+        switch (rel.KindCase)
+        {
+            case Rel.KindOneofCase.Read:
+                return TableKeys(rel.Read.Table, rel.Read.Projection);
+            case Rel.KindOneofCase.IndexLookup:
+                return TableKeys(rel.IndexLookup.Table, rel.IndexLookup.Projection);
+            case Rel.KindOneofCase.Filter:
+                return UniqueKeys(rel.Filter.Input);
+            case Rel.KindOneofCase.Sort:
+                return UniqueKeys(rel.Sort.Input);
+            case Rel.KindOneofCase.Window:
+                return UniqueKeys(rel.Window.Input);
+            case Rel.KindOneofCase.SharedRef when _sharedPlans.TryGetValue(rel.SharedRef.Id, out var body):
+                return UniqueKeys(body);
+            case Rel.KindOneofCase.Project:
+            {
+                var mapped = new List<HashSet<int>>();
+                foreach (var key in UniqueKeys(rel.Project.Input))
+                {
+                    var fields = new HashSet<int>();
+                    foreach (var field in key)
+                    {
+                        var at = rel.Project.Exprs.ToList().FindIndex(
+                            e => e is { KindCase: Expr.KindOneofCase.FieldRef } r && r.FieldRef.Index == field);
+                        if (at < 0)
+                        {
+                            fields = null;
+                            break;
+                        }
+
+                        fields.Add(at);
+                    }
+
+                    if (fields is not null)
+                    {
+                        mapped.Add(fields);
+                    }
+                }
+
+                return mapped;
+            }
+
+            case Rel.KindOneofCase.HashAggregate or Rel.KindOneofCase.StreamAggregate or Rel.KindOneofCase.Aggregate:
+            {
+                var aggregate = rel.KindCase switch
+                {
+                    Rel.KindOneofCase.HashAggregate => rel.HashAggregate.Aggregate,
+                    Rel.KindOneofCase.StreamAggregate => rel.StreamAggregate.Aggregate,
+                    _ => rel.Aggregate,
+                };
+
+                return aggregate.Groupings.Count == 1
+                    ? [[.. Enumerable.Range(0, aggregate.Groupings[0].Keys.Count)]]
+                    : [];
+            }
+
+            default:
+                return [];
+        }
+    }
+
+    /// <summary>A table's unique keys and unique indexes, as the fields of a read that projects all their columns.</summary>
+    private List<HashSet<int>> TableKeys(TableRef table, IList<uint> projection)
+    {
+        var keys = new List<HashSet<int>>();
+        if (_catalog.FindTable(table.Schema, table.Table)?.Table is not { } descriptor)
+        {
+            return keys;
+        }
+
+        IEnumerable<IReadOnlyList<int>> declared = descriptor.UniqueKeys.Select(k => k.Columns)
+            .Concat(descriptor.Indexes.Where(i => i.Unique).Select(i => i.Columns));
+        foreach (var columns in declared)
+        {
+            var fields = new HashSet<int>();
+            foreach (var column in columns)
+            {
+                var at = projection.IndexOf((uint)column);
+                if (at < 0)
+                {
+                    fields = null;
+                    break;
+                }
+
+                fields.Add(at);
+            }
+
+            if (fields is not null)
+            {
+                keys.Add(fields);
+            }
+        }
+
+        return keys;
     }
 
     private static Rel Project(Rel rel, Rel input)

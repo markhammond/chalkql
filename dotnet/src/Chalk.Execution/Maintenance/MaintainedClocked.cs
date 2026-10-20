@@ -159,6 +159,16 @@ internal sealed class HeldRows
         Changed?.Invoke(slot, true);
     }
 
+    /// <summary>Takes out every copy of the row <paramref name="slot"/> holds.</summary>
+    public void Take(int slot)
+    {
+        _identity.Encode(_encoder, Rows, _identity.Columns, slot, normalise: false);
+        Changed?.Invoke(slot, false);
+        _slots.Remove(_encoder.Span, out _);
+        Rows.Remove(slot);
+        _counts[slot] = 0;
+    }
+
     public void Clear()
     {
         Rows.Clear();
