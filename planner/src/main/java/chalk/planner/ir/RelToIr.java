@@ -112,12 +112,14 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 public final class RelToIr {
   private final TypeMapper types;
   private final RexToIr rex;
+  private final RexBuilder rexBuilder;
   private final RelMetadataQuery mq;
   private final IrVersionGate gate;
 
   public RelToIr(TypeMapper types, RexBuilder rexBuilder, RelMetadataQuery mq, IrVersionGate gate) {
     this.types = types;
     this.rex = new RexToIr(types, rexBuilder);
+    this.rexBuilder = rexBuilder;
     this.mq = mq;
     this.gate = gate;
   }
@@ -1494,10 +1496,60 @@ public final class RelToIr {
 
     chalk.ir.v1.SetOp.Builder ir = chalk.ir.v1.SetOp.newBuilder().setKind(kind);
     for (RelNode input : rel.getInputs()) {
-      ir.addInputs(toRel(input));
+      ir.addInputs(castTo(input, rel.getRowType()));
     }
 
     return ir.build();
+  }
+
+  /**
+   * A set operation's input in the set's own row type up to nullability (I-IR-4). Calcite takes the
+   * least restrictive of its inputs' types as the set's, and leaves an input of another precision,
+   * such as {@code TIMESTAMP(0)} beside {@code TIMESTAMP(9)}, as it is; such an input is cast here,
+   * each column keeping its own nullability.
+   */
+  private Rel castTo(RelNode input, RelDataType row) {
+    Rel converted = toRel(input);
+    List<RelDataTypeField> have = input.getRowType().getFieldList();
+    List<RelDataTypeField> want = row.getFieldList();
+    boolean[] cast = new boolean[have.size()];
+    boolean any = false;
+    for (int i = 0; i < have.size(); i++) {
+      Type from = types.toIr(have.get(i).getType()).toBuilder().setNullable(false).build();
+      Type to = types.toIr(want.get(i).getType()).toBuilder().setNullable(false).build();
+      cast[i] = !from.equals(to);
+      any |= cast[i];
+    }
+
+    if (!any) {
+      return converted;
+    }
+
+    Project.Builder project = Project.newBuilder().setInput(converted);
+    List<RelDataType> columns = new ArrayList<>(have.size());
+    for (int i = 0; i < have.size(); i++) {
+      RexNode field = rexBuilder.makeInputRef(input, i);
+      RexNode value =
+          cast[i]
+              ? rexBuilder.makeCast(
+                  rexBuilder
+                      .getTypeFactory()
+                      .createTypeWithNullability(want.get(i).getType(), have.get(i).getType().isNullable()),
+                  field,
+                  true,
+                  false)
+              : field;
+      project.addExprs(rex.convert(value));
+      columns.add(value.getType());
+    }
+
+    RelDataType projected =
+        rexBuilder.getTypeFactory().createStructType(columns, input.getRowType().getFieldNames());
+    return Rel.newBuilder()
+        .setProject(project)
+        .setRowType(types.toIrRow(projected))
+        .setEstRowCount(converted.getEstRowCount())
+        .build();
   }
 
   private VirtualTable virtualTable(ChalkValues values) {
