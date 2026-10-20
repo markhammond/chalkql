@@ -428,7 +428,53 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
               operand -> typeOrNull(scope, operand),
               parameter -> declaredType(parameter) != null);
         }
+        if (node instanceof org.apache.calcite.sql.fun.SqlCase branches) {
+          inferWithinBranches(scope, branches);
+        }
         super.inferUnknownTypes(inferredType, scope, node);
+      }
+
+      /**
+       * A parameter inside a call that is a {@code CASE} branch, as in {@code CASE WHEN ? < 0 THEN
+       * drawdown / ? END}, takes the type its call infers for it from the operands beside it, as it
+       * would outside the {@code CASE}. Calcite derives a {@code CASE}'s type from its branches before
+       * it infers the parameters within them, so the division was derived with a parameter of no
+       * type and refused. A branch that is a bare parameter is left to the {@code CASE}'s own
+       * inference, and a branch whose call cannot type its parameters is left as it was.
+       */
+      private void inferWithinBranches(
+          org.apache.calcite.sql.validate.SqlValidatorScope scope,
+          org.apache.calcite.sql.fun.SqlCase branches) {
+        List<org.apache.calcite.sql.SqlNode> results = new java.util.ArrayList<>(branches.getThenOperands().getList());
+        results.add(branches.getElseOperand());
+        for (org.apache.calcite.sql.SqlNode result : results) {
+          if (!(result instanceof org.apache.calcite.sql.SqlCall call)
+              || result instanceof org.apache.calcite.sql.fun.SqlCase
+              || !holdsParameter(call)) {
+            continue;
+          }
+
+          try {
+            inferUnknownTypes(getUnknownType(), scope, call);
+          } catch (org.apache.calcite.runtime.CalciteException untyped) {
+            // The CASE's own inference has its say, as before.
+          }
+        }
+      }
+
+      private boolean holdsParameter(org.apache.calcite.sql.SqlNode node) {
+        try {
+          node.accept(
+              new org.apache.calcite.sql.util.SqlBasicVisitor<Void>() {
+                @Override
+                public Void visit(org.apache.calcite.sql.SqlDynamicParam parameter) {
+                  throw org.apache.calcite.util.Util.FoundOne.NULL;
+                }
+              });
+          return false;
+        } catch (org.apache.calcite.util.Util.FoundOne found) {
+          return true;
+        }
       }
 
       /**
