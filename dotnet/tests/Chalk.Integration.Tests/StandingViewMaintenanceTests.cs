@@ -119,7 +119,7 @@ public sealed class StandingViewMaintenanceTests(SharedSidecar sidecar)
     /// and saying a recomputed view can take it.
     /// </summary>
     [Theory]
-    [InlineData("SELECT seq, SUM(qty) OVER (PARTITION BY book) AS total FROM fills", "seq", "window function")]
+    [InlineData("SELECT seq, SUM(qty) OVER (PARTITION BY book) AS total FROM fills", "seq", "reaches the end of its partition")]
     [InlineData(
         "SELECT book, PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY qty) AS middle FROM fills GROUP BY book",
         "book",
