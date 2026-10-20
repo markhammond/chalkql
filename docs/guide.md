@@ -2011,11 +2011,19 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   every frame ends at the current row, a number of rows or a range before it, or a number of rows
   or a range after it, as `LAG`, `LEAD`, `ROW_NUMBER`, `RANK`, `DENSE_RANK`, `FIRST_VALUE` and every
   aggregate over such a frame do.
-  - It holds its input rows by partition and the rows it gave. Each partition an update's changes
-    touch is computed again, whole, by the same window a recompute runs, so its values are a
-    recompute's to the bit, and readers are sent the rows whose values moved. An append to one
-    partition of many costs that partition: a running sum over 128,000 rows in eight partitions
-    took about 100 ms an update for a row appended to each, against 127 ms for a run.
+  - It holds its input rows, each partition in its order, and each row's values. An update computes
+    again, by the same window a recompute runs, only the rows whose values a change can reach, and
+    reads only the rows those values read: a `LAG(x, 2)` the two rows after a change, a running
+    call every row after it. A running `SUM`, `COUNT`, `MIN`, `MAX`, `ROW_NUMBER`, `RANK`,
+    `DENSE_RANK` or `FIRST_VALUE` resumes from the value it held at the row before, so it reads none
+    of the rows before. Readers are sent the rows whose values moved.
+  - So an append at a partition's end costs its own rows: a running sum over 128,000 rows in eight
+    partitions took 0.2 ms an update for a row appended to each, against 204 ms for a run. A change
+    in the past costs the rows from it to the partition's end for a running call. A `RANGE` frame
+    with an offset, such as an hour, reads from the partition's start.
+  - Resumed over DOUBLE, a running sum adds the value before to the rest, which can differ from a
+    recompute in the last bits: such a view is made with `ViewExactness.EqualUpToRounding`, as any
+    view with a sum over DOUBLE is.
   - A frame that reaches the end of its partition, an aggregate `OVER (PARTITION BY …)` with no
     `ORDER BY`, `NTILE`, `PERCENT_RANK` and `CUME_DIST` are refused: one change moves every row of
     the partition.

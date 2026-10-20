@@ -591,53 +591,179 @@ internal sealed class MaintainedCompiler
         }
 
         var inputTypes = Types(input.RowType);
+        var callTypes = Types(rel.RowType)[inputWidth..];
+        var partitionOrder = new SortOrdering(
+            [.. window.PartitionKeys.Select(k => new SortField
+            {
+                Expr = new Expr { Type = input.RowType.Fields[(int)k].Type, FieldRef = new FieldRef { Index = k } },
+                Direction = SortDirection.AscNullsLast,
+            })],
+            input.RowType);
         var state = new WindowCallsState(
-            inputTypes, Types(rel.RowType), [.. window.PartitionKeys.Select(k => (int)k)], ReadsClock(window), _settings.BatchSize);
+            inputTypes,
+            callTypes,
+            [.. window.PartitionKeys.Select(k => (int)k)],
+            new SortOrdering(window.Order, input.RowType),
+            partitionOrder,
+            Reach(window, callTypes),
+            ReadsClock(window),
+            _settings.BatchSize);
         States.Add(state);
         var inputFactory = Node(Rewrite(input, path), path);
 
-        // The batch window over the replay: sorted by partition and order, the calls, and the weight moved
-        // back to the end, where every maintained row carries it.
+        // The batch window over the replay, which hands it each partition's rows in their order.
         var replayRow = Weighted(input.RowType);
         var replaySchema = ArrowTypeMapping.ToArrowSchema(replayRow);
         var replayTypes = Types(replayRow);
         var replay = Substituted(replayRow, context => new WindowReplay(context, path, replaySchema, replayTypes, state));
-        var sort = new Sort { Input = replay };
-        foreach (var key in window.PartitionKeys)
-        {
-            sort.Fields.Add(new SortField
-            {
-                Expr = new Expr { Type = input.RowType.Fields[(int)key].Type, FieldRef = new FieldRef { Index = key } },
-                Direction = SortDirection.AscNullsLast,
-            });
-        }
-
-        sort.Fields.AddRange(window.Order);
-        var sorted = new Rel { RowType = replayRow, Sort = sort };
         var calls = window.Clone();
-        calls.Input = sorted;
+        calls.Input = replay;
         var callsRow = replayRow.Clone();
         for (var i = inputWidth; i < rel.RowType.Fields.Count; i++)
         {
             callsRow.Fields.Add(rel.RowType.Fields[i].Clone());
         }
 
-        var computed = new Rel { RowType = callsRow, Window = calls };
+        var body = Node(new Rel { RowType = callsRow, Window = calls }, path);
         var weighted = Weighted(rel.RowType);
-        var reorder = new Ir.Project { Input = computed };
-        for (var i = 0; i < rel.RowType.Fields.Count; i++)
-        {
-            var at = i < inputWidth ? i : i + 1;
-            reorder.Exprs.Add(new Expr { Type = callsRow.Fields[at].Type, FieldRef = new FieldRef { Index = (uint)at } });
-        }
-
-        reorder.Exprs.Add(new Expr { Type = Weights.Type.ToProto(), FieldRef = new FieldRef { Index = (uint)inputWidth } });
-        var body = Node(new Rel { RowType = weighted, Project = reorder }, path);
         var schema = ArrowTypeMapping.ToArrowSchema(weighted);
         var types = Types(weighted);
         return Substituted(weighted, context => new WindowCallChanges(
-            context, path, schema, types, state, inputFactory(context), body(context)));
+            context, path, schema, types, state, inputFactory(context), body(context), inputWidth));
     }
+
+    /// <summary>
+    /// How far one change reaches in a window, in rows (design 77 §2): the rows after and before a changed
+    /// row whose values may move, and the rows before and after a row its value reads, over every call;
+    /// and how each call is resumed at a span that does not begin its partition. A RANGE or GROUPS offset,
+    /// and an IGNORE NULLS navigation, reach without a count: unbounded.
+    /// </summary>
+    private static WindowReach Reach(Ir.Window window, ChalkType[] callTypes)
+    {
+        const int all = WindowReach.Unbounded;
+        int ahead = 0, behind = 0, lookback = 0, lookahead = 0;
+        var seeds = new WindowSeed[window.Calls.Count];
+        var frame = window.Frame;
+        var rowsFrame = frame?.Mode == FrameMode.Rows;
+        var excludes = frame?.Exclusion is not (null or FrameExclusion.Unspecified or FrameExclusion.NoOthers);
+        for (var i = 0; i < window.Calls.Count; i++)
+        {
+            var call = window.Calls[i];
+            int a, b, back, forward;
+            var seed = WindowSeed.None;
+            if (call.FunctionCase == WindowCall.FunctionOneofCase.WindowFunction
+                && call.WindowFunction is WindowFunctionId.RowNumber or WindowFunctionId.Rank or WindowFunctionId.DenseRank
+                    or WindowFunctionId.Lag or WindowFunctionId.Lead)
+            {
+                switch (call.WindowFunction)
+                {
+                    case WindowFunctionId.Lag or WindowFunctionId.Lead:
+                    {
+                        var offset = call.Args.Count > 1 && Count(call.Args[1]) is { } n ? n : (call.Args.Count > 1 ? all : 1);
+                        if (call.IgnoreNulls)
+                        {
+                            offset = all;
+                        }
+
+                        var lag = call.WindowFunction == WindowFunctionId.Lag;
+                        (a, b, back, forward) = lag ? (offset, 0, offset, 0) : (0, offset, 0, offset);
+                        break;
+                    }
+
+                    default:
+                        (a, b, back, forward) = (all, 0, 0, 0);
+                        seed = call.WindowFunction switch
+                        {
+                            WindowFunctionId.DenseRank => WindowSeed.Plus,
+                            _ => WindowSeed.Rows,
+                        };
+                        break;
+                }
+            }
+            else
+            {
+                // A frame's lower bound reaches back, its upper bound forward; a frame from the partition's
+                // start reaches every later row.
+                var lower = frame?.Lower;
+                var upper = frame?.Upper;
+                (a, back) = lower?.Kind switch
+                {
+                    FrameBoundKind.UnboundedPreceding => (all, all),
+                    FrameBoundKind.Preceding when rowsFrame && Count(lower.Offset) is { } n => (n, n),
+                    FrameBoundKind.Preceding => (all, all),
+                    _ => (0, 0),
+                };
+                (b, forward) = upper?.Kind switch
+                {
+                    FrameBoundKind.Following when rowsFrame && Count(upper.Offset) is { } n => (n, n),
+                    FrameBoundKind.Following => (all, all),
+                    _ => (0, 0),
+                };
+
+                if (lower?.Kind == FrameBoundKind.UnboundedPreceding && !excludes && !call.Distinct
+                    && call.UserFunction.Length == 0)
+                {
+                    seed = Resumable(call, upper?.Kind == FrameBoundKind.CurrentRow, callTypes[i]);
+                    if (seed != WindowSeed.None)
+                    {
+                        back = 0;
+                    }
+                }
+
+                if (excludes || frame?.Mode == FrameMode.Groups)
+                {
+                    (a, b, back, forward) = (all, all, all, all);
+                }
+            }
+
+            seeds[i] = seed;
+            ahead = Math.Max(ahead, a);
+            behind = Math.Max(behind, b);
+            lookback = Math.Max(lookback, back);
+            lookahead = Math.Max(lookahead, forward);
+        }
+
+        return new WindowReach(ahead, behind, lookback, lookahead, seeds);
+    }
+
+    /// <summary>How a call over a frame from the partition's start resumes from the value before a span, if it can.</summary>
+    private static WindowSeed Resumable(WindowCall call, bool endsAtCurrentRow, ChalkType type)
+    {
+        if (call.FunctionCase == WindowCall.FunctionOneofCase.WindowFunction)
+        {
+            return call.WindowFunction == WindowFunctionId.FirstValue
+                ? call.IgnoreNulls ? WindowSeed.FirstIgnoringNulls : WindowSeed.First
+                : WindowSeed.None;
+        }
+
+        // Only a frame that ends at its row holds just the rows before it, which the row before the span's
+        // value is the aggregate of.
+        if (!endsAtCurrentRow || call.FunctionCase != WindowCall.FunctionOneofCase.Aggregate)
+        {
+            return WindowSeed.None;
+        }
+
+        var kind = type.Kind;
+        var summed = kind is TypeKind.I64 or TypeKind.I32 or TypeKind.Fp64 or TypeKind.Fp32;
+        var ordered = summed || kind is TypeKind.I8 or TypeKind.I16 or TypeKind.Date or TypeKind.Timestamp or TypeKind.TimestampTz;
+        return call.Aggregate switch
+        {
+            AggregateFunctionId.Sum or AggregateFunctionId.Sum0 or AggregateFunctionId.Count when summed => WindowSeed.Add,
+            AggregateFunctionId.Min when ordered => WindowSeed.Least,
+            AggregateFunctionId.Max when ordered => WindowSeed.Greatest,
+            _ => WindowSeed.None,
+        };
+    }
+
+    /// <summary>A literal count of rows, or null for a parameter or anything else.</summary>
+    private static int? Count(Expr? expr) => expr?.KindCase == Expr.KindOneofCase.Literal
+        ? expr.Literal.ValueCase switch
+        {
+            Literal.ValueOneofCase.I64Value => (int)Math.Min(expr.Literal.I64Value, int.MaxValue - 1),
+            Literal.ValueOneofCase.I32Value => expr.Literal.I32Value,
+            _ => null,
+        }
+        : null;
 
     /// <summary>
     /// Why one change could move every row of a call's partition, or null: a frame that reaches its end,

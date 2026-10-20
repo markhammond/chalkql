@@ -16,7 +16,7 @@ namespace Chalk.Integration.Tests;
 /// </summary>
 public sealed class MaintainedWindowTests(SharedSidecar sidecar, ITestOutputHelper output) : IClassFixture<SharedSidecar>
 {
-    private sealed record Fill(long Seq, int Account, DateTime Ts, long Qty);
+    private sealed record Fill(long Seq, int Account, DateTime Ts, long Qty, double? Price = null);
 
     private sealed record Unkeyed(long Seq, int Account, DateTime Ts, long Qty);
 
@@ -102,6 +102,63 @@ public sealed class MaintainedWindowTests(SharedSidecar sidecar, ITestOutputHelp
             await engine.RefreshAsync(r => r.Delete(fills, Fills(0, 200)), Ct);
             await CheckAsync(engine, view, sql, replica, cursor);
             output.WriteLine($"{what}, {maintenance}: kept, {view.StateBytes:N0} B held");
+        }
+    }
+
+    public static TheoryData<string, string> Resumed() => new()
+    {
+        { "a running sum of prices, some NULL", "SUM(price) OVER (PARTITION BY account ORDER BY seq ROWS UNBOUNDED PRECEDING)" },
+        { "a running minimum of prices", "MIN(price) OVER (PARTITION BY account ORDER BY ts RANGE UNBOUNDED PRECEDING)" },
+        { "a running count of prices", "CAST(COUNT(price) OVER (PARTITION BY account ORDER BY seq ROWS UNBOUNDED PRECEDING) AS DOUBLE)" },
+        { "a running maximum of quantities", "CAST(MAX(qty) OVER (PARTITION BY account ORDER BY ts RANGE UNBOUNDED PRECEDING) AS DOUBLE)" },
+        { "a dense rank of quantities", "CAST(DENSE_RANK() OVER (PARTITION BY account ORDER BY qty) AS DOUBLE)" },
+        { "the first price, NULLs ignored", "FIRST_VALUE(price) IGNORE NULLS OVER (PARTITION BY account ORDER BY seq ROWS UNBOUNDED PRECEDING)" },
+        { "a lag of two", "CAST(LAG(qty, 2, -1) OVER (PARTITION BY account ORDER BY seq) AS DOUBLE)" },
+        { "a running sum of quantities over a running count", "CAST(SUM(qty) OVER (PARTITION BY account ORDER BY seq ROWS UNBOUNDED PRECEDING) AS DOUBLE) / CAST(ROW_NUMBER() OVER (PARTITION BY account ORDER BY seq) AS DOUBLE)" },
+    };
+
+    /// <summary>
+    /// Over 40 steps of random appends, changes and deletes, anywhere in the accounts, each window is held
+    /// to a run of the statement at every step: a running call resumed from the value before the rows it
+    /// computes gives what it gives over the whole partition, to rounding over DOUBLE.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Resumed))]
+    public async Task A_window_resumed_from_the_row_before_gives_the_statements_rows(string what, string call)
+    {
+        var sql = $"SELECT seq AS k, {call} AS v FROM fills";
+        var (engine, fills) = await DeskAsync(rows: 2_000);
+        await using var _ = engine;
+        var options = Options(ViewMaintenance.Incremental);
+        options = new ViewOptions<RowKey, RowValue>
+        {
+            Key = options.Key,
+            LocalJoinMaxRows = options.LocalJoinMaxRows,
+            Maintenance = options.Maintenance,
+            Map = static (in ViewRow row, out RowKey key, out RowValue value) =>
+            {
+                key = new RowKey { Key = row.GetInt64(0) };
+                value = new RowValue { V = row.IsNull(1) ? double.NaN : row.GetDouble(1) };
+            },
+            Exactness = ViewExactness.EqualUpToRounding,
+        };
+        await using var view = await engine.MaterializeAsync(sql, options, Ct);
+        var (replica, cursor) = Drained(view);
+        var random = new Random(what.Length * 7919);
+        var next = 2_000;
+        for (var step = 0; step < 40; step++)
+        {
+            var appended = Fills(next, random.Next(1, 30));
+            next += appended.Length;
+            var deleted = Fills(random.Next(0, next - 40), random.Next(0, 10));
+            var changed = Fills(random.Next(0, next - 40), random.Next(0, 20))
+                .Where(f => !deleted.Any(d => d.Seq == f.Seq))
+                .Select(f => f with { Qty = f.Qty + 3, Price = f.Price * 2 })
+                .ToArray();
+            await engine.RefreshAsync(r => r.Upsert(fills, [.. appended, .. changed]).Delete(fills, deleted), Ct);
+            await view.UpdateAsync(Ct);
+            view.Drain(ref cursor, replica);
+            Close(await StatementAsync(engine, sql), replica.Rows, $"{what}, step {step}");
         }
     }
 
@@ -288,7 +345,8 @@ public sealed class MaintainedWindowTests(SharedSidecar sidecar, ITestOutputHelp
 
     /// <summary>Fills from <paramref name="from"/> on, dealt to the accounts in turn, a minute apart, with quantities that tie.</summary>
     private static Fill[] Fills(int from, int count) =>
-        [.. Enumerable.Range(from, count).Select(i => new Fill(i, i % Accounts, Open.AddMinutes(i / 2), (i * 37) % 11))];
+        [.. Enumerable.Range(from, count).Select(i => new Fill(
+            i, i % Accounts, Open.AddMinutes(i / 2), (i * 37) % 11, i % 13 == 0 ? null : ((i * 7919) % 1000) / 7.0))];
 
     private async Task<(ChalkEngine Engine, PocoTable<Fill> Fills)> DeskAsync(int rows = 1_000, DateTime? clock = null)
     {
@@ -337,13 +395,25 @@ public sealed class MaintainedWindowTests(SharedSidecar sidecar, ITestOutputHelp
             {
                 for (var i = 0; i < batch.Length; i++)
                 {
+                    var held = Chalk.Arrow.RecordBatchExtensions.ValueAt(batch.Column(1), i);
                     rows[Convert.ToInt64(Chalk.Arrow.RecordBatchExtensions.ValueAt(batch.Column(0), i))] =
-                        Convert.ToDouble(Chalk.Arrow.RecordBatchExtensions.ValueAt(batch.Column(1), i));
+                        held is null ? double.NaN : Convert.ToDouble(held);
                 }
             }
         }
 
         return rows;
+    }
+
+    private static void Close(Dictionary<long, double> expected, Dictionary<long, double> actual, string where)
+    {
+        Assert.Equal(expected.Keys.Order(), actual.Keys.Order());
+        foreach (var (key, value) in expected)
+        {
+            var held = actual[key];
+            var close = double.IsNaN(value) ? double.IsNaN(held) : Math.Abs(value - held) <= 1e-9 * Math.Max(1, Math.Abs(value));
+            Assert.True(close, $"{where}: {key}: {value} against {held}");
+        }
     }
 
     private static void Same(Dictionary<long, double> expected, Dictionary<long, double> actual)
