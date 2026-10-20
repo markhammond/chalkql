@@ -1637,6 +1637,14 @@ public sealed class QueryExecution : IAsyncDisposable
     internal void UseReads(Chalk.Sources.IReadKeeper reads) => _compiled = _compiled.WithReads(reads);
 
     /// <summary>
+    /// Has this execution read its tables as <paramref name="held"/> holds them, when called before it
+    /// runs: a standing view publishing a refresh held for it (design 78 §4, §5).
+    /// </summary>
+    internal void ReadAt(Chalk.Sources.RetainedTables held) => _readAt = held;
+
+    private Chalk.Sources.RetainedTables? _readAt;
+
+    /// <summary>
     /// The plan this execution actually runs. Usually the prepared statement's own, but a statement
     /// with a list parameter is planned per list length (D29), so it is the executed plan — not the
     /// prepared one — whose collations and node kinds describe these rows.
@@ -1678,6 +1686,7 @@ public sealed class QueryExecution : IAsyncDisposable
         {
             Stats.RecordArenaPool(_pool.Name);
         }
+        arena.ReadAt = _readAt;
         try
         {
             await foreach (var batch in _compiled
@@ -1691,6 +1700,7 @@ public sealed class QueryExecution : IAsyncDisposable
         {
             PinnedCommit = arena.PinnedCommit;
             arena.PinnedCommit = -1;
+            arena.ReadAt = null;
             if (_hostArena is null)
             {
                 _pool.Return(arena, transient);

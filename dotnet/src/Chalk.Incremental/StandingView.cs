@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Apache.Arrow;
 using Chalk.Catalog;
 using Chalk.Client;
+using Chalk.Sources;
 using Microsoft.Extensions.Logging;
 
 namespace Chalk.Incremental;
@@ -86,6 +87,15 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// </summary>
     private Staged? _staging;
     private long _epoch;
+
+    /// <summary>The engine's count of commits as of the epoch the view holds (design 78 §1).</summary>
+    private long _commit = -1;
+
+    /// <summary>
+    /// The refreshes the engine holds until the view has published them (design 78 §4, §5): barriers, and
+    /// every refresh for a view that publishes every version. Null for a view that reads a database.
+    /// </summary>
+    private readonly EpochRetainer? _retainer;
     private long _version;
     private long _generation = 1;
     private long _updates;
@@ -137,6 +147,12 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
         _namesClock = ViewBinding.NamesClock(prepared, engine.ClockName);
         _reads = options.DatabaseReads == ViewDatabaseReads.WhenRefreshed ? new ViewReads(engine) : null;
+        if (_reads is null)
+        {
+            _retainer = engine.Retain(Held(engine, prepared), options.Versions == ViewVersions.Every, options.MaxBacklog);
+            _commit = _retainer.From;
+        }
+
         ContextDigest = (options.Context ?? prepared.Context) is { IsEmpty: false } context ? context.CanonicalHash : null;
         if (options.RefreshQueryPlan is not null || options.PlanImprovementMargin is not null)
         {
@@ -398,6 +414,32 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 nameof(options));
         }
 
+        if (!Enum.IsDefined(options.Versions))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.Versions,
+                "a view's Versions is Latest or Every.");
+        }
+
+        if (options.MaxBacklog < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.MaxBacklog,
+                "a view's MaxBacklog is a number of refreshes, at least one: the most the engine holds for a view "
+                + "that publishes every version while it has yet to publish them.");
+        }
+
+        if (options.Versions == ViewVersions.Every && options.DatabaseReads != ViewDatabaseReads.None)
+        {
+            throw new ArgumentException(
+                "a view that reads a database cannot publish every version: its rows from the database are read "
+                + "when it updates, and no refresh holds them. Make the view with Versions = Latest, or over "
+                + "in-process tables only.",
+                nameof(options));
+        }
+
         if (options.LocalJoinMaxRows <= 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -628,13 +670,33 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 continue;
             }
 
-            if (_engine.Stamp.Epoch == _epoch && !_rebound)
+            var at = _engine.Stamp;
+            if (_retainer is { } retainer)
+            {
+                if (retainer.Overrun)
+                {
+                    Overrun(retainer);
+                }
+
+                // Asked after the stamp is read: every refresh held up to it is stamped by then (design 78 §4).
+                if (retainer.Next(_commit) is { } held)
+                {
+                    if (await TakeHeldAsync(retainer, held, ct).ConfigureAwait(false))
+                    {
+                        return _version;
+                    }
+
+                    continue;
+                }
+            }
+
+            if (at.Epoch == _epoch && !_rebound)
             {
                 _reads?.Abandon();
                 return _version;
             }
 
-            if (!_rebound && Relabel())
+            if (!_rebound && Relabel(at))
             {
                 return _version;
             }
@@ -644,7 +706,6 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 return await CatchUpBetweenRefreshesAsync(ct).ConfigureAwait(false);
             }
 
-            var at = _engine.Stamp;
             var staged = await StageAsync(at, ct).ConfigureAwait(false);
             named = staged.Commit >= 0;
             var read = named
@@ -659,7 +720,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
             Take(staged, at);
             _rebound = false;
-            if (named && _engine.Stamp.Epoch != _epoch && ++settled < Settles)
+            if (named && _engine.Stamp.Epoch != _epoch && ++settled < Settles && _options.Versions == ViewVersions.Latest)
             {
                 continue;
             }
@@ -669,13 +730,75 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     }
 
     /// <summary>
+    /// Publishes a refresh held for the view (design 78 §4, §5), at its stamp: by a relabel where nothing it
+    /// wrote is read, or else by staging the view at the states it committed. True where the update stops
+    /// there — at a barrier, or at a change of a view that publishes every version — so that a reader that
+    /// drains after the update is sent it.
+    /// </summary>
+    /// <remarks>
+    /// A statement prepared anew may read a table the refresh's states were not held for: it is pinned as it
+    /// stands, which names another refresh, and the held one is let go unpublished. A failed update keeps it
+    /// held for the next.
+    /// </remarks>
+    private async ValueTask<bool> TakeHeldAsync(EpochRetainer retainer, HeldEpoch held, CancellationToken ct)
+    {
+        var stamp = held.Stamp!;
+        if (!_rebound && Relabel(stamp))
+        {
+            retainer.Taken(held);
+            return held.Barrier;
+        }
+
+        var staged = await StageAsync(stamp, ct, held.Tables).ConfigureAwait(false);
+        if (staged.Commit != stamp.Commit)
+        {
+            Keep(staged);
+            retainer.Taken(held);
+            return false;
+        }
+
+        Take(staged, stamp);
+        _rebound = false;
+        retainer.Taken(held);
+        return true;
+    }
+
+    /// <summary>Faults a view that publishes every version and fell further behind than its MaxBacklog.</summary>
+    private void Overrun(EpochRetainer retainer)
+    {
+        var fault = new StandingViewException(
+            ChalkErrorCodes.MemoryBudgetExceeded,
+            $"The view publishes every version, and the engine held {retainer.MaxBacklog} refreshes it had yet to "
+            + $"publish, its MaxBacklog, when another came: it was updated more slowly than the engine refreshed. "
+            + "What was held has been let go, and the view keeps this fault until it is disposed. Make it again, "
+            + "update it more often, or raise ViewOptions.MaxBacklog.");
+        _fault = fault;
+        throw fault;
+    }
+
+    /// <summary>The tables of <paramref name="prepared"/> whose states the engine can hold for the view (design 78 §4).</summary>
+    private static (string SourceId, string Table, ITrackedSource Source)[] Held(ChalkEngine engine, PreparedQuery prepared)
+    {
+        var held = new List<(string SourceId, string Table, ITrackedSource Source)>();
+        foreach (var (sourceId, table) in prepared.TablesRead)
+        {
+            if (engine.SourceById(sourceId) is ITrackedSource tracked)
+            {
+                held.Add((sourceId, table, tracked));
+            }
+        }
+
+        return [.. held];
+    }
+
+    /// <summary>
     /// Moves the view's version to the engine's when every refresh since its own wrote nothing it reads
     /// (design 78 §2): none of its tables, and not the clock where it reads the clock. Its rows are then
     /// the statement's rows at the new version too, so nothing is computed, and readers are sent a commit
     /// at it. Not for a view that reads a database, whose rows a refresh is a reason to read again, nor for
     /// one with a new plan to take or a statement to prepare again.
     /// </summary>
-    private bool Relabel()
+    private bool Relabel(EpochStamp stamp)
     {
         // A view whose statement has a plan it does not run yet takes it at an update, and a stale one is
         // prepared again there: neither is only a version.
@@ -691,7 +814,6 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             _readSet = known;
         }
 
-        var stamp = _engine.Stamp;
         var tables = known.Tables;
         if (!_engine.Untouched(_epoch, stamp.Epoch, tables.Contains, _readsTime || _namesClock))
         {
@@ -704,6 +826,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             _version = stamp.Version;
         }
 
+        _commit = stamp.Commit;
         Relabels++;
         return true;
     }
@@ -740,6 +863,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     {
         var before = _table.Position;
         Apply(staged, stamp);
+        _commit = stamp.Commit;
         _lastChanges = _table.Position - before;
         Keep(staged);
     }
@@ -944,6 +1068,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             _disposed = true;
             Detach(_prepared);
             _reads?.Dispose();
+            _retainer?.Dispose();
             if (_maintained is { } maintained)
             {
                 _maintained = null;
@@ -977,7 +1102,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// Runs the statement at <paramref name="stamp"/>'s epoch and maps every row, refusing a key the
     /// result gives twice. The view's rows are untouched until <see cref="Apply"/>.
     /// </summary>
-    private async ValueTask<Staged> StageAsync(EpochStamp stamp, CancellationToken ct)
+    private async ValueTask<Staged> StageAsync(EpochStamp stamp, CancellationToken ct, RetainedTables? at = null)
     {
         await PreparedCurrentAsync(ct).ConfigureAwait(false);
         var prepared = _prepared;
@@ -1000,7 +1125,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             MaintainedUpdate update;
             try
             {
-                update = await maintained.UpdateAsync(values, stamp.Clock ?? default, stamp.Version, whole, ct).ConfigureAwait(false);
+                update = await maintained.UpdateAsync(values, stamp.Clock ?? default, stamp.Version, whole, ct, at).ConfigureAwait(false);
             }
             catch (MaintainedKeyFault duplicate)
             {
@@ -1028,6 +1153,11 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         {
             _clock.Now = stamp.Clock!.Value;
             execution.UseClock(_clock);
+        }
+
+        if (at is not null)
+        {
+            execution.ReadAt(at);
         }
 
         if (_reads is not null)
@@ -1338,6 +1468,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
                 Detach(_prepared);
                 Volatile.Write(ref _prepared, prepared);
+                _retainer?.Reads(Held(_engine, prepared));
                 _key = key;
                 _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
                 _namesClock = ViewBinding.NamesClock(prepared, _engine.ClockName);

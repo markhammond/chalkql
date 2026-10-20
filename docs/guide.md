@@ -1845,8 +1845,8 @@ var outcome = view.Drain(ref cursor, sink, 4096); // copies what changed since t
   UTF-8 spans — and returns the host's own unmanaged key and row, which the view keeps. A drain
   hands them to the sink by reference and allocates nothing.
 - **Updates** compute only when asked, so an epoch nobody reads costs nothing. An update at the
-  epoch the view holds does nothing; one that a refresh overtakes runs again, so a view always
-  reads one epoch whole.
+  epoch the view holds does nothing. Every update reads one epoch whole, and is published at the
+  version of the epoch it read (see [Views and refreshes](#views-and-refreshes)).
 - **Drains** send each changed key once, with its latest row, then commit the view's version and
   checksum. Out of budget a drain returns `Partial` and carries on at the next call. A reader whose
   changes are no fewer than the view's rows, or who needs a delete the view has dropped, is reset:
@@ -1881,6 +1881,63 @@ var outcome = view.Drain(ref cursor, sink, 4096); // copies what changed since t
   `StandingViews.DefaultLocalJoinMaxRows`, a million rows, is the planner's assumption for a table
   of unknown size.
 
+### Views and refreshes
+
+Refreshes and view updates run side by side, and neither waits for the other.
+
+- **An update is published at the epoch it read.** An update pins its tables when it begins, and the
+  pin names the refresh it read. A refresh that commits while the update runs does not discard it:
+  the view publishes what it computed at that refresh's version, then updates again at once, a few
+  times at most, to reach the latest. So every commit a reader sees is a state the engine really
+  held, named by its version, and versions only increase. A refresh never waits for a view.
+- **A refresh that writes nothing a view reads** moves the view to its version without computing
+  anything: none of the view's tables, and not the clock where the view reads it. Readers are sent a
+  commit at the new version with the same checksum.
+- **Stamps.** A sink's `Commit(in ViewStamp stamp, uint checksum)` is called with the view's stamp:
+  its version and its generation, which counts its rebinds. A rebind changes the rows without moving
+  the engine's version, so the generation tells two commits at one version apart. A sink that
+  implements only `Commit(long version, uint checksum)` is called with the version. `view.Stamp` is
+  where the view stands.
+- **Waiting for a change.** `await view.UpdateToAsync(stamp)` returns once the view stands at the
+  stamp or after it, waiting for the engine to publish a version it has not yet. A host that numbers
+  its refreshes with `Version` waits for its own change with `new ViewStamp(version, 0)`; a rebind
+  returns its stamp. With the rule above, a view the change did not touch is there already.
+  `engine.VersionOf(epoch)` gives the version of a recent epoch, such as the one `RefreshAsync`
+  returns.
+- **Versions are this engine's.** Two engines number their epochs apart, so a stamp means something
+  only on the engine that made it, unless the host numbers every engine's refreshes from one
+  sequence of its own.
+
+```csharp
+await engine.RefreshAsync(r => r.Version(900).Barrier().Replace(closes, closing));
+```
+
+- **A barrier** is a refresh every view publishes itself, rather than going past it to a later one,
+  as a view that falls behind otherwise may. An update that reaches a barrier stops there, and the
+  next carries on from it. The engine holds the states the barrier committed of each view's tables
+  until the view has published it: little for a table only appended to since, the table's rows for
+  one replaced.
+- **Every version.** `ViewOptions.Versions = ViewVersions.Every` makes a view publish every refresh
+  that changes what it reads, in order: each update takes the next of them and stops, and refreshes
+  that change nothing it reads are passed over. The engine holds each refresh's states of the view's
+  tables until the view has published it, at most `MaxBacklog` of them (1,024 by default); one more
+  faults the view, by name, and the host makes it again.
+- **A reader still drains at its own pace.** A view keeps the latest row of each key, and a drain
+  sends what changed since the reader's cursor. A barrier, or a view of every version, makes the
+  view stop at a version; a reader is sent it only if it drains before the next update. So a host
+  that must show a row added in one refresh and taken out in the next updates and drains in turn:
+
+```csharp
+while (view.Version < engine.Version)
+{
+    await view.UpdateAsync();
+    view.Drain(ref cursor, sink);   // every reader, before the next update
+}
+```
+
+  Its readers are then sent the same changes, at the same versions, on every run of the same
+  refreshes.
+
 ### A view over a database
 
 A database changes outside the engine's refreshes, so a view over one — DuckDB, PostgreSQL, any
@@ -1911,6 +1968,10 @@ await view.UpdateAsync(); // reads instruments again, and replays what else it r
 - **The clock.** `CURRENT_TIMESTAMP` is never pushed into a database, so a comparison with it
   filters what the view kept. The clock's parameter can be pushed, and a read compared with it is
   read again when the clock moves.
+- **Versions.** The view is published at the version of the in-process tables it read; its
+  database rows are as of when it read them, which may be later. No refresh holds a database's rows,
+  so such a view goes past a barrier as past any refresh, and `Versions = ViewVersions.Every` is
+  refused for it.
 
 ### Incremental maintenance
 
@@ -2185,8 +2246,8 @@ await view.RebindAsync(new { level = 5_520.0 });
 ```
 
 - **A rebind is an update.** It binds the new values, brings the view to the latest epoch, and
-  returns the epoch's version, which is the one the view held when no refresh came between. The
-  planner is not asked for anything.
+  returns the view's stamp: the epoch's version, which is the one the view held when no refresh came
+  between, and a generation one higher. The planner is not asked for anything.
 - **Kept incrementally**, an operator that reads a rebindable parameter holds what it reads and
   runs again over it when the parameter moves, as one that reads the clock does when the clock
   moves. Readers get only the keys whose rows changed.

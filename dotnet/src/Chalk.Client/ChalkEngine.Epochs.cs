@@ -67,7 +67,72 @@ public sealed partial class ChalkEngine
     /// <summary>Completes when the next epoch is published.</summary>
     internal Task NextPublished => Volatile.Read(ref _published).Task;
 
+    /// <summary>The views' holds on refreshes they have yet to publish (design 78 §4, §5). Replaced whole.</summary>
+    private EpochRetainer[] _retainers = [];
 
+    private readonly Lock _retainersGate = new();
+
+    /// <summary>
+    /// Holds, for a standing view, each later barrier and, with <paramref name="every"/>, each later refresh
+    /// (design 78 §4, §5): the states each commits of <paramref name="tables"/>, until the view has published
+    /// it. Under the gate, so that every refresh after <see cref="EpochRetainer.From"/> is held as it must be.
+    /// </summary>
+    internal EpochRetainer Retain(
+        (string SourceId, string Table, ITrackedSource Source)[] tables, bool every, int maxBacklog)
+    {
+        var retainer = new EpochRetainer(this, tables, every, maxBacklog);
+        lock (ExecutionReadSet.Gate)
+        {
+            retainer.From = _engineCommits.Committed;
+            lock (_retainersGate)
+            {
+                _retainers = [.. _retainers, retainer];
+            }
+        }
+
+        return retainer;
+    }
+
+    /// <summary>Stops holding refreshes for <paramref name="retainer"/>.</summary>
+    internal void LetGo(EpochRetainer retainer)
+    {
+        lock (_retainersGate)
+        {
+            _retainers = [.. _retainers.Where(r => !ReferenceEquals(r, retainer))];
+        }
+    }
+
+    /// <summary>
+    /// Holds the refresh that has just committed for each view that must publish it itself: every view for a
+    /// barrier, and a view that publishes every version for any. The caller holds the gate.
+    /// </summary>
+    private void HoldCommitted(bool barrier)
+    {
+        var retainers = Volatile.Read(ref _retainers);
+        if (retainers.Length == 0)
+        {
+            return;
+        }
+
+        var commit = _engineCommits.Committed;
+        var clock = _engineClock?.Committed;
+        foreach (var retainer in retainers)
+        {
+            if (barrier || retainer.Every)
+            {
+                retainer.Hold(commit, clock, barrier);
+            }
+        }
+    }
+
+    /// <summary>Lets go, after the gate, of what views that fell too far behind held.</summary>
+    private void LetGoOfOverrun()
+    {
+        foreach (var retainer in Volatile.Read(ref _retainers))
+        {
+            retainer.LetGoIfOverrun();
+        }
+    }
 
     /// <summary>
     /// Odd while a refresh is making new rows visible — swapping snapshots and publishing the next
@@ -177,15 +242,21 @@ public sealed partial class ChalkEngine
     private void Stamped(long epoch, long? version, DateTimeOffset? clock)
     {
         var current = Stamp;
-        Volatile.Write(
-            ref _stamp,
-            new EpochStamp(epoch, version ?? current.Version + 1, clock?.ToUniversalTime() ?? current.Clock, _engineCommits.Committed)
-            {
-                Writes = _writing?.Tables,
-                MovesClock = _writing?.MovesClock ?? true,
-            });
+        var stamp = new EpochStamp(epoch, version ?? current.Version + 1, clock?.ToUniversalTime() ?? current.Clock, _engineCommits.Committed)
+        {
+            Writes = _writing?.Tables,
+            MovesClock = _writing?.MovesClock ?? true,
+        };
         _writing = null;
-        Volatile.Write(ref _recent[epoch % RecentStamps], Volatile.Read(ref _stamp));
+
+        // A held refresh is stamped first, so a view that reads this stamp finds it ready (design 78 §4).
+        foreach (var retainer in Volatile.Read(ref _retainers))
+        {
+            retainer.Published(stamp.Commit, stamp);
+        }
+
+        Volatile.Write(ref _stamp, stamp);
+        Volatile.Write(ref _recent[epoch % RecentStamps], stamp);
         Interlocked.Exchange(
             ref _published,
             new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();

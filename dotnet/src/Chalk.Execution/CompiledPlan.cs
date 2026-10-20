@@ -384,6 +384,11 @@ internal sealed class CompiledPlan
     /// </summary>
     internal DateTimeOffset PinNow(ExecutionReadSet? readSet, ExecutionArena arena)
     {
+        if (arena.ReadAt is { } held && PinHeld(readSet, arena, held))
+        {
+            return held.Clock ?? _settings.TimeProvider.GetUtcNow();
+        }
+
         if (_settings.EngineClock is not { } clock)
         {
             Pin(readSet, arena, _settings.EngineCommits);
@@ -450,6 +455,11 @@ internal sealed class CompiledPlan
     /// </summary>
     internal static void Pin(ExecutionReadSet? readSet, ExecutionArena arena, IEngineCommits? commits = null)
     {
+        if (arena.ReadAt is { } held && PinHeld(readSet, arena, held))
+        {
+            return;
+        }
+
         if (commits is not null)
         {
             // The count of commits in the same hold as the pins, so the tables read are named (design 78 §1).
@@ -468,6 +478,27 @@ internal sealed class CompiledPlan
         {
             arena.ReadSet = readSet;
         }
+    }
+
+    /// <summary>
+    /// Pins the tables as a refresh committed them, held for a standing view (design 78 §4, §5), and names
+    /// the pin by that refresh; false where it does not hold them all, and the tables are pinned as they
+    /// stand, which names the pin otherwise.
+    /// </summary>
+    private static bool PinHeld(ExecutionReadSet? readSet, ExecutionArena arena, RetainedTables held)
+    {
+        if (readSet is not null)
+        {
+            if (!readSet.PinFrom(held))
+            {
+                return false;
+            }
+
+            arena.ReadSet = readSet;
+        }
+
+        arena.PinnedCommit = held.Commit;
+        return true;
     }
 
     /// <summary>Lets the execution's pinned tables go, once its scans are done with them.</summary>

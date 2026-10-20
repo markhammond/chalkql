@@ -1604,6 +1604,7 @@ Chalk.Client.RefreshBuilder.Advance(Chalk.Sources.ISourceRuntime! source, string
 Chalk.Client.RefreshBuilder.Advance(Chalk.Sources.ITableTarget! table, System.DateTime time) -> Chalk.Client.RefreshBuilder!
 Chalk.Client.RefreshBuilder.Advance(Chalk.Sources.ITableTarget! table, System.DateTimeOffset time) -> Chalk.Client.RefreshBuilder!
 Chalk.Client.RefreshBuilder.AdvanceClock(System.DateTimeOffset time) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Barrier() -> Chalk.Client.RefreshBuilder!
 Chalk.Client.RefreshBuilder.Delete<T>(Chalk.Sources.ISourceRuntime! source, string! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
 Chalk.Client.RefreshBuilder.Delete<T>(Chalk.Sources.ITableTarget<T>! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
 Chalk.Client.RefreshBuilder.Upsert<T>(Chalk.Sources.ISourceRuntime! source, string! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!

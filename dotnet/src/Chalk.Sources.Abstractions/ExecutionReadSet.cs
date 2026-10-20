@@ -65,6 +65,26 @@ internal sealed class ExecutionReadSet
         }
     }
 
+    /// <summary>
+    /// Pins every table as <paramref name="held"/> holds it, rather than as it stands (design 78 §4, §5);
+    /// false, with nothing pinned, when it holds one not.
+    /// </summary>
+    public bool PinFrom(RetainedTables held)
+    {
+        for (var i = 0; i < _tables.Length; i++)
+        {
+            if (held.Retain(_tables[i].SourceId, _tables[i].Table) is not { } state)
+            {
+                Unpin();
+                return false;
+            }
+
+            _pinned[i] = state;
+        }
+
+        return true;
+    }
+
     /// <summary>Lets every pinned table go.</summary>
     public void Unpin()
     {

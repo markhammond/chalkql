@@ -487,9 +487,11 @@ or a user function.
 
 ### MemoryBudgetExceeded
 
-A query needed more memory than its execution arena allows.
+A query needed more memory than its execution arena allows; or a standing view would hold more than
+its `StateBudget`, or, publishing every version, fell more than its `MaxBacklog` of refreshes behind.
 
-**What to do:** Narrow the query, or raise the arena's budget.
+**What to do:** Narrow the query, or raise the arena's budget. For a view, raise `StateBudget`;
+for one past its `MaxBacklog`, update it more often or raise `MaxBacklog`, and make it again.
 
 ### BatchLifetime
 

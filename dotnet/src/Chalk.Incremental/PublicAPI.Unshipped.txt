@@ -163,3 +163,10 @@ static Chalk.Incremental.ViewStamp.operator >(Chalk.Incremental.ViewStamp left, 
 static Chalk.Incremental.ViewStamp.operator >=(Chalk.Incremental.ViewStamp left, Chalk.Incremental.ViewStamp right) -> bool
 ~override Chalk.Incremental.ViewStamp.Equals(object obj) -> bool
 ~override Chalk.Incremental.ViewStamp.ToString() -> string
+Chalk.Incremental.ViewVersions
+Chalk.Incremental.ViewVersions.Every = 1 -> Chalk.Incremental.ViewVersions
+Chalk.Incremental.ViewVersions.Latest = 0 -> Chalk.Incremental.ViewVersions
+Chalk.Incremental.ViewOptions<TKey, TRow>.Versions.get -> Chalk.Incremental.ViewVersions
+Chalk.Incremental.ViewOptions<TKey, TRow>.Versions.init -> void
+Chalk.Incremental.ViewOptions<TKey, TRow>.MaxBacklog.get -> int
+Chalk.Incremental.ViewOptions<TKey, TRow>.MaxBacklog.init -> void

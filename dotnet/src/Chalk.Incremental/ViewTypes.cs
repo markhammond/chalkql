@@ -98,6 +98,24 @@ public enum ViewExactness
     EqualUpToRounding = 1,
 }
 
+/// <summary>Which of the engine's versions a view publishes (design 78 §5).</summary>
+public enum ViewVersions
+{
+    /// <summary>
+    /// The latest at each update, and each barrier: a view that falls behind goes from the version it holds
+    /// to the latest, and a reader sees what changed between them.
+    /// </summary>
+    Latest = 0,
+
+    /// <summary>
+    /// Every version that changes what the view reads, in order: an update takes the next of them and
+    /// stops, so a reader that drains after each update is sent every one, and the same on every run of
+    /// the same refreshes. The engine holds each refresh's states of the view's tables until the view has
+    /// published it, at most <see cref="ViewOptions{TKey, TRow}.MaxBacklog"/> of them.
+    /// </summary>
+    Every = 1,
+}
+
 /// <summary>How a view computes an update (D343, <c>docs/design/68-incremental-maintenance.md</c>).</summary>
 public enum ViewMaintenance
 {
@@ -264,6 +282,20 @@ public sealed class ViewOptions<TKey, TRow>
     /// runs the statement in full; <see cref="ViewMaintenance.Incremental"/> computes only what changed.
     /// </summary>
     public ViewMaintenance Maintenance { get; init; } = ViewMaintenance.Recompute;
+
+    /// <summary>
+    /// Which versions the view publishes (design 78 §5): <see cref="ViewVersions.Latest"/>, the default, or
+    /// <see cref="ViewVersions.Every"/>. <see cref="ViewVersions.Every"/> is refused for a view that reads a
+    /// database, whose rows no refresh holds.
+    /// </summary>
+    public ViewVersions Versions { get; init; } = ViewVersions.Latest;
+
+    /// <summary>
+    /// The most refreshes the engine holds for a view that publishes every version, while it has yet to
+    /// publish them (design 78 §5): one more faults the view, which the host makes again. 1,024 by default;
+    /// less than one is refused.
+    /// </summary>
+    public int MaxBacklog { get; init; } = 1024;
 
     /// <summary>
     /// Told of each update that moves the view (design 70 §1): how long it took, the bytes allocated in

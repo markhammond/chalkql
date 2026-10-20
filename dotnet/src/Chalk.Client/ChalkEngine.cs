@@ -1362,6 +1362,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             && builder.Scopes.Count == 0
             && builder.VersionGiven is null
             && builder.ClockGiven is null
+            && !builder.BarrierGiven
             && !deferred)
         {
             return await RefreshAsync(ct).ConfigureAwait(false);
@@ -1544,11 +1545,15 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
                         // And the count of commits, which the epoch's stamp records (design 78 §1).
                         _engineCommits.Advance();
+
+                        // And the refresh, for each view that must publish it itself (design 78 §4, §5).
+                        HoldCommitted(builder.BarrierGiven);
                     }
                 }
                 finally
                 {
                     replaced?.Unpin();
+                    LetGoOfOverrun();
                 }
 
                 // What the refresh wrote, for a view to tell whether it touched what it reads (design 78 §2).
