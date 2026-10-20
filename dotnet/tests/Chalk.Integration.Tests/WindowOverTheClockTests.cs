@@ -159,6 +159,41 @@ public sealed class WindowOverTheClockTests(SharedSidecar sidecar)
         }
     }
 
+    /// <summary>
+    /// A window over the ten-minute window, a lag in each book: as the clock moves, the window computes the
+    /// rows the cut-off and the appends reach, and reads their lookback, not every book. The cut-off's reads
+    /// of the clock are its filter's, and reach the window as the rows that leave; the window's own calls
+    /// read no clock, so a move of it is not a reason to compute every partition again.
+    /// </summary>
+    [Fact]
+    public async Task A_window_over_a_cut_off_computes_what_the_clock_and_the_appends_reach()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var desk = await DeskAsync(Ticks(2_000));
+        const string sql =
+            "SELECT seq, LAG(qty, 1, 0) OVER (PARTITION BY book ORDER BY seq) AS was FROM ticks "
+            + "WHERE ts > CAST(@now AS TIMESTAMP(9)) - INTERVAL '600' SECOND";
+        var now = Start.AddSeconds(2_000);
+        var prepared = await desk.Engine.PrepareAsync(sql, ct: Ct);
+        await using var maintained = await prepared.MaintainAsync([now], 0, [0], Ct);
+        var window = Assert.Single(maintained.States.OfType<WindowCallsState>());
+        var held = new Dictionary<long, long>();
+        Apply(await maintained.UpdateAsync([now], At(now), desk.Engine.Version, whole: false, Ct), held);
+        Assert.Equal(await StatementAsync(desk.Engine, prepared, now), held);
+
+        var seq = 2_000;
+        for (var step = 0; step < 10; step++)
+        {
+            now = now.AddSeconds(3);
+            var appended = Enumerable.Range(0, 3).Select(b => new Tick(seq++, b, step - b, now.AddMilliseconds(-100 * (3 - b)))).ToArray();
+            await desk.Engine.RefreshAsync(r => r.AdvanceClock(At(now)).Append(desk.Source, "ticks", appended), Ct);
+            Apply(await maintained.UpdateAsync([now], At(now), desk.Engine.Version, whole: false, Ct), held);
+
+            Assert.InRange(window.Read, 1, 30);
+            Assert.Equal(await StatementAsync(desk.Engine, prepared, now), held);
+        }
+    }
+
     private static IReadOnlyList<Tick> Ticks(int count) =>
         [.. Enumerable.Range(0, count).Select(i => new Tick(i, i % 3, i % 7 - 3, Start.AddSeconds(i)))];
 
@@ -236,7 +271,7 @@ public sealed class WindowOverTheClockTests(SharedSidecar sidecar)
             .NamingPolicy(PocoNamingPolicy.SnakeCase)
             .AddTable("ticks", ticks, t =>
             {
-                t.OrderedBy(x => x.Ts);
+                t.OrderedBy(x => x.Ts).UniqueKey(x => x.Seq);
                 if (entitlement is not null)
                 {
                     t.Entitlement(entitlement);

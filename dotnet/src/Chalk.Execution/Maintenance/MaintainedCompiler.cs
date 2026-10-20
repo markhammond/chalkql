@@ -742,7 +742,9 @@ internal sealed class MaintainedCompiler
             new SortOrdering(window.Order, input.RowType),
             partitionOrder,
             Reach(window, callTypes),
-            ReadsClock(window),
+            // A call's arguments and frame, and the order: not the input, whose own reads of the clock its
+            // operators keep, and which reaches the window as changes.
+            window.Calls.Any(ReadsClock) || (window.Frame is { } frame && ReadsClock(frame)) || window.Order.Any(ReadsClock),
             _settings.BatchSize);
         States.Add(state);
         var inputFactory = Node(Rewrite(input, path), path);
