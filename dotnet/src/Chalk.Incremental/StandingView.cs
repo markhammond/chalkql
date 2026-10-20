@@ -529,10 +529,33 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         }
     }
 
-    /// <summary>The body of <see cref="UpdateAsync"/>, under its lock: the view brought to the latest epoch.</summary>
+    /// <summary>How many times an update catches up at once with refreshes that committed while it ran.</summary>
+    private const int Settles = 3;
+
+    /// <summary>
+    /// The body of <see cref="UpdateAsync"/>, under its lock: the view brought to the latest epoch.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// What an update reads is named by its pin (design 78 §1): the count of commits read in the same hold
+    /// of the gate as its tables. Where it is the count the stamp noted before staging recorded, the update
+    /// read that epoch's tables whatever has committed since, and the view takes it at that stamp: no
+    /// refresh is held off, and nothing staged is thrown away. A refresh that committed while it ran is then
+    /// caught up at once, a few times at most, rather than at the next update, which a quiet feed may never
+    /// send. Only a refresh that committed between noting the stamp and pinning makes it read again.
+    /// </para>
+    /// <para>
+    /// The count is this engine's: another engine's commit to a source they share changes the rows without
+    /// moving it, as it moves no epoch here. An update that pinned nothing, which a plan of no table may,
+    /// is taken only when no refresh ran through it, and after two attempts it is staged with refreshes
+    /// held off.
+    /// </para>
+    /// </remarks>
     private async ValueTask<long> CatchUpAsync(CancellationToken ct)
     {
         Usable();
+        var settled = 0;
+        var named = true;
         for (var attempt = 0; ; attempt++)
         {
             var changes = _engine.Changes;
@@ -548,20 +571,31 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 return _version;
             }
 
-            if (attempt >= 2)
+            if (!named && attempt >= 2)
             {
                 return await CatchUpBetweenRefreshesAsync(ct).ConfigureAwait(false);
             }
 
             var at = _engine.Stamp;
             var staged = await StageAsync(at, ct).ConfigureAwait(false);
-            if (_engine.Changes != changes)
+            named = staged.Commit >= 0;
+            var read = named
+                ? staged.Commit == at.Commit
+                : _engine.Changes == changes;
+            if (!read)
             {
+                // What was read is not the stamp noted: read again, once the refresh has published.
                 Keep(staged);
                 continue;
             }
 
             Take(staged, at);
+            _rebound = false;
+            if (named && _engine.Stamp.Epoch != _epoch && ++settled < Settles)
+            {
+                continue;
+            }
+
             return _version;
         }
     }
@@ -570,7 +604,16 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// The update, staged with refreshes held off, after two attempts each overtaken by one. A method of
     /// its own, so that the closure it hands the engine is made only when it runs.
     /// </summary>
-    private ValueTask<long> CatchUpBetweenRefreshesAsync(CancellationToken ct) =>
+    private ValueTask<long> CatchUpBetweenRefreshesAsync(CancellationToken ct)
+    {
+        HeldRefreshes++;
+        return CatchUpHoldingRefreshesAsync(ct);
+    }
+
+    /// <summary>How many updates have held refreshes off: for a test, which expects none where pins are named.</summary>
+    internal int HeldRefreshes { get; private set; }
+
+    private ValueTask<long> CatchUpHoldingRefreshesAsync(CancellationToken ct) =>
         _engine.WithoutRefreshAsync(
             async () =>
             {
@@ -864,7 +907,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
             // Whole for the tracker only when computed from nothing: a low-jitter swap catches up.
             _lastWhole = update.Restarted;
-            return Changes(update, stamp);
+            var changed = Changes(update, stamp);
+            changed.Commit = update.Commit;
+            return changed;
         }
 
         _lastWhole = true;
@@ -892,6 +937,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             }
         }
 
+        staged.Commit = execution.PinnedCommit;
         return staged;
     }
 
@@ -1552,8 +1598,12 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             Freed.Clear();
             Count = 0;
             Delta = delta;
+            Commit = -1;
             return this;
         }
+
+        /// <summary>How many refreshes the engine had committed when the staging pinned its tables (design 78 §1), or -1.</summary>
+        public long Commit { get; set; } = -1;
 
         /// <summary>
         /// Lets go of room beyond four times what this update used, past <see cref="Kept"/>: a whole

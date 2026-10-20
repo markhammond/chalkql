@@ -214,7 +214,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
         try
         {
             tree.Context.ReadSet ??= _compiled.NewReadSet();
-            CompiledPlan.Pin(tree.Context.ReadSet, arena);
+            CompiledPlan.Pin(tree.Context.ReadSet, arena, _compiled.Settings.EngineCommits);
             tree.Context.Begin(stats, arena, bound, now, relations, bindings);
             _ = tree.Root.ExecuteAsync(ct);
             try
@@ -247,6 +247,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
                 }
 
                 var changes = _given = _result.End(_restart || whole, _restart, tree.Output);
+                changes.Commit = arena.PinnedCommit;
                 if (_restart)
                 {
                     // An update from nothing read every row of its tables, and the buffers its changes
@@ -360,6 +361,9 @@ internal sealed class MaintainedChanges
     /// until the plan's next update.
     /// </summary>
     public required RecordBatch Before { get; init; }
+
+    /// <summary>How many refreshes the engine had committed when the update pinned its tables (design 78 §1), or -1.</summary>
+    public long Commit { get; set; } = -1;
 }
 
 /// <summary>

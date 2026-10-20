@@ -145,6 +145,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         _settings = new ExecutionSettings
         {
             EngineClock = _engineClock,
+            EngineCommits = _engineCommits,
             BatchSize = options.Execution.BatchSize,
             PlanNestingLimit = options.Planner.PlanNestingLimit,
             UseReferenceEngine = options.Execution.Engine == ExecutionEngine.Reference,
@@ -1540,6 +1541,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                         {
                             _engineClock?.Set(clock);
                         }
+
+                        // And the count of commits, which the epoch's stamp records (design 78 §1).
+                        _engineCommits.Advance();
                     }
                 }
                 finally

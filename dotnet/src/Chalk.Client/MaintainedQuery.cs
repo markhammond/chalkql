@@ -105,6 +105,7 @@ internal sealed class MaintainedQuery : IAsyncDisposable
             Restarted = changes.Restarted,
             Now = changes.Now,
             Before = changes.Before,
+            Commit = changes.Commit,
         };
     }
 
@@ -134,6 +135,9 @@ internal sealed class MaintainedUpdate
 
     /// <summary>The rows the changed keys held before.</summary>
     public required RecordBatch Before { get; init; }
+
+    /// <summary>How many refreshes the engine had committed when the update pinned its tables (design 78 §1), or -1.</summary>
+    public long Commit { get; init; } = -1;
 }
 
 /// <summary>A statement incremental maintenance cannot keep, and why (design 68 §8).</summary>

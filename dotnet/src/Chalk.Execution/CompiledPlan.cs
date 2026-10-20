@@ -386,7 +386,7 @@ internal sealed class CompiledPlan
     {
         if (_settings.EngineClock is not { } clock)
         {
-            Pin(readSet, arena);
+            Pin(readSet, arena, _settings.EngineCommits);
             return _settings.TimeProvider.GetUtcNow();
         }
 
@@ -395,6 +395,7 @@ internal sealed class CompiledPlan
         {
             readSet?.PinHeld();
             committed = clock.Committed;
+            arena.PinnedCommit = _settings.EngineCommits?.Committed ?? -1;
         }
 
         if (readSet is not null)
@@ -447,15 +448,26 @@ internal sealed class CompiledPlan
     /// to its scans through the arena (F188). The whole of a refresh transaction is then seen, or none
     /// of it, whichever of the execution's scans starts first.
     /// </summary>
-    internal static void Pin(ExecutionReadSet? readSet, ExecutionArena arena)
+    internal static void Pin(ExecutionReadSet? readSet, ExecutionArena arena, IEngineCommits? commits = null)
     {
-        if (readSet is null)
+        if (commits is not null)
         {
-            return;
+            // The count of commits in the same hold as the pins, so the tables read are named (design 78 §1).
+            lock (ExecutionReadSet.Gate)
+            {
+                readSet?.PinHeld();
+                arena.PinnedCommit = commits.Committed;
+            }
+        }
+        else if (readSet is not null)
+        {
+            readSet.Pin();
         }
 
-        readSet.Pin();
-        arena.ReadSet = readSet;
+        if (readSet is not null)
+        {
+            arena.ReadSet = readSet;
+        }
     }
 
     /// <summary>Lets the execution's pinned tables go, once its scans are done with them.</summary>

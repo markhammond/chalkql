@@ -1649,6 +1649,12 @@ public sealed class QueryExecution : IAsyncDisposable
     /// </summary>
     public IAsyncEnumerable<RecordBatch> Batches => Enumerate();
 
+    /// <summary>
+    /// How many refreshes the engine had committed when the execution pinned its tables (design 78 §1),
+    /// once its batches are read; -1 before, or where the engine counts none.
+    /// </summary>
+    internal long PinnedCommit { get; private set; } = -1;
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     private async IAsyncEnumerable<RecordBatch> Enumerate()
@@ -1680,6 +1686,8 @@ public sealed class QueryExecution : IAsyncDisposable
         }
         finally
         {
+            PinnedCommit = arena.PinnedCommit;
+            arena.PinnedCommit = -1;
             if (_hostArena is null)
             {
                 _pool.Return(arena, transient);

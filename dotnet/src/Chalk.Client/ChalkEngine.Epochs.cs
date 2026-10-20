@@ -11,6 +11,11 @@ public sealed partial class ChalkEngine
     /// <summary>The version and clock published with the current catalog. Replaced whole.</summary>
     private EpochStamp _stamp = EpochStamp.First;
 
+    /// <summary>How many refreshes this engine has committed, which each stamp records (design 78 §1).</summary>
+    private readonly EngineCommits _engineCommits = new();
+
+
+
     /// <summary>
     /// Odd while a refresh is making new rows visible — swapping snapshots and publishing the next
     /// catalog — and even otherwise. A reader that saw one even value before it read and the same
@@ -121,7 +126,7 @@ public sealed partial class ChalkEngine
         var current = Stamp;
         Volatile.Write(
             ref _stamp,
-            new EpochStamp(epoch, version ?? current.Version + 1, clock?.ToUniversalTime() ?? current.Clock));
+            new EpochStamp(epoch, version ?? current.Version + 1, clock?.ToUniversalTime() ?? current.Clock, _engineCommits.Committed));
         Interlocked.Exchange(
             ref _published,
             new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
@@ -129,9 +134,15 @@ public sealed partial class ChalkEngine
 }
 
 /// <summary>One published epoch: the catalog's number, the host's version, and the clock.</summary>
-internal sealed class EpochStamp(long epoch, long version, DateTimeOffset? clock)
+internal sealed class EpochStamp(long epoch, long version, DateTimeOffset? clock, long commit = 0)
 {
     public static EpochStamp First { get; } = new(1, 0, null);
+
+    /// <summary>
+    /// How many refreshes the engine had committed when this epoch was published (design 78 §1): an
+    /// execution that pinned at this count read this epoch's tables, whatever was published since.
+    /// </summary>
+    public long Commit { get; } = commit;
 
     public long Epoch { get; } = epoch;
 
