@@ -1938,6 +1938,96 @@ while (view.Version < engine.Version)
   Its readers are then sent the same changes, at the same versions, on every run of the same
   refreshes.
 
+#### A pipe for a slow reader
+
+A drain only copies the host's structs into the sink, so it is quick; what is slow is what a reader
+does next, such as sending each change over a network. To keep the update loop from waiting on that
+work, drain each version into a batch of its own and hand the batch to the reader through a pipe.
+A fixed number of batches go round between the two, so the loop waits only when every batch is
+still with the reader:
+
+```csharp
+readonly record struct Change(CellKey Key, Cell Row, bool Deleted);
+
+/// <summary>One version's changes, in order, and the stamp they reach.</summary>
+sealed class Batch : IViewSink<CellKey, Cell>
+{
+    private Change[] _changes = new Change[256];
+
+    public int Count { get; private set; }
+    public bool IsReset { get; private set; }     // the whole result follows: start over
+    public bool Committed { get; private set; }
+    public ViewStamp Stamp { get; private set; }
+    public uint Checksum { get; private set; }
+    public ReadOnlySpan<Change> Changes => _changes.AsSpan(0, Count);
+
+    public void Clear() => (Count, IsReset, Committed) = (0, false, false);
+
+    void IViewSink<CellKey, Cell>.Reset() => (Count, IsReset) = (0, true);
+    public void Upsert(in CellKey key, in Cell row) => Add(new Change(key, row, Deleted: false));
+    public void Delete(in CellKey key) => Add(new Change(key, default, Deleted: true));
+    public void Commit(long version, uint checksum) => Commit(new ViewStamp(version, 0), checksum);
+    public void Commit(in ViewStamp stamp, uint checksum) => (Stamp, Checksum, Committed) = (stamp, checksum, true);
+
+    private void Add(in Change change)
+    {
+        if (Count == _changes.Length)
+        {
+            Array.Resize(ref _changes, Count * 2);
+        }
+
+        _changes[Count++] = change;
+    }
+}
+
+const int Batches = 8;
+var free = Channel.CreateBounded<Batch>(Batches);
+var full = Channel.CreateBounded<Batch>(Batches);
+for (var i = 0; i < Batches; i++)
+{
+    free.Writer.TryWrite(new Batch());
+}
+
+// The update loop: one version a batch, waiting only for a free one.
+while (view.Version < engine.Version)
+{
+    var batch = await free.Reader.ReadAsync();
+    await view.UpdateAsync();
+    view.Drain(ref cursor, batch);
+    if (batch.Committed)
+    {
+        await full.Writer.WriteAsync(batch);
+    }
+    else
+    {
+        free.Writer.TryWrite(batch);
+    }
+}
+
+// The reader, at its own pace, on another task.
+await foreach (var batch in full.Reader.ReadAllAsync())
+{
+    Send(batch);   // every change of one version, then its stamp
+    batch.Clear();
+    free.Writer.TryWrite(batch);
+}
+```
+
+- **Nothing is conflated.** The batch is taken before the update and the drain completes into it,
+  so each version's changes reach the reader whole and in order, ending with that version's stamp
+  and checksum.
+- **The pipe bounds how far the view runs ahead of the reader:** as many versions as there are
+  batches. Past that the loop waits for the reader, and the engine holds the refreshes the view has
+  yet to publish, up to the view's `MaxBacklog`. Size the two together.
+- **It reuses what it holds.** A batch grows to the largest version it has carried and keeps that
+  room, and the changes are the host's unmanaged structs, copied by value. A reset batch, which a
+  new or reset reader is sent, carries the whole result: the reader starts over from it.
+- **Several readers.** Give each its own cursor and pipe; the loop takes a free batch from every
+  pipe before it updates, then drains each cursor into its own batch. A reader's jitter is absorbed
+  by its batches, and the slowest reader sets the pace once its pipe is full.
+- **Not only for every version.** Over a view that publishes the latest, the same pipe carries one
+  batch per update, the versions between them conflated as they are for any reader.
+
 ### A view over a database
 
 A database changes outside the engine's refreshes, so a view over one — DuckDB, PostgreSQL, any
