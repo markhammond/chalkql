@@ -1506,7 +1506,7 @@ public final class RelToIr {
    * A set operation's input in the set's own row type up to nullability (I-IR-4). Calcite takes the
    * least restrictive of its inputs' types as the set's, and leaves an input of another precision,
    * such as {@code TIMESTAMP(0)} beside {@code TIMESTAMP(9)}, as it is; such an input is cast here,
-   * each column keeping its own nullability.
+   * each column keeping its own nullability. A composite or a list column is never cast.
    */
   private Rel castTo(RelNode input, RelDataType row) {
     Rel converted = toRel(input);
@@ -1515,6 +1515,11 @@ public final class RelToIr {
     boolean[] cast = new boolean[have.size()];
     boolean any = false;
     for (int i = 0; i < have.size(); i++) {
+      // A composite or a list is carried as it is: it cannot be cast (I-IR-23), and the set's check
+      // already compares it up to nullability.
+      if (have.get(i).getType().isStruct() || have.get(i).getType().getComponentType() != null) {
+        continue;
+      }
       Type from = types.toIr(have.get(i).getType()).toBuilder().setNullable(false).build();
       Type to = types.toIr(want.get(i).getType()).toBuilder().setNullable(false).build();
       cast[i] = !from.equals(to);
