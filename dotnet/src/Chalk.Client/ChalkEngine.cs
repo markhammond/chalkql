@@ -942,11 +942,17 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             return null;
         }
 
+        // `@ctx` spelled in a statement is a context reference, refused as one, not a value to type.
         var parameter = rewriter.Parameters[rendered.Slots[placeholder].ParameterIndex];
+        if (string.Equals(parameter.Name, "ctx", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
         return new PlanningException(
             refusal.Violations,
-            $"{parameter} has nothing beside it to give it a type. Write CAST({parameter} AS DOUBLE), say, or declare "
-            + "its type in PrepareOptions.ParameterTypes.",
+            $"Illegal use of dynamic parameter: {parameter} has nothing beside it to give it a type. Write "
+            + $"CAST({parameter} AS DOUBLE), say, or declare its type in PrepareOptions.ParameterTypes.",
             position,
             planningState: null,
             refusal);
