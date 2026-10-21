@@ -3067,8 +3067,12 @@ So entitlements cost nothing when unused, by design as well as by measurement:
   bytes and the same digest.
 
 `RequestContext` and `PrepareAsync(sql, context)` stay on the core engine, because named
-bound values are a core feature. A statement may say `org_id IN (@ctx.my_orgs)` with no
-policy anywhere in sight.
+bound values are a core feature. SQL the host registers with the catalog, such as a table's
+row predicate, and a policy's rules refer to them as `@ctx.<name>`. A statement never reads
+the context itself: in a statement's text `@ctx` is an ordinary named parameter, so
+`org_id IN (@ctx.my_orgs)` is refused as an untyped parameter, and `@ctx.user` as a syntax
+error, before any bound value is reached. A statement that needs one of a principal's values
+binds it as a parameter of its own, or leaves the question to the policy.
 
 **A table with no tenancy column of its own.** A chat message belongs to a thread, a
 line item to an order, a comment to a post — and the row itself says nothing about who

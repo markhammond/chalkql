@@ -8,8 +8,8 @@ NuGet packages:
 
 | Package | Licence | |
 | --- | --- | --- |
-| ChalkQL [![NuGet](https://img.shields.io/nuget/v/ChalkQL.svg)](https://www.nuget.org/packages/ChalkQL) | Apache-2.0 | engine, planner client, catalogue, execution and entitlements |
-| ChalkQL.Sources [![NuGet](https://img.shields.io/nuget/v/ChalkQL.Sources.svg)](https://www.nuget.org/packages/ChalkQL.Sources) | Apache-2.0 | POCO, Akade.IndexedSet, ADO.NET, DuckDB and source conformance implementations |
+| ChalkQL [![NuGet](https://img.shields.io/nuget/v/ChalkQL.svg)](https://www.nuget.org/packages/ChalkQL) | Elastic License 2.0 | engine, planner client, catalogue, execution, entitlements and standing views |
+| ChalkQL.Sources [![NuGet](https://img.shields.io/nuget/v/ChalkQL.Sources.svg)](https://www.nuget.org/packages/ChalkQL.Sources) | Elastic License 2.0 | POCO, Akade.IndexedSet, ADO.NET, DuckDB and source conformance implementations |
 
 The public packages use the `ChalkQL` name; assemblies and .NET namespaces retain `Chalk.*`.
 
@@ -75,7 +75,9 @@ Incremental maintenance is **experimental**: `ViewMaintenance.Incremental` carri
 
 `engine.MaterializeAsync(sql, options)` keeps a statement's answer current as one row per key, mapped to the host's own structs. A reader drains it from a cursor and gets the latest row of each key that changed since it last read, never a queue of every change, with a checksum at each commit. Inputs say how they change — append-only logs with a lateness, logs read by key and time, tables changed by key — and the host numbers each refresh as an epoch.
 
-By default each update recomputes the statement in full. With `Maintenance = ViewMaintenance.Incremental`, a view computes only what changed: its statement's plan runs on the changes to its tables, and its joins, as-of joins and aggregates keep state between updates.
+By default each update recomputes the statement in full. With `Maintenance = ViewMaintenance.Incremental`, a view computes only what changed: its statement's plan runs on the changes to its tables, and its joins, as-of joins, aggregates and window functions keep state between updates.
+
+Views and refreshes run side by side: an update a refresh overtakes is published at the version it read, and no refresh waits for a view. Every commit carries a stamp, its version and generation, so a host waits for its own change with `UpdateToAsync`. A view names the parameters it may bind again, and `RebindAsync` moves them without planning the statement anew. A refresh marked `Barrier()` is published by every view, and `ViewVersions.Every` makes a view publish every version in order.
 
 ## Federation for (almost) everyone
 
@@ -270,7 +272,7 @@ The JVM process boundary is intentional. It preserves Apache Calcite's planner e
 
 **Composite types are deliberately limited.** They are flat, have no whole-value ordering or equality, and currently originate only from client functions and in-process table columns. Use their scalar fields for grouping, ordering, comparison, joins and indexes.
 
-**Rounding follows SQL type semantics .** `ROUND` rounds the value represented by its input type. Exact numeric values use decimal rounding semantics; approximate numeric values may produce different results because their represented value need not equal the corresponding decimal value. ChalkQL is consistent with SQL Server and DuckDB; PostgreSQL declines to offer `ROUND(DOUBLE, scale)`
+**Rounding follows SQL type semantics.** `ROUND` rounds the value represented by its input type. Exact numeric values use decimal rounding semantics; approximate numeric values may produce different results because their represented value need not equal the corresponding decimal value. ChalkQL is consistent with SQL Server and DuckDB; PostgreSQL declines to offer `ROUND(DOUBLE, scale)`
 
 **ChalkQL is currently read-only.** `SELECT` is supported; DML, DDL and transactions are not.
 

@@ -83,11 +83,13 @@ Standing queries, on the shoulders of giants, remain active as inputs change. Wi
 
 This makes it possible to express live views over changing application and source state using SQL: streaming state and temporal joins and tenancy-aware access control. Oh my!
 
+Live views never stall the data feeding them: an update a refresh overtakes is published at the version it read, and every commit carries a stamp a host can wait on to read its own writes. Parameters rebind without planning again, and window functions are maintained from the rows a change reaches.
+
 Spend twice the memory budget and enjoy tighter tail latency with the optional low-jitter profile.
 
 ### Bring your own functions.
 
-SQL-defined, host-language and native functions c   an participate in the same plan, with pushdown where eligible.
+SQL-defined, host-language and native functions can participate in the same plan, with pushdown where eligible.
 
 Host-language functions are ordinary .NET delegates and can use familiar CLR types such as `decimal`, `DateOnly`, `DateTime`, `DateTimeOffset`, `TimeSpan` and `Guid`.
 
