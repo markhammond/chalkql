@@ -84,7 +84,7 @@ public sealed class AkadeTemporalIndexTests
                     .Select(i =>
                     {
                         var ts = Now.AddMinutes(-10 * i);
-                        return new Trade(i, i % 2, ts, ts, DateOnly.FromDateTime(ts));
+                        return new Trade(i, i & 1, ts, ts, DateOnly.FromDateTime(ts));
                     })
                     .ToIndexedSet()
                     .WithRangeIndex(x => x.Ts)

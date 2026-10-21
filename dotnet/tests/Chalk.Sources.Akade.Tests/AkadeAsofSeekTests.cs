@@ -71,7 +71,7 @@ public sealed class AkadeAsofSeekTests
             try
             {
                 var trades = Enumerable.Range(0, 2_000)
-                    .Select(i => new Trade(i, i % 2, Now.AddMinutes(-10 * i)))
+                    .Select(i => new Trade(i, i & 1, Now.AddMinutes(-10 * i)))
                     .ToIndexedSet()
                     .WithRangeIndex(x => (x.Shard, x.Ts))
                     .Build();
