@@ -52,7 +52,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     private long _rebinds;
 
     /// <summary>The tables the view's statement reads, for the one it was worked out for (design 78 §2).</summary>
-    private (PreparedQuery For, HashSet<(string SourceId, string Table)> Tables)? _readSet;
+    private (PreparedQuery For, Func<(string SourceId, string Table), bool> Reads)? _readSet;
 
     /// <summary>How many times a refresh that wrote nothing the view reads moved its version without an update: for a test.</summary>
     internal int Relabels { get; private set; }
@@ -810,12 +810,12 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         var prepared = _prepared;
         if (_readSet is not { } known || !ReferenceEquals(known.For, prepared))
         {
-            known = (prepared, prepared.TablesRead.ToHashSet(TableNames.Instance));
+            // The question asked of each table a refresh wrote, made once per statement rather than at each update.
+            known = (prepared, prepared.TablesRead.ToHashSet(TableNames.Instance).Contains);
             _readSet = known;
         }
 
-        var tables = known.Tables;
-        if (!_engine.Untouched(_epoch, stamp.Epoch, tables.Contains, _readsTime || _namesClock))
+        if (!_engine.Untouched(_epoch, stamp.Epoch, known.Reads, _readsTime || _namesClock))
         {
             return false;
         }
