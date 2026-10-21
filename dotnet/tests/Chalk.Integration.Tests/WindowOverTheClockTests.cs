@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Reflection;
 using Chalk.Catalog;
 using Chalk.Client;
 using Chalk.Entitlements;
@@ -54,6 +56,51 @@ public sealed class WindowOverTheClockTests(SharedSidecar sidecar)
             Assert.InRange(window.Read, 10, 11);
             Assert.Equal(await StatementAsync(desk.Engine, prepared, now), held);
         }
+    }
+
+    /// <summary>
+    /// A window's clock moving half a second at a time over ticks a second apart lets a tick go at every
+    /// other move. Looking for rows behind the cut-off, and letting them go, allocates nothing: a move that
+    /// lets none go allocates under 2 KB (about 2.4 KB when every move built a view of the order and a list),
+    /// one that lets a tick go only the one-row change it gives more, and the view is the statement after
+    /// every move.
+    /// </summary>
+    [Fact]
+    public async Task Letting_rows_go_behind_a_cut_off_allocates_nothing()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        Assert.SkipWhen(
+            typeof(WindowState).Assembly.GetCustomAttribute<DebuggableAttribute>()?.IsJITOptimizerDisabled == true,
+            "a Debug build allocates each async method's state machine at every call");
+        await using var desk = await DeskAsync(Ticks(2_000));
+        var now = Start.AddSeconds(1_000);
+        var prepared = await desk.Engine.PrepareAsync(LastTenMinutes, ct: Ct);
+        await using var maintained = await prepared.MaintainAsync([now], 0, [0], Ct);
+        var held = new Dictionary<long, long>();
+        Apply(await maintained.UpdateAsync([now], At(now), desk.Engine.Version, whole: false, Ct), held);
+
+        var lettingGo = new List<long>();
+        var keeping = new List<long>();
+        for (var step = 1; step <= 400; step++)
+        {
+            now = now.AddMilliseconds(500);
+            await desk.Engine.RefreshAsync(r => r.AdvanceClock(At(now)), Ct);
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            var update = await maintained.UpdateAsync([now], At(now), desk.Engine.Version, whole: false, Ct);
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Apply(update, held);
+            if (step > 100)
+            {
+                (step % 2 == 0 ? lettingGo : keeping).Add(allocated);
+            }
+        }
+
+        Assert.Equal(await StatementAsync(desk.Engine, prepared, now), held);
+        lettingGo.Sort();
+        keeping.Sort();
+        var (letting, kept) = (lettingGo[lettingGo.Count / 2], keeping[keeping.Count / 2]);
+        Assert.True(kept <= 2_048, $"a move that let no tick go allocated {kept} bytes");
+        Assert.True(letting <= kept + 112, $"a move that let a tick go allocated {letting} bytes, one that let none go {kept}");
     }
 
     /// <summary>

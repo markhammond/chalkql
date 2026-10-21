@@ -96,18 +96,21 @@ internal sealed class WindowState : IMaintainedState
     /// Lets go of the rows held behind comparison <paramref name="cut"/>'s cut-off, which can never pass
     /// again: they fail a lower bound of the whole condition that only rises.
     /// </summary>
+    /// <remarks>
+    /// Read from the least value up, by the order's minimum, so a clock move allocates nothing for it: a row
+    /// taken out leaves the order as it goes (<see cref="Changed"/>).
+    /// </remarks>
     public void LetGoBehind(int cut, long cutOff)
     {
-        var high = Behind[cut].Strict ? cutOff : cutOff == long.MinValue ? long.MinValue : cutOff - 1;
-        if (!Behind[cut].Strict && cutOff == long.MinValue)
+        var order = _orders[CutOrder[cut]];
+        while (order.Count > 0 && IsBehind(cut, order.Min.Value, cutOff))
         {
-            return;
-        }
-
-        var behind = _orders[CutOrder[cut]].GetViewBetween((long.MinValue, int.MinValue), (high, int.MaxValue)).Select(e => e.Slot).ToList();
-        foreach (var slot in behind)
-        {
-            Input.Take(slot);
+            var held = order.Count;
+            Input.Take(order.Min.Slot);
+            if (order.Count == held)
+            {
+                throw new InvalidOperationException("a row let go behind a cut-off stayed in the cut-off's order.");
+            }
         }
     }
 
@@ -230,6 +233,9 @@ internal sealed class WindowChanges : MaintainedOperator, IKeepsScratch
     private readonly HashSet<int> _seen = [];
     private readonly List<int> _rows = [];
     private bool[] _pass = [];
+
+    /// <summary>The cut-offs' array the state does not hold: each clock move fills it, and the two take turns.</summary>
+    private long[]? _spareCuts;
 
     public WindowChanges(
         OperatorContext context,
@@ -388,6 +394,11 @@ internal sealed class WindowChanges : MaintainedOperator, IKeepsScratch
         if (moved)
         {
             state.RanAt = Moment.Of(Context);
+            if (state.Cuts is { } last && !ReferenceEquals(last, cuts))
+            {
+                _spareCuts = last;
+            }
+
             state.Cuts = cuts;
         }
 
@@ -420,7 +431,10 @@ internal sealed class WindowChanges : MaintainedOperator, IKeepsScratch
     /// <summary>Each comparison's cut-off at the update's clock, or null when one of them is NULL.</summary>
     private long[]? Cuts()
     {
-        var cuts = new long[_cuts.Length];
+        // Into the array the state does not hold, so a clock move allocates none: the state's is compared with.
+        var cuts = _spareCuts is { } spare && spare.Length == _cuts.Length && !ReferenceEquals(spare, _state.Cuts)
+            ? spare
+            : new long[_cuts.Length];
         for (var i = 0; i < _cuts.Length; i++)
         {
             var value = _eval.EvaluateOnce(_cuts[i]);
