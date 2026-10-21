@@ -201,6 +201,12 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     public CatalogContext Catalog => Volatile.Read(ref _catalog);
 
     /// <summary>
+    /// The ULID a planner keeps this engine's catalog and statistics under, minted for this engine alone
+    /// (D271 (a), F269): for a test that addresses the engine's registration itself.
+    /// </summary>
+    internal string InstanceId => _instanceId;
+
+    /// <summary>
     /// The epoch at which the catalog's <em>shape</em> last changed (D260 §2). A plan is stale when
     /// it was planned before this, and current otherwise — so a refresh that only moved rows or
     /// statistics leaves every prepared query valid, and one that added a column strands them as it
@@ -293,17 +299,18 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 schemas.Add(registration.Source.DescribeSchema());
             }
 
-            // The engine's instance version (D271 (a)): the host's own name for its catalog when it gave
-            // one — a test, a corpus recording, anything that needs the same id in two processes — and a
-            // minted ULID otherwise, unique across engines and across restarts.
-            var instanceId = string.IsNullOrEmpty(options.ContextId)
-                ? CatalogVersions.Mint()
-                : options.ContextId;
+            // The engine's instance version (D271 (a)): a ULID minted for this engine alone, unique
+            // across engines and restarts, under which a planner keeps its catalog and statistics apart
+            // from every other engine's, however the engines are named (F269). The catalog's name, which
+            // plans carry, is the host's when it gave one — a test, a corpus recording, anything that
+            // needs the same name in two processes — and the instance version otherwise.
+            var instanceId = CatalogVersions.Mint();
+            var contextId = string.IsNullOrEmpty(options.ContextId) ? instanceId : options.ContextId;
 
             var catalog = WithJoinPolicy(
                 new CatalogContext
                 {
-                    ContextId = instanceId,
+                    ContextId = contextId,
                     Epoch = 1,
                     Schemas = schemas,
                     Associations = options.Associations,

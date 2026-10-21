@@ -195,11 +195,13 @@ public sealed class ChalkEngineOptions
     /// Names this catalog to the planner. Plans carry it and are refused against another.
     /// </summary>
     /// <remarks>
-    /// Optional since D271 (a): an engine that is given no name mints an instance ULID for itself,
-    /// unique across engines and across restarts, and the host never sees it unless it logs it. What
-    /// a name is still for is <em>the same id in two processes</em> — a recorded corpus, a test that
-    /// asserts on a plan's context id, a golden that must be byte-identical to the one before it —
-    /// and that is the only reason to set one.
+    /// Optional since D271 (a): an engine that is given no name takes the instance ULID it mints for
+    /// itself, and the host never sees it unless it logs it. What a name is for is <em>the same name
+    /// in two processes</em> — a recorded corpus, a test that asserts on a plan's context id, a golden
+    /// that must be byte-identical to the one before it. A name is never what a planner keeps the
+    /// engine's catalog under: every engine mints its own instance ULID for that, so engines that
+    /// share a planner and a name, such as two instances of one service, never share its catalog or
+    /// statistics.
     /// </remarks>
     public string? ContextId { get; init; }
 

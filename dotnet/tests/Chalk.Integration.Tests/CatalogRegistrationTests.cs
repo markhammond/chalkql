@@ -434,7 +434,7 @@ public sealed class CatalogRegistrationTests(SharedSidecar sidecar, ITestOutputH
             new CatalogRegistration
             {
                 Catalog = engine.Catalog,
-                InstanceId = engine.Catalog.ContextId,
+                InstanceId = engine.InstanceId,
                 ShapeVersion = "01SQUATTERVERSIONXXXXXXXXX",
             },
             TestContext.Current.CancellationToken);
