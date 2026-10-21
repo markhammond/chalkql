@@ -1557,9 +1557,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                 }
 
                 // What the refresh wrote, for a view to tell whether it touched what it reads (design 78 §2).
-                _writing = (
-                    builder.Entries.Select(e => (e.Source.SourceId, e.Entry.Table)).ToHashSet(TableNames.Instance),
-                    builder.ClockGiven is not null);
+                _writing = (WriteSet(builder.Entries), builder.ClockGiven is not null);
                 var (epoch, behind) = await PublishAsync(builder.VersionGiven, builder.ClockGiven, deferred, ct)
                     .ConfigureAwait(false);
                 numbersBehind = behind;
