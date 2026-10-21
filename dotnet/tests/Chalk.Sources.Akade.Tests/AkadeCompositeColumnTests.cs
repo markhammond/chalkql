@@ -29,7 +29,7 @@ public sealed class AkadeCompositeColumnTests
             i,
             new DateOnly(2026, 1, 1).AddDays(i),
             new Card($"m{i}@example.org", i % 3),
-            i % 4 == 0 ? null : new Card($"old{i}@example.org", i % 2))),
+            i % 4 == 0 ? null : new Card($"old{i}@example.org", i & 1))),
     ];
 
     /// <summary>
