@@ -119,6 +119,26 @@ public sealed class ViewStampTests(SharedSidecar sidecar)
         await Assert.ThrowsAsync<ArgumentException>(() => view.UpdateToAsync(new ViewStamp(30, 5), Ct).AsTask());
     }
 
+    /// <summary>
+    /// A refresh that writes the tables the last one wrote shares its record of them, so a feed that appends to
+    /// the same table each time records what it wrote without allocating; one that writes others records anew.
+    /// </summary>
+    [Fact]
+    public async Task A_refresh_of_the_same_tables_shares_the_record_of_them()
+    {
+        var (engine, marks, notes) = await DeskAsync();
+        await using var _ = engine;
+        await engine.RefreshAsync(r => r.Append(marks, [new Mark(3, 3, Open)]), Ct);
+        var first = engine.Stamp.Writes;
+        await engine.RefreshAsync(r => r.Append(marks, [new Mark(5, 5, Open)]), Ct);
+        Assert.Same(first, engine.Stamp.Writes);
+        Assert.Equal([("desk", "marks")], first!);
+
+        await engine.RefreshAsync(r => r.Append(notes, [new Note(2, "b")]).Append(marks, [new Mark(6, 6, Open)]), Ct);
+        Assert.NotSame(first, engine.Stamp.Writes);
+        Assert.Equal(2, engine.Stamp.Writes!.Length);
+    }
+
     private async Task<(ChalkEngine Engine, PocoTable<Mark> Marks, PocoTable<Note> Notes)> DeskAsync()
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
