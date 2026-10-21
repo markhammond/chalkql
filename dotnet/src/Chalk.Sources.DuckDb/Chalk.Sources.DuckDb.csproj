@@ -9,12 +9,10 @@
   </PropertyGroup>
 
   <!--
-    DuckDB.NET.Data, not Data.Full and not Bindings.Full as 24-zero-gc.md §6 said (D148a, ADR 0024):
+    DuckDB.NET.Data, not Data.Full and not Bindings.Full:
     DuckDBConnection and DuckDBCommand.ExecuteArrowBatchesAsync live in DuckDB.NET.Data, and the
     `.Full` suffix adds only the native libduckdb runtime packages. Leaving those out makes the
-    native library the host's choice — DuckDB.NET.Bindings.Full at the same version, or its own
-    build of the same DuckDB release — which is what a library package should do. Chalk.Sources.Ado
-    is untouched and still depends on System.Data.Common alone (D85).
+    native library the host's choice.
   -->
   <ItemGroup>
     <PackageReference Include="Apache.Arrow" />

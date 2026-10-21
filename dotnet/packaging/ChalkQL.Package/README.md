@@ -102,7 +102,7 @@ Where data sources are physically segregated by sovereign zone, ChalkQL favours 
 
 Work that genuinely spans sovereign zones remains deliberate and visible: execute separate statements against the relevant engines and combine their results explicitly in application code.
 
-## Make every last delta count.
+## Make every last delta count
 
 Standing queries, on the shoulders of giants, remain active as inputs change. With incremental view maintenance (experimental), ChalkQL propagates input changes through a supported query plan, updating the result without recomputing the entire query.
 
