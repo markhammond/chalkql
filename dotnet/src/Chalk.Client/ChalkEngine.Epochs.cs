@@ -137,7 +137,24 @@ public sealed partial class ChalkEngine
     }
 
     /// <summary>Completes when the next epoch is published.</summary>
-    internal Task NextPublished => Volatile.Read(ref _published).Task;
+    /// <remarks>
+    /// Made only when someone waits, so a refresh that nobody waits on allocates nothing for it. A waiter
+    /// takes the task before it reads the stamp, and a publish writes the stamp before it completes the task,
+    /// so a waiter sees the new stamp or is woken by it.
+    /// </remarks>
+    internal Task NextPublished
+    {
+        get
+        {
+            if (Volatile.Read(ref _published) is { } waited)
+            {
+                return waited.Task;
+            }
+
+            var made = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            return (Interlocked.CompareExchange(ref _published, made, null) ?? made).Task;
+        }
+    }
 
     /// <summary>The views' holds on refreshes they have yet to publish (design 78 §4, §5). Replaced whole.</summary>
     private EpochRetainer[] _retainers = [];
@@ -213,8 +230,8 @@ public sealed partial class ChalkEngine
     /// </summary>
     private long _changes;
 
-    /// <summary>Completed, and replaced, each time an epoch is published.</summary>
-    private TaskCompletionSource _published = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    /// <summary>What a waiter for the next epoch awaits, completed and let go when it is published; null while none waits.</summary>
+    private TaskCompletionSource? _published;
 
     /// <summary>
     /// The version of the data this engine serves (D339). A refresh numbers its epoch with
@@ -269,13 +286,13 @@ public sealed partial class ChalkEngine
     {
         while (true)
         {
-            var published = Volatile.Read(ref _published);
+            var published = NextPublished;
             if (Stamp.Version >= version)
             {
                 return;
             }
 
-            await published.Task.WaitAsync(ct).ConfigureAwait(false);
+            await published.WaitAsync(ct).ConfigureAwait(false);
         }
     }
 
@@ -329,9 +346,7 @@ public sealed partial class ChalkEngine
 
         Volatile.Write(ref _stamp, stamp);
         Volatile.Write(ref _recent[epoch % RecentStamps], stamp);
-        Interlocked.Exchange(
-            ref _published,
-            new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
+        Interlocked.Exchange(ref _published, null)?.TrySetResult();
     }
 }
 
