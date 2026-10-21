@@ -63,7 +63,7 @@ public final class PlannerConfig {
   private static final String USAGE =
       "Usage: chalk-planner [--host H] [--port P | --socket PATH] [--threads N] "
           + "[--planning-workers N] [--planning-load-factor F] [--planning-session-limit N] "
-          + "[--catalog-versions N] [--catalog-idle-minutes N]";
+          + "[--catalog-versions N] [--catalog-idle-minutes N] [--exit-with-host]";
 
   private final String host;
   private final int port;
@@ -74,6 +74,7 @@ public final class PlannerConfig {
   private final int planningSessionLimit;
   private final int catalogVersions;
   private final long catalogIdleMinutes;
+  private final boolean exitWithHost;
 
   private PlannerConfig(
       String host,
@@ -84,7 +85,8 @@ public final class PlannerConfig {
       long sliceMillis,
       int planningSessionLimit,
       int catalogVersions,
-      long catalogIdleMinutes) {
+      long catalogIdleMinutes,
+      boolean exitWithHost) {
     this.host = host;
     this.port = port;
     this.socketPath = socketPath;
@@ -94,6 +96,7 @@ public final class PlannerConfig {
     this.planningSessionLimit = planningSessionLimit;
     this.catalogVersions = catalogVersions;
     this.catalogIdleMinutes = catalogIdleMinutes;
+    this.exitWithHost = exitWithHost;
   }
 
   /**
@@ -127,6 +130,12 @@ public final class PlannerConfig {
    * \u2014 the current one and its predecessors \u2014 and how long an instance may go unasked-about
    * before it is evicted whole. Both are memory policy and never correctness: a miss is answered by
    * name and the engine registers the version again and retries once.
+   *
+   * <p>{@code --exit-with-host}, command-line only, is for a planner a host starts for itself: the
+   * planner exits once its standard input reaches end of file. The host keeps that pipe open and
+   * writes nothing to it, and the OS closes it however the host ends, a kill included, so the planner
+   * goes with its host rather than running on without one. A planner deployed on its own is started
+   * without it.
    */
   public static PlannerConfig parse(String[] args) {
     return parse(args, System.getenv());
@@ -165,6 +174,7 @@ public final class PlannerConfig {
     Integer planningSessionLimitArg = null;
     Integer catalogVersionsArg = null;
     Long catalogIdleMinutesArg = null;
+    boolean exitWithHost = false;
     for (int i = 0; i < args.length; i++) {
       switch (args[i]) {
         case "--host" -> {
@@ -190,6 +200,7 @@ public final class PlannerConfig {
         case "--catalog-idle-minutes" ->
             catalogIdleMinutesArg =
                 Long.parseLong(requireValue(args, ++i, "--catalog-idle-minutes"));
+        case "--exit-with-host" -> exitWithHost = true;
         default -> throw new IllegalArgumentException("Unknown option '" + args[i] + "'. " + USAGE);
       }
     }
@@ -255,7 +266,8 @@ public final class PlannerConfig {
         sliceMillis,
         planningSessionLimit,
         catalogVersions,
-        catalogIdleMinutes);
+        catalogIdleMinutes,
+        exitWithHost);
   }
 
   /**
@@ -326,6 +338,11 @@ public final class PlannerConfig {
   public int catalogVersions() {
     return catalogVersions;
   }
+  /** Whether the planner exits once its standard input reaches end of file: its host has gone. */
+  public boolean exitWithHost() {
+    return exitWithHost;
+  }
+
 
   /**
    * Minutes an engine instance may go without a request before its catalog is evicted whole (D271

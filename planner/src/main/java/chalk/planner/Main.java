@@ -1,5 +1,6 @@
 package chalk.planner;
 
+import java.io.IOException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,6 +34,27 @@ public final class Main {
                   server.close();
                 },
                 "chalk-planner-shutdown"));
+    // A planner a host started for itself goes with the host: its standard input is the host's
+    // pipe, which nothing writes to and which the OS closes however the host ends.
+    if (config.exitWithHost()) {
+      Thread watch =
+          new Thread(
+              () -> {
+                try {
+                  while (System.in.read() != -1) {
+                    // Nothing is written; anything that is, is read and dropped.
+                  }
+                } catch (IOException e) {
+                  // A pipe that cannot be read is a host that has gone, too.
+                }
+                LOG.info("its host has gone; shutting down");
+                System.exit(0);
+              },
+              "chalk-planner-host-watch");
+      watch.setDaemon(true);
+      watch.start();
+    }
+
     server.awaitTermination();
   }
 }

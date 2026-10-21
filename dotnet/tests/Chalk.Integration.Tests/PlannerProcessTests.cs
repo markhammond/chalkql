@@ -211,6 +211,101 @@ public sealed class PlannerProcessTests
         Assert.Equal(7, planner.PlanNestingLimit);
     }
 
+    /// <summary>
+    /// A host that ends without disposing its sidecar closes the pipe the sidecar watches on its
+    /// standard input, which the OS does however the host ends: the sidecar exits by itself and takes
+    /// its socket file with it, rather than running on without a host.
+    /// </summary>
+    [Fact]
+    public async Task A_sidecar_whose_host_has_gone_exits_by_itself()
+    {
+        SkipWithoutJar();
+
+        var sidecar = await PlannerProcess.StartAsync(
+            new PlannerProcessOptions { JarPath = Jar, Transport = PlannerTransport.UnixSocket },
+            TestContext.Current.CancellationToken);
+        var pid = sidecar.ProcessId;
+        var socket = sidecar.Address.LocalPath;
+        Assert.True(File.Exists(socket));
+
+        sidecar.CloseHostPipe();
+
+        Assert.True(await ExitsWithinAsync(pid, TimeSpan.FromSeconds(15)), "the sidecar should exit once its host's pipe closes");
+        Assert.False(File.Exists(socket), $"{socket} should be gone with the sidecar");
+        await sidecar.DisposeAsync();
+    }
+
+    /// <summary>
+    /// The same with a host that is killed: a shell starts the planner with <c>--exit-with-host</c>,
+    /// its standard input a pipe only the shell holds, and is killed outright, as a host whose shutdown
+    /// was cut short is. The planner exits and removes its socket file.
+    /// </summary>
+    [Fact]
+    public async Task A_planner_whose_host_is_killed_exits()
+    {
+        SkipWithoutJar();
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "the host here is a POSIX shell");
+        var ct = TestContext.Current.CancellationToken;
+        var java = await PlannerProcess.ResolveJavaAsync(null, ct);
+        Assert.SkipWhen(java is null, "no JDK 21+");
+
+        var name = $"chalk-host-{Environment.ProcessId}-{Guid.NewGuid():N}"[..28];
+        var fifo = Path.Combine("/tmp", name + ".fifo");
+        var socket = Path.Combine("/tmp", name + ".sock");
+        var script =
+            $"mkfifo '{fifo}' || exit 1; '{java}' -jar '{Jar}' --socket '{socket}' --exit-with-host < '{fifo}' > /dev/null 2>&1 & "
+            + $"exec 9> '{fifo}'; rm -f '{fifo}'; echo $!; exec sleep 600";
+        using var host = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("/bin/sh")
+        {
+            ArgumentList = { "-c", script },
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        })!;
+        try
+        {
+            var pid = int.Parse((await host.StandardOutput.ReadLineAsync(ct))!, System.Globalization.CultureInfo.InvariantCulture);
+            var started = DateTime.UtcNow;
+            while (!File.Exists(socket) && DateTime.UtcNow - started < TimeSpan.FromSeconds(30))
+            {
+                await Task.Delay(100, ct);
+            }
+
+            Assert.True(File.Exists(socket), "the planner should be listening");
+            Assert.False(Exited(pid));
+
+            host.Kill();
+
+            Assert.True(await ExitsWithinAsync(pid, TimeSpan.FromSeconds(15)), "the planner should exit once its host is killed");
+            Assert.False(File.Exists(socket), $"{socket} should be gone with the planner");
+        }
+        finally
+        {
+            if (!host.HasExited)
+            {
+                host.Kill();
+            }
+
+            File.Delete(fifo);
+        }
+    }
+
+    /// <summary>Waits until the process has exited, up to <paramref name="limit"/>.</summary>
+    private static async Task<bool> ExitsWithinAsync(int pid, TimeSpan limit)
+    {
+        var started = DateTime.UtcNow;
+        while (!Exited(pid))
+        {
+            if (DateTime.UtcNow - started > limit)
+            {
+                return false;
+            }
+
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+        }
+
+        return true;
+    }
+
     private static void SkipWithoutJar() =>
         Assert.SkipWhen(
             RepoLayout.PlannerJar is null,

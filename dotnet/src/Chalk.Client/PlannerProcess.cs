@@ -103,6 +103,10 @@ public sealed class PlannerProcessOptions
 ///
 /// The sidecar's stderr is forwarded to the logger at Debug; its stdout carries exactly one line,
 /// which is what this parses.
+///
+/// The sidecar goes with the host. Disposing stops it; a host that ends without disposing it — its
+/// shutdown cut short, a crash, a kill — closes the pipe the sidecar watches on its standard input,
+/// and the sidecar exits and removes its socket file.
 /// </summary>
 public sealed class PlannerProcess : IAsyncDisposable
 {
@@ -176,8 +180,12 @@ public sealed class PlannerProcess : IAsyncDisposable
             PlannerAddress.RequireBindablePath(socketPath, nameof(options));
         }
 
+        // Its standard input is a pipe this process holds open and never writes to. The OS closes it
+        // however this process ends, a kill included, and the planner, told to, exits when it reads
+        // the end: so a host that ends without disposing it leaves no planner behind.
         var start = new ProcessStartInfo(java)
         {
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -189,6 +197,7 @@ public sealed class PlannerProcess : IAsyncDisposable
 
         start.ArgumentList.Add("-jar");
         start.ArgumentList.Add(jar);
+        start.ArgumentList.Add("--exit-with-host");
         if (useSocket)
         {
             start.ArgumentList.Add("--socket");
@@ -275,6 +284,12 @@ public sealed class PlannerProcess : IAsyncDisposable
             LoggerFactory = template.LoggerFactory,
         });
     }
+
+    /// <summary>
+    /// Closes the pipe the planner watches, as the OS does when this process ends: for a test, which
+    /// expects the planner to exit by itself.
+    /// </summary>
+    internal void CloseHostPipe() => _process.StandardInput.Close();
 
     /// <summary>The last lines the sidecar wrote to stderr, for a failure message.</summary>
     public IReadOnlyList<string> Diagnostics()
@@ -529,7 +544,7 @@ public sealed class PlannerProcess : IAsyncDisposable
     }
 
     /// <summary>The order in <c>scripts/java-home.sh</c>, so a shell run and a host run agree.</summary>
-    private static async Task<string?> ResolveJavaAsync(string? configuredHome, CancellationToken ct)
+    internal static async Task<string?> ResolveJavaAsync(string? configuredHome, CancellationToken ct)
     {
         var executable = OperatingSystem.IsWindows() ? "java.exe" : "java";
 

@@ -174,6 +174,12 @@ await using var exec2 = await engine.ExecuteAsync(byName,
     new { currencies = new[] { "EUR", "JPY" }, since = new DateOnly(2026, 1, 3) });
 ```
 
+The sidecar goes with its host. Disposing `PlannerProcess` stops it, and a host that ends
+without disposing it — its shutdown cut short, a crash, a kill — leaves no planner behind:
+the sidecar watches a pipe on its standard input that the host never writes to, and exits,
+removing its socket file, when the OS closes the pipe with the host. A planner you deploy
+on its own is not started so, and runs until it is stopped.
+
 `dotnet/samples/Chalk.Sample.Quickstart` is a runnable version of exactly this program:
 
 ```bash
