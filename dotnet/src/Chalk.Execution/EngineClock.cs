@@ -7,6 +7,17 @@ namespace Chalk.Execution;
 /// execution reads it in the same hold as its pins, so a query's tables and its time are of one
 /// refresh.
 /// </summary>
+internal interface IEngineCommits
+{
+    /// <summary>
+    /// How many refreshes the engine has committed (design 78 §1): moved in the same hold of the gate as
+    /// their commits, and read in the same hold as an execution's pins, so that what an execution reads
+    /// can be named by the refresh it reads.
+    /// </summary>
+    long Committed { get; }
+}
+
+/// <summary>The clock of an engine that names one; see the remarks above.</summary>
 internal interface IEngineClock
 {
     /// <summary>The clock as the last refresh to move it left it, or null while none has.</summary>

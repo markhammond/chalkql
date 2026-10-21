@@ -384,9 +384,14 @@ internal sealed class CompiledPlan
     /// </summary>
     internal DateTimeOffset PinNow(ExecutionReadSet? readSet, ExecutionArena arena)
     {
+        if (arena.ReadAt is { } held && PinHeld(readSet, arena, held))
+        {
+            return held.Clock ?? _settings.TimeProvider.GetUtcNow();
+        }
+
         if (_settings.EngineClock is not { } clock)
         {
-            Pin(readSet, arena);
+            Pin(readSet, arena, _settings.EngineCommits);
             return _settings.TimeProvider.GetUtcNow();
         }
 
@@ -395,6 +400,7 @@ internal sealed class CompiledPlan
         {
             readSet?.PinHeld();
             committed = clock.Committed;
+            arena.PinnedCommit = _settings.EngineCommits?.Committed ?? -1;
         }
 
         if (readSet is not null)
@@ -447,15 +453,52 @@ internal sealed class CompiledPlan
     /// to its scans through the arena (F188). The whole of a refresh transaction is then seen, or none
     /// of it, whichever of the execution's scans starts first.
     /// </summary>
-    internal static void Pin(ExecutionReadSet? readSet, ExecutionArena arena)
+    internal static void Pin(ExecutionReadSet? readSet, ExecutionArena arena, IEngineCommits? commits = null)
     {
-        if (readSet is null)
+        if (arena.ReadAt is { } held && PinHeld(readSet, arena, held))
         {
             return;
         }
 
-        readSet.Pin();
-        arena.ReadSet = readSet;
+        if (commits is not null)
+        {
+            // The count of commits in the same hold as the pins, so the tables read are named (design 78 §1).
+            lock (ExecutionReadSet.Gate)
+            {
+                readSet?.PinHeld();
+                arena.PinnedCommit = commits.Committed;
+            }
+        }
+        else if (readSet is not null)
+        {
+            readSet.Pin();
+        }
+
+        if (readSet is not null)
+        {
+            arena.ReadSet = readSet;
+        }
+    }
+
+    /// <summary>
+    /// Pins the tables as a refresh committed them, held for a standing view (design 78 §4, §5), and names
+    /// the pin by that refresh; false where it does not hold them all, and the tables are pinned as they
+    /// stand, which names the pin otherwise.
+    /// </summary>
+    private static bool PinHeld(ExecutionReadSet? readSet, ExecutionArena arena, RetainedTables held)
+    {
+        if (readSet is not null)
+        {
+            if (!readSet.PinFrom(held))
+            {
+                return false;
+            }
+
+            arena.ReadSet = readSet;
+        }
+
+        arena.PinnedCommit = held.Commit;
+        return true;
     }
 
     /// <summary>Lets the execution's pinned tables go, once its scans are done with them.</summary>

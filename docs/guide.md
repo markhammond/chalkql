@@ -1845,8 +1845,8 @@ var outcome = view.Drain(ref cursor, sink, 4096); // copies what changed since t
   UTF-8 spans — and returns the host's own unmanaged key and row, which the view keeps. A drain
   hands them to the sink by reference and allocates nothing.
 - **Updates** compute only when asked, so an epoch nobody reads costs nothing. An update at the
-  epoch the view holds does nothing; one that a refresh overtakes runs again, so a view always
-  reads one epoch whole.
+  epoch the view holds does nothing. Every update reads one epoch whole, and is published at the
+  version of the epoch it read (see [Views and refreshes](#views-and-refreshes)).
 - **Drains** send each changed key once, with its latest row, then commit the view's version and
   checksum. Out of budget a drain returns `Partial` and carries on at the next call. A reader whose
   changes are no fewer than the view's rows, or who needs a delete the view has dropped, is reset:
@@ -1881,6 +1881,153 @@ var outcome = view.Drain(ref cursor, sink, 4096); // copies what changed since t
   `StandingViews.DefaultLocalJoinMaxRows`, a million rows, is the planner's assumption for a table
   of unknown size.
 
+### Views and refreshes
+
+Refreshes and view updates run side by side, and neither waits for the other.
+
+- **An update is published at the epoch it read.** An update pins its tables when it begins, and the
+  pin names the refresh it read. A refresh that commits while the update runs does not discard it:
+  the view publishes what it computed at that refresh's version, then updates again at once, a few
+  times at most, to reach the latest. So every commit a reader sees is a state the engine really
+  held, named by its version, and versions only increase. A refresh never waits for a view.
+- **A refresh that writes nothing a view reads** moves the view to its version without computing
+  anything: none of the view's tables, and not the clock where the view reads it. Readers are sent a
+  commit at the new version with the same checksum.
+- **Stamps.** A sink's `Commit(in ViewStamp stamp, uint checksum)` is called with the view's stamp:
+  its version and its generation, which counts its rebinds. A rebind changes the rows without moving
+  the engine's version, so the generation tells two commits at one version apart. A sink that
+  implements only `Commit(long version, uint checksum)` is called with the version. `view.Stamp` is
+  where the view stands.
+- **Waiting for a change.** `await view.UpdateToAsync(stamp)` returns once the view stands at the
+  stamp or after it, waiting for the engine to publish a version it has not yet. A host that numbers
+  its refreshes with `Version` waits for its own change with `new ViewStamp(version, 0)`; a rebind
+  returns its stamp. With the rule above, a view the change did not touch is there already.
+  `engine.VersionOf(epoch)` gives the version of a recent epoch, such as the one `RefreshAsync`
+  returns.
+- **Versions are this engine's.** Two engines number their epochs apart, so a stamp means something
+  only on the engine that made it, unless the host numbers every engine's refreshes from one
+  sequence of its own.
+
+```csharp
+await engine.RefreshAsync(r => r.Version(900).Barrier().Replace(closes, closing));
+```
+
+- **A barrier** is a refresh every view publishes itself, rather than going past it to a later one,
+  as a view that falls behind otherwise may. An update that reaches a barrier stops there, and the
+  next carries on from it. The engine holds the states the barrier committed of each view's tables
+  until the view has published it: little for a table only appended to since, the table's rows for
+  one replaced.
+- **Every version.** `ViewOptions.Versions = ViewVersions.Every` makes a view publish every refresh
+  that changes what it reads, in order: each update takes the next of them and stops, and refreshes
+  that change nothing it reads are passed over. The engine holds each refresh's states of the view's
+  tables until the view has published it, at most `MaxBacklog` of them (1,024 by default); one more
+  faults the view, by name, and the host makes it again.
+- **A reader still drains at its own pace.** A view keeps the latest row of each key, and a drain
+  sends what changed since the reader's cursor. A barrier, or a view of every version, makes the
+  view stop at a version; a reader is sent it only if it drains before the next update. So a host
+  that must show a row added in one refresh and taken out in the next updates and drains in turn:
+
+```csharp
+while (view.Version < engine.Version)
+{
+    await view.UpdateAsync();
+    view.Drain(ref cursor, sink);   // every reader, before the next update
+}
+```
+
+  Its readers are then sent the same changes, at the same versions, on every run of the same
+  refreshes.
+
+#### A pipe for a slow reader
+
+A drain only copies the host's structs into the sink, so it is quick; what is slow is what a reader
+does next, such as sending each change over a network. To keep the update loop from waiting on that
+work, drain each version into a batch of its own and hand the batch to the reader through a pipe.
+A fixed number of batches go round between the two, so the loop waits only when every batch is
+still with the reader:
+
+```csharp
+readonly record struct Change(CellKey Key, Cell Row, bool Deleted);
+
+/// <summary>One version's changes, in order, and the stamp they reach.</summary>
+sealed class Batch : IViewSink<CellKey, Cell>
+{
+    private Change[] _changes = new Change[256];
+
+    public int Count { get; private set; }
+    public bool IsReset { get; private set; }     // the whole result follows: start over
+    public bool Committed { get; private set; }
+    public ViewStamp Stamp { get; private set; }
+    public uint Checksum { get; private set; }
+    public ReadOnlySpan<Change> Changes => _changes.AsSpan(0, Count);
+
+    public void Clear() => (Count, IsReset, Committed) = (0, false, false);
+
+    void IViewSink<CellKey, Cell>.Reset() => (Count, IsReset) = (0, true);
+    public void Upsert(in CellKey key, in Cell row) => Add(new Change(key, row, Deleted: false));
+    public void Delete(in CellKey key) => Add(new Change(key, default, Deleted: true));
+    public void Commit(long version, uint checksum) => Commit(new ViewStamp(version, 0), checksum);
+    public void Commit(in ViewStamp stamp, uint checksum) => (Stamp, Checksum, Committed) = (stamp, checksum, true);
+
+    private void Add(in Change change)
+    {
+        if (Count == _changes.Length)
+        {
+            Array.Resize(ref _changes, Count * 2);
+        }
+
+        _changes[Count++] = change;
+    }
+}
+
+const int Batches = 8;
+var free = Channel.CreateBounded<Batch>(Batches);
+var full = Channel.CreateBounded<Batch>(Batches);
+for (var i = 0; i < Batches; i++)
+{
+    free.Writer.TryWrite(new Batch());
+}
+
+// The update loop: one version a batch, waiting only for a free one.
+while (view.Version < engine.Version)
+{
+    var batch = await free.Reader.ReadAsync();
+    await view.UpdateAsync();
+    view.Drain(ref cursor, batch);
+    if (batch.Committed)
+    {
+        await full.Writer.WriteAsync(batch);
+    }
+    else
+    {
+        free.Writer.TryWrite(batch);
+    }
+}
+
+// The reader, at its own pace, on another task.
+await foreach (var batch in full.Reader.ReadAllAsync())
+{
+    Send(batch);   // every change of one version, then its stamp
+    batch.Clear();
+    free.Writer.TryWrite(batch);
+}
+```
+
+- **Nothing is conflated.** The batch is taken before the update and the drain completes into it,
+  so each version's changes reach the reader whole and in order, ending with that version's stamp
+  and checksum.
+- **The pipe bounds how far the view runs ahead of the reader:** as many versions as there are
+  batches. Past that the loop waits for the reader, and the engine holds the refreshes the view has
+  yet to publish, up to the view's `MaxBacklog`. Size the two together.
+- **It reuses what it holds.** A batch grows to the largest version it has carried and keeps that
+  room, and the changes are the host's unmanaged structs, copied by value. A reset batch, which a
+  new or reset reader is sent, carries the whole result: the reader starts over from it.
+- **Several readers.** Give each its own cursor and pipe; the loop takes a free batch from every
+  pipe before it updates, then drains each cursor into its own batch. A reader's jitter is absorbed
+  by its batches, and the slowest reader sets the pace once its pipe is full.
+- **Not only for every version.** Over a view that publishes the latest, the same pipe carries one
+  batch per update, the versions between them conflated as they are for any reader.
+
 ### A view over a database
 
 A database changes outside the engine's refreshes, so a view over one — DuckDB, PostgreSQL, any
@@ -1911,6 +2058,10 @@ await view.UpdateAsync(); // reads instruments again, and replays what else it r
 - **The clock.** `CURRENT_TIMESTAMP` is never pushed into a database, so a comparison with it
   filters what the view kept. The clock's parameter can be pushed, and a read compared with it is
   read again when the clock moves.
+- **Versions.** The view is published at the version of the in-process tables it read; its
+  database rows are as of when it read them, which may be later. No refresh holds a database's rows,
+  so such a view goes past a barrier as past any refresh, and `Versions = ViewVersions.Every` is
+  refused for it.
 
 ### Incremental maintenance
 
@@ -1953,9 +2104,13 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   stands, and on every row it holds when the clock moves. A filter whose every read of the clock is a
   cut-off a column is compared with, such as `ts > CURRENT_TIMESTAMP - INTERVAL '2' HOUR`, reads again
   only the rows between its old cut-off and its new one. That holds under `AND`, `OR` and `NOT`, for a
-  column of a whole-number type: a number, a date, a time or a timestamp. A part of the statement
-  that reads no table at all, such as the days a report is computed for, is computed whole when the
-  clock moves.
+  column of a whole-number type: a number, a date, a time or a timestamp. The clock moves only
+  forward, so where such a cut-off is a lower bound of the whole condition, as `ts > …` alone or
+  under `AND` is, and rises with the clock alone, the filter lets go of the rows behind it, and a
+  change behind it gives nothing: a two-hour window over a day of marks holds about a sixth of what
+  the whole log would. Beside an `OR`, or read from a parameter a view binds again, it holds every
+  row. A part of the statement that reads no table at all, such as the days a report is computed
+  for, is computed whole when the clock moves.
 - **Aggregate filters.** An aggregate's `FILTER (WHERE …)` is maintained, and so is a `CASE` inside
   an aggregate, such as `SUM(CASE WHEN keep THEN x END)`, which the planner writes as one. A row the
   filter does not keep counts towards its group and towards no measure, so a group whose rows all
@@ -1990,7 +2145,8 @@ left rows and its right rows by key, an aggregate its groups — so an update re
     a margin of as many again. When removals leave the window short of rows it no longer holds, it
     reads the table again in the same update. So a feed of a table's newest rows holds a few hundred
     rows, never the table, and an append-only table never makes it read again.
-  - A `LIMIT ?` binds once, when the view is made, as every parameter of a view does.
+  - A `LIMIT ?` binds once, when the view is made, and cannot be declared rebindable (see "Moving a
+    view's parameters").
   - Two rows that tie under the whole order have one key, so the key does not hold before the
     `LIMIT`: the view is faulted with `DeclarationNotHeld`, saying so.
 - **Right joins.** The planner may write a statement's `LEFT JOIN` as a `RIGHT JOIN` with its sides
@@ -2006,6 +2162,39 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   condition but its keys and an index of the table begins with them: a right row that arrives or
   leaves finds the left rows of its key through the index. So a view under a policy holds its
   reader's share, not the table ([A view under an access policy](#a-view-under-an-access-policy)).
+- **Index lookups over a range** are kept as a filter over the table: the index's leading keys held
+  equal and the next one between its bounds. A bound that reads the clock or a rebindable parameter
+  makes it a filter that moves, as such a filter does: a cut-off on an indexed time reads again only
+  the rows between the old cut and the new.
+- **Window functions.** A window is maintained when one change can move only so many of its rows:
+  every frame ends at the current row, a number of rows or a range before it, or a number of rows
+  or a range after it, as `LAG`, `LEAD`, `ROW_NUMBER`, `RANK`, `DENSE_RANK`, `FIRST_VALUE` and every
+  aggregate over such a frame do.
+  - It holds its input rows, each partition in its order, and each row's values. An update computes
+    again, by the same window a recompute runs, only the rows whose values a change can reach, and
+    reads only the rows those values read: a `LAG(x, 2)` the two rows after a change, a running
+    call every row after it. A running `SUM`, `COUNT`, `MIN`, `MAX`, `ROW_NUMBER`, `RANK`,
+    `DENSE_RANK` or `FIRST_VALUE` resumes from the value it held at the row before, so it reads none
+    of the rows before. Readers are sent the rows whose values moved.
+  - So an append at a partition's end costs its own rows: a running sum over 128,000 rows in eight
+    partitions took 0.2 ms an update for a row appended to each, against 204 ms for a run. A change
+    in the past costs the rows from it to the partition's end for a running call. A `RANGE` frame
+    with an offset, such as an hour, reads from the partition's start.
+  - Resumed over DOUBLE, a running sum adds the value before to the rest, which can differ from a
+    recompute in the last bits: such a view is made with `ViewExactness.EqualUpToRounding`, as any
+    view with a sum over DOUBLE is.
+  - A frame that reaches the end of its partition, an aggregate `OVER (PARTITION BY …)` with no
+    `ORDER BY`, `NTILE`, `PERCENT_RANK` and `CUME_DIST` are refused: one change moves every row of
+    the partition.
+  - A call whose value depends on which of two tied rows comes first — a `ROWS` frame, `LAG`,
+    `LEAD`, `ROW_NUMBER`, `FIRST_VALUE` — is refused unless its partition and order keys cover a
+    unique key its input declares: a table's `UniqueKey`, `Keyed` or unique index, or an
+    aggregate's groups. The key holds through filters and projections, and through a join that
+    meets each row once at most: an equi-join whose other side is unique on its join keys, a join
+    with one row, a semi or an anti join, an as-of join. A `RANGE` frame, `RANK` and `DENSE_RANK`
+    treat tied rows alike.
+  - A call that reads the clock or a rebindable parameter computes every partition again when it
+    moves.
 - **What it costs.** `StateBytes` counts what the maintained statement keeps, against the view's
   `StateBudget`: a budget tuned for a recompute may need raising. The count is an estimate, made from
   counts the statement keeps as rows come and go, and comes within a few percent of what the heap
@@ -2019,7 +2208,7 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   what it holds.
 - **What is not maintained.** A statement with any of these is refused when the view is made, with
   `UnsupportedInView`, naming the operator and where it is in the plan:
-  - window functions;
+  - the window functions above that one change could move every row of, or that a tie decides;
   - a `LIMIT` before the statement's last step;
   - set operations but `UNION ALL`;
   - full joins;
@@ -2027,7 +2216,6 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   - an as-of join whose right input is not a table read, or a lookup of one key in the table's
     order, through filters and projections;
   - an as-of seek whose key has one type in its table and another on its left;
-  - an index lookup over a range of keys;
   - the clock in a join's condition;
   - a source outside the engine's epochs;
   - a `LIST`, composite or `BINARY` value in what an operator keeps;
@@ -2160,6 +2348,58 @@ await engine.RefreshAsync(
 - **To see each swap**, read the view's tracker: the update that first runs the new plan
   reports it in `ViewUpdate.PlanDigest`. The observer's `PlansTakenIn.Version` says when it was
   taken in.
+
+### Moving a view's parameters
+
+A view's parameters bind when it is made. Those it names in `ViewOptions.Rebindable` can be bound
+again, and the view keeps its plan:
+
+```csharp
+var view = await engine.MaterializeAsync(
+    "SELECT seq / 100 AS bucket, SUM(price) AS equity, " +
+    "CASE WHEN SUM(price) < @level THEN 1 ELSE 0 END AS breached " +
+    "FROM marks GROUP BY seq / 100",
+    new ViewOptions<PointKey, PointRow>
+    {
+        Key = ["bucket"],
+        Parameters = new { level = 5_500.0 },
+        Rebindable = [new("level")],
+        Maintenance = ViewMaintenance.Incremental,
+        // …
+    });
+
+await view.RebindAsync(new { level = 5_520.0 });
+```
+
+- **A rebind is an update.** It binds the new values, brings the view to the latest epoch, and
+  returns the view's stamp: the epoch's version, which is the one the view held when no refresh came
+  between, and a generation one higher. The planner is not asked for anything.
+- **Kept incrementally**, an operator that reads a rebindable parameter holds what it reads and
+  runs again over it when the parameter moves, as one that reads the clock does when the clock
+  moves. Readers get only the keys whose rows changed.
+- **Where the parameter is read decides what a move costs.**
+  - Read over the groups, as above, a move runs over the groups.
+  - Read on a table, as in `WHERE price < @level`, the filter holds every row of the table it reads:
+    over 200,000 rows, about 60 MB where the same view bound once holds about 1 MB, and a move runs
+    over all of them.
+  - Compared with a column of a time, date or integer type, as in `WHERE ts >= @from`, a move reads
+    again only the rows between the old value and the new.
+- **A `WITH` of a parameter**, such as `WITH t AS (SELECT CAST(@level AS DOUBLE) AS level)` joined
+  to the statement, is the parameter itself once planned, so it is rebound the same way. Write the
+  `CAST`: a parameter with nothing beside it to say its type is refused, naming it.
+- **A list** after `IN` or `NOT IN` keeps the length it was bound with. Given a capacity,
+  `new("picks", Capacity: 32)`, it binds any list of one element up to the capacity into the same
+  plan, padded by repeating its first element, which changes neither `IN` nor `NOT IN`. Each row is
+  then compared with as many values as the capacity. An empty list is refused: it cannot be padded
+  with one of its own elements. For a list that may be empty, is long, or moves often, hold it as
+  rows of a table and read it with `IN (SELECT …)`.
+- **Refused when the view is made**, by name: a name the statement does not have, the clock's, a
+  statement whose parameters have no names, a capacity on a parameter that takes no list or below
+  the list it is made with. Kept incrementally, a parameter a `LIMIT` reads is refused too: it is
+  fixed when the maintained plan starts. A view that recomputes rebinds it.
+- **Refused at a rebind**, before anything moves: a name the view did not declare, a list where it
+  was bound to one value, a list of another length, or beyond its capacity. A rebind whose update
+  fails leaves the view with the values and the rows it held.
 
 ### A view under an access policy
 
@@ -2827,8 +3067,12 @@ So entitlements cost nothing when unused, by design as well as by measurement:
   bytes and the same digest.
 
 `RequestContext` and `PrepareAsync(sql, context)` stay on the core engine, because named
-bound values are a core feature. A statement may say `org_id IN (@ctx.my_orgs)` with no
-policy anywhere in sight.
+bound values are a core feature. SQL the host registers with the catalog, such as a table's
+row predicate, and a policy's rules refer to them as `@ctx.<name>`. A statement never reads
+the context itself: in a statement's text `@ctx` is an ordinary named parameter, so
+`org_id IN (@ctx.my_orgs)` is refused as an untyped parameter, and `@ctx.user` as a syntax
+error, before any bound value is reached. A statement that needs one of a principal's values
+binds it as a parameter of its own, or leaves the question to the policy.
 
 **A table with no tenancy column of its own.** A chat message belongs to a thread, a
 line item to an order, a comment to a post — and the row itself says nothing about who

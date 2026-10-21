@@ -196,6 +196,18 @@ public sealed class ExecutionArena : IDisposable
     internal ExecutionReadSet? ReadSet { get; set; }
 
     /// <summary>
+    /// How many refreshes the engine had committed when the execution pinned its tables, read in the
+    /// same hold of the gate (design 78 §1); -1 before a pin, or where the engine counts none.
+    /// </summary>
+    internal long PinnedCommit { get; set; } = -1;
+
+    /// <summary>
+    /// The refresh the next execution reads, as held for a standing view (design 78 §4, §5), in place of
+    /// the tables as they stand; null, as between executions, to pin them as they stand.
+    /// </summary>
+    internal RetainedTables? ReadAt { get; set; }
+
+    /// <summary>
     /// Claims the arena for one execution and points its high-water mark at
     /// <paramref name="stats"/>. Paired with <see cref="EndExecution"/> in a <c>finally</c>.
     /// </summary>

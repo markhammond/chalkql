@@ -13,15 +13,14 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      ChalkQL.Sources 0.5 updates source integrations for ChalkQL 0.5, including standing-view change tracking and revised source/runtime contracts.
+      ChalkQL.Sources 0.6 accompanies ChalkQL 0.6.
 
-      - **POCO tables**: Now track keyed updates, deletes and supported compactions as row-level changes. Keyed refreshes and index appends are substantially more efficient, with pooled row storage reducing allocations. Index lookups are faster, and string ordering is consistent across CLR strings and UTF-8.
-      - **Licence:** Changed to Elastic License 2.0 (ELv2). See the README for permitted-use details.
-      
-      Requires exactly ChalkQL 0.5.0.
+      - **POCO tables:** An index backed by a table's own order extends by the rows an append adds rather than reading every row again; on a log of 1.6 million rows, an append of 8 rows takes 0.07 ms where it took 11.5 ms.
+
+      Requires exactly ChalkQL 0.6.0.
 
       Full release notes:
-      https://github.com/markhammond/chalkql/releases/tag/v0.5
+      https://github.com/markhammond/chalkql/releases/tag/v0.6
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>

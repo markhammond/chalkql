@@ -46,6 +46,30 @@ public sealed class PocoUniqueAppendTests
         Assert.Equal(["a", "b", "c"], await CodesAsync(source));
     }
 
+    /// <summary>
+    /// A unique index the table's order backs holds no positions, and an append extends it by reading
+    /// only the appended rows and the last row before them: a repeat among them, or of the last row,
+    /// is refused by the index, and the table keeps the rows it had.
+    /// </summary>
+    [Fact]
+    public async Task An_appended_row_that_repeats_a_key_its_ordered_unique_index_holds_is_refused()
+    {
+        var source = Rows(t => t.OrderedBy(x => x.Seq).UniqueIndex(x => x.Seq));
+
+        var among = await Assert.ThrowsAsync<CatalogVerificationException>(
+            () => AppendAsync(source, new Row(4, "d"), new Row(4, "e")));
+        Assert.Contains("unique index", among.Message, StringComparison.Ordinal);
+
+        var atTheJoin = await Assert.ThrowsAsync<CatalogVerificationException>(
+            () => AppendAsync(source, new Row(3, "again")));
+        Assert.Contains("unique index", atTheJoin.Message, StringComparison.Ordinal);
+
+        await AppendAsync(source, new Row(4, "d"));
+        await AppendAsync(source, new Row(5, "e"));
+        await Assert.ThrowsAsync<CatalogVerificationException>(() => AppendAsync(source, new Row(5, "again")));
+        Assert.Equal(["a", "b", "c", "d", "e"], await CodesAsync(source));
+    }
+
     /// <summary>A key with neither is still checked over every row: a repeat of the first row's key is found.</summary>
     [Fact]
     public async Task An_appended_row_that_repeats_any_earlier_key_is_still_refused()

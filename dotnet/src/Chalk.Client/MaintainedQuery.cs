@@ -85,11 +85,15 @@ internal sealed class MaintainedQuery : IAsyncDisposable
     /// </param>
     /// <param name="whole">Give every row the result holds, for a view whose rows lag the statement's.</param>
     /// <param name="ct">Cancels the update, which leaves the statement to start again at the next.</param>
+    /// <param name="at">
+    /// The refresh to bring it to, as held for the view (design 78 §4, §5); null for the tables as they stand.
+    /// </param>
     public async ValueTask<MaintainedUpdate> UpdateAsync(
-        object?[] values, DateTimeOffset now, long version, bool whole, CancellationToken ct)
+        object?[] values, DateTimeOffset now, long version, bool whole, CancellationToken ct, RetainedTables? at = null)
     {
         var (flat, relations) = _query.BindUpdate(values, _slots, _parameterTypes, _boundScalars, PlanDigest, version, _context);
         MaintainedChanges changes;
+        _arena.ReadAt = at;
         try
         {
             changes = await _plan.UpdateAsync(flat, now, whole, _arena, new ExecutionStats(), ct, relations).ConfigureAwait(false);
@@ -98,6 +102,10 @@ internal sealed class MaintainedQuery : IAsyncDisposable
         {
             throw new MaintainedKeyFault(duplicate.Key, duplicate.Where);
         }
+        finally
+        {
+            _arena.ReadAt = null;
+        }
 
         return new MaintainedUpdate
         {
@@ -105,6 +113,7 @@ internal sealed class MaintainedQuery : IAsyncDisposable
             Restarted = changes.Restarted,
             Now = changes.Now,
             Before = changes.Before,
+            Commit = changes.Commit,
         };
     }
 
@@ -134,6 +143,9 @@ internal sealed class MaintainedUpdate
 
     /// <summary>The rows the changed keys held before.</summary>
     public required RecordBatch Before { get; init; }
+
+    /// <summary>How many refreshes the engine had committed when the update pinned its tables (design 78 §1), or -1.</summary>
+    public long Commit { get; init; } = -1;
 }
 
 /// <summary>A statement incremental maintenance cannot keep, and why (design 68 §8).</summary>

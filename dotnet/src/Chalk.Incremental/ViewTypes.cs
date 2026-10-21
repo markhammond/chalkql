@@ -40,6 +40,36 @@ public interface IViewSink<TKey, TRow>
     /// sum to <paramref name="checksum"/>.
     /// </summary>
     void Commit(long version, uint checksum);
+
+    /// <summary>
+    /// The reader is level with the view as of <paramref name="stamp"/> (design 78 §3): the version, and
+    /// how many times the view has been rebound, which changes its rows without moving the version. By
+    /// default, the version alone, to <see cref="Commit(long, uint)"/>.
+    /// </summary>
+    void Commit(in ViewStamp stamp, uint checksum) => Commit(stamp.Version, checksum);
+}
+
+/// <summary>
+/// Where a view's rows stand (design 78 §3): the version of the epoch they are the statement's rows at,
+/// and the view's generation, how many times it has been rebound since it was made. A rebind changes the
+/// rows without moving the version, so the two together name one result. Stamps order by version, then
+/// generation.
+/// </summary>
+/// <param name="Version">The engine's version the rows are at.</param>
+/// <param name="Generation">How many times the view has been rebound.</param>
+public readonly record struct ViewStamp(long Version, long Generation) : IComparable<ViewStamp>
+{
+    /// <summary>Orders by version, then generation.</summary>
+    public int CompareTo(ViewStamp other) =>
+        Version != other.Version ? Version.CompareTo(other.Version) : Generation.CompareTo(other.Generation);
+
+    public static bool operator <(ViewStamp left, ViewStamp right) => left.CompareTo(right) < 0;
+
+    public static bool operator >(ViewStamp left, ViewStamp right) => left.CompareTo(right) > 0;
+
+    public static bool operator <=(ViewStamp left, ViewStamp right) => left.CompareTo(right) <= 0;
+
+    public static bool operator >=(ViewStamp left, ViewStamp right) => left.CompareTo(right) >= 0;
 }
 
 /// <summary>What a drain did.</summary>
@@ -66,6 +96,24 @@ public enum ViewExactness
     /// by rounding: a sum moves with the order its rows are added in.
     /// </summary>
     EqualUpToRounding = 1,
+}
+
+/// <summary>Which of the engine's versions a view publishes (design 78 §5).</summary>
+public enum ViewVersions
+{
+    /// <summary>
+    /// The latest at each update, and each barrier: a view that falls behind goes from the version it holds
+    /// to the latest, and a reader sees what changed between them.
+    /// </summary>
+    Latest = 0,
+
+    /// <summary>
+    /// Every version that changes what the view reads, in order: an update takes the next of them and
+    /// stops, so a reader that drains after each update is sent every one, and the same on every run of
+    /// the same refreshes. The engine holds each refresh's states of the view's tables until the view has
+    /// published it, at most <see cref="ViewOptions{TKey, TRow}.MaxBacklog"/> of them.
+    /// </summary>
+    Every = 1,
 }
 
 /// <summary>How a view computes an update (D343, <c>docs/design/68-incremental-maintenance.md</c>).</summary>
@@ -164,6 +212,7 @@ public struct ViewCursor
     internal long Position;
     internal long ResetFrom;
     internal long Committed;
+    internal long CommittedGeneration;
 
     /// <summary>A reader that has read nothing.</summary>
     public static ViewCursor Start => default;
@@ -235,6 +284,20 @@ public sealed class ViewOptions<TKey, TRow>
     public ViewMaintenance Maintenance { get; init; } = ViewMaintenance.Recompute;
 
     /// <summary>
+    /// Which versions the view publishes (design 78 §5): <see cref="ViewVersions.Latest"/>, the default, or
+    /// <see cref="ViewVersions.Every"/>. <see cref="ViewVersions.Every"/> is refused for a view that reads a
+    /// database, whose rows no refresh holds.
+    /// </summary>
+    public ViewVersions Versions { get; init; } = ViewVersions.Latest;
+
+    /// <summary>
+    /// The most refreshes the engine holds for a view that publishes every version, while it has yet to
+    /// publish them (design 78 §5): one more faults the view, which the host makes again. 1,024 by default;
+    /// less than one is refused.
+    /// </summary>
+    public int MaxBacklog { get; init; } = 1024;
+
+    /// <summary>
     /// Told of each update that moves the view (design 70 §1): how long it took, the bytes allocated in
     /// the process meanwhile, whether it computed the view's rows from nothing, the keys it changed,
     /// and the plan it ran. Null, the default, tells nothing.
@@ -294,6 +357,21 @@ public sealed class ViewOptions<TKey, TRow>
     /// </summary>
     public object? Parameters { get; init; }
 
+    /// <summary>
+    /// The parameters <see cref="StandingView{TKey, TRow}.RebindAsync"/> may bind again, by name (design 77
+    /// §5); none by default, when every parameter binds once. The view keeps its plan across a rebind.
+    /// Kept incrementally, each operator that reads one holds what it reads and runs again over it when
+    /// one moves, as an operator that reads the clock does when the clock moves, so declaring one costs
+    /// what those operators hold. A list keeps the length it was bound with, unless it is given a
+    /// capacity.
+    /// </summary>
+    /// <remarks>
+    /// Kept incrementally, a parameter that a <c>LIMIT</c> reads, or that bounds an index seek (a list on
+    /// an indexed key column, say), is refused when the view is made: those are fixed when the maintained
+    /// plan starts.
+    /// </remarks>
+    public IReadOnlyList<RebindableParameter>? Rebindable { get; init; }
+
     /// <summary>How the statement is prepared: its parameter types, its pushdown, its options.</summary>
     public PrepareOptions? Prepare { get; init; }
 
@@ -327,3 +405,16 @@ public sealed class StandingViewException : ChalkException
     {
     }
 }
+
+/// <summary>
+/// A parameter a standing view may bind again with <see cref="StandingView{TKey, TRow}.RebindAsync"/>
+/// (design 77 §5), named as the statement writes it, with or without its <c>@</c>.
+/// </summary>
+/// <param name="Name">The parameter's name.</param>
+/// <param name="Capacity">
+/// For a parameter after <c>IN</c> or <c>NOT IN</c>: the most elements a list bound to it may hold. The
+/// view's plan then takes this many, and a shorter list is padded by repeating its first element, which
+/// changes neither <c>IN</c> nor <c>NOT IN</c>; so any list of one element up to the capacity binds into
+/// the same plan. Each row is compared with as many values as the capacity. Null keeps the list's length.
+/// </param>
+public sealed record RebindableParameter(string Name, int? Capacity = null);

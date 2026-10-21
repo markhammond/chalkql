@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Apache.Arrow;
 using Chalk.Catalog;
 using Chalk.Client;
+using Chalk.Sources;
 using Microsoft.Extensions.Logging;
 
 namespace Chalk.Incremental;
@@ -43,6 +44,18 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
     private readonly ViewOptions<TKey, TRow> _options;
     private readonly ViewBinding _binding;
+
+    /// <summary>True while a rebind's update runs: it stages at the epoch the view holds, as the values moved.</summary>
+    private bool _rebound;
+
+    /// <summary>How many rebinds the view has taken (design 78 §3): its stamp's generation.</summary>
+    private long _rebinds;
+
+    /// <summary>The tables the view's statement reads, for the one it was worked out for (design 78 §2).</summary>
+    private (PreparedQuery For, Func<(string SourceId, string Table), bool> Reads)? _readSet;
+
+    /// <summary>How many times a refresh that wrote nothing the view reads moved its version without an update: for a test.</summary>
+    internal int Relabels { get; private set; }
     private readonly Lock _gate = new();
     private readonly SemaphoreSlim _updating = new(1, 1);
     private readonly KeyedTable<TKey, TRow> _table = new();
@@ -74,6 +87,15 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// </summary>
     private Staged? _staging;
     private long _epoch;
+
+    /// <summary>The engine's count of commits as of the epoch the view holds (design 78 §1).</summary>
+    private long _commit = -1;
+
+    /// <summary>
+    /// The refreshes the engine holds until the view has published them (design 78 §4, §5): barriers, and
+    /// every refresh for a view that publishes every version. Null for a view that reads a database.
+    /// </summary>
+    private readonly EpochRetainer? _retainer;
     private long _version;
     private long _generation = 1;
     private long _updates;
@@ -125,6 +147,12 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
         _namesClock = ViewBinding.NamesClock(prepared, engine.ClockName);
         _reads = options.DatabaseReads == ViewDatabaseReads.WhenRefreshed ? new ViewReads(engine) : null;
+        if (_reads is null)
+        {
+            _retainer = engine.Retain(Held(engine, prepared), options.Versions == ViewVersions.Every, options.MaxBacklog);
+            _commit = _retainer.From;
+        }
+
         ContextDigest = (options.Context ?? prepared.Context) is { IsEmpty: false } context ? context.CanonicalHash : null;
         if (options.RefreshQueryPlan is not null || options.PlanImprovementMargin is not null)
         {
@@ -386,6 +414,32 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 nameof(options));
         }
 
+        if (!Enum.IsDefined(options.Versions))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.Versions,
+                "a view's Versions is Latest or Every.");
+        }
+
+        if (options.MaxBacklog < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.MaxBacklog,
+                "a view's MaxBacklog is a number of refreshes, at least one: the most the engine holds for a view "
+                + "that publishes every version while it has yet to publish them.");
+        }
+
+        if (options.Versions == ViewVersions.Every && options.DatabaseReads != ViewDatabaseReads.None)
+        {
+            throw new ArgumentException(
+                "a view that reads a database cannot publish every version: its rows from the database are read "
+                + "when it updates, and no refresh holds them. Make the view with Versions = Latest, or over "
+                + "in-process tables only.",
+                nameof(options));
+        }
+
         if (options.LocalJoinMaxRows <= 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -411,6 +465,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     {
         var key = KeyOf(prepared, options.Key);
         ViewChecks.Check(engine, prepared, key, options);
+        binding.Declare(prepared, options.Rebindable, engine.ClockName);
         if ((options.RefreshQueryPlan is not null || options.PlanImprovementMargin is not null)
             && prepared.Choice is not null)
         {
@@ -448,7 +503,78 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// An update that fails leaves the view at the epoch it held. One that finds a key twice in the
     /// result faults it: every call then throws that fault until the view is disposed.
     /// </remarks>
-    public async ValueTask<long> UpdateAsync(CancellationToken ct = default)
+    public ValueTask<long> UpdateAsync(CancellationToken ct = default) => RunUpdateAsync(rebind: null, ct);
+
+    /// <summary>
+    /// Binds new values to parameters the view declared in <see cref="ViewOptions{TKey, TRow}.Rebindable"/>,
+    /// and brings the view to the engine's latest epoch with them (design 77 §5): a dictionary, or an
+    /// object whose properties name them. The view keeps its plan. Kept incrementally, it runs again only
+    /// the operators that read a moved value, over what they hold, and its readers get the keys whose rows
+    /// changed. Returns the epoch's version, which is the one the view held when no refresh came between.
+    /// </summary>
+    /// <remarks>
+    /// A name the view did not declare, or a list it cannot take, is refused before anything moves. An
+    /// update with the new values that fails leaves the view with the values and the epoch it held.
+    /// </remarks>
+    public async ValueTask<ViewStamp> RebindAsync(object parameters, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        Usable();
+        var binding = ViewBinding.Of(parameters);
+        await RunUpdateAsync(binding.Named ?? throw new ArgumentException(
+            "a rebind binds parameters by name: give a dictionary, or an object whose properties name them.",
+            nameof(parameters)), ct).ConfigureAwait(false);
+        return Stamp;
+    }
+
+    /// <summary>Where the view's rows stand: its version, and how many times it has been rebound (design 78 §3).</summary>
+    public ViewStamp Stamp
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return new ViewStamp(_version, _rebinds);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Brings the view at least to <paramref name="atLeast"/> (design 78 §3), and returns where it stands:
+    /// a host that changed what the view reads, by a refresh (whose version it numbered, or found with
+    /// <see cref="ChalkEngine.VersionOf"/>) or a rebind (whose stamp it was returned), waits here until
+    /// the view shows the change. A version the engine has not published yet is waited for.
+    /// </summary>
+    /// <exception cref="ArgumentException">The stamp's generation is one the view has not been rebound to.</exception>
+    public async ValueTask<ViewStamp> UpdateToAsync(ViewStamp atLeast, CancellationToken ct = default)
+    {
+        while (true)
+        {
+            var published = _engine.NextPublished;
+            await UpdateAsync(ct).ConfigureAwait(false);
+            var stamp = Stamp;
+            if (stamp >= atLeast)
+            {
+                return stamp;
+            }
+
+            if (stamp.Version >= atLeast.Version)
+            {
+                throw new ArgumentException(
+                    $"the view stands at generation {stamp.Generation}, and the stamp names generation "
+                    + $"{atLeast.Generation}: it has not been rebound that far.",
+                    nameof(atLeast));
+            }
+
+            if (_engine.Version < atLeast.Version)
+            {
+                await published.WaitAsync(ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>An update, with <paramref name="rebind"/>'s values bound first when it is a rebind.</summary>
+    private async ValueTask<long> RunUpdateAsync(IReadOnlyDictionary<string, object?>? rebind, CancellationToken ct)
     {
         Usable();
         await _updating.WaitAsync(ct).ConfigureAwait(false);
@@ -456,9 +582,25 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         var started = tracker is null ? 0L : Stopwatch.GetTimestamp();
         var allocated = tracker is null ? 0L : GC.GetTotalAllocatedBytes();
         var taken = _updates;
+        IReadOnlyDictionary<string, object?>? before = null;
+        var rebound = false;
         try
         {
+            if (rebind is not null)
+            {
+                before = _binding.Rebind(rebind);
+                rebound = true;
+                _rebound = true;
+            }
+
             var version = await CatchUpAsync(ct).ConfigureAwait(false);
+            if (rebound)
+            {
+                lock (_gate)
+                {
+                    _rebinds++;
+                }
+            }
             if (tracker is not null && _updates != taken)
             {
                 var update = new ViewUpdate(
@@ -476,20 +618,49 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         }
         catch
         {
-            // A failed update keeps nothing new: the view keeps the epoch, and the reads, it held.
+            // A failed update keeps nothing new: the view keeps the epoch, the reads and the values it held.
             _reads?.Abandon();
+            if (rebound)
+            {
+                _binding.Restore(before);
+            }
+
             throw;
         }
         finally
         {
+            _rebound = false;
             _updating.Release();
         }
     }
 
-    /// <summary>The body of <see cref="UpdateAsync"/>, under its lock: the view brought to the latest epoch.</summary>
+    /// <summary>How many times an update catches up at once with refreshes that committed while it ran.</summary>
+    private const int Settles = 3;
+
+    /// <summary>
+    /// The body of <see cref="UpdateAsync"/>, under its lock: the view brought to the latest epoch.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// What an update reads is named by its pin (design 78 §1): the count of commits read in the same hold
+    /// of the gate as its tables. Where it is the count the stamp noted before staging recorded, the update
+    /// read that epoch's tables whatever has committed since, and the view takes it at that stamp: no
+    /// refresh is held off, and nothing staged is thrown away. A refresh that committed while it ran is then
+    /// caught up at once, a few times at most, rather than at the next update, which a quiet feed may never
+    /// send. Only a refresh that committed between noting the stamp and pinning makes it read again.
+    /// </para>
+    /// <para>
+    /// The count is this engine's: another engine's commit to a source they share changes the rows without
+    /// moving it, as it moves no epoch here. An update that pinned nothing, which a plan of no table may,
+    /// is taken only when no refresh ran through it, and after two attempts it is staged with refreshes
+    /// held off.
+    /// </para>
+    /// </remarks>
     private async ValueTask<long> CatchUpAsync(CancellationToken ct)
     {
         Usable();
+        var settled = 0;
+        var named = true;
         for (var attempt = 0; ; attempt++)
         {
             var changes = _engine.Changes;
@@ -499,40 +670,186 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 continue;
             }
 
-            if (_engine.Stamp.Epoch == _epoch)
+            var at = _engine.Stamp;
+            if (_retainer is { } retainer)
+            {
+                if (retainer.Overrun)
+                {
+                    Overrun(retainer);
+                }
+
+                // Asked after the stamp is read: every refresh held up to it is stamped by then (design 78 §4).
+                if (retainer.Next(_commit) is { } held)
+                {
+                    if (await TakeHeldAsync(retainer, held, ct).ConfigureAwait(false))
+                    {
+                        return _version;
+                    }
+
+                    continue;
+                }
+            }
+
+            if (at.Epoch == _epoch && !_rebound)
             {
                 _reads?.Abandon();
                 return _version;
             }
 
-            if (attempt >= 2)
+            if (!_rebound && Relabel(at))
+            {
+                return _version;
+            }
+
+            if (!named && attempt >= 2)
             {
                 return await CatchUpBetweenRefreshesAsync(ct).ConfigureAwait(false);
             }
 
-            var at = _engine.Stamp;
             var staged = await StageAsync(at, ct).ConfigureAwait(false);
-            if (_engine.Changes != changes)
+            named = staged.Commit >= 0;
+            var read = named
+                ? staged.Commit == at.Commit
+                : _engine.Changes == changes;
+            if (!read)
             {
+                // What was read is not the stamp noted: read again, once the refresh has published.
                 Keep(staged);
                 continue;
             }
 
             Take(staged, at);
+            _rebound = false;
+            if (named && _engine.Stamp.Epoch != _epoch && ++settled < Settles && _options.Versions == ViewVersions.Latest)
+            {
+                continue;
+            }
+
             return _version;
         }
+    }
+
+    /// <summary>
+    /// Publishes a refresh held for the view (design 78 §4, §5), at its stamp: by a relabel where nothing it
+    /// wrote is read, or else by staging the view at the states it committed. True where the update stops
+    /// there — at a barrier, or at a change of a view that publishes every version — so that a reader that
+    /// drains after the update is sent it.
+    /// </summary>
+    /// <remarks>
+    /// A statement prepared anew may read a table the refresh's states were not held for: it is pinned as it
+    /// stands, which names another refresh, and the held one is let go unpublished. A failed update keeps it
+    /// held for the next.
+    /// </remarks>
+    private async ValueTask<bool> TakeHeldAsync(EpochRetainer retainer, HeldEpoch held, CancellationToken ct)
+    {
+        var stamp = held.Stamp!;
+        if (!_rebound && Relabel(stamp))
+        {
+            retainer.Taken(held);
+            return held.Barrier;
+        }
+
+        var staged = await StageAsync(stamp, ct, held.Tables).ConfigureAwait(false);
+        if (staged.Commit != stamp.Commit)
+        {
+            Keep(staged);
+            retainer.Taken(held);
+            return false;
+        }
+
+        Take(staged, stamp);
+        _rebound = false;
+        retainer.Taken(held);
+        return true;
+    }
+
+    /// <summary>Faults a view that publishes every version and fell further behind than its MaxBacklog.</summary>
+    private void Overrun(EpochRetainer retainer)
+    {
+        var fault = new StandingViewException(
+            ChalkErrorCodes.MemoryBudgetExceeded,
+            $"The view publishes every version, and the engine held {retainer.MaxBacklog} refreshes it had yet to "
+            + $"publish, its MaxBacklog, when another came: it was updated more slowly than the engine refreshed. "
+            + "What was held has been let go, and the view keeps this fault until it is disposed. Make it again, "
+            + "update it more often, or raise ViewOptions.MaxBacklog.");
+        _fault = fault;
+        throw fault;
+    }
+
+    /// <summary>The tables of <paramref name="prepared"/> whose states the engine can hold for the view (design 78 §4).</summary>
+    private static (string SourceId, string Table, ITrackedSource Source)[] Held(ChalkEngine engine, PreparedQuery prepared)
+    {
+        var held = new List<(string SourceId, string Table, ITrackedSource Source)>();
+        foreach (var (sourceId, table) in prepared.TablesRead)
+        {
+            if (engine.SourceById(sourceId) is ITrackedSource tracked)
+            {
+                held.Add((sourceId, table, tracked));
+            }
+        }
+
+        return [.. held];
+    }
+
+    /// <summary>
+    /// Moves the view's version to the engine's when every refresh since its own wrote nothing it reads
+    /// (design 78 §2): none of its tables, and not the clock where it reads the clock. Its rows are then
+    /// the statement's rows at the new version too, so nothing is computed, and readers are sent a commit
+    /// at it. Not for a view that reads a database, whose rows a refresh is a reason to read again, nor for
+    /// one with a new plan to take or a statement to prepare again.
+    /// </summary>
+    private bool Relabel(EpochStamp stamp)
+    {
+        // A view whose statement has a plan it does not run yet takes it at an update, and a stale one is
+        // prepared again there: neither is only a version.
+        if (_reads is not null || _maintained is { IsCurrent: false } || _prepared.IsStale || _prepared.ChangedShape)
+        {
+            return false;
+        }
+
+        var prepared = _prepared;
+        if (_readSet is not { } known || !ReferenceEquals(known.For, prepared))
+        {
+            // The question asked of each table a refresh wrote, made once per statement rather than at each update.
+            known = (prepared, prepared.TablesRead.ToHashSet(TableNames.Instance).Contains);
+            _readSet = known;
+        }
+
+        if (!_engine.Untouched(_epoch, stamp.Epoch, known.Reads, _readsTime || _namesClock))
+        {
+            return false;
+        }
+
+        lock (_gate)
+        {
+            _epoch = stamp.Epoch;
+            _version = stamp.Version;
+        }
+
+        _commit = stamp.Commit;
+        Relabels++;
+        return true;
     }
 
     /// <summary>
     /// The update, staged with refreshes held off, after two attempts each overtaken by one. A method of
     /// its own, so that the closure it hands the engine is made only when it runs.
     /// </summary>
-    private ValueTask<long> CatchUpBetweenRefreshesAsync(CancellationToken ct) =>
+    private ValueTask<long> CatchUpBetweenRefreshesAsync(CancellationToken ct)
+    {
+        HeldRefreshes++;
+        return CatchUpHoldingRefreshesAsync(ct);
+    }
+
+    /// <summary>How many updates have held refreshes off: for a test, which expects none where pins are named.</summary>
+    internal int HeldRefreshes { get; private set; }
+
+    private ValueTask<long> CatchUpHoldingRefreshesAsync(CancellationToken ct) =>
         _engine.WithoutRefreshAsync(
             async () =>
             {
                 var stamp = _engine.Stamp;
-                if (stamp.Epoch != _epoch)
+                if (stamp.Epoch != _epoch || _rebound)
                 {
                     Take(await StageAsync(stamp, ct).ConfigureAwait(false), stamp);
                 }
@@ -546,6 +863,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     {
         var before = _table.Position;
         Apply(staged, stamp);
+        _commit = stamp.Commit;
         _lastChanges = _table.Position - before;
         Keep(staged);
     }
@@ -723,10 +1041,11 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 sent++;
             }
 
-            if (sent > 0 || reset || cursor.ResetFrom > 0 || cursor.Committed != _version)
+            if (sent > 0 || reset || cursor.ResetFrom > 0 || cursor.Committed != _version || cursor.CommittedGeneration != _rebinds)
             {
-                sink.Commit(_version, _table.Checksum);
+                sink.Commit(new ViewStamp(_version, _rebinds), _table.Checksum);
                 cursor.Committed = _version;
+                cursor.CommittedGeneration = _rebinds;
             }
 
             cursor.ResetFrom = 0;
@@ -749,6 +1068,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             _disposed = true;
             Detach(_prepared);
             _reads?.Dispose();
+            _retainer?.Dispose();
             if (_maintained is { } maintained)
             {
                 _maintained = null;
@@ -782,7 +1102,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     /// Runs the statement at <paramref name="stamp"/>'s epoch and maps every row, refusing a key the
     /// result gives twice. The view's rows are untouched until <see cref="Apply"/>.
     /// </summary>
-    private async ValueTask<Staged> StageAsync(EpochStamp stamp, CancellationToken ct)
+    private async ValueTask<Staged> StageAsync(EpochStamp stamp, CancellationToken ct, RetainedTables? at = null)
     {
         await PreparedCurrentAsync(ct).ConfigureAwait(false);
         var prepared = _prepared;
@@ -805,7 +1125,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             MaintainedUpdate update;
             try
             {
-                update = await maintained.UpdateAsync(values, stamp.Clock ?? default, stamp.Version, whole, ct).ConfigureAwait(false);
+                update = await maintained.UpdateAsync(values, stamp.Clock ?? default, stamp.Version, whole, ct, at).ConfigureAwait(false);
             }
             catch (MaintainedKeyFault duplicate)
             {
@@ -821,7 +1141,9 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
             // Whole for the tracker only when computed from nothing: a low-jitter swap catches up.
             _lastWhole = update.Restarted;
-            return Changes(update, stamp);
+            var changed = Changes(update, stamp);
+            changed.Commit = update.Commit;
+            return changed;
         }
 
         _lastWhole = true;
@@ -831,6 +1153,11 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         {
             _clock.Now = stamp.Clock!.Value;
             execution.UseClock(_clock);
+        }
+
+        if (at is not null)
+        {
+            execution.ReadAt(at);
         }
 
         if (_reads is not null)
@@ -849,6 +1176,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             }
         }
 
+        staged.Commit = execution.PinnedCommit;
         return staged;
     }
 
@@ -1058,7 +1386,8 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
                 ViewBinding.ClockIndex(prepared, _engine.ClockName),
                 key,
                 ct,
-                _options.Context).ConfigureAwait(false);
+                _options.Context,
+                _binding.RebindableIndexes(prepared)).ConfigureAwait(false);
         }
         catch (NotMaintainableException refusal)
         {
@@ -1139,6 +1468,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
                 Detach(_prepared);
                 Volatile.Write(ref _prepared, prepared);
+                _retainer?.Reads(Held(_engine, prepared));
                 _key = key;
                 _readsTime = ViewPlan.ReadsCurrentTime(prepared.Plan);
                 _namesClock = ViewBinding.NamesClock(prepared, _engine.ClockName);
@@ -1508,8 +1838,12 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
             Freed.Clear();
             Count = 0;
             Delta = delta;
+            Commit = -1;
             return this;
         }
+
+        /// <summary>How many refreshes the engine had committed when the staging pinned its tables (design 78 §1), or -1.</summary>
+        public long Commit { get; set; } = -1;
 
         /// <summary>
         /// Lets go of room beyond four times what this update used, past <see cref="Kept"/>: a whole
@@ -1592,11 +1926,25 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
     }
 }
 
-/// <summary>A view's parameter values, bound once, and the clock it reads in place of one (D339).</summary>
+/// <summary>
+/// A view's parameter values, bound when it is made and bound again by a rebind (design 77 §5), and the
+/// clock it reads in place of one (D339).
+/// </summary>
 internal sealed class ViewBinding
 {
-    private readonly IReadOnlyDictionary<string, object?>? _named;
+    /// <summary>The named values: replaced whole by a rebind, so that a build beside reads one binding or the other.</summary>
+    private volatile IReadOnlyDictionary<string, object?>? _named;
+
     private readonly IReadOnlyList<object?>? _positional;
+
+    /// <summary>The parameters a rebind may move, by <see cref="Name"/>, each with its list's capacity or none.</summary>
+    private Dictionary<string, Rebindable> _rebindable = new(StringComparer.Ordinal);
+
+    /// <summary>A parameter a rebind may move: its name as the statement writes it, and what it takes.</summary>
+    /// <param name="Shown">The parameter as the statement writes it, <c>@name</c>, for a refusal.</param>
+    /// <param name="Capacity">The most elements a list bound to it holds, padded to this many; or null.</param>
+    /// <param name="Length">For a list with no capacity, the length it was bound with, which a rebind keeps; or null.</param>
+    private sealed record Rebindable(string Shown, int? Capacity, int? Length);
 
     /// <summary>The statement <see cref="_bound"/> holds the values of, for the view's updates.</summary>
     private PreparedQuery? _boundFor;
@@ -1636,6 +1984,228 @@ internal sealed class ViewBinding
             .GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
             .Where(p => p.CanRead && p.GetIndexParameters().Length == 0)
             .ToDictionary(p => p.Name, p => p.GetValue(values), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The values given by name, or null for values given by position.</summary>
+    public IReadOnlyDictionary<string, object?>? Named => _named;
+
+    /// <summary>Whether any parameter may be bound again.</summary>
+    public bool AnyRebindable => _rebindable.Count > 0;
+
+    /// <summary>
+    /// Declares the parameters a rebind may move (design 77 §5), refusing a declaration that cannot hold:
+    /// a statement whose parameters have no names, a name it does not have or the clock's, a name given
+    /// twice, a capacity on a parameter that takes no list or below the list given, or an empty list for
+    /// a capacity.
+    /// </summary>
+    public void Declare(PreparedQuery prepared, IReadOnlyList<RebindableParameter>? declared, string? clock)
+    {
+        if (declared is not { Count: > 0 })
+        {
+            return;
+        }
+
+        if (prepared.ParameterStyle is not ParameterStyle.Named)
+        {
+            throw new ArgumentException(
+                "ViewOptions.Rebindable names the parameters a rebind may move, and the statement's parameters "
+                + (prepared.ParameterStyle is ParameterStyle.None ? "are none" : "have no names")
+                + ": write them as @name.",
+                "options");
+        }
+
+        var rebindable = new Dictionary<string, Rebindable>(StringComparer.Ordinal);
+        foreach (var parameter in declared)
+        {
+            ArgumentNullException.ThrowIfNull(parameter, "options");
+            var name = Name(parameter.Name ?? string.Empty);
+            if (clock is not null && name == Name(clock))
+            {
+                throw new ArgumentException(
+                    $"ViewOptions.Rebindable names @{clock}, and in a view @{clock} is the engine's clock: it moves "
+                    + "with the clock, and takes no value.",
+                    "options");
+            }
+
+            var found = prepared.Parameters.FirstOrDefault(p => p.Name is { } n && Name(n) == name);
+            if (found is null)
+            {
+                throw new ArgumentException(
+                    $"ViewOptions.Rebindable names @{parameter.Name?.TrimStart('@')}, and the statement has no such "
+                    + $"parameter: it has {string.Join(", ", prepared.Parameters.Select(p => p.ToString()))}.",
+                    "options");
+            }
+
+            if (rebindable.ContainsKey(name))
+            {
+                throw new ArgumentException($"ViewOptions.Rebindable names {found} twice.", "options");
+            }
+
+            var value = Value(name);
+            int? length = ParameterBinder.IsList(value) ? Count(value) : null;
+            if (parameter.Capacity is { } capacity)
+            {
+                if (!found.AcceptsList)
+                {
+                    throw new ArgumentException(
+                        $"ViewOptions.Rebindable gives {found} a capacity, and it takes no list: only a parameter "
+                        + "whose every occurrence follows IN or NOT IN does.",
+                        "options");
+                }
+
+                if (capacity < 1)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        "options", capacity, $"the capacity of {found} is a number of elements, one or more.");
+                }
+
+                RefuseLength(found.ToString(), length ?? 1, capacity, "the view is made with");
+                length = null;
+            }
+
+            rebindable[name] = new Rebindable(found.ToString(), parameter.Capacity, length);
+        }
+
+        _rebindable = rebindable;
+        _boundFor = null;
+    }
+
+    /// <summary>
+    /// Binds <paramref name="values"/> in place of the values their names held, refusing, before anything
+    /// moves, a name that is not rebindable, a list where none was or none where one was, and a list of
+    /// another length than the one a list with no capacity was bound with, or beyond its capacity. Returns
+    /// the values held before, which <see cref="Restore"/> puts back.
+    /// </summary>
+    public IReadOnlyDictionary<string, object?>? Rebind(IReadOnlyDictionary<string, object?> values)
+    {
+        var next = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, value) in _named ?? new Dictionary<string, object?>())
+        {
+            next[Name(name)] = value;
+        }
+
+        foreach (var (given, value) in values)
+        {
+            var name = Name(given);
+            if (!_rebindable.TryGetValue(name, out var rebindable))
+            {
+                throw new ArgumentException(
+                    _rebindable.Count == 0
+                        ? "the view declares no rebindable parameters: name them in ViewOptions.Rebindable."
+                        : $"@{given.TrimStart('@')} is not rebindable: the view may bind again "
+                            + $"{string.Join(", ", _rebindable.Values.Select(r => r.Shown))}.",
+                    "parameters");
+            }
+
+            var list = ParameterBinder.IsList(value);
+            if (rebindable.Capacity is { } capacity)
+            {
+                RefuseLength(rebindable.Shown, list ? Count(value) : 1, capacity, "a rebind gives");
+            }
+            else if (rebindable.Length is { } length && (!list || Count(value) != length))
+            {
+                throw new ArgumentException(
+                    $"{rebindable.Shown} was bound to a list of {length}, and a rebind keeps its length: give a list of "
+                    + $"{length}, or declare the parameter with a capacity.",
+                    "parameters");
+            }
+            else if (rebindable.Length is null && list)
+            {
+                throw new ArgumentException(
+                    $"{rebindable.Shown} was bound to one value, and a rebind gives it a list: declare it with a capacity.",
+                    "parameters");
+            }
+
+            next[name] = value;
+        }
+
+        var before = _named;
+        _named = next;
+        _boundFor = null;
+        return before;
+    }
+
+    /// <summary>Puts back the values <see cref="Rebind"/> replaced, after an update with the new ones failed.</summary>
+    public void Restore(IReadOnlyDictionary<string, object?>? before)
+    {
+        _named = before;
+        _boundFor = null;
+    }
+
+    /// <summary>
+    /// Refuses a list of <paramref name="length"/> for a capacity: one longer than the capacity, which
+    /// another plan would be needed for, or an empty one. An empty list cannot be padded with one of its
+    /// elements, and padding it with NULL would make <c>NOT IN</c> unknown for every row.
+    /// </summary>
+    private static void RefuseLength(string shown, int length, int capacity, string what)
+    {
+        if (length > capacity)
+        {
+            throw new ArgumentException(
+                $"{what} {shown} a list of {length}, beyond its capacity of {capacity}: raise the capacity, or "
+                + "hold the list as rows of a table and read it with IN (SELECT …).",
+                "parameters");
+        }
+
+        if (length == 0)
+        {
+            throw new ArgumentException(
+                $"{what} {shown} an empty list, and a list with a capacity holds one element or more: an empty one "
+                + "cannot be padded to the capacity. To match nothing, hold the list as rows of a table and read "
+                + "it with IN (SELECT …).",
+                "parameters");
+        }
+    }
+
+    private static int Count(object? list) => ((System.Collections.IEnumerable)list!).Cast<object?>().Count();
+
+    /// <summary>The value bound under <paramref name="name"/>, or null.</summary>
+    private object? Value(string name)
+    {
+        foreach (var (key, value) in _named ?? new Dictionary<string, object?>())
+        {
+            if (Name(key) == name)
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>A list bound to a parameter with a capacity, padded to it by repeating its first element.</summary>
+    private static object?[] Padded(object? value, int capacity)
+    {
+        object?[] elements = ParameterBinder.IsList(value)
+            ? [.. ((System.Collections.IEnumerable)value!).Cast<object?>()]
+            : [value];
+        var padded = new object?[capacity];
+        for (var i = 0; i < capacity; i++)
+        {
+            padded[i] = elements[Math.Min(i, elements.Length - 1)];
+        }
+
+        return padded;
+    }
+
+    /// <summary>The positions of the rebindable parameters in <paramref name="prepared"/>'s.</summary>
+    public int[] RebindableIndexes(PreparedQuery prepared)
+    {
+        if (_rebindable.Count == 0)
+        {
+            return [];
+        }
+
+        var found = new List<int>();
+        for (var i = 0; i < prepared.Parameters.Count; i++)
+        {
+            if (prepared.Parameters[i].Name is { } name && _rebindable.ContainsKey(Name(name)))
+            {
+                found.Add(i);
+            }
+        }
+
+        return [.. found];
+    }
 
     /// <summary>Refuses a value for the clock: in a view, it reads the engine's clock.</summary>
     public void Refuse(string? clock)
@@ -1716,11 +2286,14 @@ internal sealed class ViewBinding
             }
 
             var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            if (_named is not null)
+            if (_named is { } named)
             {
-                foreach (var (name, value) in _named)
+                foreach (var (name, value) in named)
                 {
-                    values[Name(name)] = value;
+                    var key = Name(name);
+                    values[key] = _rebindable.TryGetValue(key, out var rebindable) && rebindable.Capacity is { } capacity
+                        ? Padded(value, capacity)
+                        : value;
                 }
             }
 

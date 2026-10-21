@@ -120,8 +120,8 @@ internal sealed class IslandState : IMaintainedState
 
     public KeyEncoder Encoder { get; } = new();
 
-    /// <summary>The clock at the last computation, or null before the first.</summary>
-    public DateTimeOffset? ComputedAt { get; set; }
+    /// <summary>The clock and the bindings at the last computation, or null before the first.</summary>
+    public Moment? ComputedAt { get; set; }
 
     public long Bytes => Given.Bytes + Now.Bytes + Output.Bytes;
 
@@ -164,7 +164,7 @@ internal sealed class IslandChanges : MaintainedOperator
     {
         var output = _state.Output;
         output.Clear();
-        if (_state.ComputedAt is { } at && (!_state.ReadsClock || at == Context.Now))
+        if (_state.ComputedAt is { } at && (!_state.ReadsClock || at == Moment.Of(Context)))
         {
             return output;
         }
@@ -180,7 +180,7 @@ internal sealed class IslandChanges : MaintainedOperator
         now.Seal();
         Diff(_state.Given, now, output, _state.Identity, _state.Encoder);
         _state.Swap();
-        _state.ComputedAt = Context.Now;
+        _state.ComputedAt = Moment.Of(Context);
         return output;
     }
 

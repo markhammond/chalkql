@@ -23,17 +23,16 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      ChalkQL 0.5 introduces standing queries and experimental incremental view maintenance (IVM), alongside more responsive planning, improved temporal semantics and stricter policy enforcement.
+      ChalkQL 0.6 lets standing views and refreshes run side by side, rebinds a view's parameters without planning again, and maintains window functions incrementally.
 
-      - **Standing views:** Keep SQL results current as inputs change, with cursors that expose only changed rows. Experimental IVM propagates changes through supported query plans instead of recomputing entire results.
-      - **Planning and refresh:** Plan asynchronously off the refresh path, control when new plans take effect with `PlanAsync` and `PlanNow()`, and observe planning decisions.
-      - **SQL enhancements:** Add rollups, seek-based as-of joins, single-evaluation CTEs, `CURRENT_TIME` and `LOCALTIME`, and additional date/time/timestamp casts.
-      - **Correctness and security:** Improve temporal conformance, make zoned-timestamp parsing independent of the machine's time zone, inherit path visibility from parents by default, and tighten safeguards around statistical columns.
-      - **Compatibility:** Some query and entitlement configurations whose behaviour was unspecified in 0.4 are now explicitly supported or rejected. Query plans may change due to improved planner optimisations and source-pushdown conformance. Incremental floating-point aggregation does not yet use compensated summation, so results may differ slightly from full recomputation.
-      - **Licence:** Changed to Elastic License 2.0 (ELv2). See the README for permitted-use details.
-      
+      - **Views and refreshes:** An update a refresh overtakes is published at the version it read, never thrown away, and no refresh waits for a view. A refresh that writes nothing a view reads moves the view on without computing. Commits carry a stamp of version and generation, and `UpdateToAsync` waits for one. `RefreshBuilder.Barrier()` marks a refresh every view publishes itself, and `ViewVersions.Every` makes a view publish every version, in order.
+      - **Rebindable parameters:** `ViewOptions.Rebindable` and `RebindAsync` move a view's parameters, lists included up to a declared capacity, keeping its plan. Maintained incrementally, only the operators that read a moved value run again.
+      - **Maintained windows (experimental):** `ROW_NUMBER`, `RANK`, `LAG`, `LEAD`, running aggregates and the like are maintained from the rows a change reaches, rather than recomputed.
+      - **Planner and execution fixes:** set operations over columns of different precisions plan; a parameter in a `CASE` branch and a window's constant parameter type; timestamps are cut to their declared precision; hash joins with many rows per key build in linear time.
+      - **Compatibility:** No public API is removed or changed. A view now sends readers a commit at a version it relabels without an update, and timestamps cast to a precision lose the digits beyond it. The wire protocol and IR version are unchanged; a 0.5 planner serves a 0.6 client but lacks the planner's fixes.
+
       Full release notes:
-      https://github.com/markhammond/chalkql/releases/tag/v0.5
+      https://github.com/markhammond/chalkql/releases/tag/v0.6
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>

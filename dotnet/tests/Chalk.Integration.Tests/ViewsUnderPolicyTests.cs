@@ -267,7 +267,7 @@ public sealed class ViewsUnderPolicyTests(SharedSidecar sidecar) : IDisposable
             }
         }
 
-        Event NewEvent(long seq) => new(seq, 1 + (int)(seq % 2), 1000 + (int)(seq % 200), 201 + (int)(seq % 3), $"client-{1000 + (seq % 200)}", start.AddSeconds(seq));
+        Event NewEvent(long seq) => new(seq, 1 + (int)(seq & 1), 1000 + (int)(seq % 200), 201 + (int)(seq % 3), $"client-{1000 + (seq % 200)}", start.AddSeconds(seq));
         for (var i = 1L; i <= 5000; i++)
         {
             Add(NewEvent(i));

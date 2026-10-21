@@ -1604,6 +1604,7 @@ Chalk.Client.RefreshBuilder.Advance(Chalk.Sources.ISourceRuntime! source, string
 Chalk.Client.RefreshBuilder.Advance(Chalk.Sources.ITableTarget! table, System.DateTime time) -> Chalk.Client.RefreshBuilder!
 Chalk.Client.RefreshBuilder.Advance(Chalk.Sources.ITableTarget! table, System.DateTimeOffset time) -> Chalk.Client.RefreshBuilder!
 Chalk.Client.RefreshBuilder.AdvanceClock(System.DateTimeOffset time) -> Chalk.Client.RefreshBuilder!
+Chalk.Client.RefreshBuilder.Barrier() -> Chalk.Client.RefreshBuilder!
 Chalk.Client.RefreshBuilder.Delete<T>(Chalk.Sources.ISourceRuntime! source, string! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
 Chalk.Client.RefreshBuilder.Delete<T>(Chalk.Sources.ITableTarget<T>! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
 Chalk.Client.RefreshBuilder.Upsert<T>(Chalk.Sources.ISourceRuntime! source, string! table, System.Collections.Generic.IReadOnlyList<T>! rows) -> Chalk.Client.RefreshBuilder!
@@ -1723,3 +1724,4 @@ Chalk.Client.ChalkEngine.RefreshAsync<TState>(TState state, System.Action<Chalk.
 Chalk.Client.RefreshBuilder.PlanNow() -> Chalk.Client.RefreshBuilder!
 Chalk.Client.ChalkEngine.PrepareReplaceAsync<T>(Chalk.Sources.ISourceRuntime! source, string! table, T[]! rows, int count, int through, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PreparedReplacement!>
 Chalk.Client.ChalkEngine.PrepareReplaceAsync<T>(Chalk.Sources.ITableTarget<T>! table, T[]! rows, int count, int through, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Chalk.Client.PreparedReplacement!>
+Chalk.Client.ChalkEngine.VersionOf(long epoch) -> long?

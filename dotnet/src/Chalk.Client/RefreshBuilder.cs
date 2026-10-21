@@ -27,6 +27,7 @@ public sealed class RefreshBuilder
     private readonly List<RefreshEntry> _entries = [];
     private readonly List<IRefreshTarget> _scopes = [];
     private long? _version;
+    private bool _barrier;
     private DateTimeOffset? _clock;
     private bool _deferPlanning;
     private bool _planNow;
@@ -265,6 +266,23 @@ public sealed class RefreshBuilder
     }
 
     /// <summary>
+    /// Makes this refresh a barrier (design 78 §4): every standing view publishes its version itself,
+    /// rather than going past it to a later one, as a view that falls behind otherwise may. An update
+    /// that reaches a barrier stops there, so a reader that drains after each update is sent its
+    /// version; the next update carries on from it.
+    /// </summary>
+    /// <remarks>
+    /// The engine holds the states the barrier committed of each view's tables until the view has
+    /// published it: little for a table only appended to since, and the table's rows for one replaced.
+    /// A view that reads a database holds nothing, and goes past a barrier as past any refresh.
+    /// </remarks>
+    public RefreshBuilder Barrier()
+    {
+        _barrier = true;
+        return this;
+    }
+
+    /// <summary>
     /// Leaves this refresh's statistics and plans to the background (design 69 §4): the rows are
     /// published now, and the statistics and plans follow at a later refresh.
     /// </summary>
@@ -402,6 +420,9 @@ public sealed class RefreshBuilder
 
     /// <summary>Where this refresh moves the clock to, if anywhere (D339).</summary>
     internal DateTimeOffset? ClockGiven => _clock;
+
+    /// <summary>Whether every standing view publishes this refresh itself (design 78 §4).</summary>
+    internal bool BarrierGiven => _barrier;
 
     /// <summary>Whether this refresh leaves its statistics and plans to the background (design 69 §4).</summary>
     internal bool PlanningDeferred => _deferPlanning;

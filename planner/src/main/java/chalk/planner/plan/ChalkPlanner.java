@@ -240,9 +240,49 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
     }
     ensure(State.STATE_2_READY);
     SqlParser parser = SqlParser.create(reader, parserConfig);
-    SqlNode sqlNode = parser.parseStmt();
+    SqlNode sqlNode;
+    try {
+      sqlNode = parser.parseStmt();
+    } catch (SqlParseException e) {
+      throw namingReservedWord(e);
+    }
     state = State.STATE_3_PARSED;
     return sqlNode;
+  }
+
+  private static final java.util.regex.Pattern ENCOUNTERED =
+      java.util.regex.Pattern.compile("Encountered \"(?:[^\"]*\\s)?([A-Za-z_][A-Za-z0-9_]*)\"");
+
+  /**
+   * A parse that stopped at a reserved word used as a name, as in {@code SELECT … AS at}, says so
+   * and how to quote it, before the parser's own message: the parser names only the token it met
+   * and the many it expected.
+   */
+  private SqlParseException namingReservedWord(SqlParseException e) {
+    String message = e.getMessage();
+    java.util.regex.Matcher encountered = message == null ? null : ENCOUNTERED.matcher(message);
+    if (encountered == null || !encountered.find()) {
+      return e;
+    }
+
+    String word = encountered.group(1);
+    boolean reserved =
+        parserConfig
+            .parserFactory()
+            .getParser(new java.io.StringReader(""))
+            .getMetadata()
+            .isReservedWord(word.toUpperCase(java.util.Locale.ROOT));
+    if (!reserved) {
+      return e;
+    }
+
+    return new SqlParseException(
+        "'" + word + "' is a reserved word: to use it as a name, quote it as \"" + word + "\". "
+            + message,
+        e.getPos(),
+        e.getExpectedTokenSequences(),
+        e.getTokenImages(),
+        e.getCause());
   }
 
   @Override
@@ -428,7 +468,53 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
               operand -> typeOrNull(scope, operand),
               parameter -> declaredType(parameter) != null);
         }
+        if (node instanceof org.apache.calcite.sql.fun.SqlCase branches) {
+          inferWithinBranches(scope, branches);
+        }
         super.inferUnknownTypes(inferredType, scope, node);
+      }
+
+      /**
+       * A parameter inside a call that is a {@code CASE} branch, as in {@code CASE WHEN ? < 0 THEN
+       * drawdown / ? END}, takes the type its call infers for it from the operands beside it, as it
+       * would outside the {@code CASE}. Calcite derives a {@code CASE}'s type from its branches before
+       * it infers the parameters within them, so the division was derived with a parameter of no
+       * type and refused. A branch that is a bare parameter is left to the {@code CASE}'s own
+       * inference, and a branch whose call cannot type its parameters is left as it was.
+       */
+      private void inferWithinBranches(
+          org.apache.calcite.sql.validate.SqlValidatorScope scope,
+          org.apache.calcite.sql.fun.SqlCase branches) {
+        List<org.apache.calcite.sql.SqlNode> results = new java.util.ArrayList<>(branches.getThenOperands().getList());
+        results.add(branches.getElseOperand());
+        for (org.apache.calcite.sql.SqlNode result : results) {
+          if (!(result instanceof org.apache.calcite.sql.SqlCall call)
+              || result instanceof org.apache.calcite.sql.fun.SqlCase
+              || !holdsParameter(call)) {
+            continue;
+          }
+
+          try {
+            inferUnknownTypes(getUnknownType(), scope, call);
+          } catch (org.apache.calcite.runtime.CalciteException untyped) {
+            // The CASE's own inference has its say, as before.
+          }
+        }
+      }
+
+      private boolean holdsParameter(org.apache.calcite.sql.SqlNode node) {
+        try {
+          node.accept(
+              new org.apache.calcite.sql.util.SqlBasicVisitor<Void>() {
+                @Override
+                public Void visit(org.apache.calcite.sql.SqlDynamicParam parameter) {
+                  throw org.apache.calcite.util.Util.FoundOne.NULL;
+                }
+              });
+          return false;
+        } catch (org.apache.calcite.util.Util.FoundOne found) {
+          return true;
+        }
       }
 
       /**

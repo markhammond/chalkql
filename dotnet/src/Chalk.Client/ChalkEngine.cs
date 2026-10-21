@@ -145,6 +145,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         _settings = new ExecutionSettings
         {
             EngineClock = _engineClock,
+            EngineCommits = _engineCommits,
             BatchSize = options.Execution.BatchSize,
             PlanNestingLimit = options.Planner.PlanNestingLimit,
             UseReferenceEngine = options.Execution.Engine == ExecutionEngine.Reference,
@@ -894,7 +895,16 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         var hints = ParameterBinder.ResolveHints(
             rewriter.Parameters, rendered.Slots, parameterValueHints ?? options.ParameterValueHints);
 
-        var result = await PlanAsync(rendered.Sql, options, context, hints, ct).ConfigureAwait(false);
+        PlanResult result;
+        try
+        {
+            result = await PlanAsync(rendered.Sql, options, context, hints, ct).ConfigureAwait(false);
+        }
+        catch (PlanningException untyped) when (Untyped(untyped, rewriter, rendered) is { } named)
+        {
+            throw named;
+        }
+
         var compiled = await CompileAsync(result.Plan, options, context, ct).ConfigureAwait(false);
 
         var prepared = new PreparedQuery(
@@ -912,6 +922,41 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         }
 
         return prepared;
+    }
+
+    /// <summary>
+    /// A planner's refusal of a parameter that nothing beside it gives a type, as in <c>SELECT @level AS
+    /// level</c>, said again naming the parameter as the statement writes it; null for any other.
+    /// </summary>
+    private static PlanningException? Untyped(PlanningException refusal, ParameterRewriter rewriter, RenderedStatement rendered)
+    {
+        if (rewriter.Style is not (ParameterStyle.Named or ParameterStyle.Ordinal)
+            || refusal.Position is not { Line: > 0 } position
+            || !refusal.Message.Contains("Illegal use of dynamic parameter", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var placeholder = ParameterRewriter.PlaceholderAt(rendered.Sql, position.Line, position.Column);
+        if (placeholder < 0 || placeholder >= rendered.Slots.Count)
+        {
+            return null;
+        }
+
+        // `@ctx` spelled in a statement is a context reference, refused as one, not a value to type.
+        var parameter = rewriter.Parameters[rendered.Slots[placeholder].ParameterIndex];
+        if (string.Equals(parameter.Name, "ctx", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return new PlanningException(
+            refusal.Violations,
+            $"Illegal use of dynamic parameter: {parameter} has nothing beside it to give it a type. Write "
+            + $"CAST({parameter} AS DOUBLE), say, or declare its type in PrepareOptions.ParameterTypes.",
+            position,
+            planningState: null,
+            refusal);
     }
 
     /// <summary>Binds <c>?</c> or <c>$n</c> parameters and returns a ready-to-enumerate execution.</summary>
@@ -1317,6 +1362,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             && builder.Scopes.Count == 0
             && builder.VersionGiven is null
             && builder.ClockGiven is null
+            && !builder.BarrierGiven
             && !deferred)
         {
             return await RefreshAsync(ct).ConfigureAwait(false);
@@ -1496,13 +1542,22 @@ public sealed partial class ChalkEngine : IAsyncDisposable
                         {
                             _engineClock?.Set(clock);
                         }
+
+                        // And the count of commits, which the epoch's stamp records (design 78 §1).
+                        _engineCommits.Advance();
+
+                        // And the refresh, for each view that must publish it itself (design 78 §4, §5).
+                        HoldCommitted(builder.BarrierGiven);
                     }
                 }
                 finally
                 {
                     replaced?.Unpin();
+                    LetGoOfOverrun();
                 }
 
+                // What the refresh wrote, for a view to tell whether it touched what it reads (design 78 §2).
+                _writing = (WriteSet(builder.Entries), builder.ClockGiven is not null);
                 var (epoch, behind) = await PublishAsync(builder.VersionGiven, builder.ClockGiven, deferred, ct)
                     .ConfigureAwait(false);
                 numbersBehind = behind;

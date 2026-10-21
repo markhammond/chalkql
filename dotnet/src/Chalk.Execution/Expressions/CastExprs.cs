@@ -538,13 +538,14 @@ internal static class TemporalConversions
 
         var from = IrTypes.TimestampUnitsPerSecond((uint)source.Precision);
         var to = IrTypes.TimestampUnitsPerSecond((uint)target.Precision);
-        if (from == to)
-        {
-            return raw;
-        }
 
-        // Rescaling truncates, which for a negative instant means towards the past, not towards zero.
-        return to > from ? raw * (to / from) : CivilTime.FloorDiv(raw, from / to);
+        // Rescaling truncates, which for a negative instant means towards the past, not towards zero,
+        // and so does the cut to the target's digits: TIMESTAMP(0) counts milliseconds, and keeps whole
+        // seconds of them.
+        var rescaled = from == to ? raw : to > from ? raw * (to / from) : CivilTime.FloorDiv(raw, from / to);
+        return target.Precision < source.Precision
+            ? IrTypes.TruncateTimestamp(rescaled, (uint)target.Precision)
+            : rescaled;
     }
 
     /// <summary>A timestamp's microseconds since its midnight, before 1970 as after.</summary>

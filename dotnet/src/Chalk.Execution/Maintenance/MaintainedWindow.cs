@@ -3,6 +3,7 @@ using Chalk.Catalog;
 using Chalk.Execution.Expressions;
 using Chalk.Execution.Operators;
 using Chalk.Execution.Vectors;
+using Chalk.Sources;
 using ArrowSchema = Apache.Arrow.Schema;
 
 namespace Chalk.Execution.Maintenance;
@@ -32,15 +33,24 @@ internal sealed class WindowState : IMaintainedState
     private static readonly long EntryBytes = HeapSizes.SortedSetNode(16);
 
     private readonly int[] _columns;
+    private readonly int[] _widths;
     private readonly SortedSet<(long Value, int Slot)>[] _orders;
     private bool[] _passing = [];
 
     /// <param name="inputTypes">The filter's input columns.</param>
     /// <param name="cuts">For each comparison with a cut-off, the input column it compares.</param>
     /// <param name="batchSize">How many rows a batch of changes holds.</param>
-    public WindowState(IReadOnlyList<ChalkType> inputTypes, IReadOnlyList<int> cuts, int batchSize)
+    /// <param name="behind">
+    /// For each comparison, whether a row behind its cut-off can never pass again, and so need not be held:
+    /// a lower bound of the whole condition that rises with the clock, and only with it; and whether it is
+    /// strict, so that a row at the cut-off is behind it too.
+    /// </param>
+    public WindowState(
+        IReadOnlyList<ChalkType> inputTypes, IReadOnlyList<int> cuts, int batchSize, IReadOnlyList<(bool LetsGo, bool Strict)>? behind = null)
     {
+        Behind = behind is null ? [.. cuts.Select(_ => (false, false))] : [.. behind];
         Input = new HeldRows(inputTypes);
+        _widths = [.. inputTypes.Select(t => ColumnKinds.Width(ColumnKinds.Of(t)))];
         _columns = [.. cuts.Distinct()];
         CutOrder = [.. cuts.Select(column => Array.IndexOf(_columns, column))];
         _orders = [.. _columns.Select(_ => new SortedSet<(long Value, int Slot)>())];
@@ -53,6 +63,57 @@ internal sealed class WindowState : IMaintainedState
     /// <summary>Every input row held, with its count.</summary>
     public HeldRows Input { get; }
 
+    /// <summary>For each comparison, whether rows behind its cut-off are let go, and whether a row at it is behind.</summary>
+    public (bool LetsGo, bool Strict)[] Behind { get; }
+
+    /// <summary>The input column comparison <paramref name="cut"/> reads.</summary>
+    public int ColumnOf(int cut) => _columns[CutOrder[cut]];
+
+    /// <summary>Whether a value lies behind a cut-off that lets rows go: before it, or at it for a strict one.</summary>
+    public bool IsBehind(int cut, long value, long cutOff) => Behind[cut].Strict ? value <= cutOff : value < cutOff;
+
+    /// <summary>A batch row's whole-number value in input column <paramref name="column"/>, or null where it is NULL.</summary>
+    public long? ValueAt(int column, in ColumnView view, int row)
+    {
+        if (!view.IsValid(row))
+        {
+            return null;
+        }
+
+        var width = _widths[column];
+        var lane = view.RawLanes(width).Slice(row * width, width);
+        return width switch
+        {
+            1 => (sbyte)lane[0],
+            2 => BinaryPrimitives.ReadInt16LittleEndian(lane),
+            4 => BinaryPrimitives.ReadInt32LittleEndian(lane),
+            8 => BinaryPrimitives.ReadInt64LittleEndian(lane),
+            _ => throw new InvalidOperationException($"a column of {width}-byte values was taken for a whole number."),
+        };
+    }
+
+    /// <summary>
+    /// Lets go of the rows held behind comparison <paramref name="cut"/>'s cut-off, which can never pass
+    /// again: they fail a lower bound of the whole condition that only rises.
+    /// </summary>
+    /// <remarks>
+    /// Read from the least value up, by the order's minimum, so a clock move allocates nothing for it: a row
+    /// taken out leaves the order as it goes (<see cref="Changed"/>).
+    /// </remarks>
+    public void LetGoBehind(int cut, long cutOff)
+    {
+        var order = _orders[CutOrder[cut]];
+        while (order.Count > 0 && IsBehind(cut, order.Min.Value, cutOff))
+        {
+            var held = order.Count;
+            Input.Take(order.Min.Slot);
+            if (order.Count == held)
+            {
+                throw new InvalidOperationException("a row let go behind a cut-off stayed in the cut-off's order.");
+            }
+        }
+    }
+
     public ChangeSet InputChanges { get; }
 
     /// <summary>The rows this update reads: those the clock may have moved past, then the changes.</summary>
@@ -63,8 +124,8 @@ internal sealed class WindowState : IMaintainedState
     /// <summary>For each comparison, which order holds its column's values.</summary>
     public int[] CutOrder { get; }
 
-    /// <summary>The clock the filter last ran at, or null before its first update.</summary>
-    public DateTimeOffset? RanAt { get; set; }
+    /// <summary>The clock and the bindings the filter last ran at, or null before its first update.</summary>
+    public Moment? RanAt { get; set; }
 
     /// <summary>The cut-offs it last ran with, one per comparison, or null where one of them was NULL.</summary>
     public long[]? Cuts { get; set; }
@@ -173,6 +234,9 @@ internal sealed class WindowChanges : MaintainedOperator, IKeepsScratch
     private readonly List<int> _rows = [];
     private bool[] _pass = [];
 
+    /// <summary>The cut-offs' array the state does not hold: each clock move fills it, and the two take turns.</summary>
+    private long[]? _spareCuts;
+
     public WindowChanges(
         OperatorContext context,
         string path,
@@ -211,7 +275,7 @@ internal sealed class WindowChanges : MaintainedOperator, IKeepsScratch
         var state = _state;
         await DrainAsync(_input, state.InputChanges, ct).ConfigureAwait(false);
         var changes = state.InputChanges;
-        var moved = state.RanAt != Context.Now;
+        var moved = state.RanAt != Moment.Of(Context);
         var cuts = moved ? Cuts() : state.Cuts;
 
         // The rows held whose answer the clock may have changed: between each comparison's two
@@ -247,10 +311,12 @@ internal sealed class WindowChanges : MaintainedOperator, IKeepsScratch
             state.Replay.Write(state.Input.Rows, slot, state.Input.Count(slot));
         }
 
+        // A change behind a cut-off that lets rows go can never pass: it is not held, and gives nothing. A
+        // row held behind the new cut-off is read above, and let go below.
         _rows.Clear();
         for (var row = 0; row < changes.Count; row++)
         {
-            if (changes.Weight(row) != 0)
+            if (changes.Weight(row) != 0 && !Behind(changes.Columns, row, cuts))
             {
                 state.Replay.Write(changes.Columns, row, changes.Weight(row));
                 _rows.Add(row);
@@ -304,9 +370,35 @@ internal sealed class WindowChanges : MaintainedOperator, IKeepsScratch
             }
         }
 
+        if (moved && cuts is not null)
+        {
+            for (var cut = 0; cut < cuts.Length; cut++)
+            {
+                if (!state.Behind[cut].LetsGo)
+                {
+                    continue;
+                }
+
+                if (state.Cuts is { } was && cuts[cut] < was[cut])
+                {
+                    // It rises with the clock alone, which moves only forward: a fall is a fault, and the next
+                    // update computes the view from nothing.
+                    throw new InvalidOperationException(
+                        "a cut-off that rises only with the clock fell, and the rows behind it were let go.");
+                }
+
+                state.LetGoBehind(cut, cuts[cut]);
+            }
+        }
+
         if (moved)
         {
-            state.RanAt = Context.Now;
+            state.RanAt = Moment.Of(Context);
+            if (state.Cuts is { } last && !ReferenceEquals(last, cuts))
+            {
+                _spareCuts = last;
+            }
+
             state.Cuts = cuts;
         }
 
@@ -314,10 +406,35 @@ internal sealed class WindowChanges : MaintainedOperator, IKeepsScratch
         return output;
     }
 
+    /// <summary>Whether a change lies behind a cut-off that lets rows go, at this update's cut-offs.</summary>
+    private bool Behind(ReadOnlySpan<ColumnView> columns, int row, long[]? cuts)
+    {
+        if (cuts is null)
+        {
+            return false;
+        }
+
+        var state = _state;
+        for (var cut = 0; cut < cuts.Length; cut++)
+        {
+            if (state.Behind[cut].LetsGo
+                && state.ValueAt(state.ColumnOf(cut), columns[state.ColumnOf(cut)], row) is { } value
+                && state.IsBehind(cut, value, cuts[cut]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Each comparison's cut-off at the update's clock, or null when one of them is NULL.</summary>
     private long[]? Cuts()
     {
-        var cuts = new long[_cuts.Length];
+        // Into the array the state does not hold, so a clock move allocates none: the state's is compared with.
+        var cuts = _spareCuts is { } spare && spare.Length == _cuts.Length && !ReferenceEquals(spare, _state.Cuts)
+            ? spare
+            : new long[_cuts.Length];
         for (var i = 0; i < _cuts.Length; i++)
         {
             var value = _eval.EvaluateOnce(_cuts[i]);
