@@ -242,6 +242,40 @@ public sealed class ArenaTests
     }
 
     /// <summary>
+    /// An execution's result, still held by the host when the execution ends, counts against the budget
+    /// as the arena trims: once the host gives it back, the pools hold no more than
+    /// <c>RetainBytes</c>. Retaining the working set, repeats that give their results back after they
+    /// end rent nothing from the heap.
+    /// </summary>
+    [Fact]
+    public void A_result_given_back_after_the_execution_ends_keeps_the_pools_within_the_budget()
+    {
+        const int Mib = 1 << 20;
+        static void Run(ExecutionArena arena)
+        {
+            arena.BeginExecution();
+            var scratch = arena.Rent<byte>(Mib);
+            var result = arena.Rent<byte>(64 << 10);
+            arena.Return(scratch);
+            arena.EndExecution();
+            arena.Return(result);
+        }
+
+        using var tight = new ExecutionArena(new ArenaOptions { RetainBytes = Mib });
+        Run(tight);
+        Assert.True(tight.RetainedBytes <= Mib, $"the pools hold {tight.RetainedBytes} bytes against a budget of {Mib}");
+
+        using var sized = new ExecutionArena(new ArenaOptions { RetainBytes = Mib + (64 << 10) });
+        Run(sized);
+        Assert.Equal(Mib + (64 << 10), sized.WorkingSetBytes);
+        var fallen = sized.HeapFallbackBytes;
+        Run(sized);
+        Run(sized);
+        Assert.Equal(0, sized.HeapFallbackBytes - fallen);
+        Assert.Equal(Mib + (64 << 10), sized.RetainedBytes);
+    }
+
+    /// <summary>
     /// The working set counts what the pools could keep: a rental served exactly, above
     /// <c>MaxPooledRental</c>, does not count, and an array relinquished to the collector leaves it.
     /// </summary>
