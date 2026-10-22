@@ -20,6 +20,13 @@ public sealed class ArenaOptions
     /// What an idle arena keeps warm. <see cref="ExecutionArena.Trim"/> releases pooled memory beyond
     /// this to the collector, so an engine's worst case is <c>ArenaPoolSize × RetainBytes</c>.
     /// </summary>
+    /// <remarks>
+    /// To keep a repeated execution off the heap, it must cover
+    /// <see cref="ExecutionArena.WorkingSetBytes"/>, not <see cref="ExecutionArena.PeakBytes"/>: an
+    /// execution rents arrays of several size classes at different times, so the arrays it needs kept
+    /// can add up to more than it ever holds at once. Below the working set, every warm execution
+    /// falls back to the heap by the difference, whatever the trim lets go of first.
+    /// </remarks>
     public long RetainBytes { get; init; } = 64L << 20;
 
     /// <summary>
@@ -92,6 +99,7 @@ public sealed class ExecutionArena : IDisposable
     private long _peak;
     private long _executionPeak;
     private long _retained;
+    private long _workingSet;
     private long _rentals;
     private long _rentedBytes;
     private long _heapFallbacks;
@@ -189,6 +197,19 @@ public sealed class ExecutionArena : IDisposable
     public long TrimmedBytes => Volatile.Read(ref _trimmedBytes);
 
     /// <summary>
+    /// What the pools must hold for an execution to rent nothing from the heap when it runs again: for
+    /// each size class, the most arrays of it the execution had rented at once, times the class's
+    /// bytes, summed. The largest over the executions this arena has served, measured as each ends.
+    /// </summary>
+    /// <remarks>
+    /// It can exceed <see cref="PeakBytes"/>, which is what was rented at one moment: arrays of one class
+    /// sit idle in the pools while arrays of another are rented. Size
+    /// <see cref="ArenaOptions.RetainBytes"/> to cover it. A rental served exactly, never pooled, does
+    /// not count, since no retention could serve it again.
+    /// </remarks>
+    public long WorkingSetBytes => Volatile.Read(ref _workingSet);
+
+    /// <summary>
     /// The table states the execution using this arena pinned when it began (F188), which its scans
     /// read in place of what their tables serve when each scan starts. Set and cleared by the executor
     /// around the execution; null between executions and for a scan run outside one.
@@ -227,6 +248,12 @@ public sealed class ExecutionArena : IDisposable
             _running = true;
             _stats = stats;
             _executionPeak = _outstanding;
+
+            // Each class's most rented starts from what is rented now, normally nothing.
+            foreach (var classes in _pools.Values)
+            {
+                Array.Copy(classes.Rented, classes.MostRented, classes.Rented.Length);
+            }
         }
     }
 
@@ -240,6 +267,7 @@ public sealed class ExecutionArena : IDisposable
         {
             _running = false;
             _stats = null;
+            NoteWorkingSetLocked();
             TrimLocked();
         }
     }
@@ -457,6 +485,13 @@ public sealed class ExecutionArena : IDisposable
         // for, and that is what the trim has to keep (§2.3, D258.2).
         classes.LastUsed[index] = ++_useStamp;
 
+        // And counts towards the working set, served from the pool or not.
+        var rented = ++classes.Rented[index];
+        if (rented > classes.MostRented[index])
+        {
+            classes.MostRented[index] = rented;
+        }
+
         var bucket = classes.Buckets[index];
         if (bucket is null || bucket.Count == 0)
         {
@@ -508,6 +543,37 @@ public sealed class ExecutionArena : IDisposable
         var index = BitOperations.Log2((uint)array.Length);
         (classes.Buckets[index] ??= []).Add(array);
         _retained += bytes;
+        Released(classes, index);
+    }
+
+    /// <summary>One array of a class is no longer rented: returned, or relinquished to the collector.</summary>
+    private static void Released(SizeClasses classes, int index)
+    {
+        if (classes.Rented[index] > 0)
+        {
+            classes.Rented[index]--;
+        }
+    }
+
+    /// <summary>
+    /// Takes the execution just ended's working set, each class's most rented at once in bytes, into
+    /// <see cref="WorkingSetBytes"/>. The caller holds <see cref="_gate"/>.
+    /// </summary>
+    private void NoteWorkingSetLocked()
+    {
+        var bytes = 0L;
+        foreach (var classes in _pools.Values)
+        {
+            for (var index = 0; index < classes.MostRented.Length; index++)
+            {
+                bytes += classes.MostRented[index] * (1L << index) * classes.ElementSize;
+            }
+        }
+
+        if (bytes > _workingSet)
+        {
+            Volatile.Write(ref _workingSet, bytes);
+        }
     }
 
     /// <summary>Books a rental, refusing it when it would break the budget.</summary>
@@ -605,6 +671,10 @@ public sealed class ExecutionArena : IDisposable
             // Rent<byte>() charged array.Length bytes.
             //
             Discharge(array.Length);
+            if (IsPoolable(array.Length, array.Length))
+            {
+                Released(ClassesFor(typeof(byte), 1), BitOperations.Log2((uint)array.Length));
+            }
 
             //
             // Deliberately do NOT PutLocked().
@@ -630,6 +700,11 @@ public sealed class ExecutionArena : IDisposable
         /// element type: the recency bookkeeping is per class, not per rental.
         /// </summary>
         public long[] LastUsed { get; } = new long[32];
+
+        /// <summary>How many arrays of each class are rented now, and the most at once this execution.</summary>
+        public int[] Rented { get; } = new int[32];
+
+        public int[] MostRented { get; } = new int[32];
     }
 
     /// <summary>

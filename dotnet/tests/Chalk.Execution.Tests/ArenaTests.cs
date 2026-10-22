@@ -203,6 +203,62 @@ public sealed class ArenaTests
         arena.ReturnStrings(again);
     }
 
+    /// <summary>
+    /// An execution that rents two 1 MiB arrays, returns them, and then rents one 2 MiB array holds 2 MiB
+    /// at its peak but needs 4 MiB kept to run again without the heap: the working set. Retaining the
+    /// peak, the repeat falls back by the 2 MiB the trim let go of; retaining the working set, by nothing.
+    /// </summary>
+    [Fact]
+    public void A_repeat_rents_nothing_from_the_heap_only_when_the_working_set_is_retained()
+    {
+        const int Mib = 1 << 20;
+        static void Run(ExecutionArena arena)
+        {
+            arena.BeginExecution();
+            var first = arena.Rent<byte>(Mib);
+            var second = arena.Rent<byte>(Mib);
+            arena.Return(first);
+            arena.Return(second);
+            var whole = arena.Rent<byte>(2 * Mib);
+            arena.Return(whole);
+            arena.EndExecution();
+        }
+
+        using var atPeak = new ExecutionArena(new ArenaOptions { RetainBytes = 2 * Mib });
+        Run(atPeak);
+        Assert.Equal(2 * Mib, atPeak.PeakBytes);
+        Assert.Equal(4 * Mib, atPeak.WorkingSetBytes);
+        var fallen = atPeak.HeapFallbackBytes;
+        Run(atPeak);
+        Assert.Equal(2 * Mib, atPeak.HeapFallbackBytes - fallen);
+
+        using var atWorkingSet = new ExecutionArena(new ArenaOptions { RetainBytes = 4 * Mib });
+        Run(atWorkingSet);
+        fallen = atWorkingSet.HeapFallbackBytes;
+        Run(atWorkingSet);
+        Run(atWorkingSet);
+        Assert.Equal(0, atWorkingSet.HeapFallbackBytes - fallen);
+        Assert.Equal(4 * Mib, atWorkingSet.WorkingSetBytes);
+    }
+
+    /// <summary>
+    /// The working set counts what the pools could keep: a rental served exactly, above
+    /// <c>MaxPooledRental</c>, does not count, and an array relinquished to the collector leaves it.
+    /// </summary>
+    [Fact]
+    public void The_working_set_counts_only_what_retention_could_serve()
+    {
+        using var arena = new ExecutionArena(new ArenaOptions { MaxPooledRental = 64 << 10 });
+        arena.BeginExecution();
+        var kept = arena.Rent<byte>(64 << 10);
+        var exact = arena.Rent<byte>(100 << 10);
+        arena.Return(exact);
+        arena.Return(kept);
+        arena.EndExecution();
+
+        Assert.Equal(64 << 10, arena.WorkingSetBytes);
+    }
+
     [Fact]
     public void Trim_keeps_RetainBytes_and_no_more()
     {

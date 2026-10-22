@@ -91,6 +91,7 @@ Chalk.Sources.ExecutionArena.ReturnStrings(string![]! array) -> void
 Chalk.Sources.ExecutionArena.Trim() -> void
 Chalk.Sources.ExecutionArena.TrimmedBytes.get -> long
 Chalk.Sources.ExecutionArena.UnpooledReturnBytes.get -> long
+Chalk.Sources.ExecutionArena.WorkingSetBytes.get -> long
 Chalk.Sources.ExecutionException
 Chalk.Sources.ExecutionException.ExecutionException(string! code, ulong planDigest, string! operatorPath, string! detail, System.Exception? innerException) -> void
 Chalk.Sources.ExecutionException.ExecutionException(ulong planDigest, string! operatorPath, string! detail) -> void
