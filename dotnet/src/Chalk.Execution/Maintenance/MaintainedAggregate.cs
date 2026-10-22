@@ -302,6 +302,21 @@ internal sealed class AggregateState : IMaintainedState
         }
     }
 
+    public (long Live, long Slots) Occupancy
+    {
+        get
+        {
+            var (live, slots) = (0L, 0L);
+            foreach (var set in Sets)
+            {
+                live += set.Values.Count;
+                slots += set.Values.Slots;
+            }
+
+            return (live, slots);
+        }
+    }
+
     public void Discard()
     {
         foreach (var set in Sets)

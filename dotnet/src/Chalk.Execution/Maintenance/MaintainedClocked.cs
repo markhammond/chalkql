@@ -47,6 +47,8 @@ internal sealed class ClockedState : IMaintainedState
 
     public long Bytes => Input.Bytes + Given.Bytes + InputChanges.Bytes + Replay.Bytes + Now.Bytes + Output.Bytes;
 
+    public (long Live, long Slots) Occupancy => (Input.Rows.Count + (long)Given.Rows.Count, Input.Rows.Slots + (long)Given.Rows.Slots);
+
     public void Discard()
     {
         Input.Clear();

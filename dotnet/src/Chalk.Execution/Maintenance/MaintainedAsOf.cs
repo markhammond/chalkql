@@ -136,6 +136,8 @@ internal sealed class AsOfState : IMaintainedState
         + HeapSizes.Of(Runs, HeapSizes.ReferenceEntry) + HeapSizes.Of(SpareRuns, HeapSizes.ReferenceEntry) + RunBytes
         + HeapSizes.DictionaryOf(Reached.EnsureCapacity(0), 16);
 
+    public (long Live, long Slots) Occupancy => (Left.Count + (long)Right.Count, Left.Slots + (long)Right.Slots);
+
     public void Discard()
     {
         Left.Clear();

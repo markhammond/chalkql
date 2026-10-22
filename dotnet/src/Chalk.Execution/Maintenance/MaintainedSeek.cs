@@ -163,6 +163,8 @@ internal sealed class SeekState : IMaintainedState
         + HeapSizes.Array(LeftCounts.Length, sizeof(long)) + HeapSizes.Array(LeftMatches.Length, sizeof(int))
         + LeftSlots.Bytes + LeftBuckets.Bytes + LastIndex.Bytes + HandedOver.Bytes;
 
+    public (long Live, long Slots) Occupancy => (Left.Count, Left.Slots);
+
     public void Discard()
     {
         Left.Clear();
