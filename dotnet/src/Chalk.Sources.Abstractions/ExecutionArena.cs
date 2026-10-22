@@ -21,6 +21,8 @@ public sealed class ArenaOptions
     /// this to the collector, so an engine's worst case is <c>ArenaPoolSize × RetainBytes</c>.
     /// </summary>
     /// <remarks>
+    /// Counted with what is still outstanding when the arena trims, such as a batch the host has yet to
+    /// dispose, so it is what the pools hold once everything has come back.
     /// To keep a repeated execution off the heap, it must cover
     /// <see cref="ExecutionArena.WorkingSetBytes"/>, not <see cref="ExecutionArena.PeakBytes"/>: an
     /// execution rents arrays of several size classes at different times, so the arrays it needs kept
@@ -401,8 +403,9 @@ public sealed class ExecutionArena : IDisposable
     }
 
     /// <summary>
-    /// Releases pooled memory beyond <see cref="ArenaOptions.RetainBytes"/>, least recently used size
-    /// class first (§2.3). Outstanding rentals are untouched.
+    /// Releases pooled memory beyond <see cref="ArenaOptions.RetainBytes"/>, less what is still
+    /// outstanding, least recently used size class first (§2.3). Outstanding rentals are untouched, and
+    /// once they come back the pools hold no more than the budget.
     /// </summary>
     public void Trim()
     {
@@ -611,9 +614,16 @@ public sealed class ExecutionArena : IDisposable
     /// rentals, and it allocates nothing: <see cref="EndExecution"/> runs it on every execution, so a
     /// list or a sort here would show up in the fixed per-execution figure the benchmark gates.
     /// </remarks>
+    /// <remarks>
+    /// What is still outstanding counts against the budget too — a batch the host has yet to dispose,
+    /// say — so that once it comes back the pools hold <see cref="ArenaOptions.RetainBytes"/>, not more.
+    /// Trimmed only to the budget, a pool that was full when the execution ended would go over it as the
+    /// batch came back, and the next trim would let go of arrays the next execution rents again.
+    /// </remarks>
     private void TrimLocked()
     {
-        while (_retained > Options.RetainBytes)
+        var budget = Math.Max(0, Options.RetainBytes - _outstanding);
+        while (_retained > budget)
         {
             SizeClasses? oldest = null;
             var oldestIndex = -1;
@@ -641,7 +651,7 @@ public sealed class ExecutionArena : IDisposable
             }
 
             var bucket = oldest.Buckets[oldestIndex]!;
-            while (bucket.Count > 0 && _retained > Options.RetainBytes)
+            while (bucket.Count > 0 && _retained > budget)
             {
                 var bytes = (long)bucket[^1].Length * oldest.ElementSize;
                 _retained -= bytes;
