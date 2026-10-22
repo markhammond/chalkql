@@ -1520,6 +1520,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
         catch (StandingViewException refusal) when (refusal.Code == ChalkErrorCodes.UnsupportedInView)
         {
             kept.PlannedWith = _prepared.Plans;
+            kept.KeepSparse = true;
             return;
         }
 
@@ -1579,6 +1580,7 @@ public sealed class StandingView<TKey, TRow> : IAsyncDisposable
 
         LetGo(green);
         blue.PlannedWith = green.PlannedFor;
+        blue.KeepSparse = true;
     }
 
     /// <summary>

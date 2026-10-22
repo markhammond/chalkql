@@ -2209,6 +2209,12 @@ left rows and its right rows by key, an aggregate its groups — so an update re
   megabyte a view in the shapes measured. The first update computes everything, and
   takes longer than a recompute. The buffers its rows passed through are let go when it ends, so the
   view then holds its state and not the first update's rows.
+- **State that empties is built afresh.** What a maintained statement keeps has room for the most rows
+  it ever held, and removals free that room for reuse without giving it back. So once its states hold
+  a quarter of the rows they have room for or fewer, as after a log is compacted, the view builds the
+  statement afresh, as it moves to a new plan: at its next update, which gives the whole result once
+  and sends readers only the keys that differ, or beside it under `LowJitter`. A view that lived
+  through a compaction then holds about what a fresh view over the same rows holds.
 - **A failed update** — a fault, a cancellation, the budget — leaves the view at the epoch it held.
   The next computes the statement from nothing, and a reader is sent only the keys that differ from
   what it holds.

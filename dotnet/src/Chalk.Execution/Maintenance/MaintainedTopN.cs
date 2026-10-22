@@ -102,6 +102,8 @@ internal sealed class TopNState : IMaintainedState
         _resolved = true;
     }
 
+    public (long Live, long Slots) Occupancy => (Rows.Count, Rows.Slots);
+
     public void Discard()
     {
         Rows.Clear();

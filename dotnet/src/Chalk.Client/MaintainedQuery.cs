@@ -51,10 +51,19 @@ internal sealed class MaintainedQuery : IAsyncDisposable
     internal object PlannedWith { get; set; }
 
     /// <summary>
-    /// Whether the statement still runs the plans this query was made from: false once plans the
-    /// background made have swapped in (design 69 §4). The query answers the same rows either way.
+    /// Whether the view keeps this query as it is: false once plans the background made have swapped in
+    /// (design 69 §4), and false once its states hold a quarter of the rows they have room for or fewer
+    /// (F270), when a query built afresh over the same rows would hold a fraction of the memory. Either
+    /// way the view moves to a new query, as it does to a new plan, and the query answers the same rows
+    /// meanwhile.
     /// </summary>
-    internal bool IsCurrent => ReferenceEquals(PlannedWith, _query.Plans);
+    internal bool IsCurrent => ReferenceEquals(PlannedWith, _query.Plans) && (KeepSparse || !_plan.IsSparse);
+
+    /// <summary>Set once a rebuild for emptiness failed: the view keeps this query, sparse or not, rather than try at every update.</summary>
+    internal bool KeepSparse { get; set; }
+
+    /// <summary>Whether its states hold a quarter of the rows they have room for or fewer (F270).</summary>
+    internal bool IsSparse => _plan.IsSparse;
 
     /// <summary>Bytes the statement's operators and its result hold, against the view's state budget.</summary>
     public long StateBytes => _plan.StateBytes;

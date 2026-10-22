@@ -181,6 +181,8 @@ internal sealed class JoinState : IMaintainedState
     public long Bytes =>
         Left.Bytes + Right.Bytes + LeftChanges.Bytes + RightChanges.Bytes + Output.Bytes + Candidates.Bytes;
 
+    public (long Live, long Slots) Occupancy => (Left.Rows.Count + (long)Right.Rows.Count, Left.Rows.Slots + (long)Right.Rows.Slots);
+
     public void Discard()
     {
         Left.Clear();
