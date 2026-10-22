@@ -651,40 +651,6 @@ public sealed class ExecutionArena : IDisposable
         }
     }
     
-    /// <summary>
-    /// Relinquishes an outstanding byte rental to the GC rather than returning it
-    /// to this arena's pool.
-    ///
-    /// The caller becomes solely responsible for keeping the array alive. The
-    /// arena no longer accounts for it and must never see it through Return().
-    /// </summary>
-    internal void RelinquishToGc(byte[] array)
-    {
-        ArgumentNullException.ThrowIfNull(array);
-
-        if (array.Length == 0)
-            return;
-
-        lock (_gate)
-        {
-            //
-            // Rent<byte>() charged array.Length bytes.
-            //
-            Discharge(array.Length);
-            if (IsPoolable(array.Length, array.Length))
-            {
-                Released(ClassesFor(typeof(byte), 1), BitOperations.Log2((uint)array.Length));
-            }
-
-            //
-            // Deliberately do NOT PutLocked().
-            //
-            // The array is now ordinary managed memory whose lifetime is
-            // determined purely by GC reachability.
-            //
-        }
-    }
-
     /// <summary>The pooled arrays of one element type, one bucket per power-of-two length.</summary>
     private sealed class SizeClasses
     {

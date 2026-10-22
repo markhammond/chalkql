@@ -1644,6 +1644,12 @@ internal sealed class ColumnCopier : IArenaScratch
         }
     }
 
+    /// <summary>
+    /// A managed batch's buffer: the host may keep the batch as long as it likes, so its bytes are copied
+    /// out at their exact size into an array of the host's, and the scratch stays this copier's for its
+    /// next batch. Handing the scratch itself over would leave the arena to rent it again, from the heap,
+    /// at every batch, and the host holding an array rounded up to a power of two.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ArrowBuffer DetachManaged(
         ref ArenaBuffer buffer,
@@ -1652,14 +1658,12 @@ internal sealed class ColumnCopier : IArenaScratch
         if (length == 0)
             return ArrowBuffer.Empty;
 
-        var bytes =
-            buffer.RelinquishToGc();
-
         Debug.Assert(
-            bytes.Length >= length);
+            buffer.Bytes.Length >= length);
 
-        return new ArrowBuffer(
-            bytes.AsMemory(0, length));
+        var bytes = GC.AllocateUninitializedArray<byte>(length);
+        buffer.Bytes.AsSpan(0, length).CopyTo(bytes);
+        return new ArrowBuffer(bytes);
     }
 
     /// <summary>Builds a whole column in one call: <see cref="Begin"/>, one append, <see cref="FinishView"/>.</summary>
