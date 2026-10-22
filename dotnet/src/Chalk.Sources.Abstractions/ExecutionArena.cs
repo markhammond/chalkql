@@ -17,19 +17,30 @@ public sealed class ArenaOptions
     public long? MaxBytes { get; init; }
 
     /// <summary>
-    /// What an idle arena keeps warm. <see cref="ExecutionArena.Trim"/> releases pooled memory beyond
-    /// this to the collector, so an engine's worst case is <c>ArenaPoolSize × RetainBytes</c>.
+    /// The most an idle arena keeps warm. It keeps what its executions need — their working set, with
+    /// <see cref="WorkingSetMargin"/> — up to this ceiling, and <see cref="ExecutionArena.Trim"/> releases
+    /// pooled memory beyond that to the collector, so an engine's worst case is
+    /// <c>ArenaPoolSize × RetainBytes</c>.
     /// </summary>
     /// <remarks>
     /// Counted with what is still outstanding when the arena trims, such as a batch the host has yet to
-    /// dispose, so it is what the pools hold once everything has come back.
-    /// To keep a repeated execution off the heap, it must cover
-    /// <see cref="ExecutionArena.WorkingSetBytes"/>, not <see cref="ExecutionArena.PeakBytes"/>: an
-    /// execution rents arrays of several size classes at different times, so the arrays it needs kept
-    /// can add up to more than it ever holds at once. Below the working set, every warm execution
-    /// falls back to the heap by the difference, whatever the trim lets go of first.
+    /// dispose, so it is what the pools hold once everything has come back. A repeated execution stays
+    /// off the heap while its <see cref="ExecutionArena.WorkingSetBytes"/> fits under it, which can be
+    /// more than its <see cref="ExecutionArena.PeakBytes"/>: an execution rents arrays of several size
+    /// classes at different times, so the arrays it needs kept can add up to more than it ever holds at
+    /// once. Under a ceiling below the working set, every warm execution falls back to the heap by the
+    /// difference. So set it as a ceiling on memory, not as a measure of need: <see cref="MaxBytes"/>,
+    /// say, keeps every execution the budget admits off the heap once warm.
     /// </remarks>
     public long RetainBytes { get; init; } = 64L << 20;
+
+    /// <summary>
+    /// The room an arena keeps above its working set, as a fraction of it: 0.01, the default, keeps one
+    /// percent more. A working set moves with the data its executions read, and a shortfall costs whole
+    /// arrays, so a little room spares a round of fallbacks as tables grow. Zero keeps the working set
+    /// exactly; less than zero is refused.
+    /// </summary>
+    public double WorkingSetMargin { get; init; } = 0.01;
 
     /// <summary>
     /// The largest rental the pools will keep, in bytes. Null — the default — pools a rental of any
@@ -117,6 +128,14 @@ public sealed class ExecutionArena : IDisposable
     public ExecutionArena(ArenaOptions? options = null)
     {
         Options = options ?? new ArenaOptions();
+        if (!(Options.WorkingSetMargin >= 0) || double.IsInfinity(Options.WorkingSetMargin))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                Options.WorkingSetMargin,
+                "WorkingSetMargin is a fraction of the working set, zero or more: 0.01 keeps one percent more.");
+        }
+
         if (Options.RetainBytes < 0)
         {
             throw new ArgumentOutOfRangeException(
@@ -205,9 +224,9 @@ public sealed class ExecutionArena : IDisposable
     /// </summary>
     /// <remarks>
     /// It can exceed <see cref="PeakBytes"/>, which is what was rented at one moment: arrays of one class
-    /// sit idle in the pools while arrays of another are rented. Size
-    /// <see cref="ArenaOptions.RetainBytes"/> to cover it. A rental served exactly, never pooled, does
-    /// not count, since no retention could serve it again.
+    /// sit idle in the pools while arrays of another are rented. The arena keeps it, with
+    /// <see cref="ArenaOptions.WorkingSetMargin"/>, up to <see cref="ArenaOptions.RetainBytes"/>. A rental
+    /// served exactly, never pooled, does not count, since no retention could serve it again.
     /// </remarks>
     public long WorkingSetBytes => Volatile.Read(ref _workingSet);
 
@@ -403,9 +422,10 @@ public sealed class ExecutionArena : IDisposable
     }
 
     /// <summary>
-    /// Releases pooled memory beyond <see cref="ArenaOptions.RetainBytes"/>, less what is still
-    /// outstanding, least recently used size class first (§2.3). Outstanding rentals are untouched, and
-    /// once they come back the pools hold no more than the budget.
+    /// Releases pooled memory beyond what the arena keeps — its working set with
+    /// <see cref="ArenaOptions.WorkingSetMargin"/>, up to <see cref="ArenaOptions.RetainBytes"/> — less
+    /// what is still outstanding, least recently used size class first (§2.3). Outstanding rentals are
+    /// untouched, and once they come back the pools hold no more than that.
     /// </summary>
     public void Trim()
     {
@@ -549,6 +569,22 @@ public sealed class ExecutionArena : IDisposable
         Released(classes, index);
     }
 
+    /// <summary>
+    /// What the pools keep once everything has come back: the working set with its margin, up to
+    /// <see cref="ArenaOptions.RetainBytes"/>; the ceiling itself before any execution has ended, when
+    /// there is no working set to go by. The caller holds <see cref="_gate"/>.
+    /// </summary>
+    private long RetentionLocked()
+    {
+        if (_workingSet == 0)
+        {
+            return Options.RetainBytes;
+        }
+
+        var kept = Math.Ceiling(_workingSet * (1 + Options.WorkingSetMargin));
+        return kept >= Options.RetainBytes ? Options.RetainBytes : (long)kept;
+    }
+
     /// <summary>One array of a class is no longer rented: returned, or relinquished to the collector.</summary>
     private static void Released(SizeClasses classes, int index)
     {
@@ -622,7 +658,7 @@ public sealed class ExecutionArena : IDisposable
     /// </remarks>
     private void TrimLocked()
     {
-        var budget = Math.Max(0, Options.RetainBytes - _outstanding);
+        var budget = Math.Max(0, RetentionLocked() - _outstanding);
         while (_retained > budget)
         {
             SizeClasses? oldest = null;

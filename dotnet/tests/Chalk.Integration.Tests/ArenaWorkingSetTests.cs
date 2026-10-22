@@ -6,9 +6,9 @@ using Chalk.TestKit;
 namespace Chalk.Integration.Tests;
 
 /// <summary>
-/// A statement run again and again on one arena falls back to the heap on every run when the arena
-/// retains its peak but not its working set, and on none once it retains the working set the arena
-/// reports.
+/// A statement run again and again on one arena falls back to the heap on every run when the arena's
+/// ceiling is its peak but not its working set, and on none once the ceiling covers the working set: an
+/// arena given only a generous ceiling keeps its working set and no more, with no sizing by the host.
 /// </summary>
 [Collection(SidecarCollection.Name)]
 public sealed class ArenaWorkingSetTests(SharedSidecar sidecar)
@@ -31,10 +31,12 @@ public sealed class ArenaWorkingSetTests(SharedSidecar sidecar)
             new ChalkEngineOptions { Sources = [source], Planner = sidecar.CreatePlanner() }, ct);
         var prepared = await engine.PrepareAsync(Buckets);
 
-        // Measured on an arena that keeps everything: the working set is above the peak.
+        // An arena given only a ceiling: the working set is above the peak, the arena keeps it with its
+        // margin and no more, and its repeats rent nothing from the heap.
         using var roomy = new ExecutionArena(new ArenaOptions { RetainBytes = 1L << 30 });
-        await RunAsync(engine, prepared, roomy, ct);
+        Assert.Equal(0, await WarmFallbacksAsync(engine, prepared, roomy, ct));
         Assert.True(roomy.WorkingSetBytes > roomy.PeakBytes, $"working set {roomy.WorkingSetBytes}, peak {roomy.PeakBytes}");
+        Assert.InRange(roomy.RetainedBytes, roomy.PeakBytes, (long)Math.Ceiling(roomy.WorkingSetBytes * 1.01));
 
         using var atPeak = new ExecutionArena(new ArenaOptions { RetainBytes = roomy.PeakBytes });
         Assert.True(await WarmFallbacksAsync(engine, prepared, atPeak, ct) > 0, "retaining the peak should fall back");

@@ -276,6 +276,44 @@ public sealed class ArenaTests
     }
 
     /// <summary>
+    /// An arena keeps what its executions need, not its whole ceiling: under the default 64 MiB, an
+    /// execution whose working set is 4 MiB leaves the pools holding 4 MiB and its one percent of room,
+    /// and its repeats rent nothing from the heap with no sizing by the host. With no margin it keeps the
+    /// working set exactly; a negative margin is refused.
+    /// </summary>
+    [Fact]
+    public void An_arena_keeps_its_working_set_under_its_ceiling()
+    {
+        const int Mib = 1 << 20;
+        static void Run(ExecutionArena arena)
+        {
+            arena.BeginExecution();
+            var first = arena.Rent<byte>(Mib);
+            var second = arena.Rent<byte>(Mib);
+            arena.Return(first);
+            arena.Return(second);
+            var whole = arena.Rent<byte>(2 * Mib);
+            arena.Return(whole);
+            arena.EndExecution();
+        }
+
+        using var ceiling = new ExecutionArena(new ArenaOptions());
+        Run(ceiling);
+        var fallen = ceiling.HeapFallbackBytes;
+        Run(ceiling);
+        Run(ceiling);
+        Assert.Equal(0, ceiling.HeapFallbackBytes - fallen);
+        Assert.InRange(ceiling.RetainedBytes, 4 * Mib, (long)Math.Ceiling(4 * Mib * 1.01));
+
+        using var exact = new ExecutionArena(new ArenaOptions { WorkingSetMargin = 0 });
+        Run(exact);
+        Run(exact);
+        Assert.Equal(4 * Mib, exact.RetainedBytes);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ExecutionArena(new ArenaOptions { WorkingSetMargin = -0.5 }));
+    }
+
+    /// <summary>
     /// The working set counts what the pools could keep: a rental served exactly, above
     /// <c>MaxPooledRental</c>, does not count, and an array relinquished to the collector leaves it.
     /// </summary>
