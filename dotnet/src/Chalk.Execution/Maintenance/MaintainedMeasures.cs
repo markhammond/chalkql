@@ -135,7 +135,8 @@ internal abstract class MaintainedMeasure
     {
         if (array.Length < size)
         {
-            Array.Resize(ref array, Math.Max(size, Math.Max(16, array.Length * 2)));
+            // By the rule the group set's own arrays grow by, so a measure holds every group they do.
+            Array.Resize(ref array, StateGrowth.Next(array.Length, size));
         }
     }
 }

@@ -154,7 +154,7 @@ internal sealed class HeldRows
         held = slot;
         if (_counts.Length < Rows.Slots)
         {
-            Array.Resize(ref _counts, Math.Max(Rows.Slots, Math.Max(16, _counts.Length * 2)));
+            Array.Resize(ref _counts, StateGrowth.Next(_counts.Length, Rows.Slots));
         }
 
         _counts[slot] = weight;

@@ -264,7 +264,7 @@ internal sealed class StoredColumn
             return;
         }
 
-        var size = Math.Max(slots, Math.Max(16, _valid.Length * 2));
+        var size = StateGrowth.Next(_valid.Length, slots);
         Array.Resize(ref _valid, size);
         if (_variable)
         {
@@ -302,7 +302,7 @@ internal sealed class StoredColumn
 
             if (_dataUsed + value.Length > _data.Length)
             {
-                Array.Resize(ref _data, Math.Max(_dataUsed + value.Length, Math.Max(256, _data.Length * 2)));
+                Array.Resize(ref _data, StateGrowth.Next(_data.Length, _dataUsed + value.Length, least: 256));
             }
         }
 

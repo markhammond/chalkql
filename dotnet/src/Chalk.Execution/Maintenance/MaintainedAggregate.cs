@@ -136,7 +136,7 @@ internal sealed class GroupSet
     {
         if (Counts.Length < groups)
         {
-            var size = Math.Max(groups, Math.Max(16, Counts.Length * 2));
+            var size = StateGrowth.Next(Counts.Length, groups);
             var counts = Counts;
             var touched = IsTouched;
             var live = WasLive;
