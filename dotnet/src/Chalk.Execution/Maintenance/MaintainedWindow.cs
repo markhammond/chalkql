@@ -178,7 +178,7 @@ internal sealed class WindowState : IMaintainedState
     {
         if (filled && _passing.Length <= slot)
         {
-            Array.Resize(ref _passing, Math.Max(slot + 1, Math.Max(16, _passing.Length * 2)));
+            Array.Resize(ref _passing, StateGrowth.Next(_passing.Length, slot + 1));
         }
 
         for (var i = 0; i < _columns.Length; i++)

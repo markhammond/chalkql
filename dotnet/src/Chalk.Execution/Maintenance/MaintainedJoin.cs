@@ -77,7 +77,7 @@ internal sealed class JoinSide
         held = fresh;
         if (Counts.Length < Rows.Slots)
         {
-            var size = Math.Max(Rows.Slots, Math.Max(16, Counts.Length * 2));
+            var size = StateGrowth.Next(Counts.Length, Rows.Slots);
             var counts = Counts;
             var meets = Matches;
             Array.Resize(ref counts, size);

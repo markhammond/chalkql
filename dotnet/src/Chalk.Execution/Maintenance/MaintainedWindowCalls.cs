@@ -277,7 +277,7 @@ internal sealed class WindowCallsState : IMaintainedState
             slots.Insert(low, slot);
             if (ValueOf.Length < Input.Rows.Slots)
             {
-                var size = Math.Max(Input.Rows.Slots, Math.Max(16, ValueOf.Length * 2));
+                var size = StateGrowth.Next(ValueOf.Length, Input.Rows.Slots);
                 var values = ValueOf;
                 Array.Resize(ref values, size);
                 Array.Fill(values, -1, ValueOf.Length, size - ValueOf.Length);
