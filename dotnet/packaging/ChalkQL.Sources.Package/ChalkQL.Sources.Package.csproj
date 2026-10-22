@@ -13,14 +13,14 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      ChalkQL.Sources 0.6 accompanies ChalkQL 0.6.
+      ChalkQL.Sources 0.6.1 accompanies ChalkQL 0.6.1.
 
-      - **POCO tables:** An index backed by a table's own order extends by the rows an append adds rather than reading every row again; on a log of 1.6 million rows, an append of 8 rows takes 0.07 ms where it took 11.5 ms.
+      - **POCO tables:** string and validity buffers published as managed output are copied out at their exact size, so the source's staging stays pooled across batches.
 
-      Requires exactly ChalkQL 0.6.0.
+      Requires exactly ChalkQL 0.6.1.
 
       Full release notes:
-      https://github.com/markhammond/chalkql/releases/tag/v0.6
+      https://github.com/markhammond/chalkql/releases/tag/v0.6.1
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>

@@ -148,6 +148,8 @@ internal sealed class WindowState : IMaintainedState
     public SortedSet<(long Value, int Slot)> Between(int cut, long low, long high) =>
         _orders[CutOrder[cut]].GetViewBetween((low, int.MinValue), (high, int.MaxValue));
 
+    public (long Live, long Slots) Occupancy => (Input.Rows.Count, Input.Rows.Slots);
+
     public void Discard()
     {
         Input.Clear();
@@ -176,7 +178,7 @@ internal sealed class WindowState : IMaintainedState
     {
         if (filled && _passing.Length <= slot)
         {
-            Array.Resize(ref _passing, Math.Max(slot + 1, Math.Max(16, _passing.Length * 2)));
+            Array.Resize(ref _passing, StateGrowth.Next(_passing.Length, slot + 1));
         }
 
         for (var i = 0; i < _columns.Length; i++)

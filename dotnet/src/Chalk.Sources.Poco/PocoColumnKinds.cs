@@ -336,26 +336,18 @@ internal sealed class PocoStringColumn<T> : PocoColumn<T>
                     "the STRING column view no longer describes this writer's current buffers.");
             }
 
-            var offsetLength = view.Offsets.Length;
-            var offsets = _offsets;
-            Arena.RelinquishToGc(offsets);
-            _offsets = [];
-
-            var offsetBuffer =
-                new ArrowBuffer(offsets.AsMemory(0, offsetLength));
+            // Copied out at their exact sizes into arrays of the host's, which may keep the batch as
+            // long as it likes; the writer keeps its staging for the next batch.
+            var offsetBuffer = new ArrowBuffer(view.Offsets.ToArray());
 
             ArrowBuffer dataBuffer;
             if (view.Values.Length == 0)
             {
-                // Keep the writer's payload allocation warm when this batch has no bytes.
                 dataBuffer = ArrowBuffer.Empty;
             }
             else
             {
-                var encoded = _encoded;
-                Arena.RelinquishToGc(encoded);
-                _encoded = [];
-                dataBuffer = new ArrowBuffer(encoded.AsMemory(0, view.Values.Length));
+                dataBuffer = new ArrowBuffer(view.Values.ToArray());
             }
 
             var validity = PublishValidityManaged(view);

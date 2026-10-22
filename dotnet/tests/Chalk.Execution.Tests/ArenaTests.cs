@@ -203,6 +203,134 @@ public sealed class ArenaTests
         arena.ReturnStrings(again);
     }
 
+    /// <summary>
+    /// An execution that rents two 1 MiB arrays, returns them, and then rents one 2 MiB array holds 2 MiB
+    /// at its peak but needs 4 MiB kept to run again without the heap: the working set. Retaining the
+    /// peak, the repeat falls back by the 2 MiB the trim let go of; retaining the working set, by nothing.
+    /// </summary>
+    [Fact]
+    public void A_repeat_rents_nothing_from_the_heap_only_when_the_working_set_is_retained()
+    {
+        const int Mib = 1 << 20;
+        static void Run(ExecutionArena arena)
+        {
+            arena.BeginExecution();
+            var first = arena.Rent<byte>(Mib);
+            var second = arena.Rent<byte>(Mib);
+            arena.Return(first);
+            arena.Return(second);
+            var whole = arena.Rent<byte>(2 * Mib);
+            arena.Return(whole);
+            arena.EndExecution();
+        }
+
+        using var atPeak = new ExecutionArena(new ArenaOptions { RetainBytes = 2 * Mib });
+        Run(atPeak);
+        Assert.Equal(2 * Mib, atPeak.PeakBytes);
+        Assert.Equal(4 * Mib, atPeak.WorkingSetBytes);
+        var fallen = atPeak.HeapFallbackBytes;
+        Run(atPeak);
+        Assert.Equal(2 * Mib, atPeak.HeapFallbackBytes - fallen);
+
+        using var atWorkingSet = new ExecutionArena(new ArenaOptions { RetainBytes = 4 * Mib });
+        Run(atWorkingSet);
+        fallen = atWorkingSet.HeapFallbackBytes;
+        Run(atWorkingSet);
+        Run(atWorkingSet);
+        Assert.Equal(0, atWorkingSet.HeapFallbackBytes - fallen);
+        Assert.Equal(4 * Mib, atWorkingSet.WorkingSetBytes);
+    }
+
+    /// <summary>
+    /// An execution's result, still held by the host when the execution ends, counts against the budget
+    /// as the arena trims: once the host gives it back, the pools hold no more than
+    /// <c>RetainBytes</c>. Retaining the working set, repeats that give their results back after they
+    /// end rent nothing from the heap.
+    /// </summary>
+    [Fact]
+    public void A_result_given_back_after_the_execution_ends_keeps_the_pools_within_the_budget()
+    {
+        const int Mib = 1 << 20;
+        static void Run(ExecutionArena arena)
+        {
+            arena.BeginExecution();
+            var scratch = arena.Rent<byte>(Mib);
+            var result = arena.Rent<byte>(64 << 10);
+            arena.Return(scratch);
+            arena.EndExecution();
+            arena.Return(result);
+        }
+
+        using var tight = new ExecutionArena(new ArenaOptions { RetainBytes = Mib });
+        Run(tight);
+        Assert.True(tight.RetainedBytes <= Mib, $"the pools hold {tight.RetainedBytes} bytes against a budget of {Mib}");
+
+        using var sized = new ExecutionArena(new ArenaOptions { RetainBytes = Mib + (64 << 10) });
+        Run(sized);
+        Assert.Equal(Mib + (64 << 10), sized.WorkingSetBytes);
+        var fallen = sized.HeapFallbackBytes;
+        Run(sized);
+        Run(sized);
+        Assert.Equal(0, sized.HeapFallbackBytes - fallen);
+        Assert.Equal(Mib + (64 << 10), sized.RetainedBytes);
+    }
+
+    /// <summary>
+    /// An arena keeps what its executions need, not its whole ceiling: under the default 64 MiB, an
+    /// execution whose working set is 4 MiB leaves the pools holding 4 MiB and its one percent of room,
+    /// and its repeats rent nothing from the heap with no sizing by the host. With no margin it keeps the
+    /// working set exactly; a negative margin is refused.
+    /// </summary>
+    [Fact]
+    public void An_arena_keeps_its_working_set_under_its_ceiling()
+    {
+        const int Mib = 1 << 20;
+        static void Run(ExecutionArena arena)
+        {
+            arena.BeginExecution();
+            var first = arena.Rent<byte>(Mib);
+            var second = arena.Rent<byte>(Mib);
+            arena.Return(first);
+            arena.Return(second);
+            var whole = arena.Rent<byte>(2 * Mib);
+            arena.Return(whole);
+            arena.EndExecution();
+        }
+
+        using var ceiling = new ExecutionArena(new ArenaOptions());
+        Run(ceiling);
+        var fallen = ceiling.HeapFallbackBytes;
+        Run(ceiling);
+        Run(ceiling);
+        Assert.Equal(0, ceiling.HeapFallbackBytes - fallen);
+        Assert.InRange(ceiling.RetainedBytes, 4 * Mib, (long)Math.Ceiling(4 * Mib * 1.01));
+
+        using var exact = new ExecutionArena(new ArenaOptions { WorkingSetMargin = 0 });
+        Run(exact);
+        Run(exact);
+        Assert.Equal(4 * Mib, exact.RetainedBytes);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ExecutionArena(new ArenaOptions { WorkingSetMargin = -0.5 }));
+    }
+
+    /// <summary>
+    /// The working set counts what the pools could keep: a rental served exactly, above
+    /// <c>MaxPooledRental</c>, does not count, and an array relinquished to the collector leaves it.
+    /// </summary>
+    [Fact]
+    public void The_working_set_counts_only_what_retention_could_serve()
+    {
+        using var arena = new ExecutionArena(new ArenaOptions { MaxPooledRental = 64 << 10 });
+        arena.BeginExecution();
+        var kept = arena.Rent<byte>(64 << 10);
+        var exact = arena.Rent<byte>(100 << 10);
+        arena.Return(exact);
+        arena.Return(kept);
+        arena.EndExecution();
+
+        Assert.Equal(64 << 10, arena.WorkingSetBytes);
+    }
+
     [Fact]
     public void Trim_keeps_RetainBytes_and_no_more()
     {

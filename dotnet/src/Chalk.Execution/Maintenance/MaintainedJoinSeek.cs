@@ -116,6 +116,8 @@ internal sealed class JoinSeekState : IMaintainedState
         return IndexKeyRange.Equality(key);
     }
 
+    public (long Live, long Slots) Occupancy => (Right.Rows.Count, Right.Rows.Slots);
+
     public void Discard()
     {
         Right.Clear();

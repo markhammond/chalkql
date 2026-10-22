@@ -15,7 +15,7 @@
     <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../'))</RepoRoot>
     <ProtoRootDir>$(RepoRoot)proto</ProtoRootDir>
     <CorpusDir>$(RepoRoot)corpus</CorpusDir>
-    <Version>0.6.0</Version>
+    <Version>0.6.1</Version>
     <Authors>The Chalk Authors</Authors>
     <RepositoryUrl>https://github.com/markhammond/chalkql</RepositoryUrl>
     <RepositoryType>git</RepositoryType>

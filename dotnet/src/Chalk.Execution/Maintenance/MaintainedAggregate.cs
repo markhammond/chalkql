@@ -136,7 +136,7 @@ internal sealed class GroupSet
     {
         if (Counts.Length < groups)
         {
-            var size = Math.Max(groups, Math.Max(16, Counts.Length * 2));
+            var size = StateGrowth.Next(Counts.Length, groups);
             var counts = Counts;
             var touched = IsTouched;
             var live = WasLive;
@@ -299,6 +299,21 @@ internal sealed class AggregateState : IMaintainedState
             }
 
             return bytes;
+        }
+    }
+
+    public (long Live, long Slots) Occupancy
+    {
+        get
+        {
+            var (live, slots) = (0L, 0L);
+            foreach (var set in Sets)
+            {
+                live += set.Values.Count;
+                slots += set.Values.Slots;
+            }
+
+            return (live, slots);
         }
     }
 

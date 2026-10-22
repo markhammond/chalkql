@@ -23,16 +23,15 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      ChalkQL 0.6 lets standing views and refreshes run side by side, rebinds a view's parameters without planning again, and maintains window functions incrementally.
+      ChalkQL 0.6.1 makes long-running hosts leaner: execution arenas keep what their executions need, and standing views stop accumulating memory for rows they no longer hold.
 
-      - **Views and refreshes:** An update a refresh overtakes is published at the version it read, never thrown away, and no refresh waits for a view. A refresh that writes nothing a view reads moves the view on without computing. Commits carry a stamp of version and generation, and `UpdateToAsync` waits for one. `RefreshBuilder.Barrier()` marks a refresh every view publishes itself, and `ViewVersions.Every` makes a view publish every version, in order.
-      - **Rebindable parameters:** `ViewOptions.Rebindable` and `RebindAsync` move a view's parameters, lists included up to a declared capacity, keeping its plan. Maintained incrementally, only the operators that read a moved value run again.
-      - **Maintained windows (experimental):** `ROW_NUMBER`, `RANK`, `LAG`, `LEAD`, running aggregates and the like are maintained from the rows a change reaches, rather than recomputed.
-      - **Planner and execution fixes:** set operations over columns of different precisions plan; a parameter in a `CASE` branch and a window's constant parameter type; timestamps are cut to their declared precision; hash joins with many rows per key build in linear time.
-      - **Compatibility:** No public API is removed or changed. A view now sends readers a commit at a version it relabels without an update, and timestamps cast to a precision lose the digits beyond it. The wire protocol and IR version are unchanged; a 0.5 planner serves a 0.6 client but lacks the planner's fixes.
+      - **Arenas:** `ExecutionArena.WorkingSetBytes` reports what a repeated execution needs retained to rent nothing from the heap. An arena now keeps its working set, with `ArenaOptions.WorkingSetMargin` (1% by default) as room, up to `RetainBytes`, which becomes a ceiling on memory rather than a measure of need. Arenas that need little hold little; a ceiling is all a host sets.
+      - **Managed output:** a projection's, filter's or join's batches are copied out of the arena at their exact size, so repeated statements stop rebuilding output in fresh heap arrays.
+      - **Standing views:** a maintained view whose state has mostly emptied rebuilds itself, and long-lived views hold far less spare room: stores grow by half rather than doubling, and key maps give memory back when they compact.
+      - **Compatibility:** additive API only. Arenas now retain less memory by default; set `RetainBytes` as the ceiling you want.
 
       Full release notes:
-      https://github.com/markhammond/chalkql/releases/tag/v0.6
+      https://github.com/markhammond/chalkql/releases/tag/v0.6.1
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>

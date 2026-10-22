@@ -146,32 +146,6 @@ internal struct ArenaBuffer
         _pooled = _arena is not null;
     }
 
-    internal byte[] RelinquishToGc()
-    {
-        var bytes = _bytes;
-
-        if (bytes.Length == 0)
-            return [];
-
-        if (_pooled && _arena is { } arena)
-        {
-            //
-            // This array is no longer owned by the arena.
-            // It becomes ordinary GC-managed memory.
-            //
-            arena.RelinquishToGc(bytes);
-        }
-
-        //
-        // Keep _arena: the ArenaBuffer itself remains acquired and
-        // its next Ensure() should rent fresh storage from that arena.
-        //
-        _bytes = [];
-        _pooled = false;
-
-        return bytes;
-    }
-    
     /// <summary>
     /// Removes this buffer's current byte rental without returning it to
     /// the arena and without changing arena accounting.
@@ -190,7 +164,7 @@ internal struct ArenaBuffer
         }
 
         //
-        // Do not Return() and do not RelinquishToGc().
+        // Do not Return().
         //
         // The rental remains charged to the arena; ownership moves to
         // PooledRecordBatch.

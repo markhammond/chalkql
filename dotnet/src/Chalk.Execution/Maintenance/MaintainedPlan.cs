@@ -38,6 +38,12 @@ internal sealed class MaintainedPlan : IAsyncDisposable
     private Tree? _tree;
     private bool _restart = true;
 
+    // Whether the states held, after the last update, a quarter of the rows they have room for or fewer.
+    private bool _sparse;
+
+    /// <summary>The fewest slots, across the states, for emptiness to count: below it a rebuild saves little.</summary>
+    private const long SparseSlots = 1 << 16;
+
     // The batches the last update gave, valid until the next update lets go of them.
     private MaintainedChanges? _given;
 
@@ -96,6 +102,28 @@ internal sealed class MaintainedPlan : IAsyncDisposable
 
     /// <summary>Every state the plan's operators keep, for a test to look into.</summary>
     internal IReadOnlyList<IMaintainedState> States => _states;
+
+    /// <summary>
+    /// Whether the states, after the last update, hold a quarter of the rows they have room for or fewer,
+    /// over at least <see cref="SparseSlots"/> slots (F270). Their stores keep the room their fullest
+    /// moment needed, so a statement whose inputs shrank — a log compacted, a window passed — holds memory
+    /// for rows it no longer has, and a fresh statement over the same rows would hold a fraction of it.
+    /// Measured from counts the stores keep, so it costs nothing.
+    /// </summary>
+    internal bool IsSparse => _sparse;
+
+    private bool Sparse()
+    {
+        var (live, slots) = (0L, 0L);
+        foreach (var state in _states)
+        {
+            var (held, room) = state.Occupancy;
+            live += held;
+            slots += room;
+        }
+
+        return slots >= SparseSlots && live * 4 <= slots;
+    }
 
     /// <summary>The result's rows by key, for a test to weigh.</summary>
     internal ResultState Result => _result;
@@ -266,6 +294,7 @@ internal sealed class MaintainedPlan : IAsyncDisposable
                 }
 
                 _restart = false;
+                _sparse = Sparse();
                 completed = true;
                 return changes;
             }

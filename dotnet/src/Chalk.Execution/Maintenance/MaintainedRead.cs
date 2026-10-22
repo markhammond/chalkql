@@ -416,6 +416,13 @@ internal interface IMaintainedState
     /// <summary>Bytes held, against the view's state budget.</summary>
     long Bytes { get; }
 
+    /// <summary>
+    /// The rows the state holds, and the slots it has room for: what its stores reached at their fullest,
+    /// which removals free for reuse but never give back. A state far emptier than its slots holds memory
+    /// for rows it no longer has. Zero and zero for a state that keeps no rows of its own.
+    /// </summary>
+    (long Live, long Slots) Occupancy => default;
+
     /// <summary>Forgets everything: after an update that failed part way, the next starts from nothing (§7).</summary>
     void Discard();
 

@@ -169,12 +169,12 @@ internal sealed class ByteMap
 
         if (_keyBytes + key.Length > _keys.Length)
         {
-            Array.Resize(ref _keys, Math.Max(_keyBytes + key.Length, _keys.Length * 2));
+            Array.Resize(ref _keys, StateGrowth.Next(_keys.Length, _keyBytes + key.Length, least: 256));
         }
 
         if (_entries == _starts.Length)
         {
-            var size = _starts.Length * 2;
+            var size = StateGrowth.Next(_starts.Length, _entries + 1);
             Array.Resize(ref _starts, size);
             Array.Resize(ref _lengths, size);
             Array.Resize(ref _hashes, size);
@@ -269,7 +269,31 @@ internal sealed class ByteMap
         _keyBytes = used;
         _garbage = 0;
         _entries = live;
-        Rehash(_table.Length);
+
+        // And gives back the room churn grew, so a map that has held many keys in turn holds about what
+        // a map made afresh over its live keys would (F270): its buffers to half again what they hold, its
+        // table to the size its live keys need.
+        if (_keys.Length > 2L * Math.Max(used, 256))
+        {
+            Array.Resize(ref _keys, Math.Max(256, used + (used >> 1)));
+        }
+
+        if (_starts.Length > 2L * Math.Max(live, 16))
+        {
+            var size = Math.Max(16, live + (live >> 1));
+            Array.Resize(ref _starts, size);
+            Array.Resize(ref _lengths, size);
+            Array.Resize(ref _hashes, size);
+            Array.Resize(ref _values, size);
+        }
+
+        var table = _table.Length;
+        while (table > 32 && (Count + 1) * 8 <= table)
+        {
+            table >>= 1;
+        }
+
+        Rehash(table);
     }
 
     private static int Hash(ReadOnlySpan<byte> key)

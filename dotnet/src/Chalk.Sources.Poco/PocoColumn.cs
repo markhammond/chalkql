@@ -340,11 +340,8 @@ internal abstract class PocoChunkWriter<T>
         && segment.Count == memory.Length;
 
     /// <summary>
-    /// Transfers the current Arrow validity bitmap from this writer to
-    /// managed output storage.
-    ///
-    /// The arena relinquishes the byte array rather than returning it to
-    /// its pool. The next batch lazily rents another bitmap when required.
+    /// The current Arrow validity bitmap as managed output: a copy at its exact size, which the host may
+    /// keep as long as it likes, while the writer keeps its bitmap for the next batch.
     /// </summary>
     protected ArrowBuffer PublishValidityManaged(
         in ColumnView view)
@@ -363,18 +360,8 @@ internal abstract class PocoChunkWriter<T>
         var byteCount =
             BitmapBytes(view.Length);
 
-        var bits =
-            _bits;
-
-        Arena.RelinquishToGc(bits);
-
-        // Ownership has transferred to the Arrow result.
-        // The next BuildValidityView() lazily rents a replacement.
-        _bits = [];
-
-        return new ArrowBuffer(
-            bits.AsMemory(
-                0,
-                byteCount));
+        // Copied out at its exact size into an array of the host's; the writer keeps its bitmap for the
+        // next batch.
+        return new ArrowBuffer(_bits.AsSpan(0, byteCount).ToArray());
     }
 }

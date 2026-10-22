@@ -222,6 +222,8 @@ internal sealed class WindowCallsState : IMaintainedState
     /// <summary>Whether two held rows are peers: equal in every order key.</summary>
     public bool Peers(int a, int b) => HeldOrder.Compare(Order, Input.Rows, a, Input.Rows, b) == 0;
 
+    public (long Live, long Slots) Occupancy => (Input.Rows.Count, Input.Rows.Slots);
+
     public void Discard()
     {
         Input.Clear();
@@ -275,7 +277,7 @@ internal sealed class WindowCallsState : IMaintainedState
             slots.Insert(low, slot);
             if (ValueOf.Length < Input.Rows.Slots)
             {
-                var size = Math.Max(Input.Rows.Slots, Math.Max(16, ValueOf.Length * 2));
+                var size = StateGrowth.Next(ValueOf.Length, Input.Rows.Slots);
                 var values = ValueOf;
                 Array.Resize(ref values, size);
                 Array.Fill(values, -1, ValueOf.Length, size - ValueOf.Length);
