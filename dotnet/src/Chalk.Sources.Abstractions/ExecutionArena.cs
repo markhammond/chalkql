@@ -29,16 +29,18 @@ public sealed class ArenaOptions
     /// more than its <see cref="ExecutionArena.PeakBytes"/>: an execution rents arrays of several size
     /// classes at different times, so the arrays it needs kept can add up to more than it ever holds at
     /// once. Under a ceiling below the working set, every warm execution falls back to the heap by the
-    /// difference. So set it as a ceiling on memory, not as a measure of need: <see cref="MaxBytes"/>,
-    /// say, keeps every execution the budget admits off the heap once warm.
+    /// working set less what the pools retain, and they retain whole arrays: up to one large array less
+    /// than the ceiling. So set it as a ceiling on memory, not as a measure of need:
+    /// <see cref="MaxBytes"/>, say, keeps every execution the budget admits off the heap once warm.
     /// </remarks>
     public long RetainBytes { get; init; } = 64L << 20;
 
     /// <summary>
-    /// The room an arena keeps above its working set, as a fraction of it: 0.01, the default, keeps one
-    /// percent more. A working set moves with the data its executions read, and a shortfall costs whole
-    /// arrays, so a little room spares a round of fallbacks as tables grow. Zero keeps the working set
-    /// exactly; less than zero is refused.
+    /// The room the trim leaves above an arena's working set before it lets go of anything, as a fraction
+    /// of it: 0.01, the default, is one percent. A working set moves with the data its executions read, and
+    /// a shortfall costs whole arrays, so a little room spares a round of fallbacks as tables grow. It is
+    /// room, not memory kept: the pools hold only what executions gave back, so they settle at the working
+    /// set. Zero trims to the working set exactly; less than zero is refused.
     /// </summary>
     public double WorkingSetMargin { get; init; } = 0.01;
 
