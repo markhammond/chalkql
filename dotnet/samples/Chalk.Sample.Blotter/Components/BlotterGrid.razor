@@ -65,7 +65,7 @@
     }
 
     <div class="scroller @(_waiting || _refusal is not null ? "waiting" : "")" @ref="_scroller">
-        <QuickGrid TGridItem="BlotterRow" @ref="_grid" ItemsProvider="_provider" Virtualize="true" ItemSize="(float)RowHeight"
+        <QuickGrid TGridItem="BlotterRow" @ref="_grid" Class="@(Tab.Overrides ? "nested" : null)" ItemsProvider="_provider" Virtualize="true" ItemSize="(float)RowHeight"
                    OverscanCount="30" ItemKey="r => r.Key" RowClass="@(r => r.Parent is null ? r.RowClass : "child " + r.RowClass)">
             @if (Tab.Overrides)
             {
