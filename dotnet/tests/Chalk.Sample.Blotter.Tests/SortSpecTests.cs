@@ -17,36 +17,57 @@ public sealed class SortSpecTests
     }
 
     [Fact]
-    public void A_click_sorts_by_that_column_alone_and_a_second_click_turns_it_round()
+    public void A_click_sorts_by_that_column_alone_descending_then_ascending_then_not_at_all()
     {
-        var once = Orders.DefaultSort.Click(Orders.Named("client"), shift: false);
-        Assert.Equal("client,order_id desc", once.Name);
-        Assert.Equal("client desc,order_id desc", once.Click(Orders.Named("client"), shift: false).Name);
+        var client = Orders.Named("client");
+        var once = Orders.DefaultSort.Click(client, shift: false);
+        var twice = once.Click(client, shift: false);
+
+        Assert.Equal("client desc,order_id desc", once.Name);
+        Assert.Equal("client,order_id desc", twice.Name);
+        Assert.Equal(Orders.DefaultSort, twice.Click(client, shift: false));
     }
 
     [Fact]
-    public void A_shift_click_adds_the_column_then_turns_it_round_then_takes_it_out()
+    public void A_click_on_a_column_of_a_sort_by_several_sorts_by_it_alone()
+    {
+        var both = Orders.DefaultSort.Click(Orders.Named("client"), shift: false).Click(Orders.Named("qty"), shift: true);
+
+        Assert.Equal("qty desc,order_id desc", both.Click(Orders.Named("qty"), shift: false).Name);
+    }
+
+    [Fact]
+    public void A_shift_click_adds_the_column_then_turns_it_ascending_then_takes_it_out()
     {
         var client = Orders.DefaultSort.Click(Orders.Named("client"), shift: false);
         var filled = Orders.Named("filled_qty");
 
         var added = client.Click(filled, shift: true);
-        Assert.Equal("client,filled_qty,order_id desc", added.Name);
+        Assert.Equal("client desc,filled_qty desc,order_id desc", added.Name);
         Assert.Equal(2, added.RankOf(filled));
 
         var turned = added.Click(filled, shift: true);
-        Assert.Equal("client,filled_qty desc,order_id desc", turned.Name);
+        Assert.Equal("client desc,filled_qty,order_id desc", turned.Name);
 
         var removed = turned.Click(filled, shift: true);
-        Assert.Equal("client,order_id desc", removed.Name);
+        Assert.Equal("client desc,order_id desc", removed.Name);
         Assert.Equal(0, removed.RankOf(filled));
     }
 
     [Fact]
     public void Taking_out_the_last_column_goes_back_to_newest_first()
     {
-        var client = SortSpec.Of(Orders, new SortColumn(Orders.Named("client"), Descending: true));
+        var client = SortSpec.Of(Orders, new SortColumn(Orders.Named("client"), Descending: false));
         Assert.Equal(Orders.DefaultSort, client.Click(Orders.Named("client"), shift: true));
+    }
+
+    [Fact]
+    public void Newest_first_is_itself_a_sort_by_time_so_a_click_on_time_turns_it_round()
+    {
+        var time = Orders.Time;
+
+        Assert.Equal("order_time,order_id desc", Orders.DefaultSort.Click(time, shift: false).Name);
+        Assert.Equal(Orders.DefaultSort, Orders.DefaultSort.Click(time, shift: false).Click(time, shift: false));
     }
 
     [Fact]

@@ -81,9 +81,10 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   card also says when the order has not arrived yet, or when its latest version does not count this
   fill yet. The link opens the order's page: every version and every fill, read from the database and
   the live tail in one statement each.
-- **Sorting by any columns.** A click on a header sorts by that column; a second click turns it round;
-  a shift-click adds the column to the sort, and the header shows each column's place in it. QuickGrid
-  sorts by one column itself; its multi-column sort is a pull request
+- **Sorting by any columns.** A click on a header sorts by that column, descending; a second click
+  turns it ascending; a third takes it out of the sort, back to newest first. A shift-click does the
+  same within a sort by several columns, adding the column last, and the header shows each column's
+  place in it. QuickGrid sorts by one column itself; its multi-column sort is a pull request
   ([dotnet/aspnetcore#62604](https://github.com/dotnet/aspnetcore/pull/62604)) not yet merged, so the
   page draws its own headers.
 - **A filter on every column.** The funnel in each header opens the column's filter, and it fills in

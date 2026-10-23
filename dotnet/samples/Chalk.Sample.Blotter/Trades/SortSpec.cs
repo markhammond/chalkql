@@ -49,27 +49,26 @@ public sealed class SortSpec : IComparer<IRow>, IEquatable<SortSpec>
     public static SortSpec Of(Tab tab, params SortColumn[] keys) => new(tab, [.. keys]);
 
     /// <summary>
-    /// A header click. A plain click sorts by that column alone, and a second plain click on the
-    /// only column sorted by turns it round. A shift-click adds the column to the sort, turns it round
-    /// if it is there ascending, and takes it out if it is there descending.
+    /// A header click, which cycles its column through descending, ascending and out of the sort. A
+    /// plain click sorts by that column alone; a shift-click keeps the other columns, and adds this one
+    /// last. Taking out the last column goes back to the tab's own order, newest first.
     /// </summary>
     public SortSpec Click(Column column, bool shift)
     {
         var at = Chosen.IndexOf(Chosen.FirstOrDefault(k => k.Column == column));
-        if (!shift)
+        if (!shift && (at < 0 || Chosen.Length > 1))
         {
-            var descending = Chosen.Length == 1 && at == 0 && !Chosen[0].Descending;
-            return new SortSpec(Tab, [new SortColumn(column, descending)]);
+            return new SortSpec(Tab, [new SortColumn(column, Descending: true)]);
         }
 
         if (at < 0)
         {
-            return new SortSpec(Tab, Chosen.Add(new SortColumn(column, Descending: false)));
+            return new SortSpec(Tab, Chosen.Add(new SortColumn(column, Descending: true)));
         }
 
-        if (!Chosen[at].Descending)
+        if (Chosen[at].Descending)
         {
-            return new SortSpec(Tab, Chosen.SetItem(at, new SortColumn(column, Descending: true)));
+            return new SortSpec(Tab, Chosen.SetItem(at, new SortColumn(column, Descending: false)));
         }
 
         var fewer = Chosen.RemoveAt(at);
