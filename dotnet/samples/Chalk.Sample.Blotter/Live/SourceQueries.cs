@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using Chalk.Client;
+using Chalk.Sources;
 
 namespace Chalk.Sample.Blotter.Live;
 
@@ -425,6 +426,32 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
             Interlocked.Increment(ref _timedOut);
             throw new QueryTimeLimitException(what, timeLimit, cancelled);
         }
+        catch (Exception) when (ct.IsCancellationRequested)
+        {
+            // The caller moved on, and the statement was stopped for it, however that reads.
+            throw new OperationCanceledException(ct);
+        }
+        catch (Exception late) when (late is SourceTimeoutException || StoppedByDatabase(late))
+        {
+            // The database source keeps the same limit, and so does PostgreSQL: either may be the
+            // one to stop the statement.
+            Interlocked.Increment(ref _timedOut);
+            throw new QueryTimeLimitException(what, timeLimit, late);
+        }
+    }
+
+    /// <summary>Whether PostgreSQL stopped the statement at its <c>statement_timeout</c>, however the source wrapped it.</summary>
+    private static bool StoppedByDatabase(Exception failure)
+    {
+        for (var at = failure; at is not null; at = at.InnerException)
+        {
+            if (at is Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.QueryCanceled })
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private Task<PreparedQuery> PrepareAsync(string sql, CancellationToken ct)

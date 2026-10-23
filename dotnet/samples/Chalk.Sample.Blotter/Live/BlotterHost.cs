@@ -164,7 +164,7 @@ public sealed class BlotterHost : IAsyncDisposable
         // The tables' text is collated "C", so the database sorts and compares strings byte by byte,
         // as the host does; told so, ChalkQL pushes sorts and ranges on text down.
         var profile = DialectProfiles.PostgreSql.With(stringCollation: StringCollation.Binary);
-        var connectionString = _server.ConnectionString;
+        var connectionString = Reading(_server.ConnectionString, _options.QueryTimeLimit);
         var database = new AdoSourceBuilder("db", () => new NpgsqlConnection(connectionString), "blotter")
             .Dialect(profile)
             .Capabilities(AdoCapabilities.For(profile))
@@ -954,6 +954,23 @@ public sealed class BlotterHost : IAsyncDisposable
     ];
 
     private static ColumnDescriptor Column(string name, ChalkType type) => new() { Name = name, Type = type };
+
+    /// <summary>
+    /// The connection string the blotter reads with: every statement on it is stopped by PostgreSQL
+    /// itself at the time limit (<c>statement_timeout</c>), so a read past it frees the server's
+    /// workers too, and Npgsql gives up connecting or waiting at the same limit. The seed, the
+    /// market's writers and the oracle connect without it: building an index takes longer.
+    /// </summary>
+    private static string Reading(string connectionString, TimeSpan limit)
+    {
+        var seconds = (int)Math.Ceiling(limit.TotalSeconds);
+        return new NpgsqlConnectionStringBuilder(connectionString)
+        {
+            Timeout = seconds,
+            CommandTimeout = seconds,
+            Options = string.Create(CultureInfo.InvariantCulture, $"-c statement_timeout={(long)limit.TotalMilliseconds}"),
+        }.ConnectionString;
+    }
 
     internal static string Megabytes(long bytes) => string.Create(CultureInfo.InvariantCulture, $"{bytes / 1048576.0:F1} MB");
 

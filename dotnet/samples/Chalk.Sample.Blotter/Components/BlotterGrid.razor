@@ -2,6 +2,7 @@
 @implements IAsyncDisposable
 @inject BlotterHost Host
 @inject IJSRuntime JS
+@inject ILogger<BlotterGrid> Log
 
 <div class="tabs" role="tablist">
     @foreach (var tab in Tab.All)
@@ -58,13 +59,21 @@
     </div>
 }
 
+@if (_failure is not null)
+{
+    <div class="refusal">
+        This page could not be read: @_failure
+        <button @onclick="ReloadAsync">Try again</button>
+    </div>
+}
+
 <div class="frame">
     @if (_hidden > 0)
     {
         <button class="badge" @onclick="ShowNewestAsync">@_hidden.ToString("N0", CultureInfo.InvariantCulture) new above</button>
     }
 
-    <div class="scroller @(_waiting || _refusal is not null ? "waiting" : "")" @ref="_scroller">
+    <div class="scroller @(_waiting || _refusal is not null || _failure is not null ? "waiting" : "")" @ref="_scroller">
         <QuickGrid TGridItem="BlotterRow" @ref="_grid" Class="@(Tab.Overrides ? "nested" : null)" ItemsProvider="_provider" Virtualize="true" ItemSize="(float)RowHeight"
                    OverscanCount="30" ItemKey="r => r.Key" RowClass="@(r => r.Parent is null ? r.RowClass : "child " + r.RowClass)">
             @if (Tab.Overrides)
@@ -209,6 +218,10 @@
     private FilterSpec _filter = FilterSpec.None;
     private SortSpec _sort = default!;
     private string? _refusal;
+
+    // Why the last page of this sort and filter could not be read. Unlike a refusal, it is not
+    // retried as the feed moves on: a new sort or filter, or "Try again", reads afresh.
+    private string? _failure;
     private string? _plans;
     private long _total;
     private Column? _editing;
@@ -268,11 +281,19 @@
             // whose rank says how many rows have arrived above it; a fill in view holds its order.
             _pages.Held = true;
             var slot = Nesting.Locate((long)(scrollTop / RowHeight), _opened);
-            var page = await _pages.GetAsync(state, slot.Position, 1, CancellationToken.None);
-            if (page.Rows.Length == 1)
+            try
             {
-                _anchor = (page.Rows[0], page.Start);
-                _hiddenAt = DateTime.UtcNow;
+                var page = await _pages.GetAsync(state, slot.Position, 1, CancellationToken.None);
+                if (page.Rows.Length == 1)
+                {
+                    _anchor = (page.Rows[0], page.Start);
+                    _hiddenAt = DateTime.UtcNow;
+                }
+            }
+            catch (Exception failure)
+            {
+                // Without the row in view, nothing counts what arrives above it; the rows still hold.
+                Log.LogWarning(failure, "the row in view could not be read to hold the grid's place");
             }
         }
         else if (atTop && _pages.Held)
@@ -364,14 +385,26 @@
 
             return GridItemsProviderResult.From(shown, (int)Math.Min(int.MaxValue, Nesting.Total(rows, opened)));
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // A newer sort, filter or scroll took over: the grid lets a request go quietly only
+            // when it is cancelled with the request's own token.
+            throw new OperationCanceledException(ct);
+        }
         catch (QueryTimeLimitException limit)
         {
-            await InvokeAsync(() => Refuse(limit.Message));
+            await InvokeAsync(() => Fail(reloads, limit.Message));
             return GridItemsProviderResult.From<BlotterRow>([], 0);
         }
         catch (BlotterRefusedException refused)
         {
             await InvokeAsync(() => Refuse(refused.Message));
+            return GridItemsProviderResult.From<BlotterRow>([], 0);
+        }
+        catch (Exception failure)
+        {
+            Log.LogError(failure, "a page of {Tab} sorted by {Sort}, filtered by {Filter}, could not be read", Tab.Name, _sort, _filter);
+            await InvokeAsync(() => Fail(reloads, failure.Message));
             return GridItemsProviderResult.From<BlotterRow>([], 0);
         }
     }
@@ -504,7 +537,7 @@
                         // Serving again: take a scope again and read the first page afresh.
                         await RetryAsync();
                     }
-                    else if (_grid is not null && !_waiting)
+                    else if (_grid is not null && !_waiting && _failure is null)
                     {
                         await _grid.RefreshDataAsync();
                     }
@@ -564,6 +597,7 @@
     {
         _reloads++;
         _waiting = true;
+        _failure = null;
         _pages.Reset();
         _pages.Held = false;
         _openAt.Clear();
@@ -605,9 +639,10 @@
                 }
             }
         }
-        catch (Exception failure) when (failure is QueryTimeLimitException or InvalidOperationException)
+        catch (Exception failure)
         {
             // The estimate is for showing; a page that fails says so itself.
+            Log.LogWarning(failure, "the estimate for {Tab} sorted by {Sort} could not be read", Tab.Name, sort);
         }
     }
 
@@ -642,6 +677,19 @@
 
         await AcquireAsync(_filter);
         await ReloadAsync();
+    }
+
+    /// <summary>A page of the sort and filter chosen at <paramref name="reloads"/> failed: said, unless a newer one has been chosen since.</summary>
+    private void Fail(long reloads, string why)
+    {
+        if (reloads != _reloads)
+        {
+            return;
+        }
+
+        _waiting = false;
+        _failure = why;
+        StateHasChanged();
     }
 
     private void Refuse(string why)
