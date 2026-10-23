@@ -76,6 +76,14 @@ public sealed class TradeStore(string connectionString)
     /// <summary>The latest event in the corpus: everything after it, the exchange wrote.</summary>
     public DateTime LoadedThrough { get; private set; }
 
+    /// <summary>What <see cref="GenerateAsync"/> is doing now, for a console to show while it waits.</summary>
+    public string Stage { get; private set; } = "";
+
+    /// <summary>Orders <see cref="GenerateAsync"/> has written so far.</summary>
+    public long Written => Interlocked.Read(ref _written);
+
+    private long _written;
+
     public NpgsqlConnection Open()
     {
         var connection = new NpgsqlConnection(ConnectionString);
@@ -92,6 +100,7 @@ public sealed class TradeStore(string connectionString)
         long orders, DateTime end, TimeSpan span, int openTail, CurrentSync sync, CancellationToken ct)
     {
         var started = Stopwatch.GetTimestamp();
+        Stage = "creating the tables";
         Execute($"""
             CREATE UNLOGGED TABLE order_versions ({OrderColumns});
             CREATE UNLOGGED TABLE orders_current ({OrderColumns});
@@ -115,6 +124,7 @@ public sealed class TradeStore(string connectionString)
         var spacing = Math.Max(1, (long)(span.TotalMicroseconds / Math.Max(1, orders)));
         var origin = Cells.Micros(end - TimeSpan.FromMicroseconds(spacing * orders));
         var parts = Math.Clamp(Environment.ProcessorCount / 2, 1, 6);
+        Stage = string.Create(CultureInfo.InvariantCulture, $"writing {orders:N0} orders, their versions and fills with COPY");
         var size = (orders + parts - 1) / parts;
         var counted = await Task.WhenAll(Enumerable.Range(0, parts).Select(p => Task.Run(() =>
         {
@@ -144,6 +154,11 @@ public sealed class TradeStore(string connectionString)
 
                 versionCount += made.Length;
                 fillCount += filled.Length;
+                if ((n & 4095) == 4095)
+                {
+                    Interlocked.Add(ref _written, 4096);
+                }
+
                 latest = made[^1].EventTime > latest ? made[^1].EventTime : latest;
             }
 
@@ -159,6 +174,8 @@ public sealed class TradeStore(string connectionString)
         LoadTime = Stopwatch.GetElapsedTime(started);
 
         // Each index on a connection of its own; PostgreSQL gives each build workers of its own too.
+        Interlocked.Exchange(ref _written, orders);
+        Stage = "building seven indexes";
         started = Stopwatch.GetTimestamp();
         string[] indexes =
         [
@@ -171,6 +188,7 @@ public sealed class TradeStore(string connectionString)
             "CREATE INDEX fills_newest ON fills (event_time DESC, fill_id DESC)",
         ];
         await Task.WhenAll(indexes.Select(sql => Task.Run(() => Execute(sql), ct))).ConfigureAwait(false);
+        Stage = "analyzing the tables";
         Execute("ANALYZE order_versions; ANALYZE orders_current; ANALYZE fills");
         IndexTime = Stopwatch.GetElapsedTime(started);
 

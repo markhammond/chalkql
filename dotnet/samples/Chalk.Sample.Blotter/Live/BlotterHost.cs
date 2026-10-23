@@ -134,11 +134,22 @@ public sealed class BlotterHost : IAsyncDisposable
     public async Task StartAsync(CancellationToken ct)
     {
         var started = Stopwatch.GetTimestamp();
-        _server = await PgServer.StartAsync(_options.Postgres, _options.PostgresBinaries, ct).ConfigureAwait(false);
-        var store = new TradeStore(_server.ConnectionString);
+        TradeStore? seeding = null;
+        await using (Spinner.Start(() => seeding is null
+            ? "Starting PostgreSQL"
+            : seeding.Written < _options.Orders
+                ? string.Create(CultureInfo.InvariantCulture,
+                    $"Seeding PostgreSQL: {seeding.Stage}, {seeding.Written:N0} of {_options.Orders:N0} ({100.0 * seeding.Written / Math.Max(1, _options.Orders):F0}%)")
+                : $"Seeding PostgreSQL: {seeding.Stage}"))
+        {
+            _server = await PgServer.StartAsync(_options.Postgres, _options.PostgresBinaries, ct).ConfigureAwait(false);
+            seeding = new TradeStore(_server.ConnectionString);
+            await seeding.GenerateAsync(
+                _options.Orders, Cells.Micros(DateTime.UtcNow), TimeSpan.FromDays(5), openTail: 2000, _options.Current, ct).ConfigureAwait(false);
+        }
+
+        var store = seeding;
         _store = store;
-        await store.GenerateAsync(
-            _options.Orders, Cells.Micros(DateTime.UtcNow), TimeSpan.FromDays(5), openTail: 2000, _options.Current, ct).ConfigureAwait(false);
         _log.LogInformation(
             "loaded {Orders:N0} orders, {Versions:N0} versions and {Fills:N0} fills into PostgreSQL in {Load:F1} s, indexed in {Index:F1} s",
             store.Orders, store.Versions, store.Fills, store.LoadTime.TotalSeconds, store.IndexTime.TotalSeconds);
