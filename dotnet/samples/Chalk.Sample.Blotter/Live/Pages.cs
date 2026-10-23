@@ -95,7 +95,7 @@ public sealed class Pages(SourceQueries queries)
     public async Task<IRow[]> FromAsync(ScopeState state, SortSpec order, IRow? key, bool inclusive, int count, CancellationToken ct)
     {
         var sorted = state.Sorted(order);
-        var limit = count + Slack;
+        var limit = SourceQueries.Rounded(count + Slack);
         while (true)
         {
             var read = await queries.ReadAsync(state.Filter, order, key, inclusive, limit, ct).ConfigureAwait(false);
@@ -113,7 +113,7 @@ public sealed class Pages(SourceQueries queries)
             }
 
             Interlocked.Increment(ref _rereads);
-            limit *= 4;
+            limit = SourceQueries.Rounded(limit * 4);
         }
     }
 

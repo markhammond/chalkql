@@ -19,7 +19,8 @@ public sealed class QueryTimeLimitException(string what, TimeSpan limit, Excepti
 /// the filter run, and whose estimate that is — PostgreSQL's own, or ChalkQL's plan's.
 /// </summary>
 public sealed record PageEstimate(
-    double RowsRead, double RowsSorted, bool SortInDatabase, bool FilterInDatabase, string EstimatedBy, string PlanText);
+    double RowsRead, double RowsSorted, bool SortInDatabase, bool FilterInDatabase, string EstimatedBy, string PlanText,
+    double RowsReturned = double.NaN);
 
 /// <summary>
 /// The statements the blotter sends through ChalkQL to the database: rows from a key on, in order; the
@@ -49,30 +50,41 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
 
     public TimeSpan TimeLimit => timeLimit;
 
+    /// <summary>The limit of a first page: the rows in view, the grid's overscan and the merge's slack, rounded up.</summary>
+    public const int FirstPage = 128;
+
+    /// <summary>
+    /// A read's limit as it is written into the SQL: the next power of two, 64 at least. Written in
+    /// rather than bound, the planner knows how many rows a read returns; rounded, a few plans serve
+    /// every read.
+    /// </summary>
+    public static int Rounded(int rows) => (int)Math.Max(64, System.Numerics.BitOperations.RoundUpToPowerOf2((uint)Math.Max(1, rows)));
+
     /// <summary>A read of a tab, for the page's "how" panel: from a key on, as every page after the first is read.</summary>
-    public static string ReadSql(Tab tab, FilterSpec filter, SortSpec order, bool fromKey) => $"""
+    public static string ReadSql(Tab tab, FilterSpec filter, SortSpec order, bool fromKey, int limit = FirstPage) => string.Create(
+        CultureInfo.InvariantCulture, $"""
         SELECT {tab.Select}
         FROM {tab.Table}
         WHERE {filter.Where()}{(fromKey ? $"\n  AND ({SeekText(order, inclusive: true)})" : "")}
         ORDER BY {order.OrderBy()}
-        LIMIT @limit
-        """;
+        LIMIT {Rounded(limit)}
+        """);
 
     /// <summary>
-    /// The first <paramref name="limit"/> rows of the database that pass the filter in order, from
-    /// <paramref name="from"/> on (or after it), or from the first.
+    /// The first rows of the database that pass the filter in order, from <paramref name="from"/> on (or
+    /// after it), or from the first: <paramref name="limit"/> of them, <see cref="Rounded"/> up.
     /// </summary>
     public async Task<IRow[]> ReadAsync(
         FilterSpec filter, SortSpec order, IRow? from, bool inclusive, int limit, CancellationToken ct)
     {
         var tab = order.Tab;
         var values = filter.Parameters();
-        values["limit"] = (long)limit;
         var seek = from is null ? "" : $" AND ({Seek(order, from, inclusive, values)})";
         Interlocked.Increment(ref _reads);
         return await RowsAsync(
             tab,
-            $"SELECT {tab.Select} FROM {tab.Table} WHERE {filter.Where()}{seek} ORDER BY {order.OrderBy()} LIMIT @limit",
+            string.Create(CultureInfo.InvariantCulture,
+                $"SELECT {tab.Select} FROM {tab.Table} WHERE {filter.Where()}{seek} ORDER BY {order.OrderBy()} LIMIT {Rounded(limit)}"),
             values,
             "a page",
             ct).ConfigureAwait(false);
@@ -254,9 +266,9 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
     /// to cost: where ChalkQL runs the sort and the filter, from its plan; and the rows read, from
     /// PostgreSQL's own <c>EXPLAIN</c> when the database is PostgreSQL, or else from ChalkQL's plan.
     /// </summary>
-    public async Task<PageEstimate> EstimateAsync(FilterSpec filter, SortSpec order, CancellationToken ct)
+    public async Task<PageEstimate> EstimateAsync(FilterSpec filter, SortSpec order, CancellationToken ct, int limit = FirstPage)
     {
-        var sql = ReadSql(order.Tab, filter, order, fromKey: false);
+        var sql = ReadSql(order.Tab, filter, order, fromKey: false, limit);
         var plan = _prepared.GetOrAdd("plan:" + sql, _ => new Lazy<Task<PreparedQuery>>(
             () => engine.PrepareAsync(sql, new PrepareOptions { IncludePlanText = true }, CancellationToken.None).AsTask()));
         var text = (await plan.Value.WaitAsync(ct).ConfigureAwait(false)).PlanText ?? "";
@@ -266,7 +278,7 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
             return estimate;
         }
 
-        var postgres = await explain.EstimateAsync(order.Tab, filter, order, 100, ct).ConfigureAwait(false);
+        var postgres = await explain.EstimateAsync(order.Tab, filter, order, Rounded(limit), ct).ConfigureAwait(false);
         return estimate with
         {
             RowsRead = postgres.RowsRead,
@@ -278,8 +290,9 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
 
     /// <summary>
     /// Reads ChalkQL's physical plan: the scan's rows are what the database reads; the rows under the
-    /// sort, what is sorted; and where the sort and the filter run, by the operator that does them — a
-    /// <c>Source…</c> one in the database, a <c>Chalk…</c> one in the host.
+    /// sort, what is sorted; the rows that cross from the database into ChalkQL, what it returns; and
+    /// where the sort and the filter run, by the operator that does them — a <c>Source…</c> one in the
+    /// database, a <c>Chalk…</c> one in the host.
     /// </summary>
     internal static PageEstimate Estimate(string plan)
     {
@@ -290,6 +303,7 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
             : double.NaN;
 
         var scan = physical.FirstOrDefault(l => l.TrimStart().StartsWith("SourceScan", StringComparison.Ordinal));
+        var crossing = physical.FirstOrDefault(l => l.TrimStart().StartsWith("SourceToLocalConverter", StringComparison.Ordinal));
         var sortAt = Array.FindIndex(physical, l => l.TrimStart() is var t
             && (t.StartsWith("SourceSort", StringComparison.Ordinal) || t.StartsWith("ChalkTopN", StringComparison.Ordinal)
                 || t.StartsWith("ChalkSort", StringComparison.Ordinal)));
@@ -300,7 +314,8 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
             sortAt >= 0 && physical[sortAt].TrimStart().StartsWith("SourceSort", StringComparison.Ordinal),
             !physical.Any(l => l.TrimStart().StartsWith("ChalkFilter", StringComparison.Ordinal)),
             "ChalkQL's plan",
-            plan);
+            plan,
+            crossing is null ? double.NaN : Rows(crossing));
     }
 
     /// <summary>
