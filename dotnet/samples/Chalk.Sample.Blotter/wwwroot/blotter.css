@@ -105,7 +105,8 @@ tbody tr { height: 30px; }
 tbody tr:nth-child(even) { background: var(--row-alt); }
 td { padding: 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
 td .cell { display: block; padding: 0 8px; line-height: 29px; overflow: hidden; text-overflow: ellipsis; }
-td.num .cell { text-align: right; }
+/* Numbers in the system's monospace, as ids are, so their digits line up down a column. */
+td.num .cell { text-align: right; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
 td a { color: var(--accent); text-decoration: none; }
 
 .side-Buy { color: var(--good); }
