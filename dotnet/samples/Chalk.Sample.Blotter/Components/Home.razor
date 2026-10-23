@@ -8,11 +8,18 @@
     <div class="bar">
         <h1>Virtual blotter</h1>
         <StatusBar Status="_status" Budget="Host.Budget" BudgetChanged="SetBudgetAsync" />
-        <button @onclick="Burst" title="The house takes and fills this many orders at once">Burst 3,000</button>
-        <button @onclick="Stall" title="The database writes nothing for 20 s, while the streams go on">Stall database 20 s</button>
     </div>
 
-    <BlotterGrid @key="_tab" Tab="_tab" Select="t => _tab = t" />
+    <BlotterGrid @key="_tab" Tab="_tab" Select="t => _tab = t">
+        <Below>
+            <div class="bar telemetry">
+                <StatusBar Status="_status" Telemetry="true" />
+                <span class="spacer"></span>
+                <button @onclick="Burst" title="The house takes and fills 3,000 orders at once">Simulate burst</button>
+                <button @onclick="Stall" title="The database writes nothing for 20 s, while the streams go on">Stall database 20 s</button>
+            </div>
+        </Below>
+    </BlotterGrid>
 </main>
 
 @code {

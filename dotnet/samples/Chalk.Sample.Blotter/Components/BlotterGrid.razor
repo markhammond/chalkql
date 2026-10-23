@@ -162,6 +162,8 @@
     }
 </div>
 
+@Below
+
 <details>
     <summary>How this tab is answered</summary>
     <p>
@@ -182,6 +184,10 @@
 @code {
     [Parameter, EditorRequired]
     public Tab Tab { get; set; } = default!;
+
+    /// <summary>What the page shows immediately under the table.</summary>
+    [Parameter]
+    public RenderFragment? Below { get; set; }
 
     /// <summary>Another tab chosen on this one's tab bar.</summary>
     [Parameter]

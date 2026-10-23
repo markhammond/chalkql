@@ -1,5 +1,8 @@
-@* What the host holds and what it is waiting for, refreshed every second. *@
+@* What the host holds and what it is waiting for, refreshed every second: its state at the top of
+   the page, and the telemetry under the table. *@
 
+@if (!Telemetry)
+{
 <span class="chip @(Status.State == BlotterState.Live ? "live" : "behind")" title="@Status.Refusal">
     <b>@Status.State</b>
 </span>
@@ -35,6 +38,9 @@
         }
     </select>
 </span>
+}
+else
+{
 <span class="chip" title="DuckDB's own memory, outside the host's budget; the process's managed heap, for comparison">
     <span class="label">DuckDB</span><b>@Mb(Status.DatabaseBytes)</b>
     <span class="label">heap</span>@Mb(Status.ManagedHeapBytes)
@@ -51,6 +57,7 @@
     <span class="label">switch</span>@Status.LastSwitchMs.ToString("N0", CultureInfo.InvariantCulture) ms
     <span class="label">evicted</span>@Status.LastEvicted.ToString("N0", CultureInfo.InvariantCulture)
 </span>
+}
 
 @code {
     [Parameter, EditorRequired]
@@ -58,6 +65,10 @@
 
     [Parameter]
     public long Budget { get; set; }
+
+    /// <summary>The telemetry under the table, rather than the state at the top.</summary>
+    [Parameter]
+    public bool Telemetry { get; set; }
 
     [Parameter]
     public EventCallback<long> BudgetChanged { get; set; }
