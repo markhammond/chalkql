@@ -159,22 +159,20 @@ h2 { font-size: 14px; margin: 8px 0 0; }
 .filter-pill { cursor: pointer; }
 .link-button { border: none; background: transparent; color: var(--accent); padding: 2px 4px; }
 
-.estimate {
-    font-size: 12px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
-    display: flex; flex-wrap: wrap; gap: 2px 6px;
-}
-.estimate.warn { border-color: var(--warn); }
-
-.head { display: flex; align-items: center; }
-.head.num { flex-direction: row; }
-.head .sort { flex: 1; }
+/* A heading is its label, then its funnel just after it: at the left of a text column, at the right
+   of a number column. The funnel shows on hover, or while the column is filtered or its filter open;
+   hidden, it still keeps its place, so nothing moves when it shows. */
+.head { display: flex; align-items: center; justify-content: flex-start; cursor: pointer; }
+.head.num { justify-content: flex-end; }
+.head .sort { flex: 0 1 auto; width: auto; min-width: 0; padding-right: 2px; }
 .funnel {
     border: none; background: transparent; padding: 4px 6px 4px 0; cursor: pointer; display: flex; align-items: center;
+    visibility: hidden;
 }
-.funnel svg { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: 0.45; }
-.head:hover .funnel svg { opacity: 1; }
-.funnel.on svg { fill: var(--accent); stroke: var(--accent); opacity: 1; }
-.funnel.open svg { stroke: var(--accent); opacity: 1; }
+.head:hover .funnel, .funnel:focus-visible, .funnel.on, .funnel.open { visibility: visible; }
+.funnel svg { fill: none; stroke: var(--muted); stroke-width: 1.4; }
+.funnel.on svg { fill: var(--accent); stroke: var(--accent); }
+.funnel.open svg { stroke: var(--accent); }
 
 .editor {
     border: 1px solid var(--accent); border-radius: 8px; background: var(--panel); padding: 8px 10px;

@@ -10,11 +10,6 @@
         var t = tab;
         <button role="tab" aria-selected="@(t == Tab)" class="tab @(t == Tab ? "selected" : "")" @onclick="() => Select.InvokeAsync(t)">@t.Title</button>
     }
-    <span class="spacer"></span>
-    <span class="chip" title="The rows the tab has now, about: counted in the database a moment ago, the tail's added">
-        <span class="label">~rows</span><b>@_total.ToString("N0", CultureInfo.InvariantCulture)</b>
-    </span>
-    <span class="chip"><span class="label">sort by</span><b>@_sort.Name</b></span>
 </div>
 
 @if (!_filter.Columns.IsEmpty)
@@ -31,19 +26,6 @@
     <button type="button" class="link-button" @onclick="ClearFiltersAsync">Clear all</button>
 </div>
 }
-
-<div class="estimate @(_estimate is { SortInDatabase: false } ? "warn" : "")" title="@(_estimate?.PlanText)">
-    @if (_estimate is { } e)
-    {
-        <span>
-            Scans up to <b>@Rows(e.RowsRead)</b> rows <span class="muted">(@e.EstimatedBy)</span>
-            @(e.SortInDatabase ? "" : "— sorted in the host, every row pulled across")
-            @(e.FilterInDatabase ? "" : "; part of the filter runs in the host")
-        </span>
-        <span class="muted">· the filter passes @(_counted?.ToString("N0", CultureInfo.InvariantCulture) ?? "…") rows in the database, counted</span>
-    }
-    <span class="muted">· each statement stopped after @Host.Options.QueryTimeLimit.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) s</span>
-</div>
 
 @if (_editing is { } editing)
 {
@@ -98,9 +80,10 @@
                 var column = Tab.Columns[c];
                 <TemplateColumn TGridItem="BlotterRow" Title="@column.Title" Class="@(column.Numeric ? "num" : null)">
                     <HeaderTemplate>
-                        <div class="head @(column.Numeric ? "num" : "")">
-                            <button class="sort" type="button" title="Click to sort by @column.Title, descending, then ascending, then not; shift-click to do the same within a sort by several columns"
-                                    @onclick="e => SortAsync(column, e.ShiftKey)">
+                        @* The whole heading sorts, its label button too (a click on it reaches the heading); the funnel does not. *@
+                        <div class="head @(column.Numeric ? "num" : "")" @onclick="e => SortAsync(column, e.ShiftKey)"
+                             title="Click to sort by @column.Title, descending, then ascending, then not; shift-click to do the same within a sort by several columns">
+                            <button class="sort" type="button">
                                 @column.Title
                                 @if (_sort.RankOf(column) is var rank and > 0)
                                 {
@@ -112,7 +95,7 @@
                                 }
                             </button>
                             <button type="button" class="funnel @(_filter.For(column) is not null ? "on" : "") @(_editing == column ? "open" : "")"
-                                    title="Filter @column.Title" aria-label="Filter @column.Title" @onclick="() => OpenEditor(column)">
+                                    title="Filter @column.Title" aria-label="Filter @column.Title" @onclick="() => OpenEditor(column)" @onclick:stopPropagation>
                                 <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M1.5 2h13l-5 6.2V14l-3-1.6V8.2z" /></svg>
                             </button>
                         </div>
@@ -223,10 +206,7 @@
     // retried as the feed moves on: a new sort or filter, or "Try again", reads afresh.
     private string? _failure;
     private string? _plans;
-    private long _total;
     private Column? _editing;
-    private PageEstimate? _estimate;
-    private long? _counted;
 
     // The grid is waiting for the first page of a new sort or filter: it stays as it was, dimmed.
     private bool _waiting;
@@ -266,7 +246,6 @@
         _provider = ProvideAsync;
         Host.Published += OnPublished;
         await AcquireAsync(_filter);
-        await EstimateAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -449,12 +428,16 @@
             _flashes.Seen(state.IngestedThrough, now);
             _fillFlashes.Seen(state.IngestedThrough, now);
             _opened = opened;
-            _total = rows + hidden;
             if (_waiting && reloads == _reloads || _hiddenShown != hidden)
             {
                 _hiddenShown = hidden;
                 _waiting = _waiting && reloads != _reloads;
                 await InvokeAsync(StateHasChanged);
+            }
+
+            if (!_frozen && shown.Count > 0)
+            {
+                _ = InvokeAsync(FreezeColumnsAsync);
             }
 
             return GridItemsProviderResult.From(shown, (int)Math.Min(int.MaxValue, Nesting.Total(rows, opened)));
@@ -484,6 +467,22 @@
     }
 
     private long _hiddenShown;
+
+    // Columns keep the widths they first took with rows in them: the table does not size them again
+    // for the rows each render brings, so headings do not shift as the grid scrolls.
+    private bool _frozen;
+
+    private async Task FreezeColumnsAsync()
+    {
+        if (_frozen)
+        {
+            return;
+        }
+
+        // After the rows just provided are on the page.
+        await Task.Delay(100);
+        _frozen = await JS.InvokeAsync<bool>("blotter.freezeColumns", _scroller);
+    }
 
     /// <summary>The opened orders whose place is known, in order of position, each with its fills now.</summary>
     private async Task<IReadOnlyList<Opened>> OpenedAsync(ScopeState state, long rows, CancellationToken ct)
@@ -632,7 +631,14 @@
 
     private async Task SortAsync(Column column, bool shift)
     {
+        var was = _sort;
         _sort = _sort.Click(column, shift);
+        if (_sort.Name == was.Name)
+        {
+            // The same order, newest first, chosen or by default: only the headers change.
+            return;
+        }
+
         _pages = Host.Pages.View(_sort);
         await ReloadAsync();
     }
@@ -683,42 +689,9 @@
         _flashes.Clear();
         _fillFlashes.Clear();
         await JS.InvokeVoidAsync("blotter.scrollToTop", _scroller);
-        _ = EstimateAsync();
         if (_grid is not null)
         {
             await _grid.RefreshDataAsync();
-        }
-    }
-
-    /// <summary>What the planner expects the tab's pages to cost now, and what the filter passes, counted.</summary>
-    private async Task EstimateAsync()
-    {
-        var (filter, sort) = (_filter, _sort);
-        _estimate = null;
-        _counted = null;
-        try
-        {
-            var estimate = await Host.Queries.EstimateAsync(filter, sort, CancellationToken.None);
-            if (filter == _filter && sort == _sort)
-            {
-                _estimate = estimate;
-                await InvokeAsync(StateHasChanged);
-            }
-
-            if (_scope?.State is { Ready: true } state && state.Filter == filter)
-            {
-                var counted = await Host.Pages.DatabaseRowsAsync(state, CancellationToken.None);
-                if (filter == _filter)
-                {
-                    _counted = counted;
-                    await InvokeAsync(StateHasChanged);
-                }
-            }
-        }
-        catch (Exception failure)
-        {
-            // The estimate is for showing; a page that fails says so itself.
-            Log.LogWarning(failure, "the estimate for {Tab} sorted by {Sort} could not be read", Tab.Name, sort);
         }
     }
 
@@ -803,12 +776,6 @@
         var page = (await Host.Queries.EstimateAsync(_filter, _sort, CancellationToken.None)).PlanText;
         _plans = "-- a page of the database\n" + page + "\n-- the live scope\n" + (_scope?.PlanText ?? "");
     }
-
-    private static string Rows(double rows) => double.IsNaN(rows)
-        ? "?"
-        : rows >= 1e6 ? (rows / 1e6).ToString("0.0", CultureInfo.InvariantCulture) + "M"
-        : rows >= 1e3 ? (rows / 1e3).ToString("0", CultureInfo.InvariantCulture) + "k"
-        : rows.ToString("0", CultureInfo.InvariantCulture);
 
     public async ValueTask DisposeAsync()
     {

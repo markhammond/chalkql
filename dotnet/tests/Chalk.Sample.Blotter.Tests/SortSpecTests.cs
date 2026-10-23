@@ -62,12 +62,24 @@ public sealed class SortSpecTests
     }
 
     [Fact]
-    public void Newest_first_is_itself_a_sort_by_time_so_a_click_on_time_turns_it_round()
+    public void Newest_first_shows_no_column_sorted_and_time_cycles_like_any_column()
     {
         var time = Orders.Time;
+        var none = Orders.DefaultSort;
 
-        Assert.Equal("order_time,order_id desc", Orders.DefaultSort.Click(time, shift: false).Name);
-        Assert.Equal(Orders.DefaultSort, Orders.DefaultSort.Click(time, shift: false).Click(time, shift: false));
+        Assert.True(none.IsDefault);
+        Assert.Equal(0, none.RankOf(time));
+        Assert.False(none.IsDescending(time));
+
+        var descending = none.Click(time, shift: false);
+        Assert.False(descending.IsDefault);
+        Assert.Equal(none.Name, descending.Name);
+        Assert.Equal(1, descending.RankOf(time));
+        Assert.True(descending.IsDescending(time));
+
+        var ascending = descending.Click(time, shift: false);
+        Assert.Equal("order_time,order_id desc", ascending.Name);
+        Assert.True(ascending.Click(time, shift: false).IsDefault);
     }
 
     [Fact]

@@ -44,9 +44,10 @@
 }
 else
 {
-<span class="chip" title="PostgreSQL's database on disk, outside the host's budget; the process's managed heap, for comparison">
+<span class="chip" title="PostgreSQL's database on disk, outside the host's budget; the process's managed heap, for comparison; and the longest any statement may run before it is stopped">
     <span class="label">PostgreSQL</span><b>@Mb(Status.DatabaseBytes)</b>
     <span class="label">heap</span>@Mb(Status.ManagedHeapBytes)
+    <span class="label">statements stopped after</span>@Status.TimeLimit.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) s
 </span>
 <span class="chip" title="Statements ChalkQL has run against the database, and those stopped at the time limit; reads of pages from the database, of which read ahead, and reads a kept window answered; lookups of the tail's rows a read placed; the last refresh">
     <span class="label">statements</span><b>@Status.Statements.ToString("N0", CultureInfo.InvariantCulture)</b>

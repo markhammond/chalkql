@@ -68,9 +68,7 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
 
 ## What you see
 
-- **Two tabs.** Client orders, and fills. Each has its own sort, filters and position. The tab bar
-  shows the tab's rows (`~rows`: counted in the database a moment ago, with the tail's added) and its
-  sort (`sort by`).
+- **Two tabs.** Client orders, and fills. Each has its own sort, filters and position.
 - **A virtual grid.** QuickGrid's `Virtualize` asks for rows by position, and the host answers for any
   position in the millions (below).
 - **Fills nested under their orders.** The chevron in the first column opens an order's fills beneath it,
@@ -82,9 +80,9 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   fill yet. The link opens the order's page: every version and every fill, read from the database and
   the live tail in one statement each.
 - **Sorting by any columns.** A click on a header sorts by that column, descending; a second click
-  turns it ascending; a third takes it out of the sort, back to newest first. A shift-click does the
-  same within a sort by several columns, adding the column last, and the header shows each column's
-  place in it. QuickGrid sorts by one column itself; its multi-column sort is a pull request
+  turns it ascending; a third takes it out of the sort, back to the tab's own order, newest first, in
+  which no header shows an arrow. A shift-click does the same within a sort by several columns, adding
+  the column last, and the header shows each column's place in it. QuickGrid sorts by one column itself; its multi-column sort is a pull request
   ([dotnet/aspnetcore#62604](https://github.com/dotnet/aspnetcore/pull/62604)) not yet merged, so the
   page draws its own headers.
 - **A filter on every column.** The funnel in each header opens the column's filter, and it fills in
@@ -97,14 +95,14 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
     filter, or the last day), 50 at most, read from the database and narrowed as you type.
   - Region, channel, side, status: tick the values.
   - Numbers: at least, at most. Times: from, to (UTC).
-- **The cost, before you scroll.** Under the filters, a line shows how many rows the database scans at
-  most for a page: PostgreSQL's own estimate, from `EXPLAIN` on the page's SQL with the filter's values
-  written in. Newest first, that is a hundred rows, read down the index. Sorted by a column no index
-  has, it is the whole table. A warning shows when the sort would run in the host; with a database
-  other than PostgreSQL, the estimate comes from ChalkQL's plan instead. The line also shows the rows
-  the filter passes, counted.
+- **The cost, on request.** "How this tab is answered", under the grid, shows the page's SQL, ChalkQL's
+  plan for it, and PostgreSQL's own plan of the same page with the filter's values written in: newest
+  first, a read of a hundred rows down the index; sorted by a column no index has, the whole table.
 - **A time limit.** Every statement is stopped after 5 s, and a page that hits it says so. The status
-  bar counts those stopped.
+  bar under the grid shows the limit, beside PostgreSQL's size, and counts the statements stopped.
+- **Columns hold their widths.** Each column keeps the width it first took with rows in it, so the
+  headings do not shift as the grid scrolls; a value wider than its column is cut short with an
+  ellipsis.
 - **A new sort or filter dims the grid** until its first page is in.
 - **Flashes.** The cells of a row that changed flash, and an order or fill the streams have just sent
   flashes whole. A row scrolled into view does not flash.

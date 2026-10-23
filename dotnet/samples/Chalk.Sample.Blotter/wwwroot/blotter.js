@@ -18,6 +18,33 @@ window.blotter = {
         element.reportScroll = report;
     },
 
+    // Fixes every column at the width it has now, with rows in it, and lays the table out by those
+    // widths from then on, rather than by the rows each render brings: so the headings do not shift
+    // as the grid scrolls. A value wider than its column is cut short with an ellipsis. Not while a
+    // row is still a placeholder, whose empty cells would make its columns too narrow.
+    freezeColumns(element) {
+        const table = element.querySelector("table");
+        if (!table) {
+            return false;
+        }
+
+        if (table.style.tableLayout === "fixed") {
+            return true;
+        }
+
+        if (!table.querySelector("tbody span.cell") || table.querySelector(".grid-cell-placeholder")) {
+            return false;
+        }
+
+        // Each with room beyond what it took for a sort's arrow and rank, which come and go.
+        const heads = [...table.querySelectorAll("thead th")];
+        const widths = heads.map(th => th.getBoundingClientRect().width + (th.classList.contains("expander") ? 0 : 16));
+        heads.forEach((th, i) => { th.style.width = `${widths[i]}px`; });
+        table.style.minWidth = `${widths.reduce((sum, width) => sum + width, 0)}px`;
+        table.style.tableLayout = "fixed";
+        return true;
+    },
+
     scrollToTop(element) {
         element.scrollTo({ top: 0, behavior: "instant" });
     },

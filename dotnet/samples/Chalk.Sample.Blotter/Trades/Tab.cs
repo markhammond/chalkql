@@ -58,7 +58,7 @@ public sealed class Tab
     public bool Overrides { get; }
 
     /// <summary>The newest first, which is what a blotter opens on.</summary>
-    public SortSpec DefaultSort => SortSpec.Of(this, new SortColumn(Time, Descending: true));
+    public SortSpec DefaultSort => SortSpec.Default(this);
 
     public Column Named(string name) =>
         Columns.FirstOrDefault(c => c.Name == name) ?? throw new ArgumentException($"{Name} has no column '{name}'", nameof(name));

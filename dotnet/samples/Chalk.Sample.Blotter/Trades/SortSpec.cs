@@ -46,39 +46,50 @@ public sealed class SortSpec : IComparer<IRow>, IEquatable<SortSpec>
     /// <summary>Canonical, for caches and logs: <c>client,order_id desc</c>.</summary>
     public string Name { get; }
 
+    /// <summary>
+    /// The tab's own order, newest first, which the user has not chosen: no column shows as sorted,
+    /// and a click on any column, the time column too, sorts by it descending.
+    /// </summary>
+    public bool IsDefault { get; private init; }
+
     public static SortSpec Of(Tab tab, params SortColumn[] keys) => new(tab, [.. keys]);
+
+    /// <summary>The tab's own order: by its time, newest first.</summary>
+    public static SortSpec Default(Tab tab) => new(tab, [new SortColumn(tab.Time, Descending: true)]) { IsDefault = true };
 
     /// <summary>
     /// A header click, which cycles its column through descending, ascending and out of the sort. A
     /// plain click sorts by that column alone; a shift-click keeps the other columns, and adds this one
-    /// last. Taking out the last column goes back to the tab's own order, newest first.
+    /// last. Taking out the last column goes back to the tab's own order, newest first, in which no
+    /// column is chosen.
     /// </summary>
     public SortSpec Click(Column column, bool shift)
     {
-        var at = Chosen.IndexOf(Chosen.FirstOrDefault(k => k.Column == column));
-        if (!shift && (at < 0 || Chosen.Length > 1))
+        var chosen = IsDefault ? [] : Chosen;
+        var at = chosen.IndexOf(chosen.FirstOrDefault(k => k.Column == column));
+        if (!shift && (at < 0 || chosen.Length > 1))
         {
             return new SortSpec(Tab, [new SortColumn(column, Descending: true)]);
         }
 
         if (at < 0)
         {
-            return new SortSpec(Tab, Chosen.Add(new SortColumn(column, Descending: true)));
+            return new SortSpec(Tab, chosen.Add(new SortColumn(column, Descending: true)));
         }
 
-        if (Chosen[at].Descending)
+        if (chosen[at].Descending)
         {
-            return new SortSpec(Tab, Chosen.SetItem(at, new SortColumn(column, Descending: false)));
+            return new SortSpec(Tab, chosen.SetItem(at, new SortColumn(column, Descending: false)));
         }
 
-        var fewer = Chosen.RemoveAt(at);
+        var fewer = chosen.RemoveAt(at);
         return fewer.IsEmpty ? Tab.DefaultSort : new SortSpec(Tab, fewer);
     }
 
-    /// <summary>Where <paramref name="column"/> stands in the user's sort: its rank from 1, or 0.</summary>
+    /// <summary>Where <paramref name="column"/> stands in the user's sort: its rank from 1, or 0; 0 in the tab's own order.</summary>
     public int RankOf(Column column)
     {
-        for (var i = 0; i < Chosen.Length; i++)
+        for (var i = 0; !IsDefault && i < Chosen.Length; i++)
         {
             if (Chosen[i].Column == column)
             {
@@ -89,7 +100,7 @@ public sealed class SortSpec : IComparer<IRow>, IEquatable<SortSpec>
         return 0;
     }
 
-    public bool IsDescending(Column column) => Chosen.Any(k => k.Column == column && k.Descending);
+    public bool IsDescending(Column column) => !IsDefault && Chosen.Any(k => k.Column == column && k.Descending);
 
     /// <summary>Every key turned round: read from a row in this order, the rows before it, nearest first.</summary>
     public SortSpec Reversed() => new(

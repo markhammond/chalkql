@@ -877,6 +877,7 @@ public sealed class BlotterHost : IAsyncDisposable
             Refusal = Refusal,
             Version = _version,
             Sync = _options.Current,
+            TimeLimit = _options.QueryTimeLimit,
             Behind = _tail.OldestUnconfirmed is { } oldest ? DateTime.UtcNow - DateTime.SpecifyKind(oldest, DateTimeKind.Utc) : null,
             NotYetIngested = _exchange?.NotYetIngested ?? 0,
             CurrentWaiting = _exchange?.CurrentWaiting ?? 0,
@@ -1020,6 +1021,9 @@ public sealed record BlotterStatus
 
     /// <summary>How <c>orders_current</c> keeps up with <c>order_versions</c>.</summary>
     public CurrentSync Sync { get; init; }
+
+    /// <summary>The longest any statement may run before it is stopped.</summary>
+    public TimeSpan TimeLimit { get; init; }
 
     /// <summary>How long ago the oldest row the database has not been seen to hold was sent: how far behind it is, at least.</summary>
     public TimeSpan? Behind { get; init; }
