@@ -39,6 +39,32 @@ public sealed record ColumnFilter
 
     public bool IsEmpty => Values.IsEmpty && Min is null && Max is null && From is null && To is null;
 
+    /// <summary>
+    /// Whether <paramref name="row"/> passes, decided in the host exactly as the database decides the
+    /// SQL: values matched byte for byte, a number against its bound as the column binds it.
+    /// </summary>
+    public bool Matches(IRow row)
+    {
+        var value = Column.Value(row);
+        if (!Values.IsEmpty)
+        {
+            var passes = Column.Kind == ColumnKind.Id
+                ? Values.Any(v => (Guid.TryParse(v, out var id) ? id : Guid.Empty) == (Guid)value)
+                : Match == TextMatch.AnyOf
+                    ? Values.Contains((string)value, StringComparer.Ordinal)
+                    : Values.Any(v => ((string)value).StartsWith(v, StringComparison.Ordinal));
+            if (!passes)
+            {
+                return false;
+            }
+        }
+
+        return (Min is not { } min || Convert.ToDouble(value, CultureInfo.InvariantCulture) >= Convert.ToDouble(Column.Bind(min), CultureInfo.InvariantCulture))
+            && (Max is not { } max || Convert.ToDouble(value, CultureInfo.InvariantCulture) <= Convert.ToDouble(Column.Bind(max), CultureInfo.InvariantCulture))
+            && (From is not { } from || (DateTime)value >= from)
+            && (To is not { } to || (DateTime)value < to);
+    }
+
     /// <summary>Canonical: values sorted and distinct, times to the microsecond.</summary>
     public ColumnFilter Canonical() => this with
     {
@@ -140,6 +166,9 @@ public sealed class FilterSpec
         new([.. filters.Select(f => f.Canonical()).Where(f => !f.IsEmpty).OrderBy(f => f.Column.Name, StringComparer.Ordinal)]);
 
     public ColumnFilter? For(Column column) => Columns.FirstOrDefault(c => c.Column == column);
+
+    /// <summary>Whether <paramref name="row"/> passes every column's filter, decided in the host.</summary>
+    public bool Matches(IRow row) => Columns.All(c => c.Matches(row));
 
     /// <summary>This filter with <paramref name="filter"/> in place of its column's, or without it when it is empty.</summary>
     public FilterSpec With(ColumnFilter filter) =>
@@ -246,7 +275,10 @@ public sealed class FilterSpec
         return values;
     }
 
-    /// <summary>The same conditions with their values written in, which only the oracle does.</summary>
+    /// <summary>
+    /// The same conditions with their values written in, in SQL PostgreSQL takes: for the oracle, and
+    /// for asking PostgreSQL what it would scan.
+    /// </summary>
     public string Literal()
     {
         if (Columns.IsEmpty)

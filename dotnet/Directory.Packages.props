@@ -50,7 +50,8 @@
     <!-- Sample only, and MIT-licensed: samples/Chalk.Sample.AkadeIndexedSet wraps it as an
          IPocoIndex<T> to prove D35's extension point. No Chalk.* package references it. -->
     <PackageVersion Include="Akade.IndexedSet" Version="1.5.0" />
-    <!-- Sample only: samples/Chalk.Sample.Blotter's grid. No Chalk.* package references it. -->
+    <!-- Sample only: samples/Chalk.Sample.Blotter's grid; the sample also takes Npgsql, above, for
+         its database. No Chalk.* package references either. -->
     <PackageVersion Include="Microsoft.AspNetCore.Components.QuickGrid" Version="10.0.11" />
   </ItemGroup>
 

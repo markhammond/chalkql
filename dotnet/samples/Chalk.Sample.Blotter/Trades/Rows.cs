@@ -1,13 +1,13 @@
 using System.Globalization;
 using Apache.Arrow;
 using Apache.Arrow.Arrays;
-using DuckDB.NET.Data;
+using System.Data.Common;
 
 namespace Chalk.Sample.Blotter.Trades;
 
 /// <summary>A row of either tab: identified, versioned, and stamped with when the feed sent it.</summary>
 /// <remarks>
-/// Times are UTC, kept to the microsecond, which is what DuckDB's <c>TIMESTAMP</c> keeps: a time with
+/// Times are UTC, kept to the microsecond, which is what PostgreSQL's <c>timestamp</c> keeps: a time with
 /// finer ticks would compare differently in the database and in the host, and a page merged from
 /// both would put a row in the wrong place.
 /// </remarks>
@@ -73,7 +73,7 @@ public sealed record Order(
         Cells.Double(batch.Column(13), row),
         Cells.Text(batch.Column(14), row));
 
-    public static Order Read(DuckDBDataReader reader) => new(
+    public static Order Read(DbDataReader reader) => new(
         reader.GetGuid(0),
         reader.GetInt32(1),
         Cells.Micros(reader.GetDateTime(2)),
@@ -141,7 +141,7 @@ public sealed record Fill(
         Cells.Double(batch.Column(11), row),
         Cells.Double(batch.Column(12), row));
 
-    public static Fill Read(DuckDBDataReader reader) => new(
+    public static Fill Read(DbDataReader reader) => new(
         reader.GetGuid(0),
         reader.GetGuid(1),
         Cells.Micros(reader.GetDateTime(2)),

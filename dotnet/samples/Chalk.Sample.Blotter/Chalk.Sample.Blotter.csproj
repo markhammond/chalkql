@@ -16,16 +16,11 @@
     <ProjectReference Include="../../src/Chalk.Incremental/Chalk.Incremental.csproj" />
     <ProjectReference Include="../../src/Chalk.Sources.Poco/Chalk.Sources.Poco.csproj" />
     <ProjectReference Include="../../src/Chalk.Sources.Ado/Chalk.Sources.Ado.csproj" />
-    <ProjectReference Include="../../src/Chalk.Sources.DuckDb/Chalk.Sources.DuckDb.csproj" />
   </ItemGroup>
 
-  <!--
-    `Chalk.Sources.DuckDb` references `DuckDB.NET.Data`, the provider and nothing else: the native
-    library is the host's choice. This sample is a host, so it picks `DuckDB.NET.Data.Full` at the
-    same version.
-  -->
+  <!-- The provider for the database: the ADO.NET source takes any, and this host picks Npgsql. -->
   <ItemGroup>
-    <PackageReference Include="DuckDB.NET.Data.Full" />
+    <PackageReference Include="Npgsql" />
     <PackageReference Include="Microsoft.AspNetCore.Components.QuickGrid" />
   </ItemGroup>
 

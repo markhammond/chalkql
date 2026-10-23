@@ -103,9 +103,6 @@
     [Parameter, EditorRequired]
     public (DateTime From, DateTime To) Within { get; set; }
 
-    [Parameter, EditorRequired]
-    public Generation? Generation { get; set; }
-
     [Parameter]
     public EventCallback<ColumnFilter> Apply { get; set; }
 
@@ -181,11 +178,6 @@
     /// </summary>
     private async Task ReadChoicesAsync()
     {
-        if (Generation is null)
-        {
-            return;
-        }
-
         _reading?.Cancel();
         var reading = _reading = new CancellationTokenSource();
         _loading = true;
@@ -193,7 +185,7 @@
         {
             await Task.Delay(200, reading.Token);
             var found = await Host.Queries.ValuesAsync(
-                Generation, Tab, Column, Within.From, Within.To, _typed.Length > 0 ? _typed : null, Offered, reading.Token);
+                Tab, Column, Within.From, Within.To, _typed.Length > 0 ? _typed : null, Offered, reading.Token);
             if (!reading.IsCancellationRequested)
             {
                 _choices = found;

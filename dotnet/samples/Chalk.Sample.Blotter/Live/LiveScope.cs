@@ -22,8 +22,8 @@ public struct ScopeRow
 
 /// <summary>
 /// The part of a tab's tail one filter can see, kept current by a ChalkQL standing view: every order
-/// in the tail whose latest version passes the filter, or whose snapshot version did; every fill in
-/// the tail that passes it. Pages that filter alike share one scope, whatever they sort by and
+/// in the tail whose latest version passes the filter, or whose row in the database last did; every
+/// fill in the tail that passes it. Pages that filter alike share one scope, whatever they sort by and
 /// wherever they have scrolled to; each sorts its scope in the host, which is cheap because a scope is
 /// a slice of the tail, never of the corpus.
 /// </summary>
@@ -121,8 +121,7 @@ public sealed class LiveScope : IAsyncDisposable, IViewSink<ScopeKey, ScopeRow>
     /// Brings the view to the engine's latest epoch, takes what changed, and publishes the state it
     /// now holds, with each row resolved from the tail.
     /// </summary>
-    internal async Task UpdateAsync(
-        Tail tail, long epoch, Generation generation, DateTime ordersThrough, DateTime fillsThrough, CancellationToken ct)
+    internal async Task UpdateAsync(Tail tail, long epoch, DateTime ordersThrough, DateTime fillsThrough, CancellationToken ct)
     {
         if (Fault is not null)
         {
@@ -136,7 +135,7 @@ public sealed class LiveScope : IAsyncDisposable, IViewSink<ScopeKey, ScopeRow>
             {
             }
 
-            Volatile.Write(ref _state, ScopeState.Of(Tab, Filter, epoch, generation, ordersThrough, fillsThrough, tail, _rows));
+            Volatile.Write(ref _state, ScopeState.Of(Tab, Filter, epoch, ordersThrough, fillsThrough, tail, _rows));
         }
         catch (Exception failure) when (failure is not OperationCanceledException)
         {
@@ -170,8 +169,8 @@ public sealed class LiveScope : IAsyncDisposable, IViewSink<ScopeKey, ScopeRow>
 }
 
 /// <summary>
-/// A live scope as of one epoch: the tail's rows that pass its filter now, and the snapshot rows the
-/// tail overrides that passed it then. Immutable; sorted per order on first use.
+/// A live scope as of one epoch: the tail's rows that pass its filter now, and the database rows the
+/// tail overrides that passed it when last looked up. Immutable; sorted per order on first use.
 /// </summary>
 public sealed class ScopeState
 {
@@ -181,25 +180,27 @@ public sealed class ScopeState
         Tab tab,
         FilterSpec filter,
         long epoch,
-        Generation? generation,
+        bool ready,
         DateTime ordersThrough,
         DateTime fillsThrough,
         IRow[] live,
         IRow[] overridden,
         HashSet<Guid> overriddenIds,
         Dictionary<Guid, IRow> tail,
+        ImmutableDictionary<Guid, Order> latest,
         ImmutableDictionary<Guid, ImmutableList<Fill>> fillsByOrder)
     {
         Tab = tab;
         Filter = filter;
         Epoch = epoch;
-        Generation = generation;
+        Ready = ready;
         OrdersThrough = ordersThrough;
         FillsThrough = fillsThrough;
         Live = live;
         Overridden = overridden;
         OverriddenIds = overriddenIds;
         Tail = tail;
+        Latest = latest;
         FillsByOrder = fillsByOrder;
     }
 
@@ -210,12 +211,13 @@ public sealed class ScopeState
     /// <summary>The engine's version this state is the scope's rows at.</summary>
     public long Epoch { get; }
 
-    /// <summary>The snapshot the tail was taken against at that epoch: the one pages must read with it.</summary>
-    public Generation? Generation { get; }
+    /// <summary>Whether the scope has taken its first refresh: an empty state, before then, is no answer.</summary>
+    public bool Ready { get; }
 
     /// <summary>
-    /// How far the host had read the order stream: every version sent at or before this time is in this
-    /// state, by the generation or by the tail. Because the stream is read in order, nothing after it is.
+    /// How far the host had read the order stream: every version sent from its subscription up to this
+    /// time is in this state, in the tail or in the database. Because the stream is read in order,
+    /// nothing after it is.
     /// </summary>
     public DateTime OrdersThrough { get; }
 
@@ -228,13 +230,16 @@ public sealed class ScopeState
     /// <summary>The tail's rows that pass the filter: orders at their latest versions, or fills.</summary>
     public IRow[] Live { get; }
 
-    /// <summary>The snapshot's rows that pass the filter for orders the tail holds a newer version of.</summary>
+    /// <summary>The database's rows, as last looked up, that pass the filter for orders the tail holds a newer version of.</summary>
     public IRow[] Overridden { get; }
 
     public HashSet<Guid> OverriddenIds { get; }
 
     /// <summary>Every row in the scope by id, at its latest version, whether or not it passes the filter now.</summary>
     public Dictionary<Guid, IRow> Tail { get; }
+
+    /// <summary>Every order's latest version in the tail at this epoch, whatever filter it passes.</summary>
+    public ImmutableDictionary<Guid, Order> Latest { get; }
 
     /// <summary>The tail's fills of each order at this epoch, which an order's nested fills are read with.</summary>
     public ImmutableDictionary<Guid, ImmutableList<Fill>> FillsByOrder { get; }
@@ -243,11 +248,11 @@ public sealed class ScopeState
     public long Bytes => 64L * (Live.Length + Overridden.Length) + 48L * (OverriddenIds.Count + Tail.Count);
 
     internal static ScopeState Empty(Tab tab, FilterSpec filter) =>
-        new(tab, filter, 0, null, default, default, [], [], [], [], ImmutableDictionary<Guid, ImmutableList<Fill>>.Empty);
+        new(tab, filter, 0, false, default, default, [], [], [], [], ImmutableDictionary<Guid, Order>.Empty,
+            ImmutableDictionary<Guid, ImmutableList<Fill>>.Empty);
 
     internal static ScopeState Of(
-        Tab tab, FilterSpec filter, long epoch, Generation generation, DateTime ordersThrough, DateTime fillsThrough,
-        Tail tail, Dictionary<Guid, ScopeRow> rows)
+        Tab tab, FilterSpec filter, long epoch, DateTime ordersThrough, DateTime fillsThrough, Tail tail, Dictionary<Guid, ScopeRow> rows)
     {
         var live = new List<IRow>(rows.Count);
         var overridden = new List<IRow>();
@@ -288,7 +293,7 @@ public sealed class ScopeState
         }
 
         return new ScopeState(
-            tab, filter, epoch, generation, ordersThrough, fillsThrough, [.. live], [.. overridden], overriddenIds, byId,
+            tab, filter, epoch, true, ordersThrough, fillsThrough, [.. live], [.. overridden], overriddenIds, byId, tail.Latest,
             tail.FillsByOrder);
     }
 
@@ -317,8 +322,35 @@ public sealed class SortedScope
     /// <summary>How many of the tail's live rows sort before <paramref name="key"/>.</summary>
     public int LiveBefore(IRow key) => Before(Live, key);
 
-    /// <summary>How many overridden snapshot rows sort before <paramref name="key"/>.</summary>
+    /// <summary>How many overridden database rows sort before <paramref name="key"/>.</summary>
     public int OverriddenBefore(IRow key) => Before(Overridden, key);
+
+    /// <summary>The tail's live rows from <paramref name="key"/> on (or after it), up to and including <paramref name="last"/>.</summary>
+    public ArraySegment<IRow> LiveBetween(IRow? key, bool inclusive, IRow? last)
+    {
+        var from = key is null ? 0 : inclusive ? Before(Live, key) : After(Live, key);
+        var to = last is null ? Live.Length : After(Live, last);
+        return new ArraySegment<IRow>(Live, from, Math.Max(0, to - from));
+    }
+
+    private int After(IRow[] rows, IRow key)
+    {
+        int low = 0, high = rows.Length;
+        while (low < high)
+        {
+            var middle = (low + high) >>> 1;
+            if (Order.Compare(rows[middle], key) <= 0)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        return low;
+    }
 
     private int Before(IRow[] rows, IRow key)
     {

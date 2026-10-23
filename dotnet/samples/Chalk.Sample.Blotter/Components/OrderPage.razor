@@ -27,8 +27,8 @@
 
     <h2>Versions</h2>
     <p class="muted">
-        One statement over both sides: <code>main.order_versions</code> in DuckDB, and <code>live.order_versions</code>, the
-        versions the stream has sent that the snapshot does not have yet. A version in both is one row.
+        One statement over both sides: <code>blotter.order_versions</code> in PostgreSQL, and <code>live.order_versions</code>,
+        the versions the stream has sent that the database has not been seen to hold yet. A version in both is one row.
     </p>
     <div class="wide">
         <table class="history">

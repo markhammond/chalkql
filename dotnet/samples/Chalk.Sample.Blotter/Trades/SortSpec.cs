@@ -27,6 +27,14 @@ public sealed class SortSpec : IComparer<IRow>, IEquatable<SortSpec>
         Name = string.Join(",", Keys.Select(k => k.Column.Name + (k.Descending ? " desc" : "")));
     }
 
+    private SortSpec(Tab tab, ImmutableArray<SortColumn> chosen, ImmutableArray<SortColumn> keys)
+    {
+        Tab = tab;
+        Chosen = chosen;
+        Keys = keys;
+        Name = string.Join(",", Keys.Select(k => k.Column.Name + (k.Descending ? " desc" : "")));
+    }
+
     public Tab Tab { get; }
 
     /// <summary>The columns the user chose, in the order they chose them.</summary>
@@ -83,6 +91,10 @@ public sealed class SortSpec : IComparer<IRow>, IEquatable<SortSpec>
     }
 
     public bool IsDescending(Column column) => Chosen.Any(k => k.Column == column && k.Descending);
+
+    /// <summary>Every key turned round: read from a row in this order, the rows before it, nearest first.</summary>
+    public SortSpec Reversed() => new(
+        Tab, [.. Chosen.Select(k => k with { Descending = !k.Descending })], [.. Keys.Select(k => k with { Descending = !k.Descending })]);
 
     /// <summary>The <c>ORDER BY</c> list.</summary>
     public string OrderBy() =>

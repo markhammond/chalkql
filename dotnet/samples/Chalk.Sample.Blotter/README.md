@@ -1,25 +1,30 @@
 # Chalk.Sample.Blotter — a virtual blotter of client orders and fills
 
 A Blazor Server page with two QuickGrid tabs: **client orders** (five million by default), each with
-its fills nested beneath it, and the **fills** themselves. Both live in a database the host cannot
-hold in memory, while the house keeps taking orders and filling them. Each tab scrolls through all
-of its rows, sorts by any columns, filters on any column, and flashes what changes. The host keeps
-what it holds within a memory budget you set on the page (64 MB by default), stops any statement
-after 5 s, and never shows a stale or missing version to stay within either.
+its fills nested beneath it, and the **fills** themselves. Both live in PostgreSQL, which the host
+cannot hold in memory, while the house keeps taking orders and filling them. Each tab scrolls through
+all of its rows, sorts by any columns, filters on any column, and flashes what changes. The host keeps
+what it holds within a memory budget you set on the page (64 MB by default), stops any statement after
+5 s, and never shows an order at an older version than one it knows of to stay within either.
 
 ```bash
 JAVA_HOME=/path/to/jdk-21 dotnet run -c Release --project dotnet/samples/Chalk.Sample.Blotter
 ```
 
-Then open `http://localhost:5910`. Options:
+Then open `http://localhost:5910`. The sample starts a PostgreSQL server of its own, in a temporary
+directory, from PostgreSQL 16 or later installed on the machine (`brew install postgresql@16`), and
+deletes it when it stops; one left by a sample that was killed is swept away by the next. Options:
 
 | Option | Default | |
 |---|---|---|
-| `--orders 500k` | `5m` | the corpus generated at start: orders, their versions and their fills (about 9 s for five million orders, 12.5 million versions and 8.8 million fills) |
+| `--orders 500k` | `5m` | the corpus loaded at start: orders, their versions and their fills |
+| `--current lagging` | `trigger` | how `orders_current` keeps up with `order_versions` (below) |
+| `--postgres "Host=…;Username=…;Database=…"` | | a server of your own instead: the sample makes a schema `blotter` there, refuses if one exists, and drops it when it stops |
+| `--pg-bin /path/to/postgresql/bin` | found | the installation to start a server from |
 | `--budget-mb 32` | `64` | the host's memory budget; the page can change it while it runs |
 | `--maintenance recompute` | `incremental` | how the live scopes keep current (below) |
 | `--urls http://localhost:5911` | `http://localhost:5910` | |
-| `--probe` | | no web app: prints the plans and estimates, then checks random pages of both tabs against the oracle for 45 s (`PROBE_SECONDS`) |
+| `--probe` | | no web app: prints the estimates, then checks random pages of both tabs for 45 s (`PROBE_SECONDS`) (below) |
 
 ChalkQL's planner runs on a JDK 21+, which `PlannerProcess` starts itself: set `JAVA_HOME`, or install
 Homebrew's `openjdk@21`, which the sample looks for.
@@ -33,30 +38,49 @@ versioned: a fill or a cancel is a new version, numbered one higher, with its fi
 average price (the fills', weighted) and its status (New, Partial, Filled, Cancelled). A **fill** never
 changes, and carries its order's details (client, region, channel, instrument, side), so a fill can be
 filtered without its order. Orders and fills are identified by UUIDs (version 7), and nothing in the
-host relies on their order: a new order is looked up in the snapshot like any other, and ids only break
-ties in a sort.
+host relies on their order: ids only break ties in a sort.
 
 Order versions and fills come on **two streams**, each in its own time order and neither waiting for
 the other. The order stream runs up to 600 ms behind the fills, and a quarter of new orders are filled
-at once, so a fill often arrives **before its order**, or before the version that counts it.
+at once, so a fill often arrives **before its order**, or before the version that counts it. The
+streams are reliable from the moment a reader subscribes, and do not replay.
+
+## The database
+
+Three tables in the `blotter` schema, `UNLOGGED`, their text collated `"C"`:
+
+- `order_versions`: every version of every order, keyed by order and version.
+- `orders_current`: one row per order, at its latest version, indexed newest first. This is what the
+  blotter's order tab reads.
+- `fills`: every fill, keyed by fill, indexed by order and newest first.
+
+Ingestion jobs write each stream's rows some time after the stream sends them, 150 ms to 3 s, and
+sometimes stall. `orders_current` keeps up one of two ways (`--current`):
+
+- **trigger** (the default): a trigger on `order_versions` upserts the order's row in the same
+  statement, the newer version winning.
+- **lagging**: a job of its own applies what `order_versions` has been written, 0.5 s to 4 s later,
+  and stalls now and then, so the two tables are often out of step.
+
+The corpus is generated in C#, each order worked out from its number alone, and written with binary
+`COPY` on several connections at once before any index or trigger exists; then the indexes are built
+in parallel. Five million orders, about 12.5 million versions and 8.8 million fills load in seconds.
 
 ## What you see
 
 - **Two tabs.** Client orders, and fills. Each has its own sort, filters and position. The tab bar
-  shows the tab's rows (`~rows`: counted in the database at the snapshot, with the tail's added) and
-  its sort (`sort by`).
+  shows the tab's rows (`~rows`: counted in the database a moment ago, with the tail's added) and its
+  sort (`sort by`).
 - **A virtual grid.** QuickGrid's `Virtualize` asks for rows by position, and the host answers for any
-  position in the millions: at five million orders, half the probe's pages took under 40 ms, and the
-  deepest pages of an unfiltered sort of the 8.8 million fills up to about 3 s (DuckDB's top-N with an
-  offset of millions; starting deep pages from a cached key instead is a next step).
+  position in the millions (below).
 - **Fills nested under their orders.** The ▸ in the first column opens an order's fills beneath it,
   newest first and set in, as rows of the grid's one list (`Virtualize` wants every row one height);
-  the order's own row does not move. They stay open while new
-  fills arrive. A fill that came before its order is there once the order comes.
-- **From a fill to its order.** Hovering a fill's order number shows the order as both sides know it
-  now. The card also says when the order has not arrived yet, or when its latest version does not
-  count this fill yet. The link opens the order's page: every version and every fill, read from the
-  database and the live tail in one statement each.
+  the order's own row does not move. They stay open while new fills arrive. A fill that came before
+  its order is there once the order comes.
+- **From a fill to its order.** Hovering a fill's order shows the order as both sides know it now. The
+  card also says when the order has not arrived yet, or when its latest version does not count this
+  fill yet. The link opens the order's page: every version and every fill, read from the database and
+  the live tail in one statement each.
 - **Sorting by any columns.** A click on a header sorts by that column; a second click turns it round;
   a shift-click adds the column to the sort, and the header shows each column's place in it. QuickGrid
   sorts by one column itself; its multi-column sort is a pull request
@@ -72,10 +96,12 @@ at once, so a fill often arrives **before its order**, or before the version tha
     filter, or the last day), 50 at most, read from the database and narrowed as you type.
   - Region, channel, side, status: tick the values.
   - Numbers: at least, at most. Times: from, to (UTC).
-- **The cost, before you scroll.** Under the filters, a line shows the planner's estimate for the tab's
-  pages: how many rows the database scans at most (no access path is declared, so the planner assumes a
-  full read), with a warning when the sort would run in the host. It also shows the rows the filter
-  passes, counted.
+- **The cost, before you scroll.** Under the filters, a line shows how many rows the database scans at
+  most for a page: PostgreSQL's own estimate, from `EXPLAIN` on the page's SQL with the filter's values
+  written in. Newest first, that is a hundred rows, read down the index. Sorted by a column no index
+  has, it is the whole table. A warning shows when the sort would run in the host; with a database
+  other than PostgreSQL, the estimate comes from ChalkQL's plan instead. The line also shows the rows
+  the filter passes, counted.
 - **A time limit.** Every statement is stopped after 5 s, and a page that hits it says so. The status
   bar counts those stopped.
 - **A new sort or filter dims the grid** until its first page is in.
@@ -84,80 +110,107 @@ at once, so a fill often arrives **before its order**, or before the version tha
 - **New rows push down at the top.** Scrolled away from the top, the rows in view stay where they are,
   and an "N new above" badge counts what has arrived. A click on the badge, or a scroll back to the
   top, shows them.
-- **The status bar**: the snapshot's generation and its age, how far the database is behind, how many
-  order versions the order stream is holding back behind the fills, the tail, what the host holds
-  against the budget, DuckDB's own memory, the statements run and stopped, and the turnovers.
-- **Burst 3,000** makes 3,000 changes at once; **Stall database 20 s** stops the database writing
-  while the streams go on. Do both with a small budget to see the host refuse.
+- **The status bar**: how `orders_current` is kept and, when by the lagging job, how far behind it is;
+  how far the database is behind the streams; how many order versions the order stream is holding back
+  behind the fills; the tail and what of it is confirmed; what the host holds against the budget; the
+  database's size; the statements run and stopped; the reads and lookups pages made; the confirmations
+  and what they let go; and the gap fill.
+- **Simulate burst** makes 3,000 changes at once; **Stall database 20 s** stops the database writing
+  while the streams go on; in lagging mode, **Stall orders_current 20 s** stops only the job that keeps
+  it. Do them with a small budget to see the host refuse.
 
 ## How it works
 
-The database (DuckDB, in memory, standing in for a database in another process, with an 8 GB limit)
-writes each stream's rows some time later, 150 ms to 3 s, and sometimes stalls. It keeps a
-watermark for each stream: every order version, or every fill, at or before it is in.
+The blotter is a **bolt-on**. It asks of the database what any reader could: rows found by key, sorted
+and filtered. It asks for no watermark, no snapshot, and no promise about when `orders_current`
+catches up with `order_versions`.
 
 Each tab is two halves, merged.
 
-1. **A snapshot generation.** For orders: the latest version of each order, written by one
-   `INSERT … SELECT … QUALIFY row_number() …` into `snapshots` under a generation number, after both
-   watermarks are read. For fills, nothing is written: they never change, so a generation's fills are
-   those at or before its fills watermark. Pages are read through ChalkQL with the filter, the sort,
-   the `LIMIT` and the `OFFSET` pushed down into DuckDB's own SQL, in aligned chunks of 256 rows
-   cached by tab, generation, filter and sort.
-2. **The live tail**: every order whose latest version the snapshot does not have, and every fill
-   after the fills watermark. The streams are replayed from each watermark and then followed live,
-   each read apart from the other. The orders are a keyed POCO table in ChalkQL; each row carries the
-   order's latest version and, column for column, the snapshot's row for it. The versions behind an
-   order, and the fills, are tables of their own.
+1. **The database, read live.** For orders, `orders_current`; for fills, `fills`. Read through ChalkQL
+   with the filter, the sort and the limit pushed down into PostgreSQL's own SQL.
+2. **The live tail**: every order version and fill the streams have sent since the host subscribed,
+   that the database has not been seen to hold yet. The orders are a keyed POCO table in ChalkQL, each
+   row carrying the order's latest version and, column for column, `orders_current`'s row for it when
+   last looked up. The versions behind an order, and the fills, are tables of their own.
 
-**Correctness.** The snapshot holds every order version through the orders watermark, and the replay
-sends everything after it. Where the two overlap, in the in-flight crossing, the higher version wins.
-Fills cannot overlap at all: the database's are read up to the watermark and the tail's start after
-it. So neither the database's lag, nor the crossing, nor a fill arriving before its order can show a
-stale or a missing row. Each page is checked as it is put together: its rows' positions must follow
-one another, or the page is not shown.
+**Confirmation.** Every half second the host looks the tail's rows up in the database by key. An order
+the database holds at the tail's version or later, and a fill it holds, is confirmed, and leaves the
+tail two seconds later. That is longer than any page read takes, so no page merges a database read
+from before a version landed with a tail that has already let it go.
+
+**Reading a page.** A page is read from a key: the database's first rows at or after it in the tab's
+order, then every tail row between that key and the last row read. The read decides nothing past its
+last row, so a tail row beyond it waits for the next read. An order read at a version older than the
+tail's gives way to the tail's version, placed where that version sorts, or not at all if it no
+longer passes the filter. A tail row placed in the stretch whose database row was not read is looked
+up: if the database has moved past the tail meanwhile, the database's row stands, wherever it sorts.
+So each order appears once, at the newest version either side knows. The read is written so that
+PostgreSQL can start an index at the key: the condition is spelled column by column, with the leading
+column's bound repeated alone in front.
+
+**Positions.** `Virtualize` asks by position, and a live database has no fixed positions. Each grid
+keeps positions it has read, each tied to the row found there (`PageView`). A page near one is read
+from that row's key, forwards, or backwards in the reversed order for rows above it. At the top,
+positions are counted from the first row on every state, so new rows push the rest down. Scrolled
+away, they hold. A jump far from every position known (dragging the scrollbar) is placed by the
+database's own `OFFSET`, which knows nothing of the tail, so positions deep in a tab are approximate,
+as the total is. Each page is still read whole from one key, so a page never repeats or skips a row.
+
+**Starting, and the gap fill.** The host subscribes to the streams, and then sends the database one
+last request: every version `order_versions` holds from the last 30 s. It takes each as if the stream
+had sent it, and lets go at once of those `orders_current` already shows. A version that was in flight
+when the host subscribed, sent before the subscription and written before the gap fill, is then shown
+even though `orders_current` does not have it yet. One sent before the subscription and written after
+the gap fill shows when `orders_current` has it. Fills need no gap fill: the blotter reads them from the
+table they are written to.
 
 **Live scopes.** For each tab and distinct filter on the open pages, a ChalkQL standing view over the
 tail (`LiveScope`) holds what the filter can see. For orders, that is every order that passes the
-filter now, or whose snapshot row did: its two sets of columns let the filter be tested against both
+filter now, or whose database row did: its two sets of columns let the filter be tested against both
 in one statement. For fills, it is every fill in the tail that passes. Pages that filter alike share
 one scope, whatever they sort by and wherever they are scrolled. A page sorts its scope in the host,
 which is cheap because a scope is a slice of the tail, never of the corpus.
 
-**Placing a row.** A snapshot row at position `j` of the snapshot's own order is at position
-`j − (overridden rows before it) + (tail rows before it)` of the tab. A tail row is at
-`(tail rows before it) + (snapshot rows before it) − (overridden rows before it)` (`Pages`). Nested
-fills are let in after their orders, each opened order moving the rows below it down by its fills
-(`Nesting`).
-
-**Generations turn over** when the tail and the scopes hold 40% of the budget, or every 30 s. In one
-refresh the tail drops every order the new generation has caught up with and every fill at or before
-its watermark.
-
 **The budget** covers what the host holds: the tail, in ChalkQL and in the host; the scopes' views and
-their states; and the page cache. Past it, the page cache gives way first, then the scopes no page is
-using, then the tail, by a new generation taken at once. If that is still not enough, because the
-database is too far behind, the host stops serving and says why. It never drops a version to stay in
-budget. It starts again once the database has caught up, and the pages take their scopes again by
-themselves.
+their states; and the counts and fills it reuses for a moment. Past it, the scopes no page is using
+give way first. If that is not enough, because the database is too far behind, the host stops serving
+and says why. It never drops a version to stay in budget. While it refuses, it keeps reading the
+streams and keeps the last 30 s of what they send. It serves again once `orders_current`'s newest order
+is within 5 s of the stream's, from what it kept and a new gap fill, and the pages take their scopes
+again by themselves.
 
-## Checking it
+## What correct means here
 
-`Oracle` works out a page the slow way, in DuckDB alone. For orders: the state's generation and every
-version the order stream sent up to how far the state has read it, keeping each order's highest
-version. For fills: every fill the fill stream sent up to the state's mark, from the database and the
-stream, whatever the generation. Then it filters, sorts and pages them in one statement with the
-filter's values written in.
+Each order is shown at the highest version known when the page is read: known to the database (in
+`orders_current`, or in `order_versions` through the gap fill) or sent on the stream since the host
+subscribed. No order is missing or shown twice, and the rows are in order.
 
-`--probe`, and `tests/Chalk.Sample.Blotter.Tests/BlotterHostTests.cs`, compare random pages of both
-tabs with the oracle while the market runs, through bursts, stalls and turnovers. The pages use random
-filters on one or two columns of every kind (picked values, starts-with, ranges, times), random sorts
-of one to three columns, and random positions. On 2026-10-23, 79 probe pages over three generations,
-and every test run since, with no page wrong. The tests also cover:
+`Oracle` works out what a page should be in PostgreSQL alone. The truth is `orders_current` with every
+newer version laid over it: those `order_versions` holds, and those the stream has sent, which the
+oracle copies into a temporary table. For fills, it is the fills the database holds and those the
+stream has sent. Then it filters, sorts and limits in one statement, with the filter's values written
+in.
+
+That is exact only while nothing moves, so `--probe` and
+`tests/Chalk.Sample.Blotter.Tests/BlotterHostTests.cs` check two ways:
+
+- **While the market runs**, through bursts and stalls, every page must hold its invariants: rows in
+  order, none twice, each passing the filter.
+- **Held still**, in rounds: the market paused, a burst the stalled database cannot write, the host
+  caught up with the streams. Every page must then be the oracle's, row for row: once with the tail
+  covering the database, and again once the database has written everything. A page at the top is
+  compared from the top; a page deep in a tab, from its own first row.
+
+The pages use random filters on one or two columns of every kind (picked values, starts-with, ranges,
+times), random sorts of one to three columns, and random positions. On 2026-10-23, at 200,000 orders,
+in both `--current` modes, every page under load held its invariants and every page held still matched
+the oracle. The tests also cover:
 
 - fills that arrive before their orders;
+- the gap fill, with `orders_current` five seconds behind;
 - the time limit;
-- the budget's refusals;
+- the budget's refusals, and serving again;
 - rows held in place while rows arrive above them;
 - an order's history and fills read from both sides.
 
@@ -168,27 +221,24 @@ and every test run since, with no page wrong. The tests also cover:
 Registered in the design log as F273–F276; design 79 proposes what the owner asked for next.
 
 - **F273.** A pushed-down query names a table by its catalog name, not its registered remote name, so
-  the sample keeps its tables in DuckDB's `main` schema, and its SQL reads `main.snapshots`.
+  the sample registers its tables in ChalkQL under the PostgreSQL schema's own name, `blotter`.
 - **F274.** A DuckDB `TIMESTAMP` that discovery finds without a precision is typed `TIMESTAMP(9)`, finer
-  than DuckDB keeps, so the planner sorted on it locally. The sample declares its tables' columns with
-  `TIMESTAMP(6)`, and every sort is pushed.
+  than DuckDB keeps, so the planner sorted on it locally. Found when the sample ran on DuckDB; the
+  sample declares its columns with `TIMESTAMP(6)`.
 - **F275.** Discovery in a schema the database lacks fails with a SQLite pragma error.
 - **F276.** An incremental scope holds about 440 bytes a tail row where a recomputing one holds about
   100 (`--maintenance recompute` to compare).
 - **Design 79** (proposed, not built): what a statement examines per source, refusing at prepare when
   no access path keeps the rows read under a ceiling the host sets, and a time limit for a whole
-  statement and for a view's update. Until then the sample parses the plan text for its estimate and
+  statement and for a view's update. Until then the sample asks PostgreSQL for its estimate, and
   cancels statements after 5 s itself.
 
 ## Not here, yet
 
 - Free-text search.
 - A refusal by cost (design 79).
-- A database in another process: DuckDB 2.0's client-server mode is the candidate, once DuckDB.NET
-  supports it.
 - Tapline. On Blazor Server the grid renders on the server, and ChalkQL's views already give each
   reader what changed. Tapline would carry the same answers to a WebAssembly grid, headless clients or
   many nodes. `LiveScope`, `ScopeState` and `Pages` are the seam.
-- A writer-kept current-state table. Without one, each generation is derived from the versions.
 - Memory figures are the host's own estimates of what it holds, and the views' own count of their
   state. The status bar shows the process's managed heap beside them for comparison.

@@ -2,265 +2,376 @@ using System.Collections.Concurrent;
 
 namespace Chalk.Sample.Blotter.Live;
 
-/// <summary>Rows <see cref="Start"/> on of a merged tab, out of <see cref="Total"/>, as of <see cref="State"/>.</summary>
+/// <summary>Rows <see cref="Start"/> on of a tab, out of about <see cref="Total"/>, as of <see cref="State"/>.</summary>
 public sealed record Page(long Start, IRow[] Rows, long Total, ScopeState State);
 
 /// <summary>
-/// Pages of a tab by position, merged from a snapshot generation and a live scope.
+/// A tab's rows, read live from the database and merged with a live scope.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A tab is the generation's rows that pass the filter, less those the tail overrides, plus the tail's
-/// rows that pass it, all in one order. A generation row at position <c>j</c> of the generation's own
-/// order is at position <c>j − overridden before it + live before it</c> of the tab, and a tail row at
-/// <c>live before it + generation rows before it − overridden before it</c>. Both counts of the tail
-/// come from the scope, sorted in the host; the generation's come from the database. Fills are never
-/// overridden: the database's are those at or before the watermark, the tail's those after it.
+/// A tab is the database's rows that pass the filter, each order at the version <c>orders_current</c>
+/// holds, with the tail laid over them: an order the stream has sent a newer version of is shown at
+/// that version, where that version sorts, or not at all if it no longer passes. The database's row of
+/// an order newer than the tail's stands. So every order is shown once, at the newest version either
+/// side knows, however far <c>orders_current</c> runs behind the stream, or ahead of it.
 /// </para>
 /// <para>
-/// So a page at position <c>i</c> is found by reading the generation near position <c>i</c> less the
-/// tail's correction, placing every row of that stretch, and reading further when the stretch does
-/// not cover the page. The generation is read in aligned chunks, kept by tab, generation, filter and
-/// order: a generation never changes, so a chunk stays right for as long as its generation is read,
-/// and a page that moves only because the tail did is placed again without a query.
+/// Rows are read from a key: the database's first rows at or after it in order, then every row of the
+/// tail between that key and the last row read. The read decides nothing past its last row, so a tail
+/// row beyond it waits for the next read. An order the tail has, read in the stretch at an older
+/// version, gives way to the tail's version; one whose tail version falls in the stretch but whose
+/// database row did not is looked up, because the database may have moved past the tail meanwhile.
 /// </para>
 /// <para>
-/// Every page is checked as it is put together: its rows' positions must be exactly the page's. A
-/// page that fails the check is never shown; the failure says which rows disagree.
+/// Nothing is cached but counts and an order's fills, each for a moment: a page is read from the
+/// database each time, and is as current as the database is when it is read.
 /// </para>
 /// </remarks>
-public sealed class Pages(SnapshotQueries queries)
+public sealed class Pages(SourceQueries queries)
 {
-    /// <summary>Rows per chunk of a generation read.</summary>
-    public const int ChunkRows = 256;
+    /// <summary>How long a count of the database's rows is reused: the total is approximate anyway.</summary>
+    public static readonly TimeSpan CountFor = TimeSpan.FromSeconds(3);
 
-    private readonly ConcurrentDictionary<ChunkKey, Chunk> _chunks = new();
-    private readonly ConcurrentDictionary<(string Tab, long Generation, string Filter), Lazy<Task<long>>> _counts = new();
-    private readonly ConcurrentDictionary<(long Generation, Guid Order), Lazy<Task<Fill[]>>> _fills = new();
-    private long _cachedRows;
-    private long _clock;
-    private long _reads;
-    private long _hits;
+    /// <summary>How long an order's fills in the database are reused.</summary>
+    public static readonly TimeSpan FillsFor = TimeSpan.FromSeconds(1);
 
-    /// <summary>The most generation rows the chunk cache keeps, set from the budget.</summary>
-    public long MaxCachedRows { get; set; } = 64 * ChunkRows;
+    // Rows read beyond those asked for, so that the tail's overrides seldom leave a read short.
+    private const int Slack = 32;
 
-    /// <summary>What the chunk cache holds, in bytes.</summary>
-    public long Bytes => Interlocked.Read(ref _cachedRows) * Order.Bytes;
+    private readonly ConcurrentDictionary<(string Tab, string Filter), (DateTime At, Task<long> Count)> _counts = new();
+    private readonly ConcurrentDictionary<Guid, (DateTime At, Task<Fill[]> Fills)> _fills = new();
+    private long _lookups;
+    private long _rereads;
 
-    public int Chunks => _chunks.Count;
+    public SourceQueries Queries => queries;
 
-    /// <summary>Generation reads the pages have had to make, against those the cache answered.</summary>
-    public long Reads => Interlocked.Read(ref _reads);
+    /// <summary>Lookups of orders the tail placed in a read, to see whether the database has moved past them.</summary>
+    public long Lookups => Interlocked.Read(ref _lookups);
 
-    public long Hits => Interlocked.Read(ref _hits);
+    /// <summary>Reads read again, longer, because the tail's overrides left them short.</summary>
+    public long Rereads => Interlocked.Read(ref _rereads);
 
-    /// <summary>How many rows the generation has that pass the filter, counted by the database.</summary>
-    public Task<long> GenerationRowsAsync(ScopeState state, CancellationToken ct) =>
-        CountAsync(state.Tab, Generation(state), state.Filter, ct);
+    /// <summary>What the cache of counts and fills holds, roughly, in bytes.</summary>
+    public long Bytes => _counts.Count * 64L + _fills.Values.Sum(f => f.Fills.IsCompletedSuccessfully ? f.Fills.Result.Length * (long)Fill.Bytes : 0);
 
-    /// <summary>How many rows the tab has: the generation's, less those overridden, plus the tail's.</summary>
-    public async Task<long> TotalAsync(ScopeState state, CancellationToken ct)
+    /// <summary>A reader's place in the tab: the pages it reads, by position.</summary>
+    public PageView View(SortSpec order) => new(this, order);
+
+    /// <summary>
+    /// How many rows of the database pass the filter, counted a moment ago. A count older than
+    /// <see cref="CountFor"/> is counted again, and answers meanwhile: no page waits for a recount.
+    /// </summary>
+    public async Task<long> DatabaseRowsAsync(ScopeState state, CancellationToken ct)
     {
-        var rows = await CountAsync(state.Tab, Generation(state), state.Filter, ct).ConfigureAwait(false);
-        return rows - state.Overridden.Length + state.Live.Length;
+        var key = (state.Tab.Name, state.Filter.Name);
+        var now = DateTime.UtcNow;
+        var counted = _counts.GetOrAdd(key, _ => (now, queries.CountAsync(state.Tab, state.Filter, CancellationToken.None)));
+        if ((now - counted.At > CountFor && counted.Count.IsCompleted) || counted.Count.IsFaulted)
+        {
+            var recount = (now, queries.CountAsync(state.Tab, state.Filter, CancellationToken.None));
+            if (_counts.TryUpdate(key, recount, counted) && counted.Count.IsCompletedSuccessfully)
+            {
+                return counted.Count.Result;
+            }
+
+            counted = _counts[key];
+        }
+
+        return await counted.Count.WaitAsync(ct).ConfigureAwait(false);
     }
 
-    public async Task<Page> GetAsync(ScopeState state, SortSpec order, long start, int count, CancellationToken ct)
+    /// <summary>About how many rows the tab has: the database's, less the rows the tail overrides, plus the tail's.</summary>
+    public async Task<long> TotalAsync(ScopeState state, CancellationToken ct)
     {
-        var generation = Generation(state);
-        var sorted = state.Sorted(order);
-        var generationRows = await CountAsync(state.Tab, generation, state.Filter, ct).ConfigureAwait(false);
-        var total = generationRows - sorted.Overridden.Length + sorted.Live.Length;
-        var end = Math.Min(total, start + count);
-        if (start >= end)
-        {
-            return new Page(start, [], total, state);
-        }
-
-        if (generationRows == 0)
-        {
-            return new Page(start, sorted.Live[(int)start..(int)end], total, state);
-        }
-
-        // Where the page's first row would be in the generation, were nothing overridden or live
-        // before it; corrected below as the stretch read says.
-        var around = start;
-        var margin = 32L;
-        for (var attempt = 0; attempt < 12; attempt++)
-        {
-            var to = Math.Clamp(around + (end - start) + margin, 1, generationRows);
-            var from = Math.Clamp(around - margin, 0, to - 1);
-            var stretch = await RangeAsync(state, generation, order, from, to, generationRows, ct).ConfigureAwait(false);
-            var placed = Place(sorted, state, stretch, from, generationRows, total);
-            if (placed.Count == 0)
-            {
-                margin *= 4;
-                continue;
-            }
-
-            var (low, high) = (placed[0].Rank, placed[^1].Rank);
-            if (low <= start && high >= end - 1)
-            {
-                return new Page(start, Slice(placed, start, end), total, state);
-            }
-
-            if (start < low)
-            {
-                around -= low - start;
-            }
-            else
-            {
-                around += end - 1 - high;
-            }
-
-            margin *= 2;
-        }
-
-        throw new InvalidOperationException(
-            $"no stretch of generation {generation.Number} covers rows {start}–{end - 1} of {total} in {order}");
+        var rows = await DatabaseRowsAsync(state, ct).ConfigureAwait(false);
+        return Math.Max(0, rows - state.Overridden.Length + state.Live.Length);
     }
 
     /// <summary>
-    /// How many rows of the tab sort before <paramref name="key"/>: the position a row with that key
-    /// would have. A page that keeps its place while rows arrive above it reads this for its first row,
-    /// and a page with nested rows for each order it has opened.
+    /// The tab's rows from <paramref name="key"/> on (or after it), or from the first, in
+    /// <paramref name="order"/>: at least <paramref name="count"/> of them if the tab has that many.
+    /// </summary>
+    public async Task<IRow[]> FromAsync(ScopeState state, SortSpec order, IRow? key, bool inclusive, int count, CancellationToken ct)
+    {
+        var sorted = state.Sorted(order);
+        var limit = count + Slack;
+        while (true)
+        {
+            var read = await queries.ReadAsync(state.Filter, order, key, inclusive, limit, ct).ConfigureAwait(false);
+
+            // A full read decides nothing past its last row; a short one has reached the end.
+            var last = read.Length == limit ? read[^1] : null;
+            var candidates = sorted.LiveBetween(key, inclusive, last);
+            var rows = order.Tab.Overrides
+                ? await MergeOrdersAsync(state, order, key, inclusive, last, read, candidates, ct).ConfigureAwait(false)
+                : MergeFills(read, candidates);
+            if (rows.Count >= count || last is null)
+            {
+                rows.Sort(order);
+                return [.. rows];
+            }
+
+            Interlocked.Increment(ref _rereads);
+            limit *= 4;
+        }
+    }
+
+    /// <summary>
+    /// How many rows of the tab sort before <paramref name="key"/>, about: the database's count, with
+    /// the tail's corrections. A held page counts what has arrived above it with this.
     /// </summary>
     public async Task<long> RankAsync(ScopeState state, SortSpec order, IRow key, CancellationToken ct)
     {
-        var generation = Generation(state);
         var sorted = state.Sorted(order);
-        var before = BeforeFromCache(state, generation, order, key)
-            ?? await queries.CountBeforeAsync(generation, state.Filter, order, key, ct).ConfigureAwait(false);
-        return before - sorted.OverriddenBefore(key) + sorted.LiveBefore(key);
+        var before = await queries.CountBeforeAsync(state.Filter, order, key, ct).ConfigureAwait(false);
+        return Math.Max(0, before - sorted.OverriddenBefore(key) + sorted.LiveBefore(key));
     }
 
-    /// <summary>
-    /// An order's fills as of a state, newest first: the database's at or before the generation's
-    /// watermark, read once per generation, and the tail's after it, as the state holds them.
-    /// </summary>
+    /// <summary>An order's fills as of a state, newest first: the database's, read a moment ago at most, and the tail's.</summary>
     public async Task<Fill[]> FillsOfAsync(ScopeState state, Guid orderId, CancellationToken ct)
     {
-        var generation = Generation(state);
-        var lazy = _fills.GetOrAdd(
-            (generation.Number, orderId),
-            _ => new Lazy<Task<Fill[]>>(() => queries.FillsOfAsync(generation, orderId, CancellationToken.None)));
-        Fill[] stored;
-        try
+        var now = DateTime.UtcNow;
+        var read = _fills.AddOrUpdate(
+            orderId,
+            _ => (now, queries.FillsOfAsync(orderId, CancellationToken.None)),
+            (_, was) => now - was.At > FillsFor || was.Fills.IsFaulted ? (now, queries.FillsOfAsync(orderId, CancellationToken.None)) : was);
+        foreach (var stale in _fills.Where(f => now - f.Value.At > FillsFor * 10).Select(f => f.Key).ToList())
         {
-            stored = await lazy.Value.WaitAsync(ct).ConfigureAwait(false);
-        }
-        catch (Exception) when (lazy.Value.IsFaulted)
-        {
-            _fills.TryRemove(new KeyValuePair<(long, Guid), Lazy<Task<Fill[]>>>((generation.Number, orderId), lazy));
-            throw;
+            _fills.TryRemove(stale, out _);
         }
 
-        var tail = state.FillsByOrder.GetValueOrDefault(orderId);
-        return [.. stored.Concat(tail ?? []).OrderByDescending(f => f.EventTime).ThenByDescending(f => f.FillId)];
+        var stored = await read.Fills.WaitAsync(ct).ConfigureAwait(false);
+        return [.. stored.Concat(state.FillsByOrder.GetValueOrDefault(orderId) ?? [])
+            .DistinctBy(f => f.FillId)
+            .OrderByDescending(f => f.EventTime)
+            .ThenByDescending(f => f.FillId)];
     }
 
-    /// <summary>Forgets every chunk and count of generations other than <paramref name="keep"/>.</summary>
-    public void Retire(IReadOnlySet<long> keep)
+    private async Task<List<IRow>> MergeOrdersAsync(
+        ScopeState state, SortSpec order, IRow? key, bool inclusive, IRow? last, IRow[] read, ArraySegment<IRow> candidates,
+        CancellationToken ct)
     {
-        foreach (var key in _chunks.Keys)
+        var winners = new Dictionary<Guid, IRow>(read.Length + candidates.Count);
+        var readById = new Dictionary<Guid, IRow>(read.Length);
+        foreach (var row in read)
         {
-            if (!keep.Contains(key.Generation) && _chunks.TryRemove(key, out var gone))
+            readById[row.Id] = row;
+
+            // An order the tail has as new or newer is the tail's to place, below, if it falls here at all.
+            if (!(state.Latest.TryGetValue(row.Id, out var latest) && latest.Version >= row.Version))
             {
-                Interlocked.Add(ref _cachedRows, -gone.Rows.Length);
+                winners[row.Id] = row;
             }
         }
 
-        foreach (var key in _counts.Keys.Where(k => !keep.Contains(k.Generation)))
+        // The tail's rows here whose database rows were not read: the database may have moved past
+        // them since the tail last heard, and then its row stands, wherever it sorts.
+        var unread = candidates.Where(c => !readById.ContainsKey(c.Id)).Select(c => c.Id).ToList();
+        var current = new Dictionary<Guid, Order>();
+        if (unread.Count > 0)
         {
-            _counts.TryRemove(key, out _);
+            Interlocked.Increment(ref _lookups);
+            current = await queries.CurrentAsync(unread, ct).ConfigureAwait(false);
         }
 
-        foreach (var key in _fills.Keys.Where(k => !keep.Contains(k.Generation)))
+        foreach (var candidate in candidates)
         {
-            _fills.TryRemove(key, out _);
+            if (readById.TryGetValue(candidate.Id, out var stored) && stored.Version > candidate.Version)
+            {
+                continue;
+            }
+
+            if (current.TryGetValue(candidate.Id, out var now) && now.Version > candidate.Version)
+            {
+                if (Within(order, now, key, inclusive, last) && state.Filter.Matches(now))
+                {
+                    winners[now.Id] = now;
+                }
+
+                continue;
+            }
+
+            winners[candidate.Id] = candidate;
+        }
+
+        return [.. winners.Values];
+    }
+
+    /// <summary>Fills never change: one in both the database and the tail is the same row, kept once.</summary>
+    private static List<IRow> MergeFills(IRow[] read, ArraySegment<IRow> candidates)
+    {
+        var rows = new Dictionary<Guid, IRow>(read.Length + candidates.Count);
+        foreach (var row in read)
+        {
+            rows[row.Id] = row;
+        }
+
+        foreach (var candidate in candidates)
+        {
+            rows.TryAdd(candidate.Id, candidate);
+        }
+
+        return [.. rows.Values];
+    }
+
+    private static bool Within(SortSpec order, IRow row, IRow? key, bool inclusive, IRow? last) =>
+        (key is null || order.Compare(row, key) is var from && (from > 0 || (inclusive && from == 0)))
+        && (last is null || order.Compare(row, last) <= 0);
+}
+
+/// <summary>
+/// One reader's place in a tab: the positions it has read, each tied to the row found there, so that
+/// a page near one is read from that row's key rather than counted from the top.
+/// </summary>
+/// <remarks>
+/// <para>
+/// At the top, positions are counted from the first row, afresh on every state, so new rows push the
+/// rest down. Once the reader scrolls away (<see cref="Held"/>), the positions hold: a page is read from
+/// the nearest position known, so rows arriving above it do not move what is in view.
+/// </para>
+/// <para>
+/// Deep in a tab, positions are approximate. A jump far from every position known is placed by the
+/// database's own offset, which knows nothing of the tail; and rows arriving between two positions
+/// known shift what lies between them. But every page is read whole, from one key, so a page never
+/// repeats or skips a row, and every row in it is at the newest version known.
+/// </para>
+/// </remarks>
+public sealed class PageView(Pages pages, SortSpec order)
+{
+    /// <summary>How far from a position known a page is read from its key; farther, it is found by offset.</summary>
+    public const int SeekWithin = 4096;
+
+    // A position is kept for every so many rows read.
+    private const int Every = 64;
+
+    private readonly Lock _gate = new();
+    private readonly SortedList<long, IRow> _anchors = [];
+    private long _epoch = -1;
+    private bool _held;
+
+    public SortSpec Order => order;
+
+    /// <summary>Whether positions hold as rows arrive, or are counted afresh from the top on every state.</summary>
+    public bool Held
+    {
+        get => _held;
+        set
+        {
+            lock (_gate)
+            {
+                _held = value;
+                if (!value)
+                {
+                    _anchors.Clear();
+                }
+            }
         }
     }
 
-    private static Generation Generation(ScopeState state) =>
-        state.Generation ?? throw new InvalidOperationException("the scope has no state yet");
-
-    /// <summary>
-    /// Places every row the stretch decides: its generation rows not overridden, and the tail's rows
-    /// between its first and last, with the tail's rows before it when it starts the generation and
-    /// after it when it ends it. Returned in order of position.
-    /// </summary>
-    private static List<(long Rank, IRow Row)> Place(
-        SortedScope sorted, ScopeState state, IRow[] stretch, long from, long generationRows, long total)
+    /// <summary>Rows <paramref name="start"/> on, <paramref name="count"/> of them or as many as there are.</summary>
+    public async Task<Page> GetAsync(ScopeState state, long start, int count, CancellationToken ct)
     {
-        var placed = new List<(long Rank, IRow Row)>(stretch.Length + 16);
-        var order = sorted.Order;
-        var startsGeneration = from == 0;
-        var endsGeneration = from + stretch.Length == generationRows;
-
-        for (var x = 0; x < stretch.Length; x++)
+        var total = await pages.TotalAsync(state, ct).ConfigureAwait(false);
+        (long At, IRow Key)? below, above;
+        lock (_gate)
         {
-            var row = stretch[x];
-            if (!state.OverriddenIds.Contains(row.Id))
+            if (!_held && state.Epoch != _epoch)
             {
-                placed.Add((from + x - sorted.OverriddenBefore(row) + sorted.LiveBefore(row), row));
-            }
-        }
-
-        var live = sorted.Live;
-        var first = startsGeneration ? 0 : sorted.LiveBefore(stretch[0]);
-        for (var k = first; k < live.Length; k++)
-        {
-            var row = live[k];
-            if (!endsGeneration && order.Compare(row, stretch[^1]) > 0)
-            {
-                break;
+                _anchors.Clear();
             }
 
-            var generationBefore = from + Before(stretch, row, order);
-            placed.Add((k + generationBefore - sorted.OverriddenBefore(row), row));
+            _epoch = state.Epoch;
+            below = Floor(start);
+            above = Ceiling(start);
         }
 
-        placed.Sort((a, b) => a.Rank.CompareTo(b.Rank));
-        for (var i = 1; i < placed.Count; i++)
+        IRow[] window;
+        long first;
+        if (below is null && start <= SeekWithin)
         {
-            if (placed[i].Rank != placed[i - 1].Rank + 1)
-            {
-                throw new InvalidOperationException(
-                    $"the merge placed {placed[i - 1].Row} at {placed[i - 1].Rank} and {placed[i].Row} at {placed[i].Rank}: "
-                    + "positions must follow one another");
-            }
+            window = await pages.FromAsync(state, order, null, true, (int)start + count, ct).ConfigureAwait(false);
+            first = 0;
         }
-
-        if (placed.Count > 0 && (placed[^1].Rank >= total || placed[0].Rank < 0))
+        else if (below is { } b && start - b.At <= SeekWithin)
         {
-            throw new InvalidOperationException(
-                $"the merge placed rows at {placed[0].Rank}–{placed[^1].Rank}, outside the tab's {total}");
+            window = await pages.FromAsync(state, order, b.Key, true, (int)(start - b.At) + count, ct).ConfigureAwait(false);
+            first = b.At;
+        }
+        else if (above is { } a && a.At - start <= SeekWithin)
+        {
+            // Read backwards from the position known below the page: the rows before it, nearest first.
+            var back = await pages.FromAsync(state, order.Reversed(), a.Key, false, (int)(a.At - start), ct).ConfigureAwait(false);
+            var ahead = start + count > a.At
+                ? await pages.FromAsync(state, order, a.Key, true, (int)(start + count - a.At), ct).ConfigureAwait(false)
+                : [];
+            window = [.. Enumerable.Reverse(back), .. ahead];
+            first = a.At - back.Length;
+        }
+        else if (!_held && start <= SeekWithin)
+        {
+            window = await pages.FromAsync(state, order, null, true, (int)start + count, ct).ConfigureAwait(false);
+            first = 0;
+        }
+        else
+        {
+            // Far from anything known: placed by the database's offset, and read from the row found there.
+            var key = await pages.Queries.AtOffsetAsync(state.Filter, order, start, ct).ConfigureAwait(false);
+            window = key is null ? [] : await pages.FromAsync(state, order, key, true, count, ct).ConfigureAwait(false);
+            first = start;
         }
 
-        return placed;
+        Record(first, window);
+        var skip = (int)Math.Clamp(start - first, 0, window.Length);
+        var rows = window.AsSpan(skip, Math.Min(count, window.Length - skip)).ToArray();
+        return new Page(first + skip, rows, total, state);
     }
 
-    private static IRow[] Slice(List<(long Rank, IRow Row)> placed, long start, long end)
+    /// <summary>Forgets every position known, as a new sort or filter does.</summary>
+    public void Reset()
     {
-        var offset = (int)(start - placed[0].Rank);
-        var rows = new IRow[end - start];
-        for (var i = 0; i < rows.Length; i++)
+        lock (_gate)
         {
-            rows[i] = placed[offset + i].Row;
+            _anchors.Clear();
         }
-
-        return rows;
     }
 
-    /// <summary>How many rows of <paramref name="rows"/>, in order, sort before <paramref name="key"/>.</summary>
-    private static int Before(IRow[] rows, IRow key, SortSpec order)
+    private void Record(long first, IRow[] window)
     {
-        int low = 0, high = rows.Length;
+        if (window.Length == 0)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            // What this read found replaces what earlier reads said of the same positions.
+            var end = first + window.Length;
+            for (var i = _anchors.Count - 1; i >= 0; i--)
+            {
+                if (_anchors.Keys[i] >= first && _anchors.Keys[i] < end)
+                {
+                    _anchors.RemoveAt(i);
+                }
+            }
+
+            for (var i = 0; i < window.Length; i++)
+            {
+                if (i == 0 || (first + i) % Every == 0 || i == window.Length - 1)
+                {
+                    _anchors[first + i] = window[i];
+                }
+            }
+        }
+    }
+
+    private (long At, IRow Key)? Floor(long position)
+    {
+        int low = 0, high = _anchors.Count;
         while (low < high)
         {
             var middle = (low + high) >>> 1;
-            if (order.Compare(rows[middle], key) < 0)
+            if (_anchors.Keys[middle] <= position)
             {
                 low = middle + 1;
             }
@@ -270,111 +381,25 @@ public sealed class Pages(SnapshotQueries queries)
             }
         }
 
-        return low;
+        return low == 0 ? null : (_anchors.Keys[low - 1], _anchors.Values[low - 1]);
     }
 
-    private async Task<IRow[]> RangeAsync(
-        ScopeState state, Generation generation, SortSpec order, long from, long to, long generationRows, CancellationToken ct)
+    private (long At, IRow Key)? Ceiling(long position)
     {
-        var rows = new List<IRow>((int)(to - from));
-        for (var chunk = from / ChunkRows; chunk * ChunkRows < to; chunk++)
+        int low = 0, high = _anchors.Count;
+        while (low < high)
         {
-            var chunkRows = await ChunkAsync(state, generation, order, chunk, ct).ConfigureAwait(false);
-            var chunkStart = chunk * ChunkRows;
-            var expected = Math.Min(ChunkRows, generationRows - chunkStart);
-            if (chunkRows.Length != expected)
+            var middle = (low + high) >>> 1;
+            if (_anchors.Keys[middle] < position)
             {
-                // The generation is gone from the database, or not the size it was counted at.
-                throw new InvalidOperationException(
-                    $"generation {generation.Number} gave {chunkRows.Length} rows at {chunkStart}, not {expected}");
+                low = middle + 1;
             }
-
-            var skip = (int)Math.Max(0, from - chunkStart);
-            var take = (int)Math.Min(chunkRows.Length - skip, to - chunkStart - skip);
-            rows.AddRange(chunkRows.AsSpan(skip, take));
-        }
-
-        return [.. rows];
-    }
-
-    private async Task<IRow[]> ChunkAsync(ScopeState state, Generation generation, SortSpec order, long chunk, CancellationToken ct)
-    {
-        var key = new ChunkKey(state.Tab.Name, generation.Number, state.Filter.Name, order.Name, chunk);
-        if (_chunks.TryGetValue(key, out var cached))
-        {
-            cached.Used = Interlocked.Increment(ref _clock);
-            Interlocked.Increment(ref _hits);
-            return cached.Rows;
-        }
-
-        Interlocked.Increment(ref _reads);
-        var rows = await queries.PageAsync(generation, state.Filter, order, chunk * ChunkRows, ChunkRows, ct).ConfigureAwait(false);
-        if (_chunks.TryAdd(key, new Chunk(rows) { Used = Interlocked.Increment(ref _clock) }))
-        {
-            Interlocked.Add(ref _cachedRows, rows.Length);
-            Evict();
-        }
-
-        return rows;
-    }
-
-    private void Evict()
-    {
-        while (Interlocked.Read(ref _cachedRows) > MaxCachedRows && !_chunks.IsEmpty)
-        {
-            var oldest = _chunks.MinBy(c => c.Value.Used);
-            if (_chunks.TryRemove(oldest.Key, out var gone))
+            else
             {
-                Interlocked.Add(ref _cachedRows, -gone.Rows.Length);
-            }
-        }
-    }
-
-    private long? BeforeFromCache(ScopeState state, Generation generation, SortSpec order, IRow key)
-    {
-        foreach (var (chunkKey, chunk) in _chunks)
-        {
-            if (chunkKey.Tab != state.Tab.Name || chunkKey.Generation != generation.Number || chunkKey.Filter != state.Filter.Name
-                || chunkKey.Order != order.Name || chunk.Rows.Length == 0)
-            {
-                continue;
-            }
-
-            if (order.Compare(chunk.Rows[0], key) <= 0 && order.Compare(key, chunk.Rows[^1]) <= 0)
-            {
-                return chunkKey.Index * ChunkRows + Before(chunk.Rows, key, order);
-            }
-
-            if (chunkKey.Index == 0 && order.Compare(key, chunk.Rows[0]) < 0)
-            {
-                return 0;
+                high = middle;
             }
         }
 
-        return null;
-    }
-
-    private async Task<long> CountAsync(Tab tab, Generation generation, FilterSpec filter, CancellationToken ct)
-    {
-        var key = (tab.Name, generation.Number, filter.Name);
-        var lazy = _counts.GetOrAdd(key, _ => new Lazy<Task<long>>(() => queries.CountAsync(tab, generation, filter, CancellationToken.None)));
-        try
-        {
-            return await lazy.Value.WaitAsync(ct).ConfigureAwait(false);
-        }
-        catch (Exception) when (lazy.Value.IsFaulted)
-        {
-            _counts.TryRemove(new KeyValuePair<(string, long, string), Lazy<Task<long>>>(key, lazy));
-            throw;
-        }
-    }
-
-    private readonly record struct ChunkKey(string Tab, long Generation, string Filter, string Order, long Index);
-
-    private sealed class Chunk(IRow[] rows)
-    {
-        public IRow[] Rows { get; } = rows;
-
-        public long Used;
+        return low == _anchors.Count ? null : (_anchors.Keys[low], _anchors.Values[low]);
     }
 }

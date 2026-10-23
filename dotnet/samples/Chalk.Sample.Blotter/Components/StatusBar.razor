@@ -6,29 +6,32 @@
 <span class="chip @(Status.State == BlotterState.Live ? "live" : "behind")" title="@Status.Refusal">
     <b>@Status.State</b>
 </span>
-<span class="chip" title="The snapshot pages are read from, and the database watermark it was taken at">
-    <span class="label">generation</span><b>@Status.Generation</b>
-    <span class="label">of</span>@Status.GenerationRows.ToString("N0", CultureInfo.InvariantCulture)
-    <span class="label">as of</span>@Age(Status.CompleteThrough)
+<span class="chip" title="How orders_current keeps up with order_versions: a trigger in the same statement, or a job of its own that runs behind">
+    <span class="label">orders_current by</span><b>@(Status.Sync == CurrentSync.Trigger ? "trigger" : "lagging job")</b>
+    @if (Status.Sync == CurrentSync.Lagging)
+    {
+        <span class="label @(Status.CurrentStalled ? "stalled" : "")">behind by</span>@Status.CurrentWaiting.ToString("N0", CultureInfo.InvariantCulture)
+    }
 </span>
-<span class="chip @(Status.IngestionStalled ? "stalled" : "")" title="How far the database is behind the feed, and how many versions it has still to write">
-    <span class="label">database behind</span><b>@Age(Status.DatabaseWatermark)</b>
+<span class="chip @(Status.IngestionStalled ? "stalled" : "")" title="How long ago the oldest row the database has not been seen to hold was sent, and how many rows the streams have sent that it has still to write">
+    <span class="label">database behind</span><b>@Seconds(Status.Behind)</b>
     <span class="label">waiting</span>@Status.NotYetIngested.ToString("N0", CultureInfo.InvariantCulture)
 </span>
 <span class="chip" title="Changes a second the house is making now, and the versions and fills the streams have sent">
     <span class="label">feed</span><b>@Status.FeedRate.ToString("N0", CultureInfo.InvariantCulture)/s</b>
     <span class="label">sent</span>@Status.Published.ToString("N0", CultureInfo.InvariantCulture)
 </span>
-<span class="chip" title="Orders whose latest version the snapshot does not have, their versions, and the fills after the snapshot's watermark">
+<span class="chip" title="Orders whose latest version the database has not been seen to hold, their versions, and the fills it has not been seen to hold; and of those, the ones it has now been seen to hold, about to leave">
     <span class="label">tail</span><b>@Status.TailOrders.ToString("N0", CultureInfo.InvariantCulture)</b>
     <span class="label">orders</span>@Status.TailVersions.ToString("N0", CultureInfo.InvariantCulture)
     <span class="label">versions</span>@Status.TailFills.ToString("N0", CultureInfo.InvariantCulture)
-    <span class="label">fills</span>
+    <span class="label">fills</span>@Status.TailConfirmed.ToString("N0", CultureInfo.InvariantCulture)
+    <span class="label">confirmed</span>
 </span>
 <span class="chip" title="Order versions that have happened and that the order stream, running behind the fills, has not sent yet">
     <span class="label">orders behind fills</span><b>@Status.OrdersHeld.ToString("N0", CultureInfo.InvariantCulture)</b>
 </span>
-<span class="chip" title="Tail @Mb(Status.TailBytes), @Status.Scopes live scopes @Mb(Status.ScopeBytes), page cache @Mb(Status.PageBytes) in @Status.PageChunks chunks">
+<span class="chip" title="Tail @Mb(Status.TailBytes), @Status.Scopes live scopes @Mb(Status.ScopeBytes), counts and fills cached @Mb(Status.PageBytes)">
     <span class="label">host</span><b>@Mb(Status.UsedBytes)</b>
     <span class="label">of</span>
     <select value="@(Budget >> 20)" @onchange="ChangeAsync" aria-label="Host memory budget">
@@ -41,21 +44,21 @@
 }
 else
 {
-<span class="chip" title="DuckDB's own memory, outside the host's budget; the process's managed heap, for comparison">
-    <span class="label">DuckDB</span><b>@Mb(Status.DatabaseBytes)</b>
+<span class="chip" title="PostgreSQL's database on disk, outside the host's budget; the process's managed heap, for comparison">
+    <span class="label">PostgreSQL</span><b>@Mb(Status.DatabaseBytes)</b>
     <span class="label">heap</span>@Mb(Status.ManagedHeapBytes)
 </span>
-<span class="chip" title="Statements ChalkQL has run against the database, and those stopped at the time limit; snapshot chunks read and those the cache answered; the last refresh">
+<span class="chip" title="Statements ChalkQL has run against the database, and those stopped at the time limit; reads of pages, and lookups of the tail's rows a read placed; the last refresh">
     <span class="label">statements</span><b>@Status.Statements.ToString("N0", CultureInfo.InvariantCulture)</b>
     <span class="label">stopped</span>@Status.TimedOut.ToString("N0", CultureInfo.InvariantCulture)
-    <span class="label">chunks</span>@Status.PageReads.ToString("N0", CultureInfo.InvariantCulture)/@Status.PageHits.ToString("N0", CultureInfo.InvariantCulture)
+    <span class="label">reads</span>@Status.PageReads.ToString("N0", CultureInfo.InvariantCulture)
+    <span class="label">lookups</span>@Status.PageLookups.ToString("N0", CultureInfo.InvariantCulture)
     <span class="label">refresh</span>@Status.LastRefreshMs.ToString("F1", CultureInfo.InvariantCulture) ms
 </span>
-<span class="chip" title="Generations taken over; the last one's build in DuckDB, its switch in the host, and the orders it took out of the tail">
-    <span class="label">turnovers</span><b>@Status.Turnovers</b>
-    <span class="label">build</span>@Status.LastBuildMs.ToString("N0", CultureInfo.InvariantCulture) ms
-    <span class="label">switch</span>@Status.LastSwitchMs.ToString("N0", CultureInfo.InvariantCulture) ms
-    <span class="label">evicted</span>@Status.LastEvicted.ToString("N0", CultureInfo.InvariantCulture)
+<span class="chip" title="Lookups of the whole tail in the database, and the rows they let leave it; versions the last gap fill read, and those gap fills added to the tail">
+    <span class="label">confirmations</span><b>@Status.Confirmations.ToString("N0", CultureInfo.InvariantCulture)</b>
+    <span class="label">left</span>@Status.Evicted.ToString("N0", CultureInfo.InvariantCulture)
+    <span class="label">gap fill</span>@Status.GapRead.ToString("N0", CultureInfo.InvariantCulture)/@Status.GapFilled.ToString("N0", CultureInfo.InvariantCulture)
 </span>
 }
 
@@ -78,7 +81,7 @@ else
 
     private static string Mb(long bytes) => BlotterHost.Megabytes(bytes);
 
-    private static string Age(DateTime? time) => time is { } t
-        ? (DateTime.UtcNow - DateTime.SpecifyKind(t, DateTimeKind.Utc)).TotalSeconds.ToString("F1", CultureInfo.InvariantCulture) + " s"
+    private static string Seconds(TimeSpan? time) => time is { } t
+        ? t.TotalSeconds.ToString("F1", CultureInfo.InvariantCulture) + " s"
         : "–";
 }

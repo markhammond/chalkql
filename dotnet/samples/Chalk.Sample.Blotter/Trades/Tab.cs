@@ -1,24 +1,23 @@
 using Apache.Arrow;
 using Chalk.Sample.Blotter.Market;
-using DuckDB.NET.Data;
+using System.Data.Common;
 
 namespace Chalk.Sample.Blotter.Trades;
 
 /// <summary>
 /// A tab of the blotter: client orders, which change, or their fills, which do not. What a tab
-/// reads, how its rows are keyed and shown, and how it is bounded to a snapshot generation.
+/// reads, and how its rows are keyed and shown.
 /// </summary>
 /// <remarks>
-/// Orders are read from a generation's own snapshot of their latest versions, and the tail
-/// overrides the orders it holds newer versions of. Fills never change, so the database's fills
-/// table is its own snapshot: a generation is every fill at or before its watermark, and the
-/// tail every fill after it. The two cannot overlap, and nothing is overridden.
+/// Orders are read live from <c>orders_current</c>, one row per order, and the tail overrides an
+/// order whose version there is older than the one the stream has sent. Fills never change, so a
+/// fill in both the table and the tail is the same row, and nothing is overridden.
 /// </remarks>
 public sealed class Tab
 {
     private Tab(
-        string name, string title, IReadOnlyList<Column> columns, Column key, Column time, string table, string bound,
-        string select, Func<RecordBatch, int, IRow> read, Func<DuckDBDataReader, IRow> readDuck, bool overrides)
+        string name, string title, IReadOnlyList<Column> columns, Column key, Column time, string table,
+        string select, Func<RecordBatch, int, IRow> read, Func<DbDataReader, IRow> readDb, bool overrides)
     {
         Name = name;
         Title = title;
@@ -26,10 +25,9 @@ public sealed class Tab
         Key = key;
         Time = time;
         Table = table;
-        Bound = bound;
         Select = select;
         Read = read;
-        ReadDuck = readDuck;
+        ReadDb = readDb;
         Overrides = overrides;
     }
 
@@ -46,17 +44,15 @@ public sealed class Tab
     /// <summary>When the row happened: the period of interest that bounds a filter's list of values.</summary>
     public Column Time { get; }
 
-    /// <summary>The table pages are read from.</summary>
+    /// <summary>The table pages are read from, as ChalkQL names it.</summary>
     public string Table { get; }
-
-    /// <summary>The condition that keeps a read to one generation, over <c>@generation</c> and <c>@through</c>.</summary>
-    public string Bound { get; }
 
     public string Select { get; }
 
     public Func<RecordBatch, int, IRow> Read { get; }
 
-    public Func<DuckDBDataReader, IRow> ReadDuck { get; }
+    /// <summary>A row read straight from the database, which only the oracle does.</summary>
+    public Func<DbDataReader, IRow> ReadDb { get; }
 
     /// <summary>Whether a row in the tail stands in for the snapshot's row of the same key.</summary>
     public bool Overrides { get; }
@@ -101,8 +97,7 @@ public sealed class Tab
             ],
             key,
             time,
-            "main.snapshots",
-            "generation = @generation",
+            "blotter.orders_current",
             Order.Select,
             (batch, row) => Order.Read(batch, row),
             reader => Order.Read(reader),
@@ -133,8 +128,7 @@ public sealed class Tab
             ],
             key,
             time,
-            "main.fills",
-            "event_time <= @through",
+            "blotter.fills",
             Fill.Select,
             (batch, row) => Fill.Read(batch, row),
             reader => Fill.Read(reader),

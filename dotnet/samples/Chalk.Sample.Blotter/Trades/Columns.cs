@@ -27,7 +27,7 @@ public enum ColumnKind
 /// <summary>A column of a tab: its SQL name, how the host compares, shows and binds it.</summary>
 /// <remarks>
 /// The host's comparison must order rows exactly as the database's <c>ORDER BY</c> does, because a
-/// page is merged from both: text byte by byte (DuckDB's default collation is binary, and every
+/// page is merged from both: text byte by byte (the tables' text columns are collated "C", and every
 /// value here is ASCII), numbers and times by value. No column is nullable, so no rule for nulls is
 /// needed on either side.
 /// </remarks>

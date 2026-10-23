@@ -3,12 +3,21 @@ using Chalk.Incremental;
 using Chalk.Sample.Blotter;
 using Chalk.Sample.Blotter.Components;
 using Chalk.Sample.Blotter.Live;
+using Chalk.Sample.Blotter.Market;
 
 var options = new BlotterOptions
 {
     Orders = Number(Argument(args, "--orders")) ?? 5_000_000,
     BudgetBytes = (Number(Argument(args, "--budget-mb")) ?? 64) << 20,
     Maintenance = Argument(args, "--maintenance") == "recompute" ? ViewMaintenance.Recompute : ViewMaintenance.Incremental,
+    Postgres = Argument(args, "--postgres"),
+    PostgresBinaries = Argument(args, "--pg-bin"),
+    Current = Argument(args, "--current") switch
+    {
+        null or "trigger" => CurrentSync.Trigger,
+        "lagging" => CurrentSync.Lagging,
+        var other => throw new ArgumentException($"--current takes trigger or lagging, not '{other}'"),
+    },
 };
 
 if (args.Contains("--probe"))

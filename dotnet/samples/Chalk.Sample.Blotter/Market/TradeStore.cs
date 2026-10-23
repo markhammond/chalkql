@@ -1,240 +1,200 @@
 using System.Diagnostics;
 using System.Globalization;
-using DuckDB.NET.Data;
+using Npgsql;
+using NpgsqlTypes;
 
 namespace Chalk.Sample.Blotter.Market;
 
+/// <summary>How <c>orders_current</c> keeps up with <c>order_versions</c>.</summary>
+public enum CurrentSync
+{
+    /// <summary>A trigger on <c>order_versions</c> upserts the order's row in the statement that writes the version.</summary>
+    Trigger,
+
+    /// <summary>A job of its own applies the versions some time after they are written, and stalls now and then.</summary>
+    Lagging,
+}
+
 /// <summary>
-/// The system of record: append-only tables of order versions and of fills in DuckDB, standing in
-/// for a database in another process. It is in memory and in this process only so the sample runs
-/// with one command; nothing in the blotter reads it except through ChalkQL, or through SQL a remote
-/// database would take as well.
+/// The system of record, in PostgreSQL: every version of every client order (<c>order_versions</c>),
+/// every fill (<c>fills</c>), and <c>orders_current</c>, one row per order at its latest version, which
+/// the blotter reads live. The blotter is a bolt-on: it asks of these tables what any reader could —
+/// rows found by key, sorted and filtered — and nothing about when <c>orders_current</c> catches up.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>order_versions</c> holds every version of every client order, indexed by order and version,
-/// which serves an order's history; <c>fills</c>, every fill, indexed by order, which serves an
-/// order's fills. The two are ingested apart, each from its own stream, so the database can hold a
-/// fill whose order it does not have yet. <c>ingest_watermark</c> holds a time for each stream: every
-/// version, or every fill, whose event time is at or before it is visible. Each only moves forward,
-/// and they are all the blotter needs to know about the database's lag.
+/// The tables are <c>UNLOGGED</c>, and the corpus is written with binary <c>COPY</c> on several
+/// connections at once before any index or trigger exists; then the indexes are built in parallel.
 /// </para>
 /// <para>
-/// <c>snapshots</c> is the blotter's own: the latest version of each order as of a moment, one
-/// generation at a time, so that a page sorts one row per order rather than every version. Fills need
-/// none: they never change, so the fills at or before a watermark are a snapshot already.
+/// Text columns are collated <c>"C"</c>, byte by byte, whatever the database's own collation: the
+/// host merges the database's rows with its own and must order text exactly as the database does.
 /// </para>
 /// </remarks>
-public sealed class TradeStore : IDisposable
+public sealed class TradeStore(string connectionString)
 {
     private const string OrderColumns = """
-        order_id    UUID      NOT NULL,
-        version     INTEGER   NOT NULL,
-        event_time  TIMESTAMP NOT NULL,
-        order_time  TIMESTAMP NOT NULL,
-        cl_ord_id   VARCHAR   NOT NULL,
-        client      VARCHAR   NOT NULL,
-        region      VARCHAR   NOT NULL,
-        channel     VARCHAR   NOT NULL,
-        instrument  VARCHAR   NOT NULL,
-        side        VARCHAR   NOT NULL,
-        qty         DOUBLE    NOT NULL,
-        filled_qty  DOUBLE    NOT NULL,
-        avg_price   DOUBLE    NOT NULL,
-        markup_bps  DOUBLE    NOT NULL,
-        status      VARCHAR   NOT NULL
+        order_id    uuid             NOT NULL,
+        version     integer          NOT NULL,
+        event_time  timestamp(6)     NOT NULL,
+        order_time  timestamp(6)     NOT NULL,
+        cl_ord_id   text COLLATE "C" NOT NULL,
+        client      text COLLATE "C" NOT NULL,
+        region      text COLLATE "C" NOT NULL,
+        channel     text COLLATE "C" NOT NULL,
+        instrument  text COLLATE "C" NOT NULL,
+        side        text COLLATE "C" NOT NULL,
+        qty         double precision NOT NULL,
+        filled_qty  double precision NOT NULL,
+        avg_price   double precision NOT NULL,
+        markup_bps  double precision NOT NULL,
+        status      text COLLATE "C" NOT NULL
         """;
 
-    private readonly DuckDBConnection _keepAlive;
+    // A newer version replaces the row; an older one, arriving late, changes nothing.
+    private const string Upsert = """
+        ON CONFLICT (order_id) DO UPDATE SET
+            version = EXCLUDED.version, event_time = EXCLUDED.event_time, filled_qty = EXCLUDED.filled_qty,
+            avg_price = EXCLUDED.avg_price, status = EXCLUDED.status
+        WHERE orders_current.version < EXCLUDED.version
+        """;
 
-    public TradeStore(long memoryLimitBytes)
+    public string ConnectionString { get; } = connectionString;
+
+    /// <summary>How long <see cref="GenerateAsync"/> took to write the corpus, and then to index it.</summary>
+    public TimeSpan LoadTime { get; private set; }
+
+    public TimeSpan IndexTime { get; private set; }
+
+    /// <summary>What the corpus holds, for the planner's estimates.</summary>
+    public long Orders { get; private set; }
+
+    public long Versions { get; private set; }
+
+    public long Fills { get; private set; }
+
+    /// <summary>The latest event in the corpus: everything after it, the exchange wrote.</summary>
+    public DateTime LoadedThrough { get; private set; }
+
+    public NpgsqlConnection Open()
     {
-        ConnectionString = $"DataSource=:memory:blotter-{Guid.NewGuid():N}?cache=shared";
-        _keepAlive = new DuckDBConnection(ConnectionString);
-        _keepAlive.Open();
-        Execute($"SET memory_limit = '{memoryLimitBytes / (1 << 20)}MB'");
-        Execute($"CREATE TABLE order_versions ({OrderColumns})");
-        Execute("""
-            CREATE TABLE fills (
-                fill_id     UUID      NOT NULL,
-                order_id    UUID      NOT NULL,
-                event_time  TIMESTAMP NOT NULL,
-                cl_ord_id   VARCHAR   NOT NULL,
-                client      VARCHAR   NOT NULL,
-                region      VARCHAR   NOT NULL,
-                channel     VARCHAR   NOT NULL,
-                instrument  VARCHAR   NOT NULL,
-                side        VARCHAR   NOT NULL,
-                qty         DOUBLE    NOT NULL,
-                price       DOUBLE    NOT NULL,
-                mid         DOUBLE    NOT NULL,
-                markup_bps  DOUBLE    NOT NULL
-            )
-            """);
-        Execute("CREATE TABLE ingest_watermark (stream VARCHAR NOT NULL, complete_through TIMESTAMP NOT NULL)");
-        Execute($"CREATE TABLE snapshots (generation BIGINT NOT NULL, {OrderColumns})");
-    }
-
-    public string ConnectionString { get; }
-
-    /// <summary>How long <see cref="Generate"/> took.</summary>
-    public TimeSpan GenerationTime { get; private set; }
-
-    public DuckDBConnection Open()
-    {
-        var connection = new DuckDBConnection(ConnectionString);
+        var connection = new NpgsqlConnection(ConnectionString);
         connection.Open();
         return connection;
     }
 
     /// <summary>
-    /// Fills the tables with a history of <paramref name="orders"/> client orders, worked over the days
-    /// before <paramref name="end"/>, in a few statements. The values are hashes of the order id, so a
-    /// corpus of one size is the same corpus every time. Each order is filled in up to three fills that
-    /// split its lots, at prices around a mid with the channel's markup on top; its average price is the
-    /// fills', weighted; one in fifty is cancelled after some of its lots are filled. The newest
-    /// <paramref name="openTail"/> are left new, for the exchange to work from its first second.
+    /// Creates the tables and fills them with <paramref name="orders"/> client orders worked over the
+    /// <paramref name="span"/> before <paramref name="end"/>, the newest <paramref name="openTail"/> left
+    /// new; indexes them; and from then on keeps <c>orders_current</c> as <paramref name="sync"/> says.
     /// </summary>
-    public (DateTime OrdersThrough, DateTime FillsThrough) Generate(long orders, DateTime end, TimeSpan span, int openTail)
+    public async Task GenerateAsync(
+        long orders, DateTime end, TimeSpan span, int openTail, CurrentSync sync, CancellationToken ct)
     {
         var started = Stopwatch.GetTimestamp();
+        Execute($"""
+            CREATE UNLOGGED TABLE order_versions ({OrderColumns});
+            CREATE UNLOGGED TABLE orders_current ({OrderColumns});
+            CREATE UNLOGGED TABLE fills (
+                fill_id     uuid             NOT NULL,
+                order_id    uuid             NOT NULL,
+                event_time  timestamp(6)     NOT NULL,
+                cl_ord_id   text COLLATE "C" NOT NULL,
+                client      text COLLATE "C" NOT NULL,
+                region      text COLLATE "C" NOT NULL,
+                channel     text COLLATE "C" NOT NULL,
+                instrument  text COLLATE "C" NOT NULL,
+                side        text COLLATE "C" NOT NULL,
+                qty         double precision NOT NULL,
+                price       double precision NOT NULL,
+                mid         double precision NOT NULL,
+                markup_bps  double precision NOT NULL
+            );
+            """);
+
         var spacing = Math.Max(1, (long)(span.TotalMicroseconds / Math.Max(1, orders)));
         var origin = Cells.Micros(end - TimeSpan.FromMicroseconds(spacing * orders));
-        var clients = Reference.Clients;
+        var parts = Math.Clamp(Environment.ProcessorCount / 2, 1, 6);
+        var size = (orders + parts - 1) / parts;
+        var counted = await Task.WhenAll(Enumerable.Range(0, parts).Select(p => Task.Run(() =>
+        {
+            // Each part on three connections, one per table, so the three COPYs stream side by side.
+            using var versions = Open();
+            using var current = Open();
+            using var fills = Open();
+            using var versionsIn = versions.BeginBinaryImport("COPY order_versions FROM STDIN (FORMAT BINARY)");
+            using var currentIn = current.BeginBinaryImport("COPY orders_current FROM STDIN (FORMAT BINARY)");
+            using var fillsIn = fills.BeginBinaryImport("COPY fills FROM STDIN (FORMAT BINARY)");
+            long versionCount = 0, fillCount = 0;
+            var latest = DateTime.MinValue;
+            for (var n = p * size; n < Math.Min(orders, (p + 1) * size); n++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var (made, filled) = Corpus.Make(n, origin, spacing, open: n >= orders - openTail);
+                foreach (var version in made)
+                {
+                    WriteOrder(versionsIn, version);
+                }
 
-        // A client by how much it trades (the first twelve times the twelfth), its channel by its
-        // rank's mix, an asset by how popular it is: each a threshold on a hash.
-        var clientByHash = Pick("u1", clients.Select((_, i) => (1.0 / (i + 1), $"{i + 1}")));
-        var assetByHash = Pick("u3", Reference.Assets.Select((a, i) => (a.Weight, $"{i + 1}")));
-        var channelByRank = "CASE " + string.Join(" ", Enumerable.Range(1, clients.Count).Select(rank =>
-            $"WHEN client_rank = {rank} THEN {Pick("u2", Reference.ChannelsOf(rank).Select(c => (c.Weight, $"'{c.Name}'")))}")) + " END";
+                WriteOrder(currentIn, made[^1]);
+                foreach (var fill in filled)
+                {
+                    WriteFill(fillsIn, fill);
+                }
 
-        // A version 7 UUID from a time and a number: the time's milliseconds, then bits hashed from
-        // the number, so a corpus of one size has the same ids every time.
-        Execute("""
-            CREATE OR REPLACE MACRO uuid7_hex(t, x) AS
-                lpad(printf('%x', epoch_ms(t)), 12, '0') || '7'
-                || lpad(printf('%x', (hash(x, 71) % 4096)::BIGINT), 3, '0')
-                || printf('%x', (8 + hash(x, 72) % 4)::BIGINT)
-                || lpad(printf('%x', (hash(x, 73) % 1152921504606846976)::BIGINT), 15, '0')
-            """);
-        Execute(string.Create(CultureInfo.InvariantCulture, $"""
-            CREATE TABLE corpus_orders AS
-            WITH h AS (
-                SELECT range AS n,
-                       (hash(range, 1) % 1000000) / 1e6 AS u1,
-                       (hash(range, 2) % 1000000) / 1e6 AS u2,
-                       (hash(range, 3) % 1000000) / 1e6 AS u3,
-                       hash(range, 4) AS h4,
-                       range >= {orders - openTail} AS open
-                FROM range({orders})
-            ), c AS (
-                SELECT *, {clientByHash} AS client_rank, {assetByHash} AS asset,
-                       TIMESTAMP '{origin:yyyy-MM-dd HH:mm:ss.ffffff}' + to_microseconds(n * {spacing}) AS order_time
-                FROM h
-            )
-            SELECT n, order_time,
-                   list_extract({Literal(clients.Select(c => c.Ref))}, client_rank) AS client,
-                   list_extract({Literal(clients.Select(c => c.Region))}, client_rank) AS region,
-                   {channelByRank} AS channel,
-                   list_extract({Literal(Reference.Instruments)}, asset) AS instrument,
-                   list_extract({Literal(Reference.Assets.Select(a => a.Lot))}, asset) AS lot,
-                   list_extract({Literal(Reference.Assets.Select(a => a.Price))}, asset)
-                       * (1 + ((h4 % 2000)::DOUBLE - 1000) / 10000) AS px,
-                   CASE WHEN h4 % 2 = 0 THEN 'Buy' ELSE 'Sell' END AS side,
-                   (1 + (h4 // 7) % 6)::INTEGER AS lots,
-                   CASE WHEN open THEN 0 ELSE 1 + ((h4 // 11) % 3)::INTEGER END AS fills,
-                   NOT open AND (h4 // 13) % 50 = 0 AS cancelled
-            FROM c
-            """));
+                versionCount += made.Length;
+                fillCount += filled.Length;
+                latest = made[^1].EventTime > latest ? made[^1].EventTime : latest;
+            }
 
-        // The ids over the table as written: a function of a stored column, worked out once a row.
-        Execute("CREATE TABLE corpus AS SELECT CAST(uuid7_hex(order_time, n) AS UUID) AS order_id, * FROM corpus_orders");
-        Execute("DROP TABLE corpus_orders");
-        Execute(string.Create(CultureInfo.InvariantCulture, $"""
-            CREATE TABLE corpus_fills AS
-            WITH k AS (
-                SELECT *, unnest(range(1, fills + 1))::INTEGER AS k FROM corpus
-            )
-            SELECT n, order_id, k,
-                   order_time + to_microseconds(k * 750000) AS event_time,
-                   client, region, channel, instrument, side,
-                   -- The lots each fill takes; a cancelled order is cancelled with some of its lots unfilled.
-                   (floor(lots * CASE WHEN cancelled THEN 0.6 ELSE 1 END * k / fills)
-                    - floor(lots * CASE WHEN cancelled THEN 0.6 ELSE 1 END * (k - 1) / fills)) * lot AS qty,
-                   round(px * (1 + ((hash(n, k) % 200)::DOUBLE - 100) / 100000), 6) AS mid
-            FROM k
-            """));
-        Execute(string.Create(CultureInfo.InvariantCulture, $"""
-            INSERT INTO fills
-            SELECT CAST(hx AS UUID), order_id, event_time,
-                   client || '-' || n, client, region, channel, instrument, side, qty,
-                   round(mid * (1 + CASE WHEN side = 'Buy' THEN 1 ELSE -1 END * {MarkupCase("channel")} / 10000), 4),
-                   mid, {MarkupCase("channel")}
-            FROM (SELECT *, uuid7_hex(event_time, n * 4 + k) AS hx FROM corpus_fills WHERE qty > 0)
-            ORDER BY event_time, n
-            """));
-        Execute(string.Create(CultureInfo.InvariantCulture, $"""
-            INSERT INTO order_versions
-            WITH fills_so_far AS (
-                SELECT f.order_id, f.event_time,
-                       row_number() OVER w + 1 AS version,
-                       sum(f.qty) OVER w AS filled,
-                       sum(f.qty * f.price) OVER w / sum(f.qty) OVER w AS avg_price
-                FROM fills f
-                WINDOW w AS (PARTITION BY f.order_id ORDER BY f.event_time ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
-            ), versions AS (
-                SELECT o.order_id, 1 AS version, o.order_time AS event_time, 0.0 AS filled, 0.0 AS avg_price, 'New' AS status
-                FROM corpus o
-                UNION ALL
-                SELECT s.order_id, s.version, s.event_time, s.filled, round(s.avg_price, 4),
-                       CASE WHEN s.filled >= o.lots * o.lot - 1e-9 THEN 'Filled' ELSE 'Partial' END
-                FROM fills_so_far s JOIN corpus o USING (order_id)
-                UNION ALL
-                SELECT o.order_id, coalesce(max(s.version), 1) + 1, o.order_time + to_microseconds((o.fills + 1) * 750000),
-                       coalesce(max(s.filled), 0), coalesce(round(arg_max(s.avg_price, s.version), 4), 0), 'Cancelled'
-                FROM corpus o LEFT JOIN fills_so_far s USING (order_id)
-                WHERE o.cancelled
-                GROUP BY o.order_id, o.order_time, o.fills
-            )
-            SELECT v.order_id, v.version::INTEGER, v.event_time, o.order_time, o.client || '-' || o.n, o.client,
-                   o.region, o.channel, o.instrument, o.side, o.lots * o.lot, v.filled, v.avg_price,
-                   {MarkupCase("o.channel")}, v.status
-            FROM versions v JOIN corpus o USING (order_id)
-            ORDER BY o.n, v.version
-            """));
-        Execute("DROP TABLE corpus_fills");
-        Execute("DROP TABLE corpus");
-        Execute("DROP MACRO uuid7_hex");
-        Execute("CREATE INDEX order_versions_by_order ON order_versions (order_id, version)");
-        Execute("CREATE INDEX fills_by_order ON fills (order_id)");
+            versionsIn.Complete();
+            currentIn.Complete();
+            fillsIn.Complete();
+            return (versionCount, fillCount, latest);
+        }, ct))).ConfigureAwait(false);
+        Orders = orders;
+        Versions = counted.Sum(c => c.versionCount);
+        Fills = counted.Sum(c => c.fillCount);
+        LoadedThrough = counted.Max(c => c.latest);
+        LoadTime = Stopwatch.GetElapsedTime(started);
 
-        using var connection = Open();
-        using var last = connection.CreateCommand();
-        last.CommandText = "SELECT (SELECT max(event_time) FROM order_versions), (SELECT max(event_time) FROM fills)";
-        using var reader = last.ExecuteReader();
-        reader.Read();
-        var ordersThrough = Cells.Micros(reader.GetDateTime(0));
-        var fillsThrough = Cells.Micros(reader.GetDateTime(1));
-        Execute(string.Create(CultureInfo.InvariantCulture, $"""
-            INSERT INTO ingest_watermark VALUES
-                ('orders', TIMESTAMP '{ordersThrough:yyyy-MM-dd HH:mm:ss.ffffff}'),
-                ('fills', TIMESTAMP '{fillsThrough:yyyy-MM-dd HH:mm:ss.ffffff}')
-            """));
-        GenerationTime = Stopwatch.GetElapsedTime(started);
-        return (ordersThrough, fillsThrough);
+        // Each index on a connection of its own; PostgreSQL gives each build workers of its own too.
+        started = Stopwatch.GetTimestamp();
+        string[] indexes =
+        [
+            "ALTER TABLE orders_current ADD PRIMARY KEY (order_id)",
+            "CREATE INDEX orders_current_newest ON orders_current (order_time DESC, order_id DESC)",
+            "ALTER TABLE order_versions ADD PRIMARY KEY (order_id, version)",
+            "CREATE INDEX order_versions_recent ON order_versions (event_time)",
+            "ALTER TABLE fills ADD PRIMARY KEY (fill_id)",
+            "CREATE INDEX fills_by_order ON fills (order_id)",
+            "CREATE INDEX fills_newest ON fills (event_time DESC, fill_id DESC)",
+        ];
+        await Task.WhenAll(indexes.Select(sql => Task.Run(() => Execute(sql), ct))).ConfigureAwait(false);
+        Execute("ANALYZE order_versions; ANALYZE orders_current; ANALYZE fills");
+        IndexTime = Stopwatch.GetElapsedTime(started);
+
+        if (sync == CurrentSync.Trigger)
+        {
+            Execute($"""
+                CREATE FUNCTION keep_current() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    INSERT INTO orders_current VALUES (NEW.*)
+                    {Upsert};
+                    RETURN NULL;
+                END $$;
+                CREATE TRIGGER order_versions_keep_current AFTER INSERT ON order_versions
+                    FOR EACH ROW EXECUTE FUNCTION keep_current();
+                """);
+        }
     }
 
-    /// <summary>The orders still open at the end of the corpus, latest version each, for the exchange to work.</summary>
+    /// <summary>The orders still open, latest version each, for the exchange to work.</summary>
     public List<Order> OpenOrders()
     {
         using var connection = Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = $"""
-            SELECT {Order.Select} FROM order_versions
-            QUALIFY row_number() OVER (PARTITION BY order_id ORDER BY version DESC) = 1
-                AND status IN ('New', 'Partial')
-            """;
+        using var command = new NpgsqlCommand(
+            $"SELECT {Order.Select} FROM orders_current WHERE status IN ('New', 'Partial')", connection);
         using var reader = command.ExecuteReader();
         var open = new List<Order>();
         while (reader.Read())
@@ -245,107 +205,114 @@ public sealed class TradeStore : IDisposable
         return open;
     }
 
-    /// <summary>
-    /// Writes order versions the way an ingestion job would, in one transaction with the orders'
-    /// watermark it now holds: a reader that sees the watermark sees every version it promises.
-    /// </summary>
-    public void WriteOrders(IReadOnlyList<Order> versions, DateTime completeThrough) =>
-        Write("order_versions", "orders", versions.Select(o => o.Values()), completeThrough);
+    /// <summary>Writes order versions as an ingestion job would; under the trigger, <c>orders_current</c> moves with them.</summary>
+    public void WriteOrders(IReadOnlyList<Order> versions) =>
+        Copy("order_versions", versions, WriteOrder);
 
-    /// <summary>The same for fills, and the fills' watermark.</summary>
-    public void WriteFills(IReadOnlyList<Fill> fills, DateTime completeThrough) =>
-        Write("fills", "fills", fills.Select(f => f.Values()), completeThrough);
+    public void WriteFills(IReadOnlyList<Fill> fills) =>
+        Copy("fills", fills, WriteFill);
 
-    private void Write(string table, string stream, IEnumerable<object?[]> rows, DateTime completeThrough)
+    /// <summary>What the lagging job does with a batch: each order's row moves to the newest version in it, never back.</summary>
+    public void UpsertCurrent(IReadOnlyList<Order> versions)
     {
-        using var connection = Open();
-        using var transaction = connection.BeginTransaction();
-        using (var appender = connection.CreateAppender(table))
+        if (versions.Count == 0)
         {
-            foreach (var values in rows)
-            {
-                var row = appender.CreateRow();
-                foreach (var value in values)
-                {
-                    row = value switch
-                    {
-                        Guid v => row.AppendValue(v),
-                        long v => row.AppendValue(v),
-                        int v => row.AppendValue(v),
-                        double v => row.AppendValue(v),
-                        DateTime v => row.AppendValue(v),
-                        string v => row.AppendValue(v),
-                        _ => throw new InvalidOperationException($"cannot append a {value?.GetType().Name}"),
-                    };
-                }
-
-                row.EndRow();
-            }
+            return;
         }
 
-        using var watermark = connection.CreateCommand();
-        watermark.Transaction = transaction;
-        watermark.CommandText = "UPDATE ingest_watermark SET complete_through = greatest(complete_through, $1) WHERE stream = $2";
-        watermark.Parameters.Add(new DuckDBParameter(completeThrough));
-        watermark.Parameters.Add(new DuckDBParameter(stream));
-        watermark.ExecuteNonQuery();
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using (var stage = new NpgsqlCommand(
+            $"CREATE TEMP TABLE staged (LIKE orders_current INCLUDING ALL) ON COMMIT DROP", connection, transaction))
+        {
+            stage.ExecuteNonQuery();
+        }
+
+        using (var import = connection.BeginBinaryImport("COPY staged FROM STDIN (FORMAT BINARY)"))
+        {
+            foreach (var version in versions.GroupBy(v => v.OrderId).Select(g => g.MaxBy(v => v.Version)!))
+            {
+                WriteOrder(import, version);
+            }
+
+            import.Complete();
+        }
+
+        using (var upsert = new NpgsqlCommand($"INSERT INTO orders_current SELECT * FROM staged {Upsert}", connection, transaction))
+        {
+            upsert.ExecuteNonQuery();
+        }
+
         transaction.Commit();
     }
 
-    /// <summary>The watermarks as the database holds them now: orders', then fills'.</summary>
-    public (DateTime Orders, DateTime Fills) Watermarks(DuckDBConnection connection)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT (SELECT complete_through FROM ingest_watermark WHERE stream = 'orders'),
-                   (SELECT complete_through FROM ingest_watermark WHERE stream = 'fills')
-            """;
-        using var reader = command.ExecuteReader();
-        reader.Read();
-        return (Cells.Micros(reader.GetDateTime(0)), Cells.Micros(reader.GetDateTime(1)));
-    }
-
-    /// <summary>DuckDB's memory in use, in bytes, as it reports it.</summary>
-    public long MemoryBytes()
+    /// <summary>The database's size on disk, as PostgreSQL reports it.</summary>
+    public long SizeBytes()
     {
         using var connection = Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT coalesce(sum(memory_usage_bytes), 0)::BIGINT FROM duckdb_memory()";
+        using var command = new NpgsqlCommand("SELECT pg_database_size(current_database())", connection);
         return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
     public void Execute(string sql)
     {
         using var connection = Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
+        using var command = new NpgsqlCommand(sql, connection) { CommandTimeout = 0 };
         command.ExecuteNonQuery();
     }
 
-    public void Dispose() => _keepAlive.Dispose();
-
-    private static string MarkupCase(string channel) =>
-        $"CASE {channel} " + string.Join(" ", Reference.Channels.Select(c => string.Create(
-            CultureInfo.InvariantCulture, $"WHEN '{c}' THEN {Reference.MarkupBps(c)}"))) + " END";
-
-    /// <summary>A pick by weight, as a CASE over thresholds of the uniform <paramref name="uniform"/>.</summary>
-    private static string Pick(string uniform, IEnumerable<(double Weight, string Value)> choices)
+    private void Copy<T>(string table, IReadOnlyList<T> rows, Action<NpgsqlBinaryImporter, T> write)
     {
-        var list = choices.ToList();
-        var total = list.Sum(c => c.Weight);
-        var below = 0.0;
-        var cases = new List<string>();
-        foreach (var (weight, value) in list.SkipLast(1))
+        if (rows.Count == 0)
         {
-            below += weight / total;
-            cases.Add(string.Create(CultureInfo.InvariantCulture, $"WHEN {uniform} < {below} THEN {value}"));
+            return;
         }
 
-        return cases.Count == 0 ? list[0].Value : $"CASE {string.Join(" ", cases)} ELSE {list[^1].Value} END";
+        using var connection = Open();
+        using var import = connection.BeginBinaryImport($"COPY {table} FROM STDIN (FORMAT BINARY)");
+        foreach (var row in rows)
+        {
+            write(import, row);
+        }
+
+        import.Complete();
     }
 
-    private static string Literal(IEnumerable<string> values) => "[" + string.Join(", ", values.Select(v => $"'{v}'")) + "]";
+    internal static void WriteOrder(NpgsqlBinaryImporter import, Order o)
+    {
+        import.StartRow();
+        import.Write(o.OrderId, NpgsqlDbType.Uuid);
+        import.Write(o.Version, NpgsqlDbType.Integer);
+        import.Write(o.EventTime, NpgsqlDbType.Timestamp);
+        import.Write(o.OrderTime, NpgsqlDbType.Timestamp);
+        import.Write(o.ClOrdId, NpgsqlDbType.Text);
+        import.Write(o.Client, NpgsqlDbType.Text);
+        import.Write(o.Region, NpgsqlDbType.Text);
+        import.Write(o.Channel, NpgsqlDbType.Text);
+        import.Write(o.Instrument, NpgsqlDbType.Text);
+        import.Write(o.Side, NpgsqlDbType.Text);
+        import.Write(o.Qty, NpgsqlDbType.Double);
+        import.Write(o.FilledQty, NpgsqlDbType.Double);
+        import.Write(o.AvgPrice, NpgsqlDbType.Double);
+        import.Write(o.MarkupBps, NpgsqlDbType.Double);
+        import.Write(o.Status, NpgsqlDbType.Text);
+    }
 
-    private static string Literal(IEnumerable<double> values) =>
-        "[" + string.Join(", ", values.Select(v => v.ToString("R", CultureInfo.InvariantCulture))) + "]";
+    internal static void WriteFill(NpgsqlBinaryImporter import, Fill f)
+    {
+        import.StartRow();
+        import.Write(f.FillId, NpgsqlDbType.Uuid);
+        import.Write(f.OrderId, NpgsqlDbType.Uuid);
+        import.Write(f.EventTime, NpgsqlDbType.Timestamp);
+        import.Write(f.ClOrdId, NpgsqlDbType.Text);
+        import.Write(f.Client, NpgsqlDbType.Text);
+        import.Write(f.Region, NpgsqlDbType.Text);
+        import.Write(f.Channel, NpgsqlDbType.Text);
+        import.Write(f.Instrument, NpgsqlDbType.Text);
+        import.Write(f.Side, NpgsqlDbType.Text);
+        import.Write(f.Qty, NpgsqlDbType.Double);
+        import.Write(f.Price, NpgsqlDbType.Double);
+        import.Write(f.Mid, NpgsqlDbType.Double);
+        import.Write(f.MarkupBps, NpgsqlDbType.Double);
+    }
 }

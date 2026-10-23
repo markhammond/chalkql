@@ -10,7 +10,7 @@
         <button role="tab" aria-selected="@(t == Tab)" class="tab @(t == Tab ? "selected" : "")" @onclick="() => Select.InvokeAsync(t)">@t.Title</button>
     }
     <span class="spacer"></span>
-    <span class="chip" title="The rows the tab has now: counted in the database at the snapshot, the tail's added">
+    <span class="chip" title="The rows the tab has now, about: counted in the database a moment ago, the tail's added">
         <span class="label">~rows</span><b>@_total.ToString("N0", CultureInfo.InvariantCulture)</b>
     </span>
     <span class="chip"><span class="label">sort by</span><b>@_sort.Name</b></span>
@@ -35,11 +35,11 @@
     @if (_estimate is { } e)
     {
         <span>
-            Scans up to <b>@Rows(e.RowsRead)</b> rows
+            Scans up to <b>@Rows(e.RowsRead)</b> rows <span class="muted">(@e.EstimatedBy)</span>
             @(e.SortInDatabase ? "" : "— sorted in the host, every row pulled across")
             @(e.FilterInDatabase ? "" : "; part of the filter runs in the host")
         </span>
-        <span class="muted">· the filter passes @(_counted?.ToString("N0", CultureInfo.InvariantCulture) ?? "…") rows of generation @(_scope?.State.Generation?.Number), counted</span>
+        <span class="muted">· the filter passes @(_counted?.ToString("N0", CultureInfo.InvariantCulture) ?? "…") rows in the database, counted</span>
     }
     <span class="muted">· each statement stopped after @Host.Options.QueryTimeLimit.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) s</span>
 </div>
@@ -47,7 +47,7 @@
 @if (_editing is { } editing)
 {
     <FilterEditor Tab="Tab" Column="editing" Current="_filter.For(editing)" Within="PeriodOfInterest()"
-                  Generation="_scope?.State.Generation" Apply="ApplyFilterAsync" Close="() => _editing = null" />
+                  Apply="ApplyFilterAsync" Close="() => _editing = null" />
 }
 
 @if (_refusal is not null)
@@ -167,12 +167,12 @@
 <details>
     <summary>How this tab is answered</summary>
     <p>
-        Each page is generation @(_scope?.State.Generation?.Number) of the database
-        (@(Tab.Overrides ? "a snapshot of every order's latest version" : "the fills at or before its watermark")),
-        read through ChalkQL with the sort, the filter and the paging pushed down, merged with this filter's live scope:
-        a ChalkQL standing view over the tail of what the feed has sent since the watermark.
+        Each page is read live from PostgreSQL (@(Tab.Overrides ? "orders_current, one row per order" : "fills")) through ChalkQL,
+        from the key of a row already shown, with the sort, the filter and the limit pushed down; and merged with this
+        filter's live scope, a ChalkQL standing view over the tail: what the streams have sent that the database has not
+        been seen to hold yet.
     </p>
-    <pre>@SnapshotQueries.PageSql(Tab, _filter, _sort)</pre>
+    <pre>@SourceQueries.ReadSql(Tab, _filter, _sort, fromKey: true)</pre>
     <pre>@LiveScope.Sql(Tab, _filter)</pre>
     <button @onclick="ShowPlansAsync">Show the plans</button>
     @if (_plans is not null)
@@ -200,6 +200,7 @@
     private ElementReference _scroller;
     private DotNetObjectReference<BlotterGrid>? _self;
     private GridItemsProvider<BlotterRow> _provider = default!;
+    private PageView _pages = default!;
     private LiveScope? _scope;
     private FilterSpec _filter = FilterSpec.None;
     private SortSpec _sort = default!;
@@ -212,16 +213,19 @@
 
     // The grid is waiting for the first page of a new sort or filter: it stays as it was, dimmed.
     private bool _waiting;
-    private long _view;
+    private long _reloads;
 
     // Scrolled away from the top, the grid holds its rows in place: rows arriving above it are counted
     // here rather than pushing the rows down, until the reader goes back to the top.
     private (IRow Key, long Position)? _anchor;
     private long _hidden;
+    private DateTime _hiddenAt;
     private double _scrollTop;
 
-    // The orders opened to show their fills, by id, each with the version last seen, to find it by.
+    // The orders opened to show their fills, by id, each with the version last seen; and where a
+    // read last found each, which is where its fills are let in.
     private readonly Dictionary<Guid, Order> _open = [];
+    private readonly Dictionary<Guid, long> _openAt = [];
     private IReadOnlyList<Opened> _opened = [];
 
     private (Fill Fill, double X, double Y, bool Looked, Order? Order)? _hover;
@@ -232,6 +236,7 @@
     {
         _flashes = new Flashes(Tab.Columns);
         _sort = Tab.DefaultSort;
+        _pages = Host.Pages.View(_sort);
         _provider = ProvideAsync;
         Host.Published += OnPublished;
         await AcquireAsync(_filter);
@@ -253,20 +258,23 @@
         var atTop = scrollTop < RowHeight / 2;
         var wasAtTop = _scrollTop < RowHeight / 2;
         _scrollTop = scrollTop;
-        if (wasAtTop && !atTop && _anchor is null && _scope?.State is { Generation: not null } state)
+        if (wasAtTop && !atTop && !_pages.Held && _scope?.State is { Ready: true } state)
         {
-            // Leaving the top: hold the row now first in view where it is, by its sort key; a fill in
-            // view holds its order.
+            // Leaving the top: positions hold from here on, and the row now first in view is the one
+            // whose rank says how many rows have arrived above it; a fill in view holds its order.
+            _pages.Held = true;
             var slot = Nesting.Locate((long)(scrollTop / RowHeight), _opened);
-            var page = await Host.Pages.GetAsync(state, _sort, slot.Position, 1, CancellationToken.None);
+            var page = await _pages.GetAsync(state, slot.Position, 1, CancellationToken.None);
             if (page.Rows.Length == 1)
             {
-                _anchor = (page.Rows[0], slot.Position);
+                _anchor = (page.Rows[0], page.Start);
+                _hiddenAt = DateTime.UtcNow;
             }
         }
-        else if (atTop && _anchor is not null)
+        else if (atTop && _pages.Held)
         {
             // Back at the top: what arrived above is shown, and new rows push down again.
+            _pages.Held = false;
             _anchor = null;
             _hidden = 0;
             await RefreshAsync();
@@ -275,114 +283,145 @@
 
     private async ValueTask<GridItemsProviderResult<BlotterRow>> ProvideAsync(GridItemsProviderRequest<BlotterRow> request)
     {
-        var view = _view;
-        for (var attempt = 0; ; attempt++)
+        var reloads = _reloads;
+        var scope = _scope;
+        if (scope is null || !scope.State.Ready)
         {
-            var scope = _scope;
-            if (scope is null || scope.State.Generation is null)
+            return GridItemsProviderResult.From<BlotterRow>([], 0);
+        }
+
+        if (scope.Fault is { } fault)
+        {
+            await InvokeAsync(() => Refuse($"the live scope failed: {fault.Message}"));
+            return GridItemsProviderResult.From<BlotterRow>([], 0);
+        }
+
+        var state = scope.State;
+        var ct = request.CancellationToken;
+        try
+        {
+            // What has arrived above the held rows, counted at most once a second, and only near the
+            // top, where positions are close to exact.
+            if (_anchor is { } anchor && DateTime.UtcNow - _hiddenAt > TimeSpan.FromSeconds(1))
             {
-                return GridItemsProviderResult.From<BlotterRow>([], 0);
+                _hiddenAt = DateTime.UtcNow;
+                _hidden = anchor.Position > 100_000
+                    ? 0
+                    : Math.Max(0, await Host.Pages.RankAsync(state, _sort, anchor.Key, ct) - anchor.Position);
             }
 
-            if (scope.Fault is { } fault)
-            {
-                await InvokeAsync(() => Refuse($"the live scope failed: {fault.Message}"));
-                return GridItemsProviderResult.From<BlotterRow>([], 0);
-            }
+            var hidden = _hidden;
+            var rows = Math.Max(0, await Host.Pages.TotalAsync(state, ct) - hidden);
 
-            var state = scope.State;
-            var ct = request.CancellationToken;
-            try
+            // The opened orders are let in where a read last found them. A read that finds one
+            // somewhere else, or finds another row where it was, moves it, and the grid's rows are
+            // worked out again.
+            IReadOnlyList<Opened> opened = [];
+            List<Slot> slots = [];
+            Page? page = null;
+            for (var pass = 0; pass < 3; pass++)
             {
-                var hidden = 0L;
-                if (_anchor is { } anchor)
-                {
-                    hidden = Math.Max(0, await Host.Pages.RankAsync(state, _sort, anchor.Key, ct) - anchor.Position);
-                }
-
-                var rows = await Host.Pages.TotalAsync(state, ct) - hidden;
-                var opened = await OpenedAsync(state, hidden, rows, ct);
-                var slots = Nesting.Map(request.StartIndex, request.Count ?? 60, rows, opened);
+                opened = await OpenedAsync(state, rows, ct);
+                slots = Nesting.Map(request.StartIndex, request.Count ?? 60, rows, opened);
                 var positions = slots.Where(s => !s.IsFill).Select(s => s.Position).ToList();
-                var page = positions.Count == 0
+                page = positions.Count == 0
                     ? null
-                    : await Host.Pages.GetAsync(state, _sort, positions[0] + hidden, (int)(positions[^1] - positions[0] + 1), ct);
-
-                var now = DateTime.UtcNow;
-                var shown = new List<BlotterRow>(slots.Count);
-                foreach (var slot in slots)
+                    : await _pages.GetAsync(state, positions[0], (int)(positions[^1] - positions[0] + 1), ct);
+                if (!Learn(page))
                 {
-                    if (slot.Under is { } under)
-                    {
-                        shown.Add(_fillFlashes.Decorate(under.Fills[slot.Fill], now, under.Order.OrderId));
-                    }
-                    else if (page is not null && slot.Position - positions[0] < page.Rows.Length)
-                    {
-                        shown.Add(_flashes.Decorate(page.Rows[slot.Position - positions[0]], now));
-                    }
+                    break;
                 }
+            }
 
-                _flashes.Seen(state.IngestedThrough, now);
-                _fillFlashes.Seen(state.IngestedThrough, now);
-                _opened = opened;
-                _total = rows + hidden;
-                if (_hidden != hidden || (_waiting && view == _view))
+            var now = DateTime.UtcNow;
+            var shown = new List<BlotterRow>(slots.Count);
+            foreach (var slot in slots)
+            {
+                if (slot.Under is { } under)
                 {
-                    _hidden = hidden;
-                    _waiting = _waiting && view != _view;
-                    await InvokeAsync(StateHasChanged);
+                    shown.Add(_fillFlashes.Decorate(under.Fills[slot.Fill], now, under.Order.OrderId));
                 }
+                else if (page is not null && slot.Position - page.Start is var at && at >= 0 && at < page.Rows.Length)
+                {
+                    shown.Add(_flashes.Decorate(page.Rows[at], now));
+                }
+            }
 
-                return GridItemsProviderResult.From(shown, (int)Math.Min(int.MaxValue, Nesting.Total(rows, opened)));
-            }
-            catch (InvalidOperationException) when (attempt == 0)
+            _flashes.Seen(state.IngestedThrough, now);
+            _fillFlashes.Seen(state.IngestedThrough, now);
+            _opened = opened;
+            _total = rows + hidden;
+            if (_waiting && reloads == _reloads || _hiddenShown != hidden)
             {
-                // A state whose generation has just been retired: read the scope's latest instead.
+                _hiddenShown = hidden;
+                _waiting = _waiting && reloads != _reloads;
+                await InvokeAsync(StateHasChanged);
             }
-            catch (QueryTimeLimitException limit)
-            {
-                await InvokeAsync(() => Refuse(limit.Message));
-                return GridItemsProviderResult.From<BlotterRow>([], 0);
-            }
-            catch (BlotterRefusedException refused)
-            {
-                await InvokeAsync(() => Refuse(refused.Message));
-                return GridItemsProviderResult.From<BlotterRow>([], 0);
-            }
+
+            return GridItemsProviderResult.From(shown, (int)Math.Min(int.MaxValue, Nesting.Total(rows, opened)));
+        }
+        catch (QueryTimeLimitException limit)
+        {
+            await InvokeAsync(() => Refuse(limit.Message));
+            return GridItemsProviderResult.From<BlotterRow>([], 0);
+        }
+        catch (BlotterRefusedException refused)
+        {
+            await InvokeAsync(() => Refuse(refused.Message));
+            return GridItemsProviderResult.From<BlotterRow>([], 0);
         }
     }
 
-    /// <summary>
-    /// The opened orders in view, in order of position: each found by its latest version's sort key,
-    /// and kept only if the row at that position is the order, which it is not once the filter
-    /// leaves it out.
-    /// </summary>
-    private async Task<IReadOnlyList<Opened>> OpenedAsync(ScopeState state, long hidden, long rows, CancellationToken ct)
+    private long _hiddenShown;
+
+    /// <summary>The opened orders whose place is known, in order of position, each with its fills now.</summary>
+    private async Task<IReadOnlyList<Opened>> OpenedAsync(ScopeState state, long rows, CancellationToken ct)
     {
-        if (_open.Count == 0)
-        {
-            return [];
-        }
-
         var opened = new List<Opened>();
-        foreach (var (id, seen) in _open.ToList())
+        foreach (var (id, position) in _openAt.ToList())
         {
-            var order = state.Tail.GetValueOrDefault(id) as Order ?? seen;
-            var position = await Host.Pages.RankAsync(state, _sort, order, ct) - hidden;
-            if (position < 0 || position >= rows)
+            if (position < rows && _open.TryGetValue(id, out var order))
             {
-                continue;
-            }
-
-            var there = await Host.Pages.GetAsync(state, _sort, position + hidden, 1, ct);
-            if (there.Rows is [Order shown] && shown.OrderId == id)
-            {
-                _open[id] = shown;
-                opened.Add(new Opened(position, shown, await Host.Pages.FillsOfAsync(state, id, ct)));
+                opened.Add(new Opened(position, order, await Host.Pages.FillsOfAsync(state, id, ct)));
             }
         }
 
         return [.. opened.OrderBy(o => o.Position)];
+    }
+
+    /// <summary>What a read says of the opened orders: where each it holds is, and which are no longer where they were.</summary>
+    private bool Learn(Page? page)
+    {
+        if (page is null)
+        {
+            return false;
+        }
+
+        var changed = false;
+        for (var i = 0; i < page.Rows.Length; i++)
+        {
+            if (page.Rows[i] is Order order && _open.ContainsKey(order.OrderId))
+            {
+                _open[order.OrderId] = order;
+                if (!_openAt.TryGetValue(order.OrderId, out var was) || was != page.Start + i)
+                {
+                    _openAt[order.OrderId] = page.Start + i;
+                    changed = true;
+                }
+            }
+        }
+
+        foreach (var (id, position) in _openAt.ToList())
+        {
+            var at = position - page.Start;
+            if (at >= 0 && at < page.Rows.Length && page.Rows[at].Id != id)
+            {
+                _openAt.Remove(id);
+                changed = true;
+            }
+        }
+
+        return changed;
     }
 
     private string NestedCell(Column column, Fill fill) => column.Name switch
@@ -401,6 +440,10 @@
         if (!_open.Remove(order.OrderId))
         {
             _open[order.OrderId] = order;
+        }
+        else
+        {
+            _openAt.Remove(order.OrderId);
         }
 
         await RefreshAsync();
@@ -478,6 +521,7 @@
     private async Task SortAsync(Column column, bool shift)
     {
         _sort = _sort.Click(column, shift);
+        _pages = Host.Pages.View(_sort);
         await ReloadAsync();
     }
 
@@ -514,8 +558,11 @@
     /// <summary>A new sort or filter: the rows stay as they are, dimmed, until the first page of the new one is in.</summary>
     private async Task ReloadAsync()
     {
-        _view++;
+        _reloads++;
         _waiting = true;
+        _pages.Reset();
+        _pages.Held = false;
+        _openAt.Clear();
         _anchor = null;
         _hidden = 0;
         _plans = null;
@@ -544,9 +591,9 @@
                 await InvokeAsync(StateHasChanged);
             }
 
-            if (_scope?.State is { Generation: not null } state && state.Filter == filter)
+            if (_scope?.State is { Ready: true } state && state.Filter == filter)
             {
-                var counted = await Host.Pages.GenerationRowsAsync(state, CancellationToken.None);
+                var counted = await Host.Pages.DatabaseRowsAsync(state, CancellationToken.None);
                 if (filter == _filter)
                 {
                     _counted = counted;
@@ -607,6 +654,7 @@
     {
         _anchor = null;
         _hidden = 0;
+        _pages.Held = false;
         await JS.InvokeVoidAsync("blotter.scrollToTop", _scroller);
         await RefreshAsync();
     }
@@ -623,8 +671,8 @@
 
     private async Task ShowPlansAsync()
     {
-        var page = await Host.Queries.PagePlanAsync(_filter, _sort, CancellationToken.None);
-        _plans = "-- a page of the generation\n" + page + "\n-- the live scope\n" + (_scope?.PlanText ?? "");
+        var page = (await Host.Queries.EstimateAsync(_filter, _sort, CancellationToken.None)).PlanText;
+        _plans = "-- a page of the database\n" + page + "\n-- the live scope\n" + (_scope?.PlanText ?? "");
     }
 
     private static string Rows(double rows) => double.IsNaN(rows)

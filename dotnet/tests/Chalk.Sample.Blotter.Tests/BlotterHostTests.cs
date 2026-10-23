@@ -7,67 +7,71 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Chalk.Sample.Blotter.Tests;
 
 /// <summary>
-/// The host end to end, with ChalkQL's planner, a DuckDB corpus and a running market: every page it
-/// serves, of either tab, is checked against the oracle, which works the answer out in DuckDB alone;
-/// fills that arrive before their orders are shown as they come; no statement runs past the time
-/// limit; and what the host refuses, it refuses with a reason.
+/// The host end to end, with ChalkQL's planner, a PostgreSQL corpus and a running market. Pages read
+/// while the market is held still match the oracle, which works the answer out in PostgreSQL alone,
+/// row for row, whether the database is behind the streams or caught up, and whether a trigger or a
+/// lagging job keeps <c>orders_current</c>; pages read while it runs keep their invariants. Fills that
+/// arrive before their orders are shown as they come; the gap fill brings in what the subscription
+/// missed; no statement runs past the time limit; and what the host refuses, it refuses with a reason.
 /// </summary>
+/// <remarks>
+/// Each test starts a PostgreSQL server of its own from an installation on the machine, or uses the
+/// one <c>CHALK_TEST_POSTGRES</c> names; with neither, the tests are skipped.
+/// </remarks>
 public sealed class BlotterHostTests(ITestOutputHelper output)
 {
-    [Fact]
-    public async Task Every_page_of_either_tab_matches_the_oracle_through_bursts_stalls_and_turnovers()
+    [Theory]
+    [InlineData(CurrentSync.Trigger)]
+    [InlineData(CurrentSync.Lagging)]
+    public async Task Pages_held_still_match_the_oracle_row_for_row_behind_and_caught_up(CurrentSync sync)
     {
-        await using var host = await StartAsync(new BlotterOptions
-        {
-            Orders = 40_000,
-            TurnoverEvery = TimeSpan.FromSeconds(2),
-            Exchange = new ExchangeOptions
-            {
-                Rate = 800,
-                BurstEvery = TimeSpan.Zero,
-                Lag = new IngestLag { Max = TimeSpan.FromSeconds(1.5), StallEvery = TimeSpan.Zero },
-            },
-        });
+        await using var host = await StartAsync(new BlotterOptions { Orders = 40_000, Current = sync, Exchange = Busy() });
         var random = new Random(11);
-        var checks = 0;
-        var clock = Stopwatch.StartNew();
-        while (clock.Elapsed < TimeSpan.FromSeconds(15))
+        var (checks, wrong) = (0, 0);
+        for (var round = 0; round < 3; round++)
         {
-            if (checks % 8 == 0)
-            {
-                host.Exchange.Send(2000);
-            }
-
-            if (checks % 25 == 12)
-            {
-                host.Exchange.StallIngestion(TimeSpan.FromSeconds(2));
-            }
-
-            var tab = Tab.All[checks % 2];
-            var filter = Probe.RandomFilter(tab, random);
-            var order = Probe.RandomSort(tab, random);
-            var scope = await host.AcquireAsync(tab, filter, CancellationToken.None);
-            try
-            {
-                var state = scope.State;
-                var total = await host.Pages.TotalAsync(state, CancellationToken.None);
-                var start = random.Next(3) == 0 ? 0 : (long)(random.NextDouble() * Math.Max(0, total - 40));
-                var page = await host.Pages.GetAsync(state, order, start, 40, CancellationToken.None);
-                var (expected, expectedTotal) = Oracle.Page(host.Store, host.Exchange, state, order, start, 40);
-
-                var problem = Oracle.Compare(page, expected, expectedTotal);
-                Assert.True(problem is null, $"{tab} generation {state.Generation!.Number}, {filter.Name}, {order} at {start}: {problem}");
-                checks++;
-            }
-            finally
-            {
-                await host.ReleaseAsync(scope);
-            }
+            await Probe.UnderLoadAsync(host, random, TimeSpan.FromSeconds(1));
+            var (c, w) = await Probe.QuietAsync(host, random, 6, output.WriteLine);
+            (checks, wrong) = (checks + c, wrong + w);
         }
 
-        output.WriteLine($"{checks} pages, {host.Status.Turnovers} turnovers, tail {host.Status.TailOrders} orders, {host.Status.TailFills} fills");
+        Assert.Equal(0, wrong);
         Assert.True(checks >= 20, $"only {checks} pages were checked");
-        Assert.True(host.Status.Turnovers >= 2, $"only {host.Status.Turnovers} generations were taken over");
+        Assert.True(host.Status.Evicted > 0, "the tail never emptied into the database");
+    }
+
+    [Fact]
+    public async Task Pages_read_while_the_market_runs_keep_their_rows_in_order_once_each_and_filtered()
+    {
+        await using var host = await StartAsync(new BlotterOptions { Orders = 40_000, Exchange = Busy() });
+
+        var (checks, wrong) = await Probe.UnderLoadAsync(host, new Random(13), TimeSpan.FromSeconds(10));
+
+        Assert.Equal(0, wrong);
+        Assert.True(checks >= 20, $"only {checks} pages were checked");
+    }
+
+    [Fact]
+    public async Task The_gap_fill_takes_versions_sent_before_the_subscription_that_orders_current_does_not_show()
+    {
+        // orders_current runs five seconds behind order_versions, and the host subscribes a few
+        // seconds after the market starts: what the market sent in between, the stream never sends the
+        // host, and orders_current does not show yet. Only order_versions has it.
+        await using var host = await StartAsync(new BlotterOptions
+        {
+            Orders = 20_000,
+            Current = CurrentSync.Lagging,
+            Exchange = Quiet() with
+            {
+                Rate = 200,
+                CurrentLag = new IngestLag { Min = TimeSpan.FromSeconds(5), Max = TimeSpan.FromSeconds(6), StallEvery = TimeSpan.Zero },
+            },
+        });
+
+        Assert.True(host.Status.GapFilled > 0, "the gap fill found nothing orders_current lacked");
+        var (checks, wrong) = await Probe.QuietAsync(host, new Random(17), 8, output.WriteLine);
+        Assert.Equal(0, wrong);
+        Assert.True(checks > 0);
     }
 
     [Fact]
@@ -87,13 +91,15 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         await UntilAsync(() => fills.State.Tail.ContainsKey(early.FillId));
 
         Assert.False(orders.State.Tail.ContainsKey(early.OrderId), "the order has not arrived yet");
-        var page = await host.Pages.GetAsync(fills.State, Tab.Fills.DefaultSort, 0, 100, CancellationToken.None);
+        var page = await host.Pages.View(Tab.Fills.DefaultSort).GetAsync(fills.State, 0, 100, CancellationToken.None);
         Assert.Contains(page.Rows, r => r.Id == early.FillId);
         Assert.Contains(await host.Queries.AllFillsOfAsync(early.OrderId, CancellationToken.None), f => f.FillId == early.FillId);
         Assert.Empty(await host.Queries.HistoryAsync(early.OrderId, CancellationToken.None));
 
         // Then the order comes, and the fill that came first is among its nested fills.
-        await UntilAsync(() => orders.State.Tail.TryGetValue(early.OrderId, out var o) && o.Version >= 2, TimeSpan.FromSeconds(15));
+        await UntilAsync(
+            async () => (await host.Queries.HistoryAsync(early.OrderId, CancellationToken.None)).Any(v => v.Version >= 2),
+            TimeSpan.FromSeconds(15));
         var nested = await host.Pages.FillsOfAsync(orders.State, early.OrderId, CancellationToken.None);
         Assert.Contains(nested, f => f.FillId == early.FillId);
         Assert.Contains(sent, o => o.OrderId == early.OrderId && o.Version == 1);
@@ -105,34 +111,36 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     public async Task A_statement_past_the_time_limit_is_stopped_saying_so()
     {
         await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() });
-        var hasty = new SnapshotQueries(host.Engine, TimeSpan.FromTicks(1));
+        var hasty = new SourceQueries(host.Engine, TimeSpan.FromTicks(1));
 
         var stopped = await Assert.ThrowsAsync<QueryTimeLimitException>(() =>
-            hasty.CountAsync(Tab.Orders, host.Generation!, FilterSpec.None, CancellationToken.None));
+            hasty.CountAsync(Tab.Orders, FilterSpec.None, CancellationToken.None));
 
         Assert.Equal("a count took longer than the 0 s time limit and was stopped", stopped.Message);
         Assert.Equal(1, hasty.TimedOut);
     }
 
     [Fact]
-    public async Task A_row_keeps_its_place_by_key_while_rows_arrive_above_it()
+    public async Task A_held_page_keeps_its_rows_in_place_while_rows_arrive_above_them()
     {
-        await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() });
+        await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() with { NewShare = 1 } });
         var scope = await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
         var order = Tab.Orders.DefaultSort;
-        var state = scope.State;
-        var anchor = (await host.Pages.GetAsync(state, order, 100, 1, CancellationToken.None)).Rows[0];
-        var before = await host.Pages.RankAsync(state, order, anchor, CancellationToken.None);
+        var view = host.Pages.View(order);
+        var held = (await view.GetAsync(scope.State, 100, 1, CancellationToken.None)).Rows[0];
+        view.Held = true;
 
         host.Exchange.Send(300);
         await UntilAsync(() => scope.State.Live.Count(r => r.Version == 1) >= 50);
-        state = scope.State;
-        var after = await host.Pages.RankAsync(state, order, anchor, CancellationToken.None);
-        var page = await host.Pages.GetAsync(state, order, after, 1, CancellationToken.None);
+        var state = scope.State;
+        var again = await view.GetAsync(state, 100, 1, CancellationToken.None);
+        var rank = await host.Pages.RankAsync(state, order, held, CancellationToken.None);
 
-        Assert.Equal(100, before);
-        Assert.True(after > before, "new orders sort above the anchor");
-        Assert.Equal(anchor.Id, page.Rows[0].Id);
+        Assert.Equal(held.Id, again.Rows[0].Id);
+        Assert.True(rank >= 150, $"new orders sort above the held row, which ranks {rank}");
+        view.Held = false;
+        var top = await view.GetAsync(state, 100, 1, CancellationToken.None);
+        Assert.NotEqual(held.Id, top.Rows[0].Id);
         await host.ReleaseAsync(scope);
     }
 
@@ -162,6 +170,7 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         {
             Orders = 20_000,
             BudgetBytes = 2 << 20,
+
             // Within the budget while the database keeps up; past it once the database stalls.
             Exchange = Quiet() with { Rate = 600 },
         });
@@ -170,7 +179,7 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         host.Exchange.StallIngestion(TimeSpan.FromSeconds(10));
         await UntilAsync(() => host.State == BlotterState.Refusing, TimeSpan.FromSeconds(20));
 
-        Assert.Contains("behind the feed", host.Refusal, StringComparison.Ordinal);
+        Assert.Contains("behind the streams", host.Refusal, StringComparison.Ordinal);
         Assert.Contains("more than the 2.0 MB budget", host.Refusal, StringComparison.Ordinal);
         await Assert.ThrowsAsync<BlotterRefusedException>(() => host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None));
 
@@ -178,11 +187,14 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         foreach (var tab in Tab.All)
         {
             var again = await AcquireWhenServingAsync(host, tab);
-            var state = again.State;
-            var page = await host.Pages.GetAsync(state, tab.DefaultSort, 0, 20, CancellationToken.None);
-            var (expected, total) = Oracle.Page(host.Store, host.Exchange, state, tab.DefaultSort, 0, 20);
-            Assert.Null(Oracle.Compare(page, expected, total));
+            var page = await host.Pages.View(tab.DefaultSort).GetAsync(again.State, 0, 20, CancellationToken.None);
+            Assert.Null(Oracle.Invariants(page, tab.DefaultSort, FilterSpec.None));
+            Assert.Equal(20, page.Rows.Length);
+            await host.ReleaseAsync(again);
         }
+
+        var (_, wrong) = await Probe.QuietAsync(host, new Random(19), 4, output.WriteLine);
+        Assert.Equal(0, wrong);
     }
 
     [Fact]
@@ -231,19 +243,46 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         Rate = 50,
         BurstEvery = TimeSpan.Zero,
         Lag = new IngestLag { Max = TimeSpan.FromMilliseconds(500), StallEvery = TimeSpan.Zero },
+        CurrentLag = new IngestLag { Max = TimeSpan.FromSeconds(1), StallEvery = TimeSpan.Zero },
+    };
+
+    private static ExchangeOptions Busy() => new()
+    {
+        Rate = 800,
+        BurstEvery = TimeSpan.Zero,
+        Lag = new IngestLag { Max = TimeSpan.FromSeconds(1.5), StallEvery = TimeSpan.Zero },
+        CurrentLag = new IngestLag { Min = TimeSpan.FromMilliseconds(500), Max = TimeSpan.FromSeconds(3), StallEvery = TimeSpan.Zero },
     };
 
     private static async Task<BlotterHost> StartAsync(BlotterOptions options)
     {
-        var host = new BlotterHost(options, NullLogger<BlotterHost>.Instance);
-        await host.StartAsync(CancellationToken.None);
+        var given = Environment.GetEnvironmentVariable("CHALK_TEST_POSTGRES");
+        if (string.IsNullOrWhiteSpace(given) && !PgServer.CanStart())
+        {
+            Assert.Skip("no PostgreSQL: install PostgreSQL 16 or later, or set CHALK_TEST_POSTGRES to a connection string");
+        }
+
+        var host = new BlotterHost(options with { Postgres = given }, NullLogger<BlotterHost>.Instance);
+        try
+        {
+            await host.StartAsync(CancellationToken.None);
+        }
+        catch
+        {
+            await host.DisposeAsync();
+            throw;
+        }
+
         return host;
     }
 
-    private static async Task UntilAsync(Func<bool> condition, TimeSpan? within = null)
+    private static Task UntilAsync(Func<bool> condition, TimeSpan? within = null) =>
+        UntilAsync(() => Task.FromResult(condition()), within);
+
+    private static async Task UntilAsync(Func<Task<bool>> condition, TimeSpan? within = null)
     {
         var clock = Stopwatch.StartNew();
-        while (!condition())
+        while (!await condition())
         {
             if (clock.Elapsed > (within ?? TimeSpan.FromSeconds(10)))
             {

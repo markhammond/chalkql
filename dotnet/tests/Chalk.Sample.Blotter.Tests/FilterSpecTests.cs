@@ -79,6 +79,27 @@ public sealed class FilterSpecTests
     }
 
     [Fact]
+    public void The_host_passes_a_row_exactly_as_the_database_would()
+    {
+        var order = SortSpecTests.Make(5, "BTC/USD Perp", 64_000) with { Version = 3, FilledQty = 2.5 };
+        bool Passes(params ColumnFilter[] filters) => FilterSpec.Of(filters).Matches(order);
+
+        Assert.True(Passes());
+        Assert.True(Passes(new ColumnFilter { Column = Orders.Named("client"), Values = ["CEDAR", "FERN"] }));
+        Assert.False(Passes(new ColumnFilter { Column = Orders.Named("client"), Values = ["cedar"] }));
+        Assert.True(Passes(new ColumnFilter { Column = Orders.Named("instrument"), Values = ["BTC/"], Match = TextMatch.StartsWith }));
+        Assert.False(Passes(new ColumnFilter { Column = Orders.Named("instrument"), Values = ["btc"], Match = TextMatch.StartsWith }));
+        Assert.True(Passes(new ColumnFilter { Column = Orders.Named("order_id"), Values = [SortSpecTests.Id(5).ToString(), "nope"] }));
+        Assert.False(Passes(new ColumnFilter { Column = Orders.Named("order_id"), Values = ["nope"] }));
+
+        // A whole-number column binds its bound as a whole number, as the parameter would: 3.9 is 3.
+        Assert.True(Passes(new ColumnFilter { Column = Orders.Named("version"), Min = 3.9 }));
+        Assert.False(Passes(new ColumnFilter { Column = Orders.Named("filled_qty"), Max = 2.4 }));
+        Assert.True(Passes(new ColumnFilter { Column = Orders.Named("order_time"), From = order.OrderTime }));
+        Assert.False(Passes(new ColumnFilter { Column = Orders.Named("order_time"), To = order.OrderTime }));
+    }
+
+    [Fact]
     public void A_pill_says_what_its_column_is_filtered_by()
     {
         var pill = new ColumnFilter { Column = Orders.Named("client"), Values = ["A", "B", "C", "D", "E"] }.Describe();
@@ -94,18 +115,18 @@ public sealed class FilterSpecTests
             SourceToLocalConverter: rowcount = 1687.7, cumulative cost = {}, id = 266
               SourceSort(sort0=[$4], offset=[?4], fetch=[?3]): rowcount = 1687.7, cumulative cost = {}, id = 265
                 SourceFilter(condition=[=($0, ?0)]): rowcount = 75009.3, cumulative cost = {}, id = 263
-                  SourceScan(table=[[main, snapshots]]): rowcount = 500062.0, cumulative cost = {}, id = 215
+                  SourceScan(table=[[blotter, orders_current]]): rowcount = 500062.0, cumulative cost = {}, id = 215
             """;
         const string local = """
             -- physical
             ChalkTopN(collation=[[3 DESC]], offset=[?2], fetch=[?1]): rowcount = 75009.3, cumulative cost = {}, id = 152
               ChalkFilter(condition=[=($0, ?0)]): rowcount = 75009.3, cumulative cost = {}, id = 150
                 SourceToLocalConverter: rowcount = 500062.0, cumulative cost = {}, id = 149
-                  SourceScan(table=[[main, snapshots]]): rowcount = 500062.0, cumulative cost = {}, id = 99
+                  SourceScan(table=[[blotter, orders_current]]): rowcount = 500062.0, cumulative cost = {}, id = 99
             """;
 
-        var inDatabase = SnapshotQueries.Estimate(pushed);
-        var inHost = SnapshotQueries.Estimate(local);
+        var inDatabase = SourceQueries.Estimate(pushed);
+        var inHost = SourceQueries.Estimate(local);
 
         Assert.Equal((500062.0, 75009.3, true, true), (inDatabase.RowsRead, inDatabase.RowsSorted, inDatabase.SortInDatabase, inDatabase.FilterInDatabase));
         Assert.Equal((500062.0, 75009.3, false, false), (inHost.RowsRead, inHost.RowsSorted, inHost.SortInDatabase, inHost.FilterInDatabase));

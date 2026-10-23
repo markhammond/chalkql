@@ -81,14 +81,40 @@ public sealed class SortSpecTests
         var order = SortSpec.Of(Orders, new SortColumn(Orders.Named("client"), false), new SortColumn(Orders.Named("version"), true));
         var values = new Dictionary<string, object?>();
 
-        var condition = SnapshotQueries.Before(order, Make(42, "BTC/USD Perp", 1.0) with { Version = 3 }, values);
+        var condition = SourceQueries.Before(order, Make(42, "BTC/USD Perp", 1.0) with { Version = 3 }, values);
 
+        // The leading column's bound comes first, alone, so the database can start an index there.
         Assert.Equal(
-            "client < @k0 OR (client = @k0 AND (version > @k1 OR (version = @k1 AND (order_id > @k2))))",
+            "client <= @k0 AND (client < @k0 OR (client = @k0 AND (version > @k1 OR (version = @k1 AND (order_id > @k2)))))",
             condition);
         Assert.Equal("CEDAR", values["k0"]);
         Assert.Equal(3, values["k1"]);
         Assert.Equal(Id(42), values["k2"]);
+    }
+
+    [Fact]
+    public void From_a_key_reads_on_at_it_and_after_it_and_the_leading_bound_follows_the_direction()
+    {
+        var order = Orders.DefaultSort;
+        var values = new Dictionary<string, object?>();
+
+        var condition = SourceQueries.Seek(order, Make(7, "SOL/USD Perp", 1.0), inclusive: true, values);
+
+        Assert.Equal("order_time <= @k0 AND (order_time < @k0 OR (order_time = @k0 AND (order_id <= @k1)))", condition);
+        Assert.Equal(Id(7), values["k1"]);
+    }
+
+    [Fact]
+    public void Turned_round_every_key_runs_the_other_way_and_rows_come_nearest_first()
+    {
+        var order = SortSpec.Of(Orders, new SortColumn(Orders.Named("avg_price"), Descending: true));
+        Order[] rows = [Make(1, "ADA/USD Perp", 1.0), Make(2, "ADA/USD Perp", 3.0), Make(3, "ADA/USD Perp", 2.0)];
+
+        Array.Sort(rows, order.Reversed());
+
+        Assert.Equal("avg_price,order_id", order.Reversed().Name);
+        Assert.Equal([Id(1), Id(3), Id(2)], rows.Select(r => r.OrderId));
+        Assert.Equal(order, order.Reversed().Reversed());
     }
 
     /// <summary>Ids that sort as their numbers do, as version 7 UUIDs made a millisecond apart would.</summary>

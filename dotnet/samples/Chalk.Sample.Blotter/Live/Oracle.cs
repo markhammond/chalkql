@@ -1,118 +1,133 @@
 using System.Globalization;
 using System.Text;
 using Chalk.Sample.Blotter.Market;
-using DuckDB.NET.Data;
+using Npgsql;
 
 namespace Chalk.Sample.Blotter.Live;
 
 /// <summary>
-/// A tab's answer worked out the slow way, for checking: in DuckDB alone, with no tail, no scope and
-/// no merge, and with the filter's values written in. A state covers every event the feed sent through
-/// its stream's watermark (<see cref="ScopeState.IngestedThrough"/>); the oracle takes exactly those.
+/// A tab's answer worked out the slow way, for checking: in PostgreSQL alone, with no tail, no scope
+/// and no merge, and with the filter's values written in.
 /// </summary>
 /// <remarks>
-/// For orders: the state's generation and every version sent through that time, the highest version
-/// of each order kept. For fills: every fill sent through that time, from the database and the stream,
-/// whatever the generation; a fill in both is one row.
+/// <para>
+/// What the blotter should show is every order at the highest version known — to the database, in
+/// <c>order_versions</c>, or sent on the stream up to how far the state has read it — and every fill the
+/// database holds or the stream has sent. The oracle takes exactly those: the stream's rows go into a
+/// temporary table, and the truth is <c>orders_current</c> with every newer version laid over it.
+/// </para>
+/// <para>
+/// It is exact only while nothing moves: the market paused, the host caught up with the streams, and
+/// the database neither writing nor catching up. Then a page of the blotter and the oracle's must be
+/// the same rows. The checks stall the database to hold it still, which also leaves the tail with
+/// something to cover.
+/// </para>
 /// </remarks>
 public static class Oracle
 {
-    /// <summary>Rows <paramref name="start"/> on, and how many rows there are, as <paramref name="state"/> should show them.</summary>
-    public static (IRow[] Rows, long Total) Page(
-        TradeStore store, Exchange market, ScopeState state, SortSpec order, long start, int count)
+    /// <summary>
+    /// The first <paramref name="count"/> rows the state should show from <paramref name="from"/> on, or
+    /// from the first, in <paramref name="order"/>; and how many rows it should have in all.
+    /// </summary>
+    public static (IRow[] Rows, long Total) From(
+        TradeStore store, Exchange market, ScopeState state, SortSpec order, IRow? from, int count)
     {
-        var generation = state.Generation ?? throw new InvalidOperationException("the state has no generation");
         var tab = state.Tab;
         using var connection = store.Open();
-        var sent = "oracle_" + Guid.NewGuid().ToString("N");
+        using var transaction = connection.BeginTransaction();
         Execute(connection, tab.Overrides
-            ? $"CREATE TEMP TABLE {sent} AS SELECT * FROM order_versions WHERE false"
-            : $"CREATE TEMP TABLE {sent} AS SELECT * FROM fills WHERE false");
-        using (var appender = connection.CreateAppender(sent))
+            ? "CREATE TEMP TABLE sent (LIKE blotter.order_versions) ON COMMIT DROP"
+            : "CREATE TEMP TABLE sent (LIKE blotter.fills) ON COMMIT DROP");
+        using (var import = connection.BeginBinaryImport("COPY sent FROM STDIN (FORMAT BINARY)"))
         {
-            var rows = tab.Overrides
-                ? market.Orders.Through(state.OrdersThrough).Select(o => o.Values())
-                : market.Fills.Through(state.FillsThrough).Select(f => f.Values());
-            foreach (var values in rows)
+            if (tab.Overrides)
             {
-                var row = appender.CreateRow();
-                foreach (var value in values)
+                foreach (var order1 in market.Orders.Through(state.OrdersThrough))
                 {
-                    row = value switch
-                    {
-                        Guid v => row.AppendValue(v),
-                        long v => row.AppendValue(v),
-                        int v => row.AppendValue(v),
-                        double v => row.AppendValue(v),
-                        DateTime v => row.AppendValue(v),
-                        string v => row.AppendValue(v),
-                        _ => throw new InvalidOperationException($"the oracle cannot append a {value?.GetType().Name}"),
-                    };
+                    TradeStore.WriteOrder(import, order1);
                 }
-
-                row.EndRow();
             }
+            else
+            {
+                foreach (var fill in market.Fills.Through(state.FillsThrough))
+                {
+                    TradeStore.WriteFill(import, fill);
+                }
+            }
+
+            import.Complete();
         }
 
-        try
-        {
-            var through = string.Create(CultureInfo.InvariantCulture, $"TIMESTAMP '{state.IngestedThrough:yyyy-MM-dd HH:mm:ss.ffffff}'");
-            var rowsOf = tab.Overrides
-                ? string.Create(CultureInfo.InvariantCulture, $"""
-                    SELECT * FROM (
-                        SELECT {Order.Select} FROM snapshots WHERE generation = {generation.Number}
-                        UNION ALL
-                        SELECT {Order.Select} FROM {sent}
-                    )
-                    QUALIFY row_number() OVER (PARTITION BY order_id ORDER BY version DESC) = 1
-                    """)
-                : $"""
-                    SELECT {Fill.Select} FROM fills WHERE event_time <= {through}
-                    UNION
-                    SELECT {Fill.Select} FROM {sent}
-                    """;
-            var where = state.Filter.Literal();
-            using var total = connection.CreateCommand();
-            total.CommandText = $"SELECT count(*) FROM ({rowsOf}) WHERE {where}";
-            var all = Convert.ToInt64(total.ExecuteScalar(), CultureInfo.InvariantCulture);
+        // Everything since the corpus was loaded came from the exchange: the versions written since
+        // then, and those sent, are all that can be newer than orders_current.
+        var since = string.Create(CultureInfo.InvariantCulture, $"TIMESTAMP '{store.LoadedThrough:yyyy-MM-dd HH:mm:ss.ffffff}'");
+        var truth = tab.Overrides
+            ? $"""
+              WITH newer AS (
+                  SELECT DISTINCT ON (order_id) * FROM (
+                      SELECT * FROM sent
+                      UNION ALL
+                      SELECT * FROM blotter.order_versions WHERE event_time > {since}
+                  ) known
+                  ORDER BY order_id, version DESC
+              )
+              SELECT c.* FROM blotter.orders_current c
+              WHERE NOT EXISTS (SELECT 1 FROM newer n WHERE n.order_id = c.order_id AND n.version > c.version)
+              UNION ALL
+              SELECT n.* FROM newer n
+              WHERE NOT EXISTS (SELECT 1 FROM blotter.orders_current c WHERE c.order_id = n.order_id AND c.version >= n.version)
+              """
+            : """
+              SELECT * FROM blotter.fills
+              UNION ALL
+              SELECT s.* FROM sent s WHERE NOT EXISTS (SELECT 1 FROM blotter.fills f WHERE f.fill_id = s.fill_id)
+              """;
+        var where = state.Filter.Literal();
 
-            using var page = connection.CreateCommand();
-            page.CommandText = string.Create(CultureInfo.InvariantCulture,
-                $"SELECT {tab.Select} FROM ({rowsOf}) WHERE {where} ORDER BY {order.OrderBy()} LIMIT {count} OFFSET {start}");
-            using var reader = page.ExecuteReader();
-            var found = new List<IRow>();
+        long total;
+        using (var counting = new NpgsqlCommand($"SELECT count(*) FROM ({truth}) truth WHERE {where}", connection, transaction))
+        {
+            counting.CommandTimeout = 0;
+            total = Convert.ToInt64(counting.ExecuteScalar(), CultureInfo.InvariantCulture);
+        }
+
+        using var page = new NpgsqlCommand { Connection = connection, Transaction = transaction, CommandTimeout = 0 };
+        var values = new Dictionary<string, object?>();
+        var seek = from is null ? "" : $" AND ({SourceQueries.Seek(order, from, inclusive: true, values)})";
+        foreach (var (name, value) in values)
+        {
+            page.Parameters.AddWithValue(name, value!);
+        }
+
+        page.CommandText = string.Create(CultureInfo.InvariantCulture,
+            $"SELECT {tab.Select} FROM ({truth}) truth WHERE {where}{seek} ORDER BY {order.OrderBy()} LIMIT {count}");
+        var found = new List<IRow>();
+        using (var reader = page.ExecuteReader())
+        {
             while (reader.Read())
             {
-                found.Add(tab.ReadDuck(reader));
+                found.Add(tab.ReadDb(reader));
             }
+        }
 
-            return ([.. found], all);
-        }
-        finally
-        {
-            Execute(connection, $"DROP TABLE {sent}");
-        }
+        transaction.Commit();
+        return ([.. found], total);
     }
 
-    /// <summary>What differs between the blotter's page and the oracle's, or null when nothing does.</summary>
-    public static string? Compare(Page page, IRow[] expected, long expectedTotal)
+    /// <summary>What differs between the blotter's rows and the oracle's, or null when nothing does.</summary>
+    public static string? Compare(IRow[] rows, IRow[] expected)
     {
         var problems = new StringBuilder();
-        if (page.Total != expectedTotal)
+        if (rows.Length != expected.Length)
         {
-            problems.Append(CultureInfo.InvariantCulture, $"total {page.Total}, expected {expectedTotal}; ");
+            problems.Append(CultureInfo.InvariantCulture, $"{rows.Length} rows, expected {expected.Length}; ");
         }
 
-        if (page.Rows.Length != expected.Length)
+        for (var i = 0; i < Math.Min(rows.Length, expected.Length); i++)
         {
-            problems.Append(CultureInfo.InvariantCulture, $"{page.Rows.Length} rows, expected {expected.Length}; ");
-        }
-
-        for (var i = 0; i < Math.Min(page.Rows.Length, expected.Length); i++)
-        {
-            if (!Equals(page.Rows[i], expected[i]))
+            if (!Equals(rows[i], expected[i]))
             {
-                problems.Append(CultureInfo.InvariantCulture, $"row {page.Start + i}: {page.Rows[i]}, expected {expected[i]}; ");
+                problems.Append(CultureInfo.InvariantCulture, $"row {i}: {rows[i]}, expected {expected[i]}; ");
                 break;
             }
         }
@@ -120,10 +135,31 @@ public static class Oracle
         return problems.Length == 0 ? null : problems.ToString();
     }
 
-    private static void Execute(DuckDBConnection connection, string sql)
+    /// <summary>
+    /// What a page shown while things move must hold however the database and the streams interleave:
+    /// its rows in order, no row twice, and every row passing the filter. Null when it holds.
+    /// </summary>
+    public static string? Invariants(Page page, SortSpec order, FilterSpec filter)
     {
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
+        for (var i = 0; i < page.Rows.Length; i++)
+        {
+            if (!filter.Matches(page.Rows[i]))
+            {
+                return $"row {page.Start + i} ({page.Rows[i]}) does not pass {filter}";
+            }
+
+            if (i > 0 && order.Compare(page.Rows[i - 1], page.Rows[i]) >= 0)
+            {
+                return $"rows {page.Start + i - 1} and {page.Start + i} are out of order: {page.Rows[i - 1]}, then {page.Rows[i]}";
+            }
+        }
+
+        return page.Rows.DistinctBy(r => r.Id).Count() == page.Rows.Length ? null : "a row appears twice";
+    }
+
+    private static void Execute(NpgsqlConnection connection, string sql)
+    {
+        using var command = new NpgsqlCommand(sql, connection);
         command.ExecuteNonQuery();
     }
 }

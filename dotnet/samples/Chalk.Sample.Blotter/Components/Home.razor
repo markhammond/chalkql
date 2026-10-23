@@ -17,6 +17,10 @@
                 <span class="spacer"></span>
                 <button @onclick="Burst" title="The house takes and fills 3,000 orders at once">Simulate burst</button>
                 <button @onclick="Stall" title="The database writes nothing for 20 s, while the streams go on">Stall database 20 s</button>
+                @if (Host.Options.Current == CurrentSync.Lagging)
+                {
+                    <button @onclick="StallCurrent" title="The job that keeps orders_current applies nothing for 20 s, while order_versions is written">Stall orders_current 20 s</button>
+                }
             </div>
         </Below>
     </BlotterGrid>
@@ -42,6 +46,8 @@
     private void Burst() => Host.Exchange.Send(3000);
 
     private void Stall() => Host.Exchange.StallIngestion(TimeSpan.FromSeconds(20));
+
+    private void StallCurrent() => Host.Exchange.StallCurrent(TimeSpan.FromSeconds(20));
 
     public void Dispose() => _timer?.Dispose();
 }
