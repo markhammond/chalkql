@@ -75,7 +75,11 @@
                     @if (context.Parent is null && context.Row is Order order)
                     {
                         <button type="button" class="toggle" aria-label="@(_open.ContainsKey(order.OrderId) ? "Hide" : "Show") the fills of order @order.OrderId"
-                                @onclick="() => ToggleAsync(order)">@(_open.ContainsKey(order.OrderId) ? "▾" : "▸")</button>
+                                @onclick="() => ToggleAsync(order)">
+                            <svg class="chevron @(_open.ContainsKey(order.OrderId) ? "open" : "")" viewBox="0 0 16 16" width="18" height="18" aria-hidden="true">
+                                <path d="M6 3.5 10.5 8 6 12.5" />
+                            </svg>
+                        </button>
                     }
                 </TemplateColumn>
             }

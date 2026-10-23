@@ -73,7 +73,7 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   sort (`sort by`).
 - **A virtual grid.** QuickGrid's `Virtualize` asks for rows by position, and the host answers for any
   position in the millions (below).
-- **Fills nested under their orders.** The ▸ in the first column opens an order's fills beneath it,
+- **Fills nested under their orders.** The chevron in the first column opens an order's fills beneath it,
   newest first and set in, as rows of the grid's one list (`Virtualize` wants every row one height);
   the order's own row does not move. They stay open while new fills arrive. A fill that came before
   its order is there once the order comes.
