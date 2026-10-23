@@ -48,10 +48,12 @@ else
     <span class="label">PostgreSQL</span><b>@Mb(Status.DatabaseBytes)</b>
     <span class="label">heap</span>@Mb(Status.ManagedHeapBytes)
 </span>
-<span class="chip" title="Statements ChalkQL has run against the database, and those stopped at the time limit; reads of pages, and lookups of the tail's rows a read placed; the last refresh">
+<span class="chip" title="Statements ChalkQL has run against the database, and those stopped at the time limit; reads of pages from the database, of which read ahead, and reads a kept window answered; lookups of the tail's rows a read placed; the last refresh">
     <span class="label">statements</span><b>@Status.Statements.ToString("N0", CultureInfo.InvariantCulture)</b>
     <span class="label">stopped</span>@Status.TimedOut.ToString("N0", CultureInfo.InvariantCulture)
     <span class="label">reads</span>@Status.PageReads.ToString("N0", CultureInfo.InvariantCulture)
+    <span class="label">ahead</span>@Status.ReadAheads.ToString("N0", CultureInfo.InvariantCulture)
+    <span class="label">kept</span>@Status.PageHits.ToString("N0", CultureInfo.InvariantCulture)
     <span class="label">lookups</span>@Status.PageLookups.ToString("N0", CultureInfo.InvariantCulture)
     <span class="label">refresh</span>@Status.LastRefreshMs.ToString("F1", CultureInfo.InvariantCulture) ms
 </span>

@@ -145,6 +145,33 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task A_page_a_kept_window_covers_is_answered_from_it_and_reads_as_the_database_would()
+    {
+        await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() });
+        var scope = await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
+        host.Exchange.Pause();
+        await UntilAsync(() => host.Exchange.Quiet);
+        await host.CaughtUpAsync(CancellationToken.None);
+        var order = Tab.Orders.DefaultSort;
+        var view = host.Pages.View(order);
+
+        var first = await view.GetAsync(scope.State, 0, 60, CancellationToken.None);
+        var hits = host.Pages.WindowHits;
+        var next = await view.GetAsync(scope.State, 40, 60, CancellationToken.None);
+
+        // The first read kept a window larger than its page, and the scroll after it was answered from it.
+        Assert.True(host.Pages.WindowHits > hits, "the second page went to the database");
+        Assert.Equal(first.Rows.Skip(40).Select(r => r.Id), next.Rows.Take(20).Select(r => r.Id));
+        await UntilAsync(() => host.Pages.ReadAheads > 0);
+
+        // Once the window has gone, the same page read afresh is the same rows.
+        await Task.Delay(host.Pages.WindowFor + TimeSpan.FromMilliseconds(200));
+        var fresh = await host.Pages.View(order).GetAsync(scope.State, 40, 60, CancellationToken.None);
+        Assert.Equal(next.Rows.Select(r => r.Id), fresh.Rows.Select(r => r.Id));
+        await host.ReleaseAsync(scope);
+    }
+
+    [Fact]
     public async Task A_scope_that_would_not_fit_the_budget_is_refused_saying_so()
     {
         await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, BudgetBytes = 1 << 20, Exchange = Quiet() });

@@ -43,11 +43,12 @@ public sealed record BlotterOptions
     public TimeSpan ConfirmEvery { get; init; } = TimeSpan.FromMilliseconds(500);
 
     /// <summary>
-    /// How long a row stays in the tail after the database was first seen to hold it: longer than a
-    /// page read takes, so that no page merges a read from before the database had it with a tail
-    /// that no longer does.
+    /// How long a row stays in the tail after the database was first seen to hold it: longer than any
+    /// window of the database's rows a page is answered from is kept (a second longer, see
+    /// <see cref="Pages.WindowFor"/>), so that no page merges a read from before the database had the
+    /// row with a tail that no longer does. Longer keeps windows longer, and the tail larger.
     /// </summary>
-    public TimeSpan EvictAfter { get; init; } = TimeSpan.FromSeconds(2);
+    public TimeSpan EvictAfter { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// How far back the gap fill reaches when the host starts serving: the versions written since
@@ -55,6 +56,9 @@ public sealed record BlotterOptions
     /// subscribed that <c>orders_current</c> does not show yet.
     /// </summary>
     public TimeSpan GapFill { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Of the budget, the most the windows of rows kept for pages may hold; they give way to the tail and the scopes.</summary>
+    public double PageShare { get; init; } = 0.25;
 
     /// <summary>How long a scope no page uses stays open, in case a page comes back to it.</summary>
     public TimeSpan ScopeGrace { get; init; } = TimeSpan.FromSeconds(20);

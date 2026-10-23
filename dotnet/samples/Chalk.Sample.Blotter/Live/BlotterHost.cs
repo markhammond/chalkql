@@ -209,7 +209,11 @@ public sealed class BlotterHost : IAsyncDisposable
             Planner = _planner.CreatePlanner(),
         }, ct).ConfigureAwait(false);
         Queries = new SourceQueries(_engine, _options.QueryTimeLimit, new PostgresExplain(connectionString));
-        Pages = new Pages(Queries);
+        Pages = new Pages(Queries)
+        {
+            MaxKeptRows = PageRows(),
+            WindowFor = _options.EvictAfter > TimeSpan.FromSeconds(1) ? _options.EvictAfter - TimeSpan.FromSeconds(1) : TimeSpan.Zero,
+        };
 
         await GoLiveAsync(ct).ConfigureAwait(false);
         _log.LogInformation("serving after {Seconds:F1} s", Stopwatch.GetElapsedTime(started).TotalSeconds);
@@ -644,6 +648,7 @@ public sealed class BlotterHost : IAsyncDisposable
     /// </summary>
     private async Task KeepWithinBudgetAsync()
     {
+        Pages.MaxKeptRows = PageRows();
         if (LiveBytes() <= _budget)
         {
             return;
@@ -884,6 +889,8 @@ public sealed class BlotterHost : IAsyncDisposable
             PageBytes = Pages.Bytes,
             PageReads = Queries.Reads,
             PageLookups = Pages.Lookups,
+            PageHits = Pages.WindowHits,
+            ReadAheads = Pages.ReadAheads,
             Statements = Queries.Executed,
             Budget = _budget,
             UsedBytes = _tail.Bytes + scopeBytes + Pages.Bytes,
@@ -906,6 +913,14 @@ public sealed class BlotterHost : IAsyncDisposable
 
     /// <summary>What the host cannot give back without dropping a version: the tail, and the scopes over it.</summary>
     private long LiveBytes() => _tail.Bytes + _scopes.Values.Sum(s => s.ViewBytes + s.State.Bytes);
+
+    /// <summary>The rows the kept windows may hold: their share of the budget, or what the tail and the scopes leave, whichever is less.</summary>
+    private long PageRows()
+    {
+        var left = Math.Max(0, _budget - LiveBytes());
+        var share = (long)(_budget * _options.PageShare);
+        return Math.Min(left, share) / Order.Bytes;
+    }
 
     /// <summary>What another scope would hold: a row for every order in the tail, at what the open ones cost a row.</summary>
     private long ScopeEstimate()
@@ -1040,6 +1055,11 @@ public sealed record BlotterStatus
     public long PageReads { get; init; }
 
     public long PageLookups { get; init; }
+
+    /// <summary>Reads a kept window answered, and windows read ahead of the scrolling.</summary>
+    public long PageHits { get; init; }
+
+    public long ReadAheads { get; init; }
 
     public long Statements { get; init; }
 

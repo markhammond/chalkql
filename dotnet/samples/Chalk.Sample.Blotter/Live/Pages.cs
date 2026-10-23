@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace Chalk.Sample.Blotter.Live;
 
@@ -24,8 +25,18 @@ public sealed record Page(long Start, IRow[] Rows, long Total, ScopeState State)
 /// database row did not is looked up, because the database may have moved past the tail meanwhile.
 /// </para>
 /// <para>
-/// Nothing is cached but counts and an order's fills, each for a moment: a page is read from the
-/// database each time, and is as current as the database is when it is read.
+/// What the database returns is kept for a moment (<see cref="WindowFor"/>), as windows: runs of its rows
+/// in one order from one key, shared by every reader of the same tab, filter and sort. A read that a
+/// window covers is answered from it, and the tail is laid over it afresh each time, so the tail's rows
+/// are as current as the stream. A sort whose reads are slow, because no index serves it and the
+/// database sorts the whole table, is read in large windows, which cost the database about what a
+/// page does; and after each page the next window in the direction of scrolling is read ahead. Counts
+/// and an order's fills are kept for a moment too.
+/// </para>
+/// <para>
+/// A window is never older than the tail lets a row stay after the database was seen to hold it, less
+/// a margin: so no window is merged with a tail that has already let go of a version the window does
+/// not hold.
 /// </para>
 /// </remarks>
 public sealed class Pages(SourceQueries queries)
@@ -36,13 +47,33 @@ public sealed class Pages(SourceQueries queries)
     /// <summary>How long an order's fills in the database are reused.</summary>
     public static readonly TimeSpan FillsFor = TimeSpan.FromSeconds(1);
 
+    /// <summary>
+    /// How long a window read from the database answers later reads: a second less than the tail keeps
+    /// a row after the database was seen to hold it (<see cref="BlotterOptions.EvictAfter"/>), which the
+    /// host sets it from. Zero keeps no windows.
+    /// </summary>
+    public TimeSpan WindowFor { get; init; } = TimeSpan.FromSeconds(4);
+
+    /// <summary>A read slower than this marks its sort as one to read in large windows.</summary>
+    public static readonly TimeSpan SlowRead = TimeSpan.FromMilliseconds(25);
+
     // Rows read beyond those asked for, so that the tail's overrides seldom leave a read short.
     private const int Slack = 32;
 
+    // A slow sort's window: about what the database's whole-table sort costs for a page anyway.
+    private const int LargeWindow = 2048;
+
+    // Windows kept for one tab, filter and sort.
+    private const int WindowsPerSort = 6;
+
     private readonly ConcurrentDictionary<(string Tab, string Filter), (DateTime At, Task<long> Count)> _counts = new();
     private readonly ConcurrentDictionary<Guid, (DateTime At, Task<Fill[]> Fills)> _fills = new();
+    private readonly ConcurrentDictionary<(string Tab, string Filter, string Order), Shelf> _windows = new();
     private long _lookups;
     private long _rereads;
+    private long _windowHits;
+    private long _readAheads;
+    private long _keptRows;
 
     public SourceQueries Queries => queries;
 
@@ -52,8 +83,19 @@ public sealed class Pages(SourceQueries queries)
     /// <summary>Reads read again, longer, because the tail's overrides left them short.</summary>
     public long Rereads => Interlocked.Read(ref _rereads);
 
-    /// <summary>What the cache of counts and fills holds, roughly, in bytes.</summary>
-    public long Bytes => _counts.Count * 64L + _fills.Values.Sum(f => f.Fills.IsCompletedSuccessfully ? f.Fills.Result.Length * (long)Fill.Bytes : 0);
+    /// <summary>Reads a kept window answered, without asking the database.</summary>
+    public long WindowHits => Interlocked.Read(ref _windowHits);
+
+    /// <summary>Windows read ahead of the scrolling.</summary>
+    public long ReadAheads => Interlocked.Read(ref _readAheads);
+
+    /// <summary>The most rows the kept windows may hold, set from the budget: they give way to the tail and the scopes.</summary>
+    public long MaxKeptRows { get; set; } = 64 * 1024;
+
+    /// <summary>What the kept windows, counts and fills hold, roughly, in bytes.</summary>
+    public long Bytes =>
+        Interlocked.Read(ref _keptRows) * Order.Bytes
+        + _counts.Count * 64L + _fills.Values.Sum(f => f.Fills.IsCompletedSuccessfully ? f.Fills.Result.Length * (long)Fill.Bytes : 0);
 
     /// <summary>A reader's place in the tab: the pages it reads, by position.</summary>
     public PageView View(SortSpec order) => new(this, order);
@@ -98,10 +140,8 @@ public sealed class Pages(SourceQueries queries)
         var limit = SourceQueries.Rounded(count + Slack);
         while (true)
         {
-            var read = await queries.ReadAsync(state.Filter, order, key, inclusive, limit, ct).ConfigureAwait(false);
-
             // A full read decides nothing past its last row; a short one has reached the end.
-            var last = read.Length == limit ? read[^1] : null;
+            var (read, last) = await DatabaseAsync(state, order, key, inclusive, limit, ct).ConfigureAwait(false);
             var candidates = sorted.LiveBetween(key, inclusive, last);
             var rows = order.Tab.Overrides
                 ? await MergeOrdersAsync(state, order, key, inclusive, last, read, candidates, ct).ConfigureAwait(false)
@@ -115,6 +155,59 @@ public sealed class Pages(SourceQueries queries)
             Interlocked.Increment(ref _rereads);
             limit = SourceQueries.Rounded(limit * 4);
         }
+    }
+
+    /// <summary>
+    /// Reads the window after <paramref name="after"/> in <paramref name="order"/> in the background,
+    /// unless a kept window already covers the next two pages: the next scroll is then answered at once.
+    /// </summary>
+    public void ReadAhead(ScopeState state, SortSpec order, IRow after, int count)
+    {
+        var shelf = ShelfOf(state, order);
+        var limit = SourceQueries.Rounded((2 * count) + Slack);
+        if (Take(shelf, order, after, false, limit) is not null)
+        {
+            return;
+        }
+
+        // On from the end of the window the page came from, so that the two join into one; nothing,
+        // when that window reached the end of the tab.
+        var from = after;
+        lock (shelf.Gate)
+        {
+            var covering = shelf.Windows.LastOrDefault(w => !Expired(w) && Contains(w, order, after));
+            if (covering is { Full: false })
+            {
+                return;
+            }
+
+            if (covering is { Rows.Length: > 0 })
+            {
+                from = covering.Rows[^1];
+            }
+        }
+
+        if (Interlocked.Exchange(ref shelf.Reading, 1) == 1)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ReadWindowAsync(shelf, state.Filter, order, from, false, limit, CancellationToken.None).ConfigureAwait(false);
+                Interlocked.Increment(ref _readAheads);
+            }
+            catch (Exception)
+            {
+                // A read ahead is a guess: the page that needs the rows reads them itself, and says why if it cannot.
+            }
+            finally
+            {
+                Volatile.Write(ref shelf.Reading, 0);
+            }
+        });
     }
 
     /// <summary>
@@ -146,6 +239,213 @@ public sealed class Pages(SourceQueries queries)
             .DistinctBy(f => f.FillId)
             .OrderByDescending(f => f.EventTime)
             .ThenByDescending(f => f.FillId)];
+    }
+
+    /// <summary>
+    /// The database's first <paramref name="limit"/> rows from <paramref name="key"/> on, from a kept
+    /// window when one covers them, or read in a window of their sort's size; and the last row the read
+    /// decides, or null when it reached the end.
+    /// </summary>
+    private async Task<(IRow[] Read, IRow? Last)> DatabaseAsync(
+        ScopeState state, SortSpec order, IRow? key, bool inclusive, int limit, CancellationToken ct)
+    {
+        var shelf = ShelfOf(state, order);
+        if (Take(shelf, order, key, inclusive, limit) is { } kept)
+        {
+            Interlocked.Increment(ref _windowHits);
+            return kept;
+        }
+
+        var window = await ReadWindowAsync(shelf, state.Filter, order, key, inclusive, limit, ct).ConfigureAwait(false);
+        return Slice(window, order, key, inclusive, limit)
+            ?? throw new InvalidOperationException("a window just read does not cover the read it was made for");
+    }
+
+    private Shelf ShelfOf(ScopeState state, SortSpec order) =>
+        _windows.GetOrAdd((state.Tab.Name, state.Filter.Name, order.Name), _ => new Shelf());
+
+    /// <summary>Reads a window from <paramref name="key"/> on: twice the rows asked for, or a large window for a slow sort; and keeps it.</summary>
+    private async Task<Window> ReadWindowAsync(
+        Shelf shelf, FilterSpec filter, SortSpec order, IRow? key, bool inclusive, int limit, CancellationToken ct)
+    {
+        var size = SourceQueries.Rounded(shelf.Slow ? Math.Max(limit, LargeWindow) : 2 * limit);
+        var readAt = Stopwatch.GetTimestamp();
+        var rows = await queries.ReadAsync(filter, order, key, inclusive, size, ct).ConfigureAwait(false);
+        shelf.Slow = Stopwatch.GetElapsedTime(readAt) > SlowRead;
+        var window = new Window(key, inclusive, rows, rows.Length == size, readAt);
+        Keep(shelf, order, window);
+        return window;
+    }
+
+    /// <summary>The newest kept window that covers the read, sliced to it; or null.</summary>
+    private (IRow[] Read, IRow? Last)? Take(Shelf shelf, SortSpec order, IRow? key, bool inclusive, int limit)
+    {
+        lock (shelf.Gate)
+        {
+            shelf.Windows.RemoveAll(w => Expired(w) && Forget(w));
+            for (var i = shelf.Windows.Count - 1; i >= 0; i--)
+            {
+                if (Slice(shelf.Windows[i], order, key, inclusive, limit) is { } slice)
+                {
+                    return slice;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Keeps a window. One that starts just after another ends continues it, and the two are kept as one,
+    /// as old as the older: a page that spans both is answered from one window.
+    /// </summary>
+    private void Keep(Shelf shelf, SortSpec order, Window window)
+    {
+        lock (shelf.Gate)
+        {
+            shelf.Windows.RemoveAll(w => Expired(w) && Forget(w));
+            if (window.From is not null && !window.Inclusive)
+            {
+                var before = shelf.Windows.FindIndex(w => w.Full && w.Rows.Length > 0 && order.Compare(w.Rows[^1], window.From) == 0);
+                if (before >= 0)
+                {
+                    var joined = shelf.Windows[before];
+                    Forget(joined);
+                    shelf.Windows.RemoveAt(before);
+                    window = new Window(
+                        joined.From, joined.Inclusive, [.. joined.Rows, .. window.Rows], window.Full, Math.Min(joined.ReadAt, window.ReadAt));
+                }
+            }
+
+            shelf.Windows.Add(window);
+            Interlocked.Add(ref _keptRows, window.Rows.Length);
+            while (shelf.Windows.Count > WindowsPerSort)
+            {
+                Forget(shelf.Windows[0]);
+                shelf.Windows.RemoveAt(0);
+            }
+        }
+
+        if (Interlocked.Read(ref _keptRows) > MaxKeptRows)
+        {
+            Trim();
+        }
+    }
+
+    /// <summary>Lets the expired windows go, then the oldest, until the kept rows fit <see cref="MaxKeptRows"/>.</summary>
+    private void Trim()
+    {
+        foreach (var shelf in _windows.Values)
+        {
+            lock (shelf.Gate)
+            {
+                shelf.Windows.RemoveAll(w => Expired(w) && Forget(w));
+            }
+        }
+
+        while (Interlocked.Read(ref _keptRows) > MaxKeptRows)
+        {
+            var kept = new List<(Shelf Shelf, Window Window)>();
+            foreach (var shelf in _windows.Values)
+            {
+                lock (shelf.Gate)
+                {
+                    kept.AddRange(shelf.Windows.Select(w => (shelf, w)));
+                }
+            }
+
+            var oldest = kept.OrderBy(x => x.Window.ReadAt).FirstOrDefault();
+            if (oldest.Shelf is null)
+            {
+                return;
+            }
+
+            lock (oldest.Shelf.Gate)
+            {
+                if (oldest.Shelf.Windows.Remove(oldest.Window))
+                {
+                    Forget(oldest.Window);
+                }
+            }
+        }
+    }
+
+    private bool Forget(Window window)
+    {
+        Interlocked.Add(ref _keptRows, -window.Rows.Length);
+        return true;
+    }
+
+    private bool Expired(Window window) => Stopwatch.GetElapsedTime(window.ReadAt) > WindowFor;
+
+    /// <summary>
+    /// The first <paramref name="limit"/> rows of <paramref name="window"/> from <paramref name="key"/> on,
+    /// and the last of them; or all it has from there, with no last row, when it reached the end; or null
+    /// when it does not cover the read: it starts after the key, or runs out before the limit.
+    /// </summary>
+    private static (IRow[] Read, IRow? Last)? Slice(Window window, SortSpec order, IRow? key, bool inclusive, int limit)
+    {
+        int from;
+        if (key is null)
+        {
+            if (window.From is not null)
+            {
+                return null;
+            }
+
+            from = 0;
+        }
+        else
+        {
+            if (window.From is not null && order.Compare(key, window.From) is var start
+                && (start < 0 || (start == 0 && inclusive && !window.Inclusive)))
+            {
+                return null;
+            }
+
+            if (window.Full && window.Rows.Length > 0 && order.Compare(key, window.Rows[^1]) > 0)
+            {
+                return null;
+            }
+
+            from = First(window.Rows, order, key, inclusive);
+        }
+
+        var available = window.Rows.Length - from;
+        if (available >= limit)
+        {
+            var read = window.Rows[from..(from + limit)];
+            return (read, read[^1]);
+        }
+
+        return window.Full ? null : (window.Rows[from..], null);
+    }
+
+    /// <summary>Whether <paramref name="row"/> falls among the rows <paramref name="window"/> read.</summary>
+    private static bool Contains(Window window, SortSpec order, IRow row) =>
+        window.Rows.Length > 0
+        && (window.From is null || order.Compare(row, window.From) is var start && (start > 0 || (start == 0 && window.Inclusive)))
+        && order.Compare(row, window.Rows[^1]) <= 0;
+
+    /// <summary>Where the first row at or after <paramref name="key"/> (or after it) is in <paramref name="rows"/>.</summary>
+    private static int First(IRow[] rows, SortSpec order, IRow key, bool inclusive)
+    {
+        int low = 0, high = rows.Length;
+        while (low < high)
+        {
+            var middle = (low + high) >>> 1;
+            var compared = order.Compare(rows[middle], key);
+            if (compared < 0 || (compared == 0 && !inclusive))
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        return low;
     }
 
     private async Task<List<IRow>> MergeOrdersAsync(
@@ -218,6 +518,21 @@ public sealed class Pages(SourceQueries queries)
     private static bool Within(SortSpec order, IRow row, IRow? key, bool inclusive, IRow? last) =>
         (key is null || order.Compare(row, key) is var from && (from > 0 || (inclusive && from == 0)))
         && (last is null || order.Compare(row, last) <= 0);
+
+    /// <summary>
+    /// The database's rows in one order from one key (<see cref="From"/>, or the first row when null),
+    /// as they were when read; <see cref="Full"/> when the read stopped at its limit rather than at the end.
+    /// </summary>
+    private sealed record Window(IRow? From, bool Inclusive, IRow[] Rows, bool Full, long ReadAt);
+
+    /// <summary>The windows kept for one tab, filter and sort, and what reading it has shown.</summary>
+    private sealed class Shelf
+    {
+        public readonly Lock Gate = new();
+        public readonly List<Window> Windows = [];
+        public volatile bool Slow;
+        public int Reading;
+    }
 }
 
 /// <summary>
@@ -249,6 +564,7 @@ public sealed class PageView(Pages pages, SortSpec order)
     private readonly SortedList<long, IRow> _anchors = [];
     private long _epoch = -1;
     private bool _held;
+    private long _lastStart = -1;
 
     public SortSpec Order => order;
 
@@ -324,6 +640,14 @@ public sealed class PageView(Pages pages, SortSpec order)
         Record(first, window);
         var skip = (int)Math.Clamp(start - first, 0, window.Length);
         var rows = window.AsSpan(skip, Math.Min(count, window.Length - skip)).ToArray();
+
+        // The next window in the direction the reader is scrolling, read while they look at this one.
+        var down = start >= Interlocked.Exchange(ref _lastStart, start);
+        if (rows.Length > 0 && (down || start > 0))
+        {
+            pages.ReadAhead(state, down ? order : order.Reversed(), down ? rows[^1] : rows[0], count);
+        }
+
         return new Page(first + skip, rows, total, state);
     }
 

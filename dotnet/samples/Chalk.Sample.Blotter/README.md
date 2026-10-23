@@ -137,8 +137,8 @@ Each tab is two halves, merged.
 
 **Confirmation.** Every half second the host looks the tail's rows up in the database by key. An order
 the database holds at the tail's version or later, and a fill it holds, is confirmed, and leaves the
-tail two seconds later. That is longer than any page read takes, so no page merges a database read
-from before a version landed with a tail that has already let it go.
+tail five seconds later. That is a second longer than a window of the database's rows is kept (below),
+so no page merges a database read from before a version landed with a tail that has already let it go.
 
 **Reading a page.** A page is read from a key: the database's first rows at or after it in the tab's
 order, then every tail row between that key and the last row read. The read decides nothing past its
@@ -158,6 +158,16 @@ away, they hold. A jump far from every position known (dragging the scrollbar) i
 database's own `OFFSET`, which knows nothing of the tail, so positions deep in a tab are approximate,
 as the total is. Each page is still read whole from one key, so a page never repeats or skips a row.
 
+**Windows and read-ahead.** What the database returns is kept for four seconds as a window: a run of
+its rows in one order from one key, shared by every reader of the same tab, filter and sort. A read a
+window covers is answered from it, with the tail laid over it afresh, so the tail's rows stay as
+current as the stream. A sort whose reads take longer than 25 ms (no index serves it, and the database
+sorts the whole table) is read in windows of 2,048 rows, which cost the database about what a page
+does. After each page, the window after the one it came from, in the direction of scrolling, is read
+in the background and joined onto it. The grid also renders 60 rows beyond the view either side. At
+5 million orders, scrolling a ClOrdId sort 30 rows at a time, two steps in thirty showed placeholder
+rows, briefly, and the database was read about once in ten.
+
 **Starting, and the gap fill.** The host subscribes to the streams, and then sends the database one
 last request: every version `order_versions` holds from the last 30 s. It takes each as if the stream
 had sent it, and lets go at once of those `orders_current` already shows. A version that was in flight
@@ -174,7 +184,8 @@ one scope, whatever they sort by and wherever they are scrolled. A page sorts it
 which is cheap because a scope is a slice of the tail, never of the corpus.
 
 **The budget** covers what the host holds: the tail, in ChalkQL and in the host; the scopes' views and
-their states; and the counts and fills it reuses for a moment. Past it, the scopes no page is using
+their states; and the windows, counts and fills it keeps for a moment, which may hold a quarter of the
+budget at most and give way first to the tail and the scopes. Past it, the scopes no page is using
 give way first. If that is not enough, because the database is too far behind, the host stops serving
 and says why. It never drops a version to stay in budget. While it refuses, it keeps reading the
 streams and keeps the last 30 s of what they send. It serves again once `orders_current`'s newest order
