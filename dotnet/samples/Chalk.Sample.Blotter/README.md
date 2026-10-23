@@ -73,8 +73,9 @@ at once, so a fill often arrives **before its order**, or before the version tha
   - Region, channel, side, status: tick the values.
   - Numbers: at least, at most. Times: from, to (UTC).
 - **The cost, before you scroll.** Under the filters, a line shows the planner's estimate for the tab's
-  pages: how many rows the database reads and sorts, and whether the sort runs in the database or, as a
-  warning, in the host. It also shows the rows the filter passes, counted, so the estimate can be judged.
+  pages: how many rows the database scans at most (no access path is declared, so the planner assumes a
+  full read), with a warning when the sort would run in the host. It also shows the rows the filter
+  passes, counted.
 - **A time limit.** Every statement is stopped after 5 s, and a page that hits it says so. The status
   bar counts those stopped.
 - **A new sort or filter dims the grid** until its first page is in.

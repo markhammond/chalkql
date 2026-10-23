@@ -35,8 +35,8 @@
     @if (_estimate is { } e)
     {
         <span>
-            Planner's estimate: the database reads <b>@Rows(e.RowsRead)</b> rows and sorts <b>@Rows(e.RowsSorted)</b>
-            @(e.SortInDatabase ? "in the database" : "— in the host, every row pulled across")
+            Scans up to <b>@Rows(e.RowsRead)</b> rows
+            @(e.SortInDatabase ? "" : "— sorted in the host, every row pulled across")
             @(e.FilterInDatabase ? "" : "; part of the filter runs in the host")
         </span>
         <span class="muted">· the filter passes @(_counted?.ToString("N0", CultureInfo.InvariantCulture) ?? "…") rows of generation @(_scope?.State.Generation?.Number), counted</span>
