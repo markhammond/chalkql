@@ -68,9 +68,9 @@
 }
 
 <div class="frame">
-    @if (_hidden > 0)
+    @if (NewAbove() is var above and > 0)
     {
-        <button class="badge" @onclick="ShowNewestAsync">@_hidden.ToString("N0", CultureInfo.InvariantCulture) new above</button>
+        <button class="badge" @onclick="ShowNewestAsync">@above.ToString("N0", CultureInfo.InvariantCulture) new above</button>
     }
 
     <div class="scroller @(_waiting || _refusal is not null || _failure is not null ? "waiting" : "")" @ref="_scroller">
@@ -237,6 +237,15 @@
     private (IRow Key, long Position)? _anchor;
     private long _hidden;
     private DateTime _hiddenAt;
+
+    // Scrolling up near the top of what the reader has seen lets the rows that arrived above in, a few
+    // at a time, holding the rows in view in place: _revealed counts those let in, which the reader may
+    // not have scrolled up to yet.
+    private const int RevealNear = 200;
+    private const int RevealAtOnce = 30;
+    private long _revealed;
+    private long _shifted;
+    private bool _revealing;
     private double _scrollTop;
 
     // The orders opened to show their fills, by id, each with the version last seen; and where a
@@ -274,6 +283,7 @@
     {
         var atTop = scrollTop < RowHeight / 2;
         var wasAtTop = _scrollTop < RowHeight / 2;
+        var up = scrollTop < _scrollTop;
         _scrollTop = scrollTop;
         if (wasAtTop && !atTop && !_pages.Held && _scope?.State is { Ready: true } state)
         {
@@ -298,17 +308,71 @@
         }
         else if (atTop && _pages.Held)
         {
-            // Back at the top: what arrived above is shown, and new rows push down again.
+            // Back at the top, however fast: what arrived above is shown, and new rows push down again.
             _pages.Held = false;
             _anchor = null;
             _hidden = 0;
+            _revealed = 0;
             await RefreshAsync();
         }
+        else if (up && _pages.Held && _hidden > 0 && !_revealing && scrollTop / RowHeight < RevealNear)
+        {
+            await RevealAsync();
+        }
+        else if (_revealed > 0)
+        {
+            StateHasChanged();
+        }
     }
+
+    /// <summary>
+    /// Lets in up to <see cref="RevealAtOnce"/> of the rows that arrived above: every position the grid
+    /// holds moves down by as many, and the scroll with them, so the rows in view stay where they are
+    /// and the new ones are there to scroll up to. No more than the grid renders beyond the view, so the
+    /// rows in view are on the page already when the scroll moves; and none again until the page says
+    /// it has moved the scroll (<see cref="OnRevealed"/>), so two lots never stack.
+    /// </summary>
+    private async Task RevealAsync()
+    {
+        _revealing = true;
+        try
+        {
+            var rows = Math.Min(_hidden, RevealAtOnce);
+            _pages.Shift(rows);
+            if (_anchor is { } anchor)
+            {
+                _anchor = (anchor.Key, anchor.Position + rows);
+            }
+
+            foreach (var id in _openAt.Keys.ToList())
+            {
+                _openAt[id] += rows;
+            }
+
+            _hidden -= rows;
+            _revealed += rows;
+            _shifted += rows;
+            await JS.InvokeVoidAsync("blotter.insertAbove", _scroller, _self);
+            await RefreshAsync();
+        }
+        catch
+        {
+            _revealing = false;
+            throw;
+        }
+    }
+
+    /// <summary>The page has put the rows in view back where they were: more may be let in.</summary>
+    [JSInvokable]
+    public void OnRevealed() => _revealing = false;
+
+    /// <summary>What arrived above the rows in view: not let in yet, or let in and not yet scrolled up to.</summary>
+    private long NewAbove() => _hidden + Math.Min(_revealed, (long)(_scrollTop / RowHeight));
 
     private async ValueTask<GridItemsProviderResult<BlotterRow>> ProvideAsync(GridItemsProviderRequest<BlotterRow> request)
     {
         var reloads = _reloads;
+        var shifted = _shifted;
         var scope = _scope;
         if (scope is null || !scope.State.Ready)
         {
@@ -329,10 +393,12 @@
             // top, where positions are close to exact.
             if (_anchor is { } anchor && DateTime.UtcNow - _hiddenAt > TimeSpan.FromSeconds(1))
             {
+                // Rows let in while the count is read have moved the anchor down since it was taken.
                 _hiddenAt = DateTime.UtcNow;
+                var before = _shifted;
                 _hidden = anchor.Position > 100_000
                     ? 0
-                    : Math.Max(0, await Host.Pages.RankAsync(state, _sort, anchor.Key, ct) - anchor.Position);
+                    : Math.Max(0, await Host.Pages.RankAsync(state, _sort, anchor.Key, ct) - anchor.Position - (_shifted - before));
             }
 
             var hidden = _hidden;
@@ -352,10 +418,17 @@
                 page = positions.Count == 0
                     ? null
                     : await _pages.GetAsync(state, positions[0], (int)(positions[^1] - positions[0] + 1), ct);
-                if (!Learn(page))
+                if (!Learn(page, shifted))
                 {
                     break;
                 }
+            }
+
+            if (shifted != _shifted)
+            {
+                // Rows were let in above while this was read: its rows are placed by positions the
+                // grid no longer has, and the read that letting them in asked for is on its way.
+                throw new OperationCanceledException(ct);
             }
 
             var now = DateTime.UtcNow;
@@ -385,7 +458,7 @@
 
             return GridItemsProviderResult.From(shown, (int)Math.Min(int.MaxValue, Nesting.Total(rows, opened)));
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch (OperationCanceledException cancelled) when (ct.IsCancellationRequested || cancelled.CancellationToken == ct)
         {
             // A newer sort, filter or scroll took over: the grid lets a request go quietly only
             // when it is cancelled with the request's own token.
@@ -427,10 +500,11 @@
     }
 
     /// <summary>What a read says of the opened orders: where each it holds is, and which are no longer where they were.</summary>
-    private bool Learn(Page? page)
+    private bool Learn(Page? page, long shifted)
     {
-        if (page is null)
+        if (page is null || shifted != _shifted)
         {
+            // Rows were let in above while it was read: its positions are no longer the grid's.
             return false;
         }
 
@@ -603,6 +677,7 @@
         _openAt.Clear();
         _anchor = null;
         _hidden = 0;
+        _revealed = 0;
         _plans = null;
         _flashes.Clear();
         _fillFlashes.Clear();
@@ -706,6 +781,7 @@
     {
         _anchor = null;
         _hidden = 0;
+        _revealed = 0;
         _pages.Held = false;
         await JS.InvokeVoidAsync("blotter.scrollToTop", _scroller);
         await RefreshAsync();

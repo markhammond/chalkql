@@ -1,4 +1,4 @@
-# Chalk.Sample.Blotter — a virtual blotter of client orders and fills
+# Chalk.Sample.Blotter — a virtual trade blotter
 
 A Blazor Server page with two QuickGrid tabs: **client orders** (five million by default), each with
 its fills nested beneath it, and the **fills** themselves. Both live in PostgreSQL, which the host
@@ -109,8 +109,11 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
 - **Flashes.** The cells of a row that changed flash, and an order or fill the streams have just sent
   flashes whole. A row scrolled into view does not flash.
 - **New rows push down at the top.** Scrolled away from the top, the rows in view stay where they are,
-  and an "N new above" badge counts what has arrived. A click on the badge, or a scroll back to the
-  top, shows them.
+  and an "N new above" badge counts what has arrived. Scrolling up within 200 rows of the top lets
+  them in, 30 at a time, above the rows in view, which stay where they are (the grid moves every
+  position it holds, and the scroll with it, by as many rows), so scrolling on up reveals them in turn
+  and the badge counts down. A click on the badge, or reaching the top however fast, goes back to the
+  live top, where new rows push down again.
 - **The status bar**: how `orders_current` is kept and, when by the lagging job, how far behind it is;
   how far the database is behind the streams; how many order versions the order stream is holding back
   behind the fills; the tail and what of it is confirmed; what the host holds against the budget; the

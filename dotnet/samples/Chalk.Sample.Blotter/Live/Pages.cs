@@ -566,6 +566,9 @@ public sealed class PageView(Pages pages, SortSpec order)
     private bool _held;
     private long _lastStart = -1;
 
+    // Rows positions have moved down by, in all: a read that began before a shift places its rows by it.
+    private long _shifted;
+
     public SortSpec Order => order;
 
     /// <summary>Whether positions hold as rows arrive, or are counted afresh from the top on every state.</summary>
@@ -590,6 +593,7 @@ public sealed class PageView(Pages pages, SortSpec order)
     {
         var total = await pages.TotalAsync(state, ct).ConfigureAwait(false);
         (long At, IRow Key)? below, above;
+        long shifted;
         lock (_gate)
         {
             if (!_held && state.Epoch != _epoch)
@@ -600,6 +604,7 @@ public sealed class PageView(Pages pages, SortSpec order)
             _epoch = state.Epoch;
             below = Floor(start);
             above = Ceiling(start);
+            shifted = _shifted;
         }
 
         IRow[] window;
@@ -637,7 +642,7 @@ public sealed class PageView(Pages pages, SortSpec order)
             first = start;
         }
 
-        Record(first, window);
+        Record(first, window, shifted);
         var skip = (int)Math.Clamp(start - first, 0, window.Length);
         var rows = window.AsSpan(skip, Math.Min(count, window.Length - skip)).ToArray();
 
@@ -651,6 +656,26 @@ public sealed class PageView(Pages pages, SortSpec order)
         return new Page(first + skip, rows, total, state);
     }
 
+    /// <summary>
+    /// Moves every position known down by <paramref name="rows"/>: room for rows that arrived above,
+    /// which reads backwards from the first position known then find.
+    /// </summary>
+    public void Shift(long rows)
+    {
+        lock (_gate)
+        {
+            var moved = _anchors.Select(a => (a.Key + rows, a.Value)).ToList();
+            _anchors.Clear();
+            foreach (var (at, row) in moved)
+            {
+                _anchors[at] = row;
+            }
+
+            _lastStart += rows;
+            _shifted += rows;
+        }
+    }
+
     /// <summary>Forgets every position known, as a new sort or filter does.</summary>
     public void Reset()
     {
@@ -660,7 +685,11 @@ public sealed class PageView(Pages pages, SortSpec order)
         }
     }
 
-    private void Record(long first, IRow[] window)
+    /// <summary>
+    /// Keeps positions for the rows a read found from <paramref name="first"/> on, in the places they had
+    /// when it began; moved by any shift since, which the read did not see.
+    /// </summary>
+    private void Record(long first, IRow[] window, long shifted)
     {
         if (window.Length == 0)
         {
@@ -669,6 +698,7 @@ public sealed class PageView(Pages pages, SortSpec order)
 
         lock (_gate)
         {
+            first += _shifted - shifted;
             // What this read found replaces what earlier reads said of the same positions.
             var end = first + window.Length;
             for (var i = _anchors.Count - 1; i >= 0; i--)

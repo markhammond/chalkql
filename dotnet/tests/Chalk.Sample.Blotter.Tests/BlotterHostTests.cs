@@ -138,6 +138,20 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
 
         Assert.Equal(held.Id, again.Rows[0].Id);
         Assert.True(rank >= 150, $"new orders sort above the held row, which ranks {rank}");
+
+        // Room made for the rows that arrived: the held row moves down by as many, and the top of the
+        // view, read backwards from it, is the newest order.
+        host.Exchange.Pause();
+        await UntilAsync(() => host.Exchange.Quiet);
+        await host.CaughtUpAsync(CancellationToken.None);
+        state = scope.State;
+        var arrived = await host.Pages.RankAsync(state, order, held, CancellationToken.None) - 100;
+        view.Shift(arrived);
+        var moved = await view.GetAsync(state, 100 + arrived, 1, CancellationToken.None);
+        var newest = await view.GetAsync(state, 0, 1, CancellationToken.None);
+        Assert.Equal(held.Id, moved.Rows[0].Id);
+        Assert.Equal((await host.Pages.View(order).GetAsync(state, 0, 1, CancellationToken.None)).Rows[0].Id, newest.Rows[0].Id);
+        Assert.Equal(0, newest.Start);
         view.Held = false;
         var top = await view.GetAsync(state, 100, 1, CancellationToken.None);
         Assert.NotEqual(held.Id, top.Rows[0].Id);
