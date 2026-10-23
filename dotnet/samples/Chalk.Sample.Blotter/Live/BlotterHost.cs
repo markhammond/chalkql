@@ -589,6 +589,13 @@ public sealed class BlotterHost : IAsyncDisposable
                     versionDeletes.AddRange(entry.Versions);
                     _tail.Remove(entry.Live.OrderId);
                 }
+                else if (stored.Version != (entry.Base?.Version ?? 0))
+                {
+                    // The database's row is now the base, so the scope counts the order once: the
+                    // tail's row in place of the database's, not beside it.
+                    versionDeletes.AddRange(_tail.Rebase(entry, stored));
+                    upserts.Add(TailRow.Of(entry.Live, stored));
+                }
             }
             else if ((stored?.Version ?? 0) != (entry.Base?.Version ?? 0))
             {

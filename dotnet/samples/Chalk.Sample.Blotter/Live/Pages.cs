@@ -609,8 +609,9 @@ public sealed class PageView(Pages pages, SortSpec order)
 
         IRow[] window;
         long first;
-        if (below is null && start <= SeekWithin)
+        if (below is null && above is null && start <= SeekWithin)
         {
+            // Nothing known yet: counted from the top.
             window = await pages.FromAsync(state, order, null, true, (int)start + count, ct).ConfigureAwait(false);
             first = 0;
         }
@@ -631,6 +632,8 @@ public sealed class PageView(Pages pages, SortSpec order)
         }
         else if (!_held && start <= SeekWithin)
         {
+            // At the top, positions count from the first row. Held, they do not: the first row now may
+            // have arrived since, and the rows above the first position known are read backwards from it.
             window = await pages.FromAsync(state, order, null, true, (int)start + count, ct).ConfigureAwait(false);
             first = 0;
         }
@@ -654,6 +657,22 @@ public sealed class PageView(Pages pages, SortSpec order)
         }
 
         return new Page(first + skip, rows, total, state);
+    }
+
+    /// <summary>
+    /// The topmost position known and its row: what arrived above the view is what sorts before it,
+    /// counted from here rather than from a row further down, between which and the top rows the stream
+    /// sent late may have landed.
+    /// </summary>
+    public (long At, IRow Row)? First
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _anchors.Count == 0 ? null : (_anchors.Keys[0], _anchors.Values[0]);
+            }
+        }
     }
 
     /// <summary>

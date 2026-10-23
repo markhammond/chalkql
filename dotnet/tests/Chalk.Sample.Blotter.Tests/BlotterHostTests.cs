@@ -141,20 +141,23 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
 
         // Room made for the rows that arrived: the held row moves down by as many, and the top of the
         // view, read backwards from it, is the newest order.
-        host.Exchange.Pause();
-        await UntilAsync(() => host.Exchange.Quiet);
-        await host.CaughtUpAsync(CancellationToken.None);
+        await QuiesceAsync(host);
         state = scope.State;
-        var arrived = await host.Pages.RankAsync(state, order, held, CancellationToken.None) - 100;
+        var first = view.First!.Value;
+        var arrived = await host.Pages.RankAsync(state, order, first.Row, CancellationToken.None) - first.At;
         view.Shift(arrived);
-        var moved = await view.GetAsync(state, 100 + arrived, 1, CancellationToken.None);
+        var top = await view.GetAsync(state, first.At + arrived, 1, CancellationToken.None);
         var newest = await view.GetAsync(state, 0, 1, CancellationToken.None);
-        Assert.Equal(held.Id, moved.Rows[0].Id);
+        Assert.Equal(first.Row.Id, top.Rows[0].Id);
         Assert.Equal((await host.Pages.View(order).GetAsync(state, 0, 1, CancellationToken.None)).Rows[0].Id, newest.Rows[0].Id);
         Assert.Equal(0, newest.Start);
+
+        // The row held further down may have moved by an order the stream sent late, which landed
+        // between it and the top; it is never lost, and never above.
+        Assert.Contains(held.Id, (await view.GetAsync(state, 100 + arrived - 40, 80, CancellationToken.None)).Rows.Select(r => r.Id));
         view.Held = false;
-        var top = await view.GetAsync(state, 100, 1, CancellationToken.None);
-        Assert.NotEqual(held.Id, top.Rows[0].Id);
+        var live = await view.GetAsync(state, 100, 1, CancellationToken.None);
+        Assert.NotEqual(held.Id, live.Rows[0].Id);
         await host.ReleaseAsync(scope);
     }
 
@@ -182,6 +185,32 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         await Task.Delay(host.Pages.WindowFor + TimeSpan.FromMilliseconds(200));
         var fresh = await host.Pages.View(order).GetAsync(scope.State, 40, 60, CancellationToken.None);
         Assert.Equal(next.Rows.Select(r => r.Id), fresh.Rows.Select(r => r.Id));
+        await host.ReleaseAsync(scope);
+    }
+
+    [Fact]
+    public async Task Rows_let_in_above_a_held_page_are_those_just_above_it_not_the_newest()
+    {
+        await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() with { NewShare = 1 } });
+        var scope = await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
+        var order = Tab.Orders.DefaultSort;
+        var view = host.Pages.View(order);
+        var held = (await view.GetAsync(scope.State, 0, 40, CancellationToken.None)).Rows[0];
+        view.Held = true;
+
+        host.Exchange.Send(300);
+        await UntilAsync(() => scope.State.Live.Count(r => r.Version == 1) >= 100);
+        await QuiesceAsync(host);
+        var state = scope.State;
+
+        // Room for only 30 of them: the first position known is now 30, and nothing is known below it.
+        view.Shift(30);
+        var above = await view.GetAsync(state, 0, 31, CancellationToken.None);
+
+        var live = (await host.Pages.View(order).GetAsync(state, 0, 2_000, CancellationToken.None)).Rows;
+        var at = Array.FindIndex(live, r => r.Id == held.Id);
+        Assert.True(at >= 30, $"the held row is {at} rows from the top");
+        Assert.Equal(live[(at - 30)..(at + 1)].Select(r => r.Id), above.Rows.Select(r => r.Id));
         await host.ReleaseAsync(scope);
     }
 
@@ -277,6 +306,20 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
                 await Task.Delay(250);
             }
         }
+    }
+
+    /// <summary>
+    /// The market paused, everything it sent read and written, and the tail looked up since: counts of
+    /// the rows above a key are then exact, not off by what the database wrote since the last lookup.
+    /// </summary>
+    private static async Task QuiesceAsync(BlotterHost host)
+    {
+        host.Exchange.Pause();
+        await UntilAsync(() => host.Exchange.Quiet);
+        await host.CaughtUpAsync(CancellationToken.None);
+        await UntilAsync(() => host.Exchange.Written, TimeSpan.FromSeconds(30));
+        await Task.Delay(host.Options.ConfirmEvery * 3);
+        await host.CaughtUpAsync(CancellationToken.None);
     }
 
     private static ExchangeOptions Quiet() => new()

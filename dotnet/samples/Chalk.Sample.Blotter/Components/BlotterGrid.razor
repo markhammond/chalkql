@@ -391,14 +391,15 @@
         {
             // What has arrived above the held rows, counted at most once a second, and only near the
             // top, where positions are close to exact.
-            if (_anchor is { } anchor && DateTime.UtcNow - _hiddenAt > TimeSpan.FromSeconds(1))
+            if (_anchor is not null && _pages.First is { } top && DateTime.UtcNow - _hiddenAt > TimeSpan.FromSeconds(1))
             {
-                // Rows let in while the count is read have moved the anchor down since it was taken.
+                // What sorts above the topmost row the view knows, less its position: the rows that
+                // need positions above it. Rows let in while the count is read have moved it down since.
                 _hiddenAt = DateTime.UtcNow;
                 var before = _shifted;
-                _hidden = anchor.Position > 100_000
+                _hidden = top.At > 100_000
                     ? 0
-                    : Math.Max(0, await Host.Pages.RankAsync(state, _sort, anchor.Key, ct) - anchor.Position - (_shifted - before));
+                    : Math.Max(0, await Host.Pages.RankAsync(state, _sort, top.Row, ct) - top.At - (_shifted - before));
             }
 
             var hidden = _hidden;

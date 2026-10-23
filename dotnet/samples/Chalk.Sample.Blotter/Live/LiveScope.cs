@@ -268,6 +268,14 @@ public sealed class ScopeState
                 var fill = tail.GetFill(id) ?? throw new InvalidOperationException($"the scope holds fill {id}, which the tail does not");
                 byId[id] = fill;
                 live.Add(fill);
+
+                // A fill the database has been seen to hold is in its rows too: counted once, not twice.
+                if (tail.FillConfirmedAt(id) is not null)
+                {
+                    overridden.Add(fill);
+                    overriddenIds.Add(id);
+                }
+
                 continue;
             }
 
