@@ -3,7 +3,7 @@ namespace Chalk.Sample.Blotter.Market;
 /// <summary>How busy the brokerage is.</summary>
 public sealed record ExchangeOptions
 {
-    /// <summary>Versions a second, on average, outside a burst.</summary>
+    /// <summary>Changes a second, on average, outside a burst: new orders, fills and cancels.</summary>
     public double Rate { get; init; } = 200;
 
     /// <summary>How often a burst comes; zero for never.</summary>
@@ -14,10 +14,20 @@ public sealed record ExchangeOptions
     /// <summary>The rate in a burst, as a multiple of <see cref="Rate"/>.</summary>
     public double BurstFactor { get; init; } = 10;
 
-    /// <summary>Of the versions the exchange sends, the share that are new trades rather than fills.</summary>
+    /// <summary>Of the changes, the share that are new orders rather than fills.</summary>
     public double NewShare { get; init; } = 0.3;
 
-    /// <summary>How far back the feed can replay.</summary>
+    /// <summary>Of new orders, the share filled at once: a marketable order, whose fill races its order.</summary>
+    public double FilledAtOnce { get; init; } = 0.25;
+
+    /// <summary>
+    /// The most the order stream runs behind the fills stream: each order version is sent up to this
+    /// long after it happened, while its fill is sent at once. So a fill often arrives before the order
+    /// it fills, and before the version that counts it.
+    /// </summary>
+    public TimeSpan OrderSkew { get; init; } = TimeSpan.FromMilliseconds(600);
+
+    /// <summary>How far back the streams can replay.</summary>
     public TimeSpan FeedRetention { get; init; } = TimeSpan.FromMinutes(30);
 
     public IngestLag Lag { get; init; } = new();
@@ -26,90 +36,138 @@ public sealed record ExchangeOptions
 }
 
 /// <summary>
-/// The simulated outside world: an exchange that takes new orders and fills them, a feed that
-/// sends every version the moment it exists, and an ingestion job that writes each to the
-/// database some time later. The blotter sees the first two only through the feed and the database.
+/// The simulated outside world: the house taking client orders and filling them; two streams, one of
+/// order versions and one of fills, each sending its rows as they happen and neither waiting for the
+/// other; and two ingestion jobs that write each to the database some time later, each with its own
+/// watermark. The blotter sees all of it only through the streams and the database.
 /// </summary>
 public sealed class Exchange : IAsyncDisposable
 {
     private readonly ExchangeOptions _options;
     private readonly Random _random;
-    private readonly List<TradeVersion> _open;
-    private readonly IngestWriter _writer;
+    private readonly List<Order> _open;
+    private readonly IngestWriter<Order> _orderWriter;
+    private readonly IngestWriter<Fill> _fillWriter;
+    private readonly Queue<(Order Order, DateTime Release)> _held = new();
     private readonly CancellationTokenSource _stop = new();
-    private readonly Lock _truthGate = new();
-    private readonly Dictionary<long, TradeVersion> _changed = [];
+    private readonly Lock _gate = new();
+    private readonly double[] _mids;
+    private readonly double[] _clientWeights;
     private Task? _running;
-    private long _lastTradeId;
+    private long _orders;
     private DateTime _lastEventTime;
+    private DateTime _lastRelease;
 
-    public Exchange(TradeStore store, ExchangeOptions options, long lastTradeId, DateTime lastEventTime, List<TradeVersion> open)
+    public Exchange(
+        TradeStore store, ExchangeOptions options, long orders, DateTime ordersThrough, DateTime fillsThrough, List<Order> open)
     {
         _options = options;
         _random = new Random(options.Seed);
         _open = open;
-        _lastTradeId = lastTradeId;
-        _lastEventTime = lastEventTime;
-        Feed = new TradeFeed(lastEventTime, options.FeedRetention);
-        _writer = new IngestWriter(store, options.Lag, lastEventTime, options.Seed + 1);
+        _orders = orders;
+        _lastEventTime = ordersThrough > fillsThrough ? ordersThrough : fillsThrough;
+        _mids = [.. Reference.Assets.Select(a => a.Price)];
+        _clientWeights = [.. Reference.Clients.Select((_, i) => 1.0 / (i + 1))];
+        Orders = new Feed<Order>("orders", ordersThrough, options.FeedRetention);
+        Fills = new Feed<Fill>("fills", fillsThrough, options.FeedRetention);
+        _orderWriter = new IngestWriter<Order>(store.WriteOrders, options.Lag, ordersThrough, options.Seed + 1);
+        _fillWriter = new IngestWriter<Fill>(store.WriteFills, options.Lag, fillsThrough, options.Seed + 2);
     }
 
-    public TradeFeed Feed { get; }
+    /// <summary>The stream of order versions.</summary>
+    public Feed<Order> Orders { get; }
 
-    /// <summary>The database's watermark, as the ingestion last wrote it.</summary>
-    public DateTime CompleteThrough => _writer.CompleteThrough;
+    /// <summary>The stream of fills.</summary>
+    public Feed<Fill> Fills { get; }
 
-    /// <summary>Versions the feed has sent that the database does not show yet.</summary>
-    public int NotYetIngested => _writer.Waiting;
+    /// <summary>The database's watermarks, as the ingestion last wrote them.</summary>
+    public DateTime OrdersThrough => _orderWriter.CompleteThrough;
 
-    public bool IngestionStalled => _writer.Stalled;
+    public DateTime FillsThrough => _fillWriter.CompleteThrough;
 
-    /// <summary>The database writes nothing for a while; the feed goes on.</summary>
-    public void StallIngestion(TimeSpan time) => _writer.StallUntil(DateTime.UtcNow + time);
+    /// <summary>The older of the two watermarks: how far the database is complete for both.</summary>
+    public DateTime CompleteThrough => OrdersThrough < FillsThrough ? OrdersThrough : FillsThrough;
 
-    /// <summary>The rate the exchange is running at now, versions a second.</summary>
-    public double CurrentRate { get; private set; }
+    /// <summary>Rows the streams have sent that the database does not show yet.</summary>
+    public int NotYetIngested => _orderWriter.Waiting + _fillWriter.Waiting;
 
-    /// <summary>The trades open at the exchange, which fills come from.</summary>
-    public int OpenTrades => _open.Count;
-
-    /// <summary>
-    /// The truth, for checking: the latest version of every trade the exchange has changed since it
-    /// started. Trades it has not touched are as the corpus left them.
-    /// </summary>
-    public IReadOnlyDictionary<long, TradeVersion> ChangedSinceStart()
+    /// <summary>Order versions that have happened and that the order stream has not sent yet.</summary>
+    public int OrdersHeld
     {
-        lock (_truthGate)
+        get
         {
-            return new Dictionary<long, TradeVersion>(_changed);
+            lock (_gate)
+            {
+                return _held.Count;
+            }
         }
     }
+
+    public bool IngestionStalled => _orderWriter.Stalled || _fillWriter.Stalled;
+
+    /// <summary>The database writes nothing for a while; the streams go on.</summary>
+    public void StallIngestion(TimeSpan time)
+    {
+        _orderWriter.StallUntil(DateTime.UtcNow + time);
+        _fillWriter.StallUntil(DateTime.UtcNow + time);
+    }
+
+    /// <summary>The rate the exchange is running at now, changes a second.</summary>
+    public double CurrentRate { get; private set; }
 
     public void Start()
     {
         _running = Task.WhenAll(
             Task.Run(() => TradeAsync(_stop.Token)),
-            Task.Run(() => _writer.RunAsync(_stop.Token)));
+            Task.Run(() => _orderWriter.RunAsync(_stop.Token)),
+            Task.Run(() => _fillWriter.RunAsync(_stop.Token)));
     }
 
-    /// <summary>Sends <paramref name="count"/> versions at once, now: for tests, and for a page that wants a burst.</summary>
-    public TradeVersion[] Send(int count)
+    /// <summary>
+    /// Makes <paramref name="count"/> changes at once, now: for tests, and for a page that wants a burst.
+    /// The fills are sent at once; the order versions when the order stream's skew lets them go.
+    /// </summary>
+    public (Order[] Orders, Fill[] Fills) Send(int count)
     {
-        var batch = new TradeVersion[count];
-        lock (_truthGate)
+        var orders = new List<Order>(count + 8);
+        var fills = new List<Fill>(count);
+        lock (_gate)
         {
             for (var i = 0; i < count; i++)
             {
-                batch[i] = Next();
-                _changed[batch[i].TradeId] = batch[i];
+                Next(orders, fills);
             }
 
-            // The feed first, then the database: what is in the database has always been sent.
-            Feed.Publish(batch);
-            _writer.Enqueue(batch);
+            // The stream first, then the database: what is in the database has always been sent.
+            var batch = fills.ToArray();
+            Fills.Publish(batch);
+            _fillWriter.Enqueue(batch);
+            foreach (var order in orders)
+            {
+                // Held for a skew of its own, but never sent before a version that happened before it.
+                var release = order.EventTime + _options.OrderSkew * _random.NextDouble();
+                _lastRelease = release > _lastRelease ? release : _lastRelease;
+                _held.Enqueue((order, _lastRelease));
+            }
+
+            ReleaseOrders(DateTime.UtcNow);
         }
 
-        return batch;
+        return ([.. orders], [.. fills]);
+    }
+
+    /// <summary>Sends every held order version whose time has come, in the order they happened.</summary>
+    private void ReleaseOrders(DateTime now)
+    {
+        var due = new List<Order>();
+        while (_held.TryPeek(out var held) && held.Release <= now)
+        {
+            due.Add(_held.Dequeue().Order);
+        }
+
+        var batch = due.ToArray();
+        Orders.Publish(batch);
+        _orderWriter.Enqueue(batch);
     }
 
     public async ValueTask DisposeAsync()
@@ -147,73 +205,116 @@ public sealed class Exchange : IAsyncDisposable
             {
                 Send(count);
             }
+            else
+            {
+                lock (_gate)
+                {
+                    ReleaseOrders(DateTime.UtcNow);
+                }
+            }
         }
     }
 
-    private TradeVersion Next()
+    /// <summary>One change: a new order (filled at once, now and then), a fill, or a cancel.</summary>
+    private void Next(List<Order> orders, List<Fill> fills)
     {
-        // Strictly increasing event times: one clock, never two versions at one microsecond.
-        var now = TradeVersion.Micros(DateTime.UtcNow);
-        _lastEventTime = now > _lastEventTime ? now : _lastEventTime.AddTicks(10);
+        for (var a = 0; a < _mids.Length; a++)
+        {
+            _mids[a] *= 1 + (_random.NextDouble() - 0.5) * 0.0004;
+        }
 
         var fill = _open.Count > 0 && (_random.NextDouble() >= _options.NewShare || _open.Count > 5000);
         if (!fill)
         {
-            var qty = (100 + _random.Next(99)) * 100L;
-            var trade = new TradeVersion(
-                ++_lastTradeId,
-                1,
-                _lastEventTime,
-                _lastEventTime,
-                Pick(Reference.Clients),
-                Pick(Reference.Symbols),
-                Pick(Reference.Sides),
-                qty,
-                0,
-                0,
-                Reference.Statuses[0],
-                Pick(Reference.Venues));
-            _open.Add(trade);
-            return trade;
+            var rank = Pick(_clientWeights) + 1;
+            var (reference, _, region) = Reference.Clients[rank - 1];
+            var channel = Pick(Reference.ChannelsOf(rank));
+            var asset = Pick([.. Reference.Assets.Select(a => a.Weight)]);
+            var time = Tick();
+            var order = new Order(
+                Guid.CreateVersion7(new DateTimeOffset(time, TimeSpan.Zero)), 1, time, time, $"{reference}-{_orders++}", reference,
+                region, channel, Reference.Instruments[asset],
+                Reference.Sides[_random.Next(2)], (1 + _random.Next(6)) * Reference.Assets[asset].Lot, 0, 0,
+                Reference.MarkupBps(channel), Reference.Statuses[0]);
+            orders.Add(order);
+            if (_random.NextDouble() < _options.FilledAtOnce)
+            {
+                Work(order, orders, fills, cancel: false);
+            }
+            else
+            {
+                _open.Add(order);
+            }
+
+            return;
         }
 
         var at = _random.Next(_open.Count);
         var before = _open[at];
-        TradeVersion after;
-        if (_random.NextDouble() < 0.03)
+        _open[at] = _open[^1];
+        _open.RemoveAt(_open.Count - 1);
+        Work(before, orders, fills, cancel: _random.NextDouble() < 0.03);
+    }
+
+    /// <summary>Fills or cancels an order, and keeps it open if it is still working.</summary>
+    private void Work(Order before, List<Order> orders, List<Fill> fills, bool cancel)
+    {
+        var time = Tick();
+        Order after;
+        if (cancel)
         {
-            after = before with { Version = before.Version + 1, EventTime = _lastEventTime, Status = Reference.Statuses[3] };
+            after = before with { Version = before.Version + 1, EventTime = time, Status = Reference.Statuses[3] };
         }
         else
         {
-            var chunk = Math.Max(100, (long)(before.OrderQty * (0.1 + _random.NextDouble() * 0.5)) / 100 * 100);
-            var filled = Math.Min(before.OrderQty, before.FilledQty + chunk);
-            var price = before.AvgPrice > 0 ? before.AvgPrice : 10 + _random.Next(100_000) / 100.0;
-            var fillPrice = price * (1 + (_random.NextDouble() - 0.5) * 0.002);
-            var average = Math.Round((before.AvgPrice * before.FilledQty + fillPrice * (filled - before.FilledQty)) / filled, 4);
+            var asset = Reference.AssetOf(before.Instrument);
+            var lot = Reference.Assets[asset].Lot;
+            var left = (int)Math.Round((before.Qty - before.FilledQty) / lot);
+            var qty = (1 + _random.Next(Math.Max(1, left))) * lot;
+            var mid = Math.Round(_mids[asset], 6);
+            var price = Math.Round(mid * (1 + (before.Side == "Buy" ? 1 : -1) * before.MarkupBps / 10_000), 4);
+            var filled = before.FilledQty + qty;
             after = before with
             {
                 Version = before.Version + 1,
-                EventTime = _lastEventTime,
+                EventTime = time,
                 FilledQty = filled,
-                AvgPrice = average,
-                Status = filled == before.OrderQty ? Reference.Statuses[2] : Reference.Statuses[1],
-                Venue = Pick(Reference.Venues),
+                AvgPrice = Math.Round((before.AvgPrice * before.FilledQty + price * qty) / filled, 4),
+                Status = filled >= before.Qty - 1e-9 ? Reference.Statuses[2] : Reference.Statuses[1],
             };
+            fills.Add(new Fill(
+                Guid.CreateVersion7(new DateTimeOffset(time, TimeSpan.Zero)), after.OrderId, time, after.ClOrdId, after.Client, after.Region, after.Channel,
+                after.Instrument, after.Side, qty, price, mid, after.MarkupBps));
         }
 
-        if (after.Status is "Filled" or "Cancelled")
+        orders.Add(after);
+        if (after.Status is not ("Filled" or "Cancelled"))
         {
-            _open[at] = _open[^1];
-            _open.RemoveAt(_open.Count - 1);
+            _open.Add(after);
         }
-        else
-        {
-            _open[at] = after;
-        }
-
-        return after;
     }
 
-    private string Pick(IReadOnlyList<string> values) => values[_random.Next(values.Count)];
+    /// <summary>The next event time: one clock, strictly increasing, never two changes at one microsecond.</summary>
+    private DateTime Tick()
+    {
+        var now = Cells.Micros(DateTime.UtcNow);
+        _lastEventTime = now > _lastEventTime ? now : _lastEventTime.AddTicks(10);
+        return _lastEventTime;
+    }
+
+    private int Pick(double[] weights)
+    {
+        var r = _random.NextDouble() * weights.Sum();
+        for (var i = 0; i < weights.Length - 1; i++)
+        {
+            if ((r -= weights[i]) < 0)
+            {
+                return i;
+            }
+        }
+
+        return weights.Length - 1;
+    }
+
+    private string Pick((string Name, double Weight)[] names) => names[Pick([.. names.Select(n => n.Weight)])].Name;
 }

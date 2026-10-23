@@ -1,0 +1,640 @@
+@* One tab's grid: sorted, filtered by any column, live, and for orders, with their fills nested. *@
+@implements IAsyncDisposable
+@inject BlotterHost Host
+@inject IJSRuntime JS
+
+<div class="tabs" role="tablist">
+    @foreach (var tab in Tab.All)
+    {
+        var t = tab;
+        <button role="tab" aria-selected="@(t == Tab)" class="tab @(t == Tab ? "selected" : "")" @onclick="() => Select.InvokeAsync(t)">@t.Title</button>
+    }
+    <span class="spacer"></span>
+    <span class="chip" title="The rows the tab has now: counted in the database at the snapshot, the tail's added">
+        <span class="label">~rows</span><b>@_total.ToString("N0", CultureInfo.InvariantCulture)</b>
+    </span>
+    <span class="chip"><span class="label">sort by</span><b>@_sort.Name</b></span>
+</div>
+
+@if (!_filter.Columns.IsEmpty)
+{
+<div class="toolbar">
+    @foreach (var filter in _filter.Columns)
+    {
+        var f = filter;
+        <span class="pill filter-pill" @onclick="() => OpenEditor(f.Column)">
+            @f.Describe()
+            <button type="button" aria-label="Remove the filter on @f.Column.Title" @onclick="() => RemoveFilterAsync(f.Column)" @onclick:stopPropagation>×</button>
+        </span>
+    }
+    <button type="button" class="link-button" @onclick="ClearFiltersAsync">Clear all</button>
+</div>
+}
+
+<div class="estimate @(_estimate is { SortInDatabase: false } ? "warn" : "")" title="@(_estimate?.PlanText)">
+    @if (_estimate is { } e)
+    {
+        <span>
+            Planner's estimate: the database reads <b>@Rows(e.RowsRead)</b> rows and sorts <b>@Rows(e.RowsSorted)</b>
+            @(e.SortInDatabase ? "in the database" : "— in the host, every row pulled across")
+            @(e.FilterInDatabase ? "" : "; part of the filter runs in the host")
+        </span>
+        <span class="muted">· the filter passes @(_counted?.ToString("N0", CultureInfo.InvariantCulture) ?? "…") rows of generation @(_scope?.State.Generation?.Number), counted</span>
+    }
+    <span class="muted">· each statement stopped after @Host.Options.QueryTimeLimit.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) s</span>
+</div>
+
+@if (_editing is { } editing)
+{
+    <FilterEditor Tab="Tab" Column="editing" Current="_filter.For(editing)" Within="PeriodOfInterest()"
+                  Generation="_scope?.State.Generation" Apply="ApplyFilterAsync" Close="() => _editing = null" />
+}
+
+@if (_refusal is not null)
+{
+    <div class="refusal">
+        Not serving: @_refusal
+        <button @onclick="RetryAsync">Try again</button>
+    </div>
+}
+
+<div class="frame">
+    @if (_hidden > 0)
+    {
+        <button class="badge" @onclick="ShowNewestAsync">@_hidden.ToString("N0", CultureInfo.InvariantCulture) new above</button>
+    }
+
+    <div class="scroller @(_waiting || _refusal is not null ? "waiting" : "")" @ref="_scroller">
+        <QuickGrid TGridItem="BlotterRow" @ref="_grid" ItemsProvider="_provider" Virtualize="true" ItemSize="(float)RowHeight"
+                   OverscanCount="30" ItemKey="r => r.Key" RowClass="@(r => r.Parent is null ? r.RowClass : "child " + r.RowClass)">
+            @if (Tab.Overrides)
+            {
+                // The expander has a column of its own, so that opening an order moves nothing in its
+                // row; only its fills, below it, are set in.
+                <TemplateColumn TGridItem="BlotterRow" Title="" Class="expander">
+                    @if (context.Parent is null && context.Row is Order order)
+                    {
+                        <button type="button" class="toggle" aria-label="@(_open.ContainsKey(order.OrderId) ? "Hide" : "Show") the fills of order @order.OrderId"
+                                @onclick="() => ToggleAsync(order)">@(_open.ContainsKey(order.OrderId) ? "▾" : "▸")</button>
+                    }
+                </TemplateColumn>
+            }
+            @for (var c = 0; c < Tab.Columns.Count; c++)
+            {
+                var index = c;
+                var column = Tab.Columns[c];
+                <TemplateColumn TGridItem="BlotterRow" Title="@column.Title" Class="@(column.Numeric ? "num" : null)">
+                    <HeaderTemplate>
+                        <div class="head @(column.Numeric ? "num" : "")">
+                            <button class="sort" type="button" title="Click to sort by @column.Title; shift-click to add it to the sort"
+                                    @onclick="e => SortAsync(column, e.ShiftKey)">
+                                @column.Title
+                                @if (_sort.RankOf(column) is var rank and > 0)
+                                {
+                                    <span class="arrow">@(_sort.IsDescending(column) ? "▼" : "▲")</span>
+                                    @if (_sort.Chosen.Length > 1)
+                                    {
+                                        <span class="rank">@rank</span>
+                                    }
+                                }
+                            </button>
+                            <button type="button" class="funnel @(_filter.For(column) is not null ? "on" : "") @(_editing == column ? "open" : "")"
+                                    title="Filter @column.Title" aria-label="Filter @column.Title" @onclick="() => OpenEditor(column)">
+                                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M1.5 2h13l-5 6.2V14l-3-1.6V8.2z" /></svg>
+                            </button>
+                        </div>
+                    </HeaderTemplate>
+                    <ChildContent>
+                        @if (context.Row is Fill fill && context.Parent is not null)
+                        {
+                            <span class="cell @(column.Kind == ColumnKind.Id ? "id" : "")">@NestedCell(column, fill)</span>
+                        }
+                        else if (column.Name == "version")
+                        {
+                            <span class="cell @context.Flash[index]">
+                                <a href="order/@context.Row.Id" target="_blank" title="Every version of this order, and its fills">v@(context.Row.Version) ↗</a>
+                            </span>
+                        }
+                        else if (column.Name == "order_id" && context.Row is Fill parentOf)
+                        {
+                            <span class="cell link id" @onmouseenter="e => HoverAsync(e, parentOf)" @onmouseleave="Unhover">
+                                <a href="order/@parentOf.OrderId" target="_blank">@column.Show(context.Row)</a>
+                            </span>
+                        }
+                        else if (column.Name == "side")
+                        {
+                            <span class="cell side-@column.Show(context.Row) @context.Flash[index]">@column.Show(context.Row)</span>
+                        }
+                        else
+                        {
+                            <span class="cell @(column.Kind == ColumnKind.Id ? "id" : "") @context.Flash[index]" title="@(column.Kind == ColumnKind.Id ? column.Show(context.Row) : null)">@column.Show(context.Row)</span>
+                        }
+                    </ChildContent>
+                </TemplateColumn>
+            }
+        </QuickGrid>
+    </div>
+
+    @if (_hover is { } hover)
+    {
+        <div class="hover-card" style="left: @(hover.X)px; top: @(hover.Y)px">
+            @if (hover.Looked && hover.Order is null)
+            {
+                <div><b>Order @hover.Fill.OrderId</b> · @hover.Fill.ClOrdId</div>
+                <div class="muted">Not received yet: the fills stream runs ahead of the orders stream.</div>
+            }
+            else if (hover.Order is { } o)
+            {
+                <div><b>Order @o.OrderId</b> · @o.ClOrdId · v@(o.Version)</div>
+                <div>@o.Client (@o.Region) via @o.Channel</div>
+                <div><span class="side-@o.Side">@o.Side</span> @o.Qty.ToString("#,0.####", CultureInfo.InvariantCulture) @o.Instrument</div>
+                <div>filled @o.FilledQty.ToString("#,0.####", CultureInfo.InvariantCulture) at @o.AvgPrice.ToString("#,0.0000", CultureInfo.InvariantCulture) · @o.Status</div>
+                @if (o.EventTime < hover.Fill.EventTime)
+                {
+                    <div class="muted">Its version with this fill has not arrived yet.</div>
+                }
+            }
+            else
+            {
+                <div class="muted">Order @hover.Fill.OrderId…</div>
+            }
+        </div>
+    }
+</div>
+
+<details>
+    <summary>How this tab is answered</summary>
+    <p>
+        Each page is generation @(_scope?.State.Generation?.Number) of the database
+        (@(Tab.Overrides ? "a snapshot of every order's latest version" : "the fills at or before its watermark")),
+        read through ChalkQL with the sort, the filter and the paging pushed down, merged with this filter's live scope:
+        a ChalkQL standing view over the tail of what the feed has sent since the watermark.
+    </p>
+    <pre>@SnapshotQueries.PageSql(Tab, _filter, _sort)</pre>
+    <pre>@LiveScope.Sql(Tab, _filter)</pre>
+    <button @onclick="ShowPlansAsync">Show the plans</button>
+    @if (_plans is not null)
+    {
+        <pre>@_plans</pre>
+    }
+</details>
+
+@code {
+    [Parameter, EditorRequired]
+    public Tab Tab { get; set; } = default!;
+
+    /// <summary>Another tab chosen on this one's tab bar.</summary>
+    [Parameter]
+    public EventCallback<Tab> Select { get; set; }
+
+    private const double RowHeight = 30;
+    private Flashes _flashes = default!;
+    private Flashes _fillFlashes = new(Tab.Fills.Columns);
+    private QuickGrid<BlotterRow>? _grid;
+    private ElementReference _scroller;
+    private DotNetObjectReference<BlotterGrid>? _self;
+    private GridItemsProvider<BlotterRow> _provider = default!;
+    private LiveScope? _scope;
+    private FilterSpec _filter = FilterSpec.None;
+    private SortSpec _sort = default!;
+    private string? _refusal;
+    private string? _plans;
+    private long _total;
+    private Column? _editing;
+    private PageEstimate? _estimate;
+    private long? _counted;
+
+    // The grid is waiting for the first page of a new sort or filter: it stays as it was, dimmed.
+    private bool _waiting;
+    private long _view;
+
+    // Scrolled away from the top, the grid holds its rows in place: rows arriving above it are counted
+    // here rather than pushing the rows down, until the reader goes back to the top.
+    private (IRow Key, long Position)? _anchor;
+    private long _hidden;
+    private double _scrollTop;
+
+    // The orders opened to show their fills, by id, each with the version last seen, to find it by.
+    private readonly Dictionary<Guid, Order> _open = [];
+    private IReadOnlyList<Opened> _opened = [];
+
+    private (Fill Fill, double X, double Y, bool Looked, Order? Order)? _hover;
+    private int _refreshing;
+    private bool _dirty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _flashes = new Flashes(Tab.Columns);
+        _sort = Tab.DefaultSort;
+        _provider = ProvideAsync;
+        Host.Published += OnPublished;
+        await AcquireAsync(_filter);
+        await EstimateAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _self = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("blotter.watchScroll", _scroller, _self);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnScrolled(double scrollTop)
+    {
+        var atTop = scrollTop < RowHeight / 2;
+        var wasAtTop = _scrollTop < RowHeight / 2;
+        _scrollTop = scrollTop;
+        if (wasAtTop && !atTop && _anchor is null && _scope?.State is { Generation: not null } state)
+        {
+            // Leaving the top: hold the row now first in view where it is, by its sort key; a fill in
+            // view holds its order.
+            var slot = Nesting.Locate((long)(scrollTop / RowHeight), _opened);
+            var page = await Host.Pages.GetAsync(state, _sort, slot.Position, 1, CancellationToken.None);
+            if (page.Rows.Length == 1)
+            {
+                _anchor = (page.Rows[0], slot.Position);
+            }
+        }
+        else if (atTop && _anchor is not null)
+        {
+            // Back at the top: what arrived above is shown, and new rows push down again.
+            _anchor = null;
+            _hidden = 0;
+            await RefreshAsync();
+        }
+    }
+
+    private async ValueTask<GridItemsProviderResult<BlotterRow>> ProvideAsync(GridItemsProviderRequest<BlotterRow> request)
+    {
+        var view = _view;
+        for (var attempt = 0; ; attempt++)
+        {
+            var scope = _scope;
+            if (scope is null || scope.State.Generation is null)
+            {
+                return GridItemsProviderResult.From<BlotterRow>([], 0);
+            }
+
+            if (scope.Fault is { } fault)
+            {
+                await InvokeAsync(() => Refuse($"the live scope failed: {fault.Message}"));
+                return GridItemsProviderResult.From<BlotterRow>([], 0);
+            }
+
+            var state = scope.State;
+            var ct = request.CancellationToken;
+            try
+            {
+                var hidden = 0L;
+                if (_anchor is { } anchor)
+                {
+                    hidden = Math.Max(0, await Host.Pages.RankAsync(state, _sort, anchor.Key, ct) - anchor.Position);
+                }
+
+                var rows = await Host.Pages.TotalAsync(state, ct) - hidden;
+                var opened = await OpenedAsync(state, hidden, rows, ct);
+                var slots = Nesting.Map(request.StartIndex, request.Count ?? 60, rows, opened);
+                var positions = slots.Where(s => !s.IsFill).Select(s => s.Position).ToList();
+                var page = positions.Count == 0
+                    ? null
+                    : await Host.Pages.GetAsync(state, _sort, positions[0] + hidden, (int)(positions[^1] - positions[0] + 1), ct);
+
+                var now = DateTime.UtcNow;
+                var shown = new List<BlotterRow>(slots.Count);
+                foreach (var slot in slots)
+                {
+                    if (slot.Under is { } under)
+                    {
+                        shown.Add(_fillFlashes.Decorate(under.Fills[slot.Fill], now, under.Order.OrderId));
+                    }
+                    else if (page is not null && slot.Position - positions[0] < page.Rows.Length)
+                    {
+                        shown.Add(_flashes.Decorate(page.Rows[slot.Position - positions[0]], now));
+                    }
+                }
+
+                _flashes.Seen(state.IngestedThrough, now);
+                _fillFlashes.Seen(state.IngestedThrough, now);
+                _opened = opened;
+                _total = rows + hidden;
+                if (_hidden != hidden || (_waiting && view == _view))
+                {
+                    _hidden = hidden;
+                    _waiting = _waiting && view != _view;
+                    await InvokeAsync(StateHasChanged);
+                }
+
+                return GridItemsProviderResult.From(shown, (int)Math.Min(int.MaxValue, Nesting.Total(rows, opened)));
+            }
+            catch (InvalidOperationException) when (attempt == 0)
+            {
+                // A state whose generation has just been retired: read the scope's latest instead.
+            }
+            catch (QueryTimeLimitException limit)
+            {
+                await InvokeAsync(() => Refuse(limit.Message));
+                return GridItemsProviderResult.From<BlotterRow>([], 0);
+            }
+            catch (BlotterRefusedException refused)
+            {
+                await InvokeAsync(() => Refuse(refused.Message));
+                return GridItemsProviderResult.From<BlotterRow>([], 0);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The opened orders in view, in order of position: each found by its latest version's sort key,
+    /// and kept only if the row at that position is the order, which it is not once the filter
+    /// leaves it out.
+    /// </summary>
+    private async Task<IReadOnlyList<Opened>> OpenedAsync(ScopeState state, long hidden, long rows, CancellationToken ct)
+    {
+        if (_open.Count == 0)
+        {
+            return [];
+        }
+
+        var opened = new List<Opened>();
+        foreach (var (id, seen) in _open.ToList())
+        {
+            var order = state.Tail.GetValueOrDefault(id) as Order ?? seen;
+            var position = await Host.Pages.RankAsync(state, _sort, order, ct) - hidden;
+            if (position < 0 || position >= rows)
+            {
+                continue;
+            }
+
+            var there = await Host.Pages.GetAsync(state, _sort, position + hidden, 1, ct);
+            if (there.Rows is [Order shown] && shown.OrderId == id)
+            {
+                _open[id] = shown;
+                opened.Add(new Opened(position, shown, await Host.Pages.FillsOfAsync(state, id, ct)));
+            }
+        }
+
+        return [.. opened.OrderBy(o => o.Position)];
+    }
+
+    private string NestedCell(Column column, Fill fill) => column.Name switch
+    {
+        "order_id" => $"↳ fill {fill.FillId}",
+        "version" or "filled_qty" => "",
+        "order_time" or "event_time" => Tab.Fills.Named("event_time").Show(fill),
+        "avg_price" => Tab.Fills.Named("price").Show(fill),
+        "status" => "fill",
+        var name when Tab.Fills.Columns.Any(c => c.Name == name) => Tab.Fills.Named(name).Show(fill),
+        _ => "",
+    };
+
+    private async Task ToggleAsync(Order order)
+    {
+        if (!_open.Remove(order.OrderId))
+        {
+            _open[order.OrderId] = order;
+        }
+
+        await RefreshAsync();
+    }
+
+    /// <summary>
+    /// The fill's order, as both sides know it now: its latest version, from the database or the tail.
+    /// The order, or the version that counts the fill, may not have arrived yet, and the card says so.
+    /// </summary>
+    private async Task HoverAsync(MouseEventArgs mouse, Fill fill)
+    {
+        _hover = (fill, mouse.ClientX + 14, mouse.ClientY + 10, false, null);
+        try
+        {
+            var history = await Host.Queries.HistoryAsync(fill.OrderId, CancellationToken.None);
+            if (_hover is { } hover && hover.Fill == fill)
+            {
+                _hover = hover with { Looked = true, Order = history.Length > 0 ? history[0] : null };
+            }
+        }
+        catch (Exception failure) when (failure is QueryTimeLimitException or InvalidOperationException)
+        {
+            _hover = null;
+        }
+    }
+
+    private void Unhover() => _hover = null;
+
+    private void OnPublished(long version)
+    {
+        if (Interlocked.Exchange(ref _refreshing, 1) == 1)
+        {
+            _dirty = true;
+            return;
+        }
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                do
+                {
+                    _dirty = false;
+                    if (_scope?.Fault is { } fault)
+                    {
+                        Refuse($"the live scope failed: {fault.Message}");
+                    }
+                    else if (Host.State != BlotterState.Live)
+                    {
+                        Refuse(Host.Refusal ?? "the blotter is not serving");
+                    }
+                    else if (_refusal is not null || _scope is null)
+                    {
+                        // Serving again: take a scope again and read the first page afresh.
+                        await RetryAsync();
+                    }
+                    else if (_grid is not null && !_waiting)
+                    {
+                        await _grid.RefreshDataAsync();
+                    }
+
+                    // At most ten pages a second, however fast the feed is: changes in between are
+                    // in the scope's next state, not lost.
+                    await Task.Delay(100);
+                }
+                while (_dirty);
+            }
+            finally
+            {
+                Volatile.Write(ref _refreshing, 0);
+            }
+        });
+    }
+
+    private async Task SortAsync(Column column, bool shift)
+    {
+        _sort = _sort.Click(column, shift);
+        await ReloadAsync();
+    }
+
+    private void OpenEditor(Column column) => _editing = _editing == column ? null : column;
+
+    private async Task ApplyFilterAsync(ColumnFilter filter) => await FilterAsync(_filter.With(filter));
+
+    private async Task RemoveFilterAsync(Column column) => await FilterAsync(_filter.Without(column));
+
+    private async Task ClearFiltersAsync() => await FilterAsync(FilterSpec.None);
+
+    private async Task FilterAsync(FilterSpec filter)
+    {
+        _editing = null;
+        if (filter.Name == _filter.Name)
+        {
+            return;
+        }
+
+        _filter = filter;
+        _waiting = true;
+        await AcquireAsync(filter);
+        await ReloadAsync();
+    }
+
+    /// <summary>The rows the chooser offers values from: the tab's time filter, or the last day.</summary>
+    private (DateTime From, DateTime To) PeriodOfInterest()
+    {
+        var time = _filter.For(Tab.Time);
+        var to = time?.To ?? Cells.Micros(DateTime.UtcNow.AddMinutes(1));
+        return (time?.From ?? to.AddDays(-1), to);
+    }
+
+    /// <summary>A new sort or filter: the rows stay as they are, dimmed, until the first page of the new one is in.</summary>
+    private async Task ReloadAsync()
+    {
+        _view++;
+        _waiting = true;
+        _anchor = null;
+        _hidden = 0;
+        _plans = null;
+        _flashes.Clear();
+        _fillFlashes.Clear();
+        await JS.InvokeVoidAsync("blotter.scrollToTop", _scroller);
+        _ = EstimateAsync();
+        if (_grid is not null)
+        {
+            await _grid.RefreshDataAsync();
+        }
+    }
+
+    /// <summary>What the planner expects the tab's pages to cost now, and what the filter passes, counted.</summary>
+    private async Task EstimateAsync()
+    {
+        var (filter, sort) = (_filter, _sort);
+        _estimate = null;
+        _counted = null;
+        try
+        {
+            var estimate = await Host.Queries.EstimateAsync(filter, sort, CancellationToken.None);
+            if (filter == _filter && sort == _sort)
+            {
+                _estimate = estimate;
+                await InvokeAsync(StateHasChanged);
+            }
+
+            if (_scope?.State is { Generation: not null } state && state.Filter == filter)
+            {
+                var counted = await Host.Pages.GenerationRowsAsync(state, CancellationToken.None);
+                if (filter == _filter)
+                {
+                    _counted = counted;
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+        }
+        catch (Exception failure) when (failure is QueryTimeLimitException or InvalidOperationException)
+        {
+            // The estimate is for showing; a page that fails says so itself.
+        }
+    }
+
+    private async Task AcquireAsync(FilterSpec filter)
+    {
+        var previous = _scope;
+        try
+        {
+            _scope = await Host.AcquireAsync(Tab, filter, CancellationToken.None);
+            _refusal = null;
+        }
+        catch (BlotterRefusedException refused)
+        {
+            _scope = null;
+            Refuse(refused.Message);
+        }
+
+        if (previous is not null && previous != _scope)
+        {
+            await Host.ReleaseAsync(previous);
+        }
+    }
+
+    private async Task RetryAsync()
+    {
+        _refusal = null;
+        if (_scope is { Fault: not null } failed)
+        {
+            _scope = null;
+            await Host.ReleaseAsync(failed);
+        }
+
+        await AcquireAsync(_filter);
+        await ReloadAsync();
+    }
+
+    private void Refuse(string why)
+    {
+        _waiting = false;
+        if (_refusal != why)
+        {
+            _refusal = why;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ShowNewestAsync()
+    {
+        _anchor = null;
+        _hidden = 0;
+        await JS.InvokeVoidAsync("blotter.scrollToTop", _scroller);
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (_grid is not null)
+        {
+            await _grid.RefreshDataAsync();
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task ShowPlansAsync()
+    {
+        var page = await Host.Queries.PagePlanAsync(_filter, _sort, CancellationToken.None);
+        _plans = "-- a page of the generation\n" + page + "\n-- the live scope\n" + (_scope?.PlanText ?? "");
+    }
+
+    private static string Rows(double rows) => double.IsNaN(rows)
+        ? "?"
+        : rows >= 1e6 ? (rows / 1e6).ToString("0.0", CultureInfo.InvariantCulture) + "M"
+        : rows >= 1e3 ? (rows / 1e3).ToString("0", CultureInfo.InvariantCulture) + "k"
+        : rows.ToString("0", CultureInfo.InvariantCulture);
+
+    public async ValueTask DisposeAsync()
+    {
+        Host.Published -= OnPublished;
+        if (_scope is not null)
+        {
+            await Host.ReleaseAsync(_scope);
+        }
+
+        _self?.Dispose();
+    }
+}

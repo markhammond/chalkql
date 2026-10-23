@@ -6,8 +6,11 @@ namespace Chalk.Sample.Blotter.Live;
 /// <summary>The blotter host's settings: how big the corpus is, and how much memory the host may use.</summary>
 public sealed record BlotterOptions
 {
-    /// <summary>Trades in the corpus the sample generates at start.</summary>
-    public long Trades { get; init; } = 5_000_000;
+    /// <summary>Client orders in the corpus the sample generates at start.</summary>
+    public long Orders { get; init; } = 5_000_000;
+
+    /// <summary>The longest any statement may run, in the database or in ChalkQL, before it is stopped.</summary>
+    public TimeSpan QueryTimeLimit { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// The host's budget for what ChalkQL and the blotter keep in memory: the tail, the live scopes

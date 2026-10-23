@@ -131,3 +131,75 @@ details pre {
 .history th { position: static; }
 .changed { color: var(--accent); font-weight: 600; }
 .wide { overflow-x: auto; }
+
+h2 { font-size: 14px; margin: 8px 0 0; }
+.muted { color: var(--muted); }
+.spacer { flex: 1; }
+
+.tabs { display: flex; gap: 4px 8px; border-bottom: 1px solid var(--line); align-items: flex-end; flex-wrap: wrap; }
+.tabs .chip { margin-bottom: 4px; }
+.tab {
+    border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; background: transparent;
+    padding: 6px 14px; color: var(--muted);
+}
+.tab.selected { border-color: var(--line); background: var(--panel); color: var(--ink); font-weight: 600; margin-bottom: -1px; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; min-height: 28px; }
+.pill {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+    white-space: nowrap;
+}
+.pill button { border: none; background: transparent; padding: 0 4px; color: var(--muted); font-size: 14px; line-height: 1; }
+.pill button:hover { color: var(--bad); }
+.filter-pill { cursor: pointer; }
+.link-button { border: none; background: transparent; color: var(--accent); padding: 2px 4px; }
+
+.estimate {
+    font-size: 12px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+    display: flex; flex-wrap: wrap; gap: 2px 6px;
+}
+.estimate.warn { border-color: var(--warn); }
+
+.head { display: flex; align-items: center; }
+.head.num { flex-direction: row; }
+.head .sort { flex: 1; }
+.funnel {
+    border: none; background: transparent; padding: 4px 6px 4px 0; cursor: pointer; display: flex; align-items: center;
+}
+.funnel svg { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: 0.45; }
+.head:hover .funnel svg { opacity: 1; }
+.funnel.on svg { fill: var(--accent); stroke: var(--accent); opacity: 1; }
+.funnel.open svg { stroke: var(--accent); opacity: 1; }
+
+.editor {
+    border: 1px solid var(--accent); border-radius: 8px; background: var(--panel); padding: 8px 10px;
+    display: flex; flex-direction: column; gap: 8px;
+}
+.editor-head { display: flex; gap: 8px; align-items: center; }
+.editor select, .editor input { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+.pills {
+    display: flex; flex-wrap: wrap; gap: 4px; align-items: center; border: 1px solid var(--line); border-radius: 6px;
+    padding: 4px; min-height: 32px; cursor: text; position: relative;
+}
+.pills input { border: none !important; outline: none; flex: 1; min-width: 160px; background: transparent; }
+.clear-input { border: none; background: transparent; color: var(--muted); font-size: 16px; padding: 0 6px; }
+.chooser { display: flex; flex-wrap: wrap; gap: 4px; max-height: 140px; overflow-y: auto; }
+.chooser-head { width: 100%; font-size: 11px; color: var(--muted); }
+.choice { padding: 2px 8px; border-radius: 6px; }
+.choice.picked { border-color: var(--accent); color: var(--accent); }
+.range { display: flex; gap: 12px; align-items: end; }
+.range label { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 11px; }
+
+.toggle { border: none; background: transparent; color: var(--muted); padding: 0; cursor: pointer; width: 100%; line-height: 29px; }
+td.expander, th.expander { width: 22px; text-align: center; }
+tr.child td { background: color-mix(in srgb, var(--accent) 5%, var(--panel)); color: var(--muted); font-size: 12px; }
+tr.child td:nth-child(2) .cell { padding-left: 24px; }
+td .cell.id, .id { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }
+.cell.link a { text-decoration: underline dotted; }
+
+.hover-card {
+    position: fixed; z-index: 10; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); font-size: 12px; pointer-events: none;
+    display: flex; flex-direction: column; gap: 2px; font-variant-numeric: tabular-nums;
+}

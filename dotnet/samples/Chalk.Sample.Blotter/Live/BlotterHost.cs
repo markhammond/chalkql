@@ -4,6 +4,7 @@ using System.Threading.Channels;
 using Chalk.Catalog;
 using Chalk.Client;
 using Chalk.Sample.Blotter.Market;
+using Chalk.Sources;
 using Chalk.Sources.Ado;
 using Chalk.Sources.DuckDb;
 using Chalk.Sources.Poco;
@@ -35,16 +36,17 @@ public sealed class BlotterRefusedException(string message) : InvalidOperationEx
 /// <remarks>
 /// <para>
 /// A page is a snapshot generation and the live tail, merged. The generation is the latest version
-/// of each trade as of a watermark, written into the database once; the tail is every version the
-/// feed has sent since that watermark, replayed and then live. A version in both is told apart by
-/// its number, the higher winning, so neither the database's lag nor the in-flight crossing between
-/// the two can show a stale or a missing row.
+/// of each order as of the orders' watermark, written into the database once, and the fills at or
+/// before the fills' watermark; the tail is every version and fill the two streams have sent since,
+/// replayed and then live, each stream read apart from the other. An order's version in both is told
+/// apart by its number, the higher winning, and a fill by the watermark, so neither the database's
+/// lag nor the in-flight crossing between the two can show a stale or a missing row.
 /// </para>
 /// <para>
-/// The tail grows until a newer generation takes over from it: the host reads the watermark again,
-/// has the database write a new generation, and in one refresh drops every trade the new
-/// generation has caught up with. When the database is so far behind that the tail would outgrow its
-/// share of the budget, the host stops serving, says why, and starts again from a new generation
+/// The tail grows until a newer generation takes over from it: the host reads the watermarks again,
+/// has the database write a new generation, and in one refresh drops every order and fill the new
+/// generation has caught up with. When the database is so far behind that the tail and its scopes
+/// would outgrow the budget, the host stops serving, says why, and starts again from a new generation
 /// and a new replay once the database has caught up. It never drops a version to stay in budget.
 /// </para>
 /// </remarks>
@@ -63,15 +65,18 @@ public sealed class BlotterHost : IAsyncDisposable
     private ChalkEngine? _engine;
     private AdoTable? _snapshotsTable;
     private PocoTable<TailRow>? _tailTable;
-    private PocoTable<TradeVersion>? _versionsTable;
-    private ChannelReader<TradeVersion[]>? _feed;
+    private PocoTable<Fill>? _fillsTable;
+    private PocoTable<Order>? _versionsTable;
+    private ChannelReader<Order[]>? _orderFeed;
+    private ChannelReader<Fill[]>? _fillFeed;
     private Task? _loop;
     private Task<Generation>? _building;
     private Generation? _generation;
     private long _version;
     private long _lastGeneration;
     private long _budget;
-    private DateTime _ingestedThrough;
+    private DateTime _ordersThrough;
+    private DateTime _fillsThrough;
     private DateTime _generationTakenAt;
 
     public BlotterHost(BlotterOptions options, ILogger<BlotterHost> log)
@@ -115,19 +120,23 @@ public sealed class BlotterHost : IAsyncDisposable
     {
         var started = Stopwatch.GetTimestamp();
         _store = new TradeStore(_options.DatabaseBytes);
-        var (lastTradeId, lastEventTime) = _store.Generate(
-            _options.Trades, TradeVersion.Micros(DateTime.UtcNow), TimeSpan.FromDays(5), openTail: 2000);
-        _log.LogInformation("generated {Trades:N0} trades in {Seconds:F1} s", _options.Trades, _store.GenerationTime.TotalSeconds);
+        var (ordersThrough, fillsThrough) = _store.Generate(
+            _options.Orders, Cells.Micros(DateTime.UtcNow), TimeSpan.FromDays(5), openTail: 2000);
+        _log.LogInformation("generated {Orders:N0} orders in {Seconds:F1} s", _options.Orders, _store.GenerationTime.TotalSeconds);
 
-        // The market starts before the blotter: versions are in flight, sent and not yet written,
+        // The market starts before the blotter: events are in flight, sent and not yet written,
         // when the blotter takes its first snapshot, as they would be at any real start.
-        _exchange = new Exchange(_store, _options.Exchange, lastTradeId, lastEventTime, _store.OpenTrades());
+        _exchange = new Exchange(
+            _store, _options.Exchange, _options.Orders, ordersThrough, fillsThrough, _store.OpenOrders());
         _exchange.Start();
 
         _planner = await PlannerProcess.StartAsync(new PlannerProcessOptions { JavaHome = JavaHome() }).ConfigureAwait(false);
         var store = _store;
         var database = DuckDbSources.AddDuckDbSource("db", () => new DuckDBConnection(store.ConnectionString))
             .Capabilities(AdoCapabilities.For(DialectProfiles.DuckDb))
+
+            // No statement may run longer than the host's time limit, in the database or in ChalkQL.
+            .Options(new SourceOptions { QueryTimeout = _options.QueryTimeLimit })
 
             // The planner prices a page by the table's size: a table it thinks small it reads whole and
             // sorts itself. Counted exactly, at build and at every refresh that names the source.
@@ -137,30 +146,33 @@ public sealed class BlotterHost : IAsyncDisposable
             // discovered one is taken as nanoseconds, finer than DuckDB keeps, so the planner would
             // sort every time locally rather than trust DuckDB with it (F274). The tables are in
             // DuckDB's main schema because a pushed query names a table by its catalog name (F273).
-            .AddTable("snapshots", [Column("generation", ChalkType.Int64()), .. TradeColumns], out AdoTable snapshotsTable,
-                configure: t => t.UniqueKey("generation", "trade_id"))
-            .AddTable("trade_versions", TradeColumns, configure: t => t.UniqueKey("trade_id", "version"))
+            .AddTable("snapshots", [Column("generation", ChalkType.Int64()), .. OrderColumns], out AdoTable snapshotsTable,
+                configure: t => t.UniqueKey("generation", "order_id"))
+            .AddTable("order_versions", OrderColumns, configure: t => t.UniqueKey("order_id", "version"))
+            .AddTable("fills", FillColumns, configure: t => t.UniqueKey("fill_id"))
             .AddTable("ingest_watermark", [Column("complete_through", ChalkType.Timestamp(6))])
             .Build();
         var live = new PocoSourceBuilder("live", schemaName: "live")
             .NamingPolicy(PocoNamingPolicy.SnakeCase)
-            .AddTable("tail", (IReadOnlyList<TailRow>)[], out PocoTable<TailRow> tail, t => t.Keyed(r => r.TradeId))
+            .AddTable("tail", (IReadOnlyList<TailRow>)[], out PocoTable<TailRow> tail, t => t.Keyed(r => r.OrderId))
             .AddTable(
-                "tail_versions",
-                (IReadOnlyList<TradeVersion>)[],
-                out PocoTable<TradeVersion> versions,
-                t => t.Keyed(v => v.TradeId, v => v.Version))
+                "order_versions",
+                (IReadOnlyList<Order>)[],
+                out PocoTable<Order> versions,
+                t => t.Keyed(v => v.OrderId, v => v.Version))
+            .AddTable("tail_fills", (IReadOnlyList<Fill>)[], out PocoTable<Fill> fills, t => t.Keyed(f => f.FillId))
             .Build();
         _snapshotsTable = snapshotsTable;
         _tailTable = tail;
         _versionsTable = versions;
+        _fillsTable = fills;
         _engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
         {
             ContextId = "blotter",
             Sources = [database, live],
             Planner = _planner.CreatePlanner(),
         }, ct).ConfigureAwait(false);
-        Queries = new SnapshotQueries(_engine);
+        Queries = new SnapshotQueries(_engine, _options.QueryTimeLimit);
         Pages = new Pages(Queries) { MaxCachedRows = PageRows() };
 
         await GoLiveAsync(ct).ConfigureAwait(false);
@@ -169,15 +181,16 @@ public sealed class BlotterHost : IAsyncDisposable
     }
 
     /// <summary>
-    /// The scope for <paramref name="filter"/>: an open one if a page already filters alike, or a new
-    /// one if the budget has room for it. Every page that takes one gives it back with <see cref="ReleaseAsync"/>.
+    /// The scope for <paramref name="filter"/> on <paramref name="tab"/>: an open one if a page already
+    /// filters alike, or a new one if the budget has room for it. Every page that takes one gives it
+    /// back with <see cref="ReleaseAsync"/>.
     /// </summary>
-    /// <exception cref="BlotterRefusedException">The host is not serving, or every scope's share is taken.</exception>
-    public Task<LiveScope> AcquireAsync(FilterSpec filter, CancellationToken ct) =>
+    /// <exception cref="BlotterRefusedException">The host is not serving, or the scope would not fit the budget.</exception>
+    public Task<LiveScope> AcquireAsync(Tab tab, FilterSpec filter, CancellationToken ct) =>
         OnLoopAsync(async () =>
         {
             RefuseUnlessLive();
-            var name = filter.Name;
+            var name = tab.Name + ": " + filter.Name;
             if (_scopes.TryGetValue(name, out var open) && open.Fault is null)
             {
                 open.Pages++;
@@ -190,7 +203,7 @@ public sealed class BlotterHost : IAsyncDisposable
                 await CloseAsync(open).ConfigureAwait(false);
             }
 
-            // A scope holds a row for each trade of the tail its filter can see, so it costs about
+            // A scope holds a row for each order or fill of the tail its filter can see, so it costs about
             // what the scopes open now cost per row, times the tail. Idle scopes make room first.
             var estimate = ScopeEstimate();
             foreach (var idle in _scopes.Values.Where(s => s.Pages == 0).ToList())
@@ -210,8 +223,8 @@ public sealed class BlotterHost : IAsyncDisposable
                     + $"{_scopes.Count} open scopes already hold {Megabytes(LiveBytes())} of the {Megabytes(_budget)} budget"));
             }
 
-            var scope = await LiveScope.CreateAsync(_engine!, filter, _budget, _options.Maintenance, ct).ConfigureAwait(false);
-            await scope.UpdateAsync(_tail, _version, _generation!, _ingestedThrough, ct).ConfigureAwait(false);
+            var scope = await LiveScope.CreateAsync(_engine!, tab, filter, _budget, _options.Maintenance, ct).ConfigureAwait(false);
+            await scope.UpdateAsync(_tail, _version, _generation!, _ordersThrough, _fillsThrough, ct).ConfigureAwait(false);
             if (scope.Fault is { } fault)
             {
                 await scope.DisposeAsync().ConfigureAwait(false);
@@ -340,11 +353,16 @@ public sealed class BlotterHost : IAsyncDisposable
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromMilliseconds(100));
-        var feed = _feed;
+        var (orders, fills) = (_orderFeed, _fillFeed);
         try
         {
-            var actions = _actions.Reader.WaitToReadAsync(timeout.Token).AsTask();
-            var waits = feed is null ? [actions] : new[] { actions, feed.WaitToReadAsync(timeout.Token).AsTask() };
+            List<Task> waits = [_actions.Reader.WaitToReadAsync(timeout.Token).AsTask()];
+            if (orders is not null && fills is not null)
+            {
+                waits.Add(orders.WaitToReadAsync(timeout.Token).AsTask());
+                waits.Add(fills.WaitToReadAsync(timeout.Token).AsTask());
+            }
+
             await Task.WhenAny(waits).ConfigureAwait(false);
 
             // Batches that arrive together are refreshed together: a burst costs a few refreshes
@@ -358,47 +376,67 @@ public sealed class BlotterHost : IAsyncDisposable
 
     private async Task IngestAsync(CancellationToken ct)
     {
-        if (_feed is null)
+        if (_orderFeed is null || _fillFeed is null)
         {
             return;
         }
 
-        var incoming = new List<TradeVersion>();
-        while (_feed.TryRead(out var batch))
+        // The two streams are read apart: a fill can come before the order it fills, or before the
+        // version that counts it, and is taken as it comes.
+        var versionsIn = new List<Order>();
+        while (_orderFeed.TryRead(out var batch))
         {
-            incoming.AddRange(batch);
+            versionsIn.AddRange(batch);
         }
 
-        if (incoming.Count == 0)
+        var fillsIn = new List<Fill>();
+        while (_fillFeed.TryRead(out var batch))
+        {
+            fillsIn.AddRange(batch);
+        }
+
+        if (versionsIn.Count == 0 && fillsIn.Count == 0)
         {
             return;
         }
 
-        // The feed is read in order, so this is how far the tail now covers it: every version up
-        // to here is in the generation or in the tail once this refresh commits.
-        var through = incoming.Max(v => v.EventTime);
+        // Each stream is read in order, so this is how far the tail now covers it: every row up to
+        // here is in the generation or in the tail once this refresh commits.
+        var ordersThrough = versionsIn.Count > 0 ? versionsIn[^1].EventTime : _ordersThrough;
+        var fillsThrough = fillsIn.Count > 0 ? fillsIn[^1].EventTime : _fillsThrough;
 
         var started = Stopwatch.GetTimestamp();
         var generation = _generation!;
 
-        // Trades new to the tail need the generation's own row, to know whether the version is
-        // newer than what the snapshot holds and which of the snapshot's rows it overrides. A trade
-        // id the generation never saw needs no lookup.
-        var unknown = incoming
-            .Where(v => v.TradeId <= generation.MaxTradeId && _tail.Get(v.TradeId) is null)
-            .Select(v => v.TradeId)
+        // A fill at or before the generation's fill watermark is in the database already: the crossing.
+        var fills = new List<Fill>();
+        foreach (var fill in fillsIn)
+        {
+            if (fill.EventTime > generation.FillsThrough && _tail.GetFill(fill.FillId) is null)
+            {
+                _tail.AddFill(fill);
+                fills.Add(fill);
+            }
+        }
+
+        // Orders new to the tail need the generation's own row, to know whether the version is
+        // newer than what the snapshot holds and which of the snapshot's rows it overrides. Ids are
+        // UUIDs, in no order the host relies on, so every order it has not seen is looked up.
+        var unknown = versionsIn
+            .Where(v => _tail.Get(v.OrderId) is null)
+            .Select(v => v.OrderId)
             .Distinct()
             .ToList();
         var snapshotRows = unknown.Count == 0
             ? []
-            : await Queries.LookupAsync(generation.Number, unknown, ct).ConfigureAwait(false);
+            : await Queries.LookupAsync(generation, unknown, ct).ConfigureAwait(false);
 
-        var upserts = new Dictionary<long, TailRow>();
-        var versions = new List<TradeVersion>();
-        foreach (var version in incoming.OrderBy(v => v.TradeId).ThenBy(v => v.Version))
+        var upserts = new Dictionary<Guid, TailRow>();
+        var versions = new List<Order>();
+        foreach (var version in versionsIn.OrderBy(v => v.OrderId).ThenBy(v => v.Version))
         {
-            var entry = _tail.Get(version.TradeId);
-            var snapshot = entry is null ? snapshotRows.GetValueOrDefault(version.TradeId) : entry.Base;
+            var entry = _tail.Get(version.OrderId);
+            var snapshot = entry is null ? snapshotRows.GetValueOrDefault(version.OrderId) : entry.Base;
 
             // The crossing: the generation already has this version or a later one.
             if (snapshot is not null && version.Version <= snapshot.Version)
@@ -416,32 +454,45 @@ public sealed class BlotterHost : IAsyncDisposable
             entry.Live = version;
             _tail.Set(entry, version);
             versions.Add(version);
-            upserts[version.TradeId] = TailRow.Of(version, snapshot);
+            upserts[version.OrderId] = TailRow.Of(version, snapshot);
         }
 
-        if (upserts.Count == 0)
+        if (upserts.Count == 0 && fills.Count == 0)
         {
-            _ingestedThrough = through;
+            (_ordersThrough, _fillsThrough) = (ordersThrough, fillsThrough);
             return;
         }
 
         var tailRows = upserts.Values.ToList();
         var next = _version + 1;
         await _engine!.RefreshAsync(
-            refresh => refresh.Version(next).Upsert(_tailTable!, tailRows).Upsert(_versionsTable!, versions),
+            refresh =>
+            {
+                refresh.Version(next);
+                if (tailRows.Count > 0)
+                {
+                    refresh.Upsert(_tailTable!, tailRows).Upsert(_versionsTable!, versions);
+                }
+
+                if (fills.Count > 0)
+                {
+                    refresh.Upsert(_fillsTable!, fills);
+                }
+            },
             ct).ConfigureAwait(false);
         _version = next;
-        _ingestedThrough = through;
+        (_ordersThrough, _fillsThrough) = (ordersThrough, fillsThrough);
         await PublishAsync(ct).ConfigureAwait(false);
-        Status = Status with { LastRefreshMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds, LastRefreshVersions = versions.Count };
+        Status = Status with { LastRefreshMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds, LastRefreshVersions = versions.Count + fills.Count };
 
         await KeepWithinBudgetAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Past the budget, the page cache gives way first, then the tail, by a new generation taken at
-    /// once, which drops every trade the database has caught up with. What is left cannot give way
-    /// without dropping a version, so if it is still too much the host stops serving and says why.
+    /// Past the budget, the page cache gives way first, then the scopes no page is using, then the
+    /// tail, by a new generation taken at once, which drops every order the database has caught up
+    /// with. What is left cannot give way without dropping a version, so if it is still too much the
+    /// host stops serving and says why.
     /// </summary>
     private async Task KeepWithinBudgetAsync(CancellationToken ct)
     {
@@ -451,7 +502,16 @@ public sealed class BlotterHost : IAsyncDisposable
             return;
         }
 
-        if (_exchange!.CompleteThrough > _generation!.CompleteThrough)
+        foreach (var idle in _scopes.Values.Where(s => s.Pages == 0).ToList())
+        {
+            await CloseAsync(idle).ConfigureAwait(false);
+            if (LiveBytes() <= _budget)
+            {
+                return;
+            }
+        }
+
+        if (Moved())
         {
             var next = _building is { } building
                 ? await building.ConfigureAwait(false)
@@ -466,12 +526,16 @@ public sealed class BlotterHost : IAsyncDisposable
         }
 
         // What is left in the tail is what the database does not have yet: the gap the host covers.
-        var lag = DateTime.UtcNow - _exchange.CompleteThrough;
+        var lag = DateTime.UtcNow - _exchange!.CompleteThrough;
         await StopServingAsync(string.Create(CultureInfo.InvariantCulture,
             $"the database is {lag.TotalSeconds:F0} s behind the feed: covering the gap takes a tail of "
-            + $"{_tail.Count:N0} trades, {Megabytes(_tail.Bytes)}, and {_scopes.Count} live scopes over it "
+            + $"{_tail.Count:N0} orders and {_tail.FillCount:N0} fills, {Megabytes(_tail.Bytes)}, and {_scopes.Count} live scopes over it "
             + $"{Megabytes(LiveBytes() - _tail.Bytes)}, more than the {Megabytes(_budget)} budget")).ConfigureAwait(false);
     }
+
+    /// <summary>Whether the database has moved past the current generation on either stream.</summary>
+    private bool Moved() =>
+        _exchange!.OrdersThrough > _generation!.OrdersThrough || _exchange.FillsThrough > _generation.FillsThrough;
 
     /// <summary>A new generation when the tail has grown or the current one has aged, if the database has moved on.</summary>
     private async Task TurnOverWhenDueAsync(CancellationToken ct)
@@ -485,7 +549,7 @@ public sealed class BlotterHost : IAsyncDisposable
 
         var due = LiveBytes() > _budget * _options.TurnoverAt
             || DateTime.UtcNow - _generationTakenAt > _options.TurnoverEvery;
-        if (_building is null && due && _exchange!.CompleteThrough > _generation!.CompleteThrough)
+        if (_building is null && due && Moved())
         {
             _building = StartBuild(ct);
         }
@@ -505,32 +569,26 @@ public sealed class BlotterHost : IAsyncDisposable
 
     /// <summary>
     /// Has the database write generation <paramref name="number"/>: the watermark first, then every
-    /// trade's latest version, so the generation holds at least everything through the watermark.
+    /// order's latest version, so the generation holds at least everything through the watermarks.
     /// </summary>
     private Generation Build(long number)
     {
         var started = Stopwatch.GetTimestamp();
         using var connection = _store!.Open();
-        using var watermark = connection.CreateCommand();
-        watermark.CommandText = "SELECT complete_through FROM ingest_watermark";
-        var completeThrough = TradeVersion.Micros((DateTime)watermark.ExecuteScalar()!);
+        var (ordersThrough, fillsThrough) = _store.Watermarks(connection);
         using var insert = connection.CreateCommand();
         insert.CommandText = string.Create(CultureInfo.InvariantCulture, $"""
             INSERT INTO snapshots
-            SELECT {number}, {TradeVersion.Select} FROM trade_versions
-            QUALIFY row_number() OVER (PARTITION BY trade_id ORDER BY version DESC) = 1
-            ORDER BY trade_id
+            SELECT {number}, {Order.Select} FROM order_versions
+            QUALIFY row_number() OVER (PARTITION BY order_id ORDER BY version DESC) = 1
+            ORDER BY order_id
             """);
         var rows = insert.ExecuteNonQuery();
-        using var highest = connection.CreateCommand();
-        highest.CommandText = string.Create(CultureInfo.InvariantCulture,
-            $"SELECT coalesce(max(trade_id), -1) FROM snapshots WHERE generation = {number}");
-        var maxTradeId = Convert.ToInt64(highest.ExecuteScalar(), CultureInfo.InvariantCulture);
-        return new Generation(number, completeThrough, rows, maxTradeId, Stopwatch.GetElapsedTime(started));
+        return new Generation(number, ordersThrough, fillsThrough, rows, Stopwatch.GetElapsedTime(started));
     }
 
     /// <summary>
-    /// Moves the tail onto a new generation, in one refresh: a trade the generation has caught up
+    /// Moves the tail onto a new generation, in one refresh: an order the generation has caught up
     /// with leaves the tail; one it has not stays, over the generation's row for it. Then every scope
     /// takes the refresh, and every page reads the new generation from its next state on.
     /// </summary>
@@ -538,22 +596,22 @@ public sealed class BlotterHost : IAsyncDisposable
     {
         var started = Stopwatch.GetTimestamp();
         var entries = _tail.Entries.ToList();
-        var known = entries.Select(e => e.Live.TradeId).ToList();
+        var known = entries.Select(e => e.Live.OrderId).ToList();
         var snapshotRows = known.Count == 0
             ? []
-            : await Queries.LookupAsync(next.Number, known, ct).ConfigureAwait(false);
+            : await Queries.LookupAsync(next, known, ct).ConfigureAwait(false);
 
         var upserts = new List<TailRow>();
         var deletes = new List<TailRow>();
-        var versionDeletes = new List<TradeVersion>();
+        var versionDeletes = new List<Order>();
         foreach (var entry in entries)
         {
-            var snapshot = snapshotRows.GetValueOrDefault(entry.Live.TradeId);
+            var snapshot = snapshotRows.GetValueOrDefault(entry.Live.OrderId);
             if (snapshot is not null && snapshot.Version >= entry.Live.Version)
             {
                 deletes.Add(TailRow.Of(entry.Live, entry.Base));
                 versionDeletes.AddRange(entry.Versions);
-                _tail.Remove(entry.Live.TradeId);
+                _tail.Remove(entry.Live.OrderId);
                 continue;
             }
 
@@ -561,6 +619,9 @@ public sealed class BlotterHost : IAsyncDisposable
             versionDeletes.AddRange(_tail.Trim(entry, snapshot?.Version ?? 0));
             upserts.Add(TailRow.Of(entry.Live, snapshot));
         }
+
+        // Fills at or before the new watermark are the new generation's.
+        var fillDeletes = _tail.TrimFills(next.FillsThrough);
 
         var version = _version + 1;
         await _engine!.RefreshAsync(
@@ -581,6 +642,11 @@ public sealed class BlotterHost : IAsyncDisposable
                 if (versionDeletes.Count > 0)
                 {
                     refresh.Delete(_versionsTable!, versionDeletes);
+                }
+
+                if (fillDeletes.Count > 0)
+                {
+                    refresh.Delete(_fillsTable!, fillDeletes);
                 }
             },
             ct).ConfigureAwait(false);
@@ -620,15 +686,15 @@ public sealed class BlotterHost : IAsyncDisposable
     private async Task GoLiveAsync(CancellationToken ct)
     {
         var generation = await StartBuild(ct).ConfigureAwait(false);
-        var replay = _exchange!.Feed.CountAfter(generation.CompleteThrough);
-        var replayBytes = replay * (TailRow.Bytes + 2L * TradeVersion.Bytes);
+        var replay = _exchange!.Orders.CountAfter(generation.OrdersThrough) + _exchange.Fills.CountAfter(generation.FillsThrough);
+        var replayBytes = replay * (TailRow.Bytes + 2L * Order.Bytes);
         if (replayBytes > _budget)
         {
             _store!.Execute(string.Create(CultureInfo.InvariantCulture, $"DELETE FROM snapshots WHERE generation = {generation.Number}"));
             _generation ??= generation;
             State = BlotterState.Refusing;
             Refusal = string.Create(CultureInfo.InvariantCulture,
-                $"the feed would replay {replay:N0} versions since the database's watermark, a tail of "
+                $"the streams would replay {replay:N0} versions and fills since the database's watermarks, a tail of "
                 + $"{Megabytes(replayBytes)} before any scope over it, more than the {Megabytes(_budget)} budget");
             return;
         }
@@ -638,8 +704,9 @@ public sealed class BlotterHost : IAsyncDisposable
         await _engine!.RefreshAsync(refresh => refresh.Version(counted).Refresh(_snapshotsTable!), ct).ConfigureAwait(false);
         _version = counted;
 
-        _feed = _exchange.Feed.Subscribe(generation.CompleteThrough);
-        _ingestedThrough = generation.CompleteThrough;
+        _orderFeed = _exchange.Orders.Subscribe(generation.OrdersThrough);
+        _fillFeed = _exchange.Fills.Subscribe(generation.FillsThrough);
+        (_ordersThrough, _fillsThrough) = (generation.OrdersThrough, generation.FillsThrough);
         _generation = generation;
         _generationTakenAt = DateTime.UtcNow;
         Pages.Retire(new HashSet<long> { generation.Number });
@@ -678,10 +745,16 @@ public sealed class BlotterHost : IAsyncDisposable
         _log.LogWarning("refusing to serve: {Why}", why);
         State = BlotterState.Refusing;
         Refusal = why;
-        if (_feed is not null)
+        if (_orderFeed is not null)
         {
-            _exchange!.Feed.Unsubscribe(_feed);
-            _feed = null;
+            _exchange!.Orders.Unsubscribe(_orderFeed);
+            _orderFeed = null;
+        }
+
+        if (_fillFeed is not null)
+        {
+            _exchange!.Fills.Unsubscribe(_fillFeed);
+            _fillFeed = null;
         }
 
         // A build in flight finishes before anything else is let go, so its rows are there to delete.
@@ -705,6 +778,7 @@ public sealed class BlotterHost : IAsyncDisposable
         var all = _tail.Entries.ToList();
         var deletes = all.Select(e => TailRow.Of(e.Live, e.Base)).ToList();
         var versionDeletes = all.SelectMany(e => e.Versions).ToList();
+        var fillDeletes = _tail.Fills.ToList();
         _tail.Clear();
         var version = _version + 1;
         await _engine!.RefreshAsync(refresh =>
@@ -719,6 +793,11 @@ public sealed class BlotterHost : IAsyncDisposable
             {
                 refresh.Delete(_versionsTable!, versionDeletes);
             }
+
+            if (fillDeletes.Count > 0)
+            {
+                refresh.Delete(_fillsTable!, fillDeletes);
+            }
         }).ConfigureAwait(false);
         _version = version;
         Published?.Invoke(_version);
@@ -728,7 +807,7 @@ public sealed class BlotterHost : IAsyncDisposable
     {
         foreach (var scope in _scopes.Values)
         {
-            await scope.UpdateAsync(_tail, _version, _generation!, _ingestedThrough, ct).ConfigureAwait(false);
+            await scope.UpdateAsync(_tail, _version, _generation!, _ordersThrough, _fillsThrough, ct).ConfigureAwait(false);
         }
 
         Published?.Invoke(_version);
@@ -745,7 +824,7 @@ public sealed class BlotterHost : IAsyncDisposable
 
     private async Task CloseAsync(LiveScope scope)
     {
-        _scopes.Remove(scope.Filter.Name);
+        _scopes.Remove(scope.Name);
         await scope.DisposeAsync().ConfigureAwait(false);
     }
 
@@ -786,13 +865,16 @@ public sealed class BlotterHost : IAsyncDisposable
             Version = _version,
             Generation = _generation?.Number ?? 0,
             GenerationRows = _generation?.Rows ?? 0,
-            CompleteThrough = _generation?.CompleteThrough,
+            CompleteThrough = _generation is { } g ? (g.OrdersThrough < g.FillsThrough ? g.OrdersThrough : g.FillsThrough) : null,
             DatabaseWatermark = _exchange?.CompleteThrough,
             NotYetIngested = _exchange?.NotYetIngested ?? 0,
             IngestionStalled = _exchange?.IngestionStalled ?? false,
             FeedRate = _exchange?.CurrentRate ?? 0,
-            Published = _exchange?.Feed.Published ?? 0,
-            TailTrades = _tail.Count,
+            Published = (_exchange?.Orders.Published ?? 0) + (_exchange?.Fills.Published ?? 0),
+            OrdersHeld = _exchange?.OrdersHeld ?? 0,
+            TailOrders = _tail.Count,
+            TailFills = _tail.FillCount,
+            TimedOut = Queries.TimedOut,
             TailVersions = _tail.VersionCount,
             TailBytes = _tail.Bytes,
             Scopes = scopes.Count,
@@ -824,7 +906,7 @@ public sealed class BlotterHost : IAsyncDisposable
     /// <summary>What the host cannot give back without dropping a version: the tail, and the scopes over it.</summary>
     private long LiveBytes() => _tail.Bytes + _scopes.Values.Sum(s => s.ViewBytes + s.State.Bytes);
 
-    /// <summary>What another scope would hold: a row for every trade in the tail, at what the open ones cost a row.</summary>
+    /// <summary>What another scope would hold: a row for every order in the tail, at what the open ones cost a row.</summary>
     private long ScopeEstimate()
     {
         var rows = _scopes.Values.Sum(s => (long)s.ViewRows);
@@ -838,24 +920,44 @@ public sealed class BlotterHost : IAsyncDisposable
     {
         var left = Math.Max(0, _budget - LiveBytes());
         var share = (long)(_budget * _options.PageShare);
-        return Math.Max(16 * Pages.ChunkRows, Math.Min(left, share) / TradeVersion.Bytes);
+        return Math.Max(16 * Pages.ChunkRows, Math.Min(left, share) / Order.Bytes);
     }
 
-    /// <summary>A trade version's columns as the database holds them: times to the microsecond.</summary>
-    private static readonly ColumnDescriptor[] TradeColumns =
+    /// <summary>An order version's columns as the database holds them: times to the microsecond.</summary>
+    private static readonly ColumnDescriptor[] OrderColumns =
     [
-        Column("trade_id", ChalkType.Int64()),
+        Column("order_id", ChalkType.Uuid()),
         Column("version", ChalkType.Int32()),
         Column("event_time", ChalkType.Timestamp(6)),
-        Column("trade_time", ChalkType.Timestamp(6)),
+        Column("order_time", ChalkType.Timestamp(6)),
+        Column("cl_ord_id", ChalkType.String()),
         Column("client", ChalkType.String()),
-        Column("symbol", ChalkType.String()),
+        Column("region", ChalkType.String()),
+        Column("channel", ChalkType.String()),
+        Column("instrument", ChalkType.String()),
         Column("side", ChalkType.String()),
-        Column("order_qty", ChalkType.Int64()),
-        Column("filled_qty", ChalkType.Int64()),
+        Column("qty", ChalkType.Float64()),
+        Column("filled_qty", ChalkType.Float64()),
         Column("avg_price", ChalkType.Float64()),
+        Column("markup_bps", ChalkType.Float64()),
         Column("status", ChalkType.String()),
-        Column("venue", ChalkType.String()),
+    ];
+
+    private static readonly ColumnDescriptor[] FillColumns =
+    [
+        Column("fill_id", ChalkType.Uuid()),
+        Column("order_id", ChalkType.Uuid()),
+        Column("event_time", ChalkType.Timestamp(6)),
+        Column("cl_ord_id", ChalkType.String()),
+        Column("client", ChalkType.String()),
+        Column("region", ChalkType.String()),
+        Column("channel", ChalkType.String()),
+        Column("instrument", ChalkType.String()),
+        Column("side", ChalkType.String()),
+        Column("qty", ChalkType.Float64()),
+        Column("price", ChalkType.Float64()),
+        Column("mid", ChalkType.Float64()),
+        Column("markup_bps", ChalkType.Float64()),
     ];
 
     private static ColumnDescriptor Column(string name, ChalkType type) => new() { Name = name, Type = type };
@@ -890,6 +992,9 @@ public sealed record BlotterStatus
 
     public DateTime? CompleteThrough { get; init; }
 
+    /// <summary>Order versions that have happened and that the order stream, running behind the fills, has not sent yet.</summary>
+    public int OrdersHeld { get; init; }
+
     public DateTime? DatabaseWatermark { get; init; }
 
     public int NotYetIngested { get; init; }
@@ -900,7 +1005,11 @@ public sealed record BlotterStatus
 
     public long Published { get; init; }
 
-    public int TailTrades { get; init; }
+    public int TailOrders { get; init; }
+
+    public int TailFills { get; init; }
+
+    public long TimedOut { get; init; }
 
     public long TailVersions { get; init; }
 

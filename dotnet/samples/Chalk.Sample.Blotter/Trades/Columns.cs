@@ -2,7 +2,29 @@ using System.Globalization;
 
 namespace Chalk.Sample.Blotter.Trades;
 
-/// <summary>A column of the blotter: its SQL name, how the host compares and shows it.</summary>
+/// <summary>What a column holds, which decides how it is shown, sorted and filtered.</summary>
+public enum ColumnKind
+{
+    /// <summary>An id: filtered by values typed or pasted, matched exactly.</summary>
+    Id,
+
+    /// <summary>A whole number: filtered by a range.</summary>
+    Integer,
+
+    /// <summary>A number with a fraction: filtered by a range.</summary>
+    Number,
+
+    /// <summary>Text of open-ended values: filtered by values picked or typed, or by what they start with.</summary>
+    Text,
+
+    /// <summary>Text from a short fixed list: filtered by ticking the values.</summary>
+    Choice,
+
+    /// <summary>A time: filtered by a range.</summary>
+    Time,
+}
+
+/// <summary>A column of a tab: its SQL name, how the host compares, shows and binds it.</summary>
 /// <remarks>
 /// The host's comparison must order rows exactly as the database's <c>ORDER BY</c> does, because a
 /// page is merged from both: text byte by byte (DuckDB's default collation is binary, and every
@@ -11,74 +33,79 @@ namespace Chalk.Sample.Blotter.Trades;
 /// </remarks>
 public sealed class Column
 {
-    private Column(string name, string title, bool numeric, Comparison<TradeVersion> compare, Func<TradeVersion, string> show)
+    private readonly Func<IRow, object> _value;
+
+    private Column(
+        string name, string title, ColumnKind kind, Type type, Func<IRow, object> value, Comparison<IRow> compare,
+        Func<IRow, string> show, IReadOnlyList<string>? choices)
     {
+        Type = type;
         Name = name;
         Title = title;
-        Numeric = numeric;
+        Kind = kind;
+        _value = value;
         Compare = compare;
         Show = show;
+        Choices = choices ?? [];
     }
 
     public string Name { get; }
 
     public string Title { get; }
 
+    public ColumnKind Kind { get; }
+
+    /// <summary>The CLR type a value of the column binds as, exactly: a parameter compared with it takes no other.</summary>
+    public Type Type { get; }
+
+    /// <summary>A number typed into a range, as the column binds it.</summary>
+    public object Bind(double value) => Type switch
+    {
+        _ when Type == typeof(int) => (int)value,
+        _ when Type == typeof(long) => (long)value,
+        _ => (object)value,
+    };
+
     /// <summary>Right-aligned in the grid.</summary>
-    public bool Numeric { get; }
+    public bool Numeric => Kind is ColumnKind.Integer or ColumnKind.Number;
 
-    public Comparison<TradeVersion> Compare { get; }
+    public Comparison<IRow> Compare { get; }
 
-    public Func<TradeVersion, string> Show { get; }
+    public Func<IRow, string> Show { get; }
 
-    public static readonly Column TradeId = new(
-        "trade_id", "Trade", true, (a, b) => a.TradeId.CompareTo(b.TradeId), t => Number(t.TradeId));
+    /// <summary>The values of a <see cref="ColumnKind.Choice"/> column.</summary>
+    public IReadOnlyList<string> Choices { get; }
 
-    public static readonly Column Version = new(
-        "version", "Ver", true, (a, b) => a.Version.CompareTo(b.Version), t => Number(t.Version));
+    /// <summary>The row's value, as a parameter binds it: the column's own CLR type.</summary>
+    public object Value(IRow row) => _value(row);
 
-    public static readonly Column TradeTime = new(
-        "trade_time", "Traded", false, (a, b) => a.TradeTime.CompareTo(b.TradeTime),
-        t => t.TradeTime.ToString("MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture));
+    public static Column Uuid<T>(string name, string title, Func<T, Guid> value) where T : IRow => new(
+        name, title, ColumnKind.Id, typeof(Guid), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
+        r => value((T)r).ToString(), null);
 
-    public static readonly Column EventTime = new(
-        "event_time", "Updated", false, (a, b) => a.EventTime.CompareTo(b.EventTime),
-        t => t.EventTime.ToString("MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture));
+    public static Column Long<T>(string name, string title, Func<T, long> value) where T : IRow => new(
+        name, title, ColumnKind.Integer, typeof(long), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
+        r => value((T)r).ToString("#,0", CultureInfo.InvariantCulture), null);
 
-    public static readonly Column Client = new(
-        "client", "Client", false, (a, b) => string.CompareOrdinal(a.Client, b.Client), t => t.Client);
+    public static Column Int<T>(string name, string title, Func<T, int> value) where T : IRow => new(
+        name, title, ColumnKind.Integer, typeof(int), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
+        r => value((T)r).ToString("#,0", CultureInfo.InvariantCulture), null);
 
-    public static readonly Column Symbol = new(
-        "symbol", "Symbol", false, (a, b) => string.CompareOrdinal(a.Symbol, b.Symbol), t => t.Symbol);
+    public static Column Number<T>(string name, string title, Func<T, double> value, string format) where T : IRow => new(
+        name, title, ColumnKind.Number, typeof(double), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
+        r => value((T)r).ToString(format, CultureInfo.InvariantCulture), null);
 
-    public static readonly Column Side = new(
-        "side", "Side", false, (a, b) => string.CompareOrdinal(a.Side, b.Side), t => t.Side);
+    public static Column Text<T>(string name, string title, Func<T, string> value) where T : IRow => new(
+        name, title, ColumnKind.Text, typeof(string), r => value((T)r), (a, b) => string.CompareOrdinal(value((T)a), value((T)b)),
+        r => value((T)r), null);
 
-    public static readonly Column OrderQty = new(
-        "order_qty", "Qty", true, (a, b) => a.OrderQty.CompareTo(b.OrderQty), t => Number(t.OrderQty));
+    public static Column Choice<T>(string name, string title, Func<T, string> value, IReadOnlyList<string> choices) where T : IRow => new(
+        name, title, ColumnKind.Choice, typeof(string), r => value((T)r), (a, b) => string.CompareOrdinal(value((T)a), value((T)b)),
+        r => value((T)r), choices);
 
-    public static readonly Column FilledQty = new(
-        "filled_qty", "Filled", true, (a, b) => a.FilledQty.CompareTo(b.FilledQty), t => Number(t.FilledQty));
+    public static Column Time<T>(string name, string title, Func<T, DateTime> value) where T : IRow => new(
+        name, title, ColumnKind.Time, typeof(DateTime), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
+        r => value((T)r).ToString("MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture), null);
 
-    public static readonly Column AvgPrice = new(
-        "avg_price", "Avg px", true, (a, b) => a.AvgPrice.CompareTo(b.AvgPrice),
-        t => t.AvgPrice.ToString("0.0000", CultureInfo.InvariantCulture));
-
-    public static readonly Column Status = new(
-        "status", "Status", false, (a, b) => string.CompareOrdinal(a.Status, b.Status), t => t.Status);
-
-    public static readonly Column Venue = new(
-        "venue", "Venue", false, (a, b) => string.CompareOrdinal(a.Venue, b.Venue), t => t.Venue);
-
-    /// <summary>Every column, in the grid's order.</summary>
-    public static readonly IReadOnlyList<Column> All =
-    [
-        TradeId, Version, TradeTime, Client, Symbol, Side, OrderQty, FilledQty, AvgPrice, Status, Venue, EventTime,
-    ];
-
-    public static Column Named(string name) =>
-        All.FirstOrDefault(c => c.Name == name)
-        ?? throw new ArgumentException($"the blotter has no column '{name}'", nameof(name));
-
-    private static string Number(long value) => value.ToString("#,0", CultureInfo.InvariantCulture);
+    public override string ToString() => Name;
 }

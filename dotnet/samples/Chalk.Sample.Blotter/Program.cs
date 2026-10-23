@@ -6,7 +6,7 @@ using Chalk.Sample.Blotter.Live;
 
 var options = new BlotterOptions
 {
-    Trades = Number(Argument(args, "--trades")) ?? 5_000_000,
+    Orders = Number(Argument(args, "--orders")) ?? 5_000_000,
     BudgetBytes = (Number(Argument(args, "--budget-mb")) ?? 64) << 20,
     Maintenance = Argument(args, "--maintenance") == "recompute" ? ViewMaintenance.Recompute : ViewMaintenance.Incremental,
 };
@@ -40,7 +40,7 @@ static string? Argument(string[] args, string name)
     return at >= 0 && at + 1 < args.Length ? args[at + 1] : null;
 }
 
-// 5M, 500k and 20m are all numbers of trades here.
+// 5M, 500k and 20m are all numbers of orders here.
 static long? Number(string? text)
 {
     if (string.IsNullOrWhiteSpace(text))
