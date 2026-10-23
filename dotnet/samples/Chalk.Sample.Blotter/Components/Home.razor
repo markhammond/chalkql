@@ -1,0 +1,443 @@
+@page "/"
+@implements IAsyncDisposable
+@inject BlotterHost Host
+@inject IJSRuntime JS
+
+<PageTitle>Virtual blotter</PageTitle>
+
+<main>
+    <div class="bar">
+        <h1>Virtual blotter</h1>
+        <StatusBar Status="_status" Budget="Host.Budget" BudgetChanged="SetBudgetAsync" />
+        <button @onclick="BurstAsync" title="The exchange sends this many versions at once">Burst 3,000</button>
+        <button @onclick="Stall" title="The database writes nothing for 20 s, while the feed goes on">Stall database 20 s</button>
+    </div>
+
+    <form class="filters" @onsubmit="ApplyFiltersAsync" @onsubmit:preventDefault>
+        <label>Clients <input type="text" @bind="_clients" placeholder="C0001, C0002" /></label>
+        <label>Symbols <input type="text" @bind="_symbols" placeholder="AAPL, MSFT" /></label>
+        <label>
+            Side
+            <select @bind="_side">
+                <option value="">Both</option>
+                <option value="Buy">Buy</option>
+                <option value="Sell">Sell</option>
+            </select>
+        </label>
+        <div class="statuses">
+            @foreach (var status in Reference.Statuses)
+            {
+                var name = status;
+                <label><input type="checkbox" checked="@_statuses.Contains(name)" @onchange="e => Toggle(name, (bool)e.Value!)" /> @name</label>
+            }
+        </div>
+        <label>Traded from <input type="datetime-local" step="1" @bind="_from" /></label>
+        <label>to <input type="datetime-local" step="1" @bind="_to" /></label>
+        <button class="primary" type="submit">Apply</button>
+        <span class="chip"><span class="label">rows</span><b>@_total.ToString("N0", CultureInfo.InvariantCulture)</b></span>
+        <span class="chip"><span class="label">sort</span><b>@_sort.Name</b></span>
+    </form>
+
+    @if (_refusal is not null)
+    {
+        <div class="refusal">
+            Not serving: @_refusal
+            <button @onclick="RetryAsync">Try again</button>
+        </div>
+    }
+
+    <div class="frame">
+        @if (_hidden > 0)
+        {
+            <button class="badge" @onclick="ShowNewestAsync">@_hidden.ToString("N0", CultureInfo.InvariantCulture) new above</button>
+        }
+
+        <div class="scroller @(_waiting || _refusal is not null ? "waiting" : "")" @ref="_scroller">
+            <QuickGrid TGridItem="BlotterRow" @ref="_grid" ItemsProvider="_provider" Virtualize="true" ItemSize="(float)RowHeight"
+                       OverscanCount="30" ItemKey="r => r.Trade.TradeId" RowClass="r => r.RowClass">
+                @for (var c = 0; c < Column.All.Count; c++)
+                {
+                    var index = c;
+                    var column = Column.All[c];
+                    <TemplateColumn TGridItem="BlotterRow" Title="@column.Title" Class="@(column.Numeric ? "num" : null)">
+                        <HeaderTemplate>
+                            <button class="sort" type="button" title="Click to sort by @column.Title; shift-click to add it to the sort"
+                                    @onclick="e => SortAsync(column, e.ShiftKey)">
+                                @column.Title
+                                @if (_sort.RankOf(column) is var rank and > 0)
+                                {
+                                    <span class="arrow">@(_sort.IsDescending(column) ? "▼" : "▲")</span>
+                                    @if (_sort.Chosen.Length > 1)
+                                    {
+                                        <span class="rank">@rank</span>
+                                    }
+                                }
+                            </button>
+                        </HeaderTemplate>
+                        <ChildContent>
+                            @if (column == Column.Version)
+                            {
+                                <span class="cell @context.Flash[index]">
+                                    <a href="trade/@context.Trade.TradeId" target="_blank" title="Every version of this trade">v@(context.Trade.Version) ↗</a>
+                                </span>
+                            }
+                            else if (column == Column.Side)
+                            {
+                                <span class="cell side-@context.Trade.Side @context.Flash[index]">@column.Show(context.Trade)</span>
+                            }
+                            else
+                            {
+                                <span class="cell @context.Flash[index]">@column.Show(context.Trade)</span>
+                            }
+                        </ChildContent>
+                    </TemplateColumn>
+                }
+            </QuickGrid>
+        </div>
+    </div>
+
+    <details>
+        <summary>How this page is answered</summary>
+        <p>
+            Each page is generation @(_status.Generation) of the snapshot in DuckDB, read through ChalkQL with the sort,
+            filter and paging pushed down, merged with this filter's live scope: a ChalkQL standing view over the tail of
+            versions the feed has sent since the snapshot's watermark.
+        </p>
+        <pre>@SnapshotQueries.PageSql(_filter, _sort)</pre>
+        <pre>@LiveScope.Sql(_filter)</pre>
+        <button @onclick="ShowPlansAsync">Show the plans</button>
+        @if (_plans is not null)
+        {
+            <pre>@_plans</pre>
+        }
+    </details>
+</main>
+
+@code {
+    private readonly Flashes _flashes = new();
+    private QuickGrid<BlotterRow>? _grid;
+    private ElementReference _scroller;
+    private DotNetObjectReference<Home>? _self;
+    private GridItemsProvider<BlotterRow> _provider = default!;
+    private LiveScope? _scope;
+    private FilterSpec _filter = FilterSpec.None;
+    private SortSpec _sort = SortSpec.Default;
+    private BlotterStatus _status = new();
+    private string? _refusal;
+    private string? _plans;
+    private long _total;
+
+    // The grid is waiting for the first page of a new sort or filter: it stays as it was, dimmed.
+    private bool _waiting;
+    private long _view;
+
+    // Scrolled away from the top, the page holds its rows in place: new rows above it are counted
+    // here rather than pushing the rows down, until the reader goes back to the top.
+    private (TradeVersion Key, long Display)? _anchor;
+    private long _hidden;
+    private double _scrollTop;
+    private const double RowHeight = 30;
+
+    private string _clients = "";
+    private string _symbols = "";
+    private string _side = "";
+    private readonly HashSet<string> _statuses = [];
+    private DateTime? _from;
+    private DateTime? _to;
+
+    private int _refreshing;
+    private bool _dirty;
+    private Timer? _statusTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _provider = ProvideAsync;
+        _status = Host.Status;
+        Host.Published += OnPublished;
+        _statusTimer = new Timer(_ => InvokeAsync(() => { _status = Host.Status; StateHasChanged(); }), null, 1000, 1000);
+        await AcquireAsync(_filter);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _self = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("blotter.watchScroll", _scroller, _self);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnScrolled(double scrollTop)
+    {
+        var atTop = scrollTop < RowHeight / 2;
+        var wasAtTop = _scrollTop < RowHeight / 2;
+        _scrollTop = scrollTop;
+        if (wasAtTop && !atTop && _anchor is null && _scope?.State is { Generation: not null } state)
+        {
+            // Leaving the top: hold the row now first in view where it is, by its sort key.
+            var display = (long)(scrollTop / RowHeight);
+            var page = await Host.Pages.GetAsync(state, _sort, display, 1, CancellationToken.None);
+            if (page.Rows.Length == 1)
+            {
+                _anchor = (page.Rows[0], display);
+            }
+        }
+        else if (atTop && _anchor is not null)
+        {
+            // Back at the top: what arrived above is shown, and new rows push down again.
+            _anchor = null;
+            _hidden = 0;
+            await RefreshAsync();
+        }
+    }
+
+    private async ValueTask<GridItemsProviderResult<BlotterRow>> ProvideAsync(GridItemsProviderRequest<BlotterRow> request)
+    {
+        var view = _view;
+        for (var attempt = 0; ; attempt++)
+        {
+            var scope = _scope;
+            if (scope is null || scope.State.Generation is null)
+            {
+                return GridItemsProviderResult.From<BlotterRow>([], 0);
+            }
+
+            if (scope.Fault is { } fault)
+            {
+                await InvokeAsync(() => Refuse($"the live scope failed: {fault.Message}"));
+                return GridItemsProviderResult.From<BlotterRow>([], 0);
+            }
+
+            var state = scope.State;
+            try
+            {
+                var hidden = 0L;
+                if (_anchor is { } anchor)
+                {
+                    var rank = await Host.Pages.RankAsync(state, _sort, anchor.Key, request.CancellationToken);
+                    hidden = Math.Max(0, rank - anchor.Display);
+                }
+
+                var page = await Host.Pages.GetAsync(state, _sort, request.StartIndex + hidden, request.Count ?? 60, request.CancellationToken);
+                var rows = _flashes.Decorate(page.Rows, state.IngestedThrough, DateTime.UtcNow);
+                _total = page.Total;
+                if (_hidden != hidden || (_waiting && view == _view))
+                {
+                    _hidden = hidden;
+                    _waiting = _waiting && view != _view;
+                    await InvokeAsync(StateHasChanged);
+                }
+
+                return GridItemsProviderResult.From(rows, (int)Math.Min(int.MaxValue, page.Total - hidden));
+            }
+            catch (InvalidOperationException) when (attempt == 0)
+            {
+                // A state whose generation has just been retired: read the scope's latest instead.
+            }
+            catch (BlotterRefusedException refused)
+            {
+                await InvokeAsync(() => Refuse(refused.Message));
+                return GridItemsProviderResult.From<BlotterRow>([], 0);
+            }
+        }
+    }
+
+    private void OnPublished(long version)
+    {
+        if (Interlocked.Exchange(ref _refreshing, 1) == 1)
+        {
+            _dirty = true;
+            return;
+        }
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                do
+                {
+                    _dirty = false;
+                    if (_scope?.Fault is { } fault)
+                    {
+                        Refuse($"the live scope failed: {fault.Message}");
+                    }
+                    else if (Host.State != BlotterState.Live)
+                    {
+                        Refuse(Host.Refusal ?? "the blotter is not serving");
+                    }
+                    else if (_refusal is not null || _scope is null)
+                    {
+                        // Serving again: take a scope again and read the first page afresh.
+                        await RetryAsync();
+                    }
+                    else if (_grid is not null && !_waiting)
+                    {
+                        await _grid.RefreshDataAsync();
+                    }
+
+                    // At most ten pages a second, however fast the feed is: changes in between are
+                    // in the scope's next state, not lost.
+                    await Task.Delay(100);
+                }
+                while (_dirty);
+            }
+            finally
+            {
+                Volatile.Write(ref _refreshing, 0);
+            }
+        });
+    }
+
+    private async Task SortAsync(Column column, bool shift)
+    {
+        _sort = _sort.Click(column, shift);
+        await ReloadAsync();
+    }
+
+    private async Task ApplyFiltersAsync()
+    {
+        var filter = new FilterSpec
+        {
+            Clients = [.. List(_clients)],
+            Symbols = [.. List(_symbols).Select(s => s.ToUpperInvariant())],
+            Statuses = [.. _statuses],
+            Side = _side.Length == 0 ? null : _side,
+            From = _from is { } from ? DateTime.SpecifyKind(from.ToUniversalTime(), DateTimeKind.Unspecified) : null,
+            To = _to is { } to ? DateTime.SpecifyKind(to.ToUniversalTime(), DateTimeKind.Unspecified) : null,
+        }.Canonical();
+        if (filter.Name == _filter.Name)
+        {
+            return;
+        }
+
+        _filter = filter;
+        _waiting = true;
+        await AcquireAsync(filter);
+        await ReloadAsync();
+    }
+
+    /// <summary>A new sort or filter: the rows stay as they are, dimmed, until the first page of the new one is in.</summary>
+    private async Task ReloadAsync()
+    {
+        _view++;
+        _waiting = true;
+        _anchor = null;
+        _hidden = 0;
+        _plans = null;
+        _flashes.Clear();
+        await JS.InvokeVoidAsync("blotter.scrollToTop", _scroller);
+        if (_grid is not null)
+        {
+            await _grid.RefreshDataAsync();
+        }
+    }
+
+    private async Task AcquireAsync(FilterSpec filter)
+    {
+        var previous = _scope;
+        try
+        {
+            _scope = await Host.AcquireAsync(filter, CancellationToken.None);
+            _refusal = null;
+        }
+        catch (BlotterRefusedException refused)
+        {
+            _scope = null;
+            Refuse(refused.Message);
+        }
+
+        if (previous is not null && previous != _scope)
+        {
+            await Host.ReleaseAsync(previous);
+        }
+    }
+
+    private async Task RetryAsync()
+    {
+        _refusal = null;
+        if (_scope is { Fault: not null } failed)
+        {
+            _scope = null;
+            await Host.ReleaseAsync(failed);
+        }
+
+        await AcquireAsync(_filter);
+        await ReloadAsync();
+    }
+
+    private void Refuse(string why)
+    {
+        _waiting = false;
+        if (_refusal != why)
+        {
+            _refusal = why;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ShowNewestAsync()
+    {
+        _anchor = null;
+        _hidden = 0;
+        await JS.InvokeVoidAsync("blotter.scrollToTop", _scroller);
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (_grid is not null)
+        {
+            await _grid.RefreshDataAsync();
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task ShowPlansAsync()
+    {
+        var page = await Host.Queries.PagePlanAsync(_filter, _sort, CancellationToken.None);
+        _plans = "-- a page of the snapshot\n" + page + "\n-- the live scope\n" + (_scope?.PlanText ?? "");
+    }
+
+    private async Task SetBudgetAsync(long bytes)
+    {
+        await Host.SetBudgetAsync(bytes);
+        _status = Host.Status;
+    }
+
+    private void BurstAsync() => Host.Exchange.Send(3000);
+
+    private void Stall() => Host.Exchange.StallIngestion(TimeSpan.FromSeconds(20));
+
+    private void Toggle(string status, bool on)
+    {
+        if (on)
+        {
+            _statuses.Add(status);
+        }
+        else
+        {
+            _statuses.Remove(status);
+        }
+    }
+
+    private static IEnumerable<string> List(string text) =>
+        text.Split([',', ' ', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    public async ValueTask DisposeAsync()
+    {
+        Host.Published -= OnPublished;
+        if (_statusTimer is not null)
+        {
+            await _statusTimer.DisposeAsync();
+        }
+
+        if (_scope is not null)
+        {
+            await Host.ReleaseAsync(_scope);
+        }
+
+        _self?.Dispose();
+    }
+}

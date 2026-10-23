@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Sample.Blotter</RootNamespace>
+    <AssemblyName>Chalk.Sample.Blotter</AssemblyName>
+    <!-- Incremental maintenance of the live scopes is experimental (CHALK003): acknowledged here. -->
+    <NoWarn>$(NoWarn);CHALK003</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Chalk.Sample.Blotter.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Chalk.Client/Chalk.Client.csproj" />
+    <ProjectReference Include="../../src/Chalk.Incremental/Chalk.Incremental.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.Poco/Chalk.Sources.Poco.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.Ado/Chalk.Sources.Ado.csproj" />
+    <ProjectReference Include="../../src/Chalk.Sources.DuckDb/Chalk.Sources.DuckDb.csproj" />
+  </ItemGroup>
+
+  <!--
+    `Chalk.Sources.DuckDb` references `DuckDB.NET.Data`, the provider and nothing else: the native
+    library is the host's choice. This sample is a host, so it picks `DuckDB.NET.Data.Full` at the
+    same version.
+  -->
+  <ItemGroup>
+    <PackageReference Include="DuckDB.NET.Data.Full" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.QuickGrid" />
+  </ItemGroup>
+
+</Project>

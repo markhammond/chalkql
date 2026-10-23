@@ -1,0 +1,133 @@
+:root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --ink: #1c2330;
+    --muted: #667085;
+    --line: #e3e6eb;
+    --accent: #2f6fde;
+    --good: #1f8a4c;
+    --warn: #b7791f;
+    --bad: #c2362f;
+    --flash: rgba(47, 111, 222, 0.30);
+    --flash-new: rgba(31, 138, 76, 0.28);
+    --row-alt: #fafbfc;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #0f1218;
+        --panel: #161b23;
+        --ink: #e3e8ef;
+        --muted: #8b95a5;
+        --line: #252c37;
+        --accent: #6ea0ff;
+        --good: #47c27e;
+        --warn: #e0a43a;
+        --bad: #f0645c;
+        --flash: rgba(110, 160, 255, 0.32);
+        --flash-new: rgba(71, 194, 126, 0.30);
+        --row-alt: #181e27;
+    }
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+main { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 10px; height: 100vh; }
+
+h1 { font-size: 16px; margin: 0; font-weight: 600; }
+
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+
+.chip {
+    display: inline-flex; gap: 6px; align-items: baseline;
+    padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.chip b { font-weight: 600; }
+.chip .label { color: var(--muted); }
+.chip.live b { color: var(--good); }
+.chip.behind b, .chip.stalled b { color: var(--warn); }
+
+.filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; }
+.filters label { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 11px; }
+.filters input, .filters select, button {
+    font: inherit; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
+}
+.filters input[type=text] { width: 150px; }
+.statuses { display: flex; gap: 8px; align-items: center; }
+.statuses label { flex-direction: row; gap: 4px; color: var(--ink); font-size: 13px; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.refusal {
+    border: 1px solid var(--bad); color: var(--bad); background: var(--panel);
+    border-radius: 6px; padding: 8px 12px;
+}
+
+.frame { position: relative; flex: 1; min-height: 240px; display: flex; flex-direction: column; }
+
+.scroller {
+    flex: 1; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    transition: opacity 120ms ease;
+}
+.scroller.waiting { opacity: 0.35; pointer-events: none; }
+
+.badge {
+    position: absolute; top: 40px; left: 50%; transform: translateX(-50%); z-index: 3;
+    background: var(--accent); color: #fff; border: none; border-radius: 999px; padding: 5px 14px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+thead th {
+    position: sticky; top: 0; z-index: 2; background: var(--panel);
+    border-bottom: 1px solid var(--line); text-align: left; padding: 0; font-weight: 600;
+}
+.sort {
+    all: unset; display: flex; gap: 4px; align-items: center; width: 100%;
+    padding: 7px 8px; cursor: pointer; box-sizing: border-box; user-select: none;
+}
+.sort .arrow { color: var(--accent); font-size: 11px; }
+.sort .rank { color: var(--muted); font-size: 10px; }
+th.num .sort { justify-content: flex-end; }
+
+tbody tr { height: 30px; }
+tbody tr:nth-child(even) { background: var(--row-alt); }
+td { padding: 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td .cell { display: block; padding: 0 8px; line-height: 29px; overflow: hidden; text-overflow: ellipsis; }
+td.num .cell { text-align: right; }
+td a { color: var(--accent); text-decoration: none; }
+
+.side-Buy { color: var(--good); }
+.side-Sell { color: var(--bad); }
+
+/* Two names for one animation: a cell that changes again swaps between them, which restarts it. */
+@keyframes flash-a { from { background: var(--flash); } to { background: transparent; } }
+@keyframes flash-b { from { background: var(--flash); } to { background: transparent; } }
+@keyframes new-a { from { background: var(--flash-new); } to { background: transparent; } }
+@keyframes new-b { from { background: var(--flash-new); } to { background: transparent; } }
+.cell.flash-a { animation: flash-a 1.6s ease-out; }
+.cell.flash-b { animation: flash-b 1.6s ease-out; }
+tr.new-a td { animation: new-a 2s ease-out; }
+tr.new-b td { animation: new-b 2s ease-out; }
+
+details { color: var(--muted); }
+details pre {
+    color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px; overflow-x: auto; font-size: 11px; max-height: 260px;
+}
+
+.history { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.history td, .history th { padding: 4px 10px; }
+.history th { position: static; }
+.changed { color: var(--accent); font-weight: 600; }
+.wide { overflow-x: auto; }

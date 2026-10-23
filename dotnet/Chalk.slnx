@@ -38,6 +38,7 @@
     <Project Path="tests/Chalk.Execution.Tests/Chalk.Execution.Tests.csproj" />
     <Project Path="tests/Chalk.Integration.Tests/Chalk.Integration.Tests.csproj" />
     <Project Path="tests/Chalk.Architecture.Tests/Chalk.Architecture.Tests.csproj" />
+    <Project Path="tests/Chalk.Sample.Blotter.Tests/Chalk.Sample.Blotter.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/Chalk.CorpusTool/Chalk.CorpusTool.csproj" />
@@ -49,6 +50,7 @@
     <Project Path="samples/Chalk.Sample.Quickstart/Chalk.Sample.Quickstart.csproj" />
     <Project Path="samples/Chalk.Sample.AkadeIndexedSet/Chalk.Sample.AkadeIndexedSet.csproj" />
     <Project Path="samples/Chalk.Sample.Tutorial/Chalk.Sample.Tutorial.csproj" />
+    <Project Path="samples/Chalk.Sample.Blotter/Chalk.Sample.Blotter.csproj" />
   </Folder>
   <Project Path="bench/Chalk.Benchmarks.Akade/Chalk.Benchmarks.Akade.csproj" />
 </Solution>

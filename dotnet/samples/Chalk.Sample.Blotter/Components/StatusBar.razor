@@ -1,0 +1,68 @@
+@* What the host holds and what it is waiting for, refreshed every second. *@
+
+<span class="chip @(Status.State == BlotterState.Live ? "live" : "behind")" title="@Status.Refusal">
+    <b>@Status.State</b>
+</span>
+<span class="chip" title="The snapshot pages are read from, and the database watermark it was taken at">
+    <span class="label">generation</span><b>@Status.Generation</b>
+    <span class="label">of</span>@Status.GenerationRows.ToString("N0", CultureInfo.InvariantCulture)
+    <span class="label">as of</span>@Age(Status.CompleteThrough)
+</span>
+<span class="chip @(Status.IngestionStalled ? "stalled" : "")" title="How far the database is behind the feed, and how many versions it has still to write">
+    <span class="label">database behind</span><b>@Age(Status.DatabaseWatermark)</b>
+    <span class="label">waiting</span>@Status.NotYetIngested.ToString("N0", CultureInfo.InvariantCulture)
+</span>
+<span class="chip" title="Versions a second the exchange is sending now, and all it has sent">
+    <span class="label">feed</span><b>@Status.FeedRate.ToString("N0", CultureInfo.InvariantCulture)/s</b>
+    <span class="label">sent</span>@Status.Published.ToString("N0", CultureInfo.InvariantCulture)
+</span>
+<span class="chip" title="Trades whose latest version the snapshot does not have, and their versions">
+    <span class="label">tail</span><b>@Status.TailTrades.ToString("N0", CultureInfo.InvariantCulture)</b>
+    <span class="label">trades</span>@Status.TailVersions.ToString("N0", CultureInfo.InvariantCulture)
+    <span class="label">versions</span>
+</span>
+<span class="chip" title="Tail @Mb(Status.TailBytes), @Status.Scopes live scopes @Mb(Status.ScopeBytes), page cache @Mb(Status.PageBytes) in @Status.PageChunks chunks">
+    <span class="label">host</span><b>@Mb(Status.UsedBytes)</b>
+    <span class="label">of</span>
+    <select value="@(Budget >> 20)" @onchange="ChangeAsync" aria-label="Host memory budget">
+        @foreach (var megabytes in new[] { 4, 8, 16, 32, 64, 128, 256 })
+        {
+            <option value="@megabytes">@megabytes MB</option>
+        }
+    </select>
+</span>
+<span class="chip" title="DuckDB's own memory, outside the host's budget; the process's managed heap, for comparison">
+    <span class="label">DuckDB</span><b>@Mb(Status.DatabaseBytes)</b>
+    <span class="label">heap</span>@Mb(Status.ManagedHeapBytes)
+</span>
+<span class="chip" title="Statements ChalkQL has run against the database; snapshot chunks read and those the cache answered; the last refresh">
+    <span class="label">statements</span><b>@Status.Statements.ToString("N0", CultureInfo.InvariantCulture)</b>
+    <span class="label">chunks</span>@Status.PageReads.ToString("N0", CultureInfo.InvariantCulture)/@Status.PageHits.ToString("N0", CultureInfo.InvariantCulture)
+    <span class="label">refresh</span>@Status.LastRefreshMs.ToString("F1", CultureInfo.InvariantCulture) ms
+</span>
+<span class="chip" title="Generations taken over; the last one's build in DuckDB, its switch in the host, and the trades it took out of the tail">
+    <span class="label">turnovers</span><b>@Status.Turnovers</b>
+    <span class="label">build</span>@Status.LastBuildMs.ToString("N0", CultureInfo.InvariantCulture) ms
+    <span class="label">switch</span>@Status.LastSwitchMs.ToString("N0", CultureInfo.InvariantCulture) ms
+    <span class="label">evicted</span>@Status.LastEvicted.ToString("N0", CultureInfo.InvariantCulture)
+</span>
+
+@code {
+    [Parameter, EditorRequired]
+    public BlotterStatus Status { get; set; } = new();
+
+    [Parameter]
+    public long Budget { get; set; }
+
+    [Parameter]
+    public EventCallback<long> BudgetChanged { get; set; }
+
+    private Task ChangeAsync(ChangeEventArgs change) =>
+        BudgetChanged.InvokeAsync(long.Parse((string)change.Value!, CultureInfo.InvariantCulture) << 20);
+
+    private static string Mb(long bytes) => BlotterHost.Megabytes(bytes);
+
+    private static string Age(DateTime? time) => time is { } t
+        ? (DateTime.UtcNow - DateTime.SpecifyKind(t, DateTimeKind.Utc)).TotalSeconds.ToString("F1", CultureInfo.InvariantCulture) + " s"
+        : "–";
+}

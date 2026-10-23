@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Chalk.Sample.Blotter.Tests</RootNamespace>
+    <NoWarn>$(NoWarn);CHALK003</NoWarn>
+  </PropertyGroup>
+
+  <!-- The sample is a web app; its host runs here without the web server, but with its framework. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../samples/Chalk.Sample.Blotter/Chalk.Sample.Blotter.csproj" />
+  </ItemGroup>
+
+</Project>
