@@ -1033,13 +1033,14 @@ public sealed class BlotterHost : IAsyncDisposable
             Scopes = scopes.Count,
             ScopeBytes = scopeBytes,
             PageBytes = Pages.Bytes,
+            AlertBytes = _alerts?.Bytes ?? 0,
             PageReads = Queries.Reads,
             PageLookups = Pages.Lookups,
             PageHits = Pages.WindowHits,
             ReadAheads = Pages.ReadAheads,
             Statements = Queries.Executed,
             Budget = _budget,
-            UsedBytes = _tail.Bytes + scopeBytes + Pages.Bytes,
+            UsedBytes = _tail.Bytes + scopeBytes + Pages.Bytes + (_alerts?.Bytes ?? 0),
             DatabaseBytes = Volatile.Read(ref _vitalsWatchers) > 0 ? SafeDatabaseBytes() : Status.DatabaseBytes,
             ManagedHeapBytes = GC.GetTotalMemory(forceFullCollection: false),
         };
@@ -1225,6 +1226,9 @@ public sealed record BlotterStatus
     public long ScopeBytes { get; init; }
 
     public long PageBytes { get; init; }
+
+    /// <summary>The alert views and the tables they read.</summary>
+    public long AlertBytes { get; init; }
 
     public long PageReads { get; init; }
 

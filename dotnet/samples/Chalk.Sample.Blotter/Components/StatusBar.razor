@@ -6,7 +6,7 @@
 <span class="chip @(Status.State == BlotterState.Live ? "live" : "behind")" title="@Status.Refusal">
     <b>@Status.State</b>
 </span>
-<span class="chip" title="Tail @Mb(Status.TailBytes), @Status.Scopes live scopes @Mb(Status.ScopeBytes), counts and fills cached @Mb(Status.PageBytes)">
+<span class="chip" title="Tail @Mb(Status.TailBytes), @Status.Scopes live scopes @Mb(Status.ScopeBytes), counts and fills cached @Mb(Status.PageBytes), alert views and their tables @Mb(Status.AlertBytes)">
     <span class="label">host</span><b>@Mb(Status.UsedBytes)</b>
     <span class="label">of</span>
     <select value="@(Budget >> 20)" @onchange="ChangeAsync" aria-label="Host memory budget">

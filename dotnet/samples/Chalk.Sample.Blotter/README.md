@@ -3,7 +3,8 @@
 A trade blotter in Blazor Server and QuickGrid, over five million client orders and their fills in
 PostgreSQL, while the house keeps accepting and filling orders. Every tab scrolls through all of its
 rows, sorts by any columns, filters on any column, flashes what changed, and drives alerts. The host
-holds no copy of the corpus: it maintains an ephemeral memory cache to within a budget of a few megabytes,
+holds no copy of the corpus: it maintains an ephemeral memory cache to within a budget of a few megabytes
+(see [What ChalkQL brings to the table](#what-chalkql-brings-to-the-table)),
 which each query capped to 5 seconds, and never shows an order at an older version than one it knows of.
 
 ## A bolt-on compromise
@@ -12,16 +13,17 @@ Most live views are layered onto existing systems: someone else's database and e
 And so the blotter is intentionally built as **bolt-on** machinery, imposing the fewest prerequisites.
 Of the database it asks only what is reasonable: rows found by key, sorted and filtered at source, with
 an estimate of a query's size. Of the streams, only that it is reliable and delivers what
-is sent after a reader subscribes. ChalkQL can then make the most it.
+is sent after a reader subscribes. ChalkQL can then make the most of it, as
+[What ChalkQL brings to the table](#what-chalkql-brings-to-the-table) describes.
 
 ```bash
-JAVA_HOME=/path/to/jdk-21 dotnet run -c Release --project dotnet/samples/Chalk.Sample.Blotter
+dotnet run -c Release --project dotnet/samples/Chalk.Sample.Blotter
 ```
 
-Then open `http://localhost:5910`. The sample starts a PostgreSQL server of its own, in a temporary
-directory, from PostgreSQL 16 or later installed on the machine, and deletes it when it stops;
-one left by a sample that was killed is swept away by the next. ChalkQL's planner runs on a JDK 21+,
-which `PlannerProcess` starts itself, expecting `JAVA_HOME` to be set.
+Then open `http://localhost:5910`. The sample needs a JDK 21+ for ChalkQL's planner, and PostgreSQL 16
+or later installed on the machine; [Getting a working tree](../../../CONTRIBUTING.md#getting-a-working-tree)
+says how to install both. It starts a PostgreSQL server of its own, in a temporary directory, and
+deletes it when it stops; one left by a sample that was killed is swept away by the next.
 
 | Option | Default | |
 |---|---|---|
@@ -91,13 +93,29 @@ it does here that would otherwise be hand-written:
   indexes, its row count, and that its text is collated byte by byte. With that, the planner pushes the
   filter, the sort, the keyset seek and the limit into PostgreSQL's SQL, and keeps in the host only what
   PostgreSQL cannot do. "How this tab is answered", under the grid, shows the plan.
+- **A small memory that comes and goes, held to one budget.** The host copies none of the corpus. It
+  holds only what the database cannot answer yet, or has just answered:
+  - the tail: what the streams sent that the database has not been seen to hold, each row let go 5 s
+    after it has;
+  - the live scopes: one standing view per tab and filter in use, closed 20 s after its last page;
+  - windows of recent reads, kept 4 s and shared by readers of the same sort and filter, within a
+    quarter of the budget;
+  - while any browser has an alert, the alert views and the tables they read: fills for 10 s, orders
+    until unchanged for 10 minutes, and each tail row's wait.
+
+  ChalkQL counts each view's state (`StateBytes`) and stops an update past the view's
+  `StateBudget`, so the host can add the views to its own tables and hold the lot to one budget,
+  8 MB to start. Past it, the scopes no page uses go first; while no budget has been chosen, the host
+  steps up to 16, 32 and then 64 MB; past that, it refuses to serve, and says why, rather than grow. None of it survives a restart, and none of it needs to: the database
+  and a 30 s gap fill rebuild it.
 - **Standing views over the live data, kept current incrementally, inside a budget.** Each live scope
   (one per tab and filter in use) is a ChalkQL view over the tail: it takes the rows the filter can
   see, and on every change takes only the difference, rather than rerunning. Each has a state budget,
   and refuses rather than grow past it. `--maintenance recompute` trades a little more work an update
   for about a quarter of the memory.
-- **Atomic refreshes.** The catch-up loop changes the three tail tables as one engine version, so every
-  view and every page sees a tail that is whole, never one table ahead of another.
+- **Atomic refreshes.** The catch-up loop changes the three tail tables, and the alert tables with them,
+  as one engine version, so every view and every page sees a tail that is whole, never one table ahead
+  of another.
 - **Prepared statements, bound exactly.** Every page's SQL is prepared once and run with its key and
   filter as parameters, each given as its column's own .NET type; ChalkQL checks a parameter's type
   exactly against its column's, rather than converting a value that might then compare differently in
