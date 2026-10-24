@@ -191,7 +191,8 @@ public sealed record ViewLink(Tab Tab, SortSpec Sort, FilterSpec Filter, IReadOn
                 throw Refuse($"the row held at is given by {string.Join(", ", given)}, where this sort needs {string.Join(", ", keys)}");
             }
 
-            at = Row(tab, sort.Keys.ToDictionary(
+            // Only the keyset's values: each column reads its own from it, whatever the tab's rows are.
+            at = new KeyRow(tab, sort.Keys.ToDictionary(
                 k => k.Column.Name, k => Read(k.Column, k.Column.Type, Single("at." + k.Column.Name, [.. pairs["at." + k.Column.Name].Select(v => v ?? "")]))));
         }
 
@@ -233,20 +234,5 @@ public sealed record ViewLink(Tab Tab, SortSpec Sort, FilterSpec Filter, IReadOn
             _ => text,
         };
         return value ?? throw Refuse($"'{text}' is not a value of {column.Title}");
-    }
-
-    /// <summary>A row with only the values a keyset gives: enough to read from, which is all it is for.</summary>
-    private static IRow Row(Tab tab, Dictionary<string, object> values)
-    {
-        T Get<T>(string name, T otherwise) => values.TryGetValue(name, out var value) ? (T)value : otherwise;
-        return tab == Trades.Tab.Orders
-            ? new Order(
-                Get("order_id", Guid.Empty), Get("version", 0), Get("event_time", default(DateTime)), Get("order_time", default(DateTime)),
-                Get("cl_ord_id", ""), Get("client", ""), Get("region", ""), Get("channel", ""), Get("instrument", ""), Get("side", ""),
-                Get("qty", 0d), Get("filled_qty", 0d), Get("avg_price", 0d), Get("markup_bps", 0d), Get("status", ""))
-            : new Fill(
-                Get("fill_id", Guid.Empty), Get("order_id", Guid.Empty), Get("event_time", default(DateTime)),
-                Get("cl_ord_id", ""), Get("client", ""), Get("region", ""), Get("channel", ""), Get("instrument", ""), Get("side", ""),
-                Get("qty", 0d), Get("price", 0d), Get("mid", 0d), Get("markup_bps", 0d));
     }
 }

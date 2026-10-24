@@ -97,39 +97,39 @@ public sealed class Column
     public object Value(IRow row) => _value(row);
 
     public static Column Uuid<T>(string name, string title, Func<T, Guid> value) where T : IRow => new(
-        name, title, ColumnKind.Id, typeof(Guid), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
-        r => value((T)r).ToString(), null);
+        name, title, ColumnKind.Id, typeof(Guid), r => Of(r, name, value), (a, b) => Of(a, name, value).CompareTo(Of(b, name, value)),
+        r => Of(r, name, value).ToString(), null);
 
     public static Column Long<T>(string name, string title, Func<T, long> value) where T : IRow => new(
-        name, title, ColumnKind.Integer, typeof(long), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
-        r => value((T)r).ToString("#,0", CultureInfo.InvariantCulture), null);
+        name, title, ColumnKind.Integer, typeof(long), r => Of(r, name, value), (a, b) => Of(a, name, value).CompareTo(Of(b, name, value)),
+        r => Of(r, name, value).ToString("#,0", CultureInfo.InvariantCulture), null);
 
     public static Column Int<T>(string name, string title, Func<T, int> value) where T : IRow => new(
-        name, title, ColumnKind.Integer, typeof(int), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
-        r => value((T)r).ToString("#,0", CultureInfo.InvariantCulture), null);
+        name, title, ColumnKind.Integer, typeof(int), r => Of(r, name, value), (a, b) => Of(a, name, value).CompareTo(Of(b, name, value)),
+        r => Of(r, name, value).ToString("#,0", CultureInfo.InvariantCulture), null);
 
     /// <param name="decimals">The most decimal places shown.</param>
     public static Column Number<T>(string name, string title, Func<T, double> value, int decimals) where T : IRow => new(
-        name, title, ColumnKind.Number, typeof(double), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
-        r => Finance(value((T)r), decimals), null);
+        name, title, ColumnKind.Number, typeof(double), r => Of(r, name, value), (a, b) => Of(a, name, value).CompareTo(Of(b, name, value)),
+        r => Finance(Of(r, name, value), decimals), null);
 
     /// <summary>A price: to six significant figures, see <see cref="Significant"/>.</summary>
     public static Column Price<T>(string name, string title, Func<T, double> value) where T : IRow => new(
-        name, title, ColumnKind.Number, typeof(double), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
-        r => Significant(value((T)r)), null);
+        name, title, ColumnKind.Number, typeof(double), r => Of(r, name, value), (a, b) => Of(a, name, value).CompareTo(Of(b, name, value)),
+        r => Significant(Of(r, name, value)), null);
 
     public static Column Text<T>(string name, string title, Func<T, string> value) where T : IRow => new(
-        name, title, ColumnKind.Text, typeof(string), r => value((T)r), (a, b) => string.CompareOrdinal(value((T)a), value((T)b)),
-        r => value((T)r), null);
+        name, title, ColumnKind.Text, typeof(string), r => Of(r, name, value), (a, b) => string.CompareOrdinal(Of(a, name, value), Of(b, name, value)),
+        r => Of(r, name, value), null);
 
     public static Column Choice<T>(string name, string title, Func<T, string> value, IReadOnlyList<string> choices) where T : IRow => new(
-        name, title, ColumnKind.Choice, typeof(string), r => value((T)r), (a, b) => string.CompareOrdinal(value((T)a), value((T)b)),
-        r => value((T)r), choices);
+        name, title, ColumnKind.Choice, typeof(string), r => Of(r, name, value), (a, b) => string.CompareOrdinal(Of(a, name, value), Of(b, name, value)),
+        r => Of(r, name, value), choices);
 
     public static Column Time<T>(string name, string title, Func<T, DateTime> value, string? description = null) where T : IRow => new(
-        name, title, ColumnKind.Time, typeof(DateTime), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
-        r => value((T)r).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture), null, description,
-        r => value((T)r).ToString("yyyy-MM-dd HH:mm:ss.ffffff", CultureInfo.InvariantCulture));
+        name, title, ColumnKind.Time, typeof(DateTime), r => Of(r, name, value), (a, b) => Of(a, name, value).CompareTo(Of(b, name, value)),
+        r => Of(r, name, value).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture), null, description,
+        r => Of(r, name, value).ToString("yyyy-MM-dd HH:mm:ss.ffffff", CultureInfo.InvariantCulture));
 
     /// <summary>A value worked out from others and only shown, see <see cref="Derived"/>: right-aligned if <paramref name="numeric"/>.</summary>
     public static Column Shown<T>(string name, string title, Func<T, string> show, bool numeric, string? description = null) where T : IRow => new(
@@ -175,5 +175,28 @@ public sealed class Column
             : text;
     }
 
+    /// <summary>
+    /// A row's value of the column named <paramref name="name"/>: from the row, or from a
+    /// <see cref="KeyRow"/>, which gives only some columns' values, by name.
+    /// </summary>
+    private static TValue Of<T, TValue>(IRow row, string name, Func<T, TValue> value) where T : IRow =>
+        row is KeyRow key ? (TValue)key.Values[name] : value((T)row);
+
     public override string ToString() => Name;
+}
+
+/// <summary>
+/// A row given only by some of its columns' values, by name: a keyset, as a view's link carries one,
+/// to read from and to place by. Each column reads its value from it as from a whole row; a column it
+/// has no value for is not asked.
+/// </summary>
+public sealed class KeyRow(Tab tab, IReadOnlyDictionary<string, object> values) : IRow
+{
+    public IReadOnlyDictionary<string, object> Values => values;
+
+    public Guid Id => (Guid)values[tab.Key.Name];
+
+    public int Version => 0;
+
+    public DateTime EventTime => default;
 }

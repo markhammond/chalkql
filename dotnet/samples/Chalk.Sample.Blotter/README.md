@@ -1,14 +1,10 @@
-# Virtual blotter: a live grid over data you do not own
+# Virtual blotter: an unobtrusive live grid
 
 A trade blotter in Blazor Server and QuickGrid, over five million client orders and their fills in
 PostgreSQL, while the house keeps taking orders and filling them. Every tab scrolls through all of its
 rows, sorts by any columns, filters on any column, flashes what changes, and sounds alerts. The host
 holds no copy of the corpus: it keeps what it holds inside a memory budget of a few megabytes, stops
 any statement after 5 s, and never shows an order at an older version than one it knows of.
-
-It is written for product engineers who have to put a live view in front of a system they did not
-design. It is built as a **bolt-on**: it asks almost nothing of the database or the streams, and shows
-what that costs and what ChalkQL makes of it.
 
 ```bash
 JAVA_HOME=/path/to/jdk-21 dotnet run -c Release --project dotnet/samples/Chalk.Sample.Blotter
@@ -30,14 +26,14 @@ planner runs on a JDK 21+, which `PlannerProcess` starts itself: set `JAVA_HOME`
 | `--maintenance recompute` | `incremental` | how the live scopes keep current (below) |
 | `--urls http://localhost:5911` | `http://localhost:5910` | |
 | `--link-keys /path/to/folder` | `Chalk.Sample.Blotter/link-keys` under the user's local application data | where the keys that shroud shared links are kept (below) |
-| `--probe` | | no web app: prints the estimates, then checks random pages of both tabs for 45 s (`PROBE_SECONDS`) (below) |
 
 ## A bolt-on, on purpose
 
 Most live views are added to systems that already exist: a database someone else owns, feeds someone
-else publishes. So the blotter assumes the least it can. Of the database it asks only what any reader
-could: rows found by key, sorted and filtered, and an estimate of a query's size. Of the streams, only
-that they deliver what is sent after a reader subscribes.
+else publishes. So the blotter is built as a **bolt-on**, and assumes the least it can. Of the
+database it asks only what any reader could: rows found by key, sorted and filtered, and an estimate
+of a query's size. Of the streams, only that they deliver what is sent after a reader subscribes. What
+follows shows what that costs, and what ChalkQL makes of it.
 
 It does **not** assume:
 
@@ -50,6 +46,21 @@ It does **not** assume:
 - that the two streams agree with each other: a fill often arrives before its order;
 - that a stream replays anything sent before the subscription;
 - an index for every sort a reader picks, or a cheap count.
+
+It does need the data to change in one way only, forward:
+
+- **Every change to an order is a new version**, numbered higher than the order's last, and a version
+  once written never changes. The host keeps whichever side holds the higher version, and confirms the
+  database by version alone, so a correction made in place, at the same version, would go unseen.
+  Versions only need to rise within each order: nothing orders one order's versions against another's.
+- **Fills never change**, and are only ever added.
+- **Nothing is deleted.** The streams carry versions and fills, not removals, so the host has no way to
+  learn that a row has gone. `order_versions` and `fills` only grow; `orders_current` changes in place,
+  but only to a higher version.
+- **Each stream sends everything after a reader subscribes, in the order it happened.** The host reads
+  "everything up to here" from where it has read a stream, and the gap fill and the count of what
+  arrives above a held view rely on it.
+- **A key is never reused** for another order or fill.
 
 What it takes on instead, in the host:
 
@@ -360,8 +371,8 @@ oracle copies into a temporary table. For fills, it is the fills the database ho
 stream has sent. Then it filters, sorts and limits in one statement, with the filter's values written
 in.
 
-That is exact only while nothing moves, so `--probe` and
-`tests/Chalk.Sample.Blotter.Tests/BlotterHostTests.cs` check two ways:
+That is exact only while nothing moves, so `tests/Chalk.Sample.Blotter.Tests/BlotterHostTests.cs`
+checks two ways, with random pages from `Probe`:
 
 - **While the market runs**, through bursts and stalls, every page must hold its invariants: rows in
   order, none twice, each passing the filter.
@@ -376,6 +387,13 @@ fills that arrive before their orders, the gap fill, the time limit, the budget'
 again, rows held in place while rows arrive above them, the count of what arrives above a held view
 against the merged page (exact, for sorts on columns that never change and on ones that do), estimates
 and counts off the page's path, and an order's history read from both sides.
+
+A longer run of the same checks, against a busy market, is a test run by hand, which prints PostgreSQL's
+estimates and what the host held:
+
+```bash
+BLOTTER_PROBE_SECONDS=300 BLOTTER_PROBE_ORDERS=5000000 dotnet test dotnet/tests/Chalk.Sample.Blotter.Tests --filter Random_pages_hold
+```
 
 `SortSpecTests`, `FilterSpecTests`, `ColumnsTests`, `ViewLinkTests`, `AlertSessionTests`, `FlashesTests`
 and `NestingTests` cover the host's own rules: sorting, filtering, number formats, links and their

@@ -61,7 +61,8 @@ public sealed class ViewLinkTests
         Assert.Equal(fills, back.Tab);
         Assert.True(back.Sort.IsDefault);
         Assert.Empty(back.Hidden);
-        Assert.Equal(at.EventTime, back.At!.EventTime);
+        Assert.IsType<KeyRow>(back.At);
+        Assert.Equal(at.EventTime, fills.Time.Value(back.At));
         Assert.Equal(at.FillId, back.At.Id);
     }
 
