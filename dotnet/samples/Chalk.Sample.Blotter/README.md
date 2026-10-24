@@ -346,8 +346,9 @@ sequenceDiagram
     participant Grid as QuickGrid
     participant Pages as Pages and PageView
     participant Windows as Kept windows
-    participant PG as PostgreSQL via ChalkQL
-    participant Scope as Live scope
+    participant PG as PostgreSQL, read by ChalkQL
+    participant Scope as Live scope, a ChalkQL standing view
+    Note over Scope: kept as each refresh lands: the tail's<br/>rows that pass the filter, at the stream's<br/>version or the database's
     Grid->>Pages: rows 4,200 to 4,260
     Pages->>Pages: nearest position known, and its row's key
     Pages->>Windows: a window from that key?
@@ -359,7 +360,7 @@ sequenceDiagram
         Pages->>Windows: keep, shared by readers of the same sort and filter
     end
     Pages->>Scope: the tail's rows between the first key and the last row read
-    Scope-->>Pages: newer versions, and rows the database has not got yet
+    Scope-->>Pages: newer versions, and rows the database has not got yet<br/>(filtered by ChalkQL; sorted and sliced in the host)
     Pages->>Pages: merge: each row once, at the newest version either side knows
     Pages-->>Grid: 61 rows, and the total as far as known
     Pages-)PG: read ahead, in the direction of scrolling
