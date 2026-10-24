@@ -294,9 +294,10 @@ Press Escape to close whatever is open over the page.
 | Folder | |
 |---|---|
 | `Grid` | what any live grid over a versioned table needs: rows (`IRow`, `KeyRow`), columns and formats, tabs, sorts, filters, view links and their shrouding, alert rules and conditions |
-| `Domain` | the trades: client orders and fills (`Trades`), their two tabs, reference data, and `ITradeRepository`, the tables as the house writes them, with `PostgresTradeRepository` |
-| `Fixtures` | stand-ins for a real house: the generated corpus and `Seeder`, the simulated `Exchange` and its streams (`Feed`), the lagging ingestion jobs, and `IHouseDatabase`, the database the house runs on, with `PostgresHouseDatabase` and the sample's own PostgreSQL server |
-| `Live` | the bolt-on: tail, merge, live scopes, pages and positions, counts, alert views and their tables, the host that runs them, and `IBlotterProvider`, the database it reads, with `PostgresBlotterProvider` |
+| `Domain` | the trades: client orders and fills (`Trades`), their two tabs, reference data, and `ITradeRepository`, the tables as the house writes them |
+| `Fixtures` | stand-ins for a real house: the generated corpus and `Seeder`, the simulated `Exchange` and its streams (`Feed`), the lagging ingestion jobs, and `IHouseDatabase`, the database the house runs on |
+| `Live` | the bolt-on: tail, merge, live scopes, pages and positions, counts, alert views and their tables, the host that runs them, and `IBlotterProvider`, the database it reads |
+| `Postgres` | everything PostgreSQL: the provider the host reads through and its estimates (`PostgresBlotterProvider`, `PostgresExplain`), the repository the house writes (`PostgresTradeRepository`), the house database that pairs them (`PostgresHouseDatabase`), the sample's own server (`PgServer`), and SQL written for PostgreSQL directly (`PostgresSql`) |
 | `Components` | the Blazor pages, the grid and the condition editor |
 
 `Grid` knows nothing of trades, nor `Domain` of live display; `Live` and the grid component still speak

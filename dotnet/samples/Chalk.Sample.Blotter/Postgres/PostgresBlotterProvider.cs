@@ -6,9 +6,10 @@ using Chalk.Client;
 using Chalk.Ir;
 using Chalk.Sources;
 using Chalk.Sources.Ado;
+using Chalk.Sample.Blotter.Live;
 using Npgsql;
 
-namespace Chalk.Sample.Blotter.Live;
+namespace Chalk.Sample.Blotter.Postgres;
 
 /// <summary>The blotter's database in PostgreSQL, at a connection string, read through plain ADO.NET.</summary>
 /// <remarks>

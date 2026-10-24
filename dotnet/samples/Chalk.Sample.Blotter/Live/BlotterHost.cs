@@ -6,6 +6,7 @@ using Chalk.Catalog;
 using Chalk.Client;
 using Chalk.Ir;
 using Chalk.Sample.Blotter.Fixtures;
+using Chalk.Sample.Blotter.Postgres;
 using Chalk.Sample.Blotter.Domain;
 using Chalk.Sources;
 using Chalk.Sources.Ado;
@@ -225,7 +226,7 @@ public sealed class BlotterHost : IAsyncDisposable
         _exchange = new Exchange(repository, _options.Exchange, _options.Orders, seeding.LoadedThrough, repository.OpenOrders(), _options.Current);
         _exchange.Start();
 
-        _planner = await PlannerProcess.StartAsync(new PlannerProcessOptions { JavaHome = JavaHome() }).ConfigureAwait(false);
+        _planner = await PlannerProcess.StartAsync(new PlannerProcessOptions()).ConfigureAwait(false);
 
         var reads = _provider.Open(new TableRows(seeding.Orders, seeding.Versions, seeding.Fills), _options.QueryTimeLimit);
         var live = new PocoSourceBuilder("live", schemaName: "live")
@@ -1067,18 +1068,6 @@ public sealed class BlotterHost : IAsyncDisposable
     }
 
     internal static string Megabytes(long bytes) => string.Create(CultureInfo.InvariantCulture, $"{bytes / 1048576.0:F1} MB");
-
-    private static string? JavaHome()
-    {
-        var configured = Environment.GetEnvironmentVariable("JAVA_HOME");
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            return configured;
-        }
-
-        const string homebrew = "/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home";
-        return Directory.Exists(homebrew) ? homebrew : null;
-    }
 }
 
 /// <summary>What the page's status bar shows.</summary>

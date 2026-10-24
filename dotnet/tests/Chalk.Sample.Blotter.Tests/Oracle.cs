@@ -4,6 +4,7 @@ using Chalk.Sample.Blotter.Live;
 using Chalk.Sample.Blotter.Fixtures;
 using Chalk.Sample.Blotter.Domain;
 using Chalk.Sample.Blotter.Grid;
+using Chalk.Sample.Blotter.Postgres;
 using Npgsql;
 
 namespace Chalk.Sample.Blotter.Tests;
@@ -89,7 +90,7 @@ public static class Oracle
               UNION ALL
               SELECT s.* FROM sent s WHERE NOT EXISTS (SELECT 1 FROM blotter.fills f WHERE f.fill_id = s.fill_id)
               """;
-        var where = state.Filter.Literal();
+        var where = PostgresSql.Where(state.Filter);
 
         long total;
         using (var counting = new NpgsqlCommand($"SELECT count(*) FROM ({truth}) truth WHERE {where}", connection, transaction))
@@ -113,7 +114,7 @@ public static class Oracle
         {
             while (reader.Read())
             {
-                found.Add(tab.ReadDb(reader));
+                found.Add(tab.Overrides ? Order.Read(reader) : Fill.Read(reader));
             }
         }
 

@@ -283,52 +283,6 @@ public sealed class FilterSpec
         return values;
     }
 
-    /// <summary>
-    /// The same conditions with their values written in, in SQL PostgreSQL takes: for the oracle, and
-    /// for asking PostgreSQL what it would scan.
-    /// </summary>
-    public string Literal()
-    {
-        if (Columns.IsEmpty)
-        {
-            return "TRUE";
-        }
-
-        var conditions = new List<string>();
-        foreach (var filter in Columns)
-        {
-            var column = filter.Column.Name;
-            if (!filter.Values.IsEmpty)
-            {
-                conditions.Add(filter.Match == TextMatch.AnyOf || filter.Column.Kind == ColumnKind.Id
-                    ? $"{column} IN ({string.Join(", ", filter.Values.Select(v => filter.Column.Kind == ColumnKind.Id ? Quote(Guid.TryParse(v, out var id) ? id.ToString() : Guid.Empty.ToString()) : Quote(v)))})"
-                    : "(" + string.Join(" OR ", filter.Values.Select(v => $"starts_with({column}, {Quote(v)})")) + ")");
-            }
-
-            if (filter.Min is { } min)
-            {
-                conditions.Add(string.Create(CultureInfo.InvariantCulture, $"{column} >= {filter.Column.Bind(min)}"));
-            }
-
-            if (filter.Max is { } max)
-            {
-                conditions.Add(string.Create(CultureInfo.InvariantCulture, $"{column} <= {filter.Column.Bind(max)}"));
-            }
-
-            if (filter.From is { } from)
-            {
-                conditions.Add(string.Create(CultureInfo.InvariantCulture, $"{column} >= TIMESTAMP '{from:yyyy-MM-dd HH:mm:ss.ffffff}'"));
-            }
-
-            if (filter.To is { } to)
-            {
-                conditions.Add(string.Create(CultureInfo.InvariantCulture, $"{column} < TIMESTAMP '{to:yyyy-MM-dd HH:mm:ss.ffffff}'"));
-            }
-        }
-
-        return string.Join(" AND ", conditions);
-    }
-
     /// <summary>The same conditions as an alert's condition writes them: in SQL, the values written in.</summary>
     public string Condition()
     {
@@ -377,6 +331,4 @@ public sealed class FilterSpec
         text.Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("%", "\\%", StringComparison.Ordinal)
             .Replace("_", "\\_", StringComparison.Ordinal);
-
-    private static string Quote(string text) => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'";
 }

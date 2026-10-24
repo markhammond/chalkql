@@ -1,6 +1,7 @@
 using Chalk.Sample.Blotter.Live;
 using Chalk.Sample.Blotter.Grid;
 using Chalk.Sample.Blotter.Domain;
+using Chalk.Sample.Blotter.Postgres;
 
 namespace Chalk.Sample.Blotter.Tests;
 
@@ -73,7 +74,7 @@ public sealed class FilterSpecTests
         Assert.Equal(
             "(starts_with(cl_ord_id, 'KELP-')) AND client IN ('O''NEIL') AND order_id IN "
             + "('0199a3b0-0000-7000-8000-000000000001', '00000000-0000-0000-0000-000000000000') AND version >= 7",
-            filter.Literal());
+            PostgresSql.Where(filter));
         Assert.Equal(
             [Guid.Parse("0199a3b0-0000-7000-8000-000000000001"), Guid.Empty],
             (Guid[])filter.Parameters()["order_id_in"]!);

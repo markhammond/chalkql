@@ -2,8 +2,9 @@ using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Globalization;
 using System.Text.Json;
+using Chalk.Sample.Blotter.Live;
 
-namespace Chalk.Sample.Blotter.Live;
+namespace Chalk.Sample.Blotter.Postgres;
 
 /// <summary>
 /// Asks PostgreSQL what a page would cost, with <c>EXPLAIN</c> on the page's own SQL, its filter's values
@@ -33,7 +34,7 @@ public sealed class PostgresExplain(DbDataSource reading, Func<TimeSpan, DbDataS
     public async Task<ReadEstimate> EstimateAsync(Tab tab, FilterSpec filter, SortSpec order, int limit, CancellationToken ct)
     {
         var sql = string.Create(CultureInfo.InvariantCulture,
-            $"SELECT {tab.Select} FROM {tab.Table} WHERE {filter.Literal()} ORDER BY {order.OrderBy()} LIMIT {limit}");
+            $"SELECT {tab.Select} FROM {tab.Table} WHERE {PostgresSql.Where(filter)} ORDER BY {order.OrderBy()} LIMIT {limit}");
         await using var connection = await reading.OpenConnectionAsync(ct).ConfigureAwait(false);
         string json;
         await using (var command = Command(connection, "EXPLAIN (FORMAT JSON) " + sql))
@@ -83,7 +84,7 @@ public sealed class PostgresExplain(DbDataSource reading, Func<TimeSpan, DbDataS
     /// milliseconds, where a count may read the table.
     /// </summary>
     public Task<long> RowsAsync(Tab tab, FilterSpec filter, CancellationToken ct) =>
-        PlanRowsAsync(tab.Table, filter.Literal(), ct);
+        PlanRowsAsync(tab.Table, PostgresSql.Where(filter), ct);
 
     public Task<long> RowsBeforeAsync(FilterSpec filter, SortSpec order, IRow key, CancellationToken ct)
     {
@@ -93,10 +94,10 @@ public sealed class PostgresExplain(DbDataSource reading, Func<TimeSpan, DbDataS
         // The key's values written in, the longest names first, so that @k1 is not taken for the start of @k10.
         foreach (var (name, value) in values.OrderByDescending(v => v.Key.Length).ThenByDescending(v => v.Key, StringComparer.Ordinal))
         {
-            before = before.Replace("@" + name, Literal(value), StringComparison.Ordinal);
+            before = before.Replace("@" + name, PostgresSql.Literal(value), StringComparison.Ordinal);
         }
 
-        return PlanRowsAsync(order.Tab.Table, $"{filter.Literal()} AND ({before})", ct);
+        return PlanRowsAsync(order.Tab.Table, $"{PostgresSql.Where(filter)} AND ({before})", ct);
     }
 
     /// <summary>
@@ -106,7 +107,7 @@ public sealed class PostgresExplain(DbDataSource reading, Func<TimeSpan, DbDataS
     public async Task<long> CountAsync(Tab tab, FilterSpec filter, TimeSpan limit, CancellationToken ct)
     {
         await using var connection = await counting(limit).OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var command = Command(connection, $"SELECT COUNT(*) FROM {tab.Table} WHERE {filter.Literal()}");
+        await using var command = Command(connection, $"SELECT COUNT(*) FROM {tab.Table} WHERE {PostgresSql.Where(filter)}");
         return (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
     }
 
@@ -125,17 +126,6 @@ public sealed class PostgresExplain(DbDataSource reading, Func<TimeSpan, DbDataS
         command.CommandText = sql;
         return command;
     }
-
-    /// <summary>A value written into SQL as PostgreSQL takes it.</summary>
-    private static string Literal(object? value) => value switch
-    {
-        DateTime time => string.Create(CultureInfo.InvariantCulture, $"TIMESTAMP '{time:yyyy-MM-dd HH:mm:ss.ffffff}'"),
-        Guid id => $"'{id}'::uuid",
-        string text => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'",
-        double number => number.ToString("R", CultureInfo.InvariantCulture),
-        IFormattable other => other.ToString(null, CultureInfo.InvariantCulture),
-        _ => throw new ArgumentException($"no SQL literal for {value?.GetType().Name ?? "null"}", nameof(value)),
-    };
 
     private static bool IsSort(JsonElement node) =>
         node.GetProperty("Node Type").GetString() is "Sort" or "Incremental Sort";

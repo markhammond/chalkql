@@ -1,7 +1,7 @@
-using Chalk.Sample.Blotter.Domain;
+using Chalk.Sample.Blotter.Fixtures;
 using Chalk.Sample.Blotter.Live;
 
-namespace Chalk.Sample.Blotter.Fixtures;
+namespace Chalk.Sample.Blotter.Postgres;
 
 /// <summary>
 /// The simulated house's database in PostgreSQL: a server the sample starts for itself, or one it is

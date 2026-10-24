@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Data.Common;
 using Apache.Arrow;
 
 namespace Chalk.Sample.Blotter.Grid;
@@ -17,7 +16,7 @@ public sealed class Tab
 {
     public Tab(
         string name, string title, IReadOnlyList<Column> columns, Column key, Column time, string table,
-        string select, Func<RecordBatch, int, IRow> read, Func<DbDataReader, IRow> readDb, bool overrides, int frozen,
+        string select, Func<RecordBatch, int, IRow> read, bool overrides, int frozen,
         IReadOnlySet<string>? hiddenAtFirst = null, bool home = false, Func<IRow, string>? describe = null,
         IReadOnlyList<TabPath>? paths = null)
     {
@@ -34,7 +33,6 @@ public sealed class Tab
         Table = table;
         Select = select;
         Read = read;
-        ReadDb = readDb;
         Overrides = overrides;
     }
 
@@ -63,9 +61,6 @@ public sealed class Tab
     public string Select { get; }
 
     public Func<RecordBatch, int, IRow> Read { get; }
-
-    /// <summary>A row read straight from the database, which only the oracle does.</summary>
-    public Func<DbDataReader, IRow> ReadDb { get; }
 
     /// <summary>Whether a row in the tail stands in for the database's row of the same key, its version being newer.</summary>
     public bool Overrides { get; }

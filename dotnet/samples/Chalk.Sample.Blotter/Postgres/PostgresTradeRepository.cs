@@ -2,7 +2,7 @@ using System.Globalization;
 using Npgsql;
 using NpgsqlTypes;
 
-namespace Chalk.Sample.Blotter.Domain;
+namespace Chalk.Sample.Blotter.Postgres;
 
 /// <summary>
 /// The system of record in PostgreSQL, as the simulated house writes it (see <see cref="ITradeRepository"/>):
