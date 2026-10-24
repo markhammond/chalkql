@@ -4,10 +4,11 @@
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap, startCompletion } from "@codemirror/autocomplete";
+import { acceptCompletion, autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap, startCompletion } from "@codemirror/autocomplete";
 import { linter } from "@codemirror/lint";
 import { sql, StandardSQL } from "@codemirror/lang-sql";
-import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { tags } from "@lezer/highlight";
 
 const theme = EditorView.theme({
     "&": { fontSize: "12px", border: "1px solid var(--line)", borderRadius: "6px", background: "var(--panel)", color: "var(--ink)" },
@@ -22,7 +23,18 @@ const theme = EditorView.theme({
     ".cm-completionInfo": { background: "var(--panel)", color: "var(--ink)" },
     ".cm-diagnostic": { color: "var(--ink)" },
     ".cm-completionDetail": { color: "var(--muted)", fontStyle: "normal", marginLeft: "1em" },
+    ".cm-tooltip-autocomplete ul li[aria-selected] .cm-completionDetail": { color: "inherit", opacity: "0.8" },
 });
+
+// The page's own colours, which follow its light or dark scheme; text values bold amber, to stand out
+// on either.
+const highlight = HighlightStyle.define([
+    { tag: [tags.string, tags.special(tags.string)], color: "var(--warn)", fontWeight: "600" },
+    { tag: [tags.keyword, tags.bool, tags.null], color: "var(--accent)" },
+    { tag: tags.number, color: "var(--good)" },
+    { tag: [tags.operator, tags.punctuation, tags.bracket], color: "var(--muted)" },
+    { tag: tags.invalid, color: "var(--bad)" },
+]);
 
 // The host completes: what fits where the cursor is, for this tab.
 const completeFrom = host => async context => {
@@ -61,8 +73,14 @@ window.blotterEditor = {
                     history(),
                     closeBrackets(),
                     sql({ dialect: StandardSQL, upperCaseKeywords: true }),
-                    syntaxHighlighting(defaultHighlightStyle),
-                    autocompletion({ override: [completeFrom(host)], activateOnTyping: true, icons: false }),
+                    syntaxHighlighting(highlight),
+                    autocompletion({
+                        override: [completeFrom(host)],
+                        activateOnTyping: true,
+                        icons: false,
+                        // A name, an operator or a path picked from the list asks at once for what follows it.
+                        activateOnCompletion: c => c.type !== "text" && /[ .(']$/.test(c.apply ?? ""),
+                    }),
                     checkWith(host),
                     placeholder(hint),
                     EditorView.lineWrapping,
@@ -80,7 +98,8 @@ window.blotterEditor = {
                             host.invokeMethodAsync("OnChanged", update.state.doc.toString());
                         }
                     }),
-                    keymap.of([...closeBracketsKeymap, ...completionKeymap, ...historyKeymap, ...defaultKeymap]),
+                    // Tab takes the suggestion chosen; with no list open it moves on, as it does elsewhere on the page.
+                    keymap.of([{ key: "Tab", run: acceptCompletion }, ...closeBracketsKeymap, ...completionKeymap, ...historyKeymap, ...defaultKeymap]),
                 ],
             }),
         });

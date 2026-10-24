@@ -258,8 +258,8 @@ million orders, about 12.5 million versions and 8.8 million fills load in second
 - **An editor that knows the tab.** Write the condition in CodeMirror 6, bundled into
   `wwwroot/condition-editor.js` from `editor/` (MIT; notice alongside). The host completes it: columns
   and paths where a comparison starts, the order's columns after `order.`, operators after a name, and
-  values after those, a choice's own or a text column's most frequent of the last day, read through
-  ChalkQL. It marks unknown names in place, then asks ChalkQL to prepare the statement and shows any
+  values after those, quoted for you, a choice's own or a text column's most frequent of the last day,
+  read through ChalkQL. Tab takes a suggestion. It marks unknown names in place, then asks ChalkQL to prepare the statement and shows any
   refusal. A refused condition is not added.
 - **Incremental views, kept by ChalkQL.** Each distinct condition is a standing view, maintained
   incrementally and shared by every rule in any browser that has it; a row entering the view fires

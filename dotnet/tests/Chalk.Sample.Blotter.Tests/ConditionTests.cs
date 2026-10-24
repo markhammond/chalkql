@@ -121,6 +121,26 @@ public sealed class ConditionTests
         Assert.Equal(["AND", "OR"], (await Complete(Tabs.Orders, "qty >= 10 ")).Options.Select(o => o.Label));
     }
 
+    [Fact]
+    public async Task A_text_columns_values_are_offered_after_its_operator_with_no_quote_typed_and_inserted_quoted()
+    {
+        string[] clients = ["ACORN", "ASPEN", "BIRCH"];
+        var after = await Complete(Tabs.Orders, "client = ", clients);
+        Assert.Equal([("ACORN", "'ACORN'"), ("ASPEN", "'ASPEN'"), ("BIRCH", "'BIRCH'")], after.Options.Select(o => (o.Label, o.Apply)));
+        Assert.Equal("client = ".Length, after.From);
+
+        // A word begun without a quote narrows them, and is replaced by the quoted value.
+        var begun = await Complete(Tabs.Orders, "client = AS", clients);
+        Assert.Equal([("ASPEN", "'ASPEN'")], begun.Options.Select(o => (o.Label, o.Apply)));
+        Assert.Equal("client = ".Length, begun.From);
+
+        // In a list, more of them; a number's list offers none.
+        var listed = await Complete(Tabs.Orders, "client IN ('ACORN', ", clients);
+        Assert.Contains(listed.Options, o => o is { Label: "BIRCH", Apply: "'BIRCH'" });
+        Assert.Contains("Sell", (await Complete(Tabs.Orders, "side IN (")).Options.Select(o => o.Label));
+        Assert.Empty((await Complete(Tabs.Orders, "qty IN (", clients)).Options);
+    }
+
     private static Task<Suggestions> Complete(Tab tab, string text, string[]? values = null) =>
         ConditionCompletion.CompleteAsync(
             tab, text, text.Length, (_, typed, _) => Task.FromResult<IReadOnlyList<string>>([.. (values ?? []).Where(v => v.StartsWith(typed, StringComparison.Ordinal))]),

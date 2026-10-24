@@ -67,13 +67,16 @@ public static class ConditionCompletion
             // After a name: how it may be compared.
             options.AddRange(Operators(named));
         }
-        else if (previous.Kind is Condition.TokenKind.None || previous.Text is "(" or "," || IsWord(previous, "AND", "OR", "NOT", "WHEN", "THEN", "ELSE"))
+        else if (previous.Text == "," || previous.Text == "(" && before >= 1 && IsWord(tokens[before - 1], "IN"))
         {
-            if (previous.Text == "," || previous.Text == "(" && before >= 1 && IsWord(tokens[before - 1], "IN"))
+            // In a list: more values to compare with, if it is a text column's.
+            if (Compared(tab, tokens, before + 1) is { Kind: ColumnKind.Choice or ColumnKind.Text } listed)
             {
-                return Suggestions.None;
+                options.AddRange(await ValuesAsync(listed, prefix, values, ct).ConfigureAwait(false));
             }
-
+        }
+        else if (previous.Kind is Condition.TokenKind.None || previous.Text == "(" || IsWord(previous, "AND", "OR", "NOT", "WHEN", "THEN", "ELSE"))
+        {
             // Where a comparison starts: the tab's columns, its paths, and NOT.
             options.AddRange(tab.Columns.Where(c => !c.Derived).Select(c => Of(c, null)));
             options.AddRange(tab.Paths.Select(p => new Suggestion(p.Name, "namespace", $"to {p.Target.Title.ToLowerInvariant()}", p.Description, p.Name + ".")));
@@ -88,10 +91,10 @@ public static class ConditionCompletion
         }
         else if (previous.Kind == Condition.TokenKind.Punct && previous.Text is "=" or "<>" or "!=" or "<" or "<=" or ">" or ">=")
         {
-            // After an operator: values to compare with, if the column has a list of them.
-            if (Compared(tab, tokens, before + 1) is { Kind: ColumnKind.Choice } choice)
+            // After an operator: values to compare with, quoted, if the column is text; no quote to type first.
+            if (Compared(tab, tokens, before + 1) is { Kind: ColumnKind.Choice or ColumnKind.Text } compared)
             {
-                options.AddRange(choice.Choices.Select(c => new Suggestion(c, "text", choice.Title, Apply: Condition.Quote(c))));
+                options.AddRange(await ValuesAsync(compared, prefix, values, ct).ConfigureAwait(false));
             }
             else if (Compared(tab, tokens, before + 1) is { Kind: ColumnKind.Time } time)
             {
@@ -102,6 +105,14 @@ public static class ConditionCompletion
         }
 
         return new Suggestions(from, Filter(prefix, options));
+    }
+
+    /// <summary>A text column's values, quoted as they are inserted: a choice's own, or the most frequent starting with <paramref name="typed"/>.</summary>
+    private static async Task<IEnumerable<Suggestion>> ValuesAsync(
+        Column column, string typed, Func<Column, string, CancellationToken, Task<IReadOnlyList<string>>> values, CancellationToken ct)
+    {
+        var found = column.Kind == ColumnKind.Choice ? column.Choices : await values(column, typed, ct).ConfigureAwait(false);
+        return found.Select(v => new Suggestion(v, "text", column.Title, Apply: Condition.Quote(v)));
     }
 
     private static Suggestion Of(Column column, TabPath? path) => new(
