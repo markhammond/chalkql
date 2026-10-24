@@ -33,8 +33,8 @@ public sealed class BlotterRow(IRow row, string?[] flash, string? rowClass, Guid
 /// </remarks>
 public sealed class Flashes(IReadOnlyList<Column> columns)
 {
-    private static readonly TimeSpan CellFlash = TimeSpan.FromMilliseconds(1600);
-    private static readonly TimeSpan RowFlash = TimeSpan.FromMilliseconds(2000);
+    private static readonly TimeSpan CellFlash = TimeSpan.FromMilliseconds(2400);
+    private static readonly TimeSpan RowFlash = TimeSpan.FromMilliseconds(3000);
 
     private readonly Dictionary<Guid, Shown> _shown = [];
     private DateTime _since = DateTime.MaxValue;

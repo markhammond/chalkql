@@ -1,6 +1,7 @@
 @page "/"
 @implements IDisposable
 @inject BlotterHost Host
+@inject NavigationManager Nav
 
 <PageTitle>Virtual blotter</PageTitle>
 
@@ -10,7 +11,15 @@
         <StatusBar Status="_status" Budget="Host.Budget" BudgetChanged="SetBudgetAsync" />
     </div>
 
-    <BlotterGrid @key="_tab" Tab="_tab" Select="t => _tab = t">
+    @if (_linkRefused is not null)
+    {
+        <div class="refusal">
+            This link could not be opened, so the blotter opens as it always does: @_linkRefused
+            <button @onclick="() => _linkRefused = null">Dismiss</button>
+        </div>
+    }
+
+    <BlotterGrid @key="_tab" Tab="_tab" Link="_link" Select="t => { _tab = t; _link = null; }">
         <Toggles>
             <button type="button" class="link-button disclosure" aria-expanded="@_vitals" @onclick="ToggleVitals"><Chevron Open="_vitals" /> Vital statistics</button>
         </Toggles>
@@ -36,12 +45,31 @@
 
 @code {
     private Tab _tab = Tab.Orders;
+
+    // The view the page's link describes, for the tab it names, until another tab is chosen; or why
+    // the link was not understood, in which case none of it is taken.
+    private ViewLink? _link;
+    private string? _linkRefused;
     private BlotterStatus _status = new();
     private Timer? _timer;
     private bool _vitals;
 
     protected override void OnInitialized()
     {
+        var query = new Uri(Nav.Uri).Query;
+        if (query.Length > 1)
+        {
+            try
+            {
+                _link = ViewLink.Parse(query);
+                _tab = _link.Tab;
+            }
+            catch (ArgumentException refused)
+            {
+                _linkRefused = refused.Message;
+            }
+        }
+
         _status = Host.Status;
         _timer = new Timer(_ => InvokeAsync(() => { _status = Host.Status; StateHasChanged(); }), null, 1000, 1000);
     }

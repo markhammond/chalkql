@@ -695,6 +695,20 @@ public sealed class PageView(Pages pages, SortSpec order)
         }
     }
 
+    /// <summary>
+    /// Holds positions from <paramref name="at"/>, the place of <paramref name="row"/>: a view opened at a
+    /// row, from a link, rather than at the top. The rows above it are read backwards from it.
+    /// </summary>
+    public void HoldAt(long at, IRow row)
+    {
+        lock (_gate)
+        {
+            _held = true;
+            _anchors.Clear();
+            _anchors[at] = row;
+        }
+    }
+
     /// <summary>Forgets every position known, as a new sort or filter does.</summary>
     public void Reset()
     {

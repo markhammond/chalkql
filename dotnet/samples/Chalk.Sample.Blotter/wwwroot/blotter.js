@@ -17,6 +17,9 @@ window.blotter = {
         // For checking from a script, where a page in the background is sent no scroll events.
         element.reportScroll = report;
 
+        // For the share button, which asks the page for its link.
+        element.page = page;
+
         // Scrolled down, the row cut by the top edge fades; at the top, the newest row does not.
         const frame = element.parentElement;
         element.addEventListener("scroll", () => {
@@ -88,6 +91,82 @@ window.blotter = {
 
     scrollToTop(element) {
         element.scrollTo({ top: 0, behavior: "instant" });
+    },
+
+    // Scrolls to a place, once the grid is tall enough to: it may not be yet, its rows' count just read.
+    // Then tells the page where it is, as a scroll would.
+    scrollTo(element, top) {
+        let tries = 0;
+        const go = () => {
+            element.scrollTo({ top, behavior: "instant" });
+            if (Math.abs(element.scrollTop - top) > 1 && ++tries < 40) {
+                setTimeout(go, 50);
+            } else {
+                element.reportScroll();
+            }
+        };
+        go();
+    },
+
+    // Copies the rows in view, at least half of each, under the headings of the columns shown: as text
+    // a tab between values, which a sheet takes as cells, and as a table, for what pastes one. Each
+    // value as the grid shows it, but a time with its date and an id whole.
+    copyRows(button) {
+        const scroller = document.querySelector(".scroller");
+        const table = scroller?.querySelector("table");
+        if (!table) {
+            return;
+        }
+
+        // Below the headings, which stay in place as the grid scrolls (the cells do; their row does not).
+        const box = scroller.getBoundingClientRect();
+        const heads = [...table.querySelectorAll("thead th")];
+        const below = heads[heads.length - 1].getBoundingClientRect().bottom;
+        const shown = heads.map((th, i) => i).filter(i => !heads[i].classList.contains("expander"));
+        const label = th => [...(th.querySelector(".sort")?.childNodes ?? [])]
+            .filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join("").trim();
+        const value = td => {
+            const cell = td?.querySelector(".cell");
+            return !cell ? "" : cell.classList.contains("id") && cell.title ? cell.title : cell.textContent.replace("↗", "").trim();
+        };
+        const rows = [...table.querySelectorAll("tbody tr")]
+            .filter(tr => tr.querySelector(".cell"))
+            .filter(tr => {
+                const r = tr.getBoundingClientRect();
+                return Math.min(r.bottom, box.bottom) - Math.max(r.top, below) >= r.height / 2;
+            })
+            .map(tr => shown.map(i => value(tr.children[i])));
+        const titles = shown.map(i => label(heads[i]));
+
+        const text = [titles, ...rows].map(row => row.join("\t")).join("\n");
+        const escape = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const html = "<table><thead><tr>" + titles.map(t => `<th>${escape(t)}</th>`).join("") + "</tr></thead><tbody>"
+            + rows.map(row => "<tr>" + row.map(v => `<td>${escape(v)}</td>`).join("") + "</tr>").join("") + "</tbody></table>";
+        navigator.clipboard.write([new ClipboardItem({
+            "text/plain": new Blob([text], { type: "text/plain" }),
+            "text/html": new Blob([html], { type: "text/html" }),
+        })]).then(
+            () => this.say(button, `${rows.length} rows copied`),
+            failure => this.say(button, `Not copied: ${failure.message}`));
+    },
+
+    // Copies a link to the view: the page writes it, and the clipboard is handed the promise of it in
+    // the click itself, as Safari asks.
+    shareView(button) {
+        const scroller = document.querySelector(".scroller");
+        const link = scroller.page.invokeMethodAsync("ShareLink", scroller.scrollTop);
+        navigator.clipboard.write([new ClipboardItem({
+            "text/plain": link.then(url => new Blob([url], { type: "text/plain" })),
+        })]).then(
+            () => this.say(button, "Link copied"),
+            failure => this.say(button, `Not copied: ${failure.message}`));
+    },
+
+    // A word under a button, for a moment.
+    say(button, words) {
+        button.dataset.said = words;
+        clearTimeout(button.saying);
+        button.saying = setTimeout(() => delete button.dataset.said, 1800);
     },
 
     // Holds what is in view in place while rows are let in above it: notes the first order row in

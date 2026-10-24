@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Apache.Arrow;
 using Chalk.Sample.Blotter.Market;
 using System.Data.Common;
@@ -66,6 +67,11 @@ public sealed class Tab
 
     /// <summary>The newest first, which is what a blotter opens on.</summary>
     public SortSpec DefaultSort => SortSpec.Default(this);
+
+    /// <summary>The columns hidden until the reader shows them, by name.</summary>
+    public IReadOnlySet<string> HiddenAtFirst => Overrides
+        ? ImmutableHashSet.Create(StringComparer.Ordinal, "version", "region", "channel", "filled_qty")
+        : ImmutableHashSet.Create(StringComparer.Ordinal, "region", "channel");
 
     public Column Named(string name) =>
         Columns.FirstOrDefault(c => c.Name == name) ?? throw new ArgumentException($"{Name} has no column '{name}'", nameof(name));

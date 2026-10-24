@@ -125,8 +125,19 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   database and the live tail in one statement each. A fill's id opens its order's page, that fill
   marked. The ↗ after the id shows while the pointer is on its row.
 - **A new sort or filter dims the grid** until its first page is in.
-- **Flashes.** The cells of a row that changed flash, and an order or fill the streams have just sent
-  flashes whole. A row scrolled into view does not flash.
+- **Flashes.** The cells of a row that changed flash for 2.4 s, and an order or fill the streams have
+  just sent flashes whole for 3 s. A row scrolled into view does not flash.
+- **Copy and share.** On the tab bar, ⧉ copies the rows in view, at least half of each, under the
+  headings of the columns shown: as text with a tab between values, which a sheet takes as cells, and
+  as a table. Each value is as the grid shows it, but a time has its date and an id is whole. The link
+  icon copies a link to the view, which opens it in a new window. The link holds everything, and
+  nothing is kept for it: the tab, the sort, the filters, the columns hidden when they are not those
+  hidden at first, and, scrolled away from the live top, the row first in full view, by its keyset
+  (its value of each column sorted by, then its key). Opened, the row's place is counted, and the grid
+  is scrolled there and held, counting what has arrived above it since; at the live top, the link
+  holds no row and follows the top. A link not understood is refused whole, saying what, and the
+  blotter opens as it always does. For example:
+  `/?tab=fills&sort=-client,qty&hide=&f.side=Buy&f.qty.min=0.1&f.instrument.starts=B&at.client=FERN&at.qty=0.5&at.fill_id=…`.
 - **New rows push down at the top.** Scrolled away from the top, the rows in view stay where they are,
   and an "N new above" badge counts what has arrived. Scrolling up within 200 rows of the top lets
   them in, 30 at a time, above the rows in view, which stay where they are (the grid moves every

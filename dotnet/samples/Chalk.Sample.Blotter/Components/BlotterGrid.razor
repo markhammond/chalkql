@@ -3,6 +3,7 @@
 @inject BlotterHost Host
 @inject IJSRuntime JS
 @inject ILogger<BlotterGrid> Log
+@inject NavigationManager Nav
 
 <div class="tabs" role="tablist">
     @foreach (var tab in Tab.All)
@@ -11,6 +12,13 @@
         <button role="tab" aria-selected="@(t == Tab)" class="tab @(t == Tab ? "selected" : "")" @onclick="() => Select.InvokeAsync(t)">@t.Title</button>
     }
     <span class="spacer"></span>
+    @* Both copy in the browser itself, in the click: a clipboard takes nothing written later. *@
+    <button type="button" class="icon-button" title="Copy the rows in view, to paste into a sheet or a message" aria-label="Copy the rows in view" onclick="blotter.copyRows(this)">
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="5.5" y="5.5" width="8.5" height="8.5" rx="1.5" /><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5" /></svg>
+    </button>
+    <button type="button" class="icon-button" title="Copy a link to this view: its sort, filters and columns, and the row at the top unless it follows the live top" aria-label="Copy a link to this view" onclick="blotter.shareView(this)">
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M6.5 9.5l3-3" /><path d="M7.2 4.3l1.1-1.1a2.9 2.9 0 0 1 4.1 4.1l-1.1 1.1" /><path d="M8.8 11.7l-1.1 1.1a2.9 2.9 0 0 1-4.1-4.1l1.1-1.1" /></svg>
+    </button>
     <span class="chooser-wrap">
         <button type="button" class="link-button" aria-expanded="@_choosing" @onclick="() => _choosing = !_choosing">Columns <Chevron Down="true" Open="_choosing" /></button>
         @if (_choosing)
@@ -265,6 +273,10 @@
     [Parameter]
     public EventCallback<Tab> Select { get; set; }
 
+    /// <summary>The view a link opened this tab on, if one did: its sort, filters, columns, and the row it was held at.</summary>
+    [Parameter]
+    public ViewLink? Link { get; set; }
+
     private const double RowHeight = 30;
     private Flashes _flashes = default!;
 
@@ -322,8 +334,9 @@
     protected override async Task OnInitializedAsync()
     {
         _flashes = new Flashes(Tab.Columns);
-        _hiddenColumns = Tab.Overrides ? ["version", "region", "channel", "filled_qty"] : ["region", "channel"];
-        _sort = Tab.DefaultSort;
+        _hiddenColumns = [.. Link?.Hidden ?? Tab.HiddenAtFirst];
+        _sort = Link?.Sort ?? Tab.DefaultSort;
+        _filter = Link?.Filter ?? FilterSpec.None;
         _pages = Host.Pages.View(_sort);
         _provider = ProvideAsync;
         Host.Published += OnPublished;
@@ -336,7 +349,68 @@
         {
             _self = DotNetObjectReference.Create(this);
             await JS.InvokeVoidAsync("blotter.watchScroll", _scroller, _self);
+            if (Link?.At is { } at)
+            {
+                await HoldAtAsync(at);
+            }
         }
+    }
+
+    /// <summary>
+    /// Opens the grid where a link was made: the row it was held at counted to its place, the grid
+    /// scrolled there and held, as if the reader had scrolled there; what arrives above is counted.
+    /// </summary>
+    private async Task HoldAtAsync(IRow at)
+    {
+        for (var wait = 0; wait < 200 && _scope?.State is not { Ready: true }; wait++)
+        {
+            await Task.Delay(50);
+        }
+
+        if (_scope?.State is not { Ready: true } state)
+        {
+            // Refused, or not ready: the reason is shown, and the grid stays at the top.
+            return;
+        }
+
+        long rank;
+        try
+        {
+            rank = await Host.Pages.RankAsync(state, _sort, at, CancellationToken.None);
+        }
+        catch (QueryTimeLimitException limit)
+        {
+            Fail(_reloads, $"the link's row could not be placed, so the grid is at the top: {limit.Message}");
+            return;
+        }
+
+        _pages.HoldAt(rank, at);
+        _anchor = (at, rank);
+        _hiddenAt = DateTime.UtcNow;
+        _scrollTop = rank * RowHeight;
+
+        // The grid learns how many rows it has first: until then it is not tall enough to scroll there.
+        await RefreshAsync();
+        await JS.InvokeVoidAsync("blotter.scrollTo", _scroller, rank * RowHeight);
+    }
+
+    /// <summary>
+    /// A link to this view, for the share button: the sort, the filters, the columns hidden, and,
+    /// scrolled away from the live top, the first row wholly in view, by its keyset.
+    /// </summary>
+    [JSInvokable]
+    public async Task<string> ShareLink(double scrollTop)
+    {
+        IRow? at = null;
+        if (_pages.Held && scrollTop >= RowHeight / 2 && _scope?.State is { Ready: true } state)
+        {
+            var slot = Nesting.Locate((long)Math.Ceiling(scrollTop / RowHeight), _opened);
+            var page = await _pages.GetAsync(state, slot.Position, 1, CancellationToken.None);
+            at = page.Rows.FirstOrDefault() ?? throw new InvalidOperationException("the row in view could not be read");
+        }
+
+        var query = new ViewLink(Tab, _sort, _filter, _hiddenColumns, at).Query();
+        return Nav.BaseUri + (query.Length > 0 ? "?" + query : "");
     }
 
     [JSInvokable]
