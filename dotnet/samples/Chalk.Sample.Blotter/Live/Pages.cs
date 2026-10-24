@@ -41,11 +41,14 @@ public sealed record Page(long Start, IRow[] Rows, long Total, ScopeState State)
 /// </remarks>
 public sealed class Pages(SourceQueries queries)
 {
-    /// <summary>How long a count of the database's rows is reused: the total is approximate anyway.</summary>
-    public static readonly TimeSpan CountFor = TimeSpan.FromSeconds(3);
+    /// <summary>How long PostgreSQL's estimate of a filter's rows is reused.</summary>
+    public static readonly TimeSpan EstimateFor = TimeSpan.FromSeconds(3);
 
-    /// <summary>The most rows PostgreSQL may expect a filter to pass for them to be counted rather than estimated.</summary>
-    public long CountUpTo { get; set; } = 250_000;
+    /// <summary>How long a count, off any page's path, may run before it is given up.</summary>
+    public static readonly TimeSpan CountLimit = TimeSpan.FromSeconds(60);
+
+    /// <summary>How often a filter's rows are counted again, off any page's path, while pages use it.</summary>
+    public TimeSpan RecountAfter { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>How long an order's fills in the database are reused.</summary>
     public static readonly TimeSpan FillsFor = TimeSpan.FromSeconds(1);
@@ -69,10 +72,8 @@ public sealed class Pages(SourceQueries queries)
     // Windows kept for one tab, filter and sort.
     private const int WindowsPerSort = 6;
 
-    private readonly ConcurrentDictionary<(string Tab, string Filter), (DateTime At, Task<long> Count)> _counts = new();
-
-    // Filters whose count was stopped at the time limit: estimated from then on.
-    private readonly ConcurrentDictionary<(string Tab, string Filter), bool> _estimated = new();
+    // What is known of how many rows of the database pass each filter.
+    private readonly ConcurrentDictionary<(string Tab, string Filter), Known> _known = new();
     private readonly ConcurrentDictionary<Guid, (DateTime At, Task<Fill[]> Fills)> _fills = new();
     private readonly ConcurrentDictionary<(string Tab, string Filter, string Order), Shelf> _windows = new();
     private long _lookups;
@@ -101,64 +102,86 @@ public sealed class Pages(SourceQueries queries)
     /// <summary>What the kept windows, counts and fills hold, roughly, in bytes.</summary>
     public long Bytes =>
         Interlocked.Read(ref _keptRows) * Order.Bytes
-        + _counts.Count * 64L + _fills.Values.Sum(f => f.Fills.IsCompletedSuccessfully ? f.Fills.Result.Length * (long)Fill.Bytes : 0);
+        + _known.Count * 64L + _fills.Values.Sum(f => f.Fills.IsCompletedSuccessfully ? f.Fills.Result.Length * (long)Fill.Bytes : 0);
 
     /// <summary>A reader's place in the tab: the pages it reads, by position.</summary>
     public PageView View(SortSpec order) => new(this, order);
 
     /// <summary>
-    /// How many rows of the database pass the filter, counted, or estimated, a moment ago. A count older
-    /// than <see cref="CountFor"/> is counted again, and answers meanwhile: no page waits for a recount.
+    /// About how many rows of the database pass the filter, at once: no page waits for a count. At first
+    /// PostgreSQL's estimate, which <c>EXPLAIN</c> gives in milliseconds; then, once a count off any
+    /// page's path has finished, that count, taken again every <see cref="RecountAfter"/> while pages
+    /// use the filter. A count past <see cref="CountLimit"/> is given up, and the estimate stays. It
+    /// only sizes the grid, which learns where its rows end from the reads that reach the end.
     /// </summary>
-    public async Task<long> DatabaseRowsAsync(ScopeState state, CancellationToken ct)
+    /// <param name="count">
+    /// Whether to count, as well as estimate: not for a page that follows the live top, where the total
+    /// only sizes the scroll bar, and the estimate does that well enough.
+    /// </param>
+    public async Task<long> DatabaseRowsAsync(ScopeState state, CancellationToken ct, bool count = true)
     {
-        var key = (state.Tab.Name, state.Filter.Name);
+        var (tab, filter) = (state.Tab, state.Filter);
+        var known = _known.GetOrAdd((tab.Name, filter.Name), _ => new Known());
         var now = DateTime.UtcNow;
-        var counted = _counts.GetOrAdd(key, _ => (now, RowsAsync(state.Tab, state.Filter)));
-        if ((now - counted.At > CountFor && counted.Count.IsCompleted) || counted.Count.IsFaulted)
+        Task<long> estimate;
+        lock (known)
         {
-            var recount = (now, RowsAsync(state.Tab, state.Filter));
-            if (_counts.TryUpdate(key, recount, counted) && counted.Count.IsCompletedSuccessfully)
+            if (count && !known.GaveUp && known.Counting is not { IsCompleted: false } && (known.Counted is null || now - known.CountedAt > RecountAfter))
             {
-                return counted.Count.Result;
+                known.Counting = CountLaterAsync(known, tab, filter);
             }
 
-            counted = _counts[key];
+            if (known.Counted is { } counted)
+            {
+                return counted;
+            }
+
+            if (known.Estimate is null || known.Estimate.IsFaulted || (known.Estimate.IsCompleted && now - known.EstimatedAt > EstimateFor))
+            {
+                known.Estimate = EstimateAsync(tab, filter);
+                known.EstimatedAt = now;
+            }
+
+            estimate = known.Estimate;
         }
 
-        return await counted.Count.WaitAsync(ct).ConfigureAwait(false);
+        return await estimate.WaitAsync(ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// How many rows of the database pass the filter: counted where that is cheap, else PostgreSQL's
-    /// estimate. It only sizes the grid, whose far places are found by offset anyway. A result
-    /// PostgreSQL expects to be larger than <see cref="CountUpTo"/> is estimated, as is one whose count
-    /// was stopped at the time limit, from then on: a count that reads the table would do so again
-    /// every few seconds, and be stopped again.
-    /// </summary>
-    private async Task<long> RowsAsync(Tab tab, FilterSpec filter)
-    {
-        var estimate = await queries.EstimateRowsAsync(tab, filter, CancellationToken.None).ConfigureAwait(false);
-        if (estimate is { } large && (large > CountUpTo || _estimated.ContainsKey((tab.Name, filter.Name))))
-        {
-            return large;
-        }
+    /// <summary>Whether the filter's rows have been counted, rather than only estimated.</summary>
+    public bool IsCounted(ScopeState state) =>
+        _known.TryGetValue((state.Tab.Name, state.Filter.Name), out var known) && known.Counted is not null;
 
+    private async Task<long> EstimateAsync(Tab tab, FilterSpec filter) =>
+        await queries.EstimateRowsAsync(tab, filter, CancellationToken.None).ConfigureAwait(false)
+        ?? await queries.CountAsync(tab, filter, CancellationToken.None).ConfigureAwait(false);
+
+    private async Task CountLaterAsync(Known known, Tab tab, FilterSpec filter)
+    {
         try
         {
-            return await queries.CountAsync(tab, filter, CancellationToken.None).ConfigureAwait(false);
+            var counted = await queries.CountLaterAsync(tab, filter, CountLimit, CancellationToken.None).ConfigureAwait(false);
+            lock (known)
+            {
+                known.Counted = counted;
+                known.CountedAt = DateTime.UtcNow;
+            }
         }
-        catch (QueryTimeLimitException) when (estimate is { } instead)
+        catch (Exception)
         {
-            _estimated[(tab.Name, filter.Name)] = true;
-            return instead;
+            // Too slow, or the database went: the estimate stays, and this filter is not counted again.
+            lock (known)
+            {
+                known.GaveUp = true;
+            }
         }
     }
 
     /// <summary>About how many rows the tab has: the database's, less the rows the tail overrides, plus the tail's.</summary>
-    public async Task<long> TotalAsync(ScopeState state, CancellationToken ct)
+    /// <param name="count">See <see cref="DatabaseRowsAsync"/>.</param>
+    public async Task<long> TotalAsync(ScopeState state, CancellationToken ct, bool count = true)
     {
-        var rows = await DatabaseRowsAsync(state, ct).ConfigureAwait(false);
+        var rows = await DatabaseRowsAsync(state, ct, count).ConfigureAwait(false);
         return Math.Max(0, rows - state.Overridden.Length + state.Live.Length);
     }
 
@@ -583,6 +606,17 @@ public sealed class Pages(SourceQueries queries)
         public volatile bool Slow;
         public int Reading;
     }
+
+    /// <summary>What is known of how many rows of the database pass one filter.</summary>
+    private sealed class Known
+    {
+        public Task<long>? Estimate;
+        public DateTime EstimatedAt;
+        public long? Counted;
+        public DateTime CountedAt;
+        public Task? Counting;
+        public bool GaveUp;
+    }
 }
 
 /// <summary>
@@ -641,7 +675,7 @@ public sealed class PageView(Pages pages, SortSpec order)
     /// <summary>Rows <paramref name="start"/> on, <paramref name="count"/> of them or as many as there are.</summary>
     public async Task<Page> GetAsync(ScopeState state, long start, int count, CancellationToken ct)
     {
-        var total = await pages.TotalAsync(state, ct).ConfigureAwait(false);
+        var total = await pages.TotalAsync(state, ct, count: _held).ConfigureAwait(false);
         (long At, IRow Key)? below, above;
         long shifted;
         lock (_gate)

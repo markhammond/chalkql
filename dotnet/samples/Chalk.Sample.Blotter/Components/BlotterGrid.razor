@@ -317,7 +317,15 @@
     // here rather than pushing the rows down, until the reader goes back to the top.
     private (IRow Key, long Position)? _anchor;
     private long _hidden;
-    private DateTime _hiddenAt;
+
+    // Counts, from the streams, what arrives above the held rows; none while the grid follows the top.
+    private ArrivalsAbove? _arrivals;
+
+    // How far the rows really end from where the database's estimate or count puts the end: learned
+    // from reads that reach the end. A count that replaces the estimate starts it again.
+    private long _endLearned;
+    private bool _counted;
+    private const int GrowBy = 60;
 
     // Scrolling up near the top of what the reader has seen lets the rows that arrived above in, a few
     // at a time, holding the rows in view in place: _revealed counts those let in, which the reader may
@@ -395,7 +403,8 @@
 
         _pages.HoldAt(rank, at);
         _anchor = (at, rank);
-        _hiddenAt = DateTime.UtcNow;
+        _arrivals?.Dispose();
+        _arrivals = new ArrivalsAbove(Host, _sort, () => _scope?.State ?? state);
         _scrollTop = rank * RowHeight;
 
         // The grid learns how many rows it has first: until then it is not tall enough to scroll there.
@@ -436,6 +445,8 @@
             // Leaving the top: positions hold from here on, and the row now first in view is the one
             // whose rank says how many rows have arrived above it; a fill in view holds its order.
             _pages.Held = true;
+            _arrivals?.Dispose();
+            _arrivals = new ArrivalsAbove(Host, _sort, () => _scope?.State ?? state);
             var slot = Nesting.Locate((long)(scrollTop / RowHeight), _opened);
             try
             {
@@ -443,7 +454,6 @@
                 if (page.Rows.Length == 1)
                 {
                     _anchor = (page.Rows[0], page.Start);
-                    _hiddenAt = DateTime.UtcNow;
                 }
             }
             catch (Exception failure)
@@ -457,6 +467,8 @@
             // Back at the top, however fast: what arrived above is shown, and new rows push down again.
             _pages.Held = false;
             _anchor = null;
+            _arrivals?.Dispose();
+        _arrivals = null;
             _hidden = 0;
             _revealed = 0;
             await RefreshAsync();
@@ -541,29 +553,26 @@
         var ct = request.CancellationToken;
         try
         {
-            // What has arrived above the held rows, counted at most once a second, and only near the
-            // top, where positions are close to exact.
-            if (_anchor is not null && _pages.First is { } top && DateTime.UtcNow - _hiddenAt > TimeSpan.FromSeconds(1))
+            // What has arrived above the held rows, from the streams: the rows that crossed the topmost
+            // row the view knows since the last state, up or down.
+            if (_arrivals is not null && _pages.First is { } top)
             {
-                // What sorts above the topmost row the view knows, less its position: the rows that
-                // need positions above it. Rows let in while the count is read have moved it down since.
-                // A count stopped at the time limit leaves the last one: it is no reason to fail the page.
-                _hiddenAt = DateTime.UtcNow;
-                var before = _shifted;
-                try
-                {
-                    _hidden = top.At > 100_000
-                        ? 0
-                        : Math.Max(0, await Host.Pages.RankAsync(state, _sort, top.Row, ct) - top.At - (_shifted - before));
-                }
-                catch (QueryTimeLimitException limit)
-                {
-                    Log.LogInformation("rows above the view not counted this time: {Why}", limit.Message);
-                }
+                _hidden = Math.Max(0, _hidden + await _arrivals.TakeAsync(top.Row, ct));
             }
 
             var hidden = _hidden;
-            var rows = Math.Max(0, await Host.Pages.TotalAsync(state, ct) - hidden);
+            var counted = Host.Pages.IsCounted(state);
+            if (counted != _counted)
+            {
+                // A count has replaced the estimate: what was learned against the estimate no longer holds.
+                _counted = counted;
+                _endLearned = 0;
+            }
+
+            // Following the live top, the estimate sizes the scroll bar well enough: rows are counted only
+            // once the reader scrolls away.
+            var estimated = Math.Max(0, await Host.Pages.TotalAsync(state, ct, count: _pages.Held) - hidden);
+            var rows = Math.Max(0, estimated + _endLearned);
 
             // The opened orders are let in where a read last found them. A read that finds one
             // somewhere else, or finds another row where it was, moves it, and the grid's rows are
@@ -571,17 +580,39 @@
             IReadOnlyList<Opened> opened = [];
             List<Slot> slots = [];
             Page? page = null;
+            var asked = 0;
             for (var pass = 0; pass < 3; pass++)
             {
                 opened = await OpenedAsync(state, rows, ct);
                 slots = Nesting.Map(request.StartIndex, request.Count ?? 60, rows, opened);
                 var positions = slots.Where(s => !s.IsFill).Select(s => s.Position).ToList();
+
+                // At the end the grid has found, a row more is asked for: if there is one, the rows go on.
+                asked = positions.Count == 0 ? 0 : (int)(positions[^1] - positions[0] + 1);
+                var atEnd = positions.Count > 0 && positions[^1] >= rows - 1;
                 page = positions.Count == 0
                     ? null
-                    : await _pages.GetAsync(state, positions[0], (int)(positions[^1] - positions[0] + 1), ct);
+                    : await _pages.GetAsync(state, positions[0], asked + (atEnd ? 1 : 0), ct);
                 if (!Learn(page, shifted))
                 {
                     break;
+                }
+            }
+
+            // Where the rows end, learned from the read: one short of what it asked for found the last
+            // row; one that found more at the end the grid had goes on a screenful further.
+            if (page is not null && asked > 0)
+            {
+                var reached = page.Start + page.Rows.Length;
+                if (page.Rows.Length < asked)
+                {
+                    _endLearned = reached - estimated;
+                    rows = reached;
+                }
+                else if (page.Rows.Length > asked)
+                {
+                    _endLearned += GrowBy;
+                    rows += GrowBy;
                 }
             }
 
@@ -903,6 +934,9 @@
         _pages.Held = false;
         _openAt.Clear();
         _anchor = null;
+        _arrivals?.Dispose();
+        _arrivals = null;
+        _endLearned = 0;
         _hidden = 0;
         _revealed = 0;
         _plans = null;
@@ -974,6 +1008,8 @@
     private async Task ShowNewestAsync()
     {
         _anchor = null;
+        _arrivals?.Dispose();
+        _arrivals = null;
         _hidden = 0;
         _revealed = 0;
         _pages.Held = false;
@@ -1000,6 +1036,7 @@
     public async ValueTask DisposeAsync()
     {
         Host.Published -= OnPublished;
+        _arrivals?.Dispose();
         if (_scope is not null)
         {
             await Host.ReleaseAsync(_scope);

@@ -135,6 +135,13 @@ public sealed class BlotterHost : IAsyncDisposable
     /// <summary>Raised after every refresh the scopes have taken, with its version.</summary>
     public event Action<long>? Published;
 
+    /// <summary>
+    /// Raised with every batch the host reads off the streams, as it reads it: each order version and
+    /// fill sent, whether or not the tail takes it (it does not, when the database holds it already).
+    /// On the ingest loop: a handler only takes note.
+    /// </summary>
+    public event Action<IReadOnlyList<Order>, IReadOnlyList<Fill>>? Arrived;
+
     /// <summary>Counters for the page's status bar, refreshed by the loop.</summary>
     public BlotterStatus Status { get; private set; } = new();
 
@@ -479,6 +486,8 @@ public sealed class BlotterHost : IAsyncDisposable
         var (ordersThrough, fillsThrough) = (_ordersThrough, _fillsThrough);
         if (_orderFeed is not null && _fillFeed is not null)
         {
+            var sent = versionsIn.Count;
+            var sentFills = fillsIn.Count;
             while (_orderFeed.TryRead(out var batch))
             {
                 versionsIn.AddRange(batch);
@@ -492,6 +501,12 @@ public sealed class BlotterHost : IAsyncDisposable
                 fillsIn.AddRange(batch);
                 fillsThrough = batch[^1].EventTime;
                 Interlocked.Add(ref _fillsRead, batch.Length);
+            }
+
+            // What the streams sent, not what a gap fill or a resume takes again.
+            if (versionsIn.Count > sent || fillsIn.Count > sentFills)
+            {
+                Arrived?.Invoke(versionsIn[sent..], fillsIn[sentFills..]);
             }
         }
 

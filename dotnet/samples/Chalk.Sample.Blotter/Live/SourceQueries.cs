@@ -111,6 +111,16 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
         await CountAsync($"SELECT COUNT(*) AS n FROM {tab.Table} WHERE {filter.Where()}", filter.Parameters(), ct)
             .ConfigureAwait(false);
 
+    /// <summary>
+    /// How many rows of the database pass the filter, counted off any page's path: by PostgreSQL directly,
+    /// for up to <paramref name="limit"/>, where a page's count has the time limit; through ChalkQL where
+    /// there is no PostgreSQL to ask.
+    /// </summary>
+    public async Task<long> CountLaterAsync(Tab tab, FilterSpec filter, TimeSpan limit, CancellationToken ct) =>
+        explain is null
+            ? await CountAsync(tab, filter, ct).ConfigureAwait(false)
+            : await explain.CountAsync(tab.Table, filter.Literal(), limit, ct).ConfigureAwait(false);
+
     /// <summary>About how many rows of the database pass the filter, by PostgreSQL's estimate; none without one.</summary>
     public async Task<long?> EstimateRowsAsync(Tab tab, FilterSpec filter, CancellationToken ct) =>
         explain is null ? null : await explain.RowsAsync(tab.Table, filter.Literal(), ct).ConfigureAwait(false);
@@ -153,6 +163,26 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
         var before = Before(order, key, values);
         return await CountAsync(
             $"SELECT COUNT(*) AS n FROM {order.Tab.Table} WHERE {filter.Where()} AND ({before})", values, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Each order as it was at <paramref name="asOf"/>: its latest version in <c>order_versions</c>
+    /// sent by then, by order; an order placed later is absent. Found by key, a few versions an order.
+    /// </summary>
+    public async Task<Dictionary<Guid, Order>> OrdersAsOfAsync(IReadOnlyList<Guid> orderIds, DateTime asOf, CancellationToken ct)
+    {
+        var found = new Dictionary<Guid, Order>(orderIds.Count);
+        foreach (Order row in await LookupAsync(
+            Tab.Orders, $"SELECT {Order.Select} FROM blotter.order_versions WHERE order_id IN @ids AND event_time <= @asOf",
+            orderIds, ct, new Dictionary<string, object?> { ["asOf"] = asOf }).ConfigureAwait(false))
+        {
+            if (!found.TryGetValue(row.OrderId, out var had) || row.Version > had.Version)
+            {
+                found[row.OrderId] = row;
+            }
+        }
+
+        return found;
     }
 
     /// <summary><c>orders_current</c>'s rows for these orders, by order; an order it has no row for is absent.</summary>
@@ -397,7 +427,8 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
         return $"{first.Name} {(firstDescending ? "<=" : ">=")} @k0 AND ({text.Append(')', closing)})";
     }
 
-    private async Task<IRow[]> LookupAsync(Tab tab, string sql, IReadOnlyList<Guid> ids, CancellationToken ct)
+    private async Task<IRow[]> LookupAsync(
+        Tab tab, string sql, IReadOnlyList<Guid> ids, CancellationToken ct, Dictionary<string, object?>? values = null)
     {
         var found = new List<IRow>(ids.Count);
         for (var start = 0; start < ids.Count; start += LookupSizes[^1])
@@ -412,8 +443,8 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
                 batch[i] = ids[start + (i < count ? i : 0)];
             }
 
-            found.AddRange(await RowsAsync(tab, sql, new Dictionary<string, object?> { ["ids"] = batch }, "a lookup", ct)
-                .ConfigureAwait(false));
+            var given = new Dictionary<string, object?>(values ?? []) { ["ids"] = batch };
+            found.AddRange(await RowsAsync(tab, sql, given, "a lookup", ct).ConfigureAwait(false));
         }
 
         return [.. found];

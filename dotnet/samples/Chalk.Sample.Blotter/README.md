@@ -240,12 +240,22 @@ refused for want of budget (a scope that would not fit, or a tail grown past it)
 the next of 16, 32 and 64 MB instead. It never lowers it. Past 64 MB, or once a budget is chosen on the
 page (4 MB is there too, to see the host refuse), a refusal is a refusal.
 
-**Counts.** The grid needs to know about how many rows a tab has, to size its scroll. A filter
-PostgreSQL expects to pass more than 250,000 rows is sized by its estimate (`EXPLAIN`, a few
-milliseconds), as is one whose count was stopped at the time limit, from then on; smaller ones are
-counted. Counting what has arrived above a held view, a slow count leaves the last number; placing a
-shared link's row, a slow count gives way to the estimate. A page that cannot be read leaves the rows
-shown, faded under the reason, rather than emptying the grid.
+**Counts.** No page waits for a count. The grid is sized at once by PostgreSQL's estimate (`EXPLAIN`,
+a few milliseconds), and the true range is refined off the page's path: once a reader scrolls away from
+the live top, the rows are counted, on a connection of their own for up to 60 s, and again every 30 s
+while pages use the filter (a count past 60 s is given up, and the estimate stays). At the live top the
+estimate alone sizes the scroll bar, and nothing is counted. Reads learn the rest: one that comes back
+short of what it asked for has found the last row, and the grid ends there; one that finds more at the
+end the grid had goes on a screenful further.
+
+**What arrives above a held view** is counted from the streams, not the database. The host hands every
+batch it reads off the streams to the counter, whether or not the tail takes it (the tail does not take
+a version the database holds already). Each row is weighed against what it was: what the counter last
+saw of it, the tail's rows when the view was held, or, for an order it had not seen, its version as of
+then, looked up by key in `order_versions`; an order placed since, or a fill, is new. A shared link's row
+is still placed by a count, once, with PostgreSQL's estimate if that count is too slow.
+
+A page that cannot be read leaves the rows shown, faded under the reason, rather than emptying the grid.
 
 **The budget** covers what the host holds: the tail, in ChalkQL and in the host; the scopes' views and
 their states; and the windows, counts and fills it keeps for a moment, which may hold a quarter of the

@@ -278,7 +278,7 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task A_result_larger_than_is_worth_counting_is_postgres_estimate_and_ranks_can_be_estimated()
+    public async Task A_grid_is_sized_by_the_estimate_at_once_and_by_a_count_off_the_page_path_once_held()
     {
         await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() });
         var scope = await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
@@ -289,13 +289,16 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         Assert.NotNull(estimate);
         Assert.InRange(estimate.Value, counted * 0.9, counted * 1.1);
 
-        // Over the threshold, the grid is sized by the estimate, not a count.
-        host.Pages.CountUpTo = 1_000;
-        var filter = FilterSpec.Of([new ColumnFilter { Column = Tab.Orders.Named("qty"), Min = 0 }]);
-        var fresh = await host.AcquireAsync(Tab.Orders, filter, CancellationToken.None);
-        Assert.Equal(
-            await host.Queries.EstimateRowsAsync(Tab.Orders, filter, CancellationToken.None),
-            await host.Pages.DatabaseRowsAsync(fresh.State, CancellationToken.None));
+        // Following the live top, the estimate alone: nothing is counted.
+        Assert.Equal(estimate, await host.Pages.DatabaseRowsAsync(scope.State, CancellationToken.None, count: false));
+        await Task.Delay(500);
+        Assert.False(host.Pages.IsCounted(scope.State));
+
+        // Held, the estimate at once, and the count, off the page's path, as soon as it is in.
+        Assert.Equal(estimate, await host.Pages.DatabaseRowsAsync(scope.State, CancellationToken.None));
+        await UntilAsync(() => host.Pages.IsCounted(scope.State));
+        var rows = await host.Pages.DatabaseRowsAsync(scope.State, CancellationToken.None);
+        Assert.InRange(rows, counted, counted + 100);
 
         // A row's place, estimated with its key written into the SQL, every kind of value in it.
         var order = SortSpec.Of(Tab.Orders, new SortColumn(Tab.Orders.Named("client"), true), new SortColumn(Tab.Orders.Named("qty"), false),
@@ -306,6 +309,58 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         Assert.NotNull(guessed);
         Assert.InRange(guessed.Value, 0, counted);
         output.WriteLine($"{before} rows before the row; PostgreSQL guessed {guessed}");
+    }
+
+    [Theory]
+    [InlineData("order_time")]
+    [InlineData("status")]
+    [InlineData("filled_qty")]
+    public async Task What_arrives_above_a_held_view_is_counted_from_the_streams_as_a_count_would(string sortedBy)
+    {
+        await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() });
+        var scope = await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
+        await host.CaughtUpAsync(CancellationToken.None);
+        var order = sortedBy == "order_time"
+            ? Tab.Orders.DefaultSort
+            : SortSpec.Of(Tab.Orders, new SortColumn(Tab.Orders.Named(sortedBy), Descending: false));
+
+        // Held at the 500th row, with the market still: what sorts above it is what has arrived since,
+        // less what has left.
+        host.Exchange.Pause();
+        await UntilAsync(() => host.Exchange.Quiet, TimeSpan.FromSeconds(20));
+        await host.CaughtUpAsync(CancellationToken.None);
+        var held = scope.State;
+        var top = (await host.Pages.FromAsync(held, order, null, true, 500, CancellationToken.None))[^1];
+        var was = await AboveAsync(host, held, order, top);
+        using var arrivals = new ArrivalsAbove(host, order, () => held);
+        var counted = 0L;
+
+        // Taken as the grid takes it, on every new state, while the market makes changes.
+        host.Exchange.Resume();
+        host.Exchange.Send(1500);
+        var clock = Stopwatch.StartNew();
+        while (clock.Elapsed < TimeSpan.FromSeconds(4))
+        {
+            counted += await arrivals.TakeAsync(top, CancellationToken.None);
+            await Task.Delay(20);
+        }
+
+        // Once the streams have sent everything (the order stream runs behind the fills, and the
+        // database may hold an order it has not sent yet) and the host has read it all.
+        host.Exchange.Pause();
+        while (!host.Exchange.Quiet)
+        {
+            counted += await arrivals.TakeAsync(top, CancellationToken.None);
+            await Task.Delay(20);
+        }
+
+        await host.CaughtUpAsync(CancellationToken.None);
+        var last = scope.State;
+        counted += await arrivals.TakeAsync(top, CancellationToken.None);
+        var now = await AboveAsync(host, last, order, top);
+        output.WriteLine($"by {sortedBy}: {was} above, now {now}; counted {counted} arriving");
+        Assert.True(now != was, "nothing moved above the row");
+        Assert.Equal(now - was, counted);
     }
 
     [Fact]
@@ -438,6 +493,10 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
 
         return host;
     }
+
+    /// <summary>How many rows of the merged page, read from the top, sort above <paramref name="top"/>: what a reader scrolling up would find.</summary>
+    private static async Task<long> AboveAsync(BlotterHost host, ScopeState state, SortSpec order, IRow top) =>
+        (await host.Pages.FromAsync(state, order, null, true, 8192, CancellationToken.None)).Count(r => order.Compare(r, top) < 0);
 
     private static Task UntilAsync(Func<bool> condition, TimeSpan? within = null) =>
         UntilAsync(() => Task.FromResult(condition()), within);

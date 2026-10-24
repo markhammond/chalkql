@@ -94,6 +94,28 @@ public sealed class PostgresExplain(string connectionString)
         return (long)plan.RootElement[0].GetProperty("Plan").GetProperty("Plan Rows").GetDouble();
     }
 
+    /// <summary>
+    /// The rows <c>WHERE <paramref name="where"/></c> selects from <paramref name="table"/>, counted, on
+    /// a connection of its own whose statements may run up to <paramref name="limit"/>: a count off any
+    /// page's path, longer than a page may take.
+    /// </summary>
+    public async Task<long> CountAsync(string table, string where, TimeSpan limit, CancellationToken ct)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+        var milliseconds = (int)limit.TotalMilliseconds;
+        await using (var set = new NpgsqlCommand($"SET statement_timeout = {milliseconds}", connection))
+        {
+            await set.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        await using var command = new NpgsqlCommand($"SELECT COUNT(*) FROM {table} WHERE {where}", connection)
+        {
+            CommandTimeout = (int)limit.TotalSeconds + 5,
+        };
+        return (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+    }
+
     private static bool IsSort(JsonElement node) =>
         node.GetProperty("Node Type").GetString() is "Sort" or "Incremental Sort";
 
