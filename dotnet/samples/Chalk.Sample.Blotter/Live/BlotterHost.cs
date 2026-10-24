@@ -4,7 +4,8 @@ using System.Threading.Channels;
 using Chalk.Catalog;
 using Chalk.Client;
 using Chalk.Ir;
-using Chalk.Sample.Blotter.Market;
+using Chalk.Sample.Blotter.Fixtures;
+using Chalk.Sample.Blotter.Domain;
 using Chalk.Sources;
 using Chalk.Sources.Ado;
 using Chalk.Sources.Poco;
@@ -115,6 +116,9 @@ public sealed class BlotterHost : IAsyncDisposable
     /// <summary>The database, for the checks that read it directly.</summary>
     public TradeStore Store => _store ?? throw new InvalidOperationException("the host has not started");
 
+    /// <summary>How the database was seeded: what the corpus holds, and the latest event in it.</summary>
+    public Seeder Seeded { get; private set; } = null!;
+
     public SourceQueries Queries { get; private set; } = null!;
 
     /// <summary>The engine, for the tests' own statements.</summary>
@@ -148,7 +152,7 @@ public sealed class BlotterHost : IAsyncDisposable
     public async Task StartAsync(CancellationToken ct)
     {
         var started = Stopwatch.GetTimestamp();
-        TradeStore? seeding = null;
+        Seeder? seeding = null;
         await using (Spinner.Start(() => seeding is null
             ? "Starting PostgreSQL"
             : seeding.Written < _options.Orders
@@ -157,20 +161,20 @@ public sealed class BlotterHost : IAsyncDisposable
                 : $"Seeding PostgreSQL: {seeding.Stage}"))
         {
             _server = await PgServer.StartAsync(_options.Postgres, _options.PostgresBinaries, ct).ConfigureAwait(false);
-            seeding = new TradeStore(_server.ConnectionString);
+            seeding = new Seeder(new TradeStore(_server.ConnectionString));
             await seeding.GenerateAsync(
                 _options.Orders, Cells.Micros(DateTime.UtcNow), TimeSpan.FromDays(5), openTail: 2000, _options.Current, ct).ConfigureAwait(false);
         }
 
-        var store = seeding;
-        _store = store;
+        var store = seeding.Store;
+        (_store, Seeded) = (store, seeding);
         _log.LogInformation(
             "loaded {Orders:N0} orders, {Versions:N0} versions and {Fills:N0} fills into PostgreSQL in {Load:F1} s, indexed in {Index:F1} s",
-            store.Orders, store.Versions, store.Fills, store.LoadTime.TotalSeconds, store.IndexTime.TotalSeconds);
+            seeding.Orders, seeding.Versions, seeding.Fills, seeding.LoadTime.TotalSeconds, seeding.IndexTime.TotalSeconds);
 
         // The market starts before the blotter: events are in flight, sent and not yet written, when
         // the blotter subscribes, as they would be at any real start.
-        _exchange = new Exchange(store, _options.Exchange, _options.Orders, store.LoadedThrough, store.OpenOrders(), _options.Current);
+        _exchange = new Exchange(store, _options.Exchange, _options.Orders, seeding.LoadedThrough, store.OpenOrders(), _options.Current);
         _exchange.Start();
 
         _planner = await PlannerProcess.StartAsync(new PlannerProcessOptions { JavaHome = JavaHome() }).ConfigureAwait(false);
@@ -192,16 +196,16 @@ public sealed class BlotterHost : IAsyncDisposable
             .AddTable("orders_current", OrderColumns, configure: t => t
                 .UniqueKey("order_id")
                 .Index("orders_current_newest", false, "order_time", "order_id")
-                .RowCount(store.Orders))
+                .RowCount(seeding.Orders))
             .AddTable("order_versions", OrderColumns, configure: t => t
                 .UniqueKey("order_id", "version")
                 .Index("order_versions_recent", false, "event_time")
-                .RowCount(store.Versions))
+                .RowCount(seeding.Versions))
             .AddTable("fills", FillColumns, configure: t => t
                 .UniqueKey("fill_id")
                 .Index("fills_by_order", false, "order_id")
                 .Index("fills_newest", false, "event_time", "fill_id")
-                .RowCount(store.Fills))
+                .RowCount(seeding.Fills))
             .Build();
         var live = new PocoSourceBuilder("live", schemaName: "live")
             .NamingPolicy(PocoNamingPolicy.SnakeCase)

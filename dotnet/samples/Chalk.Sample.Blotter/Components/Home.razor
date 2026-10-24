@@ -79,7 +79,7 @@
 </main>
 
 @code {
-    private Tab _tab = Tab.Orders;
+    private Tab _tab = Tabs.Orders;
 
     // The view the page's link describes, for the tab it names, until another tab is chosen; or why
     // the link was not understood, in which case none of it is taken.
@@ -103,7 +103,7 @@
         {
             try
             {
-                _link = ViewLink.Parse(query, Shroud);
+                _link = ViewLink.Parse(query, Tabs.All, Shroud);
                 _tab = _link.Tab;
             }
             catch (ArgumentException refused)
@@ -132,7 +132,7 @@
         {
             try
             {
-                rules.Add(AlertRule.Load(rule));
+                rules.Add(AlertRule.Load(rule, Tabs.All));
             }
             catch (ArgumentException why)
             {

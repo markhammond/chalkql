@@ -1,4 +1,4 @@
-namespace Chalk.Sample.Blotter.Market;
+namespace Chalk.Sample.Blotter.Domain;
 
 /// <summary>
 /// The brokerage's reference data, after the Tapline PivotTable sample's: clients trading linear

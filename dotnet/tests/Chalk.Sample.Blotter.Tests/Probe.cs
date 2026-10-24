@@ -1,8 +1,9 @@
 using System.Diagnostics;
 using System.Globalization;
 using Chalk.Sample.Blotter.Live;
-using Chalk.Sample.Blotter.Market;
-using Chalk.Sample.Blotter.Trades;
+using Chalk.Sample.Blotter.Fixtures;
+using Chalk.Sample.Blotter.Domain;
+using Chalk.Sample.Blotter.Grid;
 
 namespace Chalk.Sample.Blotter.Tests;
 
@@ -21,7 +22,7 @@ internal static class Probe
     public static async Task<(int Loaded, int LoadedWrong, int Exact, int ExactWrong)> RunAsync(BlotterHost host, TimeSpan time, Action<string> log)
     {
         host.WatchVitals(true);
-        foreach (var tab in Tab.All)
+        foreach (var tab in Tabs.All)
         {
             var estimate = await host.Queries.EstimateAsync(FilterSpec.None, tab.DefaultSort, CancellationToken.None);
             log(string.Create(CultureInfo.InvariantCulture,
@@ -66,7 +67,7 @@ internal static class Probe
         while (clock.Elapsed < time)
         {
             await Task.Delay(100);
-            var tab = Tab.All[random.Next(Tab.All.Count)];
+            var tab = Tabs.All[random.Next(Tabs.All.Count)];
             var filter = RandomFilter(tab, random);
             var order = RandomSort(tab, random);
             if (await TryAcquireAsync(host, tab, filter, log) is not { } scope)
@@ -163,7 +164,7 @@ internal static class Probe
     /// <summary>One random page, checked row for row: from the top, or from wherever it starts.</summary>
     internal static async Task<(bool Ok, string? Line)> CheckExactAsync(BlotterHost host, Random random, Action<string> log)
     {
-        var tab = Tab.All[random.Next(Tab.All.Count)];
+        var tab = Tabs.All[random.Next(Tabs.All.Count)];
         var filter = RandomFilter(tab, random);
         var order = RandomSort(tab, random);
         if (await TryAcquireAsync(host, tab, filter, log) is not { } scope)
@@ -184,7 +185,7 @@ internal static class Probe
                 return (true, null);
             }
 
-            var (expected, expectedTotal) = Oracle.From(host.Store, host.Exchange, state, order, from, 50);
+            var (expected, expectedTotal) = Oracle.From(host.Seeded, host.Exchange, state, order, from, 50);
             var problem = Oracle.Compare(page.Rows, expected);
             return (problem is null, string.Create(CultureInfo.InvariantCulture,
                 $"{tab.Name} tail {state.Live.Length} over {state.Overridden.Length} | {filter.Name} | {order} @ {page.Start:N0} "

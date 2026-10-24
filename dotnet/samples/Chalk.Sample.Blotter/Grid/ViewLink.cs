@@ -3,7 +3,7 @@ using System.Globalization;
 using System.Text;
 using Microsoft.AspNetCore.WebUtilities;
 
-namespace Chalk.Sample.Blotter.Trades;
+namespace Chalk.Sample.Blotter.Grid;
 
 /// <summary>
 /// A view of a tab as a link: its sort, its filters, the columns hidden, and the row it is held at,
@@ -40,7 +40,7 @@ public sealed record ViewLink(Tab Tab, SortSpec Sort, FilterSpec Filter, IReadOn
     public string Query(LinkShroud? shroud = null)
     {
         var pairs = new List<(string Key, string Value)>();
-        if (Tab != Trades.Tab.Orders)
+        if (!Tab.Home)
         {
             pairs.Add(("tab", Tab.Name));
         }
@@ -93,9 +93,12 @@ public sealed record ViewLink(Tab Tab, SortSpec Sort, FilterSpec Filter, IReadOn
         }
     }
 
-    /// <summary>The view a link's query describes, its shrouded part, if it has one, opened by <paramref name="shroud"/>.</summary>
+    /// <summary>
+    /// The view a link's query describes, of one of <paramref name="tabs"/> (the home tab, if it names
+    /// none), its shrouded part, if it has one, opened by <paramref name="shroud"/>.
+    /// </summary>
     /// <exception cref="ArgumentException">Something in the link is not understood: said what, and nothing of it is taken.</exception>
-    public static ViewLink Parse(string query, LinkShroud? shroud = null)
+    public static ViewLink Parse(string query, IReadOnlyList<Tab> tabs, LinkShroud? shroud = null)
     {
         var pairs = QueryHelpers.ParseQuery(query);
         if (pairs.Remove("s", out var shrouded))
@@ -122,8 +125,8 @@ public sealed record ViewLink(Tab Tab, SortSpec Sort, FilterSpec Filter, IReadOn
         }
 
         var tab = pairs.TryGetValue("tab", out var named)
-            ? Trades.Tab.All.FirstOrDefault(t => t.Name == named.ToString()) ?? throw Refuse($"there is no tab '{named}'")
-            : Trades.Tab.Orders;
+            ? tabs.FirstOrDefault(t => t.Name == named.ToString()) ?? throw Refuse($"there is no tab '{named}'")
+            : tabs.FirstOrDefault(t => t.Home) ?? tabs[0];
 
         var sort = pairs.TryGetValue("sort", out var sorted)
             ? SortSpec.Of(tab, [.. sorted.ToString().Split(',').Select(s => s.StartsWith('-')

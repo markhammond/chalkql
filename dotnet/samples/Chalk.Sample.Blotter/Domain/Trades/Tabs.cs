@@ -1,88 +1,19 @@
 using System.Collections.Immutable;
-using Apache.Arrow;
-using Chalk.Sample.Blotter.Market;
-using System.Data.Common;
+using System.Globalization;
 
-namespace Chalk.Sample.Blotter.Trades;
+namespace Chalk.Sample.Blotter.Domain;
 
 /// <summary>
-/// A tab of the blotter: client orders, which change, or their fills, which do not. What a tab
-/// reads, and how its rows are keyed and shown.
+/// The blotter's two tabs: client orders, which change, read live from <c>orders_current</c> and
+/// overridden by newer versions in the tail; and their fills, which never change.
 /// </summary>
-/// <remarks>
-/// Orders are read live from <c>orders_current</c>, one row per order, and the tail overrides an
-/// order whose version there is older than the one the stream has sent. Fills never change, so a
-/// fill in both the table and the tail is the same row, and nothing is overridden.
-/// </remarks>
-public sealed class Tab
+public static class Tabs
 {
-    private Tab(
-        string name, string title, IReadOnlyList<Column> columns, Column key, Column time, string table,
-        string select, Func<RecordBatch, int, IRow> read, Func<DbDataReader, IRow> readDb, bool overrides, int frozen)
-    {
-        Frozen = frozen;
-        Name = name;
-        Title = title;
-        Columns = columns;
-        Key = key;
-        Time = time;
-        Table = table;
-        Select = select;
-        Read = read;
-        ReadDb = readDb;
-        Overrides = overrides;
-    }
-
-    public string Name { get; }
-
-    public string Title { get; }
-
-    /// <summary>Every column, in the grid's order.</summary>
-    public IReadOnlyList<Column> Columns { get; }
-
-    /// <summary>
-    /// How many of <see cref="Columns"/>, from the first, stay in place while the grid scrolls sideways:
-    /// enough to tell which row is which.
-    /// </summary>
-    public int Frozen { get; }
-
-    /// <summary>The unique key, which breaks every tie in a sort.</summary>
-    public Column Key { get; }
-
-    /// <summary>When the row happened: the period of interest that bounds a filter's list of values.</summary>
-    public Column Time { get; }
-
-    /// <summary>The table pages are read from, as ChalkQL names it.</summary>
-    public string Table { get; }
-
-    public string Select { get; }
-
-    public Func<RecordBatch, int, IRow> Read { get; }
-
-    /// <summary>A row read straight from the database, which only the oracle does.</summary>
-    public Func<DbDataReader, IRow> ReadDb { get; }
-
-    /// <summary>Whether a row in the tail stands in for the snapshot's row of the same key.</summary>
-    public bool Overrides { get; }
-
-    /// <summary>The newest first, which is what a blotter opens on.</summary>
-    public SortSpec DefaultSort => SortSpec.Default(this);
-
-    /// <summary>The columns hidden until the reader shows them, by name.</summary>
-    public IReadOnlySet<string> HiddenAtFirst => Overrides
-        ? ImmutableHashSet.Create(StringComparer.Ordinal, "version", "region", "channel", "filled_qty")
-        : ImmutableHashSet.Create(StringComparer.Ordinal, "region", "channel");
-
-    public Column Named(string name) =>
-        Columns.FirstOrDefault(c => c.Name == name) ?? throw new ArgumentException($"{Name} has no column '{name}'", nameof(name));
-
     public static readonly Tab Orders = MakeOrders();
 
     public static readonly Tab Fills = MakeFills();
 
     public static readonly IReadOnlyList<Tab> All = [Orders, Fills];
-
-    public override string ToString() => Name;
 
     private static Tab MakeOrders()
     {
@@ -117,7 +48,12 @@ public sealed class Tab
             (batch, row) => Order.Read(batch, row),
             reader => Order.Read(reader),
             overrides: true,
-            frozen: 2);
+            frozen: 2,
+            hiddenAtFirst: ImmutableHashSet.Create(StringComparer.Ordinal, "version", "region", "channel", "filled_qty"),
+            home: true,
+            describe: row => row is Order o
+                ? string.Create(CultureInfo.InvariantCulture, $"{o.Client} {o.Side} {Column.Finance(o.Qty, 4)} {o.Instrument} · {o.Status}")
+                : row.Id.ToString());
     }
 
     private static Tab MakeFills()
@@ -149,6 +85,10 @@ public sealed class Tab
             (batch, row) => Fill.Read(batch, row),
             reader => Fill.Read(reader),
             overrides: false,
-            frozen: 2);
+            frozen: 2,
+            hiddenAtFirst: ImmutableHashSet.Create(StringComparer.Ordinal, "region", "channel"),
+            describe: row => row is Fill f
+                ? string.Create(CultureInfo.InvariantCulture, $"{f.Client} {f.Side} {Column.Finance(f.Qty, 4)} {f.Instrument} @ {Column.Significant(f.Price)}")
+                : row.Id.ToString());
     }
 }

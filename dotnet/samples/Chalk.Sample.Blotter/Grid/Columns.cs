@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace Chalk.Sample.Blotter.Trades;
+namespace Chalk.Sample.Blotter.Grid;
 
 /// <summary>What a column holds, which decides how it is shown, sorted and filtered.</summary>
 public enum ColumnKind

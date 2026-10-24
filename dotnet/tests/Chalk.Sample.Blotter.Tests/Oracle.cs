@@ -1,8 +1,9 @@
 using System.Globalization;
 using System.Text;
 using Chalk.Sample.Blotter.Live;
-using Chalk.Sample.Blotter.Market;
-using Chalk.Sample.Blotter.Trades;
+using Chalk.Sample.Blotter.Fixtures;
+using Chalk.Sample.Blotter.Domain;
+using Chalk.Sample.Blotter.Grid;
 using Npgsql;
 
 namespace Chalk.Sample.Blotter.Tests;
@@ -32,10 +33,10 @@ public static class Oracle
     /// from the first, in <paramref name="order"/>; and how many rows it should have in all.
     /// </summary>
     public static (IRow[] Rows, long Total) From(
-        TradeStore store, Exchange market, ScopeState state, SortSpec order, IRow? from, int count)
+        Seeder seeded, Exchange market, ScopeState state, SortSpec order, IRow? from, int count)
     {
         var tab = state.Tab;
-        using var connection = store.Open();
+        using var connection = seeded.Store.Open();
         using var transaction = connection.BeginTransaction();
         Execute(connection, tab.Overrides
             ? "CREATE TEMP TABLE sent (LIKE blotter.order_versions) ON COMMIT DROP"
@@ -62,7 +63,7 @@ public static class Oracle
 
         // Everything since the corpus was loaded came from the exchange: the versions written since
         // then, and those sent, are all that can be newer than orders_current.
-        var since = string.Create(CultureInfo.InvariantCulture, $"TIMESTAMP '{store.LoadedThrough:yyyy-MM-dd HH:mm:ss.ffffff}'");
+        var since = string.Create(CultureInfo.InvariantCulture, $"TIMESTAMP '{seeded.LoadedThrough:yyyy-MM-dd HH:mm:ss.ffffff}'");
         var truth = tab.Overrides
             ? $"""
               WITH newer AS (

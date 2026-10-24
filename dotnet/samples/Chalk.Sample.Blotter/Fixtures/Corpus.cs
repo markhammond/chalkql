@@ -1,4 +1,4 @@
-namespace Chalk.Sample.Blotter.Market;
+namespace Chalk.Sample.Blotter.Fixtures;
 
 /// <summary>
 /// The history the sample starts with: client orders worked over the days before it starts, each

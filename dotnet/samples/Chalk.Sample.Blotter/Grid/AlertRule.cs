@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace Chalk.Sample.Blotter.Trades;
+namespace Chalk.Sample.Blotter.Grid;
 
 /// <summary>
 /// The sounds an alert can make: short recordings in <c>wwwroot/sounds</c>, mono, 8-bit, at no more than
@@ -63,11 +63,11 @@ public sealed record AlertRule(string Id, string Name, Tab Tab, FilterSpec Filte
     public SavedRule Save() => new(
         Id, Name, new ViewLink(Tab, Tab.DefaultSort, Filter, Tab.HiddenAtFirst, null).Query(), Sound, Throttle.TotalSeconds, Muted);
 
-    /// <summary>A rule the browser kept.</summary>
+    /// <summary>A rule the browser kept, on one of <paramref name="tabs"/>.</summary>
     /// <exception cref="ArgumentException">It is not a rule: said why.</exception>
-    public static AlertRule Load(SavedRule saved)
+    public static AlertRule Load(SavedRule saved, IReadOnlyList<Tab> tabs)
     {
-        var view = ViewLink.Parse(saved.View);
+        var view = ViewLink.Parse(saved.View, tabs);
         if (!view.Sort.IsDefault || view.At is not null || !view.Hidden.SetEquals(view.Tab.HiddenAtFirst))
         {
             throw new ArgumentException($"the alert '{saved.Name}' is not a filter alone");
@@ -83,16 +83,6 @@ public sealed record AlertRule(string Id, string Name, Tab Tab, FilterSpec Filte
         var throttle = Throttles.FirstOrDefault(t => t.TotalSeconds >= saved.ThrottleSeconds, Throttles[^1]);
         return new AlertRule(saved.Id, saved.Name, view.Tab, view.Filter, sound, throttle, saved.Muted);
     }
-
-    /// <summary>What a row that fired the rule says, in a line.</summary>
-    public static string Describe(IRow row) => row switch
-    {
-        Order o => string.Create(CultureInfo.InvariantCulture,
-            $"{o.Client} {o.Side} {Column.Finance(o.Qty, 4)} {o.Instrument} · {o.Status}"),
-        Fill f => string.Create(CultureInfo.InvariantCulture,
-            $"{f.Client} {f.Side} {Column.Finance(f.Qty, 4)} {f.Instrument} @ {Column.Significant(f.Price)}"),
-        _ => row.Id.ToString(),
-    };
 }
 
 /// <summary>An alert as the browser keeps it, in its local settings.</summary>

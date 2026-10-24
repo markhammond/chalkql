@@ -1,5 +1,6 @@
 using Chalk.Sample.Blotter.Components;
-using Chalk.Sample.Blotter.Trades;
+using Chalk.Sample.Blotter.Grid;
+using Chalk.Sample.Blotter.Domain;
 
 namespace Chalk.Sample.Blotter.Tests;
 

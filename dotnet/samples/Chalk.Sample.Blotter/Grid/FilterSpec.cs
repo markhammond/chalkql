@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 
-namespace Chalk.Sample.Blotter.Trades;
+namespace Chalk.Sample.Blotter.Grid;
 
 /// <summary>How a text column's values are matched.</summary>
 public enum TextMatch

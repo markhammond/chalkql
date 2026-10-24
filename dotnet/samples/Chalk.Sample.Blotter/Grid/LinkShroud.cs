@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.DataProtection;
 
-namespace Chalk.Sample.Blotter.Trades;
+namespace Chalk.Sample.Blotter.Grid;
 
 /// <summary>
 /// Shrouds the values a view's link carries (its filters' values, and the row it is held at), so

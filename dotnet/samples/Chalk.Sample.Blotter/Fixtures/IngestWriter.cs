@@ -1,4 +1,4 @@
-namespace Chalk.Sample.Blotter.Market;
+namespace Chalk.Sample.Blotter.Fixtures;
 
 /// <summary>When the database's writes land: a lag per row, and now and then a stall.</summary>
 public sealed record IngestLag

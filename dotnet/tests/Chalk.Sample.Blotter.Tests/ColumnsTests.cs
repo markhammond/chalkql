@@ -1,4 +1,5 @@
-using Chalk.Sample.Blotter.Trades;
+using Chalk.Sample.Blotter.Grid;
+using Chalk.Sample.Blotter.Domain;
 
 namespace Chalk.Sample.Blotter.Tests;
 
@@ -29,10 +30,10 @@ public sealed class ColumnsTests
     [Fact]
     public void A_column_only_shown_is_refused_as_a_sort_or_a_filter()
     {
-        var filled = Tab.Orders.Named("filled_pct");
+        var filled = Tabs.Orders.Named("filled_pct");
         Assert.True(filled.Derived);
 
-        var sort = Assert.Throws<ArgumentException>(() => SortSpec.Of(Tab.Orders, new SortColumn(filled, Descending: true)));
+        var sort = Assert.Throws<ArgumentException>(() => SortSpec.Of(Tabs.Orders, new SortColumn(filled, Descending: true)));
         Assert.Contains("nothing is sorted by it", sort.Message, StringComparison.Ordinal);
         var filter = Assert.Throws<ArgumentException>(() => FilterSpec.Of([new ColumnFilter { Column = filled, Values = ["50%"] }]));
         Assert.Contains("nothing is filtered by it", filter.Message, StringComparison.Ordinal);
@@ -41,13 +42,13 @@ public sealed class ColumnsTests
     [Fact]
     public void The_grid_shows_times_with_their_date_to_the_second_and_an_order_page_to_the_microsecond()
     {
-        var time = Tab.Fills.Named("event_time");
+        var time = Tabs.Fills.Named("event_time");
         var fill = new Fill(
             Guid.CreateVersion7(), Guid.CreateVersion7(), new DateTime(2026, 10, 24, 3, 4, 5, 678, 901, DateTimeKind.Utc),
             "ACORN-1", "ACORN", "EMEA", "API", "BTC/USD Perp", "Buy", 1, 2, 2, 0);
 
         Assert.Equal("2026-10-24 03:04:05", time.Show(fill));
         Assert.Equal("2026-10-24 03:04:05.678901", time.Detail(fill));
-        Assert.DoesNotContain(Tab.All.SelectMany(t => t.Columns), c => c.Name == "date");
+        Assert.DoesNotContain(Tabs.All.SelectMany(t => t.Columns), c => c.Name == "date");
     }
 }

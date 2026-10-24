@@ -1,9 +1,8 @@
-using System.Diagnostics;
 using System.Globalization;
 using Npgsql;
 using NpgsqlTypes;
 
-namespace Chalk.Sample.Blotter.Market;
+namespace Chalk.Sample.Blotter.Domain;
 
 /// <summary>How <c>orders_current</c> keeps up with <c>order_versions</c>.</summary>
 public enum CurrentSync
@@ -23,8 +22,8 @@ public enum CurrentSync
 /// </summary>
 /// <remarks>
 /// <para>
-/// The tables are <c>UNLOGGED</c>, and the corpus is written with binary <c>COPY</c> on several
-/// connections at once before any index or trigger exists; then the indexes are built in parallel.
+/// The tables are <c>UNLOGGED</c>. A corpus is best loaded into them before any index or trigger
+/// exists (<see cref="CreateTables"/>, then <see cref="CreateIndexesAsync"/> and <see cref="KeepCurrent"/>).
 /// </para>
 /// <para>
 /// Text columns are collated <c>"C"</c>, byte by byte, whatever the database's own collation: the
@@ -61,29 +60,6 @@ public sealed class TradeStore(string connectionString)
 
     public string ConnectionString { get; } = connectionString;
 
-    /// <summary>How long <see cref="GenerateAsync"/> took to write the corpus, and then to index it.</summary>
-    public TimeSpan LoadTime { get; private set; }
-
-    public TimeSpan IndexTime { get; private set; }
-
-    /// <summary>What the corpus holds, for the planner's estimates.</summary>
-    public long Orders { get; private set; }
-
-    public long Versions { get; private set; }
-
-    public long Fills { get; private set; }
-
-    /// <summary>The latest event in the corpus: everything after it, the exchange wrote.</summary>
-    public DateTime LoadedThrough { get; private set; }
-
-    /// <summary>What <see cref="GenerateAsync"/> is doing now, for a console to show while it waits.</summary>
-    public string Stage { get; private set; } = "";
-
-    /// <summary>Orders <see cref="GenerateAsync"/> has written so far.</summary>
-    public long Written => Interlocked.Read(ref _written);
-
-    private long _written;
-
     public NpgsqlConnection Open()
     {
         var connection = new NpgsqlConnection(ConnectionString);
@@ -91,92 +67,33 @@ public sealed class TradeStore(string connectionString)
         return connection;
     }
 
+    /// <summary>Creates the three tables, empty, with no index or trigger yet: the fastest to load.</summary>
+    public void CreateTables() => Execute($"""
+        CREATE UNLOGGED TABLE order_versions ({OrderColumns});
+        CREATE UNLOGGED TABLE orders_current ({OrderColumns});
+        CREATE UNLOGGED TABLE fills (
+            fill_id     uuid             NOT NULL,
+            order_id    uuid             NOT NULL,
+            event_time  timestamp(6)     NOT NULL,
+            cl_ord_id   text COLLATE "C" NOT NULL,
+            client      text COLLATE "C" NOT NULL,
+            region      text COLLATE "C" NOT NULL,
+            channel     text COLLATE "C" NOT NULL,
+            instrument  text COLLATE "C" NOT NULL,
+            side        text COLLATE "C" NOT NULL,
+            qty         double precision NOT NULL,
+            price       double precision NOT NULL,
+            mid         double precision NOT NULL,
+            markup_bps  double precision NOT NULL
+        );
+        """);
+
     /// <summary>
-    /// Creates the tables and fills them with <paramref name="orders"/> client orders worked over the
-    /// <paramref name="span"/> before <paramref name="end"/>, the newest <paramref name="openTail"/> left
-    /// new; indexes them; and from then on keeps <c>orders_current</c> as <paramref name="sync"/> says.
+    /// The keys and the indexes the blotter reads by, each built on a connection of its own (PostgreSQL
+    /// gives each build workers of its own too); then the tables analysed, for the planner.
     /// </summary>
-    public async Task GenerateAsync(
-        long orders, DateTime end, TimeSpan span, int openTail, CurrentSync sync, CancellationToken ct)
+    public async Task CreateIndexesAsync(CancellationToken ct)
     {
-        var started = Stopwatch.GetTimestamp();
-        Stage = "creating the tables";
-        Execute($"""
-            CREATE UNLOGGED TABLE order_versions ({OrderColumns});
-            CREATE UNLOGGED TABLE orders_current ({OrderColumns});
-            CREATE UNLOGGED TABLE fills (
-                fill_id     uuid             NOT NULL,
-                order_id    uuid             NOT NULL,
-                event_time  timestamp(6)     NOT NULL,
-                cl_ord_id   text COLLATE "C" NOT NULL,
-                client      text COLLATE "C" NOT NULL,
-                region      text COLLATE "C" NOT NULL,
-                channel     text COLLATE "C" NOT NULL,
-                instrument  text COLLATE "C" NOT NULL,
-                side        text COLLATE "C" NOT NULL,
-                qty         double precision NOT NULL,
-                price       double precision NOT NULL,
-                mid         double precision NOT NULL,
-                markup_bps  double precision NOT NULL
-            );
-            """);
-
-        var spacing = Math.Max(1, (long)(span.TotalMicroseconds / Math.Max(1, orders)));
-        var origin = Cells.Micros(end - TimeSpan.FromMicroseconds(spacing * orders));
-        var parts = Math.Clamp(Environment.ProcessorCount / 2, 1, 6);
-        Stage = string.Create(CultureInfo.InvariantCulture, $"writing {orders:N0} orders, their versions and fills with COPY");
-        var size = (orders + parts - 1) / parts;
-        var counted = await Task.WhenAll(Enumerable.Range(0, parts).Select(p => Task.Run(() =>
-        {
-            // Each part on three connections, one per table, so the three COPYs stream side by side.
-            using var versions = Open();
-            using var current = Open();
-            using var fills = Open();
-            using var versionsIn = versions.BeginBinaryImport("COPY order_versions FROM STDIN (FORMAT BINARY)");
-            using var currentIn = current.BeginBinaryImport("COPY orders_current FROM STDIN (FORMAT BINARY)");
-            using var fillsIn = fills.BeginBinaryImport("COPY fills FROM STDIN (FORMAT BINARY)");
-            long versionCount = 0, fillCount = 0;
-            var latest = DateTime.MinValue;
-            for (var n = p * size; n < Math.Min(orders, (p + 1) * size); n++)
-            {
-                ct.ThrowIfCancellationRequested();
-                var (made, filled) = Corpus.Make(n, origin, spacing, open: n >= orders - openTail);
-                foreach (var version in made)
-                {
-                    WriteOrder(versionsIn, version);
-                }
-
-                WriteOrder(currentIn, made[^1]);
-                foreach (var fill in filled)
-                {
-                    WriteFill(fillsIn, fill);
-                }
-
-                versionCount += made.Length;
-                fillCount += filled.Length;
-                if ((n & 4095) == 4095)
-                {
-                    Interlocked.Add(ref _written, 4096);
-                }
-
-                latest = made[^1].EventTime > latest ? made[^1].EventTime : latest;
-            }
-
-            versionsIn.Complete();
-            currentIn.Complete();
-            fillsIn.Complete();
-            return (versionCount, fillCount, latest);
-        }, ct))).ConfigureAwait(false);
-        Orders = orders;
-        Versions = counted.Sum(c => c.versionCount);
-        Fills = counted.Sum(c => c.fillCount);
-        LoadedThrough = counted.Max(c => c.latest);
-        LoadTime = Stopwatch.GetElapsedTime(started);
-
-        // Each index on a connection of its own; PostgreSQL gives each build workers of its own too.
-        Interlocked.Exchange(ref _written, orders);
-        Stage = "building seven indexes";
-        started = Stopwatch.GetTimestamp();
         string[] indexes =
         [
             "ALTER TABLE orders_current ADD PRIMARY KEY (order_id)",
@@ -188,10 +105,12 @@ public sealed class TradeStore(string connectionString)
             "CREATE INDEX fills_newest ON fills (event_time DESC, fill_id DESC)",
         ];
         await Task.WhenAll(indexes.Select(sql => Task.Run(() => Execute(sql), ct))).ConfigureAwait(false);
-        Stage = "analyzing the tables";
         Execute("ANALYZE order_versions; ANALYZE orders_current; ANALYZE fills");
-        IndexTime = Stopwatch.GetElapsedTime(started);
+    }
 
+    /// <summary>From now on keeps <c>orders_current</c> as <paramref name="sync"/> says: by a trigger, or left to a job.</summary>
+    public void KeepCurrent(CurrentSync sync)
+    {
         if (sync == CurrentSync.Trigger)
         {
             Execute($"""
@@ -296,7 +215,7 @@ public sealed class TradeStore(string connectionString)
         import.Complete();
     }
 
-    internal static void WriteOrder(NpgsqlBinaryImporter import, Order o)
+    public static void WriteOrder(NpgsqlBinaryImporter import, Order o)
     {
         import.StartRow();
         import.Write(o.OrderId, NpgsqlDbType.Uuid);
@@ -316,7 +235,7 @@ public sealed class TradeStore(string connectionString)
         import.Write(o.Status, NpgsqlDbType.Text);
     }
 
-    internal static void WriteFill(NpgsqlBinaryImporter import, Fill f)
+    public static void WriteFill(NpgsqlBinaryImporter import, Fill f)
     {
         import.StartRow();
         import.Write(f.FillId, NpgsqlDbType.Uuid);

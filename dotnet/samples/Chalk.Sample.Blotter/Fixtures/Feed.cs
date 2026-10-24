@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 
-namespace Chalk.Sample.Blotter.Market;
+namespace Chalk.Sample.Blotter.Fixtures;
 
 /// <summary>
 /// A real-time stream: every row, as it happens, to every subscriber. It is reliable — a subscriber

@@ -1,4 +1,5 @@
-using Chalk.Sample.Blotter.Trades;
+using Chalk.Sample.Blotter.Grid;
+using Chalk.Sample.Blotter.Domain;
 using Microsoft.AspNetCore.DataProtection;
 
 namespace Chalk.Sample.Blotter.Tests;
@@ -6,7 +7,7 @@ namespace Chalk.Sample.Blotter.Tests;
 /// <summary>A view as a link: written, read back the same, and refused whole where it is not understood.</summary>
 public sealed class ViewLinkTests
 {
-    private static readonly Tab Orders = Tab.Orders;
+    private static readonly Tab Orders = Tabs.Orders;
 
     [Fact]
     public void The_tab_as_it_opens_is_an_empty_link_and_reads_back_so()
@@ -14,7 +15,7 @@ public sealed class ViewLinkTests
         var link = new ViewLink(Orders, Orders.DefaultSort, FilterSpec.None, Orders.HiddenAtFirst, null);
         Assert.Equal("", link.Query());
 
-        var back = ViewLink.Parse("");
+        var back = ViewLink.Parse("", Tabs.All);
         Assert.Equal(Orders, back.Tab);
         Assert.True(back.Sort.IsDefault);
         Assert.True(back.Filter.Columns.IsEmpty);
@@ -38,7 +39,7 @@ public sealed class ViewLinkTests
             Guid.CreateVersion7(), 3, default, default, "CEDAR-1", "CEDAR", "", "", "", "", 0.15, 0, 0, 0, "");
         var link = new ViewLink(Orders, sort, filter, new HashSet<string> { "region" }, at);
 
-        var back = ViewLink.Parse("?" + link.Query());
+        var back = ViewLink.Parse("?" + link.Query(), Tabs.All);
 
         Assert.Equal(sort, back.Sort);
         Assert.Equal(filter.Name, back.Filter.Name);
@@ -51,12 +52,12 @@ public sealed class ViewLinkTests
     [Fact]
     public void Fills_held_at_a_row_in_their_own_order_read_back_the_same()
     {
-        var fills = Tab.Fills;
+        var fills = Tabs.Fills;
         var at = new Fill(Guid.CreateVersion7(), Guid.CreateVersion7(), Cells.Micros(new DateTime(2026, 10, 24, 3, 4, 5).AddTicks(123450)),
             "", "", "", "", "", "", 0, 0, 0, 0);
         var link = new ViewLink(fills, fills.DefaultSort, FilterSpec.None, new HashSet<string>(), at);
 
-        var back = ViewLink.Parse(link.Query());
+        var back = ViewLink.Parse(link.Query(), Tabs.All);
 
         Assert.Equal(fills, back.Tab);
         Assert.True(back.Sort.IsDefault);
@@ -73,7 +74,7 @@ public sealed class ViewLinkTests
         var (link, at) = Held();
 
         var query = link.Query(shroud);
-        var back = ViewLink.Parse(query, shroud);
+        var back = ViewLink.Parse(query, Tabs.All, shroud);
 
         Assert.DoesNotContain("CEDAR", query, StringComparison.Ordinal);
         Assert.DoesNotContain("f.", query, StringComparison.Ordinal);
@@ -92,11 +93,11 @@ public sealed class ViewLinkTests
         var (link, _) = Held();
         var shrouded = link.Query(shroud);
 
-        var mixed = ViewLink.Parse(shrouded + "&f.side=Buy", shroud);
+        var mixed = ViewLink.Parse(shrouded + "&f.side=Buy", Tabs.All, shroud);
         Assert.Contains(mixed.Filter.Columns, f => f.Column.Name == "side");
         Assert.Contains(mixed.Filter.Columns, f => f.Column.Name == "client");
 
-        var both = Assert.ThrowsAny<ArgumentException>(() => ViewLink.Parse(shrouded + "&f.client=FERN", shroud));
+        var both = Assert.ThrowsAny<ArgumentException>(() => ViewLink.Parse(shrouded + "&f.client=FERN", Tabs.All, shroud));
         Assert.Contains("'f.client' is given both as is and shrouded", both.Message, StringComparison.Ordinal);
     }
 
@@ -109,12 +110,12 @@ public sealed class ViewLinkTests
         var at = query.IndexOf("s=", StringComparison.Ordinal) + 10;
         var altered = query[..at] + (query[at] == 'A' ? 'B' : 'A') + query[(at + 1)..];
 
-        Assert.Contains("altered", Assert.ThrowsAny<ArgumentException>(() => ViewLink.Parse(altered, shroud)).Message, StringComparison.Ordinal);
+        Assert.Contains("altered", Assert.ThrowsAny<ArgumentException>(() => ViewLink.Parse(altered, Tabs.All, shroud)).Message, StringComparison.Ordinal);
         Assert.Contains("another blotter's keys", Assert.ThrowsAny<ArgumentException>(
-            () => ViewLink.Parse(query, new LinkShroud(new EphemeralDataProtectionProvider()))).Message, StringComparison.Ordinal);
-        Assert.Contains("cannot be opened here", Assert.ThrowsAny<ArgumentException>(() => ViewLink.Parse(query)).Message, StringComparison.Ordinal);
+            () => ViewLink.Parse(query, Tabs.All, new LinkShroud(new EphemeralDataProtectionProvider()))).Message, StringComparison.Ordinal);
+        Assert.Contains("cannot be opened here", Assert.ThrowsAny<ArgumentException>(() => ViewLink.Parse(query, Tabs.All)).Message, StringComparison.Ordinal);
         Assert.Contains("which alone are shrouded", Assert.ThrowsAny<ArgumentException>(
-            () => ViewLink.Parse("s=" + shroud.Shroud("sort=qty"), shroud)).Message, StringComparison.Ordinal);
+            () => ViewLink.Parse("s=" + shroud.Shroud("sort=qty"), Tabs.All, shroud)).Message, StringComparison.Ordinal);
     }
 
     private static (ViewLink Link, Order At) Held()
@@ -140,7 +141,7 @@ public sealed class ViewLinkTests
     [InlineData("page=2", "'page' is not part of a view")]
     public void A_link_not_understood_is_refused_saying_what(string query, string why)
     {
-        var refused = Assert.ThrowsAny<ArgumentException>(() => ViewLink.Parse(query));
+        var refused = Assert.ThrowsAny<ArgumentException>(() => ViewLink.Parse(query, Tabs.All));
         Assert.Contains(why, refused.Message, StringComparison.Ordinal);
     }
 }

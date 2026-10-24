@@ -1,18 +1,19 @@
 using Chalk.Sample.Blotter.Live;
-using Chalk.Sample.Blotter.Trades;
+using Chalk.Sample.Blotter.Grid;
+using Chalk.Sample.Blotter.Domain;
 
 namespace Chalk.Sample.Blotter.Tests;
 
 /// <summary>A tab's order: what a header click does, and how the order is written for the database.</summary>
 public sealed class SortSpecTests
 {
-    private static readonly Tab Orders = Tab.Orders;
+    private static readonly Tab Orders = Tabs.Orders;
 
     [Fact]
     public void Each_tab_opens_newest_first_with_its_key_breaking_ties()
     {
         Assert.Equal("order_time desc,order_id desc", Orders.DefaultSort.Name);
-        Assert.Equal("event_time desc,fill_id desc", Tab.Fills.DefaultSort.Name);
+        Assert.Equal("event_time desc,fill_id desc", Tabs.Fills.DefaultSort.Name);
         Assert.Equal("order_time DESC, order_id DESC", Orders.DefaultSort.OrderBy());
     }
 

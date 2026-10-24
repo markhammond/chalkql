@@ -7,7 +7,7 @@
 @inject LinkShroud Shroud
 
 <div class="tabs" role="tablist">
-    @foreach (var tab in Tab.All)
+    @foreach (var tab in Tabs.All)
     {
         var t = tab;
         <button role="tab" aria-selected="@(t == Tab)" class="tab @(t == Tab ? "selected" : "")" @onclick="() => Select.InvokeAsync(t)">@t.Title</button>
@@ -332,7 +332,7 @@
     // How many alerts had fired on this tab when the grid was held: more since, and the bell shows.
     private long _firedAtHold;
     private bool _explaining;
-    private Flashes _fillFlashes = new(Tab.Fills.Columns);
+    private Flashes _fillFlashes = new(Tabs.Fills.Columns);
     private QuickGrid<BlotterRow>? _grid;
     private ElementReference _scroller;
     private DotNetObjectReference<BlotterGrid>? _self;
@@ -832,10 +832,10 @@
     {
         "order_id" => $"↳ fill {fill.FillId}",
         "version" or "filled_qty" => "",
-        "order_time" or "event_time" => full ? Tab.Fills.Named("event_time").Detail(fill) : Tab.Fills.Named("event_time").Show(fill),
-        "avg_price" => Tab.Fills.Named("price").Show(fill),
+        "order_time" or "event_time" => full ? Tabs.Fills.Named("event_time").Detail(fill) : Tabs.Fills.Named("event_time").Show(fill),
+        "avg_price" => Tabs.Fills.Named("price").Show(fill),
         "status" => "fill",
-        var name when Tab.Fills.Columns.Any(c => c.Name == name) => Tab.Fills.Named(name).Show(fill),
+        var name when Tabs.Fills.Columns.Any(c => c.Name == name) => Tabs.Fills.Named(name).Show(fill),
         _ => "",
     };
 

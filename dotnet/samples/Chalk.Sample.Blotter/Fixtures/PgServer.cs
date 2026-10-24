@@ -4,7 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using Npgsql;
 
-namespace Chalk.Sample.Blotter.Market;
+namespace Chalk.Sample.Blotter.Fixtures;
 
 /// <summary>
 /// The database server: one the sample starts for itself, in a directory of its own, from a

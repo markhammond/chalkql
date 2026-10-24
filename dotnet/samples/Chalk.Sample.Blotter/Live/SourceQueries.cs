@@ -173,7 +173,7 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
     {
         var found = new Dictionary<Guid, Order>(orderIds.Count);
         foreach (Order row in await LookupAsync(
-            Tab.Orders, $"SELECT {Order.Select} FROM blotter.order_versions WHERE order_id IN @ids AND event_time <= @asOf",
+            Tabs.Orders, $"SELECT {Order.Select} FROM blotter.order_versions WHERE order_id IN @ids AND event_time <= @asOf",
             orderIds, ct, new Dictionary<string, object?> { ["asOf"] = asOf }).ConfigureAwait(false))
         {
             if (!found.TryGetValue(row.OrderId, out var had) || row.Version > had.Version)
@@ -190,7 +190,7 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
     {
         var found = new Dictionary<Guid, Order>(orderIds.Count);
         foreach (Order row in await LookupAsync(
-            Tab.Orders, $"SELECT {Order.Select} FROM blotter.orders_current WHERE order_id IN @ids", orderIds, ct).ConfigureAwait(false))
+            Tabs.Orders, $"SELECT {Order.Select} FROM blotter.orders_current WHERE order_id IN @ids", orderIds, ct).ConfigureAwait(false))
         {
             found[row.OrderId] = row;
         }
@@ -201,13 +201,13 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
     /// <summary>Which of these fills the database holds.</summary>
     public async Task<HashSet<Guid>> FillsHeldAsync(IReadOnlyList<Guid> fillIds, CancellationToken ct) =>
         [.. (await LookupAsync(
-            Tab.Fills, $"SELECT {Fill.Select} FROM blotter.fills WHERE fill_id IN @ids", fillIds, ct).ConfigureAwait(false))
+            Tabs.Fills, $"SELECT {Fill.Select} FROM blotter.fills WHERE fill_id IN @ids", fillIds, ct).ConfigureAwait(false))
             .Select(f => f.Id)];
 
     /// <summary>An order's fills in the database, oldest first.</summary>
     public async Task<Fill[]> FillsOfAsync(Guid orderId, CancellationToken ct) =>
         [.. (await RowsAsync(
-            Tab.Fills,
+            Tabs.Fills,
             $"SELECT {Fill.Select} FROM blotter.fills WHERE order_id = @order ORDER BY event_time",
             new Dictionary<string, object?> { ["order"] = orderId },
             "an order's fills",
@@ -219,7 +219,7 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
     /// </summary>
     public async Task<Order[]> HistoryAsync(Guid orderId, CancellationToken ct) =>
         [.. (await RowsAsync(
-            Tab.Orders,
+            Tabs.Orders,
             $"""
             SELECT {Order.Select} FROM blotter.order_versions WHERE order_id = @order
             UNION
@@ -236,7 +236,7 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
     /// </summary>
     public async Task<Fill[]> AllFillsOfAsync(Guid orderId, CancellationToken ct) =>
         [.. (await RowsAsync(
-            Tab.Fills,
+            Tabs.Fills,
             $"""
             SELECT {Fill.Select} FROM blotter.fills WHERE order_id = @order
             UNION
@@ -251,7 +251,7 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
     public async Task<HashSet<int>> TailOnlyAsync(Guid orderId, CancellationToken ct)
     {
         var rows = await RowsAsync(
-            Tab.Orders,
+            Tabs.Orders,
             $"""
             SELECT {Order.Select} FROM live.order_versions WHERE order_id = @order
               AND version NOT IN (SELECT version FROM blotter.order_versions WHERE order_id = @order)
@@ -268,7 +268,7 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
     /// </summary>
     public async Task<Order[]> VersionsSinceAsync(DateTime since, CancellationToken ct) =>
         [.. (await RowsAsync(
-            Tab.Orders,
+            Tabs.Orders,
             $"SELECT {Order.Select} FROM blotter.order_versions WHERE event_time >= @since ORDER BY event_time",
             new Dictionary<string, object?> { ["since"] = since },
             "the gap fill",
@@ -277,7 +277,7 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
     /// <summary>The newest order <c>orders_current</c> has: how far it has caught up with new orders.</summary>
     public async Task<Order?> NewestOrderAsync(CancellationToken ct) =>
         (await RowsAsync(
-            Tab.Orders,
+            Tabs.Orders,
             $"SELECT {Order.Select} FROM blotter.orders_current ORDER BY order_time DESC, order_id DESC LIMIT 1",
             [],
             "the newest order",

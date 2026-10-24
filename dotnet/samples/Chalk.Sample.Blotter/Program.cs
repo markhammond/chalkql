@@ -4,8 +4,9 @@ using Microsoft.AspNetCore.DataProtection;
 using Chalk.Sample.Blotter;
 using Chalk.Sample.Blotter.Components;
 using Chalk.Sample.Blotter.Live;
-using Chalk.Sample.Blotter.Market;
-using Chalk.Sample.Blotter.Trades;
+using Chalk.Sample.Blotter.Fixtures;
+using Chalk.Sample.Blotter.Domain;
+using Chalk.Sample.Blotter.Grid;
 
 var budget = Number(Argument(args, "--budget-mb"));
 var options = new BlotterOptions

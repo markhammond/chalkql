@@ -1,12 +1,13 @@
 using Chalk.Sample.Blotter.Live;
-using Chalk.Sample.Blotter.Trades;
+using Chalk.Sample.Blotter.Grid;
+using Chalk.Sample.Blotter.Domain;
 
 namespace Chalk.Sample.Blotter.Tests;
 
 /// <summary>A filter on any column: the SQL it writes, the values it binds, and what it says it filters.</summary>
 public sealed class FilterSpecTests
 {
-    private static readonly Tab Orders = Tab.Orders;
+    private static readonly Tab Orders = Tabs.Orders;
 
     [Fact]
     public void Each_kind_of_column_writes_its_own_condition_over_bound_parameters()

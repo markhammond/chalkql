@@ -6,6 +6,14 @@ rows, sorts by any columns, filters on any column, flashes what changes, and sou
 holds no copy of the corpus: it keeps what it holds inside a memory budget of a few megabytes, stops
 any statement after 5 s, and never shows an order at an older version than one it knows of.
 
+## A bolt-on, on purpose
+
+Most live views are added to existing systems: someone else's database with an external feeds. 
+So the blotter is built as a **bolt-on**, imposing the fewest assumptions. Of the
+database it asks only what is reasonable: rows found by key, sorted and filtered, and an estimate
+of a query's size. Of the streams, only that they deliver what is sent after a reader subscribes. ChalkQL
+can then make the most it.
+
 ```bash
 JAVA_HOME=/path/to/jdk-21 dotnet run -c Release --project dotnet/samples/Chalk.Sample.Blotter
 ```
@@ -27,14 +35,6 @@ planner runs on a JDK 21+, which `PlannerProcess` starts itself: set `JAVA_HOME`
 | `--urls http://localhost:5911` | `http://localhost:5910` | |
 | `--link-keys /path/to/folder` | `Chalk.Sample.Blotter/link-keys` under the user's local application data | where the keys that shroud shared links are kept (below) |
 
-## A bolt-on, on purpose
-
-Most live views are added to systems that already exist: a database someone else owns, feeds someone
-else publishes. So the blotter is built as a **bolt-on**, and assumes the least it can. Of the
-database it asks only what any reader could: rows found by key, sorted and filtered, and an estimate
-of a query's size. Of the streams, only that they deliver what is sent after a reader subscribes. What
-follows shows what that costs, and what ChalkQL makes of it.
-
 It does **not** assume:
 
 - a watermark, a commit sequence or a log position on any row;
@@ -47,7 +47,7 @@ It does **not** assume:
 - that a stream replays anything sent before the subscription;
 - an index for every sort a reader picks, or a cheap count.
 
-It does need the data to change in one way only, forward:
+It does need to assume records are append-only:
 
 - **Every change to an order is a new version**, numbered higher than the order's last, and a version
   once written never changes. The host keeps whichever side holds the higher version, and confirms the
@@ -75,31 +75,6 @@ What it takes on instead, in the host:
   reads that reach it.
 
 Each is described under [How it works](#how-it-works), with what it costs.
-
-## With a free hand: mechanical sympathy
-
-Given a free hand over the source, a blotter would be built with more sympathy for the machine
-underneath, and most of the host's work above would go:
-
-- **A commit sequence on every row, and the stream's watermark in step with it.** The tail could let a
-  row go the moment the database's watermark passes it: no confirmation lookups, no grace period, no
-  windows whose life is tied to that grace.
-- **The stream taken from the database's own log** (logical replication, change data capture). Stream
-  and table would agree by construction: no order behind its fills, no database ahead of the stream,
-  no gap fill.
-- **Reads at a snapshot that matches the watermark.** Every merge would be exact, rather than "the
-  newest version either side knows".
-- **A stream that replays from an offset.** Starting, and serving again after a refusal, would need
-  no 30 s gap fill and no kept tail.
-- **Indexes, or a column store, for the sorts readers use, and counts kept as rows change.** No sort
-  of the whole table, no count that reads it, and the 5 s limit would seldom bite.
-- **The current table kept in the same transaction as the versions** (the sample's default trigger),
-  never by a job that runs behind.
-- **A dense sequence in the default order.** A jump to a far position would be exact, not placed by
-  `OFFSET`.
-
-The sample does without all of these so that it works where none is on offer, and each item above
-marks a place where the host approximates or does extra work because of it.
 
 ## What ChalkQL brings
 
@@ -276,6 +251,19 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
 
 Escape closes whatever is open over the page.
 
+## The code
+
+| Folder | |
+|---|---|
+| `Grid` | what any live grid over a versioned table needs, whatever its rows: rows (`IRow`, `KeyRow`), columns and their formats, tabs, sorts, filters, view links and their shrouding, alert rules |
+| `Domain` | the trades: client orders and their fills (`Trades`), the two tabs over them, the reference data, and `TradeStore`, the trade model in PostgreSQL |
+| `Fixtures` | what stands in for a real house: the generated corpus and its `Seeder`, the simulated `Exchange` and its streams (`Feed`), the lagging ingestion jobs, and a PostgreSQL server of the sample's own |
+| `Live` | the bolt-on: the tail, the merge, the live scopes, pages and positions, counts, alerts, and the host that runs them |
+| `Components` | the Blazor pages and the grid |
+
+`Grid` knows nothing of trades, and `Domain` nothing of how it is shown live; `Live` and the grid
+component still speak of orders and fills.
+
 ## How it works
 
 Each tab is two halves, merged.
@@ -399,29 +387,37 @@ BLOTTER_PROBE_SECONDS=300 BLOTTER_PROBE_ORDERS=5000000 dotnet test dotnet/tests/
 and `NestingTests` cover the host's own rules: sorting, filtering, number formats, links and their
 shrouding, alerts and their throttles.
 
-## What it found in ChalkQL
+## Aspirational mechanical sympathy
 
-Registered in the design log as F273–F277; design 79 proposes what comes next.
+With carte blanche ownership a blotter would be built with more sympathy for the data flow, greatly
+reducing the cost of data source queries:
 
-- **F273.** A pushed-down query names a table by its catalog name, not its registered remote name, so
-  the sample registers its tables in ChalkQL under the PostgreSQL schema's own name, `blotter`.
-- **F274.** A DuckDB `TIMESTAMP` that discovery finds without a precision is typed `TIMESTAMP(9)`, finer
-  than DuckDB keeps, so the planner sorted on it locally. Found when the sample ran on DuckDB.
-- **F275.** Discovery in a schema the database lacks fails with a SQLite pragma error.
-- **F276.** An incremental scope holds about 440 bytes a tail row where a recomputing one holds about
-  100 (`--maintenance recompute` to compare).
-- **F277.** A standing view keeps the memory of its largest update after its rows go.
-- **Design 79** (proposed, not built): what a statement examines per source, refusing at prepare when
-  no access path keeps the rows read under a ceiling the host sets, and a time limit for a whole
-  statement and for a view's update. Until then the sample asks PostgreSQL for its estimate, and
-  stops statements after 5 s itself.
+- **A commit sequence on every row, and the stream's watermark in step with it.** The tail could let a
+  row go the moment the database's watermark passes it: no confirmation lookups, no grace period, no
+  windows whose life is tied to that grace.
+- **The stream taken from the database's own log** (logical replication, change data capture). Stream
+  and table would agree by construction: no order behind its fills, no database ahead of the stream,
+  no gap fill.
+- **Reads at a snapshot that matches the watermark.** Every merge would be exact, rather than "the
+  newest version either side knows".
+- **A stream that replays from an offset.** Starting, and serving again after a refusal, would need
+  no 30 s gap fill and no kept tail.
+- **Indexes, or a column store, for the sorts readers use, and counts kept as rows change.** No sort
+  of the whole table, no count that reads it, and the 5 s limit would seldom bite.
+- **The current table kept in the same transaction as the versions** (the sample's default trigger),
+  never by a job that runs behind.
+- **A dense sequence in the default order.** A jump to a far position would be exact, not placed by
+  `OFFSET`.
+
+The sample dispenses with all of these so that it works with minimal support, and each item above
+marks a place where the host approximates or does extra work because of it.
 
 ## Not here, yet
 
 - Entitlements (above).
 - Free-text search.
-- A refusal by cost (design 79).
-- Tapline. On Blazor Server the grid renders on the server, and ChalkQL's views already give each
+- A refusal by query cost estimate.
+- Use of Tapline could greatly improve scalability. On Blazor Server the grid renders on the server, and ChalkQL's views already give each
   reader what changed. Tapline would carry the same answers to a WebAssembly grid, headless clients or
   many nodes. `LiveScope`, `ScopeState` and `Pages` are the seam.
 - Memory figures are the host's own estimates of what it holds, and the views' own count of their

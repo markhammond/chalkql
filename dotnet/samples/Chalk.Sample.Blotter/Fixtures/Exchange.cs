@@ -1,4 +1,4 @@
-namespace Chalk.Sample.Blotter.Market;
+namespace Chalk.Sample.Blotter.Fixtures;
 
 /// <summary>How busy the brokerage is.</summary>
 public sealed record ExchangeOptions

@@ -1,5 +1,6 @@
 using Chalk.Incremental;
-using Chalk.Sample.Blotter.Market;
+using Chalk.Sample.Blotter.Fixtures;
+using Chalk.Sample.Blotter.Domain;
 
 namespace Chalk.Sample.Blotter.Live;
 

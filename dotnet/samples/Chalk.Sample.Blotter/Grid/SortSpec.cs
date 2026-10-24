@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace Chalk.Sample.Blotter.Trades;
+namespace Chalk.Sample.Blotter.Grid;
 
 /// <summary>One column of a sort, and its direction.</summary>
 public readonly record struct SortColumn(Column Column, bool Descending);

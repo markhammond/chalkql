@@ -1,5 +1,6 @@
 using Chalk.Sample.Blotter.Live;
-using Chalk.Sample.Blotter.Trades;
+using Chalk.Sample.Blotter.Grid;
+using Chalk.Sample.Blotter.Domain;
 
 namespace Chalk.Sample.Blotter.Tests;
 
@@ -11,7 +12,7 @@ public sealed class AlertSessionTests
     [Fact]
     public void An_order_fires_as_it_comes_to_pass_the_filter_and_not_again_until_it_has_left_it()
     {
-        var (session, fired) = Session(Rule(Tab.Orders, ("status", "Rejected")));
+        var (session, fired) = Session(Rule(Tabs.Orders, ("status", "Rejected")));
         var id = Guid.CreateVersion7();
 
         session.Note([Order(id, 1, "New")], [], Now);
@@ -26,7 +27,7 @@ public sealed class AlertSessionTests
     [Fact]
     public void Within_its_throttle_a_rule_gathers_its_rows_and_sounds_once_saying_how_many()
     {
-        var (session, fired) = Session(Rule(Tab.Fills, ("client", "CEDAR")) with { Throttle = TimeSpan.FromSeconds(3) });
+        var (session, fired) = Session(Rule(Tabs.Fills, ("client", "CEDAR")) with { Throttle = TimeSpan.FromSeconds(3) });
 
         session.Note([], [Fill("CEDAR")], Now);
         session.Note([], [Fill("CEDAR"), Fill("FERN"), Fill("CEDAR")], Now.AddSeconds(1));
@@ -41,7 +42,7 @@ public sealed class AlertSessionTests
     [Fact]
     public void Alerts_wait_in_order_until_a_page_has_sounded_them()
     {
-        var (session, _) = Session(Rule(Tab.Fills));
+        var (session, _) = Session(Rule(Tabs.Fills));
         session.Note([], [Fill("CEDAR")], Now);
         session.Note([], [Fill("FERN")], Now.AddSeconds(5));
 
@@ -53,7 +54,7 @@ public sealed class AlertSessionTests
     [Fact]
     public void A_rule_whose_filter_is_unchanged_keeps_what_it_gathered_and_a_changed_one_starts_again()
     {
-        var rule = Rule(Tab.Fills, ("client", "CEDAR")) with { Throttle = TimeSpan.FromSeconds(10) };
+        var rule = Rule(Tabs.Fills, ("client", "CEDAR")) with { Throttle = TimeSpan.FromSeconds(10) };
         var (session, fired) = Session(rule);
         session.Note([], [Fill("CEDAR")], Now);
         session.Note([], [Fill("CEDAR")], Now.AddSeconds(1));
@@ -63,7 +64,7 @@ public sealed class AlertSessionTests
         Assert.Equal(("renamed", "laserfire", 1), (fired[^1].RuleName, fired[^1].Sound, fired[^1].Count));
 
         session.Note([], [Fill("CEDAR")], Now.AddSeconds(11));
-        session.SetRules([Rule(Tab.Fills, ("client", "FERN")) with { Id = rule.Id }]);
+        session.SetRules([Rule(Tabs.Fills, ("client", "FERN")) with { Id = rule.Id }]);
         session.Flush(Now.AddSeconds(30));
         Assert.Equal(2, fired.Count);
     }
@@ -71,13 +72,13 @@ public sealed class AlertSessionTests
     [Fact]
     public void A_rule_kept_by_the_browser_reads_back_the_same_and_one_not_understood_is_refused()
     {
-        var rule = Rule(Tab.Fills, ("client", "CEDAR")) with { Sound = "bangecho", Throttle = TimeSpan.FromSeconds(30), Muted = true };
-        var back = AlertRule.Load(rule.Save());
+        var rule = Rule(Tabs.Fills, ("client", "CEDAR")) with { Sound = "bangecho", Throttle = TimeSpan.FromSeconds(30), Muted = true };
+        var back = AlertRule.Load(rule.Save(), Tabs.All);
 
         Assert.Equal((rule.Tab, rule.Filter.Name, rule.Sound, rule.Throttle, rule.Muted), (back.Tab, back.Filter.Name, back.Sound, back.Throttle, back.Muted));
-        Assert.Throws<ArgumentException>(() => AlertRule.Load(rule.Save() with { Sound = "Gong" }));
-        Assert.Equal("kaching", AlertRule.Load(rule.Save() with { Sound = "Register" }).Sound);
-        Assert.Throws<ArgumentException>(() => AlertRule.Load(rule.Save() with { View = "sort=-client" }));
+        Assert.Throws<ArgumentException>(() => AlertRule.Load(rule.Save() with { Sound = "Gong" }, Tabs.All));
+        Assert.Equal("kaching", AlertRule.Load(rule.Save() with { Sound = "Register" }, Tabs.All).Sound);
+        Assert.Throws<ArgumentException>(() => AlertRule.Load(rule.Save() with { View = "sort=-client" }, Tabs.All));
     }
 
     private static (AlertSession Session, List<AlertEvent> Fired) Session(AlertRule rule)

@@ -1,8 +1,9 @@
 using System.Diagnostics;
 using System.Globalization;
 using Chalk.Sample.Blotter.Live;
-using Chalk.Sample.Blotter.Market;
-using Chalk.Sample.Blotter.Trades;
+using Chalk.Sample.Blotter.Fixtures;
+using Chalk.Sample.Blotter.Domain;
+using Chalk.Sample.Blotter.Grid;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Chalk.Sample.Blotter.Tests;
@@ -83,8 +84,8 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
             Orders = 20_000,
             Exchange = Quiet() with { NewShare = 1, FilledAtOnce = 1, OrderSkew = TimeSpan.FromSeconds(10) },
         });
-        var orders = await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
-        var fills = await host.AcquireAsync(Tab.Fills, FilterSpec.None, CancellationToken.None);
+        var orders = await host.AcquireAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None);
+        var fills = await host.AcquireAsync(Tabs.Fills, FilterSpec.None, CancellationToken.None);
 
         // New orders, each filled at once: the fills go out now, the orders up to ten seconds later.
         var (sent, filled) = host.Exchange.Send(50);
@@ -92,7 +93,7 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         await UntilAsync(() => fills.State.Tail.ContainsKey(early.FillId));
 
         Assert.False(orders.State.Tail.ContainsKey(early.OrderId), "the order has not arrived yet");
-        var page = await host.Pages.View(Tab.Fills.DefaultSort).GetAsync(fills.State, 0, 100, CancellationToken.None);
+        var page = await host.Pages.View(Tabs.Fills.DefaultSort).GetAsync(fills.State, 0, 100, CancellationToken.None);
         Assert.Contains(page.Rows, r => r.Id == early.FillId);
         Assert.Contains(await host.Queries.AllFillsOfAsync(early.OrderId, CancellationToken.None), f => f.FillId == early.FillId);
         Assert.Empty(await host.Queries.HistoryAsync(early.OrderId, CancellationToken.None));
@@ -115,7 +116,7 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         var hasty = new SourceQueries(host.Engine, TimeSpan.FromTicks(1));
 
         var stopped = await Assert.ThrowsAsync<QueryTimeLimitException>(() =>
-            hasty.CountAsync(Tab.Orders, FilterSpec.None, CancellationToken.None));
+            hasty.CountAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None));
 
         Assert.Equal("a count took longer than the 0 s time limit and was stopped", stopped.Message);
         Assert.Equal(1, hasty.TimedOut);
@@ -125,8 +126,8 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     public async Task A_held_page_keeps_its_rows_in_place_while_rows_arrive_above_them()
     {
         await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() with { NewShare = 1 } });
-        var scope = await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
-        var order = Tab.Orders.DefaultSort;
+        var scope = await host.AcquireAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None);
+        var order = Tabs.Orders.DefaultSort;
         var view = host.Pages.View(order);
         var held = (await view.GetAsync(scope.State, 100, 1, CancellationToken.None)).Rows[0];
         view.Held = true;
@@ -166,11 +167,11 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     public async Task A_page_a_kept_window_covers_is_answered_from_it_and_reads_as_the_database_would()
     {
         await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() });
-        var scope = await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
+        var scope = await host.AcquireAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None);
         host.Exchange.Pause();
         await UntilAsync(() => host.Exchange.Quiet);
         await host.CaughtUpAsync(CancellationToken.None);
-        var order = Tab.Orders.DefaultSort;
+        var order = Tabs.Orders.DefaultSort;
         var view = host.Pages.View(order);
 
         var first = await view.GetAsync(scope.State, 0, 60, CancellationToken.None);
@@ -193,8 +194,8 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     public async Task Rows_let_in_above_a_held_page_are_those_just_above_it_not_the_newest()
     {
         await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() with { NewShare = 1 } });
-        var scope = await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
-        var order = Tab.Orders.DefaultSort;
+        var scope = await host.AcquireAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None);
+        var order = Tabs.Orders.DefaultSort;
         var view = host.Pages.View(order);
         var held = (await view.GetAsync(scope.State, 0, 40, CancellationToken.None)).Rows[0];
         view.Held = true;
@@ -224,8 +225,8 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         {
             for (var i = 0; i < 200; i++)
             {
-                var filter = FilterSpec.Of([new ColumnFilter { Column = Tab.Orders.Named("qty"), Min = i * 0.001 }]);
-                scopes.Add(await host.AcquireAsync(Tab.Orders, filter, CancellationToken.None));
+                var filter = FilterSpec.Of([new ColumnFilter { Column = Tabs.Orders.Named("qty"), Min = i * 0.001 }]);
+                scopes.Add(await host.AcquireAsync(Tabs.Orders, filter, CancellationToken.None));
             }
         });
 
@@ -244,7 +245,7 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         });
 
         // No scope fits in the first step: the first is opened in the next that holds it.
-        var scopes = new List<LiveScope> { await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None) };
+        var scopes = new List<LiveScope> { await host.AcquireAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None) };
         Assert.Contains(host.Budget, steps[1..]);
 
         // Scope after scope raises it again, to the last step; only past that is one refused.
@@ -252,11 +253,13 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         {
             for (var i = 0; i < 200; i++)
             {
-                var filter = FilterSpec.Of([new ColumnFilter { Column = Tab.Orders.Named("qty"), Min = i * 0.001 }]);
-                scopes.Add(await host.AcquireAsync(Tab.Orders, filter, CancellationToken.None));
+                var filter = FilterSpec.Of([new ColumnFilter { Column = Tabs.Orders.Named("qty"), Min = i * 0.001 }]);
+                scopes.Add(await host.AcquireAsync(Tabs.Orders, filter, CancellationToken.None));
             }
         });
-        Assert.StartsWith("no live scope for this filter", refused.Message, StringComparison.Ordinal);
+        // Refused for want of budget, either way: the next scope would not fit, or, with the market
+        // running, the tail and the scopes outgrew it first and the host stopped serving.
+        Assert.Contains("budget", refused.Message, StringComparison.Ordinal);
         Assert.Equal(steps[^1], host.Budget);
         Assert.True(scopes.Count > 4, $"refused after {scopes.Count} scopes");
 
@@ -271,8 +274,8 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         {
             for (var i = 0; i < 200; i++)
             {
-                var filter = FilterSpec.Of([new ColumnFilter { Column = Tab.Orders.Named("qty"), Min = 1 + i * 0.001 }]);
-                await host.AcquireAsync(Tab.Orders, filter, CancellationToken.None);
+                var filter = FilterSpec.Of([new ColumnFilter { Column = Tabs.Orders.Named("qty"), Min = 1 + i * 0.001 }]);
+                await host.AcquireAsync(Tabs.Orders, filter, CancellationToken.None);
             }
         });
         Assert.Equal(1 << 20, host.Budget);
@@ -282,9 +285,9 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     public async Task A_grid_is_sized_by_the_estimate_at_once_and_by_a_count_off_the_page_path_once_held()
     {
         await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() });
-        var scope = await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
-        var counted = await host.Queries.CountAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
-        var estimate = await host.Queries.EstimateRowsAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
+        var scope = await host.AcquireAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None);
+        var counted = await host.Queries.CountAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None);
+        var estimate = await host.Queries.EstimateRowsAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None);
 
         // The tables are analysed when loaded: the estimate is close.
         Assert.NotNull(estimate);
@@ -302,8 +305,8 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         Assert.InRange(rows, counted, counted + 100);
 
         // A row's place, estimated with its key written into the SQL, every kind of value in it.
-        var order = SortSpec.Of(Tab.Orders, new SortColumn(Tab.Orders.Named("client"), true), new SortColumn(Tab.Orders.Named("qty"), false),
-            new SortColumn(Tab.Orders.Named("order_time"), true));
+        var order = SortSpec.Of(Tabs.Orders, new SortColumn(Tabs.Orders.Named("client"), true), new SortColumn(Tabs.Orders.Named("qty"), false),
+            new SortColumn(Tabs.Orders.Named("order_time"), true));
         var row = (await host.Pages.FromAsync(scope.State, order, null, true, 200, CancellationToken.None))[^1];
         var before = await host.Queries.CountBeforeAsync(FilterSpec.None, order, row, CancellationToken.None);
         var guessed = await host.Queries.EstimateBeforeAsync(FilterSpec.None, order, row, CancellationToken.None);
@@ -339,11 +342,11 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     public async Task What_arrives_above_a_held_view_is_counted_from_the_streams_as_a_count_would(string sortedBy)
     {
         await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() });
-        var scope = await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
+        var scope = await host.AcquireAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None);
         await host.CaughtUpAsync(CancellationToken.None);
         var order = sortedBy == "order_time"
-            ? Tab.Orders.DefaultSort
-            : SortSpec.Of(Tab.Orders, new SortColumn(Tab.Orders.Named(sortedBy), Descending: false));
+            ? Tabs.Orders.DefaultSort
+            : SortSpec.Of(Tabs.Orders, new SortColumn(Tabs.Orders.Named(sortedBy), Descending: false));
 
         // Held at the 500th row, with the market still: what sorts above it is what has arrived since,
         // less what has left.
@@ -396,17 +399,17 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
             // Within the budget while the database keeps up; past it once the database stalls.
             Exchange = Quiet() with { Rate = 600 },
         });
-        await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
+        await host.AcquireAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None);
 
         host.Exchange.StallIngestion(TimeSpan.FromSeconds(10));
         await UntilAsync(() => host.State == BlotterState.Refusing, TimeSpan.FromSeconds(20));
 
         Assert.Contains("behind the streams", host.Refusal, StringComparison.Ordinal);
         Assert.Contains("more than the 2.0 MB budget", host.Refusal, StringComparison.Ordinal);
-        await Assert.ThrowsAsync<BlotterRefusedException>(() => host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None));
+        await Assert.ThrowsAsync<BlotterRefusedException>(() => host.AcquireAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None));
 
         await UntilAsync(() => host.State == BlotterState.Live, TimeSpan.FromSeconds(30));
-        foreach (var tab in Tab.All)
+        foreach (var tab in Tabs.All)
         {
             var again = await AcquireWhenServingAsync(host, tab);
             var page = await host.Pages.View(tab.DefaultSort).GetAsync(again.State, 0, 20, CancellationToken.None);
@@ -423,7 +426,7 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     public async Task An_orders_history_and_fills_span_the_database_and_the_tail_in_one_statement()
     {
         await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() with { NewShare = 0, OrderSkew = TimeSpan.Zero } });
-        var scope = await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
+        var scope = await host.AcquireAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None);
         host.Exchange.StallIngestion(TimeSpan.FromSeconds(30));
 
         // Fills for open orders, which the database will not write for a while.

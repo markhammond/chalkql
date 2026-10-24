@@ -1,7 +1,8 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Chalk.Sample.Blotter.Live;
-using Chalk.Sample.Blotter.Trades;
+using Chalk.Sample.Blotter.Grid;
+using Chalk.Sample.Blotter.Domain;
 
 namespace Chalk.Sample.Blotter.Components;
 

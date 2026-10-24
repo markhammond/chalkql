@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using Chalk.Sample.Blotter.Trades;
+using Chalk.Sample.Blotter.Grid;
+using Chalk.Sample.Blotter.Domain;
 
 namespace Chalk.Sample.Blotter.Live;
 
@@ -126,7 +127,7 @@ public sealed class AlertSession(string browser)
             foreach (var state in _states.Values)
             {
                 var rule = state.Rule;
-                if (rule.Tab == Tab.Orders)
+                if (rule.Tab == Tabs.Orders)
                 {
                     foreach (var version in versions)
                     {
@@ -226,7 +227,7 @@ public sealed class AlertSession(string browser)
     {
         var rule = state.Rule;
         var alert = new AlertEvent(
-            ++_seq, rule.Id, rule.Name, rule.Sound, rule.Muted, rule.Tab.Name, state.Gathered, AlertRule.Describe(state.Latest!), now);
+            ++_seq, rule.Id, rule.Name, rule.Sound, rule.Muted, rule.Tab.Name, state.Gathered, rule.Tab.Describe(state.Latest!), now);
         state.Gathered = 0;
         state.SoundedAt = now;
         _waiting.Add(alert);

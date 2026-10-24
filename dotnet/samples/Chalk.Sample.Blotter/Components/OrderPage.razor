@@ -34,7 +34,7 @@
         <table class="history">
             <thead>
                 <tr>
-                    @foreach (var column in Tab.Orders.Columns)
+                    @foreach (var column in Tabs.Orders.Columns)
                     {
                         <th>@column.Title</th>
                     }
@@ -47,7 +47,7 @@
                     var version = _versions[i];
                     var older = i + 1 < _versions.Length ? _versions[i + 1] : null;
                     <tr>
-                        @foreach (var column in Tab.Orders.Columns)
+                        @foreach (var column in Tabs.Orders.Columns)
                         {
                             <td class="@(older is not null && column.Detail(older) != column.Detail(version) ? "changed" : null)">@column.Detail(version)</td>
                         }
@@ -63,7 +63,7 @@
         <table class="history">
             <thead>
                 <tr>
-                    @foreach (var column in Tab.Fills.Columns)
+                    @foreach (var column in Tabs.Fills.Columns)
                     {
                         <th>@column.Title</th>
                     }
@@ -73,7 +73,7 @@
                 @foreach (var fill in _fills)
                 {
                     <tr class="@(fill.FillId == Fill ? "marked" : null)">
-                        @foreach (var column in Tab.Fills.Columns)
+                        @foreach (var column in Tabs.Fills.Columns)
                         {
                             <td>@column.Detail(fill)</td>
                         }
