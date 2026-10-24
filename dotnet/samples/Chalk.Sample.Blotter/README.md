@@ -499,6 +499,9 @@ reducing the cost of data source queries:
 - **The stream taken from the database's own log** (logical replication, change data capture). Stream
   and table would agree by construction: no order behind its fills, no database ahead of the stream,
   no gap fill.
+- **A subscription to the database's changes**, beside the streams. What the database has written
+  would be one more table the catch-up loop refreshes, so Recon and the waits would be an incremental
+  view of the streams beside the database's changes: exact lags, and no lookups to find them.
 - **Reads at a snapshot that matches the watermark.** Every merge would be exact, rather than "the
   newest version either side knows".
 - **A stream that replays from an offset.** Starting, and serving again after a refusal, would need
