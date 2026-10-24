@@ -87,6 +87,12 @@ public sealed class BlotterHost : IAsyncDisposable
     private TimeSpan _refusedBehind;
     private int _disposed;
 
+    // Until the first live scope opens: raise the budget rather than refuse for want of it.
+    private bool _findingBudget;
+
+    // Pages with the vital statistics open: the database's size, a query, is read only while there are any.
+    private int _vitalsWatchers;
+
     // Rows of each stream the host has read, counted from the start of the stream, as Published is.
     private long _ordersRead;
     private long _fillsRead;
@@ -96,6 +102,7 @@ public sealed class BlotterHost : IAsyncDisposable
         _options = options;
         _log = log;
         _budget = options.BudgetBytes;
+        _findingBudget = options.FindBudget;
     }
 
     public BlotterState State { get; private set; } = BlotterState.Starting;
@@ -256,6 +263,10 @@ public sealed class BlotterHost : IAsyncDisposable
                 await CloseAsync(idle).ConfigureAwait(false);
             }
 
+            while (LiveBytes() + estimate > _budget && RaiseBudget($"another live scope would hold about {Megabytes(estimate)}"))
+            {
+            }
+
             if (LiveBytes() + estimate > _budget)
             {
                 throw new BlotterRefusedException(string.Create(CultureInfo.InvariantCulture,
@@ -263,17 +274,27 @@ public sealed class BlotterHost : IAsyncDisposable
                     + $"{_scopes.Count} open scopes already hold {Megabytes(LiveBytes())} of the {Megabytes(_budget)} budget"));
             }
 
-            var scope = await LiveScope.CreateAsync(_engine!, tab, filter, _budget, _options.Maintenance, ct).ConfigureAwait(false);
-            await scope.UpdateAsync(_tail, _version, _ordersThrough, _fillsThrough, ct).ConfigureAwait(false);
-            if (scope.Fault is { } fault)
+            while (true)
             {
-                await scope.DisposeAsync().ConfigureAwait(false);
-                throw new BlotterRefusedException($"the live scope for this filter could not start: {fault.Message}");
-            }
+                var scope = await LiveScope.CreateAsync(_engine!, tab, filter, _budget, _options.Maintenance, ct).ConfigureAwait(false);
+                await scope.UpdateAsync(_tail, _version, _ordersThrough, _fillsThrough, ct).ConfigureAwait(false);
+                if (scope.Fault is { } fault)
+                {
+                    await scope.DisposeAsync().ConfigureAwait(false);
+                    if (RaiseBudget($"the live scope for this filter could not start: {fault.Message}"))
+                    {
+                        continue;
+                    }
 
-            scope.Pages = 1;
-            _scopes[name] = scope;
-            return scope;
+                    throw new BlotterRefusedException($"the live scope for this filter could not start: {fault.Message}");
+                }
+
+                // The first scope open, the budget is found.
+                _findingBudget = false;
+                scope.Pages = 1;
+                _scopes[name] = scope;
+                return scope;
+            }
         });
 
     public Task ReleaseAsync(LiveScope scope) =>
@@ -293,6 +314,7 @@ public sealed class BlotterHost : IAsyncDisposable
         OnLoopAsync(async () =>
         {
             Interlocked.Exchange(ref _budget, Math.Max(1L << 20, bytes));
+            _findingBudget = false;
             if (State == BlotterState.Live)
             {
                 await KeepWithinBudgetAsync().ConfigureAwait(false);
@@ -300,6 +322,9 @@ public sealed class BlotterHost : IAsyncDisposable
 
             return true;
         });
+
+    /// <summary>A page opens (or closes) its vital statistics: the host reads what only they show while any page has them open.</summary>
+    public void WatchVitals(bool watching) => Interlocked.Add(ref _vitalsWatchers, watching ? 1 : -1);
 
     /// <summary>Waits until the host has read everything the streams have sent so far, and its scopes have taken it.</summary>
     public async Task CaughtUpAsync(CancellationToken ct)
@@ -670,6 +695,13 @@ public sealed class BlotterHost : IAsyncDisposable
             }
         }
 
+        // Still finding the budget, the host has not been refused yet: it takes the next one up.
+        if (RaiseBudget($"the tail and {_scopes.Count} live scopes hold {Megabytes(LiveBytes())}"))
+        {
+            await KeepWithinBudgetAsync().ConfigureAwait(false);
+            return;
+        }
+
         // What is in the tail is what the database has not been seen to hold: the gap the host covers.
         var lag = _tail.OldestUnconfirmed is { } oldest ? DateTime.UtcNow - DateTime.SpecifyKind(oldest, DateTimeKind.Utc) : TimeSpan.Zero;
         _refusedBehind = lag;
@@ -764,7 +796,9 @@ public sealed class BlotterHost : IAsyncDisposable
 
     /// <summary>
     /// Stops serving: empties the tail and closes every scope, so that nothing a page could read is
-    /// left half true. The streams are still read; what they send is kept for when serving starts again.
+    /// left half true. What of the tail the database has not been seen to hold is kept, and the streams
+    /// are still read, what they send kept after it, for when serving starts again: the gap fill finds
+    /// only what the database has written.
     /// </summary>
     private async Task StopServingAsync(string why)
     {
@@ -780,6 +814,8 @@ public sealed class BlotterHost : IAsyncDisposable
         var deletes = all.Select(e => TailRow.Of(e.Live, e.Base)).ToList();
         var versionDeletes = all.SelectMany(e => e.Versions).ToList();
         var fillDeletes = _tail.Fills.ToList();
+        _keptOrders.InsertRange(0, all.Where(e => e.ConfirmedAt is null).SelectMany(e => e.Versions));
+        _keptFills.InsertRange(0, fillDeletes.Where(f => _tail.FillConfirmedAt(f.FillId) is null));
         _tail.Clear();
         await RefreshAsync(refresh =>
         {
@@ -902,7 +938,7 @@ public sealed class BlotterHost : IAsyncDisposable
             Statements = Queries.Executed,
             Budget = _budget,
             UsedBytes = _tail.Bytes + scopeBytes + Pages.Bytes,
-            DatabaseBytes = SafeDatabaseBytes(),
+            DatabaseBytes = Volatile.Read(ref _vitalsWatchers) > 0 ? SafeDatabaseBytes() : Status.DatabaseBytes,
             ManagedHeapBytes = GC.GetTotalMemory(forceFullCollection: false),
         };
     }
@@ -917,6 +953,25 @@ public sealed class BlotterHost : IAsyncDisposable
         {
             return Status.DatabaseBytes;
         }
+    }
+
+    /// <summary>While the host is still finding its budget, raises it to the next step, if there is one.</summary>
+    private bool RaiseBudget(string why)
+    {
+        var next = _options.BudgetSteps.FirstOrDefault(step => step > _budget);
+        if (!_findingBudget || next == 0)
+        {
+            return false;
+        }
+
+        _log.LogInformation("raising the budget from {From} to {To}: {Why}", Megabytes(_budget), Megabytes(next), why);
+        Interlocked.Exchange(ref _budget, next);
+        if (Pages is not null)
+        {
+            Pages.MaxKeptRows = PageRows();
+        }
+
+        return true;
     }
 
     /// <summary>What the host cannot give back without dropping a version: the tail, and the scopes over it.</summary>

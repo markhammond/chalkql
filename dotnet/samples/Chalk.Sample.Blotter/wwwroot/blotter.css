@@ -76,6 +76,19 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 
 .frame { position: relative; flex: 1; min-height: 240px; display: flex; flex-direction: column; }
 
+/* Rows cut by the grid's edges fade under a band one row high over each edge: drawn over the grid by
+   the browser alone, nothing measured or run as it scrolls. The top band shows only once the grid is
+   scrolled down, so at the top the newest row stays clear. */
+.frame::before, .frame::after {
+    content: ""; position: absolute; left: 1px; right: 1px; height: 30px; pointer-events: none; z-index: 4;
+}
+.frame::before {
+    top: var(--grid-head, 32px); background: linear-gradient(var(--panel), transparent);
+    opacity: 0; transition: opacity 0.15s;
+}
+.frame[data-scrolled]::before { opacity: 1; }
+.frame::after { bottom: 1px; background: linear-gradient(transparent, var(--panel)); border-radius: 0 0 8px 8px; }
+
 .scroller {
     flex: 1; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
     transition: opacity 120ms ease;
@@ -171,7 +184,10 @@ h2 { font-size: 14px; margin: 8px 0 0; }
 .pill button { border: none; background: transparent; padding: 0 4px; color: var(--muted); font-size: 14px; line-height: 1; }
 .pill button:hover { color: var(--bad); }
 .filter-pill { cursor: pointer; }
-.link-button { border: none; background: transparent; color: var(--accent); padding: 2px 4px; }
+.link-button { border: none; background: transparent; color: var(--accent); padding: 2px 4px; display: inline-flex; align-items: center; gap: 4px; }
+/* Opens a section of the page, as "How this tab is answered" does: grey as it is, its chevron in line
+   with that one's, both set in a little from the edge. */
+.link-button.disclosure { color: var(--muted); padding-left: 0.35em; }
 
 /* A heading is its label, then its funnel just after it: at the left of a text column, at the right
    of a number column. The funnel shows on hover, or while the column is filtered or its filter open;
@@ -207,13 +223,19 @@ h2 { font-size: 14px; margin: 8px 0 0; }
 .range { display: flex; gap: 12px; align-items: end; }
 .range label { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 11px; }
 
-/* The chevron is drawn, not a character, so its size is its own; it stays within the row's height,
-   because every row of the grid is one height. Open, it turns to point down. */
+/* The chevron is drawn, not a character, and sized by the text it sits in: drawn about 0.46em tall,
+   three quarters of the browser's disclosure triangle. In the grid it stays within the row's height,
+   because every row is one height. */
 .toggle { border: none; background: transparent; color: var(--muted); padding: 0; cursor: pointer; width: 100%; height: 29px; display: flex; align-items: center; justify-content: center; }
 .toggle:hover { color: var(--accent); }
-.chevron { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.12s ease; }
-.chevron.open { transform: rotate(90deg); }
-/* 12px before the chevron; after it, the order cell's own 8px. */
+.chevron {
+    width: 0.85em; height: 0.85em; flex: none; vertical-align: -0.08em;
+    fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.12s ease;
+}
+.chevron.open, .chevron.down, details[open] > summary .chevron { transform: rotate(90deg); }
+.chevron.down.open { transform: rotate(-90deg); }
+summary { list-style: none; cursor: pointer; padding-left: 0.35em; }
+summary::-webkit-details-marker { display: none; }
 /* Frozen columns, once the widths are fixed: they stay in place as the grid scrolls sideways, over
    what scrolls beneath them, so they keep a background of their own; a rule marks where they end. */
 table[data-pinned] .frozen { position: sticky; z-index: 1; background: var(--panel); }
@@ -221,7 +243,8 @@ table[data-pinned] thead th.frozen { z-index: 3; }
 table[data-pinned] tbody tr:nth-child(even) td.frozen { background: var(--row-alt); }
 table[data-pinned] tbody tr.child td.frozen { background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
 table[data-pinned] .frozen-last { box-shadow: inset -1px 0 0 var(--line); }
-td.expander, th.expander { width: 9px; text-align: center; padding: 0 0 0 12px; }
+/* Room before the chevron's box; after it, the next cell's own padding. */
+td.expander, th.expander { width: 0.85em; text-align: center; padding: 0 0 0 0.75em; }
 tr.child td { background: color-mix(in srgb, var(--accent) 5%, var(--panel)); color: var(--muted); font-size: 12px; }
 td .cell.id, .id { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }
 .cell.link a { text-decoration: underline dotted; }

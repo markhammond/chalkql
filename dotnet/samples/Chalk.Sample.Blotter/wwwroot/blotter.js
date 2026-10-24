@@ -16,6 +16,12 @@ window.blotter = {
 
         // For checking from a script, where a page in the background is sent no scroll events.
         element.reportScroll = report;
+
+        // Scrolled down, the row cut by the top edge fades; at the top, the newest row does not.
+        const frame = element.parentElement;
+        element.addEventListener("scroll", () => {
+            frame.toggleAttribute("data-scrolled", element.scrollTop > 0);
+        }, { passive: true });
     },
 
     // Fixes every column at the width it has now, with rows in it, and lays the table out by those

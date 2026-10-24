@@ -20,6 +20,7 @@ internal static class Probe
         using var logging = LoggerFactory.Create(b => b.AddSimpleConsole(o => o.SingleLine = true).SetMinimumLevel(LogLevel.Information));
         await using var host = new BlotterHost(options, logging.CreateLogger<BlotterHost>());
         await host.StartAsync(CancellationToken.None);
+        host.WatchVitals(true);
 
         foreach (var tab in Tab.All)
         {

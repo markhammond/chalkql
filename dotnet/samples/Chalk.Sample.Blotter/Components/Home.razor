@@ -12,8 +12,8 @@
 
     <BlotterGrid @key="_tab" Tab="_tab" Select="t => _tab = t">
         <Below>
-            <div class="bar telemetry">
-                <StatusBar Status="_status" Telemetry="true" />
+            <div class="bar controls">
+                <button type="button" class="link-button disclosure" aria-expanded="@_vitals" @onclick="ToggleVitals"><Chevron Open="_vitals" /> Vital statistics</button>
                 <span class="spacer"></span>
                 <button @onclick="Burst" title="The house takes and fills 3,000 orders at once">Simulate burst</button>
                 <button @onclick="Stall" title="The database writes nothing for 20 s, while the streams go on">Stall database 20 s</button>
@@ -22,6 +22,13 @@
                     <button @onclick="StallCurrent" title="The job that keeps orders_current applies nothing for 20 s, while order_versions is written">Stall orders_current 20 s</button>
                 }
             </div>
+            @* Closed, the statistics are not on the page at all, so nothing in them is rendered as they change. *@
+            @if (_vitals)
+            {
+                <div class="bar telemetry">
+                    <StatusBar Status="_status" Telemetry="true" />
+                </div>
+            }
         </Below>
     </BlotterGrid>
 </main>
@@ -30,6 +37,7 @@
     private Tab _tab = Tab.Orders;
     private BlotterStatus _status = new();
     private Timer? _timer;
+    private bool _vitals;
 
     protected override void OnInitialized()
     {
@@ -43,11 +51,25 @@
         _status = Host.Status;
     }
 
+    /// <summary>Opens or closes the vital statistics; the host reads the database's size only while some page has them open.</summary>
+    private void ToggleVitals()
+    {
+        _vitals = !_vitals;
+        Host.WatchVitals(_vitals);
+    }
+
     private void Burst() => Host.Exchange.Send(3000);
 
     private void Stall() => Host.Exchange.StallIngestion(TimeSpan.FromSeconds(20));
 
     private void StallCurrent() => Host.Exchange.StallCurrent(TimeSpan.FromSeconds(20));
 
-    public void Dispose() => _timer?.Dispose();
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        if (_vitals)
+        {
+            Host.WatchVitals(false);
+        }
+    }
 }

@@ -12,7 +12,7 @@
     }
     <span class="spacer"></span>
     <span class="chooser-wrap">
-        <button type="button" class="link-button" aria-expanded="@_choosing" @onclick="() => _choosing = !_choosing">Columns ▾</button>
+        <button type="button" class="link-button" aria-expanded="@_choosing" @onclick="() => _choosing = !_choosing">Columns <Chevron Down="true" Open="_choosing" /></button>
         @if (_choosing)
         {
             <div class="column-chooser" role="group" aria-label="Columns shown">
@@ -85,9 +85,7 @@
                     {
                         <button type="button" class="toggle" aria-label="@(_open.ContainsKey(order.OrderId) ? "Hide" : "Show") the fills of order @order.OrderId"
                                 @onclick="() => ToggleAsync(order)">
-                            <svg class="chevron @(_open.ContainsKey(order.OrderId) ? "open" : "")" viewBox="0 0 16 16" width="9" height="9" aria-hidden="true">
-                                <path d="M6 3.5 10.5 8 6 12.5" />
-                            </svg>
+                            <Chevron Open="_open.ContainsKey(order.OrderId)" />
                         </button>
                     }
                 </TemplateColumn>
@@ -192,7 +190,7 @@
 @Below
 
 <details>
-    <summary>How this tab is answered</summary>
+    <summary><Chevron /> How this tab is answered</summary>
     <p>
         Each page is read live from PostgreSQL (@(Tab.Overrides ? "orders_current, one row per order" : "fills")) through ChalkQL,
         from the key of a row already shown, with the sort, the filter and the limit pushed down; and merged with this

@@ -25,7 +25,7 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     [InlineData(CurrentSync.Lagging)]
     public async Task Pages_held_still_match_the_oracle_row_for_row_behind_and_caught_up(CurrentSync sync)
     {
-        await using var host = await StartAsync(new BlotterOptions { Orders = 40_000, Current = sync, Exchange = Busy() });
+        await using var host = await StartAsync(Roomy() with { Orders = 40_000, Current = sync, Exchange = Busy() });
         var random = new Random(11);
         var (checks, wrong) = (0, 0);
         for (var round = 0; round < 3; round++)
@@ -43,7 +43,7 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     [Fact]
     public async Task Pages_read_while_the_market_runs_keep_their_rows_in_order_once_each_and_filtered()
     {
-        await using var host = await StartAsync(new BlotterOptions { Orders = 40_000, Exchange = Busy() });
+        await using var host = await StartAsync(Roomy() with { Orders = 40_000, Exchange = Busy() });
 
         var (checks, wrong) = await Probe.UnderLoadAsync(host, new Random(13), TimeSpan.FromSeconds(10));
 
@@ -217,7 +217,7 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     [Fact]
     public async Task A_scope_that_would_not_fit_the_budget_is_refused_saying_so()
     {
-        await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, BudgetBytes = 1 << 20, Exchange = Quiet() });
+        await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, BudgetBytes = 1 << 20, FindBudget = false, Exchange = Quiet() });
         var scopes = new List<LiveScope>();
         var refused = await Assert.ThrowsAsync<BlotterRefusedException>(async () =>
         {
@@ -234,12 +234,40 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task Until_the_first_scope_opens_the_budget_is_raised_rather_than_refused_and_then_kept()
+    {
+        long[] steps = [128 << 10, 512 << 10, 4 << 20];
+        await using var host = await StartAsync(new BlotterOptions
+        {
+            Orders = 20_000, BudgetBytes = steps[0], BudgetSteps = steps, Exchange = Quiet(),
+        });
+
+        // No scope fits in the first step: the first is opened in the next that holds it.
+        await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
+        var found = host.Budget;
+        Assert.Contains(found, steps[1..]);
+
+        // Found, the budget stays: what does not fit now is refused.
+        var refused = await Assert.ThrowsAsync<BlotterRefusedException>(async () =>
+        {
+            for (var i = 0; i < 200; i++)
+            {
+                var filter = FilterSpec.Of([new ColumnFilter { Column = Tab.Orders.Named("qty"), Min = i * 0.001 }]);
+                await host.AcquireAsync(Tab.Orders, filter, CancellationToken.None);
+            }
+        });
+        Assert.StartsWith("no live scope for this filter", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(found, host.Budget);
+    }
+
+    [Fact]
     public async Task A_database_too_far_behind_for_the_budget_stops_serving_then_serves_again()
     {
         await using var host = await StartAsync(new BlotterOptions
         {
             Orders = 20_000,
             BudgetBytes = 2 << 20,
+            FindBudget = false,
 
             // Within the budget while the database keeps up; past it once the database stalls.
             Exchange = Quiet() with { Rate = 600 },
@@ -329,6 +357,9 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         Lag = new IngestLag { Max = TimeSpan.FromMilliseconds(500), StallEvery = TimeSpan.Zero },
         CurrentLag = new IngestLag { Max = TimeSpan.FromSeconds(1), StallEvery = TimeSpan.Zero },
     };
+
+    // Room for whatever a busy market leaves the tail holding: what these check is the pages, not the budget.
+    private static BlotterOptions Roomy() => new() { BudgetBytes = 64L << 20, FindBudget = false };
 
     private static ExchangeOptions Busy() => new()
     {

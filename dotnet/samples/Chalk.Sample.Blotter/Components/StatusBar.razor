@@ -1,17 +1,10 @@
-@* What the host holds and what it is waiting for, refreshed every second: its state at the top of
-   the page, and the telemetry under the table. *@
+@* What the host holds and what it is waiting for: at the top of the page, whether it is serving and
+   its budget; under the table, the vital statistics, from the feed to the host. *@
 
 @if (!Telemetry)
 {
 <span class="chip @(Status.State == BlotterState.Live ? "live" : "behind")" title="@Status.Refusal">
     <b>@Status.State</b>
-</span>
-<span class="chip" title="Changes a second the house is making now, and the versions and fills the streams have sent">
-    <span class="label">feed</span><b>@Status.FeedRate.ToString("N0", CultureInfo.InvariantCulture)/s</b>
-    <span class="label">sent</span>@Status.Published.ToString("N0", CultureInfo.InvariantCulture)
-</span>
-<span class="chip" title="Order versions that have happened and that the order stream, running behind the fills, has not sent yet">
-    <span class="label">orders behind fills</span><b>@Status.OrdersHeld.ToString("N0", CultureInfo.InvariantCulture)</b>
 </span>
 <span class="chip" title="Tail @Mb(Status.TailBytes), @Status.Scopes live scopes @Mb(Status.ScopeBytes), counts and fills cached @Mb(Status.PageBytes)">
     <span class="label">host</span><b>@Mb(Status.UsedBytes)</b>
@@ -26,6 +19,13 @@
 }
 else
 {
+<span class="chip" title="Changes a second the house is making now, and the versions and fills the streams have sent">
+    <span class="label">feed</span><b>@Status.FeedRate.ToString("N0", CultureInfo.InvariantCulture)/s</b>
+    <span class="label">sent</span>@Status.Published.ToString("N0", CultureInfo.InvariantCulture)
+</span>
+<span class="chip" title="Order versions that have happened and that the order stream, running behind the fills, has not sent yet">
+    <span class="label">orders behind fills</span><b>@Status.OrdersHeld.ToString("N0", CultureInfo.InvariantCulture)</b>
+</span>
 <span class="chip" title="How orders_current keeps up with order_versions: a trigger in the same statement, or a job of its own that runs behind">
     <span class="label">orders_current by</span><b>@(Status.Sync == CurrentSync.Trigger ? "trigger" : "lagging job")</b>
     @if (Status.Sync == CurrentSync.Lagging)

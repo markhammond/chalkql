@@ -4,7 +4,8 @@ A Blazor Server page with two QuickGrid tabs: **client orders** (five million by
 its fills nested beneath it, and the **fills** themselves. Both live in PostgreSQL, which the host
 cannot hold in memory, while the house keeps taking orders and filling them. Each tab scrolls through
 all of its rows, sorts by any columns, filters on any column, and flashes what changes. The host keeps
-what it holds within a memory budget you set on the page (64 MB by default), stops any statement after
+what it holds within a memory budget, the smallest that serves of 4, 8, 16, 32 and 64 MB unless you set
+one (on the page, or at start), stops any statement after
 5 s, and never shows an order at an older version than one it knows of to stay within either.
 
 ```bash
@@ -21,7 +22,7 @@ deletes it when it stops; one left by a sample that was killed is swept away by 
 | `--current lagging` | `trigger` | how `orders_current` keeps up with `order_versions` (below) |
 | `--postgres "Host=…;Username=…;Database=…"` | | a server of your own instead: the sample makes a schema `blotter` there, refuses if one exists, and drops it when it stops |
 | `--pg-bin /path/to/postgresql/bin` | found | the installation to start a server from |
-| `--budget-mb 32` | `64` | the host's memory budget; the page can change it while it runs |
+| `--budget-mb 32` | found | the host's memory budget, fixed; without it, the host finds one (below); the page can change it while it runs |
 | `--maintenance recompute` | `incremental` | how the live scopes keep current (below) |
 | `--urls http://localhost:5911` | `http://localhost:5910` | |
 | `--probe` | | no web app: prints the estimates, then checks random pages of both tabs for 45 s (`PROBE_SECONDS`) (below) |
@@ -122,11 +123,17 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   position it holds, and the scroll with it, by as many rows), so scrolling on up reveals them in turn
   and the badge counts down. A click on the badge, or reaching the top however fast, goes back to the
   live top, where new rows push down again.
-- **The status bars.** Above the grid: whether the host is serving, the feed, how many order versions
-  the order stream is holding back behind the fills, and what the host holds against the budget. Under
-  it: how `orders_current` is kept (and, by the lagging job, how far behind it is); PostgreSQL's size, how far it is behind the streams and the statement time limit; the tail and what of it is
-  confirmed; the statements run and stopped, and the reads and lookups pages made; and the
-  confirmations, what they let go, and the gap fill.
+- **Rows cut by the grid's edges fade.** A band one row high over the bottom edge, and over the top
+  edge under the headings once the grid is scrolled down: plain CSS over the grid, nothing run as it
+  scrolls. At the top, the newest row stays clear.
+- **Above the grid**, whether the host is serving and what it holds against the budget. **Vital
+  statistics**, under the grid, closed at first: the feed, and how many order versions the order
+  stream is holding back behind the fills; how `orders_current` is kept (and, by the lagging job, how
+  far behind it is); PostgreSQL's size, how far it is behind the streams and the statement time limit;
+  the tail and what of it is confirmed; the statements run and stopped, and the reads and lookups pages
+  made; and the confirmations, what they let go, and the gap fill. Closed, none of it is rendered, and
+  the host does not ask PostgreSQL its size.
+- **Chevrons** are drawn, one size wherever they are, set in em.
 - **"N new above"** sits across the top edge of the grid, over no more than the top quarter of the
   headings, so they and the first row stay readable.
 - **Simulate burst** makes 3,000 changes at once; **Stall database 20 s** stops the database writing
@@ -195,6 +202,11 @@ filter now, or whose database row did: its two sets of columns let the filter be
 in one statement. For fills, it is every fill in the tail that passes. Pages that filter alike share
 one scope, whatever they sort by and wherever they are scrolled. A page sorts its scope in the host,
 which is cheap because a scope is a slice of the tail, never of the corpus.
+
+**Finding the budget.** Unless `--budget-mb` sets one, the host starts at 4 MB, and until the first
+page has opened its scope, whatever would be refused for want of budget (the tail at start, or that
+first scope) raises the budget to the next of 8, 16, 32 and 64 MB instead. Once that scope is open, or
+a budget is chosen on the page, the budget stays as it is, and a refusal is a refusal.
 
 **The budget** covers what the host holds: the tail, in ChalkQL and in the host; the scopes' views and
 their states; and the windows, counts and fills it keeps for a moment, which may hold a quarter of the
