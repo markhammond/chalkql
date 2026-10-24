@@ -4,6 +4,7 @@
 @inject IJSRuntime JS
 @inject ILogger<BlotterGrid> Log
 @inject NavigationManager Nav
+@inject LinkShroud Shroud
 
 <div class="tabs" role="tablist">
     @foreach (var tab in Tab.All)
@@ -229,7 +230,7 @@
         <Chevron Open="_explaining" /> How this tab is answered
     </button>
     <span class="spacer"></span>
-    @Actions
+    <span class="actions">@Actions</span>
 </div>
 
 @Below
@@ -396,7 +397,8 @@
 
     /// <summary>
     /// A link to this view, for the share button: the sort, the filters, the columns hidden, and,
-    /// scrolled away from the live top, the first row wholly in view, by its keyset.
+    /// scrolled away from the live top, the first row wholly in view, by its keyset; the filters'
+    /// values and the row, shrouded.
     /// </summary>
     [JSInvokable]
     public async Task<string> ShareLink(double scrollTop)
@@ -409,7 +411,8 @@
             at = page.Rows.FirstOrDefault() ?? throw new InvalidOperationException("the row in view could not be read");
         }
 
-        var query = new ViewLink(Tab, _sort, _filter, _hiddenColumns, at).Query();
+        // Shrouded: the filters' values and the row held at are data, which a link passed on should not show.
+        var query = new ViewLink(Tab, _sort, _filter, _hiddenColumns, at).Query(Shroud);
         return Nav.BaseUri + (query.Length > 0 ? "?" + query : "");
     }
 

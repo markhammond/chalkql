@@ -22,13 +22,22 @@ namespace Chalk.Sample.Blotter.Trades;
 /// with <c>.starts</c> what they start with, <c>.min</c> and <c>.max</c> for a number,
 /// <c>.from</c> and <c>.to</c> for a time; and the row held at.
 /// </para>
+/// <para>
+/// Shrouded (<see cref="LinkShroud"/>), the filters' values and the row held at, which are data, go
+/// in one opaque <c>s=</c>; the tab, the sort and the hidden columns, which are only how it is laid
+/// out, stay as they are. A link may give a filter or the row held at as is, shrouded, or some of
+/// each, but not one part both ways.
+/// </para>
 /// </remarks>
 public sealed record ViewLink(Tab Tab, SortSpec Sort, FilterSpec Filter, IReadOnlySet<string> Hidden, IRow? At)
 {
     private const string TimeFormat = "yyyy-MM-ddTHH:mm:ss.ffffff";
 
-    /// <summary>The link's query, without the <c>?</c>; empty for the tab as it opens.</summary>
-    public string Query()
+    /// <summary>
+    /// The link's query, without the <c>?</c>; empty for the tab as it opens. Given a
+    /// <paramref name="shroud"/>, the filters' values and the row held at are shrouded.
+    /// </summary>
+    public string Query(LinkShroud? shroud = null)
     {
         var pairs = new List<(string Key, string Value)>();
         if (Tab != Trades.Tab.Orders)
@@ -46,6 +55,8 @@ public sealed record ViewLink(Tab Tab, SortSpec Sort, FilterSpec Filter, IReadOn
             pairs.Add(("hide", string.Join(",", Tab.Columns.Where(c => Hidden.Contains(c.Name)).Select(c => c.Name))));
         }
 
+        // What the view holds rather than how it is laid out: shrouded, if the link is.
+        var open = pairs.Count;
         foreach (var filter in Filter.Columns)
         {
             var name = "f." + filter.Column.Name;
@@ -61,7 +72,17 @@ public sealed record ViewLink(Tab Tab, SortSpec Sort, FilterSpec Filter, IReadOn
             pairs.AddRange(Sort.Keys.Select(k => ("at." + k.Column.Name, Write(k.Column.Value(at)))));
         }
 
-        return string.Join("&", pairs.Select(p => Uri.EscapeDataString(p.Key) + "=" + Uri.EscapeDataString(p.Value)));
+        if (shroud is not null && pairs.Count > open)
+        {
+            var held = Join(pairs.GetRange(open, pairs.Count - open));
+            pairs.RemoveRange(open, pairs.Count - open);
+            pairs.Add(("s", shroud.Shroud(held)));
+        }
+
+        return Join(pairs);
+
+        static string Join(IEnumerable<(string Key, string Value)> pairs) =>
+            string.Join("&", pairs.Select(p => Uri.EscapeDataString(p.Key) + "=" + Uri.EscapeDataString(p.Value)));
 
         void Add(string key, object? value)
         {
@@ -72,11 +93,34 @@ public sealed record ViewLink(Tab Tab, SortSpec Sort, FilterSpec Filter, IReadOn
         }
     }
 
-    /// <summary>The view a link's query describes.</summary>
+    /// <summary>The view a link's query describes, its shrouded part, if it has one, opened by <paramref name="shroud"/>.</summary>
     /// <exception cref="ArgumentException">Something in the link is not understood: said what, and nothing of it is taken.</exception>
-    public static ViewLink Parse(string query)
+    public static ViewLink Parse(string query, LinkShroud? shroud = null)
     {
         var pairs = QueryHelpers.ParseQuery(query);
+        if (pairs.Remove("s", out var shrouded))
+        {
+            if (shrouded.Count != 1)
+            {
+                throw Refuse($"'s' is given {shrouded.Count} times");
+            }
+
+            var held = QueryHelpers.ParseQuery(
+                (shroud ?? throw Refuse("its shrouded part cannot be opened here")).Unshroud(shrouded.ToString()));
+            foreach (var (key, values) in held)
+            {
+                if (!key.StartsWith("f.", StringComparison.Ordinal) && !key.StartsWith("at.", StringComparison.Ordinal))
+                {
+                    throw Refuse($"'{key}' is not a filter or the row held at, which alone are shrouded");
+                }
+
+                if (!pairs.TryAdd(key, values))
+                {
+                    throw Refuse($"'{key}' is given both as is and shrouded");
+                }
+            }
+        }
+
         var tab = pairs.TryGetValue("tab", out var named)
             ? Trades.Tab.All.FirstOrDefault(t => t.Name == named.ToString()) ?? throw Refuse($"there is no tab '{named}'")
             : Trades.Tab.Orders;

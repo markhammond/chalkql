@@ -25,6 +25,7 @@ deletes it when it stops; one left by a sample that was killed is swept away by 
 | `--budget-mb 32` | found | the host's memory budget, fixed; without it, the host finds one (below); the page can change it while it runs |
 | `--maintenance recompute` | `incremental` | how the live scopes keep current (below) |
 | `--urls http://localhost:5911` | `http://localhost:5910` | |
+| `--link-keys /path/to/folder` | `Chalk.Sample.Blotter/link-keys` under the user's local application data | where the keys that shroud shared links are kept (below) |
 | `--probe` | | no web app: prints the estimates, then checks random pages of both tabs for 45 s (`PROBE_SECONDS`) (below) |
 
 ChalkQL's planner runs on a JDK 21+, which `PlannerProcess` starts itself: set `JAVA_HOME`, or install
@@ -138,6 +139,14 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   holds no row and follows the top. A link not understood is refused whole, saying what, and the
   blotter opens as it always does. For example:
   `/?tab=fills&sort=-client,qty&hide=&f.side=Buy&f.qty.min=0.1&f.instrument.starts=B&at.client=FERN&at.qty=0.5&at.fill_id=…`.
+- **Shrouded links.** The link the share button copies shows none of the view's data: the filters'
+  values and the row held at, which are data, go in one opaque `s=`, encrypted and signed with ASP.NET
+  Data Protection; the tab, the sort and the hidden columns, only how the view is laid out, stay as
+  they are (`/?sort=-client&s=CfDJ8…`). The keys are kept in a folder (`--link-keys`), so a link opens
+  after a restart; they rotate every 90 days, the old ones kept to open what they shrouded. A link may
+  give any filter or the row held at as is, shrouded, or some of each, but not one part both ways; a
+  shrouded part altered, or shrouded by another blotter's keys, is refused. The keys are kept as they
+  are, not encrypted at rest: the folder is what keeps them private.
 - **New rows push down at the top.** Scrolled away from the top, the rows in view stay where they are,
   and an "N new above" badge counts what has arrived. Scrolling up within 200 rows of the top lets
   them in, 30 at a time, above the rows in view, which stay where they are (the grid moves every
@@ -158,7 +167,7 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   answered open from one row under the grid.
 - **"N new above"** sits across the top edge of the grid, over no more than the top quarter of the
   headings, so they and the first row stay readable.
-- **Simulate burst** makes 3,000 changes at once; **Stall database 20 s** stops the database writing
+- **Simulate burst** (shown, with the stalls, while the pointer is on the page) makes 3,000 changes at once; **Stall database 20 s** stops the database writing
   while the streams go on; in lagging mode, **Stall orders_current 20 s** stops only the job that keeps
   it. Do them with a small budget chosen on the page to see the host refuse.
 

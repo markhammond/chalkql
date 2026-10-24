@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject BlotterHost Host
 @inject NavigationManager Nav
+@inject LinkShroud Shroud
 
 <PageTitle>Virtual blotter</PageTitle>
 
@@ -61,7 +62,7 @@
         {
             try
             {
-                _link = ViewLink.Parse(query);
+                _link = ViewLink.Parse(query, Shroud);
                 _tab = _link.Tab;
             }
             catch (ArgumentException refused)

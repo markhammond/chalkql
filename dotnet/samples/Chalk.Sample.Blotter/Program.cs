@@ -1,9 +1,11 @@
 using System.Globalization;
 using Chalk.Incremental;
+using Microsoft.AspNetCore.DataProtection;
 using Chalk.Sample.Blotter;
 using Chalk.Sample.Blotter.Components;
 using Chalk.Sample.Blotter.Live;
 using Chalk.Sample.Blotter.Market;
+using Chalk.Sample.Blotter.Trades;
 
 var budget = Number(Argument(args, "--budget-mb"));
 var options = new BlotterOptions
@@ -37,6 +39,15 @@ builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<BlotterHost>();
 builder.Services.AddHostedService<BlotterService>();
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
+
+// The keys that shroud the values in a view's link, kept in a folder so that a link opens after a
+// restart: rotated every 90 days, an old one kept to open what it shrouded.
+var linkKeys = Argument(args, "--link-keys")
+    ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Chalk.Sample.Blotter", "link-keys");
+builder.Services.AddDataProtection()
+    .SetApplicationName("Chalk.Sample.Blotter")
+    .PersistKeysToFileSystem(new DirectoryInfo(linkKeys));
+builder.Services.AddSingleton<LinkShroud>();
 
 var app = builder.Build();
 app.UseAntiforgery();
