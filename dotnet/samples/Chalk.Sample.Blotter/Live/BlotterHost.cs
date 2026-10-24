@@ -117,7 +117,7 @@ public sealed class BlotterHost : IAsyncDisposable
 
     public SourceQueries Queries { get; private set; } = null!;
 
-    /// <summary>The engine, for the probe's own statements.</summary>
+    /// <summary>The engine, for the tests' own statements.</summary>
     internal ChalkEngine Engine => _engine ?? throw new InvalidOperationException("the host has not started");
 
     public Pages Pages { get; private set; } = null!;

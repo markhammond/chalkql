@@ -24,11 +24,6 @@ var options = new BlotterOptions
     },
 };
 
-if (args.Contains("--probe"))
-{
-    return await Probe.RunAsync(options);
-}
-
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(Argument(args, "--urls") ?? "http://localhost:5910");
 

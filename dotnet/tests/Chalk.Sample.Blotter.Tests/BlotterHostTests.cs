@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Chalk.Sample.Blotter.Live;
 using Chalk.Sample.Blotter.Market;
 using Chalk.Sample.Blotter.Trades;
@@ -309,6 +310,26 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         Assert.NotNull(guessed);
         Assert.InRange(guessed.Value, 0, counted);
         output.WriteLine($"{before} rows before the row; PostgreSQL guessed {guessed}");
+    }
+
+    /// <summary>
+    /// The long check, run by hand: <c>BLOTTER_PROBE_SECONDS=300 dotnet test --filter Random_pages_hold</c>
+    /// runs <see cref="Probe"/> against a busy market for that long, over <c>BLOTTER_PROBE_ORDERS</c>
+    /// orders (200,000 if not given), and prints PostgreSQL's estimates and what the host held.
+    /// </summary>
+    [Fact]
+    public async Task Random_pages_hold_for_as_long_as_the_probe_runs()
+    {
+        var seconds = Environment.GetEnvironmentVariable("BLOTTER_PROBE_SECONDS");
+        Assert.SkipWhen(string.IsNullOrWhiteSpace(seconds), "a long check, run by hand: set BLOTTER_PROBE_SECONDS");
+        var orders = long.Parse(Environment.GetEnvironmentVariable("BLOTTER_PROBE_ORDERS") ?? "200000", CultureInfo.InvariantCulture);
+        await using var host = await StartAsync(new BlotterOptions { Orders = orders });
+
+        var (loaded, loadedWrong, exact, exactWrong) = await Probe.RunAsync(
+            host, TimeSpan.FromSeconds(double.Parse(seconds!, CultureInfo.InvariantCulture)), output.WriteLine);
+
+        Assert.Equal((0, 0), (loadedWrong, exactWrong));
+        Assert.True(loaded > 0 && exact > 0, $"only {loaded} pages under load and {exact} held still were checked");
     }
 
     [Theory]

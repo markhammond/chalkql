@@ -2,66 +2,65 @@ using System.Diagnostics;
 using System.Globalization;
 using Chalk.Sample.Blotter.Live;
 using Chalk.Sample.Blotter.Market;
-using Microsoft.Extensions.Logging;
+using Chalk.Sample.Blotter.Trades;
 
-namespace Chalk.Sample.Blotter;
+namespace Chalk.Sample.Blotter.Tests;
 
 /// <summary>
-/// <c>--probe</c>: starts the host without the web app, prints the estimates for each tab, then reads
-/// random pages of both tabs — random filters on random columns, sorts and positions. While the market
-/// runs, each page is checked for what must hold however things interleave; then, in rounds, the market
-/// is paused and the database held still, once behind the streams and once caught up, and each page is
-/// checked against the <see cref="Oracle"/> row for row.
+/// Random pages of both tabs, checked: random filters on random columns, sorts and positions. While the
+/// market runs, each page is checked for what must hold however things interleave; then, in rounds, the
+/// market is paused and the database held still, once behind the streams and once caught up, and each
+/// page is checked against the <see cref="Oracle"/> row for row.
 /// </summary>
 internal static class Probe
 {
-    public static async Task<int> RunAsync(BlotterOptions options)
+    /// <summary>
+    /// The whole check, for <paramref name="time"/>: PostgreSQL's estimates for each tab first, then half
+    /// the time under load and half in rounds held still, then what the host held.
+    /// </summary>
+    public static async Task<(int Loaded, int LoadedWrong, int Exact, int ExactWrong)> RunAsync(BlotterHost host, TimeSpan time, Action<string> log)
     {
-        using var logging = LoggerFactory.Create(b => b.AddSimpleConsole(o => o.SingleLine = true).SetMinimumLevel(LogLevel.Information));
-        await using var host = new BlotterHost(options, logging.CreateLogger<BlotterHost>());
-        await host.StartAsync(CancellationToken.None);
         host.WatchVitals(true);
-
         foreach (var tab in Tab.All)
         {
             var estimate = await host.Queries.EstimateAsync(FilterSpec.None, tab.DefaultSort, CancellationToken.None);
-            Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+            log(string.Create(CultureInfo.InvariantCulture,
                 $"{tab.Title}, newest first: reads {estimate.RowsRead:N0} by {estimate.EstimatedBy}, sorts {estimate.RowsSorted:N0} "
                 + $"{(estimate.SortInDatabase ? "in the database" : "IN THE HOST")}"));
-            Console.WriteLine(estimate.PlanText);
+            log(estimate.PlanText);
         }
 
         var random = new Random(7);
-        var seconds = double.Parse(Environment.GetEnvironmentVariable("PROBE_SECONDS") ?? "45", CultureInfo.InvariantCulture);
-        var (loaded, loadedWrong) = await UnderLoadAsync(host, random, TimeSpan.FromSeconds(seconds / 2));
+        var (loaded, loadedWrong) = await UnderLoadAsync(host, random, time / 2, log);
         var (exact, exactWrong) = (0, 0);
         var rounds = Stopwatch.StartNew();
-        while (rounds.Elapsed.TotalSeconds < seconds / 2)
+        while (rounds.Elapsed < time / 2)
         {
-            var (checks, wrong) = await QuietAsync(host, random, 8, Console.WriteLine);
+            var (checks, wrong) = await QuietAsync(host, random, 8, log);
             exact += checks;
             exactWrong += wrong;
         }
 
         foreach (var scope in host.Scopes)
         {
-            Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+            log(string.Create(CultureInfo.InvariantCulture,
                 $"scope {scope.Name}: {scope.ViewRows:N0} rows, view {scope.ViewBytes:N0} B, {scope.ViewBytes / Math.Max(1, scope.ViewRows)} B a row"));
         }
 
         var status = host.Status;
-        Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+        log(string.Create(CultureInfo.InvariantCulture,
             $"{loaded} pages under load, {loadedWrong} breaking an invariant; {exact} pages held still, {exactWrong} differing "
             + $"from the oracle; tail {status.TailOrders:N0} orders, {status.TailFills:N0} fills; {status.Evicted:N0} confirmed and gone; "
             + $"gap fill took {status.GapFilled:N0}; used {BlotterHost.Megabytes(status.UsedBytes)} of {BlotterHost.Megabytes(status.Budget)}; "
             + $"database {BlotterHost.Megabytes(status.DatabaseBytes)}; reads {status.PageReads:N0}, lookups {status.PageLookups:N0}; "
             + $"stopped at the time limit {status.TimedOut}"));
-        return loadedWrong == 0 && exactWrong == 0 && loaded > 0 && exact > 0 ? 0 : 1;
+        return (loaded, loadedWrong, exact, exactWrong);
     }
 
     /// <summary>Random pages while the market runs, with bursts and stalls between them: each must hold <see cref="Oracle.Invariants"/>.</summary>
-    internal static async Task<(int Checks, int Wrong)> UnderLoadAsync(BlotterHost host, Random random, TimeSpan time)
+    internal static async Task<(int Checks, int Wrong)> UnderLoadAsync(BlotterHost host, Random random, TimeSpan time, Action<string>? log = null)
     {
+        log ??= _ => { };
         var (checks, wrong) = (0, 0);
         var clock = Stopwatch.StartNew();
         while (clock.Elapsed < time)
@@ -70,7 +69,7 @@ internal static class Probe
             var tab = Tab.All[random.Next(Tab.All.Count)];
             var filter = RandomFilter(tab, random);
             var order = RandomSort(tab, random);
-            if (await TryAcquireAsync(host, tab, filter) is not { } scope)
+            if (await TryAcquireAsync(host, tab, filter, log) is not { } scope)
             {
                 continue;
             }
@@ -85,13 +84,13 @@ internal static class Probe
                 var problem = Oracle.Invariants(page, order, filter);
                 checks++;
                 wrong += problem is null ? 0 : 1;
-                Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+                log(string.Create(CultureInfo.InvariantCulture,
                     $"{(problem is null ? "ok  " : "FAIL")} load  {tab.Name} tail {scope.State.Live.Length} over {scope.State.Overridden.Length} "
                     + $"| {filter.Name} | {order} @ {start:N0} of ~{page.Total:N0} in {timer.Elapsed.TotalMilliseconds:F1} ms {problem}"));
             }
             catch (QueryTimeLimitException limit)
             {
-                Console.WriteLine($"stopped: {limit.Message}");
+                log($"stopped: {limit.Message}");
             }
             finally
             {
@@ -139,7 +138,7 @@ internal static class Probe
 
                 for (var i = 0; i < pages; i++)
                 {
-                    var (ok, line) = await CheckExactAsync(host, random);
+                    var (ok, line) = await CheckExactAsync(host, random, log);
                     if (line is null)
                     {
                         continue;
@@ -162,12 +161,12 @@ internal static class Probe
     }
 
     /// <summary>One random page, checked row for row: from the top, or from wherever it starts.</summary>
-    internal static async Task<(bool Ok, string? Line)> CheckExactAsync(BlotterHost host, Random random)
+    internal static async Task<(bool Ok, string? Line)> CheckExactAsync(BlotterHost host, Random random, Action<string> log)
     {
         var tab = Tab.All[random.Next(Tab.All.Count)];
         var filter = RandomFilter(tab, random);
         var order = RandomSort(tab, random);
-        if (await TryAcquireAsync(host, tab, filter) is not { } scope)
+        if (await TryAcquireAsync(host, tab, filter, log) is not { } scope)
         {
             return (true, null);
         }
@@ -201,7 +200,7 @@ internal static class Probe
         }
     }
 
-    private static async Task<LiveScope?> TryAcquireAsync(BlotterHost host, Tab tab, FilterSpec filter)
+    private static async Task<LiveScope?> TryAcquireAsync(BlotterHost host, Tab tab, FilterSpec filter, Action<string> log)
     {
         try
         {
@@ -209,7 +208,7 @@ internal static class Probe
         }
         catch (BlotterRefusedException refused)
         {
-            Console.WriteLine($"refused: {refused.Message}");
+            log($"refused: {refused.Message}");
             return null;
         }
     }

@@ -1,9 +1,11 @@
 using System.Globalization;
 using System.Text;
+using Chalk.Sample.Blotter.Live;
 using Chalk.Sample.Blotter.Market;
+using Chalk.Sample.Blotter.Trades;
 using Npgsql;
 
-namespace Chalk.Sample.Blotter.Live;
+namespace Chalk.Sample.Blotter.Tests;
 
 /// <summary>
 /// A tab's answer worked out the slow way, for checking: in PostgreSQL alone, with no tail, no scope
