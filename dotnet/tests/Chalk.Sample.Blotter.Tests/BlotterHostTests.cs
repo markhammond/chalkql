@@ -37,9 +37,11 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
             (checks, wrong) = (checks + c, wrong + w);
         }
 
-        Assert.Equal(0, wrong);
-        Assert.True(checks >= 20, $"only {checks} pages were checked");
-        Assert.True(host.Status.Evicted > 0, "the tail never emptied into the database");
+        // Each says which way it failed: a page differing from the oracle is a fault in the host; too
+        // few pages checked, or a tail that never emptied, is a run that did not get far enough.
+        Assert.True(wrong == 0, $"{wrong} of {checks} pages differed from the oracle: see the FAIL lines in the output");
+        Assert.True(checks >= 20, $"only {checks} pages were checked, none wrong");
+        Assert.True(host.Status.Evicted > 0, $"the tail never emptied into the database ({checks} pages checked, none wrong)");
     }
 
     [Fact]
@@ -318,7 +320,9 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     /// <summary>
     /// The long check, run by hand: <c>BLOTTER_PROBE_SECONDS=300 dotnet test --filter Random_pages_hold</c>
     /// runs <see cref="Probe"/> against a busy market for that long, over <c>BLOTTER_PROBE_ORDERS</c>
-    /// orders (200,000 if not given), and prints PostgreSQL's estimates and what the host held.
+    /// orders (200,000 if not given), with <c>orders_current</c> kept by a trigger, or, with
+    /// <c>BLOTTER_PROBE_CURRENT=lagging</c>, by a job that runs behind; and prints PostgreSQL's
+    /// estimates and what the host held.
     /// </summary>
     [Fact]
     public async Task Random_pages_hold_for_as_long_as_the_probe_runs()
@@ -326,7 +330,8 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         var seconds = Environment.GetEnvironmentVariable("BLOTTER_PROBE_SECONDS");
         Assert.SkipWhen(string.IsNullOrWhiteSpace(seconds), "a long check, run by hand: set BLOTTER_PROBE_SECONDS");
         var orders = long.Parse(Environment.GetEnvironmentVariable("BLOTTER_PROBE_ORDERS") ?? "200000", CultureInfo.InvariantCulture);
-        await using var host = await StartAsync(new BlotterOptions { Orders = orders });
+        var current = Environment.GetEnvironmentVariable("BLOTTER_PROBE_CURRENT") == "lagging" ? CurrentSync.Lagging : CurrentSync.Trigger;
+        await using var host = await StartAsync(new BlotterOptions { Orders = orders, Current = current });
 
         var (loaded, loadedWrong, exact, exactWrong) = await Probe.RunAsync(
             host, TimeSpan.FromSeconds(double.Parse(seconds!, CultureInfo.InvariantCulture)), output.WriteLine);
