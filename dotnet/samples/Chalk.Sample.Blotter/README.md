@@ -294,7 +294,7 @@ Press Escape to close whatever is open over the page.
 | Folder | |
 |---|---|
 | `Grid` | what any live grid over a versioned table needs: rows (`IRow`, `KeyRow`), columns and formats, tabs, sorts, filters, view links and their shrouding, alert rules and conditions |
-| `Domain` | the trades: client orders and fills (`Trades`), their two tabs, reference data, and `ITradeStore`, the tables as the house writes them, with `PostgresTradeStore` |
+| `Domain` | the trades: client orders and fills (`Trades`), their two tabs, reference data, and `ITradeRepository`, the tables as the house writes them, with `PostgresTradeRepository` |
 | `Fixtures` | stand-ins for a real house: the generated corpus and `Seeder`, the simulated `Exchange` and its streams (`Feed`), the lagging ingestion jobs, and `IHouseDatabase`, the database the house runs on, with `PostgresHouseDatabase` and the sample's own PostgreSQL server |
 | `Live` | the bolt-on: tail, merge, live scopes, pages and positions, counts, alert views and their tables, the host that runs them, and `IBlotterProvider`, the database it reads, with `PostgresBlotterProvider` |
 | `Components` | the Blazor pages, the grid and the condition editor |
@@ -307,8 +307,8 @@ of orders and fills.
 time limit; optionally the database's own estimates and counts (`IRowEstimates`; without them, the host
 counts through ChalkQL on the page's path); whether a failure was the database's own time limit; and
 its size. The tables must be append-only, as above, and compare text byte by byte. The house writes
-through `ITradeStore` (the tables, a bulk load, and the two ways of keeping `orders_current`), and
-`IHouseDatabase` pairs a store with a provider over the same tables; pass one as
+through `ITradeRepository` (the tables, a bulk load, and the two ways of keeping `orders_current`), and
+`IHouseDatabase` pairs a repository with a provider over the same tables; pass one as
 `BlotterOptions.House`. The PostgreSQL implementations are the example, and the test oracle works in
 PostgreSQL alone. The host still starts the house itself, so reading a real database with no house
 would need the streams behind a seam too.

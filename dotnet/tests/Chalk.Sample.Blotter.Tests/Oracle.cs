@@ -38,7 +38,7 @@ public static class Oracle
         var tab = state.Tab;
 
         // The truth is worked out in the database itself, in its own SQL: PostgreSQL's, here.
-        var store = seeded.Store as PostgresTradeStore
+        var store = seeded.Store as PostgresTradeRepository
             ?? throw new NotSupportedException($"the oracle works out pages in PostgreSQL, not in {seeded.Store.GetType().Name}");
         using var connection = store.Open();
         using var transaction = connection.BeginTransaction();
@@ -51,14 +51,14 @@ public static class Oracle
             {
                 foreach (var order1 in market.Orders.Read(state.Mark.OrdersRead))
                 {
-                    PostgresTradeStore.WriteOrder(import, order1);
+                    PostgresTradeRepository.WriteOrder(import, order1);
                 }
             }
             else
             {
                 foreach (var fill in market.Fills.Read(state.Mark.FillsRead))
                 {
-                    PostgresTradeStore.WriteFill(import, fill);
+                    PostgresTradeRepository.WriteFill(import, fill);
                 }
             }
 

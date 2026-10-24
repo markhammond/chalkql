@@ -4,15 +4,15 @@ using System.Globalization;
 namespace Chalk.Sample.Blotter.Fixtures;
 
 /// <summary>
-/// Seeds an <see cref="ITradeStore"/> with a generated corpus: client orders worked over a span of time,
+/// Seeds an <see cref="ITradeRepository"/> with a generated corpus: client orders worked over a span of time,
 /// with their versions and fills (<see cref="Corpus"/>), bulk loaded by several writers at once before any
 /// index or trigger exists; then indexed, and kept current from then on.
 /// </summary>
-public sealed class Seeder(ITradeStore store)
+public sealed class Seeder(ITradeRepository store)
 {
     private long _written;
 
-    public ITradeStore Store => store;
+    public ITradeRepository Store => store;
 
     /// <summary>How long <see cref="GenerateAsync"/> took to write the corpus, and then to index it.</summary>
     public TimeSpan LoadTime { get; private set; }

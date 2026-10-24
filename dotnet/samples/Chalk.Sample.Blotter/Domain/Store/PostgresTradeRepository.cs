@@ -4,11 +4,11 @@ using NpgsqlTypes;
 namespace Chalk.Sample.Blotter.Domain;
 
 /// <summary>
-/// The system of record in PostgreSQL, as the simulated house writes it (see <see cref="ITradeStore"/>):
+/// The system of record in PostgreSQL, as the simulated house writes it (see <see cref="ITradeRepository"/>):
 /// <c>UNLOGGED</c> tables, text collated <c>"C"</c>, loaded with binary <c>COPY</c>, and
 /// <c>orders_current</c> kept by a trigger or by a job's upserts.
 /// </summary>
-public sealed class PostgresTradeStore(string connectionString) : ITradeStore
+public sealed class PostgresTradeRepository(string connectionString) : ITradeRepository
 {
     private const string OrderColumns = """
         order_id    uuid             NOT NULL,
@@ -230,7 +230,7 @@ public sealed class PostgresTradeStore(string connectionString) : ITradeStore
         private readonly NpgsqlBinaryImporter _current;
         private readonly NpgsqlBinaryImporter _fills;
 
-        public Load(PostgresTradeStore store)
+        public Load(PostgresTradeRepository store)
         {
             _connections = [store.Open(), store.Open(), store.Open()];
             _versions = _connections[0].BeginBinaryImport("COPY order_versions FROM STDIN (FORMAT BINARY)");

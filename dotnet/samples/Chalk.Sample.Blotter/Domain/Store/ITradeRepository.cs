@@ -23,7 +23,7 @@ public enum CurrentSync
 /// collation: the host merges the database's rows with its own and orders text exactly as the
 /// database does.
 /// </remarks>
-public interface ITradeStore
+public interface ITradeRepository
 {
     /// <summary>Creates the three tables, empty, with no index or trigger yet.</summary>
     void CreateTables();

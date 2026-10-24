@@ -118,7 +118,7 @@ public sealed class BlotterHost : IAsyncDisposable
     public Exchange Exchange => _exchange ?? throw new InvalidOperationException("the host has not started");
 
     /// <summary>The database, for the checks that read it directly.</summary>
-    public ITradeStore Store => _house?.Store ?? throw new InvalidOperationException("the host has not started");
+    public ITradeRepository Store => _house?.Store ?? throw new InvalidOperationException("the host has not started");
 
     /// <summary>The database the host reads.</summary>
     public IBlotterProvider Provider => _provider ?? throw new InvalidOperationException("the host has not started");

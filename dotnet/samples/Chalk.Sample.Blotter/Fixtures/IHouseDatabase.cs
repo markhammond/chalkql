@@ -18,7 +18,7 @@ public interface IHouseDatabase : IAsyncDisposable
     string Name { get; }
 
     /// <summary>The tables, as the house writes them.</summary>
-    ITradeStore Store { get; }
+    ITradeRepository Store { get; }
 
     /// <summary>The same tables, as the host reads them.</summary>
     IBlotterProvider Provider { get; }

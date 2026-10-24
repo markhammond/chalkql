@@ -5,7 +5,7 @@ namespace Chalk.Sample.Blotter.Fixtures;
 
 /// <summary>
 /// The simulated house's database in PostgreSQL: a server the sample starts for itself, or one it is
-/// given a connection string to (<see cref="PgServer"/>), written through <see cref="PostgresTradeStore"/>
+/// given a connection string to (<see cref="PgServer"/>), written through <see cref="PostgresTradeRepository"/>
 /// and read through <see cref="PostgresBlotterProvider"/>.
 /// </summary>
 public sealed class PostgresHouseDatabase : IHouseDatabase
@@ -15,13 +15,13 @@ public sealed class PostgresHouseDatabase : IHouseDatabase
     private PostgresHouseDatabase(PgServer server)
     {
         _server = server;
-        Store = new PostgresTradeStore(server.ConnectionString);
+        Store = new PostgresTradeRepository(server.ConnectionString);
         Provider = new PostgresBlotterProvider(server.ConnectionString);
     }
 
     public string Name => "PostgreSQL";
 
-    public ITradeStore Store { get; }
+    public ITradeRepository Store { get; }
 
     public IBlotterProvider Provider { get; }
 
