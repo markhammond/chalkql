@@ -122,10 +122,9 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   position it holds, and the scroll with it, by as many rows), so scrolling on up reveals them in turn
   and the badge counts down. A click on the badge, or reaching the top however fast, goes back to the
   live top, where new rows push down again.
-- **The status bars.** Above the grid: whether the host is serving, how `orders_current` is kept (and,
-  by the lagging job, how far behind it is), the feed, how many order versions the order stream is
-  holding back behind the fills, and what the host holds against the budget. Under it: PostgreSQL's
-  size, how far it is behind the streams and the statement time limit; the tail and what of it is
+- **The status bars.** Above the grid: whether the host is serving, the feed, how many order versions
+  the order stream is holding back behind the fills, and what the host holds against the budget. Under
+  it: how `orders_current` is kept (and, by the lagging job, how far behind it is); PostgreSQL's size, how far it is behind the streams and the statement time limit; the tail and what of it is
   confirmed; the statements run and stopped, and the reads and lookups pages made; and the
   confirmations, what they let go, and the gap fill.
 - **"N new above"** sits across the top edge of the grid, over no more than the top quarter of the

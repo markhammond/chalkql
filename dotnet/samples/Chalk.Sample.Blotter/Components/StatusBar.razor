@@ -6,13 +6,6 @@
 <span class="chip @(Status.State == BlotterState.Live ? "live" : "behind")" title="@Status.Refusal">
     <b>@Status.State</b>
 </span>
-<span class="chip" title="How orders_current keeps up with order_versions: a trigger in the same statement, or a job of its own that runs behind">
-    <span class="label">orders_current by</span><b>@(Status.Sync == CurrentSync.Trigger ? "trigger" : "lagging job")</b>
-    @if (Status.Sync == CurrentSync.Lagging)
-    {
-        <span class="label @(Status.CurrentStalled ? "stalled" : "")">behind by</span>@Status.CurrentWaiting.ToString("N0", CultureInfo.InvariantCulture)
-    }
-</span>
 <span class="chip" title="Changes a second the house is making now, and the versions and fills the streams have sent">
     <span class="label">feed</span><b>@Status.FeedRate.ToString("N0", CultureInfo.InvariantCulture)/s</b>
     <span class="label">sent</span>@Status.Published.ToString("N0", CultureInfo.InvariantCulture)
@@ -33,6 +26,13 @@
 }
 else
 {
+<span class="chip" title="How orders_current keeps up with order_versions: a trigger in the same statement, or a job of its own that runs behind">
+    <span class="label">orders_current by</span><b>@(Status.Sync == CurrentSync.Trigger ? "trigger" : "lagging job")</b>
+    @if (Status.Sync == CurrentSync.Lagging)
+    {
+        <span class="label @(Status.CurrentStalled ? "stalled" : "")">behind by</span>@Status.CurrentWaiting.ToString("N0", CultureInfo.InvariantCulture)
+    }
+</span>
 <span class="chip @(Status.IngestionStalled ? "stalled" : "")" title="PostgreSQL's database on disk, outside the host's budget; how long ago the oldest row it has not been seen to hold was sent; the process's managed heap, for comparison; and the longest any statement may run before it is stopped">
     <span class="label">PostgreSQL</span><b>@Mb(Status.DatabaseBytes)</b>
     <span class="label">behind</span>@Seconds(Status.Behind)
