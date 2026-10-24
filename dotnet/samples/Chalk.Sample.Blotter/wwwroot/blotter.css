@@ -43,6 +43,9 @@ body {
 main { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 10px; height: 100vh; }
 
 h1 { font-size: 16px; margin: 0; font-weight: 600; }
+/* Blazor focuses the heading on each navigation, so a screen reader announces the page; the focus
+   stays, but nothing is drawn around it. */
+h1:focus { outline: none; }
 
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .bar.telemetry { gap: 6px 10px; }
