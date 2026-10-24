@@ -231,7 +231,8 @@ window.blotter = {
 // Escape closes what is open over the page: the link menu here, the grid's editor, alerts and column
 // chooser on the grid, and the splash that asks for sound.
 document.addEventListener("keydown", event => {
-    if (event.key !== "Escape") {
+    // An editor that took the key, closing its list of suggestions, leaves the rest open.
+    if (event.key !== "Escape" || event.defaultPrevented) {
         return;
     }
 

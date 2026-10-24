@@ -246,18 +246,28 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
 
 **Alerts**
 
-- **A saved filter with a sound.** The bell on the tab bar opens the alerts: each is a tab's filters,
-  saved in the browser, with one of 22 short recorded sounds and a throttle. A new one takes the tab's
-  filters as they are; each can be heard, muted or removed.
-- **Evaluated by the host, from the streams.** Every order version and fill the streams send is
-  weighed against each rule as the host reads it, however far behind a grid has fallen and whether or
-  not a page is open. A fill fires a rule when it passes the filter; an order, when a version of it
-  comes to pass the filter, and not again until it has left it. Within its throttle, a rule gathers
-  its rows and sounds once, saying how many (×26).
-- **Or on a wait.** A rule may fire instead once a row that passes its filter has waited more than 1,
-  2, 5, 10 or 30 s for the database (its Recon): once for each wait, a newer version starting a new
-  one. The host weighs the tail against these rules four times a second, from the same record of each
-  row's wait the grid shows. Stall the database to hear one.
+- **A condition in SQL, with a sound.** The bell on the tab bar opens the alerts: each is a condition
+  on a tab's rows, saved in the browser, with one of 22 short recorded sounds and a throttle. A new one
+  starts from the tab's filters, written as SQL (`client = 'CEDAR' AND qty >= 10`); each can be heard,
+  muted or removed. A fill's condition can read its order along a path: `order.status = 'Partial'`.
+- **An editor that knows the tab.** The condition is written in CodeMirror 6, bundled into
+  `wwwroot/condition-editor.js` from `editor/` (MIT; the notice is beside it). The host completes it:
+  columns and paths where a comparison starts, the order's columns after `order.`, operators after a
+  name, and values after one, a choice's own or a text column's most frequent of the last day, read
+  through ChalkQL. It marks names it does not know where they are, and then asks ChalkQL to prepare the
+  statement and shows what ChalkQL refuses. A condition ChalkQL refuses is not added.
+- **Run by ChalkQL, from the streams.** What the streams send goes into two in-memory tables,
+  `live.arrived_orders` and `live.arrived_fills`, kept ten seconds while any browser has an alert, at the
+  same refresh as the tail. Each distinct condition is then the `WHERE` of one statement over them,
+  run once for every browser that has it, however far behind a grid has fallen and whether or not a
+  page is open. A path is a join to the tail and to `orders_current` by key, the newer version
+  standing. A fill fires a rule when it passes the condition; an order, when a version of it comes to
+  pass it, and not again until it has left it. Within its throttle, a rule gathers its rows and sounds
+  once, saying how many (×26).
+- **Or on a wait.** A rule may fire instead once a row that passes its condition has waited more than
+  1, 2, 5, 10 or 30 s for the database (its Recon): once for each wait, a newer version starting a new
+  one. Four times a second, the rows past the wait are weighed by ChalkQL against the tail, each
+  version once. Stall the database to hear one.
 - **None missed.** A browser's alerts wait until a page of it has sounded them. A page opened again
   within 10 minutes says what fired meanwhile.
 - **Sound** is a recording in `wwwroot/sounds`, mono and 8-bit (about 280 KB for all 22), served at a
@@ -479,8 +489,9 @@ BLOTTER_PROBE_SECONDS=300 BLOTTER_PROBE_ORDERS=5000000 dotnet test dotnet/tests/
 ```
 
 `SortSpecTests`, `FilterSpecTests`, `ColumnsTests`, `ViewLinkTests`, `AlertSessionTests`, `FlashesTests`,
-`NestingTests` and `TailTests` cover the host's own rules: sorting, filtering, number formats, links and
-their shrouding, alerts and their throttles, and how long each row waits for the database.
+`NestingTests`, `TailTests` and `ConditionTests` cover the host's own rules: sorting, filtering, number
+formats, links and their shrouding, alerts and their throttles, how long each row waits for the
+database, and alert conditions: their names, paths, refusals and completions.
 
 ## Aspirational mechanical sympathy
 
@@ -517,9 +528,11 @@ marks a place where the host approximates or does extra work because of it.
   would be a feature of its own, switched on by choice, sized against the budget, and refused when
   the open orders do not fit. ChalkQL's engine clock (`@now`) lets a standing view's filter move
   with time, so the alert itself, "open for more than five minutes", can be one.
-- Alert conditions written in SQL and run by ChalkQL as standing views, rather than matched in the
-  host, so that they read as the grid's filters do and an access policy can apply to them; with
-  paths, such as `order.status` in a fill's alert, as a feature of ChalkQL itself.
+- Alert conditions run as ChalkQL standing views rather than statements over each batch, so that an
+  access policy can apply to them; and paths, such as `order.status`, as a feature of ChalkQL itself.
+  As built here, the host writes a path as two joins, the database's side read for the keys the rows
+  name; ChalkQL plans that well while the local tables have rows, but while they are empty it plans a
+  nested loop and then refuses it, so a fill's condition along `order.` can be refused for a while.
 - A refusal by query cost estimate.
 - Use of Tapline could greatly improve scalability. On Blazor Server the grid renders on the server, and ChalkQL's views already give each
   reader what changed. Tapline would carry the same answers to a WebAssembly grid, headless clients or

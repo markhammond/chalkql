@@ -459,6 +459,54 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         await host.ReleaseAsync(scope);
     }
 
+    [Fact]
+    public async Task Alert_conditions_are_run_by_ChalkQL_along_paths_and_on_the_wait_and_what_it_refuses_is_refused()
+    {
+        await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() });
+        await using var desk = new AlertDesk(host, NullLogger<AlertDesk>.Instance);
+        var session = desk.Open("browser");
+        var fired = new List<AlertEvent>();
+        session.Fired += alert => { lock (fired) fired.Add(alert); };
+        AlertRule Rule(string id, Tab tab, string condition, TimeSpan? lagOver = null) => new(
+            id, id, Condition.Parse(tab, condition), AlertSounds.Default, TimeSpan.FromSeconds(1), false, lagOver);
+        session.SetRules(
+        [
+            Rule("partial", Tabs.Fills, "order.status = 'Partial' AND qty > 0"),
+            Rule("filled", Tabs.Orders, "status = 'Filled'"),
+            Rule("nobody", Tabs.Orders, "client = 'NOBODY'"),
+            Rule("late", Tabs.Fills, "order.client = client", TimeSpan.FromSeconds(1)),
+        ]);
+
+        // The desk keeps the arrival tables while an alert wants them.
+        await UntilAsync(() => host.KeepArrivals);
+        host.Exchange.Send(400);
+        await UntilAsync(() => Fired("partial") && Fired("filled"), TimeSpan.FromSeconds(15));
+
+        // A wait for the database fires the rule that watches it, and says how long.
+        host.Exchange.StallIngestion(TimeSpan.FromSeconds(5));
+        host.Exchange.Send(100);
+        await UntilAsync(() => Fired("late"), TimeSpan.FromSeconds(15));
+        lock (fired)
+        {
+            Assert.DoesNotContain(fired, a => a.RuleId == "nobody");
+            Assert.Contains("waiting for the database", fired.First(a => a.RuleId == "late").Latest, StringComparison.Ordinal);
+            output.WriteLine(string.Join("\n", fired.Select(a => $"{a.RuleId} ×{a.Count}: {a.Latest}")));
+        }
+
+        // What ChalkQL refuses, the desk refuses before a browser keeps it.
+        Assert.Null(await desk.CheckAsync(Condition.Parse(Tabs.Fills, "order.status IN ('New', 'Partial') AND price > 0"), CancellationToken.None));
+        Assert.NotNull(await desk.CheckAsync(Condition.Parse(Tabs.Fills, "qty = 'x'"), CancellationToken.None));
+        Assert.Equal("Fills has no column 'nope'", await desk.CheckAsync(Condition.Parse(Tabs.Fills, "nope = 1"), CancellationToken.None));
+
+        bool Fired(string rule)
+        {
+            lock (fired)
+            {
+                return fired.Any(a => a.RuleId == rule);
+            }
+        }
+    }
+
     /// <summary>A scope, once the host serves again: a page asks again after a refusal, as this does.</summary>
     private static async Task<LiveScope> AcquireWhenServingAsync(BlotterHost host, Tab tab)
     {

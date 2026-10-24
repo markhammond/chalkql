@@ -18,8 +18,10 @@ public sealed class Tab
     public Tab(
         string name, string title, IReadOnlyList<Column> columns, Column key, Column time, string table,
         string select, Func<RecordBatch, int, IRow> read, Func<DbDataReader, IRow> readDb, bool overrides, int frozen,
-        IReadOnlySet<string>? hiddenAtFirst = null, bool home = false, Func<IRow, string>? describe = null)
+        IReadOnlySet<string>? hiddenAtFirst = null, bool home = false, Func<IRow, string>? describe = null,
+        IReadOnlyList<TabPath>? paths = null)
     {
+        Paths = paths ?? [];
         HiddenAtFirst = hiddenAtFirst ?? ImmutableHashSet<string>.Empty;
         Home = home;
         Describe = describe ?? (row => row.Id.ToString());
@@ -79,6 +81,9 @@ public sealed class Tab
 
     /// <summary>A row in a line, as an alert or a notification says what fired it.</summary>
     public Func<IRow, string> Describe { get; }
+
+    /// <summary>The paths from this tab's rows to other tabs' rows, which a condition reads along.</summary>
+    public IReadOnlyList<TabPath> Paths { get; }
 
     public Column Named(string name) =>
         Columns.FirstOrDefault(c => c.Name == name) ?? throw new ArgumentException($"{Name} has no column '{name}'", nameof(name));

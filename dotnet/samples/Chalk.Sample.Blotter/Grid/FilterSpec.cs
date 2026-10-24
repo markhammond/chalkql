@@ -329,6 +329,47 @@ public sealed class FilterSpec
         return string.Join(" AND ", conditions);
     }
 
+    /// <summary>The same conditions as an alert's condition writes them: in SQL, the values written in.</summary>
+    public string Condition()
+    {
+        var conditions = new List<string>();
+        foreach (var filter in Columns)
+        {
+            var column = filter.Column;
+            if (!filter.Values.IsEmpty)
+            {
+                var values = filter.Values
+                    .Select(v => column.Kind == ColumnKind.Id ? Grid.Condition.Literal(column, Guid.TryParse(v, out var id) ? id : Guid.Empty) : Grid.Condition.Quote(v))
+                    .ToList();
+                conditions.Add(filter.Match == TextMatch.StartsWith && column.Kind != ColumnKind.Id
+                    ? "(" + string.Join(" OR ", filter.Values.Select(v => $"{column.Name} LIKE {Grid.Condition.Quote(Escape(v) + "%")}" + (Escape(v) != v ? " ESCAPE '\\'" : ""))) + ")"
+                    : values.Count == 1 ? $"{column.Name} = {values[0]}" : $"{column.Name} IN ({string.Join(", ", values)})");
+            }
+
+            if (filter.Min is { } min)
+            {
+                conditions.Add($"{column.Name} >= {Grid.Condition.Literal(column, column.Bind(min))}");
+            }
+
+            if (filter.Max is { } max)
+            {
+                conditions.Add($"{column.Name} <= {Grid.Condition.Literal(column, column.Bind(max))}");
+            }
+
+            if (filter.From is { } from)
+            {
+                conditions.Add($"{column.Name} >= {Grid.Condition.Literal(column, from)}");
+            }
+
+            if (filter.To is { } to)
+            {
+                conditions.Add($"{column.Name} < {Grid.Condition.Literal(column, to)}");
+            }
+        }
+
+        return string.Join(" AND ", conditions);
+    }
+
     public override string ToString() => Name;
 
     /// <summary>A typed value matched literally by <c>LIKE … ESCAPE '\'</c>: its wildcards and the escape itself escaped.</summary>

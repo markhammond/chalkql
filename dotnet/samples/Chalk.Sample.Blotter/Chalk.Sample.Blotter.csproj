@@ -5,6 +5,8 @@
     <AssemblyName>Chalk.Sample.Blotter</AssemblyName>
     <!-- Incremental maintenance of the live scopes is experimental (CHALK003): acknowledged here. -->
     <NoWarn>$(NoWarn);CHALK003</NoWarn>
+    <!-- The condition editor's sources, bundled by hand into wwwroot (see editor/package.json). -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);editor/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

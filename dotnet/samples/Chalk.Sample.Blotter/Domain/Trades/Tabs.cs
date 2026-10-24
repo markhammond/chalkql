@@ -93,6 +93,7 @@ public static class Tabs
             overrides: false,
             frozen: 2,
             hiddenAtFirst: ImmutableHashSet.Create(StringComparer.Ordinal, "region", "channel"),
+            paths: [new TabPath("order", Orders, "order_id", "The fill's order, at the newest version the host or the database knows")],
             describe: row => row is Fill f
                 ? string.Create(CultureInfo.InvariantCulture, $"{f.Client} {f.Side} {Column.Finance(f.Qty, 4)} {f.Instrument} @ {Column.Significant(f.Price)}")
                 : row.Id.ToString());

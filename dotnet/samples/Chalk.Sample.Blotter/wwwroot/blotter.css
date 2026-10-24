@@ -228,6 +228,9 @@ main:not(:hover) .actions:not(:focus-within) { opacity: 0; pointer-events: none;
 .alerts-list td { padding: 4px 6px 4px 0; border-top: 1px solid var(--line); vertical-align: top; }
 .alerts-actions { white-space: nowrap; text-align: right; }
 .alerts-list td.alerts-settings { display: flex; flex-wrap: wrap; gap: 4px; }
+.alerts-list code, .alerts-how code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; }
+.alerts-new .condition-editor { flex: 1 1 100%; min-width: 0; }
+.alerts-refused { flex: 1 1 100%; color: var(--bad, #c0392b); }
 .alerts-how { margin: 0; }
 .alerts-new { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .alerts-panel select, .alerts-panel input[type=text] { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }

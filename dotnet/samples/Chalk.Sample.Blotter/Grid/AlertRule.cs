@@ -47,14 +47,14 @@ public static class AlertSounds
 }
 
 /// <summary>
-/// An alert: a tab's filter, saved, with a sound and a throttle. It fires when a row comes to pass the
-/// filter: a fill that passes it, or an order whose version passes it when the one before did not. With
-/// <see cref="LagOver"/>, it fires instead when a row that passes the filter has waited longer than that
-/// for the database to hold it: once for each wait.
-/// Fired again within <see cref="Throttle"/>, it sounds once when the throttle allows, saying how many.
+/// An alert: a condition on a tab's rows, in SQL, with a sound and a throttle. It fires when a row
+/// comes to pass the condition: a fill that passes it, or an order whose version passes it when the
+/// one before did not. With <see cref="LagOver"/>, it fires instead when a row that passes the
+/// condition has waited longer than that for the database to hold it: once for each wait. Fired
+/// again within <see cref="Throttle"/>, it sounds once when the throttle allows, saying how many.
 /// </summary>
 public sealed record AlertRule(
-    string Id, string Name, Tab Tab, FilterSpec Filter, string Sound, TimeSpan Throttle, bool Muted, TimeSpan? LagOver = null)
+    string Id, string Name, Condition Condition, string Sound, TimeSpan Throttle, bool Muted, TimeSpan? LagOver = null)
 {
     /// <summary>The throttles a rule may have.</summary>
     public static readonly TimeSpan[] Throttles =
@@ -64,21 +64,44 @@ public sealed record AlertRule(
     public static readonly TimeSpan[] Lags =
         [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30)];
 
-    public bool Matches(IRow row) => Filter.Columns.All(f => f.Matches(row));
+    public Tab Tab => Condition.Tab;
 
-    /// <summary>As the browser keeps it: the filter as a view's readable link.</summary>
+    /// <summary>As the browser keeps it.</summary>
     public SavedRule Save() => new(
-        Id, Name, new ViewLink(Tab, Tab.DefaultSort, Filter, Tab.HiddenAtFirst, null).Query(), Sound, Throttle.TotalSeconds, Muted,
-        LagOver?.TotalSeconds);
+        Id, Name, null, Sound, Throttle.TotalSeconds, Muted, LagOver?.TotalSeconds, Tab.Name, Condition.Text);
 
-    /// <summary>A rule the browser kept, on one of <paramref name="tabs"/>.</summary>
+    /// <summary>
+    /// A rule the browser kept, on one of <paramref name="tabs"/>. One kept before conditions were
+    /// written in SQL keeps its filter as a view's link, and takes it as the condition it means.
+    /// </summary>
     /// <exception cref="ArgumentException">It is not a rule: said why.</exception>
     public static AlertRule Load(SavedRule saved, IReadOnlyList<Tab> tabs)
     {
-        var view = ViewLink.Parse(saved.View, tabs);
-        if (!view.Sort.IsDefault || view.At is not null || !view.Hidden.SetEquals(view.Tab.HiddenAtFirst))
+        Condition condition;
+        if (saved.Condition is { } text)
         {
-            throw new ArgumentException($"the alert '{saved.Name}' is not a filter alone");
+            var tab = tabs.FirstOrDefault(t => t.Name == saved.Tab)
+                ?? throw new ArgumentException($"the alert '{saved.Name}' is on no tab '{saved.Tab}'");
+            condition = Condition.Parse(tab, text);
+        }
+        else if (saved.View is { } link)
+        {
+            var view = ViewLink.Parse(link, tabs);
+            if (!view.Sort.IsDefault || view.At is not null || !view.Hidden.SetEquals(view.Tab.HiddenAtFirst))
+            {
+                throw new ArgumentException($"the alert '{saved.Name}' is not a filter alone");
+            }
+
+            condition = Condition.Parse(view.Tab, view.Filter.Condition());
+        }
+        else
+        {
+            throw new ArgumentException($"the alert '{saved.Name}' has no condition");
+        }
+
+        if (!condition.Errors.IsEmpty)
+        {
+            throw new ArgumentException($"the alert '{saved.Name}': {condition.Errors[0].Message}");
         }
 
         // The sounds the page once drew itself, two of which have recordings like them now.
@@ -94,10 +117,14 @@ public sealed record AlertRule(
                 ? known
                 : throw new ArgumentException($"the alert '{saved.Name}' waits {seconds} s for the database, which is not one of the waits offered")
             : (TimeSpan?)null;
-        return new AlertRule(saved.Id, saved.Name, view.Tab, view.Filter, sound, throttle, saved.Muted, lag);
+        return new AlertRule(saved.Id, saved.Name, condition, sound, throttle, saved.Muted, lag);
     }
 }
 
-/// <summary>An alert as the browser keeps it, in its local settings.</summary>
+/// <summary>
+/// An alert as the browser keeps it, in its local settings: its tab and condition, or, kept before
+/// conditions were written in SQL, its filter as a view's link.
+/// </summary>
 public sealed record SavedRule(
-    string Id, string Name, string View, string Sound, double ThrottleSeconds, bool Muted, double? LagOverSeconds = null);
+    string Id, string Name, string? View, string Sound, double ThrottleSeconds, bool Muted, double? LagOverSeconds = null,
+    string? Tab = null, string? Condition = null);

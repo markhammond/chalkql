@@ -76,6 +76,12 @@ public sealed class BlotterHost : IAsyncDisposable
     private PocoTable<TailRow>? _tailTable;
     private PocoTable<Fill>? _fillsTable;
     private PocoTable<Order>? _versionsTable;
+    private PocoTable<Order>? _arrivedOrdersTable;
+    private PocoTable<Fill>? _arrivedFillsTable;
+
+    // What the streams sent, kept a while for alert conditions to read, oldest first.
+    private readonly Queue<(DateTime At, List<Order> Versions, List<Fill> Fills)> _arrived = new();
+    private long _arrivedRows;
     private ChannelReader<Order[]>? _orderFeed;
     private ChannelReader<Fill[]>? _fillFeed;
     private Task? _loop;
@@ -146,6 +152,21 @@ public sealed class BlotterHost : IAsyncDisposable
     /// On the ingest loop: a handler only takes note.
     /// </summary>
     public event Action<IReadOnlyList<Order>, IReadOnlyList<Fill>>? Arrived;
+
+    /// <summary>
+    /// Whether to keep what the streams send in <c>live.arrived_orders</c> and <c>live.arrived_fills</c>,
+    /// for <see cref="ArrivedFor"/>, for alert conditions to read: while any browser has an alert.
+    /// </summary>
+    public bool KeepArrivals { get; set; }
+
+    /// <summary>How long what the streams sent stays in the arrival tables.</summary>
+    public static readonly TimeSpan ArrivedFor = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Raised on the ingest loop once what the streams sent is in the arrival tables, at the refresh
+    /// that put it there: an alert condition run after this reads it.
+    /// </summary>
+    public event Action<IReadOnlyList<Order>, IReadOnlyList<Fill>>? ArrivalsKept;
 
     /// <summary>How long the database has taken to hold each row in the tail, as of the latest state.</summary>
     public ImmutableDictionary<Guid, Reconciliation> Reconciling => _tail.Reconciling;
@@ -220,7 +241,15 @@ public sealed class BlotterHost : IAsyncDisposable
                 out PocoTable<Order> versions,
                 t => t.Keyed(v => v.OrderId, v => v.Version))
             .AddTable("tail_fills", (IReadOnlyList<Fill>)[], out PocoTable<Fill> fills, t => t.Keyed(f => f.FillId))
+            .AddTable(
+                "arrived_orders",
+                (IReadOnlyList<Order>)[],
+                out PocoTable<Order> arrivedOrders,
+                t => t.Keyed(v => v.OrderId, v => v.Version))
+            .AddTable("arrived_fills", (IReadOnlyList<Fill>)[], out PocoTable<Fill> arrivedFills, t => t.Keyed(f => f.FillId))
             .Build();
+        _arrivedOrdersTable = arrivedOrders;
+        _arrivedFillsTable = arrivedFills;
         _tailTable = tail;
         _versionsTable = versions;
         _fillsTable = fills;
@@ -492,6 +521,8 @@ public sealed class BlotterHost : IAsyncDisposable
         var versionsIn = new List<Order>(moreOrders);
         var fillsIn = new List<Fill>(moreFills);
         var (ordersThrough, fillsThrough) = (_ordersThrough, _fillsThrough);
+        List<Order> arrivedVersions = [];
+        List<Fill> arrivedFills = [];
         if (_orderFeed is not null && _fillFeed is not null)
         {
             var sent = versionsIn.Count;
@@ -515,6 +546,10 @@ public sealed class BlotterHost : IAsyncDisposable
             if (versionsIn.Count > sent || fillsIn.Count > sentFills)
             {
                 Arrived?.Invoke(versionsIn[sent..], fillsIn[sentFills..]);
+                if (KeepArrivals)
+                {
+                    (arrivedVersions, arrivedFills) = (versionsIn[sent..], fillsIn[sentFills..]);
+                }
             }
         }
 
@@ -567,7 +602,17 @@ public sealed class BlotterHost : IAsyncDisposable
             upserts[version.OrderId] = TailRow.Of(version, entry.Base);
         }
 
-        if (upserts.Count > 0 || fills.Count > 0)
+        // What the streams sent goes into the arrival tables at the same refresh, and what has been
+        // there long enough leaves; all of it, once no alert wants it.
+        var expired = new List<(DateTime At, List<Order> Versions, List<Fill> Fills)>();
+        var keepFrom = KeepArrivals ? DateTime.UtcNow - ArrivedFor : DateTime.MaxValue;
+        while (_arrived.TryPeek(out var oldest) && oldest.At < keepFrom)
+        {
+            expired.Add(_arrived.Dequeue());
+        }
+
+        var arrivals = arrivedVersions.Count + arrivedFills.Count;
+        if (upserts.Count > 0 || fills.Count > 0 || arrivals > 0 || expired.Count > 0)
         {
             var tailRows = upserts.Values.ToList();
             await RefreshAsync(refresh =>
@@ -581,7 +626,34 @@ public sealed class BlotterHost : IAsyncDisposable
                 {
                     refresh.Upsert(_fillsTable!, fills);
                 }
+
+                if (expired.SelectMany(e => e.Versions).ToList() is [_, ..] goneVersions)
+                {
+                    refresh.Delete(_arrivedOrdersTable!, goneVersions);
+                }
+
+                if (expired.SelectMany(e => e.Fills).ToList() is [_, ..] goneFills)
+                {
+                    refresh.Delete(_arrivedFillsTable!, goneFills);
+                }
+
+                if (arrivedVersions.Count > 0)
+                {
+                    refresh.Upsert(_arrivedOrdersTable!, arrivedVersions);
+                }
+
+                if (arrivedFills.Count > 0)
+                {
+                    refresh.Upsert(_arrivedFillsTable!, arrivedFills);
+                }
             }, ordersThrough, fillsThrough, ct).ConfigureAwait(false);
+            _arrivedRows += arrivals - expired.Sum(e => e.Versions.Count + e.Fills.Count);
+            if (arrivals > 0)
+            {
+                _arrived.Enqueue((DateTime.UtcNow, arrivedVersions, arrivedFills));
+                ArrivalsKept?.Invoke(arrivedVersions, arrivedFills);
+            }
+
             Status = Status with
             {
                 LastRefreshMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds,
@@ -1003,7 +1075,8 @@ public sealed class BlotterHost : IAsyncDisposable
     }
 
     /// <summary>What the host cannot give back without dropping a version: the tail, and the scopes over it.</summary>
-    private long LiveBytes() => _tail.Bytes + _scopes.Values.Sum(s => s.ViewBytes + s.State.Bytes);
+    private long LiveBytes() =>
+        _tail.Bytes + _scopes.Values.Sum(s => s.ViewBytes + s.State.Bytes) + Interlocked.Read(ref _arrivedRows) * 2 * Order.Bytes;
 
     /// <summary>The rows the kept windows may hold: their share of the budget, or what the tail and the scopes leave, whichever is less.</summary>
     private long PageRows()
