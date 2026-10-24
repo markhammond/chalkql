@@ -266,6 +266,54 @@ component still speak of orders and fills.
 
 ## How it works
 
+Who does what, lane by lane: the house writes to PostgreSQL late, and streams to the host at once; the
+host reads PostgreSQL live, lays its tail over each page, and weighs every row the streams send
+against the alerts.
+
+```mermaid
+flowchart TB
+    subgraph House["The house (Fixtures)"]
+        direction LR
+        Exchange["Exchange<br/>takes orders, fills them"]
+        Jobs["Ingestion jobs<br/>0.15 to 3 s behind, and stalling"]
+        Exchange -->|"versions, fills"| Jobs
+    end
+
+    subgraph Database["PostgreSQL: the system of record"]
+        direction LR
+        Versions[("order_versions")]
+        Current[("orders_current")]
+        FillsTable[("fills")]
+        Versions -->|"trigger, or a lagging job"| Current
+    end
+
+    subgraph Host["The host: .NET, with ChalkQL"]
+        direction LR
+        Tail["Tail<br/>sent, not yet seen in the database"]
+        Scopes["Live scopes<br/>a standing view per filter"]
+        Pages["Pages<br/>keyset reads, merged with the tail"]
+        Desk["Alert desk<br/>each row against each rule"]
+        Tail -->|"one refresh, one version"| Scopes
+        Scopes --> Pages
+    end
+
+    subgraph Browser["The browser"]
+        direction LR
+        Grid["QuickGrid<br/>virtualized"]
+        Alerts["Sounds, red dots,<br/>notifications"]
+    end
+
+    Jobs --> Versions
+    Jobs --> FillsTable
+    Exchange -->|"order and fill streams"| Tail
+    Exchange -->|"order and fill streams"| Desk
+    Current -->|"pushed down: filter, sort, seek, limit"| Pages
+    FillsTable -->|"pushed down: filter, sort, seek, limit"| Pages
+    Tail -.->|"confirmed by key every 0.5 s"| Current
+    Pages -->|"rows by position"| Grid
+    Desk -->|"throttled, kept until sounded"| Alerts
+```
+
 Each tab is two halves, merged.
 
 1. **The database, read live.** For orders, `orders_current`; for fills, `fills`. Read through ChalkQL
@@ -280,6 +328,32 @@ the database holds at the tail's version or later, and a fill it holds, is confi
 tail five seconds later. That is a second longer than a window of the database's rows is kept (below),
 so no page merges a database read from before a version landed with a tail that has already let it go.
 A version the database holds already when the stream sends it never enters the tail.
+
+A page, as the grid asks for it:
+
+```mermaid
+sequenceDiagram
+    participant Grid as QuickGrid
+    participant Pages as Pages and PageView
+    participant Windows as Kept windows
+    participant PG as PostgreSQL via ChalkQL
+    participant Scope as Live scope
+    Grid->>Pages: rows 4,200 to 4,260
+    Pages->>Pages: nearest position known, and its row's key
+    Pages->>Windows: a window from that key?
+    alt the window covers it
+        Windows-->>Pages: the database's rows, read in the last 4 s
+    else
+        Pages->>PG: SELECT ... WHERE key after k ORDER BY ... LIMIT 128
+        PG-->>Pages: the database's rows
+        Pages->>Windows: keep, shared by readers of the same sort and filter
+    end
+    Pages->>Scope: the tail's rows between the first key and the last row read
+    Scope-->>Pages: newer versions, and rows the database has not got yet
+    Pages->>Pages: merge: each row once, at the newest version either side knows
+    Pages-->>Grid: 61 rows, and the total as far as known
+    Pages-)PG: read ahead, in the direction of scrolling
+```
 
 **Reading a page.** A page is read from a key: the database's first rows at or after it in the tab's
 order, then every tail row between that key and the last row read. The read decides nothing past its
