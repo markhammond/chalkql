@@ -110,9 +110,15 @@
                         }
                         else
                         {
-                        @* The whole heading sorts, its label button too (a click on it reaches the heading); the funnel does not. *@
+                        @* The whole heading sorts, its label button too (a click on it reaches the heading); the funnel does not.
+                           The funnel sits just before the label, in the gutter every column keeps at its left. *@
                         <div class="head @(column.Numeric ? "num" : "")" @onclick="e => SortAsync(column, e.ShiftKey)"
                              title="@(column.Description is { } about ? about + ". " : "")Click to sort by @column.Title, descending, then ascending, then not; shift-click to do the same within a sort by several columns">
+                            <span class="label">
+                            <button type="button" class="funnel @(_filter.For(column) is not null ? "on" : "") @(_editing == column ? "open" : "")"
+                                    title="Filter @column.Title" aria-label="Filter @column.Title" @onclick="() => OpenEditor(column)" @onclick:stopPropagation>
+                                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M1.5 2h13l-5 6.2V14l-3-1.6V8.2z" /></svg>
+                            </button>
                             <button class="sort" type="button">
                                 @column.Title
                                 @* The arrow keeps its place when the column is not sorted, so the heading is as wide either way. *@
@@ -122,10 +128,7 @@
                                     <span class="rank">@rank</span>
                                 }
                             </button>
-                            <button type="button" class="funnel @(_filter.For(column) is not null ? "on" : "") @(_editing == column ? "open" : "")"
-                                    title="Filter @column.Title" aria-label="Filter @column.Title" @onclick="() => OpenEditor(column)" @onclick:stopPropagation>
-                                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M1.5 2h13l-5 6.2V14l-3-1.6V8.2z" /></svg>
-                            </button>
+                            </span>
                         </div>
                         }
                     </HeaderTemplate>

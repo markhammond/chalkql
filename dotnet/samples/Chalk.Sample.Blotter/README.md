@@ -116,8 +116,9 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
 - **Numbers as finance writes them:** no zero before the point of a fraction, none after its last digit
   that counts (.25, not 0.2500), and a dash for nought. Prices are rounded to six significant figures,
   and written in scientific notation (1.23457e-5) where they would take more than eight digits. Every
-  value is in the system's monospace, its zeros slashed. Columns 1.5em apart, a heading keeping room for its sort
-  arrow whether or not its column is sorted.
+  value is in the system's monospace, its zeros slashed. Columns 2em apart, each with a gutter at its left that
+  holds its heading's funnel; a heading keeps room for its sort arrow whether or not its column is
+  sorted.
 - **To an order's page.** An order's id opens its page: every version and every fill, read from the
   database and the live tail in one statement each. A fill's id opens its order's page, that fill
   marked. The ↗ after the id shows while the pointer is on its row.

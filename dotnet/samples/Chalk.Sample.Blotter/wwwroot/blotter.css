@@ -113,10 +113,11 @@ thead th {
     position: sticky; top: 0; z-index: 2; background: var(--panel);
     border-bottom: 1px solid var(--line); text-align: left; padding: 0; font-weight: 600;
 }
-/* Columns are 1.5em apart: three-quarters of an em either side of each value. */
+/* Columns are 2em apart: three-quarters of an em after each value, an em and a quarter before it, a
+   gutter that holds the heading's funnel. */
 .sort {
     all: unset; display: flex; gap: 2px; align-items: center; width: 100%;
-    padding: 7px 1px 7px 0.75em; cursor: pointer; box-sizing: border-box; user-select: none; white-space: nowrap;
+    padding: 7px 1px 7px 1.25em; cursor: pointer; box-sizing: border-box; user-select: none; white-space: nowrap;
 }
 .sort .arrow.unsorted { visibility: hidden; }
 .sort .arrow { color: var(--accent); font-size: 11px; }
@@ -126,7 +127,7 @@ th.num .sort { justify-content: flex-end; }
 tbody tr { height: 30px; }
 tbody tr:nth-child(even) { background: var(--row-alt); }
 td { padding: 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
-td .cell { display: block; padding: 0 0.75em; line-height: 29px; overflow: hidden; text-overflow: ellipsis; }
+td .cell { display: block; padding: 0 0.75em 0 1.25em; line-height: 29px; overflow: hidden; text-overflow: ellipsis; }
 td.num .cell { text-align: right; }
 td a { color: var(--accent); text-decoration: none; }
 /* An id that opens its order's page: the whole id is the link, in the row's own colour; its arrow
@@ -195,18 +196,20 @@ h2 { font-size: 14px; margin: 8px 0 0; }
 /* Opens a section under the grid: grey, its chevron set in a little from the edge. */
 .link-button.disclosure { color: var(--muted); padding-left: 0.35em; }
 
-/* A heading is its label, then its funnel just after it: at the left of a text column, at the right
-   of a number column. The funnel shows on hover, or while the column is filtered or its filter open;
-   hidden, it still keeps its place, so nothing moves when it shows. */
+/* A heading is its label, at the left of a text column, at the right of a number column, with its
+   funnel just before it, in the column's gutter, so it takes no room of its own. The funnel shows on
+   hover, or while the column is filtered or its filter open. */
 .head { display: flex; align-items: center; justify-content: flex-start; cursor: pointer; }
 .head.num { justify-content: flex-end; }
 /* A column only shown is not sorted or filtered by: its heading is a label alone. */
 .head.shown, .head.shown .sort { cursor: default; }
 /* With no arrow or funnel after it, its label ends where the values do. */
 .head.shown .sort { padding-right: 0.75em; }
+.head .label { position: relative; display: flex; min-width: 0; }
 .head .sort { flex: 0 1 auto; width: auto; min-width: 0; padding-right: 1px; }
 .funnel {
-    border: none; background: transparent; padding: 4px 0.5em 4px 0; cursor: pointer; display: flex; align-items: center;
+    position: absolute; top: 50%; transform: translateY(-50%); left: calc(1.25em - 16px); z-index: 1;
+    border: none; background: transparent; padding: 4px 1px; cursor: pointer; display: flex; align-items: center;
     visibility: hidden;
 }
 .head:hover .funnel, .funnel:focus-visible, .funnel.on, .funnel.open { visibility: visible; }
