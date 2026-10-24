@@ -4,7 +4,6 @@ window.blotterAlerts = (() => {
     const key = "blotter.alerts";
     let audio = null;
     let page = null;
-    let flashing = null;
     let unseen = false;
     const title = document.title;
 
@@ -98,22 +97,16 @@ window.blotterAlerts = (() => {
     link.type = "image/svg+xml";
     link.href = icon(false);
 
-    // The page in the background: a red dot on its icon, and its title flashing the rule's name, until
-    // it is looked at. No count: what matters is that something fired, and what.
-    const flash = rule => {
+    // The page in the background: a red dot on its icon, and on its title, which names the rule last
+    // fired, until it is looked at. Held, not flashed; no count: what matters is that something
+    // fired, and what.
+    const mark = rule => {
         unseen = true;
         link.href = icon(true);
-        clearInterval(flashing);
-        let on = false;
-        flashing = setInterval(() => {
-            on = !on;
-            document.title = on ? `🔔 ${rule}` : title;
-        }, 1000);
+        document.title = `🔴 ${rule} · ${title}`;
     };
     const looked = () => {
         if (unseen && !document.hidden && document.hasFocus()) {
-            clearInterval(flashing);
-            flashing = null;
             unseen = false;
             link.href = icon(false);
             document.title = title;
@@ -178,7 +171,7 @@ window.blotterAlerts = (() => {
                 this.play(alert.sound);
             }
             if (document.hidden || !document.hasFocus()) {
-                flash(alert.ruleName);
+                mark(alert.ruleName);
                 if (notify && "Notification" in window && Notification.permission === "granted") {
                     // The notification is the alert itself: how many rows, and the latest.
                     const words = `${alert.ruleName}${alert.count > 1 ? ` ×${alert.count}` : ""}`;
