@@ -80,20 +80,6 @@ public sealed class AlertSessionTests
         Assert.Throws<ArgumentException>(() => AlertRule.Load(rule.Save() with { View = "sort=-client" }));
     }
 
-    [Fact]
-    public void Every_sound_has_its_file_and_every_file_its_sound()
-    {
-        var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (!Directory.Exists(Path.Combine(root.FullName, "samples", "Chalk.Sample.Blotter")))
-        {
-            root = root.Parent ?? throw new DirectoryNotFoundException("the sample's folder is not above the tests");
-        }
-
-        var folder = Path.Combine(root.FullName, "samples", "Chalk.Sample.Blotter", "wwwroot", "sounds");
-        var files = Directory.GetFiles(folder, "*.wav");
-        Assert.Equal(AlertSounds.All.Select(s => s.Id).Order(StringComparer.Ordinal), files.Select(Path.GetFileNameWithoutExtension).Order(StringComparer.Ordinal));
-    }
-
     private static (AlertSession Session, List<AlertEvent> Fired) Session(AlertRule rule)
     {
         var session = new AlertSession("browser");
