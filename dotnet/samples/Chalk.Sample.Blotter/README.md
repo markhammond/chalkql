@@ -240,6 +240,13 @@ refused for want of budget (a scope that would not fit, or a tail grown past it)
 the next of 16, 32 and 64 MB instead. It never lowers it. Past 64 MB, or once a budget is chosen on the
 page (4 MB is there too, to see the host refuse), a refusal is a refusal.
 
+**Counts.** The grid needs to know about how many rows a tab has, to size its scroll. A filter
+PostgreSQL expects to pass more than 250,000 rows is sized by its estimate (`EXPLAIN`, a few
+milliseconds), as is one whose count was stopped at the time limit, from then on; smaller ones are
+counted. Counting what has arrived above a held view, a slow count leaves the last number; placing a
+shared link's row, a slow count gives way to the estimate. A page that cannot be read leaves the rows
+shown, faded under the reason, rather than emptying the grid.
+
 **The budget** covers what the host holds: the tail, in ChalkQL and in the host; the scopes' views and
 their states; and the windows, counts and fills it keeps for a moment, which may hold a quarter of the
 budget at most and give way first to the tail and the scopes. Past it, the scopes no page is using

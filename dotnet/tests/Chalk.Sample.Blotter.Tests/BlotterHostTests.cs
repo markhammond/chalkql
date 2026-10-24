@@ -278,6 +278,37 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task A_result_larger_than_is_worth_counting_is_postgres_estimate_and_ranks_can_be_estimated()
+    {
+        await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() });
+        var scope = await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
+        var counted = await host.Queries.CountAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
+        var estimate = await host.Queries.EstimateRowsAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
+
+        // The tables are analysed when loaded: the estimate is close.
+        Assert.NotNull(estimate);
+        Assert.InRange(estimate.Value, counted * 0.9, counted * 1.1);
+
+        // Over the threshold, the grid is sized by the estimate, not a count.
+        host.Pages.CountUpTo = 1_000;
+        var filter = FilterSpec.Of([new ColumnFilter { Column = Tab.Orders.Named("qty"), Min = 0 }]);
+        var fresh = await host.AcquireAsync(Tab.Orders, filter, CancellationToken.None);
+        Assert.Equal(
+            await host.Queries.EstimateRowsAsync(Tab.Orders, filter, CancellationToken.None),
+            await host.Pages.DatabaseRowsAsync(fresh.State, CancellationToken.None));
+
+        // A row's place, estimated with its key written into the SQL, every kind of value in it.
+        var order = SortSpec.Of(Tab.Orders, new SortColumn(Tab.Orders.Named("client"), true), new SortColumn(Tab.Orders.Named("qty"), false),
+            new SortColumn(Tab.Orders.Named("order_time"), true));
+        var row = (await host.Pages.FromAsync(scope.State, order, null, true, 200, CancellationToken.None))[^1];
+        var before = await host.Queries.CountBeforeAsync(FilterSpec.None, order, row, CancellationToken.None);
+        var guessed = await host.Queries.EstimateBeforeAsync(FilterSpec.None, order, row, CancellationToken.None);
+        Assert.NotNull(guessed);
+        Assert.InRange(guessed.Value, 0, counted);
+        output.WriteLine($"{before} rows before the row; PostgreSQL guessed {guessed}");
+    }
+
+    [Fact]
     public async Task A_database_too_far_behind_for_the_budget_stops_serving_then_serves_again()
     {
         await using var host = await StartAsync(new BlotterOptions

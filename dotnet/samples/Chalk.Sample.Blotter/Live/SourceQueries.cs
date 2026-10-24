@@ -111,6 +111,41 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
         await CountAsync($"SELECT COUNT(*) AS n FROM {tab.Table} WHERE {filter.Where()}", filter.Parameters(), ct)
             .ConfigureAwait(false);
 
+    /// <summary>About how many rows of the database pass the filter, by PostgreSQL's estimate; none without one.</summary>
+    public async Task<long?> EstimateRowsAsync(Tab tab, FilterSpec filter, CancellationToken ct) =>
+        explain is null ? null : await explain.RowsAsync(tab.Table, filter.Literal(), ct).ConfigureAwait(false);
+
+    /// <summary>About how many rows of the database pass the filter and sort before <paramref name="key"/>, by PostgreSQL's estimate.</summary>
+    public async Task<long?> EstimateBeforeAsync(FilterSpec filter, SortSpec order, IRow key, CancellationToken ct)
+    {
+        if (explain is null)
+        {
+            return null;
+        }
+
+        var values = new Dictionary<string, object?>();
+        var before = Before(order, key, values);
+
+        // The key's values written in, the longest names first, so that @k1 is not taken for the start of @k10.
+        foreach (var (name, value) in values.OrderByDescending(v => v.Key.Length).ThenByDescending(v => v.Key, StringComparer.Ordinal))
+        {
+            before = before.Replace("@" + name, Literal(value), StringComparison.Ordinal);
+        }
+
+        return await explain.RowsAsync(order.Tab.Table, $"{filter.Literal()} AND ({before})", ct).ConfigureAwait(false);
+    }
+
+    /// <summary>A value written into SQL as PostgreSQL takes it.</summary>
+    private static string Literal(object? value) => value switch
+    {
+        DateTime time => string.Create(CultureInfo.InvariantCulture, $"TIMESTAMP '{time:yyyy-MM-dd HH:mm:ss.ffffff}'"),
+        Guid id => $"'{id}'::uuid",
+        string text => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'",
+        double number => number.ToString("R", CultureInfo.InvariantCulture),
+        IFormattable other => other.ToString(null, CultureInfo.InvariantCulture),
+        _ => throw new ArgumentException($"no SQL literal for {value?.GetType().Name ?? "null"}", nameof(value)),
+    };
+
     /// <summary>How many rows of the database pass the filter and sort before <paramref name="key"/>.</summary>
     public async Task<long> CountBeforeAsync(FilterSpec filter, SortSpec order, IRow key, CancellationToken ct)
     {

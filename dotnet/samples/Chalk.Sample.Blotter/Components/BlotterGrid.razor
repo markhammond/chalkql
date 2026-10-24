@@ -384,7 +384,8 @@
         long rank;
         try
         {
-            rank = await Host.Pages.RankAsync(state, _sort, at, CancellationToken.None);
+            // Placing the row, an estimate will do if the count is too slow.
+            rank = await Host.Pages.RankAsync(state, _sort, at, CancellationToken.None, orEstimate: true);
         }
         catch (QueryTimeLimitException limit)
         {
@@ -519,6 +520,12 @@
         var reloads = _reloads;
         var shifted = _shifted;
         var scope = _scope;
+        if (scope is null && _refusal is not null)
+        {
+            // Refused: the rows shown stay, faded under the reason, until the host serves again.
+            throw Keep(request.CancellationToken);
+        }
+
         if (scope is null || !scope.State.Ready)
         {
             return GridItemsProviderResult.From<BlotterRow>([], 0);
@@ -527,7 +534,7 @@
         if (scope.Fault is { } fault)
         {
             await InvokeAsync(() => Refuse($"the live scope failed: {fault.Message}"));
-            return GridItemsProviderResult.From<BlotterRow>([], 0);
+            throw Keep(request.CancellationToken);
         }
 
         var state = scope.State;
@@ -540,11 +547,19 @@
             {
                 // What sorts above the topmost row the view knows, less its position: the rows that
                 // need positions above it. Rows let in while the count is read have moved it down since.
+                // A count stopped at the time limit leaves the last one: it is no reason to fail the page.
                 _hiddenAt = DateTime.UtcNow;
                 var before = _shifted;
-                _hidden = top.At > 100_000
-                    ? 0
-                    : Math.Max(0, await Host.Pages.RankAsync(state, _sort, top.Row, ct) - top.At - (_shifted - before));
+                try
+                {
+                    _hidden = top.At > 100_000
+                        ? 0
+                        : Math.Max(0, await Host.Pages.RankAsync(state, _sort, top.Row, ct) - top.At - (_shifted - before));
+                }
+                catch (QueryTimeLimitException limit)
+                {
+                    Log.LogInformation("rows above the view not counted this time: {Why}", limit.Message);
+                }
             }
 
             var hidden = _hidden;
@@ -617,20 +632,27 @@
         catch (QueryTimeLimitException limit)
         {
             await InvokeAsync(() => Fail(reloads, limit.Message));
-            return GridItemsProviderResult.From<BlotterRow>([], 0);
+            throw Keep(ct);
         }
         catch (BlotterRefusedException refused)
         {
             await InvokeAsync(() => Refuse(refused.Message));
-            return GridItemsProviderResult.From<BlotterRow>([], 0);
+            throw Keep(ct);
         }
         catch (Exception failure)
         {
             Log.LogError(failure, "a page of {Tab} sorted by {Sort}, filtered by {Filter}, could not be read", Tab.Name, _sort, _filter);
             await InvokeAsync(() => Fail(reloads, failure.Message));
-            return GridItemsProviderResult.From<BlotterRow>([], 0);
+            throw Keep(ct);
         }
     }
+
+    /// <summary>
+    /// A page that could not be read leaves the rows shown as they are, faded under the reason, rather
+    /// than emptying the grid: the grid lets a request go, and keeps what it has, when it is cancelled
+    /// with the request's own token.
+    /// </summary>
+    private static OperationCanceledException Keep(CancellationToken request) => new(request);
 
     private long _hiddenShown;
 

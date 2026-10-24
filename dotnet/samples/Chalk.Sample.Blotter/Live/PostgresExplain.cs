@@ -79,6 +79,21 @@ public sealed class PostgresExplain(string connectionString)
             read, sorted is { } s ? s.GetProperty("Plan Rows").GetDouble() : 0, string.Join('\n', text));
     }
 
+    /// <summary>
+    /// The rows PostgreSQL expects <c>WHERE <paramref name="where"/></c> to select from
+    /// <paramref name="table"/>: its estimate, from its statistics, in a few milliseconds, where a
+    /// count may read the table.
+    /// </summary>
+    public async Task<long> RowsAsync(string table, string where, CancellationToken ct)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand($"EXPLAIN (FORMAT JSON) SELECT 1 FROM {table} WHERE {where}", connection);
+        var json = (string)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+        using var plan = JsonDocument.Parse(json);
+        return (long)plan.RootElement[0].GetProperty("Plan").GetProperty("Plan Rows").GetDouble();
+    }
+
     private static bool IsSort(JsonElement node) =>
         node.GetProperty("Node Type").GetString() is "Sort" or "Incremental Sort";
 
