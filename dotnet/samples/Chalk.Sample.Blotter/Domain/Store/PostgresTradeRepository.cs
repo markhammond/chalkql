@@ -1,3 +1,4 @@
+using System.Globalization;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -159,6 +160,23 @@ public sealed class PostgresTradeRepository(string connectionString) : ITradeRep
         }
 
         transaction.Commit();
+    }
+
+    public long? SizeBytes()
+    {
+        try
+        {
+            using var connection = Open();
+            using var command = new NpgsqlCommand(
+                "SELECT pg_total_relation_size('order_versions') + pg_total_relation_size('orders_current') "
+                + "+ pg_total_relation_size('fills')",
+                connection);
+            return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+        }
+        catch (NpgsqlException)
+        {
+            return null;
+        }
     }
 
     public void Execute(string sql)

@@ -305,13 +305,13 @@ of orders and fills.
 **Another database.** There are two seams: one the host reads through, one for the fixtures.
 `IBlotterProvider` only reads: a ChalkQL source over the three tables, every statement stopped at the
 time limit; optionally the database's own estimates and counts (`IRowEstimates`; without them, the host
-counts through ChalkQL on the page's path); whether a failure was the database's own time limit; and
-its size. The tables must be append-only, as above, and compare text byte by byte. The house writes
-through `ITradeRepository` (the tables, a bulk load, and the two ways of keeping `orders_current`), and
-`IHouseDatabase` pairs a repository with a provider over the same tables; pass one as
-`BlotterOptions.House`. The PostgreSQL implementations are the example, and the test oracle works in
-PostgreSQL alone. The host still starts the house itself, so reading a real database with no house
-would need the streams behind a seam too.
+counts through ChalkQL on the page's path); and whether a failure was the database's own time limit. The
+tables must be append-only, as above, and compare text byte by byte. The house writes through
+`ITradeRepository` (the tables, a bulk load, the two ways of keeping `orders_current`, and the tables'
+size for the vital statistics), and `IHouseDatabase` pairs a repository with a provider over the same
+tables; pass one as `BlotterOptions.House`. The PostgreSQL implementations are the example, and the test
+oracle works in PostgreSQL alone. The host still starts the house itself, so reading a real database
+with no house would need the streams behind a seam too.
 
 ## How it works
 

@@ -26,14 +26,12 @@ public sealed class PostgresBlotterProvider : IBlotterProvider
     private const string QueryCanceled = "57014";
 
     private readonly string _connectionString;
-    private readonly NpgsqlDataSource _plain;
     private readonly ConcurrentDictionary<TimeSpan, NpgsqlDataSource> _limited = new();
 
     /// <param name="connectionString">The database, its tables found in the <c>blotter</c> schema.</param>
     public PostgresBlotterProvider(string connectionString)
     {
         _connectionString = connectionString;
-        _plain = NpgsqlDataSource.Create(connectionString);
     }
 
     public string Name => "PostgreSQL";
@@ -85,21 +83,6 @@ public sealed class PostgresBlotterProvider : IBlotterProvider
         return false;
     }
 
-    public long? SizeBytes()
-    {
-        try
-        {
-            using var connection = _plain.OpenConnection();
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT pg_database_size(current_database())";
-            return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
-        }
-        catch (DbException)
-        {
-            return null;
-        }
-    }
-
     public async ValueTask DisposeAsync()
     {
         foreach (var source in _limited.Values)
@@ -108,7 +91,6 @@ public sealed class PostgresBlotterProvider : IBlotterProvider
         }
 
         _limited.Clear();
-        await _plain.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <summary>A connection factory whose every statement the server stops at <paramref name="limit"/>.</summary>

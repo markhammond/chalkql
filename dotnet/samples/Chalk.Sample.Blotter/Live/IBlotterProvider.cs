@@ -12,8 +12,8 @@ public sealed record DatabaseReads(ISourceRuntime Source, IRowEstimates? Estimat
 /// The database the blotter reads live, wherever it is and whatever it is: the one seam a different
 /// database plugs into. The host asks of it only what a bolt-on may: a ChalkQL source over
 /// <c>blotter.orders_current</c>, <c>blotter.order_versions</c> and <c>blotter.fills</c>, every statement stopped
-/// at a time limit; and, if the database can give them, estimates and counts off the page's path, its
-/// size, and whether a failure was the database stopping a statement at the limit.
+/// at a time limit; and, if the database can give them, estimates and counts off the page's path, and
+/// whether a failure was the database stopping a statement at the limit.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -45,9 +45,6 @@ public interface IBlotterProvider : IAsyncDisposable
 
     /// <summary>Whether <paramref name="failure"/> is the database stopping a statement at the time limit, however a source wrapped it.</summary>
     bool StoppedAtTimeLimit(Exception failure);
-
-    /// <summary>The database's size on disk, for the vital statistics; null if it cannot say now.</summary>
-    long? SizeBytes();
 }
 
 /// <summary>The database's estimate of a page: the rows it expects to read and to sort, and its plan.</summary>

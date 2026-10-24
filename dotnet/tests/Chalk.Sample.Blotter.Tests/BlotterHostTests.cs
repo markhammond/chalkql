@@ -532,12 +532,12 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
             Assert.Same(counted, host.Provider);
             Assert.Equal(1, counted!.Opened);
 
-            // Pages, estimates and the database's size all come through it.
+            // Pages and estimates come through the provider; the tables' size, through the house's repository.
             var scope = await host.AcquireAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None);
             var page = await host.Pages.View(Tabs.Orders.DefaultSort).GetAsync(scope.State, 0, 20, CancellationToken.None);
             Assert.Equal(20, page.Rows.Length);
             Assert.Equal("Counted", (await host.Queries.EstimateAsync(FilterSpec.None, Tabs.Orders.DefaultSort, CancellationToken.None)).EstimatedBy);
-            Assert.True(counted.SizeBytes() > 0);
+            Assert.True(host.Repository.SizeBytes() > 0);
             await host.ReleaseAsync(scope);
         }
 
@@ -576,8 +576,6 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         }
 
         public bool StoppedAtTimeLimit(Exception failure) => inner.StoppedAtTimeLimit(failure);
-
-        public long? SizeBytes() => inner.SizeBytes();
 
         public async ValueTask DisposeAsync()
         {

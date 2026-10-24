@@ -1024,7 +1024,7 @@ public sealed class BlotterHost : IAsyncDisposable
         };
     }
 
-    private long SafeDatabaseBytes() => _provider?.SizeBytes() ?? Status.DatabaseBytes;
+    private long SafeDatabaseBytes() => _house?.Repository.SizeBytes() ?? Status.DatabaseBytes;
 
     /// <summary>While no budget is chosen, raises it to the next step, if there is one.</summary>
     private bool RaiseBudget(string why)

@@ -47,6 +47,9 @@ public interface ITradeRepository
 
     /// <summary>What the lagging job does with a batch: each order's row moves to the newest version in it, never back.</summary>
     void UpsertCurrent(IReadOnlyList<Order> versions);
+
+    /// <summary>The three tables' size on disk, indexes included, for the vital statistics; null if it cannot say now.</summary>
+    long? SizeBytes();
 }
 
 /// <summary>One writer of a bulk load: rows added, then completed; disposed without completing, nothing is kept.</summary>

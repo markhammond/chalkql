@@ -38,7 +38,7 @@ else
         <span class="label @(Status.CurrentStalled ? "stalled" : "")">behind by</span>@Status.CurrentWaiting.ToString("N0", CultureInfo.InvariantCulture)
     }
 </span>
-<span class="chip @(Status.IngestionStalled ? "stalled" : "")" title="PostgreSQL's database on disk, outside the host's budget; how long ago the oldest row it has not been seen to hold was sent; the process's managed heap, for comparison; and the longest any statement may run before it is stopped">
+<span class="chip @(Status.IngestionStalled ? "stalled" : "")" title="The three tables in PostgreSQL on disk, indexes included, outside the host's budget; how long ago the oldest row it has not been seen to hold was sent; the process's managed heap, for comparison; and the longest any statement may run before it is stopped">
     <span class="label">PostgreSQL</span><b>@Mb(Status.DatabaseBytes)</b>
     <span class="label">behind</span>@Seconds(Status.Behind)
     <span class="label">heap</span>@Mb(Status.ManagedHeapBytes)
