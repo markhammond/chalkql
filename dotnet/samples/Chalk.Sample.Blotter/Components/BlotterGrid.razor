@@ -114,7 +114,7 @@
     }
 
     <div class="scroller @(_waiting || _refusal is not null || _failure is not null ? "waiting" : "")" @ref="_scroller">
-        <QuickGrid TGridItem="BlotterRow" @ref="_grid" Class="@(Tab.Overrides ? "nested" : null)" ItemsProvider="_provider" Virtualize="true" ItemSize="(float)RowHeight"
+        <QuickGrid TGridItem="BlotterRow" @ref="_grid" Class="@(Tab.Overrides ? "nested" : null)" ItemsProvider="_provider" Virtualize="true" ItemSize="(float)GridRows.RowHeight"
                    OverscanCount="60" ItemKey="r => r.Key" RowClass="@(r => r.Parent is null ? r.RowClass : "child " + r.RowClass)">
             @if (Tab.Overrides)
             {
@@ -123,9 +123,9 @@
                 <TemplateColumn TGridItem="BlotterRow" Title="" Class="expander frozen">
                     @if (context.Parent is null && context.Row is Order order)
                     {
-                        <button type="button" class="toggle" aria-label="@(_open.ContainsKey(order.OrderId) ? "Hide" : "Show") the fills of order @order.OrderId"
+                        <button type="button" class="toggle" aria-label="@(_rows.IsOpen(order.OrderId) ? "Hide" : "Show") the fills of order @order.OrderId"
                                 @onclick="() => ToggleAsync(order)">
-                            <Chevron Open="_open.ContainsKey(order.OrderId)" />
+                            <Chevron Open="_rows.IsOpen(order.OrderId)" />
                         </button>
                     }
                 </TemplateColumn>
@@ -317,8 +317,7 @@
     [Parameter]
     public ViewLink? Link { get; set; }
 
-    private const double RowHeight = 30;
-    private Flashes _flashes = default!;
+    private GridRows _rows = default!;
 
     // Columns the reader has hidden, by name; the frozen ones, which tell the rows apart, are always shown.
     private HashSet<string> _hiddenColumns = [];
@@ -336,16 +335,13 @@
     // How many alerts had fired on this tab when the grid was held: more since, and the bell shows.
     private long _firedAtHold;
     private bool _explaining;
-    private Flashes _fillFlashes = new(Tabs.Fills.Columns);
     private QuickGrid<BlotterRow>? _grid;
     private ElementReference _scroller;
     private DotNetObjectReference<BlotterGrid>? _self;
 
-    // Whether a row shown is still waiting for the database, and the clock that shows its lag again.
-    private bool _counting;
+    // The clock that shows a lag still counting again, whether or not the feed sends anything.
     private Timer? _ticker;
     private GridItemsProvider<BlotterRow> _provider = default!;
-    private PageView _pages = default!;
     private LiveScope? _scope;
     private FilterSpec _filter = FilterSpec.None;
     private SortSpec _sort = default!;
@@ -361,35 +357,12 @@
     private bool _waiting;
     private long _reloads;
 
-    // Scrolled away from the top, the grid holds its rows in place: rows arriving above it are counted
-    // here rather than pushing the rows down, until the reader goes back to the top.
-    private (IRow Key, long Position)? _anchor;
-    private long _hidden;
-
-    // Counts, from the streams, what arrives above the held rows; none while the grid follows the top.
-    private ArrivalsAbove? _arrivals;
-
-    // How far the rows really end from where the database's estimate or count puts the end: learned
-    // from reads that reach the end. A count that replaces the estimate starts it again.
-    private long _endLearned;
-    private bool _counted;
-    private const int GrowBy = 60;
-
     // Scrolling up near the top of what the reader has seen lets the rows that arrived above in, a few
-    // at a time, holding the rows in view in place: _revealed counts those let in, which the reader may
-    // not have scrolled up to yet.
+    // at a time, holding the rows in view in place.
     private const int RevealNear = 200;
     private const int RevealAtOnce = 30;
-    private long _revealed;
-    private long _shifted;
     private bool _revealing;
     private double _scrollTop;
-
-    // The orders opened to show their fills, by id, each with the version last seen; and where a
-    // read last found each, which is where its fills are let in.
-    private readonly Dictionary<Guid, Order> _open = [];
-    private readonly Dictionary<Guid, long> _openAt = [];
-    private IReadOnlyList<Opened> _opened = [];
 
     private (Fill Fill, double X, double Y, bool Looked, Order? Order)? _hover;
     private int _refreshing;
@@ -397,14 +370,13 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _flashes = new Flashes(Tab.Columns);
         _hiddenColumns = [.. Link?.Hidden ?? Tab.HiddenAtFirst];
         _sort = Link?.Sort ?? Tab.DefaultSort;
         _filter = Link?.Filter ?? FilterSpec.None;
-        _pages = Host.Pages.View(_sort);
+        _rows = new GridRows(Host, Tab, _sort);
         _provider = ProvideAsync;
         Host.Published += OnPublished;
-        _ticker = new Timer(_ => { if (_counting) OnPublished(0); }, null, 1000, 1000);
+        _ticker = new Timer(_ => { if (_rows.Counting) OnPublished(0); }, null, 1000, 1000);
         await AcquireAsync(_filter);
     }
 
@@ -450,16 +422,13 @@
             return;
         }
 
-        _pages.HoldAt(rank, at);
-        _anchor = (at, rank);
-        _arrivals?.Dispose();
-        _arrivals = new ArrivalsAbove(Host, _sort, () => _scope?.State ?? state);
+        _rows.HoldAt(rank, at, () => _scope?.State ?? state);
         _firedAtHold = Alerts?.FiredOn(Tab) ?? 0;
-        _scrollTop = rank * RowHeight;
+        _scrollTop = rank * GridRows.RowHeight;
 
         // The grid learns how many rows it has first: until then it is not tall enough to scroll there.
         await RefreshAsync();
-        await JS.InvokeVoidAsync("blotter.scrollTo", _scroller, rank * RowHeight);
+        await JS.InvokeVoidAsync("blotter.scrollTo", _scroller, rank * GridRows.RowHeight);
     }
 
     /// <summary>
@@ -471,11 +440,10 @@
     public async Task<string> ShareLink(double scrollTop, bool shrouded)
     {
         IRow? at = null;
-        if (_pages.Held && scrollTop >= RowHeight / 2 && _scope?.State is { Ready: true } state)
+        if (_rows.Held && scrollTop >= GridRows.RowHeight / 2 && _scope?.State is { Ready: true } state)
         {
-            var slot = Nesting.Locate((long)Math.Ceiling(scrollTop / RowHeight), _opened);
-            var page = await _pages.GetAsync(state, slot.Position, 1, CancellationToken.None);
-            at = page.Rows.FirstOrDefault() ?? throw new InvalidOperationException("the row in view could not be read");
+            at = await _rows.RowAtAsync(state, scrollTop, CancellationToken.None)
+                ?? throw new InvalidOperationException("the row in view could not be read");
         }
 
         // Private, the filters' values and the row held at, which are data, are shrouded.
@@ -486,26 +454,17 @@
     [JSInvokable]
     public async Task OnScrolled(double scrollTop)
     {
-        var atTop = scrollTop < RowHeight / 2;
-        var wasAtTop = _scrollTop < RowHeight / 2;
+        var atTop = scrollTop < GridRows.RowHeight / 2;
+        var wasAtTop = _scrollTop < GridRows.RowHeight / 2;
         var up = scrollTop < _scrollTop;
         _scrollTop = scrollTop;
-        if (wasAtTop && !atTop && !_pages.Held && _scope?.State is { Ready: true } state)
+        if (wasAtTop && !atTop && !_rows.Held && _scope?.State is { Ready: true } state)
         {
-            // Leaving the top: positions hold from here on, and the row now first in view is the one
-            // whose rank says how many rows have arrived above it; a fill in view holds its order.
-            _pages.Held = true;
-            _arrivals?.Dispose();
-            _arrivals = new ArrivalsAbove(Host, _sort, () => _scope?.State ?? state);
+            // Leaving the top: positions hold from here on, and what arrives above is counted.
             _firedAtHold = Alerts?.FiredOn(Tab) ?? 0;
-            var slot = Nesting.Locate((long)(scrollTop / RowHeight), _opened);
             try
             {
-                var page = await _pages.GetAsync(state, slot.Position, 1, CancellationToken.None);
-                if (page.Rows.Length == 1)
-                {
-                    _anchor = (page.Rows[0], page.Start);
-                }
+                await _rows.HoldAsync(state, scrollTop, () => _scope?.State ?? state);
             }
             catch (Exception failure)
             {
@@ -513,23 +472,19 @@
                 Log.LogWarning(failure, "the row in view could not be read to hold the grid's place");
             }
         }
-        else if (atTop && _pages.Held)
+        else if (atTop && _rows.Held)
         {
             // Back at the top, however fast: what arrived above is shown, and new rows push down again.
-            _pages.Held = false;
-            _anchor = null;
-            _arrivals?.Dispose();
-        _arrivals = null;
-            _hidden = 0;
-            _revealed = 0;
+            _rows.Release();
             await RefreshAsync();
         }
-        else if (up && _pages.Held && _hidden > 0 && !_revealing && scrollTop / RowHeight < RevealNear)
+        else if (up && !_revealing && _rows.CanReveal(scrollTop, RevealNear))
         {
             await RevealAsync();
         }
-        else if (_revealed > 0)
+        else if (_rows.HasRevealed)
         {
+            // Rows let in and not yet scrolled up to: the count of what is new above moves as the reader scrolls.
             StateHasChanged();
         }
     }
@@ -546,21 +501,7 @@
         _revealing = true;
         try
         {
-            var rows = Math.Min(_hidden, RevealAtOnce);
-            _pages.Shift(rows);
-            if (_anchor is { } anchor)
-            {
-                _anchor = (anchor.Key, anchor.Position + rows);
-            }
-
-            foreach (var id in _openAt.Keys.ToList())
-            {
-                _openAt[id] += rows;
-            }
-
-            _hidden -= rows;
-            _revealed += rows;
-            _shifted += rows;
+            _rows.Reveal(RevealAtOnce);
             await JS.InvokeVoidAsync("blotter.insertAbove", _scroller, _self);
             await RefreshAsync();
         }
@@ -576,12 +517,11 @@
     public void OnRevealed() => _revealing = false;
 
     /// <summary>What arrived above the rows in view: not let in yet, or let in and not yet scrolled up to.</summary>
-    private long NewAbove() => _hidden + Math.Min(_revealed, (long)(_scrollTop / RowHeight));
+    private long NewAbove() => _rows.NewAbove(_scrollTop);
 
     private async ValueTask<GridItemsProviderResult<BlotterRow>> ProvideAsync(GridItemsProviderRequest<BlotterRow> request)
     {
         var reloads = _reloads;
-        var shifted = _shifted;
         var scope = _scope;
         if (scope is null && _refusal is not null)
         {
@@ -600,104 +540,10 @@
             throw Keep(request.CancellationToken);
         }
 
-        var state = scope.State;
         var ct = request.CancellationToken;
         try
         {
-            // What has arrived above the held rows, from the streams: the rows that crossed the topmost
-            // row the view knows since the last state, up or down.
-            if (_arrivals is not null && _pages.First is { } top)
-            {
-                _hidden = Math.Max(0, _hidden + await _arrivals.TakeAsync(top.Row, ct));
-            }
-
-            var hidden = _hidden;
-            var counted = Host.Pages.IsCounted(state);
-            if (counted != _counted)
-            {
-                // A count has replaced the estimate: what was learned against the estimate no longer holds.
-                _counted = counted;
-                _endLearned = 0;
-            }
-
-            // Following the live top, the estimate sizes the scroll bar well enough: rows are counted only
-            // once the reader scrolls away.
-            var estimated = Math.Max(0, await Host.Pages.TotalAsync(state, ct, count: _pages.Held) - hidden);
-            var rows = Math.Max(0, estimated + _endLearned);
-
-            // The opened orders are let in where a read last found them. A read that finds one
-            // somewhere else, or finds another row where it was, moves it, and the grid's rows are
-            // worked out again.
-            IReadOnlyList<Opened> opened = [];
-            List<Slot> slots = [];
-            Page? page = null;
-            var asked = 0;
-            for (var pass = 0; pass < 3; pass++)
-            {
-                opened = await OpenedAsync(state, rows, ct);
-                slots = Nesting.Map(request.StartIndex, request.Count ?? 60, rows, opened);
-                var positions = slots.Where(s => !s.IsFill).Select(s => s.Position).ToList();
-
-                // At the end the grid has found, a row more is asked for: if there is one, the rows go on.
-                asked = positions.Count == 0 ? 0 : (int)(positions[^1] - positions[0] + 1);
-                var atEnd = positions.Count > 0 && positions[^1] >= rows - 1;
-                page = positions.Count == 0
-                    ? null
-                    : await _pages.GetAsync(state, positions[0], asked + (atEnd ? 1 : 0), ct);
-                if (!Learn(page, shifted))
-                {
-                    break;
-                }
-            }
-
-            // Where the rows end, learned from the read: one short of what it asked for found the last
-            // row; one that found more at the end the grid had goes on a screenful further.
-            if (page is not null && asked > 0)
-            {
-                var reached = page.Start + page.Rows.Length;
-                if (page.Rows.Length < asked)
-                {
-                    _endLearned = reached - estimated;
-                    rows = reached;
-                }
-                else if (page.Rows.Length > asked)
-                {
-                    _endLearned += GrowBy;
-                    rows += GrowBy;
-                }
-            }
-
-            if (shifted != _shifted)
-            {
-                // Rows were let in above while this was read: its rows are placed by positions the
-                // grid no longer has, and the read that letting them in asked for is on its way.
-                throw new OperationCanceledException(ct);
-            }
-
-            var now = DateTime.UtcNow;
-            var shown = new List<BlotterRow>(slots.Count);
-            foreach (var slot in slots)
-            {
-                if (slot.Under is { } under)
-                {
-                    shown.Add(_fillFlashes.Decorate(under.Fills[slot.Fill], now, under.Order.OrderId));
-                }
-                else if (page is not null && slot.Position - page.Start is var at && at >= 0 && at < page.Rows.Length)
-                {
-                    shown.Add(_flashes.Decorate(page.Rows[at], now));
-                }
-            }
-
-            foreach (var row in shown)
-            {
-                row.Reconciliation = state.Reconciling.TryGetValue(row.Row.Id, out var reconciliation) ? reconciliation : null;
-            }
-
-            // A lag still counting is shown again in a second, whether or not the feed sends anything.
-            _counting = shown.Any(r => r.Reconciliation is { Reconciled: false });
-            _flashes.Seen(state.IngestedThrough, now);
-            _fillFlashes.Seen(state.IngestedThrough, now);
-            _opened = opened;
+            var (shown, total, hidden) = await _rows.ReadAsync(scope.State, request.StartIndex, request.Count ?? 60, ct);
             if (_waiting && reloads == _reloads || _hiddenShown != hidden)
             {
                 _hiddenShown = hidden;
@@ -710,7 +556,7 @@
                 _ = InvokeAsync(FreezeColumnsAsync);
             }
 
-            return GridItemsProviderResult.From(shown, (int)Math.Min(int.MaxValue, Nesting.Total(rows, opened)));
+            return GridItemsProviderResult.From(shown, total);
         }
         catch (OperationCanceledException cancelled) when (ct.IsCancellationRequested || cancelled.CancellationToken == ct)
         {
@@ -774,57 +620,6 @@
         _frozen = await JS.InvokeAsync<bool>("blotter.freezeColumns", _scroller);
     }
 
-    /// <summary>The opened orders whose place is known, in order of position, each with its fills now.</summary>
-    private async Task<IReadOnlyList<Opened>> OpenedAsync(ScopeState state, long rows, CancellationToken ct)
-    {
-        var opened = new List<Opened>();
-        foreach (var (id, position) in _openAt.ToList())
-        {
-            if (position < rows && _open.TryGetValue(id, out var order))
-            {
-                opened.Add(new Opened(position, order, await Host.Pages.FillsOfAsync(state, id, ct)));
-            }
-        }
-
-        return [.. opened.OrderBy(o => o.Position)];
-    }
-
-    /// <summary>What a read says of the opened orders: where each it holds is, and which are no longer where they were.</summary>
-    private bool Learn(Page? page, long shifted)
-    {
-        if (page is null || shifted != _shifted)
-        {
-            // Rows were let in above while it was read: its positions are no longer the grid's.
-            return false;
-        }
-
-        var changed = false;
-        for (var i = 0; i < page.Rows.Length; i++)
-        {
-            if (page.Rows[i] is Order order && _open.ContainsKey(order.OrderId))
-            {
-                _open[order.OrderId] = order;
-                if (!_openAt.TryGetValue(order.OrderId, out var was) || was != page.Start + i)
-                {
-                    _openAt[order.OrderId] = page.Start + i;
-                    changed = true;
-                }
-            }
-        }
-
-        foreach (var (id, position) in _openAt.ToList())
-        {
-            var at = position - page.Start;
-            if (at >= 0 && at < page.Rows.Length && page.Rows[at].Id != id)
-            {
-                _openAt.Remove(id);
-                changed = true;
-            }
-        }
-
-        return changed;
-    }
-
     /// <summary>A column's classes: right-aligned for numbers; frozen for the first few, which stay in place as the grid scrolls sideways.</summary>
     private string ColumnClass(Column column, int index) => string.Join(' ', new[]
     {
@@ -877,15 +672,7 @@
 
     private async Task ToggleAsync(Order order)
     {
-        if (!_open.Remove(order.OrderId))
-        {
-            _open[order.OrderId] = order;
-        }
-        else
-        {
-            _openAt.Remove(order.OrderId);
-        }
-
+        _rows.Toggle(order);
         await RefreshAsync();
     }
 
@@ -968,7 +755,6 @@
             return;
         }
 
-        _pages = Host.Pages.View(_sort);
         await ReloadAsync();
     }
 
@@ -1026,18 +812,8 @@
         _reloads++;
         _waiting = true;
         _failure = null;
-        _pages.Reset();
-        _pages.Held = false;
-        _openAt.Clear();
-        _anchor = null;
-        _arrivals?.Dispose();
-        _arrivals = null;
-        _endLearned = 0;
-        _hidden = 0;
-        _revealed = 0;
+        _rows.Reset(_sort);
         _plans = null;
-        _flashes.Clear();
-        _fillFlashes.Clear();
         await JS.InvokeVoidAsync("blotter.scrollToTop", _scroller);
         if (_grid is not null)
         {
@@ -1103,12 +879,7 @@
 
     private async Task ShowNewestAsync()
     {
-        _anchor = null;
-        _arrivals?.Dispose();
-        _arrivals = null;
-        _hidden = 0;
-        _revealed = 0;
-        _pages.Held = false;
+        _rows.Release();
         await JS.InvokeVoidAsync("blotter.scrollToTop", _scroller);
         await RefreshAsync();
     }
@@ -1133,7 +904,7 @@
     {
         Host.Published -= OnPublished;
         _ticker?.Dispose();
-        _arrivals?.Dispose();
+        _rows?.Dispose();
         if (_scope is not null)
         {
             await Host.ReleaseAsync(_scope);
