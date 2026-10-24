@@ -67,6 +67,7 @@ public sealed class BlotterHost : IAsyncDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly List<Order> _keptOrders = [];
     private readonly List<Fill> _keptFills = [];
+    private IHouseDatabase? _house;
     private IBlotterProvider? _provider;
     private Exchange? _exchange;
     private PlannerProcess? _planner;
@@ -117,7 +118,7 @@ public sealed class BlotterHost : IAsyncDisposable
     public Exchange Exchange => _exchange ?? throw new InvalidOperationException("the host has not started");
 
     /// <summary>The database, for the checks that read it directly.</summary>
-    public ITradeStore Store => _provider?.Store ?? throw new InvalidOperationException("the host has not started");
+    public ITradeStore Store => _house?.Store ?? throw new InvalidOperationException("the host has not started");
 
     /// <summary>The database the host reads.</summary>
     public IBlotterProvider Provider => _provider ?? throw new InvalidOperationException("the host has not started");
@@ -201,13 +202,14 @@ public sealed class BlotterHost : IAsyncDisposable
             ? "Starting the database"
             : seeding.Written < _options.Orders
                 ? string.Create(CultureInfo.InvariantCulture,
-                    $"Seeding {_provider!.Name}: {seeding.Stage}, {seeding.Written:N0} of {_options.Orders:N0} ({100.0 * seeding.Written / Math.Max(1, _options.Orders):F0}%)")
-                : $"Seeding {_provider!.Name}: {seeding.Stage}"))
+                    $"Seeding {_house!.Name}: {seeding.Stage}, {seeding.Written:N0} of {_options.Orders:N0} ({100.0 * seeding.Written / Math.Max(1, _options.Orders):F0}%)")
+                : $"Seeding {_house!.Name}: {seeding.Stage}"))
         {
-            _provider = _options.Provider is { } open
+            _house = _options.House is { } open
                 ? await open(ct).ConfigureAwait(false)
-                : await PostgresBlotterProvider.StartAsync(_options.Postgres, _options.PostgresBinaries, ct).ConfigureAwait(false);
-            seeding = new Seeder(_provider.Store);
+                : await PostgresHouseDatabase.StartAsync(_options.Postgres, _options.PostgresBinaries, ct).ConfigureAwait(false);
+            _provider = _house.Provider;
+            seeding = new Seeder(_house.Store);
             await seeding.GenerateAsync(
                 _options.Orders, Cells.Micros(DateTime.UtcNow), TimeSpan.FromDays(5), openTail: 2000, _options.Current, ct).ConfigureAwait(false);
         }
@@ -423,9 +425,9 @@ public sealed class BlotterHost : IAsyncDisposable
             await _planner.DisposeAsync().ConfigureAwait(false);
         }
 
-        if (_provider is not null)
+        if (_house is not null)
         {
-            await _provider.DisposeAsync().ConfigureAwait(false);
+            await _house.DisposeAsync().ConfigureAwait(false);
         }
 
         _stop.Dispose();

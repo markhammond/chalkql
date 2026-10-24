@@ -4,18 +4,13 @@ using System.Globalization;
 using Chalk.Catalog;
 using Chalk.Client;
 using Chalk.Ir;
-using Chalk.Sample.Blotter.Domain;
-using Chalk.Sample.Blotter.Fixtures;
 using Chalk.Sources;
 using Chalk.Sources.Ado;
 using Npgsql;
 
 namespace Chalk.Sample.Blotter.Live;
 
-/// <summary>
-/// The blotter's database in PostgreSQL: a server the sample starts for itself, or one it is given a
-/// connection string to (<see cref="PgServer"/>), read through plain ADO.NET.
-/// </summary>
+/// <summary>The blotter's database in PostgreSQL, at a connection string, read through plain ADO.NET.</summary>
 /// <remarks>
 /// Every read goes through a <see cref="DbDataSource"/>, ADO.NET's connection factory, whose
 /// connections carry the time limit as PostgreSQL's own <c>statement_timeout</c>: ChalkQL's source
@@ -30,27 +25,18 @@ public sealed class PostgresBlotterProvider : IBlotterProvider
     // carries it on every DbException as the SQL standard's SQLSTATE.
     private const string QueryCanceled = "57014";
 
-    private readonly PgServer _server;
+    private readonly string _connectionString;
     private readonly NpgsqlDataSource _plain;
     private readonly ConcurrentDictionary<TimeSpan, NpgsqlDataSource> _limited = new();
 
-    private PostgresBlotterProvider(PgServer server)
+    /// <param name="connectionString">The database, its tables found in the <c>blotter</c> schema.</param>
+    public PostgresBlotterProvider(string connectionString)
     {
-        _server = server;
-        _plain = NpgsqlDataSource.Create(server.ConnectionString);
-        Store = new PostgresTradeStore(server.ConnectionString);
+        _connectionString = connectionString;
+        _plain = NpgsqlDataSource.Create(connectionString);
     }
 
     public string Name => "PostgreSQL";
-
-    public ITradeStore Store { get; }
-
-    /// <summary>
-    /// The server <paramref name="connectionString"/> names, if given; otherwise one started from
-    /// <paramref name="binaries"/>, or from the first PostgreSQL 16 or later found on this machine.
-    /// </summary>
-    public static async Task<PostgresBlotterProvider> StartAsync(string? connectionString, string? binaries, CancellationToken ct) =>
-        new(await PgServer.StartAsync(connectionString, binaries, ct).ConfigureAwait(false));
 
     public DatabaseReads Open(TableRows rows, TimeSpan timeLimit)
     {
@@ -121,15 +107,15 @@ public sealed class PostgresBlotterProvider : IBlotterProvider
             await source.DisposeAsync().ConfigureAwait(false);
         }
 
+        _limited.Clear();
         await _plain.DisposeAsync().ConfigureAwait(false);
-        await _server.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <summary>A connection factory whose every statement the server stops at <paramref name="limit"/>.</summary>
     private NpgsqlDataSource Limited(TimeSpan limit) => _limited.GetOrAdd(limit, l =>
     {
         var seconds = (int)Math.Ceiling(l.TotalSeconds);
-        return NpgsqlDataSource.Create(new NpgsqlConnectionStringBuilder(_server.ConnectionString)
+        return NpgsqlDataSource.Create(new NpgsqlConnectionStringBuilder(_connectionString)
         {
             Timeout = seconds,
             CommandTimeout = seconds + 5,

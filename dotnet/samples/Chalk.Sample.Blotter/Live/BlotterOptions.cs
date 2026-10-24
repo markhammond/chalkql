@@ -20,10 +20,11 @@ public sealed record BlotterOptions
     public string? PostgresBinaries { get; init; }
 
     /// <summary>
-    /// Opens a different database to read, in place of PostgreSQL (<see cref="Postgres"/> and
-    /// <see cref="PostgresBinaries"/> are then unused); the host disposes of it when it stops.
+    /// Opens a different database for the simulated house to run on, and the host to read, in place of
+    /// PostgreSQL (<see cref="Postgres"/> and <see cref="PostgresBinaries"/> are then unused); the host
+    /// disposes of it when it stops.
     /// </summary>
-    public Func<CancellationToken, Task<IBlotterProvider>>? Provider { get; init; }
+    public Func<CancellationToken, Task<IHouseDatabase>>? House { get; init; }
 
     /// <summary>How <c>orders_current</c> keeps up with <c>order_versions</c>.</summary>
     public CurrentSync Current { get; init; } = CurrentSync.Trigger;

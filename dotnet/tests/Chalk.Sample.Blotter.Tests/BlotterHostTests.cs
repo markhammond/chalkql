@@ -514,17 +514,21 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task A_provider_given_in_the_options_is_the_one_the_host_reads_through_and_disposes_of()
+    public async Task The_house_database_given_in_the_options_is_the_one_seeded_and_its_provider_the_one_read()
     {
         Counted? counted = null;
         await using (var host = await StartAsync(new BlotterOptions
         {
             Orders = 20_000,
             Exchange = Quiet(),
-            Provider = async ct => counted = new Counted(await PostgresBlotterProvider.StartAsync(
-                Environment.GetEnvironmentVariable("CHALK_TEST_POSTGRES"), null, ct)),
+            House = async ct =>
+            {
+                var house = await PostgresHouseDatabase.StartAsync(Environment.GetEnvironmentVariable("CHALK_TEST_POSTGRES"), null, ct);
+                return new CountedHouse(house, counted = new Counted(house.Provider));
+            },
         }))
         {
+            Assert.Equal(20_000, host.Seeded.Orders);
             Assert.Same(counted, host.Provider);
             Assert.Equal(1, counted!.Opened);
 
@@ -540,6 +544,22 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         Assert.True(counted.Disposed);
     }
 
+    /// <summary>PostgreSQL's house database, its provider counted.</summary>
+    private sealed class CountedHouse(IHouseDatabase inner, Counted provider) : IHouseDatabase
+    {
+        public string Name => inner.Name;
+
+        public ITradeStore Store => inner.Store;
+
+        public IBlotterProvider Provider => provider;
+
+        public async ValueTask DisposeAsync()
+        {
+            await provider.DisposeAsync();
+            await inner.DisposeAsync();
+        }
+    }
+
     /// <summary>A provider that hands everything to PostgreSQL's, counting what the host asks of it.</summary>
     private sealed class Counted(IBlotterProvider inner) : IBlotterProvider
     {
@@ -548,8 +568,6 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         public bool Disposed { get; private set; }
 
         public string Name => "Counted";
-
-        public ITradeStore Store => inner.Store;
 
         public DatabaseReads Open(TableRows rows, TimeSpan timeLimit)
         {

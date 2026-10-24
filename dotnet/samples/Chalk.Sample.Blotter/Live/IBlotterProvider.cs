@@ -1,5 +1,4 @@
 using Chalk.Sources;
-using Chalk.Sample.Blotter.Domain;
 
 namespace Chalk.Sample.Blotter.Live;
 
@@ -26,17 +25,17 @@ public sealed record DatabaseReads(ISourceRuntime Source, IRowEstimates? Estimat
 /// <para>
 /// The source must name the tables by those catalog names, declare their keys and the indexes the
 /// database has, and compare text byte by byte, as the host does when it merges the database's rows
-/// with its own. <see cref="Store"/> is for the simulated house alone: in a real deployment, someone
-/// else's system writes the tables.
+/// with its own.
+/// </para>
+/// <para>
+/// A provider only reads: someone else's system writes the tables. In this sample, the simulated
+/// house does, through <see cref="Fixtures.IHouseDatabase"/>, which hands the host its provider.
 /// </para>
 /// </remarks>
 public interface IBlotterProvider : IAsyncDisposable
 {
     /// <summary>What the database is called, in what the host says: "PostgreSQL".</summary>
     string Name { get; }
-
-    /// <summary>The same tables, for the simulated house to write.</summary>
-    ITradeStore Store { get; }
 
     /// <summary>
     /// What the host reads through, every statement stopped at <paramref name="timeLimit"/>, by the
