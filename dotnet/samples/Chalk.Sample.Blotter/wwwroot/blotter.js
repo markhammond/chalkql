@@ -150,16 +150,33 @@ window.blotter = {
             failure => this.say(button, `Not copied: ${failure.message}`));
     },
 
-    // Copies a link to the view: the page writes it, and the clipboard is handed the promise of it in
-    // the click itself, as Safari asks.
-    shareView(button) {
+    // Opens or closes the link menu under the link icon; a click anywhere else closes it.
+    toggleShare(button) {
+        const wrap = button.closest(".share-wrap");
+        if (wrap.toggleAttribute("data-open")) {
+            const close = event => {
+                if (!wrap.contains(event.target)) {
+                    wrap.removeAttribute("data-open");
+                    document.removeEventListener("click", close, true);
+                }
+            };
+            document.addEventListener("click", close, true);
+        }
+    },
+
+    // Copies a link to the view, private (its data shrouded) or readable: the page writes it, and the
+    // clipboard is handed the promise of it in the click itself, as Safari asks.
+    shareView(item, shrouded) {
+        const wrap = item.closest(".share-wrap");
+        const icon = wrap.querySelector(".icon-button");
+        wrap.removeAttribute("data-open");
         const scroller = document.querySelector(".scroller");
-        const link = scroller.page.invokeMethodAsync("ShareLink", scroller.scrollTop);
+        const link = scroller.page.invokeMethodAsync("ShareLink", scroller.scrollTop, shrouded);
         navigator.clipboard.write([new ClipboardItem({
             "text/plain": link.then(url => new Blob([url], { type: "text/plain" })),
         })]).then(
-            () => this.say(button, "Link copied"),
-            failure => this.say(button, `Not copied: ${failure.message}`));
+            () => this.say(icon, shrouded ? "Private link copied" : "Readable link copied"),
+            failure => this.say(icon, `Not copied: ${failure.message}`));
     },
 
     // A word under a button, for a moment.

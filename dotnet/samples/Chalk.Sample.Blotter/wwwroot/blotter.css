@@ -214,6 +214,15 @@ main:not(:hover) .actions:not(:focus-within) { opacity: 0; pointer-events: none;
 .icon-button { position: relative; align-self: center; border: none; background: transparent; color: var(--muted); padding: 2px 5px; display: inline-flex; align-items: center; cursor: pointer; }
 .icon-button:hover { color: var(--accent); }
 .icon-button svg { fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.share-wrap { position: relative; align-self: center; display: inline-flex; }
+.share-menu {
+    display: none; position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 20; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px;
+    box-shadow: 0 4px 16px rgb(0 0 0 / 0.15); white-space: nowrap;
+}
+.share-wrap[data-open] .share-menu { display: flex; }
+.share-menu button { border: none; background: transparent; color: var(--ink); text-align: left; padding: 5px 10px; border-radius: 5px; cursor: pointer; }
+.share-menu button:hover, .share-menu button:focus-visible { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
 .icon-button[data-said]::after {
     content: attr(data-said); position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 20; pointer-events: none;
     white-space: nowrap; background: var(--ink); color: var(--panel); font-size: 11px; padding: 3px 7px; border-radius: 6px;

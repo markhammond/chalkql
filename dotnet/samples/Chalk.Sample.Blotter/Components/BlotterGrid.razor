@@ -17,9 +17,16 @@
     <button type="button" class="icon-button" title="Copy the rows in view, to paste into a sheet or a message" aria-label="Copy the rows in view" onclick="blotter.copyRows(this)">
         <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><rect x="5.5" y="5.5" width="8.5" height="8.5" rx="1.5" /><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5" /></svg>
     </button>
-    <button type="button" class="icon-button" title="Copy a link to this view: its sort, filters and columns, and the row at the top unless it follows the live top" aria-label="Copy a link to this view" onclick="blotter.shareView(this)">
-        <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M6.5 9.5l3-3" /><path d="M7.2 4.3l1.1-1.1a2.9 2.9 0 0 1 4.1 4.1l-1.1 1.1" /><path d="M8.8 11.7l-1.1 1.1a2.9 2.9 0 0 1-4.1-4.1l1.1-1.1" /></svg>
-    </button>
+    @* The menu opens and closes in the browser alone, so a choice in it is still the click a clipboard asks for. *@
+    <span class="share-wrap">
+        <button type="button" class="icon-button" title="Copy a link to this view: its sort, filters and columns, and the row at the top unless it follows the live top" aria-label="Copy a link to this view" aria-haspopup="menu" onclick="blotter.toggleShare(this)">
+            <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M6.5 9.5l3-3" /><path d="M7.2 4.3l1.1-1.1a2.9 2.9 0 0 1 4.1 4.1l-1.1 1.1" /><path d="M8.8 11.7l-1.1 1.1a2.9 2.9 0 0 1-4.1-4.1l1.1-1.1" /></svg>
+        </button>
+        <span class="share-menu" role="menu">
+            <button type="button" role="menuitem" title="The filters' values and the row at the top shrouded: the link shows only the tab, the sort and the columns" onclick="blotter.shareView(this, true)">Copy private link</button>
+            <button type="button" role="menuitem" title="Everything in plain text, the filters' values and the row at the top included" onclick="blotter.shareView(this, false)">Copy readable link</button>
+        </span>
+    </span>
     <span class="chooser-wrap">
         <button type="button" class="link-button" aria-expanded="@_choosing" @onclick="() => _choosing = !_choosing">Columns <Chevron Down="true" Open="_choosing" /></button>
         @if (_choosing)
@@ -398,10 +405,10 @@
     /// <summary>
     /// A link to this view, for the share button: the sort, the filters, the columns hidden, and,
     /// scrolled away from the live top, the first row wholly in view, by its keyset; the filters'
-    /// values and the row, shrouded.
+    /// values and the row shrouded, if the link is to be private.
     /// </summary>
     [JSInvokable]
-    public async Task<string> ShareLink(double scrollTop)
+    public async Task<string> ShareLink(double scrollTop, bool shrouded)
     {
         IRow? at = null;
         if (_pages.Held && scrollTop >= RowHeight / 2 && _scope?.State is { Ready: true } state)
@@ -411,8 +418,8 @@
             at = page.Rows.FirstOrDefault() ?? throw new InvalidOperationException("the row in view could not be read");
         }
 
-        // Shrouded: the filters' values and the row held at are data, which a link passed on should not show.
-        var query = new ViewLink(Tab, _sort, _filter, _hiddenColumns, at).Query(Shroud);
+        // Private, the filters' values and the row held at, which are data, are shrouded.
+        var query = new ViewLink(Tab, _sort, _filter, _hiddenColumns, at).Query(shrouded ? Shroud : null);
         return Nav.BaseUri + (query.Length > 0 ? "?" + query : "");
     }
 

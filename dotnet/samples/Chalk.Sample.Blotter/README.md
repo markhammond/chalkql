@@ -131,7 +131,8 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
 - **Copy and share.** On the tab bar, ⧉ copies the rows in view, at least half of each, under the
   headings of the columns shown: as text with a tab between values, which a sheet takes as cells, and
   as a table. Each value is as the grid shows it, but a time has its date and an id is whole. The link
-  icon copies a link to the view, which opens it in a new window. The link holds everything, and
+  icon opens a menu: **Copy private link** (shrouded, below) or **Copy readable link** (everything in
+  plain text); either opens the view in a new window. The link holds everything, and
   nothing is kept for it: the tab, the sort, the filters, the columns hidden when they are not those
   hidden at first, and, scrolled away from the live top, the row first in full view, by its keyset
   (its value of each column sorted by, then its key). Opened, the row's place is counted, and the grid
@@ -139,7 +140,7 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   holds no row and follows the top. A link not understood is refused whole, saying what, and the
   blotter opens as it always does. For example:
   `/?tab=fills&sort=-client,qty&hide=&f.side=Buy&f.qty.min=0.1&f.instrument.starts=B&at.client=FERN&at.qty=0.5&at.fill_id=…`.
-- **Shrouded links.** The link the share button copies shows none of the view's data: the filters'
+- **Shrouded links.** A private link shows none of the view's data: the filters'
   values and the row held at, which are data, go in one opaque `s=`, encrypted and signed with ASP.NET
   Data Protection; the tab, the sort and the hidden columns, only how the view is laid out, stay as
   they are (`/?sort=-client&s=CfDJ8…`). The keys are kept in a folder (`--link-keys`), so a link opens
