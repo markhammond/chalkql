@@ -1,0 +1,119 @@
+@* The browser's alerts: each a tab's filter, saved, with a sound and a throttle. A new one takes this
+   tab's filters as they are; each can be tried, muted or removed. *@
+
+<div class="alerts-panel" role="dialog" aria-label="Alerts">
+    <div class="alerts-head">
+        <b>Alerts</b>
+        <label title="A system notification for each alert while this page is in the background, if the browser allows it">
+            <input type="checkbox" checked="@Book.Notify" onchange="blotterAlerts.setNotify(this.checked)" />
+            Notify in the background
+        </label>
+        @if (!Book.SoundOn)
+        {
+            <button type="button" class="link-button" onclick="blotterAlerts.enableSound()">Enable sound</button>
+        }
+    </div>
+
+    @if (Book.Rules.IsEmpty)
+    {
+        <p class="muted">No alerts yet.</p>
+    }
+    else
+    {
+        <table class="alerts-list">
+            @foreach (var rule in Book.Rules)
+            {
+                var r = rule;
+                <tr>
+                    <td><b>@r.Name</b><div class="muted">@r.Tab.Title: @Describe(r.Filter)</div></td>
+                    <td>
+                        <select value="@r.Sound" aria-label="Sound" @onchange="e => SaveAsync(r with { Sound = Enum.Parse<AlertSound>((string)e.Value!) })">
+                            @foreach (var sound in Enum.GetValues<AlertSound>())
+                            {
+                                <option value="@sound">@Named(sound)</option>
+                            }
+                        </select>
+                    </td>
+                    <td>
+                        <select value="@r.Throttle.TotalSeconds" aria-label="At most once every" @onchange="e => SaveAsync(r with { Throttle = TimeSpan.FromSeconds(double.Parse((string)e.Value!, CultureInfo.InvariantCulture)) })">
+                            @foreach (var throttle in AlertRule.Throttles)
+                            {
+                                <option value="@throttle.TotalSeconds">at most every @Seconds(throttle)</option>
+                            }
+                        </select>
+                    </td>
+                    <td class="alerts-actions">
+                        <button type="button" class="icon-button" title="Hear it" aria-label="Hear @r.Name" onclick="blotterAlerts.play('@r.Sound')">▶</button>
+                        <button type="button" class="link-button" @onclick="() => SaveAsync(r with { Muted = !r.Muted })">@(r.Muted ? "Unmute" : "Mute")</button>
+                        <button type="button" class="link-button" @onclick="() => RemoveAsync(r)">Remove</button>
+                    </td>
+                </tr>
+            }
+        </table>
+    }
+
+    <div class="alerts-new">
+        <span class="muted">New alert on @Tab.Title, @Describe(Filter):</span>
+        <input type="text" placeholder="@DefaultName()" @bind="_name" aria-label="Name" />
+        <select @bind="_sound" aria-label="Sound">
+            @foreach (var sound in Enum.GetValues<AlertSound>())
+            {
+                <option value="@sound">@Named(sound)</option>
+            }
+        </select>
+        <select @bind="_throttle" aria-label="At most once every">
+            @foreach (var throttle in AlertRule.Throttles)
+            {
+                <option value="@throttle.TotalSeconds">at most every @Seconds(throttle)</option>
+            }
+        </select>
+        <button type="button" @onclick="AddAsync">Add</button>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public AlertBook Book { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public Tab Tab { get; set; } = default!;
+
+    /// <summary>The tab's filters now, which a new alert takes.</summary>
+    [Parameter, EditorRequired]
+    public FilterSpec Filter { get; set; } = default!;
+
+    private string _name = "";
+    private AlertSound _sound = AlertSound.Register;
+    private double _throttle = 3;
+
+    private string DefaultName() => Filter.Columns.IsEmpty
+        ? (Tab.Overrides ? "Any order" : "Any fill")
+        : Describe(Filter);
+
+    private async Task AddAsync()
+    {
+        var rule = new AlertRule(
+            Guid.NewGuid().ToString("N"), string.IsNullOrWhiteSpace(_name) ? DefaultName() : _name.Trim(), Tab, Filter, _sound,
+            TimeSpan.FromSeconds(_throttle), Muted: false);
+        _name = "";
+        await Book.SaveAsync([.. Book.Rules, rule]);
+    }
+
+    private Task SaveAsync(AlertRule changed) => Book.SaveAsync([.. Book.Rules.Select(r => r.Id == changed.Id ? changed : r)]);
+
+    private Task RemoveAsync(AlertRule removed) => Book.SaveAsync([.. Book.Rules.Where(r => r.Id != removed.Id)]);
+
+    private static string Describe(FilterSpec filter) =>
+        filter.Columns.IsEmpty ? "every row" : string.Join("; ", filter.Columns.Select(f => f.Describe()));
+
+    private static string Named(AlertSound sound) => sound switch
+    {
+        AlertSound.Register => "Cash register",
+        AlertSound.Klaxon => "Klaxon",
+        AlertSound.Zap => "Zap",
+        _ => "Laser",
+    };
+
+    private static string Seconds(TimeSpan throttle) =>
+        throttle.TotalSeconds < 60 ? $"{throttle.TotalSeconds:0} s" : $"{throttle.TotalMinutes:0} min";
+}

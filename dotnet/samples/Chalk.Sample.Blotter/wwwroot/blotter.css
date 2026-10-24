@@ -210,6 +210,37 @@ h2 { font-size: 14px; margin: 8px 0 0; }
 main:not(:hover) .actions:not(:focus-within) { opacity: 0; pointer-events: none; }
 @media (hover: none) { main .actions { opacity: 1; pointer-events: auto; } }
 
+/* Alerts: the bell, its panel, the splash that asks for sound, and a notice of what fired while away. */
+.bell { fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.bell.muted { opacity: 0.7; }
+.badge .bell { margin-right: 4px; vertical-align: -1px; }
+.alerts-wrap { position: relative; align-self: center; display: inline-flex; }
+.alerts-count { font-size: 10px; margin-left: 2px; }
+.alerts-panel {
+    position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 20; width: min(640px, calc(100vw - 32px));
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+    box-shadow: 0 4px 16px rgb(0 0 0 / 0.15); display: flex; flex-direction: column; gap: 8px; font-size: 12px;
+}
+.alerts-head { display: flex; align-items: center; gap: 12px; }
+.alerts-head label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.alerts-list { width: 100%; border-collapse: collapse; }
+.alerts-list td { padding: 4px 6px 4px 0; border-top: 1px solid var(--line); vertical-align: top; }
+.alerts-actions { white-space: nowrap; text-align: right; }
+.alerts-new { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.alerts-panel select, .alerts-panel input[type=text] { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+.splash { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: rgb(0 0 0 / 0.25); }
+.splash-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; max-width: 360px;
+    box-shadow: 0 8px 32px rgb(0 0 0 / 0.25); display: flex; flex-direction: column; gap: 8px;
+}
+.splash-card p { margin: 0; color: var(--muted); }
+.splash-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+.splash-buttons .primary { background: var(--accent); color: white; border-color: var(--accent); }
+.notice {
+    display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 10%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+
 /* The copy and share buttons, and what they say for a moment once clicked. */
 .icon-button { position: relative; align-self: center; border: none; background: transparent; color: var(--muted); padding: 2px 5px; display: inline-flex; align-items: center; cursor: pointer; }
 .icon-button:hover { color: var(--accent); }

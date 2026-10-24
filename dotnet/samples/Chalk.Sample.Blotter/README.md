@@ -172,6 +172,26 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   while the streams go on; in lagging mode, **Stall orders_current 20 s** stops only the job that keeps
   it. Do them with a small budget chosen on the page to see the host refuse.
 
+- **Alerts.** The bell on the tab bar opens the alerts: each is a tab's filters, saved, with a sound
+  (cash register, klaxon, zap or laser) and a throttle. A new one takes the tab's filters as they are;
+  each can be heard (▶), muted or removed. They are kept in the browser's local settings.
+  - **The host evaluates them, from the streams, not the page:** every order version and fill the
+    streams send is weighed against each rule as the host reads it, however far behind a grid has
+    fallen. A fill fires a rule when it passes its filter; an order, when a version of it comes to
+    pass the filter, and not again until it has left it. Fired again within its throttle, a rule
+    gathers its rows and sounds once the throttle allows, saying how many (×26).
+  - **None is missed:** a browser's alerts wait, in order, until a page of it has sounded them. Closed
+    and opened again within 10 minutes, a page says what fired meanwhile, and sounds it once a rule;
+    the host keeps a browser's alerts, and evaluates its rules, that long after its last page closes.
+  - **Sound** is drawn with Web Audio, so there is nothing to load, and alerts at once mix. A browser
+    lets a page make sound only once someone has clicked on it: with alerts set to sound, the page
+    opens with a splash that asks (Enable sound, or Not now).
+  - **In the background,** the page's title flashes with the alert until it is looked at, and, with
+    "Notify in the background" ticked and the browser's leave, the system shows a notification.
+  - **Scrolled away from the live top,** the "N new above" pill shows a bell once an alert has fired
+    on the tab since, struck through while the page may not make sound. Alerts sound wherever the
+    grid is.
+
 ## How it works
 
 The blotter is a **bolt-on**. It asks of the database what any reader could: rows found by key, sorted

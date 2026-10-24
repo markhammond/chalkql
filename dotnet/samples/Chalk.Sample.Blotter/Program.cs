@@ -48,6 +48,7 @@ builder.Services.AddDataProtection()
     .SetApplicationName("Chalk.Sample.Blotter")
     .PersistKeysToFileSystem(new DirectoryInfo(linkKeys));
 builder.Services.AddSingleton<LinkShroud>();
+builder.Services.AddSingleton<AlertDesk>();
 
 var app = builder.Build();
 app.UseAntiforgery();

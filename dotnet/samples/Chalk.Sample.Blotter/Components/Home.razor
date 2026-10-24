@@ -3,6 +3,9 @@
 @inject BlotterHost Host
 @inject NavigationManager Nav
 @inject LinkShroud Shroud
+@inject AlertDesk Desk
+@inject IJSRuntime JS
+@inject ILogger<Home> Log
 
 <PageTitle>Virtual blotter</PageTitle>
 
@@ -20,7 +23,38 @@
         </div>
     }
 
-    <BlotterGrid @key="_tab" Tab="_tab" Link="_link" Select="t => { _tab = t; _link = null; }">
+    @if (_alertsRefused is not null)
+    {
+        <div class="refusal">
+            Some saved alerts could not be read, and are left out: @_alertsRefused
+            <button @onclick="() => _alertsRefused = null">Dismiss</button>
+        </div>
+    }
+
+    @if (_away is not null)
+    {
+        <div class="notice">
+            @_away
+            <button @onclick="() => _away = null">Dismiss</button>
+        </div>
+    }
+
+    @* A browser makes no sound until someone has clicked on the page: asked once, when alerts would sound. *@
+    @if (_book.Session is not null && !_book.Answered && _book.Rules.Any(r => !r.Muted))
+    {
+        <div class="splash" role="dialog" aria-label="Sound alerts">
+            <div class="splash-card">
+                <b>This blotter sounds alerts</b>
+                <p>@(_book.Rules.Count(r => !r.Muted) is 1 ? "An alert is" : $"{_book.Rules.Count(r => !r.Muted)} alerts are") set to sound. The browser lets the page make sound once you allow it.</p>
+                <div class="splash-buttons">
+                    <button type="button" class="primary" onclick="blotterAlerts.enableSound()">Enable sound</button>
+                    <button type="button" @onclick="() => _book.Answered = true">Not now</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    <BlotterGrid @key="_tab" Tab="_tab" Link="_link" Alerts="_book" Select="t => { _tab = t; _link = null; }">
         <Toggles>
             <button type="button" class="link-button disclosure" aria-expanded="@_vitals" @onclick="ToggleVitals"><Chevron Open="_vitals" /> Vital statistics</button>
         </Toggles>
@@ -55,6 +89,13 @@
     private Timer? _timer;
     private bool _vitals;
 
+    // The browser's alerts, which the host evaluates; why some saved ones were left out; and how many
+    // fired while no page of the browser was open.
+    private readonly AlertBook _book = new();
+    private DotNetObjectReference<Home>? _self;
+    private string? _alertsRefused;
+    private string? _away;
+
     protected override void OnInitialized()
     {
         var query = new Uri(Nav.Uri).Query;
@@ -74,6 +115,107 @@
         _status = Host.Status;
         _timer = new Timer(_ => InvokeAsync(() => { _status = Host.Status; StateHasChanged(); }), null, 1000, 1000);
     }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        // The browser's id and rules are in its local settings, which only the page can read.
+        _self = DotNetObjectReference.Create(this);
+        var saved = await JS.InvokeAsync<SavedAlerts>("blotterAlerts.load", _self);
+        var rules = new List<AlertRule>();
+        var refused = new List<string>();
+        foreach (var rule in saved.Rules)
+        {
+            try
+            {
+                rules.Add(AlertRule.Load(rule));
+            }
+            catch (ArgumentException why)
+            {
+                refused.Add(why.Message);
+            }
+        }
+
+        _alertsRefused = refused.Count == 0 ? null : string.Join("; ", refused);
+        _book.Notify = saved.Notify;
+        _book.SoundOn = saved.Sound;
+        _book.Answered = saved.Sound;
+        _book.SaveAsync = SaveRulesAsync;
+        var session = Desk.Open(saved.Browser);
+        session.SetRules(rules);
+        session.Attach();
+        session.Fired += OnFired;
+        _book.Session = session;
+
+        // What fired while no page of this browser was open: said, and sounded once a rule.
+        var waiting = session.Waiting();
+        Log.LogInformation("alerts: browser {Browser} opened a page, {Rules} rules, {Waiting} alerts waiting", saved.Browser, rules.Count, waiting.Count);
+        if (waiting.Count > 0)
+        {
+            _away = $"While no page of this browser was open, alerts fired for {waiting.Sum(a => a.Count):N0} rows: "
+                + string.Join(", ", waiting.GroupBy(a => a.RuleName).Select(g => $"{g.Key} ×{g.Sum(a => a.Count):N0}"));
+            foreach (var latest in waiting.GroupBy(a => a.RuleId).Select(g => g.Last()))
+            {
+                await SoundAsync(latest);
+            }
+
+            session.Acknowledge(waiting[^1].Seq);
+        }
+
+        StateHasChanged();
+    }
+
+    /// <summary>An alert the host fired: counted for the bell, sounded by the page, and then let go.</summary>
+    private void OnFired(AlertEvent alert) => _ = InvokeAsync(async () =>
+    {
+        try
+        {
+            await SoundAsync(alert);
+            _book.Session?.Acknowledge(alert.Seq);
+            StateHasChanged();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The page went: the alert waits for the next one.
+        }
+    });
+
+    private async Task SoundAsync(AlertEvent alert)
+    {
+        _book.Count(alert);
+        await JS.InvokeVoidAsync("blotterAlerts.fire", alert with { Muted = alert.Muted || !_book.SoundOn }, _book.Notify);
+    }
+
+    private async Task SaveRulesAsync(IReadOnlyList<AlertRule> rules)
+    {
+        _book.Session?.SetRules(rules);
+        await JS.InvokeVoidAsync("blotterAlerts.saveRules", rules.Select(r => r.Save()).ToList());
+        StateHasChanged();
+    }
+
+    /// <summary>The page may make sound now, or may not.</summary>
+    [JSInvokable]
+    public void SoundEnabled(bool on)
+    {
+        _book.SoundOn = on;
+        _book.Answered = true;
+        StateHasChanged();
+    }
+
+    /// <summary>Whether the browser lets the page notify, now that it was asked.</summary>
+    [JSInvokable]
+    public void NotifyAllowed(bool allowed)
+    {
+        _book.Notify = allowed;
+        StateHasChanged();
+    }
+
+    /// <summary>What the page keeps of alerts in the browser's local settings.</summary>
+    private sealed record SavedAlerts(string Browser, SavedRule[] Rules, bool Notify, bool Sound);
 
     private async Task SetBudgetAsync(long bytes)
     {
@@ -97,6 +239,14 @@
     public void Dispose()
     {
         _timer?.Dispose();
+        if (_book.Session is { } session)
+        {
+            session.Fired -= OnFired;
+            session.Detach();
+            Log.LogInformation("alerts: browser {Browser} closed a page", session.Browser);
+        }
+
+        _self?.Dispose();
         if (_vitals)
         {
             Host.WatchVitals(false);

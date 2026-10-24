@@ -13,6 +13,22 @@
         <button role="tab" aria-selected="@(t == Tab)" class="tab @(t == Tab ? "selected" : "")" @onclick="() => Select.InvokeAsync(t)">@t.Title</button>
     }
     <span class="spacer"></span>
+    @if (Alerts is not null)
+    {
+        <span class="alerts-wrap">
+            <button type="button" class="icon-button" aria-expanded="@_alerting" title="Alerts: a sound when a row comes to pass a filter" aria-label="Alerts" @onclick="() => _alerting = !_alerting">
+                <Bell Muted="!Alerts.SoundOn && !Alerts.Rules.IsEmpty" />
+                @if (!Alerts.Rules.IsEmpty)
+                {
+                    <span class="alerts-count">@Alerts.Rules.Length</span>
+                }
+            </button>
+            @if (_alerting)
+            {
+                <AlertsPanel Book="Alerts" Tab="Tab" Filter="_filter" />
+            }
+        </span>
+    }
     @* Both copy in the browser itself, in the click: a clipboard takes nothing written later. *@
     <button type="button" class="icon-button" title="Copy the rows in view, to paste into a sheet or a message" aria-label="Copy the rows in view" onclick="blotter.copyRows(this)">
         <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><rect x="5.5" y="5.5" width="8.5" height="8.5" rx="1.5" /><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5" /></svg>
@@ -86,7 +102,14 @@
 <div class="frame">
     @if (NewAbove() is var above and > 0)
     {
-        <button class="badge" @onclick="ShowNewestAsync">@above.ToString("N0", CultureInfo.InvariantCulture) new above</button>
+        <button class="badge" @onclick="ShowNewestAsync">
+            @if (Alerts is not null && Alerts.FiredOn(Tab) > _firedAtHold)
+            {
+                @* Alerts fired since the grid was held: among the rows above, most likely. *@
+                <Bell Muted="!Alerts.SoundOn" />
+            }
+            @above.ToString("N0", CultureInfo.InvariantCulture) new above
+        </button>
     }
 
     <div class="scroller @(_waiting || _refusal is not null || _failure is not null ? "waiting" : "")" @ref="_scroller">
@@ -281,6 +304,10 @@
     [Parameter]
     public EventCallback<Tab> Select { get; set; }
 
+    /// <summary>The page's alerts, for the tab bar's alerts and the bell in "new above".</summary>
+    [Parameter]
+    public AlertBook? Alerts { get; set; }
+
     /// <summary>The view a link opened this tab on, if one did: its sort, filters, columns, and the row it was held at.</summary>
     [Parameter]
     public ViewLink? Link { get; set; }
@@ -291,6 +318,10 @@
     // Columns the reader has hidden, by name; the frozen ones, which tell the rows apart, are always shown.
     private HashSet<string> _hiddenColumns = [];
     private bool _choosing;
+    private bool _alerting;
+
+    // How many alerts had fired on this tab when the grid was held: more since, and the bell shows.
+    private long _firedAtHold;
     private bool _explaining;
     private Flashes _fillFlashes = new(Tab.Fills.Columns);
     private QuickGrid<BlotterRow>? _grid;
@@ -405,6 +436,7 @@
         _anchor = (at, rank);
         _arrivals?.Dispose();
         _arrivals = new ArrivalsAbove(Host, _sort, () => _scope?.State ?? state);
+        _firedAtHold = Alerts?.FiredOn(Tab) ?? 0;
         _scrollTop = rank * RowHeight;
 
         // The grid learns how many rows it has first: until then it is not tall enough to scroll there.
@@ -447,6 +479,7 @@
             _pages.Held = true;
             _arrivals?.Dispose();
             _arrivals = new ArrivalsAbove(Host, _sort, () => _scope?.State ?? state);
+            _firedAtHold = Alerts?.FiredOn(Tab) ?? 0;
             var slot = Nesting.Locate((long)(scrollTop / RowHeight), _opened);
             try
             {
