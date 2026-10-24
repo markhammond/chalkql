@@ -511,6 +511,15 @@ marks a place where the host approximates or does extra work because of it.
 
 - Entitlements (above).
 - Free-text search.
+- Hung orders: orders still open (New or Partial) with no update for longer than a threshold,
+  counted from the last update, or from when the order was placed if nothing has filled. This needs
+  every open order, those placed before the host started too, so it is not a view of the tail: it
+  would be a feature of its own, switched on by choice, sized against the budget, and refused when
+  the open orders do not fit. ChalkQL's engine clock (`@now`) lets a standing view's filter move
+  with time, so the alert itself, "open for more than five minutes", can be one.
+- Alert conditions written in SQL and run by ChalkQL as standing views, rather than matched in the
+  host, so that they read as the grid's filters do and an access policy can apply to them; with
+  paths, such as `order.status` in a fill's alert, as a feature of ChalkQL itself.
 - A refusal by query cost estimate.
 - Use of Tapline could greatly improve scalability. On Blazor Server the grid renders on the server, and ChalkQL's views already give each
   reader what changed. Tapline would carry the same answers to a WebAssembly grid, headless clients or
