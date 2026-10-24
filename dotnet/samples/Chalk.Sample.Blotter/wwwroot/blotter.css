@@ -84,9 +84,10 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
    at once, and the last one chosen is the one shown. */
 .scroller.waiting tbody { opacity: 0.35; pointer-events: none; }
 
-/* Across the line under the headings, so the first row shows beneath it. */
+/* Across the top edge of the grid, over no more than the top quarter of the headings, so they and
+   the first row stay readable. */
 .badge {
-    position: absolute; top: 17px; left: 50%; transform: translateX(-50%); z-index: 5;
+    position: absolute; top: -20px; left: 50%; transform: translateX(-50%); z-index: 5;
     background: var(--accent); color: #fff; border: none; border-radius: 999px; padding: 5px 14px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }

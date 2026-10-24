@@ -128,7 +128,8 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   size, how far it is behind the streams and the statement time limit; the tail and what of it is
   confirmed; the statements run and stopped, and the reads and lookups pages made; and the
   confirmations, what they let go, and the gap fill.
-- **"N new above"** sits across the line under the headings, so the first row shows beneath it.
+- **"N new above"** sits across the top edge of the grid, over no more than the top quarter of the
+  headings, so they and the first row stay readable.
 - **Simulate burst** makes 3,000 changes at once; **Stall database 20 s** stops the database writing
   while the streams go on; in lagging mode, **Stall orders_current 20 s** stops only the job that keeps
   it. Do them with a small budget to see the host refuse.
