@@ -37,7 +37,8 @@ public sealed class Column
 
     private Column(
         string name, string title, ColumnKind kind, Type type, Func<IRow, object> value, Comparison<IRow> compare,
-        Func<IRow, string> show, IReadOnlyList<string>? choices, string? description = null)
+        Func<IRow, string> show, IReadOnlyList<string>? choices, string? description = null, Func<IRow, string>? detail = null,
+        bool derived = false)
     {
         Type = type;
         Name = name;
@@ -47,6 +48,8 @@ public sealed class Column
         _value = value;
         Compare = compare;
         Show = show;
+        Detail = detail ?? show;
+        Derived = derived;
         Choices = choices ?? [];
     }
 
@@ -75,7 +78,17 @@ public sealed class Column
 
     public Comparison<IRow> Compare { get; }
 
+    /// <summary>The value as the grid shows it.</summary>
     public Func<IRow, string> Show { get; }
+
+    /// <summary>The value in full, as an order's own page shows it: a time to the microsecond.</summary>
+    public Func<IRow, string> Detail { get; }
+
+    /// <summary>
+    /// Worked out from the row's other values, and only shown: not a column of the database's rows,
+    /// so a page is neither sorted nor filtered by it.
+    /// </summary>
+    public bool Derived { get; }
 
     /// <summary>The values of a <see cref="ColumnKind.Choice"/> column.</summary>
     public IReadOnlyList<string> Choices { get; }
@@ -95,9 +108,15 @@ public sealed class Column
         name, title, ColumnKind.Integer, typeof(int), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
         r => value((T)r).ToString("#,0", CultureInfo.InvariantCulture), null);
 
-    public static Column Number<T>(string name, string title, Func<T, double> value, string format) where T : IRow => new(
+    /// <param name="decimals">The most decimal places shown.</param>
+    public static Column Number<T>(string name, string title, Func<T, double> value, int decimals) where T : IRow => new(
         name, title, ColumnKind.Number, typeof(double), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
-        r => value((T)r).ToString(format, CultureInfo.InvariantCulture), null);
+        r => Finance(value((T)r), decimals), null);
+
+    /// <summary>A price: to six significant figures, see <see cref="Significant"/>.</summary>
+    public static Column Price<T>(string name, string title, Func<T, double> value) where T : IRow => new(
+        name, title, ColumnKind.Number, typeof(double), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
+        r => Significant(value((T)r)), null);
 
     public static Column Text<T>(string name, string title, Func<T, string> value) where T : IRow => new(
         name, title, ColumnKind.Text, typeof(string), r => value((T)r), (a, b) => string.CompareOrdinal(value((T)a), value((T)b)),
@@ -109,7 +128,55 @@ public sealed class Column
 
     public static Column Time<T>(string name, string title, Func<T, DateTime> value, string? description = null) where T : IRow => new(
         name, title, ColumnKind.Time, typeof(DateTime), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
-        r => value((T)r).ToString("MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture), null, description);
+        r => value((T)r).ToString("HH:mm:ss", CultureInfo.InvariantCulture), null, description,
+        r => value((T)r).ToString("HH:mm:ss.ffffff", CultureInfo.InvariantCulture));
+
+    /// <summary>A value worked out from others and only shown, see <see cref="Derived"/>: right-aligned if <paramref name="numeric"/>.</summary>
+    public static Column Shown<T>(string name, string title, Func<T, string> show, bool numeric, string? description = null) where T : IRow => new(
+        name, title, numeric ? ColumnKind.Number : ColumnKind.Text, typeof(string), r => show((T)r),
+        (a, b) => string.CompareOrdinal(show((T)a), show((T)b)), r => show((T)r), null, description, derived: true);
+
+    /// <summary>The date of a time, apart from it.</summary>
+    public static string Date(DateTime time) => time.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    /// <summary>What a value of nought shows as: a dash, which the eye passes over.</summary>
+    public const string Nought = "–";
+
+    /// <summary>
+    /// A quantity as finance writes it: no zero before the point of a fraction, and none after its
+    /// last digit that counts (0.2500 is .25); nought is a dash.
+    /// </summary>
+    public static string Finance(double value, int decimals)
+    {
+        var text = value.ToString("#,0." + new string('#', decimals), CultureInfo.InvariantCulture);
+        return text switch
+        {
+            "0" or "-0" => Nought,
+            ['0', '.', ..] => text[1..],
+            ['-', '0', '.', ..] => "-" + text[2..],
+            _ => text,
+        };
+    }
+
+    /// <summary>
+    /// A price to <paramref name="figures"/> significant figures at most, written as
+    /// <see cref="Finance"/> writes a quantity; in scientific notation (1.23457e-5) where that would
+    /// take more than <paramref name="digits"/> digits.
+    /// </summary>
+    public static string Significant(double value, int figures = 6, int digits = 8)
+    {
+        var rounded = double.Parse(value.ToString("G" + figures, CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
+        if (rounded == 0)
+        {
+            return Nought;
+        }
+
+        var magnitude = (int)Math.Floor(Math.Log10(Math.Abs(rounded)));
+        var text = Finance(rounded, Math.Max(0, figures - 1 - magnitude));
+        return text.Count(char.IsAsciiDigit) > digits
+            ? rounded.ToString("0." + new string('#', figures - 1) + "e0", CultureInfo.InvariantCulture)
+            : text;
+    }
 
     public override string ToString() => Name;
 }

@@ -246,7 +246,7 @@ internal static class Probe
         }
 
         var filters = new List<ColumnFilter>();
-        foreach (var column in Enumerable.Range(0, 1 + random.Next(2)).Select(_ => tab.Columns[random.Next(tab.Columns.Count)]).Distinct())
+        foreach (var column in Enumerable.Range(0, 1 + random.Next(2)).Select(_ => Sortable(tab)[random.Next(Sortable(tab).Length)]).Distinct())
         {
             if (column.Kind == ColumnKind.Id)
             {
@@ -289,7 +289,10 @@ internal static class Probe
         tab,
         [
             .. Enumerable.Range(0, 1 + random.Next(3))
-                .Select(_ => new SortColumn(tab.Columns[random.Next(tab.Columns.Count)], random.Next(2) == 0))
+                .Select(_ => new SortColumn(Sortable(tab)[random.Next(Sortable(tab).Length)], random.Next(2) == 0))
                 .DistinctBy(k => k.Column),
         ]);
+
+    /// <summary>The columns a page may sort and filter by: all but those only shown.</summary>
+    private static Column[] Sortable(Tab tab) => [.. tab.Columns.Where(c => !c.Derived)];
 }

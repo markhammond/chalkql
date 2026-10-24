@@ -4,7 +4,7 @@ A Blazor Server page with two QuickGrid tabs: **client orders** (five million by
 its fills nested beneath it, and the **fills** themselves. Both live in PostgreSQL, which the host
 cannot hold in memory, while the house keeps taking orders and filling them. Each tab scrolls through
 all of its rows, sorts by any columns, filters on any column, and flashes what changes. The host keeps
-what it holds within a memory budget, the smallest that serves of 4, 8, 16, 32 and 64 MB unless you set
+what it holds within a memory budget, the smallest that serves of 8, 16, 32 and 64 MB unless you set
 one (on the page, or at start), stops any statement after
 5 s, and never shows an order at an older version than one it knows of to stay within either.
 
@@ -109,11 +109,18 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   row can still be told apart: the expander, Time and Order on the orders tab; Time and Fill on the
   fills tab.
 - **Choosing columns.** "Columns" at the right of the tab bar shows or hides any column but the frozen
-  ones. Ver, Region and Channel start hidden. Columns 1.5em apart, a heading keeping room for its sort
+  ones. Ver, Region, Channel, Filled and Date start hidden.
+- **Shown only.** Fill % (of an order) and Date are worked out from the row in the host: shown, not
+  sorted or filtered by, and refused if asked to be. The grid shows times to the second; an order's page
+  shows them to the microsecond, with the date apart.
+- **Numbers as finance writes them:** no zero before the point of a fraction, none after its last digit
+  that counts (.25, not 0.2500), and a dash for nought. Prices are rounded to six significant figures,
+  and written in scientific notation (1.23457e-5) where they would take more than eight digits. Every
+  value is in the system's monospace, its zeros slashed. Columns 1.5em apart, a heading keeping room for its sort
   arrow whether or not its column is sorted.
-- **To an order's page.** The ↗ beside an order's id opens its page: every version and every fill,
-  read from the database and the live tail in one statement each. The ↗ beside a fill's id opens its
-  order's page, that fill marked.
+- **To an order's page.** An order's id opens its page: every version and every fill, read from the
+  database and the live tail in one statement each. A fill's id opens its order's page, that fill
+  marked. The ↗ after the id shows while the pointer is on its row.
 - **A new sort or filter dims the grid** until its first page is in.
 - **Flashes.** The cells of a row that changed flash, and an order or fill the streams have just sent
   flashes whole. A row scrolled into view does not flash.
@@ -123,7 +130,7 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   position it holds, and the scroll with it, by as many rows), so scrolling on up reveals them in turn
   and the badge counts down. A click on the badge, or reaching the top however fast, goes back to the
   live top, where new rows push down again.
-- **Rows cut by the grid's edges fade.** A band one row high over the bottom edge, and over the top
+- **Rows cut by the grid's edges fade.** A band two thirds of a row high over the bottom edge, and over the top
   edge under the headings once the grid is scrolled down: plain CSS over the grid, nothing run as it
   scrolls. At the top, the newest row stays clear.
 - **Above the grid**, whether the host is serving and what it holds against the budget. **Vital
@@ -133,12 +140,13 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   the tail and what of it is confirmed; the statements run and stopped, and the reads and lookups pages
   made; and the confirmations, what they let go, and the gap fill. Closed, none of it is rendered, and
   the host does not ask PostgreSQL its size.
-- **Chevrons** are drawn, one size wherever they are, set in em.
+- **Chevrons** are drawn, one size wherever they are, set in em. Vital statistics and how the tab is
+  answered open from one row under the grid.
 - **"N new above"** sits across the top edge of the grid, over no more than the top quarter of the
   headings, so they and the first row stay readable.
 - **Simulate burst** makes 3,000 changes at once; **Stall database 20 s** stops the database writing
   while the streams go on; in lagging mode, **Stall orders_current 20 s** stops only the job that keeps
-  it. Do them with a small budget to see the host refuse.
+  it. Do them with a small budget chosen on the page to see the host refuse.
 
 ## How it works
 
@@ -203,10 +211,10 @@ in one statement. For fills, it is every fill in the tail that passes. Pages tha
 one scope, whatever they sort by and wherever they are scrolled. A page sorts its scope in the host,
 which is cheap because a scope is a slice of the tail, never of the corpus.
 
-**Finding the budget.** Unless `--budget-mb` sets one, the host starts at 4 MB, and until the first
-page has opened its scope, whatever would be refused for want of budget (the tail at start, or that
-first scope) raises the budget to the next of 8, 16, 32 and 64 MB instead. Once that scope is open, or
-a budget is chosen on the page, the budget stays as it is, and a refusal is a refusal.
+**Finding the budget.** Unless `--budget-mb` sets one, the host starts at 8 MB, and whatever would be
+refused for want of budget (a scope that would not fit, or a tail grown past it) raises the budget to
+the next of 16, 32 and 64 MB instead. It never lowers it. Past 64 MB, or once a budget is chosen on the
+page (4 MB is there too, to see the host refuse), a refusal is a refusal.
 
 **The budget** covers what the host holds: the tail, in ChalkQL and in the host; the scopes' views and
 their states; and the windows, counts and fills it keeps for a moment, which may hold a quarter of the

@@ -14,6 +14,11 @@ public sealed class SortSpec : IComparer<IRow>, IEquatable<SortSpec>
 {
     private SortSpec(Tab tab, ImmutableArray<SortColumn> chosen)
     {
+        if (chosen.FirstOrDefault(k => k.Column.Derived).Column is { } shown)
+        {
+            throw new ArgumentException($"{shown.Title} is worked out from the row and only shown: nothing is sorted by it", nameof(chosen));
+        }
+
         Tab = tab;
         Chosen = chosen;
         var keys = chosen.ToBuilder();

@@ -29,18 +29,17 @@ public sealed record BlotterOptions
     /// what pages cache. The database's own memory is not in it. Where to start from, while
     /// <see cref="FindBudget"/> is on.
     /// </summary>
-    public long BudgetBytes { get; init; } = 4L << 20;
+    public long BudgetBytes { get; init; } = 8L << 20;
 
     /// <summary>
-    /// Whether the host finds the smallest budget it is not refused at: until the first live scope
-    /// opens, what would be refused for want of budget raises it to the next of
-    /// <see cref="BudgetSteps"/> instead, up to the last. From then on a refusal is a refusal, and a
-    /// budget chosen on the page is kept. Off when the budget is given.
+    /// Whether the host finds the smallest budget it is not refused at: whatever would be refused for
+    /// want of budget raises it to the next of <see cref="BudgetSteps"/> instead, up to the last, until
+    /// a budget is chosen on the page. Off when the budget is given.
     /// </summary>
     public bool FindBudget { get; init; } = true;
 
     /// <summary>The budgets <see cref="FindBudget"/> tries, smallest first.</summary>
-    public IReadOnlyList<long> BudgetSteps { get; init; } = [4L << 20, 8L << 20, 16L << 20, 32L << 20, 64L << 20];
+    public IReadOnlyList<long> BudgetSteps { get; init; } = [8L << 20, 16L << 20, 32L << 20, 64L << 20];
 
     /// <summary>How busy the simulated market is, and how far behind its database runs.</summary>
     public ExchangeOptions Exchange { get; init; } = new();

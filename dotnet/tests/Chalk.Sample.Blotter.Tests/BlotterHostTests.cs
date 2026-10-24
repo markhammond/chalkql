@@ -234,7 +234,7 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task Until_the_first_scope_opens_the_budget_is_raised_rather_than_refused_and_then_kept()
+    public async Task Until_a_budget_is_chosen_it_is_raised_rather_than_refused_up_to_the_last_step()
     {
         long[] steps = [128 << 10, 512 << 10, 4 << 20];
         await using var host = await StartAsync(new BlotterOptions
@@ -243,21 +243,38 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         });
 
         // No scope fits in the first step: the first is opened in the next that holds it.
-        await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None);
-        var found = host.Budget;
-        Assert.Contains(found, steps[1..]);
+        var scopes = new List<LiveScope> { await host.AcquireAsync(Tab.Orders, FilterSpec.None, CancellationToken.None) };
+        Assert.Contains(host.Budget, steps[1..]);
 
-        // Found, the budget stays: what does not fit now is refused.
+        // Scope after scope raises it again, to the last step; only past that is one refused.
         var refused = await Assert.ThrowsAsync<BlotterRefusedException>(async () =>
         {
             for (var i = 0; i < 200; i++)
             {
                 var filter = FilterSpec.Of([new ColumnFilter { Column = Tab.Orders.Named("qty"), Min = i * 0.001 }]);
-                await host.AcquireAsync(Tab.Orders, filter, CancellationToken.None);
+                scopes.Add(await host.AcquireAsync(Tab.Orders, filter, CancellationToken.None));
             }
         });
         Assert.StartsWith("no live scope for this filter", refused.Message, StringComparison.Ordinal);
-        Assert.Equal(found, host.Budget);
+        Assert.Equal(steps[^1], host.Budget);
+        Assert.True(scopes.Count > 4, $"refused after {scopes.Count} scopes");
+
+        // Chosen, the budget stays as it is: what does not fit is refused.
+        foreach (var scope in scopes)
+        {
+            await host.ReleaseAsync(scope);
+        }
+
+        await host.SetBudgetAsync(1 << 20);
+        await Assert.ThrowsAsync<BlotterRefusedException>(async () =>
+        {
+            for (var i = 0; i < 200; i++)
+            {
+                var filter = FilterSpec.Of([new ColumnFilter { Column = Tab.Orders.Named("qty"), Min = 1 + i * 0.001 }]);
+                await host.AcquireAsync(Tab.Orders, filter, CancellationToken.None);
+            }
+        });
+        Assert.Equal(1 << 20, host.Budget);
     }
 
     [Fact]

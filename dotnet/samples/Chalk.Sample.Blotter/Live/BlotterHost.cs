@@ -87,7 +87,7 @@ public sealed class BlotterHost : IAsyncDisposable
     private TimeSpan _refusedBehind;
     private int _disposed;
 
-    // Until the first live scope opens: raise the budget rather than refuse for want of it.
+    // Until a budget is chosen: raise it rather than refuse for want of it.
     private bool _findingBudget;
 
     // Pages with the vital statistics open: the database's size, a query, is read only while there are any.
@@ -289,8 +289,6 @@ public sealed class BlotterHost : IAsyncDisposable
                     throw new BlotterRefusedException($"the live scope for this filter could not start: {fault.Message}");
                 }
 
-                // The first scope open, the budget is found.
-                _findingBudget = false;
                 scope.Pages = 1;
                 _scopes[name] = scope;
                 return scope;
@@ -695,7 +693,7 @@ public sealed class BlotterHost : IAsyncDisposable
             }
         }
 
-        // Still finding the budget, the host has not been refused yet: it takes the next one up.
+        // While no budget is chosen, the host takes the next one up rather than refuse.
         if (RaiseBudget($"the tail and {_scopes.Count} live scopes hold {Megabytes(LiveBytes())}"))
         {
             await KeepWithinBudgetAsync().ConfigureAwait(false);
@@ -955,7 +953,7 @@ public sealed class BlotterHost : IAsyncDisposable
         }
     }
 
-    /// <summary>While the host is still finding its budget, raises it to the next step, if there is one.</summary>
+    /// <summary>While no budget is chosen, raises it to the next step, if there is one.</summary>
     private bool RaiseBudget(string why)
     {
         var next = _options.BudgetSteps.FirstOrDefault(step => step > _budget);

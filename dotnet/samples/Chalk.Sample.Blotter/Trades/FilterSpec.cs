@@ -162,8 +162,16 @@ public sealed class FilterSpec
     /// <summary>Canonical, for sharing a live scope between pages that filter alike.</summary>
     public string Name { get; }
 
-    public static FilterSpec Of(IEnumerable<ColumnFilter> filters) =>
-        new([.. filters.Select(f => f.Canonical()).Where(f => !f.IsEmpty).OrderBy(f => f.Column.Name, StringComparer.Ordinal)]);
+    public static FilterSpec Of(IEnumerable<ColumnFilter> filters)
+    {
+        ColumnFilter[] all = [.. filters];
+        if (all.FirstOrDefault(f => f.Column.Derived)?.Column is { } shown)
+        {
+            throw new ArgumentException($"{shown.Title} is worked out from the row and only shown: nothing is filtered by it", nameof(filters));
+        }
+
+        return new([.. all.Select(f => f.Canonical()).Where(f => !f.IsEmpty).OrderBy(f => f.Column.Name, StringComparer.Ordinal)]);
+    }
 
     public ColumnFilter? For(Column column) => Columns.FirstOrDefault(c => c.Column == column);
 

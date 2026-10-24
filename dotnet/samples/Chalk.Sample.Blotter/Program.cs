@@ -9,7 +9,7 @@ var budget = Number(Argument(args, "--budget-mb"));
 var options = new BlotterOptions
 {
     Orders = Number(Argument(args, "--orders")) ?? 5_000_000,
-    BudgetBytes = (budget ?? 4) << 20,
+    BudgetBytes = (budget ?? 8) << 20,
     FindBudget = budget is null,
     Maintenance = Argument(args, "--maintenance") == "recompute" ? ViewMaintenance.Recompute : ViewMaintenance.Incremental,
     Postgres = Argument(args, "--postgres"),

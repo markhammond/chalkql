@@ -76,11 +76,11 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 
 .frame { position: relative; flex: 1; min-height: 240px; display: flex; flex-direction: column; }
 
-/* Rows cut by the grid's edges fade under a band one row high over each edge: drawn over the grid by
+/* Rows cut by the grid's edges fade under a band two thirds of a row high over each edge: drawn over the grid by
    the browser alone, nothing measured or run as it scrolls. The top band shows only once the grid is
    scrolled down, so at the top the newest row stays clear. */
 .frame::before, .frame::after {
-    content: ""; position: absolute; left: 1px; right: 1px; height: 30px; pointer-events: none; z-index: 4;
+    content: ""; position: absolute; left: 1px; right: 1px; height: 20px; pointer-events: none; z-index: 4;
 }
 .frame::before {
     top: var(--grid-head, 32px); background: linear-gradient(var(--panel), transparent);
@@ -106,6 +106,9 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 }
 
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+/* Every value, in every column, in the system's monospace: its digits line up down a column, and its
+   zeros are slashed, so 0 is never O. The headings stay in the page's font. */
+td .cell, .history td { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
 thead th {
     position: sticky; top: 0; z-index: 2; background: var(--panel);
     border-bottom: 1px solid var(--line); text-align: left; padding: 0; font-weight: 600;
@@ -113,7 +116,7 @@ thead th {
 /* Columns are 1.5em apart: three-quarters of an em either side of each value. */
 .sort {
     all: unset; display: flex; gap: 2px; align-items: center; width: 100%;
-    padding: 7px 1px 7px 0.75em; cursor: pointer; box-sizing: border-box; user-select: none;
+    padding: 7px 1px 7px 0.75em; cursor: pointer; box-sizing: border-box; user-select: none; white-space: nowrap;
 }
 .sort .arrow.unsorted { visibility: hidden; }
 .sort .arrow { color: var(--accent); font-size: 11px; }
@@ -124,10 +127,13 @@ tbody tr { height: 30px; }
 tbody tr:nth-child(even) { background: var(--row-alt); }
 td { padding: 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
 td .cell { display: block; padding: 0 0.75em; line-height: 29px; overflow: hidden; text-overflow: ellipsis; }
-/* Every column in the page's one font; its digits are all one width (the table's tabular-nums), so
-   numbers still line up down a column. */
 td.num .cell { text-align: right; }
 td a { color: var(--accent); text-decoration: none; }
+/* An id that opens its order's page: the whole id is the link, in the row's own colour; its arrow
+   shows while the pointer is anywhere on the row, and keeps its place when hidden. */
+td a.go { color: inherit; }
+td a.go .arrow { color: var(--accent); visibility: hidden; font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; }
+tbody tr:hover a.go .arrow, td a.go:focus-visible .arrow { visibility: visible; }
 
 .side-Buy { color: var(--good); }
 .side-Sell { color: var(--bad); }
@@ -144,8 +150,8 @@ td a { color: var(--accent); text-decoration: none; }
 tr.new-a td { animation: new-a 2s ease-out; }
 tr.new-b td { animation: new-b 2s ease-out; }
 
-details { color: var(--muted); }
-details pre {
+.explain { color: var(--muted); }
+.explain pre {
     color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
     padding: 8px; overflow-x: auto; font-size: 11px; max-height: 260px;
 }
@@ -186,8 +192,7 @@ h2 { font-size: 14px; margin: 8px 0 0; }
 .pill button:hover { color: var(--bad); }
 .filter-pill { cursor: pointer; }
 .link-button { border: none; background: transparent; color: var(--accent); padding: 2px 4px; display: inline-flex; align-items: center; gap: 4px; }
-/* Opens a section of the page, as "How this tab is answered" does: grey as it is, its chevron in line
-   with that one's, both set in a little from the edge. */
+/* Opens a section under the grid: grey, its chevron set in a little from the edge. */
 .link-button.disclosure { color: var(--muted); padding-left: 0.35em; }
 
 /* A heading is its label, then its funnel just after it: at the left of a text column, at the right
@@ -195,6 +200,10 @@ h2 { font-size: 14px; margin: 8px 0 0; }
    hidden, it still keeps its place, so nothing moves when it shows. */
 .head { display: flex; align-items: center; justify-content: flex-start; cursor: pointer; }
 .head.num { justify-content: flex-end; }
+/* A column only shown is not sorted or filtered by: its heading is a label alone. */
+.head.shown, .head.shown .sort { cursor: default; }
+/* With no arrow or funnel after it, its label ends where the values do. */
+.head.shown .sort { padding-right: 0.75em; }
 .head .sort { flex: 0 1 auto; width: auto; min-width: 0; padding-right: 1px; }
 .funnel {
     border: none; background: transparent; padding: 4px 0.5em 4px 0; cursor: pointer; display: flex; align-items: center;
@@ -224,19 +233,16 @@ h2 { font-size: 14px; margin: 8px 0 0; }
 .range { display: flex; gap: 12px; align-items: end; }
 .range label { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 11px; }
 
-/* The chevron is drawn, not a character, and sized by the text it sits in: drawn about 0.46em tall,
-   three quarters of the browser's disclosure triangle. In the grid it stays within the row's height,
+/* The chevron is drawn, not a character, and sized by the text it sits in: drawn about 0.36em tall. In the grid it stays within the row's height,
    because every row is one height. */
 .toggle { border: none; background: transparent; color: var(--muted); padding: 0; cursor: pointer; width: 100%; height: 29px; display: flex; align-items: center; justify-content: center; }
 .toggle:hover { color: var(--accent); }
 .chevron {
-    width: 0.85em; height: 0.85em; flex: none; vertical-align: -0.08em;
+    width: 0.64em; height: 0.64em; flex: none; vertical-align: -0.04em;
     fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.12s ease;
 }
-.chevron.open, .chevron.down, details[open] > summary .chevron { transform: rotate(90deg); }
+.chevron.open, .chevron.down { transform: rotate(90deg); }
 .chevron.down.open { transform: rotate(-90deg); }
-summary { list-style: none; cursor: pointer; padding-left: 0.35em; }
-summary::-webkit-details-marker { display: none; }
 /* Frozen columns, once the widths are fixed: they stay in place as the grid scrolls sideways, over
    what scrolls beneath them, so they keep a background of their own; a rule marks where they end. */
 table[data-pinned] .frozen { position: sticky; z-index: 1; background: var(--panel); }
@@ -245,7 +251,7 @@ table[data-pinned] tbody tr:nth-child(even) td.frozen { background: var(--row-al
 table[data-pinned] tbody tr.child td.frozen { background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
 table[data-pinned] .frozen-last { box-shadow: inset -1px 0 0 var(--line); }
 /* Room before the chevron's box; after it, the next cell's own padding. */
-td.expander, th.expander { width: 0.85em; text-align: center; padding: 0 0 0 0.75em; }
+td.expander, th.expander { width: 0.64em; text-align: center; padding: 0 0 0 0.75em; }
 tr.child td { background: color-mix(in srgb, var(--accent) 5%, var(--panel)); color: var(--muted); font-size: 12px; }
 .cell.link a { text-decoration: underline dotted; }
 

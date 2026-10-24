@@ -11,17 +11,18 @@
     </div>
 
     <BlotterGrid @key="_tab" Tab="_tab" Select="t => _tab = t">
-        <Below>
-            <div class="bar controls">
-                <button type="button" class="link-button disclosure" aria-expanded="@_vitals" @onclick="ToggleVitals"><Chevron Open="_vitals" /> Vital statistics</button>
-                <span class="spacer"></span>
+        <Toggles>
+            <button type="button" class="link-button disclosure" aria-expanded="@_vitals" @onclick="ToggleVitals"><Chevron Open="_vitals" /> Vital statistics</button>
+        </Toggles>
+        <Actions>
                 <button @onclick="Burst" title="The house takes and fills 3,000 orders at once">Simulate burst</button>
                 <button @onclick="Stall" title="The database writes nothing for 20 s, while the streams go on">Stall database 20 s</button>
                 @if (Host.Options.Current == CurrentSync.Lagging)
                 {
                     <button @onclick="StallCurrent" title="The job that keeps orders_current applies nothing for 20 s, while order_versions is written">Stall orders_current 20 s</button>
                 }
-            </div>
+        </Actions>
+        <Below>
             @* Closed, the statistics are not on the page at all, so nothing in them is rendered as they change. *@
             @if (_vitals)
             {

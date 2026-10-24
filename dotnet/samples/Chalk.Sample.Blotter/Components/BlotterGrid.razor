@@ -101,6 +101,15 @@
 
                 <TemplateColumn TGridItem="BlotterRow" Title="@column.Title" Class="@ColumnClass(column, index)">
                     <HeaderTemplate>
+                        @if (column.Derived)
+                        {
+                            @* Only shown: worked out in the host from the row, so neither sorted nor filtered by. *@
+                            <div class="head shown @(column.Numeric ? "num" : "")" title="@column.Description; worked out from the row, so not sorted or filtered by">
+                                <span class="sort">@column.Title</span>
+                            </div>
+                        }
+                        else
+                        {
                         @* The whole heading sorts, its label button too (a click on it reaches the heading); the funnel does not. *@
                         <div class="head @(column.Numeric ? "num" : "")" @onclick="e => SortAsync(column, e.ShiftKey)"
                              title="@(column.Description is { } about ? about + ". " : "")Click to sort by @column.Title, descending, then ascending, then not; shift-click to do the same within a sort by several columns">
@@ -118,6 +127,7 @@
                                 <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M1.5 2h13l-5 6.2V14l-3-1.6V8.2z" /></svg>
                             </button>
                         </div>
+                        }
                     </HeaderTemplate>
                     <ChildContent>
                         @if (context.Row is Fill fill && context.Parent is not null)
@@ -131,13 +141,13 @@
                         else if (column == Tab.Key && context.Row is Order own)
                         {
                             <span class="cell id @context.Flash[index]" title="@own.OrderId">
-                                @own.OrderId <a href="order/@own.OrderId" target="_blank" title="Every version of this order, and its fills">↗</a>
+                                <a class="go" href="order/@own.OrderId" target="_blank" title="@own.OrderId: every version of this order, and its fills">@own.OrderId <span class="arrow">↗</span></a>
                             </span>
                         }
                         else if (column == Tab.Key && context.Row is Fill thisFill)
                         {
                             <span class="cell id @context.Flash[index]" title="@thisFill.FillId">
-                                @thisFill.FillId <a href="order/@thisFill.OrderId?fill=@thisFill.FillId" target="_blank" title="Its order: every version, and every fill, this one marked">↗</a>
+                                <a class="go" href="order/@thisFill.OrderId?fill=@thisFill.FillId" target="_blank" title="@thisFill.FillId: its order, every version and every fill, this one marked">@thisFill.FillId <span class="arrow">↗</span></a>
                             </span>
                         }
                         else if (column.Name == "order_id" && context.Row is Fill parentOf)
@@ -172,8 +182,8 @@
             {
                 <div><b>Order @o.OrderId</b> · @o.ClOrdId · v@(o.Version)</div>
                 <div>@o.Client (@o.Region) via @o.Channel</div>
-                <div><span class="side-@o.Side">@o.Side</span> @o.Qty.ToString("#,0.####", CultureInfo.InvariantCulture) @o.Instrument</div>
-                <div>filled @o.FilledQty.ToString("#,0.####", CultureInfo.InvariantCulture) at @o.AvgPrice.ToString("#,0.0000", CultureInfo.InvariantCulture) · @o.Status</div>
+                <div><span class="side-@o.Side">@o.Side</span> @Column.Finance(o.Qty, 4) @o.Instrument</div>
+                <div>filled @Column.Finance(o.FilledQty, 4) at @Column.Significant(o.AvgPrice) · @o.Status</div>
                 @if (o.EventTime < hover.Fill.EventTime)
                 {
                     <div class="muted">Its version with this fill has not arrived yet.</div>
@@ -187,10 +197,21 @@
     }
 </div>
 
+@* Under the grid, one row: what opens beneath it, side by side while closed, then what the page acts with. *@
+<div class="bar controls">
+    @Toggles
+    <button type="button" class="link-button disclosure" aria-expanded="@_explaining" @onclick="() => _explaining = !_explaining">
+        <Chevron Open="_explaining" /> How this tab is answered
+    </button>
+    <span class="spacer"></span>
+    @Actions
+</div>
+
 @Below
 
-<details>
-    <summary><Chevron /> How this tab is answered</summary>
+@if (_explaining)
+{
+<div class="explain">
     <p>
         Each page is read live from PostgreSQL (@(Tab.Overrides ? "orders_current, one row per order" : "fills")) through ChalkQL,
         from the key of a row already shown, with the sort, the filter and the limit pushed down; and merged with this
@@ -204,13 +225,22 @@
     {
         <pre>@_plans</pre>
     }
-</details>
+</div>
+}
 
 @code {
     [Parameter, EditorRequired]
     public Tab Tab { get; set; } = default!;
 
-    /// <summary>What the page shows immediately under the table.</summary>
+    /// <summary>Toggles of the page's own, on the row under the table before this one's.</summary>
+    [Parameter]
+    public RenderFragment? Toggles { get; set; }
+
+    /// <summary>What the page acts with, at the right of the row under the table.</summary>
+    [Parameter]
+    public RenderFragment? Actions { get; set; }
+
+    /// <summary>What the page shows under that row, above how the tab is answered.</summary>
     [Parameter]
     public RenderFragment? Below { get; set; }
 
@@ -224,6 +254,7 @@
     // Columns the reader has hidden, by name; the frozen ones, which tell the rows apart, are always shown.
     private HashSet<string> _hiddenColumns = [];
     private bool _choosing;
+    private bool _explaining;
     private Flashes _fillFlashes = new(Tab.Fills.Columns);
     private QuickGrid<BlotterRow>? _grid;
     private ElementReference _scroller;
@@ -274,7 +305,7 @@
     protected override async Task OnInitializedAsync()
     {
         _flashes = new Flashes(Tab.Columns);
-        _hiddenColumns = Tab.Overrides ? ["version", "region", "channel"] : ["region", "channel"];
+        _hiddenColumns = Tab.Overrides ? ["version", "region", "channel", "filled_qty", "date"] : ["region", "channel", "date"];
         _sort = Tab.DefaultSort;
         _pages = Host.Pages.View(_sort);
         _provider = ProvideAsync;

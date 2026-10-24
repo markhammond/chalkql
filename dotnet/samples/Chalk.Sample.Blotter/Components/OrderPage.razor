@@ -49,7 +49,7 @@
                     <tr>
                         @foreach (var column in Tab.Orders.Columns)
                         {
-                            <td class="@(older is not null && column.Show(older) != column.Show(version) ? "changed" : null)">@column.Show(version)</td>
+                            <td class="@(older is not null && column.Detail(older) != column.Detail(version) ? "changed" : null)">@column.Detail(version)</td>
                         }
                         <td>@(_tailOnly.Contains(version.Version) ? "tail only" : "database")</td>
                     </tr>
@@ -75,7 +75,7 @@
                     <tr class="@(fill.FillId == Fill ? "marked" : null)">
                         @foreach (var column in Tab.Fills.Columns)
                         {
-                            <td>@column.Show(fill)</td>
+                            <td>@column.Detail(fill)</td>
                         }
                     </tr>
                 }
