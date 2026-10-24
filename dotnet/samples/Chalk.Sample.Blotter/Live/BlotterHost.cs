@@ -118,7 +118,7 @@ public sealed class BlotterHost : IAsyncDisposable
     public Exchange Exchange => _exchange ?? throw new InvalidOperationException("the host has not started");
 
     /// <summary>The database, for the checks that read it directly.</summary>
-    public ITradeRepository Store => _house?.Store ?? throw new InvalidOperationException("the host has not started");
+    public ITradeRepository Repository => _house?.Repository ?? throw new InvalidOperationException("the host has not started");
 
     /// <summary>The database the host reads.</summary>
     public IBlotterProvider Provider => _provider ?? throw new InvalidOperationException("the host has not started");
@@ -209,12 +209,12 @@ public sealed class BlotterHost : IAsyncDisposable
                 ? await open(ct).ConfigureAwait(false)
                 : await PostgresHouseDatabase.StartAsync(_options.Postgres, _options.PostgresBinaries, ct).ConfigureAwait(false);
             _provider = _house.Provider;
-            seeding = new Seeder(_house.Store);
+            seeding = new Seeder(_house.Repository);
             await seeding.GenerateAsync(
                 _options.Orders, Cells.Micros(DateTime.UtcNow), TimeSpan.FromDays(5), openTail: 2000, _options.Current, ct).ConfigureAwait(false);
         }
 
-        var store = seeding.Store;
+        var repository = seeding.Repository;
         Seeded = seeding;
         _log.LogInformation(
             "loaded {Orders:N0} orders, {Versions:N0} versions and {Fills:N0} fills into {Database} in {Load:F1} s, indexed in {Index:F1} s",
@@ -222,7 +222,7 @@ public sealed class BlotterHost : IAsyncDisposable
 
         // The market starts before the blotter: events are in flight, sent and not yet written, when
         // the blotter subscribes, as they would be at any real start.
-        _exchange = new Exchange(store, _options.Exchange, _options.Orders, seeding.LoadedThrough, store.OpenOrders(), _options.Current);
+        _exchange = new Exchange(repository, _options.Exchange, _options.Orders, seeding.LoadedThrough, repository.OpenOrders(), _options.Current);
         _exchange.Start();
 
         _planner = await PlannerProcess.StartAsync(new PlannerProcessOptions { JavaHome = JavaHome() }).ConfigureAwait(false);

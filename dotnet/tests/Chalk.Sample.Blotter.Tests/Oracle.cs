@@ -38,9 +38,9 @@ public static class Oracle
         var tab = state.Tab;
 
         // The truth is worked out in the database itself, in its own SQL: PostgreSQL's, here.
-        var store = seeded.Store as PostgresTradeRepository
-            ?? throw new NotSupportedException($"the oracle works out pages in PostgreSQL, not in {seeded.Store.GetType().Name}");
-        using var connection = store.Open();
+        var repository = seeded.Repository as PostgresTradeRepository
+            ?? throw new NotSupportedException($"the oracle works out pages in PostgreSQL, not in {seeded.Repository.GetType().Name}");
+        using var connection = repository.Open();
         using var transaction = connection.BeginTransaction();
         Execute(connection, tab.Overrides
             ? "CREATE TEMP TABLE sent (LIKE blotter.order_versions) ON COMMIT DROP"

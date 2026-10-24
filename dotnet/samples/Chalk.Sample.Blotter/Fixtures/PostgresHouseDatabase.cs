@@ -15,13 +15,13 @@ public sealed class PostgresHouseDatabase : IHouseDatabase
     private PostgresHouseDatabase(PgServer server)
     {
         _server = server;
-        Store = new PostgresTradeRepository(server.ConnectionString);
+        Repository = new PostgresTradeRepository(server.ConnectionString);
         Provider = new PostgresBlotterProvider(server.ConnectionString);
     }
 
     public string Name => "PostgreSQL";
 
-    public ITradeRepository Store { get; }
+    public ITradeRepository Repository { get; }
 
     public IBlotterProvider Provider { get; }
 

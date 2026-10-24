@@ -5,7 +5,7 @@ namespace Chalk.Sample.Blotter.Fixtures;
 
 /// <summary>
 /// The database the simulated house runs on, for as long as the sample does: one set of tables, which
-/// the house seeds and writes its synthetic events to (<see cref="Store"/>), and the host reads live
+/// the house seeds and writes its synthetic events to (<see cref="Repository"/>), and the host reads live
 /// (<see cref="Provider"/>). Disposed, it lets both go, and with them any server it started.
 /// </summary>
 /// <remarks>
@@ -18,7 +18,7 @@ public interface IHouseDatabase : IAsyncDisposable
     string Name { get; }
 
     /// <summary>The tables, as the house writes them.</summary>
-    ITradeRepository Store { get; }
+    ITradeRepository Repository { get; }
 
     /// <summary>The same tables, as the host reads them.</summary>
     IBlotterProvider Provider { get; }

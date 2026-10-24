@@ -8,11 +8,11 @@ namespace Chalk.Sample.Blotter.Fixtures;
 /// with their versions and fills (<see cref="Corpus"/>), bulk loaded by several writers at once before any
 /// index or trigger exists; then indexed, and kept current from then on.
 /// </summary>
-public sealed class Seeder(ITradeRepository store)
+public sealed class Seeder(ITradeRepository repository)
 {
     private long _written;
 
-    public ITradeRepository Store => store;
+    public ITradeRepository Repository => repository;
 
     /// <summary>How long <see cref="GenerateAsync"/> took to write the corpus, and then to index it.</summary>
     public TimeSpan LoadTime { get; private set; }
@@ -45,7 +45,7 @@ public sealed class Seeder(ITradeRepository store)
     {
         var started = Stopwatch.GetTimestamp();
         Stage = "creating the tables";
-        store.CreateTables();
+        repository.CreateTables();
 
         var spacing = Math.Max(1, (long)(span.TotalMicroseconds / Math.Max(1, orders)));
         var origin = Cells.Micros(end - TimeSpan.FromMicroseconds(spacing * orders));
@@ -54,7 +54,7 @@ public sealed class Seeder(ITradeRepository store)
         var size = (orders + parts - 1) / parts;
         var counted = await Task.WhenAll(Enumerable.Range(0, parts).Select(p => Task.Run(() =>
         {
-            using var load = store.BeginLoad();
+            using var load = repository.BeginLoad();
             long versionCount = 0, fillCount = 0;
             var latest = DateTime.MinValue;
             for (var n = p * size; n < Math.Min(orders, (p + 1) * size); n++)
@@ -94,8 +94,8 @@ public sealed class Seeder(ITradeRepository store)
         Interlocked.Exchange(ref _written, orders);
         Stage = "building seven indexes, then analysing";
         started = Stopwatch.GetTimestamp();
-        await store.CreateIndexesAsync(ct).ConfigureAwait(false);
+        await repository.CreateIndexesAsync(ct).ConfigureAwait(false);
         IndexTime = Stopwatch.GetElapsedTime(started);
-        store.KeepCurrent(sync);
+        repository.KeepCurrent(sync);
     }
 }

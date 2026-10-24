@@ -549,7 +549,7 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     {
         public string Name => inner.Name;
 
-        public ITradeRepository Store => inner.Store;
+        public ITradeRepository Repository => inner.Repository;
 
         public IBlotterProvider Provider => provider;
 

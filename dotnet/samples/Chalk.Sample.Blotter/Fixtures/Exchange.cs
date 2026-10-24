@@ -92,7 +92,7 @@ public sealed class Exchange : IAsyncDisposable
     private readonly Queue<(Order Order, DateTime Release)> _held = new();
     private readonly PriorityQueue<Order, DateTime> _lateOrders = new();
     private readonly PriorityQueue<Fill, DateTime> _lateFills = new();
-    private readonly ITradeRepository _store;
+    private readonly ITradeRepository _repository;
     private readonly Action<IReadOnlyList<Order>> _writeOrders;
     private volatile bool _disordered;
     private long _sentLate;
@@ -108,10 +108,10 @@ public sealed class Exchange : IAsyncDisposable
     private volatile bool _paused;
 
     public Exchange(
-        ITradeRepository store, ExchangeOptions options, long orders, DateTime lastEventTime, List<Order> open, CurrentSync sync)
+        ITradeRepository repository, ExchangeOptions options, long orders, DateTime lastEventTime, List<Order> open, CurrentSync sync)
     {
         _options = options;
-        _store = store;
+        _repository = repository;
         _disordered = options.Disordered;
         _random = new Random(options.Seed);
         _open = open;
@@ -126,18 +126,18 @@ public sealed class Exchange : IAsyncDisposable
         // A lagging orders_current is worked from what order_versions has been written, some time after.
         if (sync == CurrentSync.Lagging)
         {
-            var current = new IngestWriter<Order>(store.UpsertCurrent, options.CurrentLag, options.Seed + 3);
+            var current = new IngestWriter<Order>(repository.UpsertCurrent, options.CurrentLag, options.Seed + 3);
             _currentWriter = current;
-            _writeOrders = written => { store.WriteOrders(written); current.Enqueue([.. written]); };
+            _writeOrders = written => { repository.WriteOrders(written); current.Enqueue([.. written]); };
         }
         else
         {
-            _writeOrders = store.WriteOrders;
+            _writeOrders = repository.WriteOrders;
         }
 
         _orderWriter = new IngestWriter<Order>(_writeOrders, options.Lag, options.Seed + 1);
 
-        _fillWriter = new IngestWriter<Fill>(store.WriteFills, options.Lag, options.Seed + 2);
+        _fillWriter = new IngestWriter<Fill>(repository.WriteFills, options.Lag, options.Seed + 2);
     }
 
     /// <summary>How <c>orders_current</c> keeps up.</summary>
@@ -271,7 +271,7 @@ public sealed class Exchange : IAsyncDisposable
                 }
             }
 
-            _store.WriteFills(first);
+            _repository.WriteFills(first);
             Fills.Publish([.. onTime]);
             _fillWriter.Enqueue([.. written]);
             foreach (var order in orders)
