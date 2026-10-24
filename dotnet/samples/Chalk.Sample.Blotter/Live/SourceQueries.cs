@@ -427,31 +427,6 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
         return $"{first.Name} {(firstDescending ? "<=" : ">=")} @k0 AND ({text.Append(')', closing)})";
     }
 
-    /// <summary>
-    /// Which of <paramref name="rows"/> a statement of <see cref="ConditionStatements"/> finds, read by
-    /// their keys, and along each path by the keys they hold.
-    /// </summary>
-    public async Task<IRow[]> WhereAsync(Condition condition, string sql, IReadOnlyList<IRow> rows, CancellationToken ct)
-    {
-        var tab = condition.Tab;
-        var paths = condition.Paths.ToList();
-        var found = new List<IRow>(rows.Count);
-        for (var start = 0; start < rows.Count; start += LookupSizes[^1])
-        {
-            var some = rows.Skip(start).Take(LookupSizes[^1]).ToList();
-            var values = new Dictionary<string, object?> { ["ids"] = Padded([.. some.Select(r => r.Id)]) };
-            foreach (var path in paths)
-            {
-                var via = tab.Named(path.Via);
-                values[$"{path.Name}_ids"] = Padded([.. some.Select(r => (Guid)via.Value(r)).Distinct()]);
-            }
-
-            found.AddRange(await RowsAsync(tab, sql, values, "an alert's condition", ct).ConfigureAwait(false));
-        }
-
-        return [.. found];
-    }
-
     /// <summary>What ChalkQL says is wrong with a statement, as it prepares it; null if nothing.</summary>
     public async Task<string?> CheckAsync(string sql, CancellationToken ct)
     {
@@ -464,19 +439,6 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
         {
             return refused.Message;
         }
-    }
-
-    /// <summary>Keys for an <c>IN</c>, padded to one of a few sizes by repeating the first, which changes nothing an IN finds.</summary>
-    private static Guid[] Padded(IReadOnlyList<Guid> ids)
-    {
-        var size = LookupSizes.First(s => s >= ids.Count);
-        var padded = new Guid[size];
-        for (var i = 0; i < size; i++)
-        {
-            padded[i] = ids[i < ids.Count ? i : 0];
-        }
-
-        return padded;
     }
 
     private async Task<IRow[]> LookupAsync(
