@@ -5,7 +5,6 @@ window.blotterAlerts = (() => {
     let audio = null;
     let page = null;
     let unseen = false;
-    const title = document.title;
 
     // Local settings may be off (a private window, blocked storage): the page works without them.
     const read = () => {
@@ -97,19 +96,16 @@ window.blotterAlerts = (() => {
     link.type = "image/svg+xml";
     link.href = icon(false);
 
-    // The page in the background: a red dot on its icon, and on its title, which names the rule last
-    // fired, until it is looked at. Held, not flashed; no count: what matters is that something
-    // fired, and what.
-    const mark = rule => {
+    // The page in the background: a red dot on its icon until it is looked at. The title stays as it
+    // is; no count: what matters is that something fired.
+    const mark = () => {
         unseen = true;
         link.href = icon(true);
-        document.title = `🔴 ${rule} · ${title}`;
     };
     const looked = () => {
         if (unseen && !document.hidden && document.hasFocus()) {
             unseen = false;
             link.href = icon(false);
-            document.title = title;
         }
     };
     window.addEventListener("focus", looked);
@@ -164,14 +160,14 @@ window.blotterAlerts = (() => {
             return true;
         },
 
-        // An alert the host fired: sounded, unless its rule is muted; and, in the background, the title
-        // flashes and, if allowed, the system shows a notification.
+        // An alert the host fired: sounded, unless its rule is muted; and, in the background, a red dot
+        // on the page's icon and, if allowed, a notification from the system.
         fire(alert, notify) {
             if (!alert.muted) {
                 this.play(alert.sound);
             }
             if (document.hidden || !document.hasFocus()) {
-                mark(alert.ruleName);
+                mark();
                 if (notify && "Notification" in window && Notification.permission === "granted") {
                     // The notification is the alert itself: how many rows, and the latest.
                     const words = `${alert.ruleName}${alert.count > 1 ? ` ×${alert.count}` : ""}`;
