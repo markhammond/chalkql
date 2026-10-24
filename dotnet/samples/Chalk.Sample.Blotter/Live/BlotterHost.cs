@@ -2,34 +2,13 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
 using System.Threading.Channels;
-using Chalk.Catalog;
 using Chalk.Client;
-using Chalk.Ir;
 using Chalk.Sample.Blotter.Fixtures;
-using Chalk.Sample.Blotter.Postgres;
 using Chalk.Sample.Blotter.Domain;
-using Chalk.Sources;
-using Chalk.Sources.Ado;
 using Chalk.Sources.Poco;
 using Microsoft.Extensions.Logging;
 
 namespace Chalk.Sample.Blotter.Live;
-
-/// <summary>Whether the host is serving pages, and if not, why.</summary>
-public enum BlotterState
-{
-    Starting,
-    Live,
-
-    /// <summary>
-    /// What the host would have to hold to serve correctly does not fit the budget: the tail that
-    /// covers the database's lag, and the scopes over it. Nothing is served until it would fit.
-    /// </summary>
-    Refusing,
-}
-
-/// <summary>A refusal, said once: what the host will not do, and why.</summary>
-public sealed class BlotterRefusedException(string message) : InvalidOperationException(message);
 
 /// <summary>
 /// The blotter's host: the database and the simulated market, the ChalkQL engine over the database and
@@ -68,6 +47,7 @@ public sealed class BlotterHost : IAsyncDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly List<Order> _keptOrders = [];
     private readonly List<Fill> _keptFills = [];
+    private readonly HostBudget _budget;
     private IHouseDatabase? _house;
     private IBlotterProvider? _provider;
     private Exchange? _exchange;
@@ -84,7 +64,6 @@ public sealed class BlotterHost : IAsyncDisposable
     private ChannelReader<Fill[]>? _fillFeed;
     private Task? _loop;
     private long _version;
-    private long _budget;
     private DateTime _ordersThrough;
     private DateTime _fillsThrough;
     private DateTime _newestOrderSent;
@@ -92,9 +71,6 @@ public sealed class BlotterHost : IAsyncDisposable
     private long _lastResumeCheck;
     private TimeSpan _refusedBehind;
     private int _disposed;
-
-    // Until a budget is chosen: raise it rather than refuse for want of it.
-    private bool _findingBudget;
 
     // Pages with the vital statistics open: the database's size, a query, is read only while there are any.
     private int _vitalsWatchers;
@@ -107,8 +83,7 @@ public sealed class BlotterHost : IAsyncDisposable
     {
         _options = options;
         _log = log;
-        _budget = options.BudgetBytes;
-        _findingBudget = options.FindBudget;
+        _budget = new HostBudget(options, log);
     }
 
     public BlotterState State { get; private set; } = BlotterState.Starting;
@@ -137,7 +112,7 @@ public sealed class BlotterHost : IAsyncDisposable
     public BlotterOptions Options => _options;
 
     /// <summary>The budget now; the page may change it.</summary>
-    public long Budget => Interlocked.Read(ref _budget);
+    public long Budget => _budget.Bytes;
 
     /// <summary>How far the host has read each stream: everything sent from its subscription to here is in the tail or the database.</summary>
     public DateTime OrdersThrough => _ordersThrough;
@@ -178,7 +153,7 @@ public sealed class BlotterHost : IAsyncDisposable
         _alertsWatched = names;
         _ = OnLoopAsync(async () =>
         {
-            await _alerts!.WatchAsync(specs, _engine, _budget, _stop.Token).ConfigureAwait(false);
+            await _alerts!.WatchAsync(specs, _engine, _budget.Bytes, _stop.Token).ConfigureAwait(false);
             return true;
         });
     }
@@ -198,65 +173,11 @@ public sealed class BlotterHost : IAsyncDisposable
     public async Task StartAsync(CancellationToken ct)
     {
         var started = Stopwatch.GetTimestamp();
-        Seeder? seeding = null;
-        await using (Spinner.Start(() => seeding is null
-            ? "Starting the database"
-            : seeding.Written < _options.Orders
-                ? string.Create(CultureInfo.InvariantCulture,
-                    $"Seeding {_house!.Name}: {seeding.Stage}, {seeding.Written:N0} of {_options.Orders:N0} ({100.0 * seeding.Written / Math.Max(1, _options.Orders):F0}%)")
-                : $"Seeding {_house!.Name}: {seeding.Stage}"))
-        {
-            _house = _options.House is { } open
-                ? await open(ct).ConfigureAwait(false)
-                : await PostgresHouseDatabase.StartAsync(_options.Postgres, _options.PostgresBinaries, ct).ConfigureAwait(false);
-            _provider = _house.Provider;
-            seeding = new Seeder(_house.Repository);
-            await seeding.GenerateAsync(
-                _options.Orders, Cells.Micros(DateTime.UtcNow), TimeSpan.FromDays(5), openTail: 2000, _options.Current, ct).ConfigureAwait(false);
-        }
-
-        var repository = seeding.Repository;
-        Seeded = seeding;
-        _log.LogInformation(
-            "loaded {Orders:N0} orders, {Versions:N0} versions and {Fills:N0} fills into {Database} in {Load:F1} s, indexed in {Index:F1} s",
-            seeding.Orders, seeding.Versions, seeding.Fills, _provider.Name, seeding.LoadTime.TotalSeconds, seeding.IndexTime.TotalSeconds);
-
-        // The market starts before the blotter: events are in flight, sent and not yet written, when
-        // the blotter subscribes, as they would be at any real start.
-        _exchange = new Exchange(repository, _options.Exchange, _options.Orders, seeding.LoadedThrough, repository.OpenOrders(), _options.Current);
-        _exchange.Start();
-
-        _planner = await PlannerProcess.StartAsync(new PlannerProcessOptions()).ConfigureAwait(false);
-
-        var reads = _provider.Open(new TableRows(seeding.Orders, seeding.Versions, seeding.Fills), _options.QueryTimeLimit);
-        var live = new PocoSourceBuilder("live", schemaName: "live")
-            .NamingPolicy(PocoNamingPolicy.SnakeCase)
-            .AddTable("tail", (IReadOnlyList<TailRow>)[], out PocoTable<TailRow> tail, t => t.Keyed(r => r.OrderId))
-            .AddTable(
-                "order_versions",
-                (IReadOnlyList<Order>)[],
-                out PocoTable<Order> versions,
-                t => t.Keyed(v => v.OrderId, v => v.Version))
-            .AddTable("tail_fills", (IReadOnlyList<Fill>)[], out PocoTable<Fill> fills, t => t.Keyed(f => f.FillId))
-            .AddTable("arrived_fills", (IReadOnlyList<Fill>)[], out PocoTable<Fill> arrivedFills, t => t.Keyed(f => f.FillId))
-            .AddTable("latest_orders", (IReadOnlyList<Order>)[], out PocoTable<Order> latestOrders, t => t.Keyed(o => o.OrderId))
-            .AddTable("waits", (IReadOnlyList<Wait>)[], out PocoTable<Wait> waits, t => t.Keyed(w => w.Id))
-            .Build();
-        _alerts = new AlertTables(arrivedFills, latestOrders, waits);
+        var parts = await HostStart.StartAsync(_options, _log, ct).ConfigureAwait(false);
+        (_house, _provider, Seeded, _exchange, _planner, _engine, Queries) =
+            (parts.House, parts.House.Provider, parts.Seeded, parts.Exchange, parts.Planner, parts.Engine, parts.Queries);
+        (_tailTable, _versionsTable, _fillsTable, _alerts) = (parts.Tables.Tail, parts.Tables.Versions, parts.Tables.Fills, parts.Tables.Alerts);
         _alerts.Entered += (spec, rows) => AlertsEntered?.Invoke(spec, rows);
-        _tailTable = tail;
-        _versionsTable = versions;
-        _fillsTable = fills;
-        _engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
-        {
-            ContextId = "blotter",
-            Sources = [reads.Source, live],
-            Planner = _planner.CreatePlanner(),
-
-            // Alert views of the wait read the time as @now: the clock every refresh moves.
-            Clock = "now",
-        }, ct).ConfigureAwait(false);
-        Queries = new SourceQueries(_engine, _options.QueryTimeLimit, reads.Estimates, _provider.StoppedAtTimeLimit, _provider.Name);
         Pages = new Pages(Queries)
         {
             MaxKeptRows = PageRows(),
@@ -296,7 +217,7 @@ public sealed class BlotterHost : IAsyncDisposable
             var estimate = ScopeEstimate();
             foreach (var idle in _scopes.Values.Where(s => s.Pages == 0).ToList())
             {
-                if (LiveBytes() + estimate <= _budget)
+                if (LiveBytes() + estimate <= _budget.Bytes)
                 {
                     break;
                 }
@@ -304,20 +225,20 @@ public sealed class BlotterHost : IAsyncDisposable
                 await CloseAsync(idle).ConfigureAwait(false);
             }
 
-            while (LiveBytes() + estimate > _budget && RaiseBudget($"another live scope would hold about {Megabytes(estimate)}"))
+            while (LiveBytes() + estimate > _budget.Bytes && RaiseBudget($"another live scope would hold about {Megabytes(estimate)}"))
             {
             }
 
-            if (LiveBytes() + estimate > _budget)
+            if (LiveBytes() + estimate > _budget.Bytes)
             {
                 throw new BlotterRefusedException(string.Create(CultureInfo.InvariantCulture,
                     $"no live scope for this filter: another would hold about {Megabytes(estimate)}, and the tail and "
-                    + $"{_scopes.Count} open scopes already hold {Megabytes(LiveBytes())} of the {Megabytes(_budget)} budget"));
+                    + $"{_scopes.Count} open scopes already hold {Megabytes(LiveBytes())} of the {Megabytes(_budget.Bytes)} budget"));
             }
 
             while (true)
             {
-                var scope = await LiveScope.CreateAsync(_engine!, tab, filter, _budget, _options.Maintenance, ct).ConfigureAwait(false);
+                var scope = await LiveScope.CreateAsync(_engine!, tab, filter, _budget.Bytes, _options.Maintenance, ct).ConfigureAwait(false);
                 await scope.UpdateAsync(_tail, _version, Mark(), ct).ConfigureAwait(false);
                 if (scope.Fault is { } fault)
                 {
@@ -352,8 +273,7 @@ public sealed class BlotterHost : IAsyncDisposable
     public Task SetBudgetAsync(long bytes) =>
         OnLoopAsync(async () =>
         {
-            Interlocked.Exchange(ref _budget, Math.Max(1L << 20, bytes));
-            _findingBudget = false;
+            _budget.Choose(bytes);
             if (State == BlotterState.Live)
             {
                 await KeepWithinBudgetAsync().ConfigureAwait(false);
@@ -743,7 +663,7 @@ public sealed class BlotterHost : IAsyncDisposable
     private async Task KeepWithinBudgetAsync()
     {
         Pages.MaxKeptRows = PageRows();
-        if (LiveBytes() <= _budget)
+        if (LiveBytes() <= _budget.Bytes)
         {
             return;
         }
@@ -751,7 +671,7 @@ public sealed class BlotterHost : IAsyncDisposable
         foreach (var idle in _scopes.Values.Where(s => s.Pages == 0).ToList())
         {
             await CloseAsync(idle).ConfigureAwait(false);
-            if (LiveBytes() <= _budget)
+            if (LiveBytes() <= _budget.Bytes)
             {
                 return;
             }
@@ -770,7 +690,7 @@ public sealed class BlotterHost : IAsyncDisposable
         await StopServingAsync(string.Create(CultureInfo.InvariantCulture,
             $"the database is {lag.TotalSeconds:F0} s behind the streams: covering it takes a tail of "
             + $"{_tail.Count:N0} orders and {_tail.FillCount:N0} fills, {Megabytes(_tail.Bytes)}, and {_scopes.Count} live scopes over it "
-            + $"{Megabytes(LiveBytes() - _tail.Bytes)}, more than the {Megabytes(_budget)} budget")).ConfigureAwait(false);
+            + $"{Megabytes(LiveBytes() - _tail.Bytes)}, more than the {Megabytes(_budget.Bytes)} budget")).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1018,7 +938,7 @@ public sealed class BlotterHost : IAsyncDisposable
             PageHits = Pages.WindowHits,
             ReadAheads = Pages.ReadAheads,
             Statements = Queries.Executed,
-            Budget = _budget,
+            Budget = _budget.Bytes,
             UsedBytes = _tail.Bytes + scopeBytes + Pages.Bytes + (_alerts?.Bytes ?? 0),
             DatabaseBytes = Volatile.Read(ref _vitalsWatchers) > 0 ? SafeDatabaseBytes() : Status.DatabaseBytes,
             ManagedHeapBytes = GC.GetTotalMemory(forceFullCollection: false),
@@ -1027,17 +947,14 @@ public sealed class BlotterHost : IAsyncDisposable
 
     private long SafeDatabaseBytes() => _house?.Repository.SizeBytes() ?? Status.DatabaseBytes;
 
-    /// <summary>While no budget is chosen, raises it to the next step, if there is one.</summary>
+    /// <summary>While no budget is chosen, raises it to the next step, and lets the kept windows grow with it.</summary>
     private bool RaiseBudget(string why)
     {
-        var next = _options.BudgetSteps.FirstOrDefault(step => step > _budget);
-        if (!_findingBudget || next == 0)
+        if (!_budget.TryRaise(why))
         {
             return false;
         }
 
-        _log.LogInformation("raising the budget from {From} to {To}: {Why}", Megabytes(_budget), Megabytes(next), why);
-        Interlocked.Exchange(ref _budget, next);
         if (Pages is not null)
         {
             Pages.MaxKeptRows = PageRows();
@@ -1050,13 +967,7 @@ public sealed class BlotterHost : IAsyncDisposable
     private long LiveBytes() =>
         _tail.Bytes + _scopes.Values.Sum(s => s.ViewBytes + s.State.Bytes) + (_alerts?.Bytes ?? 0);
 
-    /// <summary>The rows the kept windows may hold: their share of the budget, or what the tail and the scopes leave, whichever is less.</summary>
-    private long PageRows()
-    {
-        var left = Math.Max(0, _budget - LiveBytes());
-        var share = (long)(_budget * _options.PageShare);
-        return Math.Min(left, share) / Order.Bytes;
-    }
+    private long PageRows() => _budget.PageRows(LiveBytes());
 
     /// <summary>What another scope would hold: a row for every order in the tail, at what the open ones cost a row.</summary>
     private long ScopeEstimate()
@@ -1068,99 +979,4 @@ public sealed class BlotterHost : IAsyncDisposable
     }
 
     internal static string Megabytes(long bytes) => string.Create(CultureInfo.InvariantCulture, $"{bytes / 1048576.0:F1} MB");
-}
-
-/// <summary>What the page's status bar shows.</summary>
-public sealed record BlotterStatus
-{
-    public BlotterState State { get; init; }
-
-    public string? Refusal { get; init; }
-
-    public long Version { get; init; }
-
-    /// <summary>How <c>orders_current</c> keeps up with <c>order_versions</c>.</summary>
-    public CurrentSync Sync { get; init; }
-
-    /// <summary>The longest any statement may run before it is stopped.</summary>
-    public TimeSpan TimeLimit { get; init; }
-
-    /// <summary>How long ago the oldest row the database has not been seen to hold was sent: how far behind it is, at least.</summary>
-    public TimeSpan? Behind { get; init; }
-
-    /// <summary>Order versions that have happened and that the order stream, running behind the fills, has not sent yet.</summary>
-    public int OrdersHeld { get; init; }
-
-    /// <summary>Rows the streams have sent late, and after the database had written them, while out of order.</summary>
-    public long SentLate { get; init; }
-
-    public long SentAfterDatabase { get; init; }
-
-    public int NotYetIngested { get; init; }
-
-    /// <summary>Versions written that the lagging job has not applied to <c>orders_current</c> yet.</summary>
-    public int CurrentWaiting { get; init; }
-
-    public bool IngestionStalled { get; init; }
-
-    public bool CurrentStalled { get; init; }
-
-    public double FeedRate { get; init; }
-
-    public long Published { get; init; }
-
-    public int TailOrders { get; init; }
-
-    public int TailFills { get; init; }
-
-    /// <summary>Rows of the tail the database has been seen to hold, waiting to leave.</summary>
-    public int TailConfirmed { get; init; }
-
-    public long TimedOut { get; init; }
-
-    public long TailVersions { get; init; }
-
-    public long TailBytes { get; init; }
-
-    public int Scopes { get; init; }
-
-    public long ScopeBytes { get; init; }
-
-    public long PageBytes { get; init; }
-
-    /// <summary>The alert views and the tables they read.</summary>
-    public long AlertBytes { get; init; }
-
-    public long PageReads { get; init; }
-
-    public long PageLookups { get; init; }
-
-    /// <summary>Reads a kept window answered, and windows read ahead of the scrolling.</summary>
-    public long PageHits { get; init; }
-
-    public long ReadAheads { get; init; }
-
-    public long Statements { get; init; }
-
-    public long Budget { get; init; }
-
-    public long UsedBytes { get; init; }
-
-    public long DatabaseBytes { get; init; }
-
-    public long ManagedHeapBytes { get; init; }
-
-    public double LastRefreshMs { get; init; }
-
-    public int LastRefreshVersions { get; init; }
-
-    /// <summary>Lookups of the whole tail run, and rows they let leave it.</summary>
-    public long Confirmations { get; init; }
-
-    public long Evicted { get; init; }
-
-    /// <summary>Versions the last gap fill read, and versions gap fills have added to the tail in all.</summary>
-    public int GapRead { get; init; }
-
-    public long GapFilled { get; init; }
 }
