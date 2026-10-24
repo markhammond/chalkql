@@ -340,3 +340,6 @@ tr.child td { background: color-mix(in srgb, var(--accent) 5%, var(--panel)); co
     padding: 8px 10px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); font-size: 12px; pointer-events: none;
     display: flex; flex-direction: column; gap: 2px; font-variant-numeric: tabular-nums;
 }
+.alert-when { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.alerts-panel input.count-number { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; width: 5.5em; }
+.alerts-panel input.count-number:invalid { border-color: var(--bad); }

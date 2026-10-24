@@ -26,6 +26,7 @@ public sealed class AlertDesk : IDisposable
     {
         _host = host;
         host.AlertsEntered += OnEntered;
+        host.AlertsCounted += OnCounted;
         _timer = new Timer(_ => Tick(DateTime.UtcNow), null, 250, 250);
     }
 
@@ -50,12 +51,14 @@ public sealed class AlertDesk : IDisposable
         return at < 0 ? refused : refused![..at];
     }
 
-    /// <summary>What ChalkQL said when it would not make the rule's view; null while it runs.</summary>
-    public string? Refusal(AlertRule rule) => _host.AlertsRefused.GetValueOrDefault(AlertViewSpec.Of(rule).Name);
+    /// <summary>What ChalkQL said when it would not make the rule's view, or the alert view a count reads; null while it runs.</summary>
+    public string? Refusal(AlertRule rule) =>
+        _host.AlertsRefused.GetValueOrDefault(AlertWindowSpec.NameOf(rule)) ?? _host.AlertsRefused.GetValueOrDefault(AlertViewSpec.Of(rule).Name);
 
     public void Dispose()
     {
         _host.AlertsEntered -= OnEntered;
+        _host.AlertsCounted -= OnCounted;
         _timer.Dispose();
     }
 
@@ -68,9 +71,21 @@ public sealed class AlertDesk : IDisposable
         }
     }
 
+    private void OnCounted(AlertWindowSpec view, long matches)
+    {
+        var now = DateTime.UtcNow;
+        foreach (var session in _sessions.Values)
+        {
+            session.Count(view.Name, matches, now);
+        }
+    }
+
     private void Tick(DateTime now)
     {
-        _host.WatchAlerts([.. _sessions.Values.SelectMany(s => s.Rules).Select(AlertViewSpec.Of)]);
+        var rules = _sessions.Values.SelectMany(s => s.Rules).ToList();
+        _host.WatchAlerts(
+            [.. rules.Where(r => r.Count is null).Select(AlertViewSpec.Of)],
+            [.. rules.Select(AlertWindowSpec.Of).OfType<AlertWindowSpec>()]);
         foreach (var (browser, session) in _sessions)
         {
             session.Flush(now);

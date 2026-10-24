@@ -515,6 +515,73 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task Counts_slide_with_the_clock_counting_each_newer_order_version_and_none_fires_in_an_outage()
+    {
+        await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() });
+        using var desk = new AlertDesk(host);
+        var session = desk.Open("browser");
+        var fired = new List<AlertEvent>();
+        session.Fired += alert => { lock (fired) fired.Add(alert); };
+        AlertRule Rule(string id, Tab tab, string condition, AlertCount count) => new(
+            id, id, Condition.Parse(tab, condition), AlertSounds.Default, TimeSpan.FromSeconds(1), false, Count: count);
+
+        // An outage: the house takes no orders but those the test makes it.
+        const int Changes = 200;
+        host.Exchange.Pause();
+        session.SetRules(
+        [
+            Rule("versions", Tabs.Orders, "qty > 0", new AlertCount(CountKind.AtLeast, Changes, TimeSpan.FromMinutes(1))),
+            Rule("fills", Tabs.Fills, "qty > 0", new AlertCount(CountKind.AtLeast, 3, TimeSpan.FromMinutes(1))),
+            Rule("quiet", Tabs.Fills, "qty > 0", new AlertCount(CountKind.None, 0, TimeSpan.FromSeconds(5))),
+            Rule("nobody", Tabs.Orders, "client = 'NOBODY'", new AlertCount(CountKind.AtLeast, 1, TimeSpan.FromMinutes(1))),
+        ]);
+
+        // Four count views, and the three alert views they count.
+        await UntilAsync(() => host.AlertViewsOpen == 7 || !host.AlertsRefused.IsEmpty);
+        Assert.True(host.AlertsRefused.IsEmpty, string.Join("\n", host.AlertsRefused.Values));
+
+        // In the outage, no fill in the last 5 s: the count of none fires, a window after it began.
+        await UntilAsync(() => Fired("quiet"), TimeSpan.FromSeconds(20));
+
+        // Two hundred changes at once, each a version of an order, some of the same order: counted by
+        // version, they reach a number that orders entering the view could not.
+        var (versions, _) = host.Exchange.Send(Changes);
+        var orders = versions.Select(v => v.OrderId).Distinct().Count();
+        Assert.True(versions.Length >= Changes && orders < Changes, $"{versions.Length} versions of {orders} orders");
+        await UntilAsync(() => Fired("versions") && Fired("fills"), TimeSpan.FromSeconds(15));
+
+        // The fills stop again: the count of none, which left its view as they came, fires again.
+        await UntilAsync(() => Fires("quiet") == 2, TimeSpan.FromSeconds(20));
+        lock (fired)
+        {
+            Assert.DoesNotContain(fired, a => a.RuleId == "nobody");
+            Assert.Equal("none in the last 5 s", fired.Last(a => a.RuleId == "quiet").Latest);
+            Assert.Single(fired, a => a.RuleId == "versions");
+            output.WriteLine(string.Join("\n", fired.Select(a => $"{a.RuleId}: {a.Latest}")));
+        }
+
+        // More fills: the count of none fires once more after them; three fills in a minute, still
+        // in its view, does not fire again.
+        host.Exchange.Send(50);
+        await UntilAsync(() => Fires("quiet") == 3, TimeSpan.FromSeconds(20));
+        Assert.Equal(1, Fires("fills"));
+
+        // Rules dropped close their views and the counters behind them.
+        session.SetRules([]);
+        await UntilAsync(() => host.AlertViewsOpen == 0);
+
+        bool Fired(string rule) => Fires(rule) > 0;
+
+        int Fires(string rule)
+        {
+            lock (fired)
+            {
+                return fired.Count(a => a.RuleId == rule);
+            }
+        }
+    }
+
+    [Fact]
     public async Task The_house_database_given_in_the_options_is_the_one_seeded_and_its_provider_the_one_read()
     {
         Counted? counted = null;

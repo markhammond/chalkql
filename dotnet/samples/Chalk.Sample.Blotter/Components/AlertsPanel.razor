@@ -1,6 +1,7 @@
 @* The browser's alerts: each a condition on a tab's rows, in SQL, with a sound and a throttle, firing
-   as a row comes to pass it or as one that passes it waits too long for the database. A new one starts
-   from this tab's filters as they are; each can be tried, muted or removed. *@
+   as a row comes to pass it, as one that passes it waits too long for the database, or as the rows
+   that match in a sliding window come to be enough, or none. A new one starts from this tab's filters
+   as they are; each can be tried, muted or removed. *@
 @inject AlertDesk Desk
 
 <div class="alerts-panel" role="dialog" aria-label="Alerts">
@@ -35,21 +36,22 @@
                         }
                     </td>
                     <td class="alerts-settings">
-                        <select value="@When(r.LagOver)" aria-label="When it fires" @onchange="e => SaveAsync(r with { LagOver = Lag((string)e.Value!) })">
-                            @WhenOptions
-                        </select>
+                        <AlertWhen LagOver="r.LagOver" Count="r.Count" Changed="when => SaveWhenAsync(r, when)" />
                         <select value="@r.Sound" aria-label="Sound" @onchange="e => SaveAsync(r with { Sound = (string)e.Value! })">
                             @foreach (var (id, label) in AlertSounds.All)
                             {
                                 <option value="@id">@label</option>
                             }
                         </select>
-                        <select value="@r.Throttle.TotalSeconds" aria-label="At most once every" @onchange="e => SaveAsync(r with { Throttle = TimeSpan.FromSeconds(double.Parse((string)e.Value!, CultureInfo.InvariantCulture)) })">
-                            @foreach (var throttle in AlertRule.Throttles)
-                            {
-                                <option value="@throttle.TotalSeconds">at most every @Seconds(throttle)</option>
-                            }
-                        </select>
+                        @if (r.Count is null)
+                        {
+                            <select value="@r.Throttle.TotalSeconds" aria-label="At most once every" @onchange="e => SaveAsync(r with { Throttle = TimeSpan.FromSeconds(double.Parse((string)e.Value!, CultureInfo.InvariantCulture)) })">
+                                @foreach (var throttle in AlertRule.Throttles)
+                                {
+                                    <option value="@throttle.TotalSeconds">at most every @AlertCount.Span(throttle)</option>
+                                }
+                            </select>
+                        }
                     </td>
                     <td class="alerts-actions">
                         <button type="button" class="icon-button" title="Hear it" aria-label="Hear @r.Name" onclick="blotterAlerts.play('@r.Sound')">▶</button>
@@ -63,8 +65,9 @@
 
     @* An alert's condition is SQL: an example, before the editor that writes one. *@
     <p class="alerts-how muted">
-        An alert fires on the rows that pass its condition, as they arrive, or once the database is too far behind
-        them (see the Recon column). Write the condition in SQL over this tab's columns@(Tab.Paths.Count > 0 ? ", and along " + string.Join(", ", Tab.Paths.Select(p => p.Name + ".")) : ""),
+        An alert fires on the rows that pass its condition, as they arrive, once the database is too far behind
+        them (see the Recon column), or on how many pass within a sliding window: at least so many, or none. An
+        order counts each time a newer version of it passes. Write the condition in SQL over this tab's columns@(Tab.Paths.Count > 0 ? ", and along " + string.Join(", ", Tab.Paths.Select(p => p.Name + ".")) : ""),
         or set the column funnels first and start from those: for example
         <code>@(Tab.Overrides ? "client = 'CEDAR' AND side = 'Buy' AND qty >= 10" : "order.status = 'Partial' AND instrument LIKE 'BTC%'")</code>.
         ChalkQL runs it.
@@ -73,9 +76,7 @@
         <span class="muted">New alert on @Tab.Title:</span>
         <ConditionEditor Tab="Tab" @bind-Text="_condition" Placeholder="every row; ctrl-space for what may come next" />
         <input type="text" placeholder="@NamePlaceholder()" @bind="_name" aria-label="Name" />
-        <select @bind="_when" aria-label="When it fires">
-            @WhenOptions
-        </select>
+        <AlertWhen LagOver="_lagOver" Count="_count" Changed="when => (_lagOver, _count) = when" />
         <select @bind="_sound" aria-label="Sound">
             @foreach (var (id, label) in AlertSounds.All)
             {
@@ -83,12 +84,15 @@
             }
         </select>
         <button type="button" class="icon-button" title="Hear it" aria-label="Hear the sound chosen" onclick="blotterAlerts.play(this.previousElementSibling.value)">▶</button>
-        <select @bind="_throttle" aria-label="At most once every">
-            @foreach (var throttle in AlertRule.Throttles)
-            {
-                <option value="@throttle.TotalSeconds">at most every @Seconds(throttle)</option>
-            }
-        </select>
+        @if (_count is null)
+        {
+            <select @bind="_throttle" aria-label="At most once every">
+                @foreach (var throttle in AlertRule.Throttles)
+                {
+                    <option value="@throttle.TotalSeconds">at most every @AlertCount.Span(throttle)</option>
+                }
+            </select>
+        }
         <button type="button" @onclick="AddAsync">Add</button>
         @if (_refused is { } refused)
         {
@@ -114,22 +118,8 @@
     private (Tab, FilterSpec)? _from;
     private string _sound = AlertSounds.Default;
     private double _throttle = 3;
-    private string _when = "";
-
-    // As a row arrives, or after it has waited this long for the database.
-    private static readonly RenderFragment WhenOptions = __builder =>
-    {
-        <option value="">as it arrives</option>
-        @foreach (var lag in AlertRule.Lags)
-        {
-            <option value="@When(lag)" title="Once it has waited over @Seconds(lag) for the database to hold it">over @Seconds(lag) behind</option>
-        }
-    };
-
-    private static string When(TimeSpan? lag) => lag is { } l ? l.TotalSeconds.ToString(CultureInfo.InvariantCulture) : "";
-
-    private static TimeSpan? Lag(string when) =>
-        when.Length == 0 ? null : TimeSpan.FromSeconds(double.Parse(when, CultureInfo.InvariantCulture));
+    private TimeSpan? _lagOver;
+    private AlertCount? _count;
 
     // The condition starts from the tab's filters, and again whenever they change.
     protected override void OnParametersSet()
@@ -151,14 +141,14 @@
         var named = text.Length == 0 ? (Tab.Overrides ? "Any order" : "Any fill")
             : !Filter.Columns.IsEmpty && text == Filter.Condition() ? Describe(Filter)
             : text.Length <= 40 ? text : text[..39] + "…";
-        return named + (Lag(_when) is { } lag ? $", over {Seconds(lag)} behind" : "");
+        return named + (_lagOver is { } lag ? $", over {AlertCount.Span(lag)} behind" : _count is { } count ? ", " + count.Describe() : "");
     }
 
     /// <summary>Adds the alert, once ChalkQL has taken its condition; if not, says why, and adds nothing.</summary>
     private async Task AddAsync()
     {
         var condition = Condition.Parse(Tab, _condition);
-        _refused = await Desk.CheckAsync(condition, Lag(_when), CancellationToken.None);
+        _refused = _count?.Problem() ?? await Desk.CheckAsync(condition, _lagOver, CancellationToken.None);
         if (_refused is not null)
         {
             return;
@@ -166,10 +156,14 @@
 
         var rule = new AlertRule(
             Guid.NewGuid().ToString("N"), string.IsNullOrWhiteSpace(_name) ? DefaultName() : _name.Trim(), condition, _sound,
-            TimeSpan.FromSeconds(_throttle), Muted: false, Lag(_when));
+            TimeSpan.FromSeconds(_throttle), Muted: false, _lagOver, _count);
         _name = "";
         await Book.SaveAsync([.. Book.Rules, rule]);
     }
+
+    // A count out of range is not kept: the rule keeps the one it had, and the count says what is wrong.
+    private Task SaveWhenAsync(AlertRule rule, (TimeSpan? LagOver, AlertCount? Count) when) =>
+        when.Count?.Problem() is null ? SaveAsync(rule with { LagOver = when.LagOver, Count = when.Count }) : Task.CompletedTask;
 
     private Task SaveAsync(AlertRule changed) => Book.SaveAsync([.. Book.Rules.Select(r => r.Id == changed.Id ? changed : r)]);
 
@@ -178,6 +172,4 @@
     private static string Describe(FilterSpec filter) =>
         filter.Columns.IsEmpty ? "every row" : string.Join("; ", filter.Columns.Select(f => f.Describe()));
 
-    private static string Seconds(TimeSpan throttle) =>
-        throttle.TotalSeconds < 60 ? $"{throttle.TotalSeconds:0} s" : $"{throttle.TotalMinutes:0} min";
 }

@@ -111,6 +111,49 @@ public sealed class AlertSessionTests
         Assert.Throws<ArgumentException>(() => AlertRule.Load(rule.Save() with { Condition = null, View = "sort=-client" }, Tabs.All));
     }
 
+    [Fact]
+    public void A_count_reads_back_the_same_and_one_out_of_range_or_with_a_wait_is_refused()
+    {
+        var rule = Rule(Tabs.Orders, ("client", "CEDAR")) with { Count = new AlertCount(CountKind.AtLeast, 5, TimeSpan.FromSeconds(90)) };
+        Assert.Equal(rule.Count, AlertRule.Load(rule.Save(), Tabs.All).Count);
+        var none = rule with { Count = new AlertCount(CountKind.None, 0, TimeSpan.FromMinutes(15)) };
+        Assert.Equal(none.Count, AlertRule.Load(none.Save(), Tabs.All).Count);
+        Assert.Equal("none in 15 min", none.Count!.Describe());
+        Assert.Equal("at least 5 in 90 s", rule.Count!.Describe());
+
+        Assert.Equal("a window runs from 5 s to 60 min", (rule.Count with { Window = TimeSpan.FromSeconds(4) }).Problem());
+        Assert.Equal("a window runs from 5 s to 60 min", (rule.Count with { Window = TimeSpan.FromMinutes(61) }).Problem());
+        Assert.Equal("at least runs from 1 to 1,000,000 matches", (rule.Count with { Matches = 0 }).Problem());
+        Assert.Null((rule.Count with { Kind = CountKind.None, Matches = 0 }).Problem());
+        Assert.Throws<ArgumentException>(() => AlertRule.Load(rule.Save() with { WindowSeconds = 3601 }, Tabs.All));
+        Assert.Throws<ArgumentException>(() => AlertRule.Load(rule.Save() with { CountKind = "most" }, Tabs.All));
+        Assert.Throws<ArgumentException>(() => AlertRule.Load(rule.Save() with { LagOverSeconds = 2 }, Tabs.All));
+    }
+
+    [Fact]
+    public void A_count_view_entering_fires_the_rules_that_count_with_it_at_once_saying_how_many()
+    {
+        var rule = Rule(Tabs.Fills, ("client", "CEDAR")) with
+        {
+            Throttle = TimeSpan.FromSeconds(30), Count = new AlertCount(CountKind.AtLeast, 5, TimeSpan.FromMinutes(1)),
+        };
+        var (session, fired) = Session(rule);
+        var window = AlertWindowSpec.Of(rule)!;
+        Assert.Equal(TimeSpan.FromSeconds(1), window.Slice);
+
+        // The alert view the count reads fires nothing itself; the count view does, throttle or none.
+        session.Enter(View(rule), [(Fill("CEDAR"), null)], Now);
+        session.Count(window.Name, 7, Now);
+        session.Count(window.Name, 5, Now.AddSeconds(1));
+        Assert.Equal(["7 in the last 1 min", "5 in the last 1 min"], fired.Select(a => a.Latest));
+
+        var none = rule with { Count = new AlertCount(CountKind.None, 0, TimeSpan.FromMinutes(30)) };
+        session.SetRules([none]);
+        Assert.Equal(TimeSpan.FromSeconds(30), AlertWindowSpec.Of(none)!.Slice);
+        session.Count(AlertWindowSpec.Of(none)!.Name, 0, Now);
+        Assert.Equal("none in the last 30 min", fired[^1].Latest);
+    }
+
     private static (AlertSession Session, List<AlertEvent> Fired) Session(AlertRule rule)
     {
         var session = new AlertSession("browser");

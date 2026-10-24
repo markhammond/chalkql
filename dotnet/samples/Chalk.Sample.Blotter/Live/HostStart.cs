@@ -72,6 +72,7 @@ internal static class HostStart
                 .AddTable("arrived_fills", (IReadOnlyList<Fill>)[], out PocoTable<Fill> arrivedFills, t => t.Keyed(f => f.FillId))
                 .AddTable("latest_orders", (IReadOnlyList<Order>)[], out PocoTable<Order> latestOrders, t => t.Keyed(o => o.OrderId))
                 .AddTable("waits", (IReadOnlyList<Wait>)[], out PocoTable<Wait> waits, t => t.Keyed(w => w.Id))
+                .AddTable("match_counts", (IReadOnlyList<MatchCount>)[], out PocoTable<MatchCount> matchCounts, t => t.Keyed(c => c.Counter, c => c.SliceStart))
                 .Build();
             var engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
             {
@@ -79,7 +80,7 @@ internal static class HostStart
                 Sources = [reads.Source, live],
                 Planner = planner.CreatePlanner(),
 
-                // Alert views of the wait read the time as @now: the clock every refresh moves.
+                // Alert views of the wait, and count views, read the time as @now: the clock every refresh moves.
                 Clock = "now",
             }, ct).ConfigureAwait(false);
             started.Add(engine);
@@ -87,7 +88,7 @@ internal static class HostStart
             var queries = new SourceQueries(engine, options.QueryTimeLimit, reads.Estimates, provider.StoppedAtTimeLimit, provider.Name);
             return new HostParts(
                 house, seeding, exchange, planner, engine,
-                new LiveTables(tail, versions, fills, new AlertTables(arrivedFills, latestOrders, waits)), queries);
+                new LiveTables(tail, versions, fills, new AlertTables(arrivedFills, latestOrders, waits, matchCounts)), queries);
         }
         catch
         {

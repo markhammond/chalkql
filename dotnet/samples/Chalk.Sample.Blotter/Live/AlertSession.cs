@@ -47,7 +47,7 @@ public sealed class AlertSession(string browser)
 
             foreach (var rule in _rules)
             {
-                if (!_states.TryGetValue(rule.Id, out var state) || state.View != AlertViewSpec.Of(rule).Name)
+                if (!_states.TryGetValue(rule.Id, out var state) || state.View != AlertWindowSpec.NameOf(rule))
                 {
                     _states[rule.Id] = new RuleState(rule);
                 }
@@ -76,6 +76,22 @@ public sealed class AlertSession(string browser)
                 {
                     fired.Add(Sound(state, now));
                 }
+            }
+        }
+
+        Raise(fired);
+    }
+
+    /// <summary>A count view's row has entered it: each rule that counts with it fires, saying how many matches the window holds.</summary>
+    public void Count(string view, long matches, DateTime now)
+    {
+        List<AlertEvent> fired = [];
+        lock (_gate)
+        {
+            foreach (var state in _states.Values.Where(s => s.View == view))
+            {
+                state.Counted(matches);
+                fired.Add(Sound(state, now));
             }
         }
 
@@ -143,9 +159,12 @@ public sealed class AlertSession(string browser)
     private AlertEvent Sound(RuleState state, DateTime now)
     {
         var rule = state.Rule;
-        var alert = new AlertEvent(
-            ++_seq, rule.Id, rule.Name, rule.Sound, rule.Muted, rule.Tab.Name, state.Gathered,
-            rule.Tab.Describe(state.Latest!) + (state.LatestLag is { } lag ? $" · {Column.Seconds(lag)} waiting for the database" : ""), now);
+        var latest = rule.Count is { } count
+            ? count.Kind == CountKind.AtLeast
+                ? $"{state.LatestMatches:N0} in the last {AlertCount.Span(count.Window)}"
+                : $"none in the last {AlertCount.Span(count.Window)}"
+            : rule.Tab.Describe(state.Latest!) + (state.LatestLag is { } lag ? $" · {Column.Seconds(lag)} waiting for the database" : "");
+        var alert = new AlertEvent(++_seq, rule.Id, rule.Name, rule.Sound, rule.Muted, rule.Tab.Name, state.Gathered, latest, now);
         state.Gathered = 0;
         state.SoundedAt = now;
         _waiting.Add(alert);
@@ -169,8 +188,8 @@ public sealed class AlertSession(string browser)
     {
         public AlertRule Rule { get; set; } = rule;
 
-        /// <summary>The alert view it watches, by name.</summary>
-        public string View { get; } = AlertViewSpec.Of(rule).Name;
+        /// <summary>The alert view or count view it watches, by name.</summary>
+        public string View { get; } = AlertWindowSpec.NameOf(rule);
 
         public int Gathered { get; set; }
 
@@ -180,6 +199,15 @@ public sealed class AlertSession(string browser)
         public TimeSpan? LatestLag { get; private set; }
 
         public DateTime SoundedAt { get; set; } = DateTime.MinValue;
+
+        /// <summary>For a rule that counts, the matches in the window when it last fired.</summary>
+        public long LatestMatches { get; private set; }
+
+        public void Counted(long matches)
+        {
+            Gathered++;
+            LatestMatches = matches;
+        }
 
         public void Hit(IRow row, TimeSpan? lag = null)
         {

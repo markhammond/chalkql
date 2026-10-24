@@ -1,0 +1,79 @@
+@* When an alert fires: as a row arrives, once one has waited too long for the database, or on how
+   many rows match in a sliding window, at least so many or none. A count out of range is shown as
+   it is written, and said what is wrong with it; whoever keeps the rule refuses it. *@
+
+<span class="alert-when">
+    <select value="@Kind()" aria-label="When it fires" @onchange="e => ChooseAsync((string)e.Value!)">
+        <option value="">as it arrives</option>
+        @foreach (var lag in AlertRule.Lags)
+        {
+            <option value="@Seconds(lag)" title="Once it has waited over @AlertCount.Span(lag) for the database to hold it">over @AlertCount.Span(lag) behind</option>
+        }
+        <option value="at-least" title="Once at least so many rows match within a sliding window">at least … in …</option>
+        <option value="none" title="Once no row has matched within a sliding window">none in …</option>
+    </select>
+    @if (Count is { } count)
+    {
+        @if (count.Kind == CountKind.AtLeast)
+        {
+            <input type="number" class="count-number" min="1" max="@AlertCount.MostMatches" value="@count.Matches" aria-label="At least how many"
+                   @onchange="e => ChangeAsync(count with { Matches = Whole(e.Value) })" />
+            <span class="muted">in</span>
+        }
+
+        var (amount, unit) = Amount(count.Window);
+        <input type="number" class="count-number" min="1" value="@amount" aria-label="Window"
+               @onchange="e => ChangeAsync(count with { Window = Window(Whole(e.Value), unit) })" />
+        <select value="@unit" aria-label="Window in" @onchange="e => ChangeAsync(count with { Window = Window(amount, (string)e.Value!) })">
+            <option value="s">s</option>
+            <option value="min">min</option>
+        </select>
+        @if (count.Problem() is { } problem)
+        {
+            <span class="alerts-refused">@problem</span>
+        }
+    }
+</span>
+
+@code {
+    [Parameter]
+    public TimeSpan? LagOver { get; set; }
+
+    [Parameter]
+    public AlertCount? Count { get; set; }
+
+    /// <summary>The lag or count chosen: at most one of them.</summary>
+    [Parameter]
+    public EventCallback<(TimeSpan? LagOver, AlertCount? Count)> Changed { get; set; }
+
+    private string Kind() => Count switch
+    {
+        { Kind: CountKind.AtLeast } => "at-least",
+        { Kind: CountKind.None } => "none",
+        _ => LagOver is { } lag ? Seconds(lag) : "",
+    };
+
+    private Task ChooseAsync(string kind) => kind switch
+    {
+        "" => Changed.InvokeAsync((null, null)),
+        "at-least" => Changed.InvokeAsync((null, new AlertCount(CountKind.AtLeast, Count?.Matches ?? 5, Count?.Window ?? TimeSpan.FromMinutes(1)))),
+        "none" => Changed.InvokeAsync((null, new AlertCount(CountKind.None, Count?.Matches ?? 5, Count?.Window ?? TimeSpan.FromMinutes(1)))),
+        var seconds => Changed.InvokeAsync((TimeSpan.FromSeconds(double.Parse(seconds, CultureInfo.InvariantCulture)), null)),
+    };
+
+    private Task ChangeAsync(AlertCount count) => Changed.InvokeAsync((null, count));
+
+    private static string Seconds(TimeSpan lag) => lag.TotalSeconds.ToString(CultureInfo.InvariantCulture);
+
+    // A window in whole minutes is shown in minutes; any other, in seconds.
+    private static (int Amount, string Unit) Amount(TimeSpan window) =>
+        window.Ticks % TimeSpan.TicksPerMinute == 0 && window >= TimeSpan.FromMinutes(1)
+            ? ((int)window.TotalMinutes, "min")
+            : ((int)window.TotalSeconds, "s");
+
+    private static TimeSpan Window(int amount, string unit) => unit == "min" ? TimeSpan.FromMinutes(amount) : TimeSpan.FromSeconds(amount);
+
+    // What is not a whole number reads as none, which the count then says is out of range.
+    private static int Whole(object? value) =>
+        int.TryParse(value as string, NumberStyles.Integer, CultureInfo.InvariantCulture, out var whole) ? whole : 0;
+}

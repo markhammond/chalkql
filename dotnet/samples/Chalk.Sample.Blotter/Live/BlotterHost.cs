@@ -135,16 +135,19 @@ public sealed class BlotterHost : IAsyncDisposable
     /// </summary>
     public event Action<AlertViewSpec, IReadOnlyList<(IRow Row, TimeSpan? Lag)>>? AlertsEntered;
 
-    /// <summary>How often the clock moves while nothing arrives, for the alert views that watch the wait.</summary>
+    /// <summary>Raised on the catch-up loop as a count view's row enters it: the view, and the matches in its window. A handler only takes note.</summary>
+    public event Action<AlertWindowSpec, long>? AlertsCounted;
+
+    /// <summary>How often the clock moves while nothing arrives, for the alert views that watch the wait and the count views.</summary>
     public static readonly TimeSpan AlertTick = TimeSpan.FromMilliseconds(250);
 
     /// <summary>
-    /// The alert views the browsers' rules need: on the catch-up loop, those not open are opened, each
-    /// within the host's budget, and those no rule needs any more are closed.
+    /// The alert views and count views the browsers' rules need: on the catch-up loop, those not open
+    /// are opened, each within the host's budget, and those no rule needs any more are closed.
     /// </summary>
-    public void WatchAlerts(IReadOnlyCollection<AlertViewSpec> specs)
+    public void WatchAlerts(IReadOnlyCollection<AlertViewSpec> specs, IReadOnlyCollection<AlertWindowSpec> windows)
     {
-        var names = string.Join("\u0001", specs.Select(s => s.Name).Distinct().Order(StringComparer.Ordinal));
+        var names = string.Join("\u0001", specs.Select(s => s.Name).Concat(windows.Select(w => w.Name)).Distinct().Order(StringComparer.Ordinal));
         if (names == _alertsWatched || _engine is null)
         {
             return;
@@ -153,7 +156,7 @@ public sealed class BlotterHost : IAsyncDisposable
         _alertsWatched = names;
         _ = OnLoopAsync(async () =>
         {
-            await _alerts!.WatchAsync(specs, _engine, _budget.Bytes, _stop.Token).ConfigureAwait(false);
+            await _alerts!.WatchAsync(specs, windows, _engine, _budget.Bytes, _stop.Token).ConfigureAwait(false);
             return true;
         });
     }
@@ -178,6 +181,7 @@ public sealed class BlotterHost : IAsyncDisposable
             (parts.House, parts.House.Provider, parts.Seeded, parts.Exchange, parts.Planner, parts.Engine, parts.Queries);
         (_tailTable, _versionsTable, _fillsTable, _alerts) = (parts.Tables.Tail, parts.Tables.Versions, parts.Tables.Fills, parts.Tables.Alerts);
         _alerts.Entered += (spec, rows) => AlertsEntered?.Invoke(spec, rows);
+        _alerts.Counted += (spec, matches) => AlertsCounted?.Invoke(spec, matches);
         Pages = new Pages(Queries)
         {
             MaxKeptRows = PageRows(),
@@ -382,7 +386,7 @@ public sealed class BlotterHost : IAsyncDisposable
                         await ConfirmAsync(ct).ConfigureAwait(false);
                     }
 
-                    // A wait grows while nothing arrives: the views that watch it see the clock move.
+                    // A wait grows, and a window slides, while nothing arrives: the views that watch them see the clock move.
                     if (_alerts!.WatchesTime && Stopwatch.GetElapsedTime(_lastRefresh) >= AlertTick)
                     {
                         await RefreshAsync(_ => { }, _ordersThrough, _fillsThrough, ct).ConfigureAwait(false);

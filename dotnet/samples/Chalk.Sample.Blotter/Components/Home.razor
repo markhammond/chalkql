@@ -65,6 +65,10 @@
                         title="Out of order: a few rows on each stream sent late, by a delay mostly short and now and then long; and a few written to the database before they are sent">
                     Out of order: @(Host.Exchange.Disordered ? "on" : "off")
                 </button>
+                <button @onclick="ToggleOutage" aria-pressed="@Host.Exchange.Paused"
+                        title="Outage: the house takes and works no orders, so nothing new reaches the streams or the database, and an alert of none in a window fires">
+                    Outage: @(Host.Exchange.Paused ? "on" : "off")
+                </button>
                 @if (Host.Options.Current == CurrentSync.Lagging)
                 {
                     <button @onclick="StallCurrent" title="The job that keeps orders_current applies nothing for 20 s, while order_versions is written">Stall orders_current 20 s</button>
@@ -250,6 +254,18 @@
     private void Stall() => Host.Exchange.StallIngestion(TimeSpan.FromSeconds(20));
 
     private void ToggleDisorder() => Host.Exchange.Disordered = !Host.Exchange.Disordered;
+
+    private void ToggleOutage()
+    {
+        if (Host.Exchange.Paused)
+        {
+            Host.Exchange.Resume();
+        }
+        else
+        {
+            Host.Exchange.Pause();
+        }
+    }
 
     private void StallCurrent() => Host.Exchange.StallCurrent(TimeSpan.FromSeconds(20));
 

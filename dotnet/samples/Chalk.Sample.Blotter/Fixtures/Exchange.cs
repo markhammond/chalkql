@@ -213,6 +213,9 @@ public sealed class Exchange : IAsyncDisposable
 
     public void Resume() => _paused = false;
 
+    /// <summary>Whether the house has stopped taking and working orders.</summary>
+    public bool Paused => _paused;
+
     /// <summary>Whether the streams have sent everything that has happened: paused, and nothing held for the skew or sent late.</summary>
     public bool Quiet => _paused && OrdersHeld == 0 && LateHeld == 0;
 

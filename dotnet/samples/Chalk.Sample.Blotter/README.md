@@ -100,7 +100,7 @@ otherwise write by hand:
   - windows of recent reads, kept 4 s and shared by readers of the same sort and filter, within a
     quarter of the budget;
   - while any browser has an alert, the alert views and their tables: fills for 10 s, orders until
-    unchanged for 10 minutes, and each tail row's wait.
+    unchanged for 10 minutes, each tail row's wait, and, for counts, matches by slice of time.
 
   ChalkQL counts each view's state (`StateBytes`) and stops an update past its `StateBudget`, so the
   host can add the views to its own tables and hold the lot to one budget, 8 MB to start. Past it,
@@ -229,7 +229,8 @@ million orders, about 12.5 million versions and 8.8 million fills load in second
   statistics**, below it and closed at first: the feed, how `orders_current` is kept, PostgreSQL's size
   and lag, the tail, statements run and stopped, and confirmations. Closed, none of it is read.
 - **Simulate burst** makes 3,000 changes at once; **Stall database 20 s** stops database writes while
-  the streams carry on; in lagging mode, **Stall orders_current 20 s** stops only its job. They show
+  the streams carry on; **Outage** stops the house taking orders, so nothing new reaches the streams
+  or the database; in lagging mode, **Stall orders_current 20 s** stops only its job. They show
   while the pointer is on the page. Try them with a small budget chosen on the page to watch the host
   refuse.
 
@@ -259,8 +260,8 @@ million orders, about 12.5 million versions and 8.8 million fills load in second
   `wwwroot/condition-editor.js` from `editor/` (MIT; notice alongside). The host completes it: columns
   and paths where a comparison starts, the order's columns after `order.`, operators after a name, and
   values after those, quoted for you, a choice's own or a text column's most frequent of the last day,
-  read through ChalkQL. Tab takes a suggestion. It marks unknown names in place, then asks ChalkQL to prepare the statement and shows any
-  refusal. A refused condition is not added.
+  read through ChalkQL. Tab takes a suggestion. It marks unknown names in place, then asks ChalkQL to
+  prepare the statement and shows any refusal. A refused condition is not added.
 - **Incremental views, kept by ChalkQL.** Each distinct condition is a standing view, maintained
   incrementally and shared by every rule in any browser that has it; a row entering the view fires
   them. The views read only the host's own tables, which the catch-up loop changes in the same refresh
@@ -276,6 +277,14 @@ million orders, about 12.5 million versions and 8.8 million fills load in second
   reads the tail beside `live.waits` and the engine's clock, `@now`, which every refresh advances, and
   the catch-up loop advances four times a second while such a view is open. Stall the database to hear
   one.
+- **Or on a count.** Fire a rule instead on how many rows pass its condition in a sliding window of 5 s
+  to 60 minutes: at least so many, or none. Each fill counts, and each newer version of an order, not
+  only the first to pass. The host counts what each alert view sees into `live.match_counts`, by
+  slices of a sixtieth of the window (a second at least), and a second standing view sums the slices
+  within the window by `@now`, holding one row while the count is enough, or nought. The window slides
+  with the clock, a slice at a time; a rule fires as the row enters, and not again until it has left.
+  A count of none is judged only once a whole window has passed since counting began. Turn on
+  **Outage** to hear one.
 - **None missed.** A browser's alerts wait until one of its pages has sounded them. Reopen a page within
   10 minutes to hear what fired meanwhile.
 - **Sound**: recordings in `wwwroot/sounds`, mono and 8-bit (about 280 KB for all 22), served at
@@ -497,7 +506,8 @@ kept its invariants and every held page matched the oracle. The tests also cover
 their orders, the gap fill, the time limit, budget refusals and recovery, rows held in place while rows
 arrive above, the count of arrivals above a held view against the merged page (exact, for sorts on
 columns that change and those that do not), estimates and counts off the page's path, an order's
-history read from both sides, and alerts fired by incremental views along paths and on the wait.
+history read from both sides, and alerts fired by incremental views along paths, on the wait, and on
+counts in a sliding window, of order versions and of none in an outage.
 
 Run a longer check against a busy market by hand; it prints PostgreSQL's estimates and what the host
 held:
@@ -508,7 +518,7 @@ BLOTTER_PROBE_SECONDS=300 BLOTTER_PROBE_ORDERS=5000000 dotnet test dotnet/tests/
 
 `SortSpecTests`, `FilterSpecTests`, `ColumnsTests`, `ViewLinkTests`, `AlertSessionTests`, `FlashesTests`,
 `NestingTests`, `TailTests` and `ConditionTests` cover the host's own rules: sorting, filtering, number
-formats, links and shrouding, alerts and throttles, each row's wait for the database, and alert
+formats, links and shrouding, alerts, throttles and counts, each row's wait for the database, and alert
 conditions: names, paths, refusals and completions.
 
 ## Mechanical sympathy
