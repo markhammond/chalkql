@@ -4,8 +4,8 @@ A trade blotter in Blazor Server and QuickGrid over five million client orders a
 PostgreSQL, while the house keeps accepting and filling orders. Every tab scrolls through all its rows,
 sorts by any columns, filters on any column, flashes what changed and drives alerts. The host holds no
 copy of the corpus: it keeps an ephemeral memory cache within a budget of a few megabytes (see
-[What ChalkQL brings to the table](#what-chalkql-brings-to-the-table)), with each query capped at 5 s,
-and never shows an order at an older version than one it knows of.
+[What ChalkQL brings to the table](#what-chalkql-brings-to-the-table)), with each statement stopped after
+5 s, and never shows an order at an older version than one it knows of.
 
 ## A bolt-on compromise
 
