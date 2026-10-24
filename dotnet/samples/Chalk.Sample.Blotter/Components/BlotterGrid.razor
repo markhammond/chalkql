@@ -16,11 +16,12 @@
     @if (Alerts is not null)
     {
         <span class="alerts-wrap">
-            <button type="button" class="icon-button" aria-expanded="@_alerting" title="Alerts: a sound when a row comes to pass a filter" aria-label="Alerts" @onclick="() => _alerting = !_alerting">
+            <button type="button" class="icon-button" aria-expanded="@_alerting" title="Alerts: a sound when a row comes to pass a filter" aria-label="@(Alerts.Unseen ? "Alerts, some unseen" : "Alerts")" @onclick="ToggleAlerts">
                 <Bell Muted="!Alerts.SoundOn && !Alerts.Rules.IsEmpty" />
-                @if (!Alerts.Rules.IsEmpty)
+                @if (Alerts.Unseen)
                 {
-                    <span class="alerts-count">@Alerts.Rules.Length</span>
+                    @* An alert has fired since the alerts were last looked at. *@
+                    <span class="unseen-dot"></span>
                 }
             </button>
             @if (_alerting)
@@ -319,6 +320,14 @@
     private HashSet<string> _hiddenColumns = [];
     private bool _choosing;
     private bool _alerting;
+
+    /// <summary>Opens or closes the alerts panel; opened, its alerts are seen.</summary>
+    private void ToggleAlerts()
+    {
+        _alerting = !_alerting;
+        Alerts!.Looking = _alerting;
+        Alerts.Seen();
+    }
 
     // How many alerts had fired on this tab when the grid was held: more since, and the bell shows.
     private long _firedAtHold;

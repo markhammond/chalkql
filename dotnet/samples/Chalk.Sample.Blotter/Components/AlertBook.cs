@@ -32,5 +32,18 @@ public sealed class AlertBook
     /// <summary>How many rows have fired alerts on <paramref name="tab"/> since the page opened.</summary>
     public long FiredOn(Tab tab) => _fired.GetValueOrDefault(tab.Name);
 
-    public void Count(AlertEvent alert) => _fired.AddOrUpdate(alert.Tab, alert.Count, (_, n) => n + alert.Count);
+    /// <summary>Whether an alert has fired since the alerts were last looked at, for the red dot on the bell.</summary>
+    public bool Unseen { get; private set; }
+
+    /// <summary>Whether the alerts panel is open, where an alert is seen as it fires.</summary>
+    public bool Looking { get; set; }
+
+    public void Count(AlertEvent alert)
+    {
+        _fired.AddOrUpdate(alert.Tab, alert.Count, (_, n) => n + alert.Count);
+        Unseen |= !Looking;
+    }
+
+    /// <summary>The alerts were looked at: the bell's dot goes.</summary>
+    public void Seen() => Unseen = false;
 }

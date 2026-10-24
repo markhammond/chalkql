@@ -186,8 +186,11 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   - **Sound** is drawn with Web Audio, so there is nothing to load, and alerts at once mix. A browser
     lets a page make sound only once someone has clicked on it: with alerts set to sound, the page
     opens with a splash that asks (Enable sound, or Not now).
-  - **In the background,** the page's title flashes with the alert until it is looked at, and, with
-    "Notify in the background" ticked and the browser's leave, the system shows a notification.
+  - **Unseen alerts** show as a red dot, not a count, since what matters is that something fired and
+    what: on the bell, until the alerts are opened; and, in the background, on the page's icon, while
+    its title flashes the rule's name, until the page is looked at. With "Notify in the background"
+    ticked and the browser's leave, the system shows a notification, which, like the alert itself,
+    says how many rows (×26) and the latest.
   - **Scrolled away from the live top,** the "N new above" pill shows a bell once an alert has fired
     on the tab since, struck through while the page may not make sound. Alerts sound wherever the
     grid is.

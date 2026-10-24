@@ -5,7 +5,7 @@ window.blotterAlerts = (() => {
     let audio = null;
     let page = null;
     let flashing = null;
-    let unseen = 0;
+    let unseen = false;
     const title = document.title;
 
     // Local settings may be off (a private window, blocked storage): the page works without them.
@@ -87,21 +87,35 @@ window.blotterAlerts = (() => {
         },
     };
 
-    // The page in the background: its title flashes, alternating with the alert, until it is looked at.
-    const flash = words => {
-        unseen++;
+    // The page's icon, drawn: a blotter's rows, and a red dot on them while an alert is unseen.
+    const icon = dot => "data:image/svg+xml," + encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">`
+        + `<rect x="2" y="4" width="28" height="24" rx="5" fill="#3b6fd9"/>`
+        + `<path d="M8 12h16M8 17h16M8 22h10" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>`
+        + (dot ? `<circle cx="25" cy="8" r="7" fill="#e5383b" stroke="#fff" stroke-width="2"/>` : "")
+        + `</svg>`);
+    const link = document.querySelector("link[rel~='icon']") ?? document.head.appendChild(Object.assign(document.createElement("link"), { rel: "icon" }));
+    link.type = "image/svg+xml";
+    link.href = icon(false);
+
+    // The page in the background: a red dot on its icon, and its title flashing the rule's name, until
+    // it is looked at. No count: what matters is that something fired, and what.
+    const flash = rule => {
+        unseen = true;
+        link.href = icon(true);
         clearInterval(flashing);
         let on = false;
         flashing = setInterval(() => {
             on = !on;
-            document.title = on ? `(${unseen}) ${words}` : title;
+            document.title = on ? `🔔 ${rule}` : title;
         }, 1000);
     };
     const looked = () => {
-        if (!document.hidden && document.hasFocus()) {
+        if (unseen && !document.hidden && document.hasFocus()) {
             clearInterval(flashing);
             flashing = null;
-            unseen = 0;
+            unseen = false;
+            link.href = icon(false);
             document.title = title;
         }
     };
@@ -163,10 +177,11 @@ window.blotterAlerts = (() => {
             if (!alert.muted) {
                 this.play(alert.sound);
             }
-            const words = `${alert.ruleName}${alert.count > 1 ? ` ×${alert.count}` : ""}`;
             if (document.hidden || !document.hasFocus()) {
-                flash(words);
+                flash(alert.ruleName);
                 if (notify && "Notification" in window && Notification.permission === "granted") {
+                    // The notification is the alert itself: how many rows, and the latest.
+                    const words = `${alert.ruleName}${alert.count > 1 ? ` ×${alert.count}` : ""}`;
                     const shown = new Notification(`Blotter: ${words}`, { body: alert.latest, tag: alert.ruleId, renotify: true });
                     shown.onclick = () => { window.focus(); shown.close(); };
                 }
