@@ -3,13 +3,13 @@
 A trade blotter in Blazor Server and QuickGrid, over five million client orders and their fills in
 PostgreSQL, while the house keeps accepting and filling orders. Every tab scrolls through all of its
 rows, sorts by any columns, filters on any column, flashes what changed, and drives alerts. The host
-holds no copy of the corpus: it maintains an ephemeral memory cache to within a budget of a few megabytes, 
-stops slow queries after 5 seconds, and never shows an order at an older version than one it knows of.
+holds no copy of the corpus: it maintains an ephemeral memory cache to within a budget of a few megabytes,
+which each query capped to 5 seconds, and never shows an order at an older version than one it knows of.
 
 ## A bolt-on compromise
 
-Most live views are layered onto existing systems: someone else's database and external feed. 
-And so the blotter is intentionally built as **bolt-on** machinery, imposing the fewest prerequisites. 
+Most live views are layered onto existing systems: someone else's database and external feed.
+And so the blotter is intentionally built as **bolt-on** machinery, imposing the fewest prerequisites.
 Of the database it asks only what is reasonable: rows found by key, sorted and filtered at source, with
 an estimate of a query's size. Of the streams, only that it is reliable and delivers what
 is sent after a reader subscribes. ChalkQL can then make the most it.
@@ -19,8 +19,8 @@ JAVA_HOME=/path/to/jdk-21 dotnet run -c Release --project dotnet/samples/Chalk.S
 ```
 
 Then open `http://localhost:5910`. The sample starts a PostgreSQL server of its own, in a temporary
-directory, from PostgreSQL 16 or later installed on the machine, and deletes it when it stops; 
-one left by a sample that was killed is swept away by the next. ChalkQL's planner runs on a JDK 21+, 
+directory, from PostgreSQL 16 or later installed on the machine, and deletes it when it stops;
+one left by a sample that was killed is swept away by the next. ChalkQL's planner runs on a JDK 21+,
 which `PlannerProcess` starts itself, expecting `JAVA_HOME` to be set.
 
 | Option | Default | |
@@ -114,12 +114,12 @@ serves every reader everything, so none of it is shown.
 
 ## The domain
 
-Twelve clients trading the house's linear perpetuals (`BTC/USD Perp` and seven others) in US dollars, 
-each in its region and through various channels, at the mark plus its channel's markup. 
-A **client order** is versioned: a fill or a cancel is a new version, numbered one higher, with its 
-filled quantity, the weighted average filled price, and its status. A **fill** never changes, and 
-carries its order's details (client, region, channel, instrument, side), so a fill can be filtered 
-without its order. Orders and fills are identified by UUIDs, and nothing in the host relies on their 
+The model consists of twelve clients trading the house's linear perpetuals (`BTC/USD Perp` and seven
+others) in US dollars, each in its region and through various channels, at the mark plus its channel's
+markup. A **client order** is versioned: a fill or a cancel is a new version, numbered one higher, with
+its filled quantity, the weighted average filled price, and its status. A **fill** never changes, and
+carries its order's details (client, region, channel, instrument, side), so a fill can be filtered
+without its order. Orders and fills are identified by UUIDs, and nothing in the host relies on their
 order: ids only break ties to ensure sort order is deterministic.
 
 Order versions and fills come on **two streams**, each mostly in its own time order and neither
@@ -152,8 +152,8 @@ sometimes stall. `orders_current` keeps up one of two ways (`--current`):
 - **lagging**: a job of its own applies what `order_versions` has been written, 0.5 s to 4 s later,
   and stalls now and then, so the two tables are often out of step.
 
-The corpus is generated procedurally, each order worked out from its number alone, and bulk loaded 
-on several connections at once before any index or trigger exists; then the indexes are built in 
+The corpus is generated procedurally, each order worked out from its number alone, and bulk loaded
+on several connections at once before any index or trigger exists; then the indexes are built in
 parallel. Five million orders, about 12.5 million versions and 8.8 million fills load in seconds.
 
 ## What you see
@@ -174,8 +174,12 @@ parallel. Five million orders, about 12.5 million versions and 8.8 million fills
   the order was filled. The expander, Time and Order (or Time and Fill) stay in place as the grid
   scrolls sideways. A time shows as `… 03:26:23`, an ellipsis where its date is; on hover, it shows in
   full, date and microseconds.
-- **Computed columns.** Fill % is worked out from the row in the host: shown, never sorted or filtered 
-  by, and refused if asked to be.
+- **Columns hold their widths**; "Columns" shows or hides all but the frozen ones, and Ver, Region,
+  Channel and Filled start hidden.
+- **Numbers as finance writes them:** `.25` not `0.2500`, a dash for nought, prices to six significant
+  figures, in monospace with slashed zeros.
+- **Computed columns.** Fill %, from the row, and Recon (below), from the host's tail, are worked out
+  in the host: shown, never sorted or filtered by, and refused if asked to be.
 - **Flashes.** The cells of a row that changed flash for 2.4 s, and an order or fill just sent flashes
   whole for 3 s. A row scrolled into view does not flash. Rows cut by the grid's edges fade.
 - **Recon: how far behind the database is, row by row.** For each order and fill in the tail, how long
@@ -183,7 +187,7 @@ parallel. Five million orders, about 12.5 million versions and 8.8 million fills
   has not, muted once a lookup has found it there, a dash once the row has left the tail. Lookups run
   every 0.5 s, so a lag is known to within one. A row sent late counts its lateness too: Recon is how
   long the two sides took to agree, whichever was behind. The largest is PostgreSQL's "behind" in the
-  vital statistics. Like Fill %, it is shown, never sorted or filtered by.
+  vital statistics.
 
 **Sorting and filtering**
 
@@ -488,7 +492,7 @@ BLOTTER_PROBE_SECONDS=300 BLOTTER_PROBE_ORDERS=5000000 dotnet test dotnet/tests/
 formats, links and their shrouding, alerts and their throttles, how long each row waits for the
 database, and alert conditions: their names, paths, refusals and completions.
 
-## Aspirational mechanical sympathy
+## Mechanical sympathy
 
 With carte blanche ownership a blotter would be built with more sympathy for the data flow, greatly
 reducing the cost of data source queries:
