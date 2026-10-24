@@ -187,7 +187,8 @@ public sealed class ScopeState
         HashSet<Guid> overriddenIds,
         Dictionary<Guid, IRow> tail,
         ImmutableDictionary<Guid, Order> latest,
-        ImmutableDictionary<Guid, ImmutableList<Fill>> fillsByOrder)
+        ImmutableDictionary<Guid, ImmutableList<Fill>> fillsByOrder,
+        ImmutableDictionary<Guid, Reconciliation> reconciling)
     {
         Tab = tab;
         Filter = filter;
@@ -200,6 +201,7 @@ public sealed class ScopeState
         Tail = tail;
         Latest = latest;
         FillsByOrder = fillsByOrder;
+        Reconciling = reconciling;
     }
 
     public Tab Tab { get; }
@@ -244,12 +246,15 @@ public sealed class ScopeState
     /// <summary>The tail's fills of each order at this epoch, which an order's nested fills are read with.</summary>
     public ImmutableDictionary<Guid, ImmutableList<Fill>> FillsByOrder { get; }
 
+    /// <summary>How long the database has taken to hold each order and fill in the tail at this epoch.</summary>
+    public ImmutableDictionary<Guid, Reconciliation> Reconciling { get; }
+
     /// <summary>A rough size in memory, for the budget.</summary>
     public long Bytes => 64L * (Live.Length + Overridden.Length) + 48L * (OverriddenIds.Count + Tail.Count);
 
     internal static ScopeState Empty(Tab tab, FilterSpec filter) =>
         new(tab, filter, 0, false, default, [], [], [], [], ImmutableDictionary<Guid, Order>.Empty,
-            ImmutableDictionary<Guid, ImmutableList<Fill>>.Empty);
+            ImmutableDictionary<Guid, ImmutableList<Fill>>.Empty, ImmutableDictionary<Guid, Reconciliation>.Empty);
 
     internal static ScopeState Of(
         Tab tab, FilterSpec filter, long epoch, StreamMark mark, Tail tail, Dictionary<Guid, ScopeRow> rows)
@@ -302,7 +307,7 @@ public sealed class ScopeState
 
         return new ScopeState(
             tab, filter, epoch, true, mark, [.. live], [.. overridden], overriddenIds, byId, tail.Latest,
-            tail.FillsByOrder);
+            tail.FillsByOrder, tail.Reconciling);
     }
 
     /// <summary>The scope's rows in <paramref name="order"/>.</summary>

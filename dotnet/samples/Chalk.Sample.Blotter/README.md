@@ -186,6 +186,12 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   scientific notation past eight digits. Every value is in the system's monospace, zeros slashed.
 - **Flashes.** The cells of a row that changed flash for 2.4 s, and an order or fill just sent flashes
   whole for 3 s. A row scrolled into view does not flash. Rows cut by the grid's edges fade.
+- **Recon: how far behind the database is, row by row.** For each order and fill in the tail, how long
+  the database has taken to hold what the streams sent, from the exchange's time: counting while it
+  has not, muted once a lookup has found it there, a dash once the row has left the tail. Lookups run
+  every 0.5 s, so a lag is known to within one. A row sent late counts its lateness too: Recon is how
+  long the two sides took to agree, whichever was behind. The largest is PostgreSQL's "behind" in the
+  vital statistics. Like Fill %, it is shown, never sorted or filtered by.
 
 **Sorting and filtering**
 
@@ -248,6 +254,10 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   not a page is open. A fill fires a rule when it passes the filter; an order, when a version of it
   comes to pass the filter, and not again until it has left it. Within its throttle, a rule gathers
   its rows and sounds once, saying how many (×26).
+- **Or on a wait.** A rule may fire instead once a row that passes its filter has waited more than 1,
+  2, 5, 10 or 30 s for the database (its Recon): once for each wait, a newer version starting a new
+  one. The host weighs the tail against these rules four times a second, from the same record of each
+  row's wait the grid shows. Stall the database to hear one.
 - **None missed.** A browser's alerts wait until a page of it has sounded them. A page opened again
   within 10 minutes says what fired meanwhile.
 - **Sound** is a recording in `wwwroot/sounds`, mono and 8-bit (about 280 KB for all 22), served at a
@@ -468,9 +478,9 @@ estimates and what the host held:
 BLOTTER_PROBE_SECONDS=300 BLOTTER_PROBE_ORDERS=5000000 dotnet test dotnet/tests/Chalk.Sample.Blotter.Tests --filter Random_pages_hold
 ```
 
-`SortSpecTests`, `FilterSpecTests`, `ColumnsTests`, `ViewLinkTests`, `AlertSessionTests`, `FlashesTests`
-and `NestingTests` cover the host's own rules: sorting, filtering, number formats, links and their
-shrouding, alerts and their throttles.
+`SortSpecTests`, `FilterSpecTests`, `ColumnsTests`, `ViewLinkTests`, `AlertSessionTests`, `FlashesTests`,
+`NestingTests` and `TailTests` cover the host's own rules: sorting, filtering, number formats, links and
+their shrouding, alerts and their throttles, and how long each row waits for the database.
 
 ## Aspirational mechanical sympathy
 

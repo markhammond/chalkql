@@ -1,5 +1,6 @@
-@* The browser's alerts: each a tab's filter, saved, with a sound and a throttle. A new one takes this
-   tab's filters as they are; each can be tried, muted or removed. *@
+@* The browser's alerts: each a tab's filter, saved, with a sound and a throttle, firing as a row comes
+   to pass it or as one that passes it waits too long for the database. A new one takes this tab's
+   filters as they are; each can be tried, muted or removed. *@
 
 <div class="alerts-panel" role="dialog" aria-label="Alerts">
     <div class="alerts-head">
@@ -26,15 +27,16 @@
                 var r = rule;
                 <tr>
                     <td><b>@r.Name</b><div class="muted">@r.Tab.Title: @Describe(r.Filter)</div></td>
-                    <td>
+                    <td class="alerts-settings">
+                        <select value="@When(r.LagOver)" aria-label="When it fires" @onchange="e => SaveAsync(r with { LagOver = Lag((string)e.Value!) })">
+                            @WhenOptions
+                        </select>
                         <select value="@r.Sound" aria-label="Sound" @onchange="e => SaveAsync(r with { Sound = (string)e.Value! })">
                             @foreach (var (id, label) in AlertSounds.All)
                             {
                                 <option value="@id">@label</option>
                             }
                         </select>
-                    </td>
-                    <td>
                         <select value="@r.Throttle.TotalSeconds" aria-label="At most once every" @onchange="e => SaveAsync(r with { Throttle = TimeSpan.FromSeconds(double.Parse((string)e.Value!, CultureInfo.InvariantCulture)) })">
                             @foreach (var throttle in AlertRule.Throttles)
                             {
@@ -54,13 +56,17 @@
 
     @* An alert's condition is the tab's filters: an example of setting them, before the row that adds it. *@
     <p class="alerts-how muted">
-        An alert fires on the rows that pass this tab's filters. Set them with the column funnels first: for example
+        An alert fires on the rows that pass this tab's filters, as they arrive, or once the database is too far behind
+        them (see the Recon column). Set the filters with the column funnels first: for example
         @(Tab.Overrides ? "Client CEDAR, Side Buy and Qty at least 10, for CEDAR buying 10 or more;" : "Client CEDAR and Instrument starting BTC, for every CEDAR fill in BTC;")
         then add it here.
     </p>
     <div class="alerts-new">
         <span class="muted">New alert on @Tab.Title, @Describe(Filter):</span>
         <input type="text" placeholder="@NamePlaceholder()" @bind="_name" aria-label="Name" />
+        <select @bind="_when" aria-label="When it fires">
+            @WhenOptions
+        </select>
         <select @bind="_sound" aria-label="Sound">
             @foreach (var (id, label) in AlertSounds.All)
             {
@@ -92,21 +98,36 @@
     private string _name = "";
     private string _sound = AlertSounds.Default;
     private double _throttle = 3;
+    private string _when = "";
+
+    // As a row arrives, or after it has waited this long for the database.
+    private static readonly RenderFragment WhenOptions = __builder =>
+    {
+        <option value="">as it arrives</option>
+        @foreach (var lag in AlertRule.Lags)
+        {
+            <option value="@When(lag)" title="Once it has waited over @Seconds(lag) for the database to hold it">over @Seconds(lag) behind</option>
+        }
+    };
+
+    private static string When(TimeSpan? lag) => lag is { } l ? l.TotalSeconds.ToString(CultureInfo.InvariantCulture) : "";
+
+    private static TimeSpan? Lag(string when) =>
+        when.Length == 0 ? null : TimeSpan.FromSeconds(double.Parse(when, CultureInfo.InvariantCulture));
 
     // With no filters set, the name box shows an example of a name, as the line above shows one of a condition.
     private string NamePlaceholder() => Filter.Columns.IsEmpty
         ? (Tab.Overrides ? "e.g. CEDAR buys of 10 or more" : "e.g. CEDAR fills in BTC")
         : Describe(Filter);
 
-    private string DefaultName() => Filter.Columns.IsEmpty
-        ? (Tab.Overrides ? "Any order" : "Any fill")
-        : Describe(Filter);
+    private string DefaultName() => (Filter.Columns.IsEmpty ? (Tab.Overrides ? "Any order" : "Any fill") : Describe(Filter))
+        + (Lag(_when) is { } lag ? $", over {Seconds(lag)} behind" : "");
 
     private async Task AddAsync()
     {
         var rule = new AlertRule(
             Guid.NewGuid().ToString("N"), string.IsNullOrWhiteSpace(_name) ? DefaultName() : _name.Trim(), Tab, Filter, _sound,
-            TimeSpan.FromSeconds(_throttle), Muted: false);
+            TimeSpan.FromSeconds(_throttle), Muted: false, Lag(_when));
         _name = "";
         await Book.SaveAsync([.. Book.Rules, rule]);
     }

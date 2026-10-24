@@ -406,7 +406,7 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         await using var host = await StartAsync(new BlotterOptions
         {
             Orders = 20_000,
-            BudgetBytes = 2 << 20,
+            BudgetBytes = 3 << 20,
             FindBudget = false,
 
             // Within the budget while the database keeps up; past it once the database stalls.
@@ -418,7 +418,7 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         await UntilAsync(() => host.State == BlotterState.Refusing, TimeSpan.FromSeconds(20));
 
         Assert.Contains("behind the streams", host.Refusal, StringComparison.Ordinal);
-        Assert.Contains("more than the 2.0 MB budget", host.Refusal, StringComparison.Ordinal);
+        Assert.Contains("more than the 3.0 MB budget", host.Refusal, StringComparison.Ordinal);
         await Assert.ThrowsAsync<BlotterRefusedException>(() => host.AcquireAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None));
 
         await UntilAsync(() => host.State == BlotterState.Live, TimeSpan.FromSeconds(30));

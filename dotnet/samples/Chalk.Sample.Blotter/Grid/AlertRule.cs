@@ -48,20 +48,28 @@ public static class AlertSounds
 
 /// <summary>
 /// An alert: a tab's filter, saved, with a sound and a throttle. It fires when a row comes to pass the
-/// filter: a fill that passes it, or an order whose version passes it when the one before did not.
+/// filter: a fill that passes it, or an order whose version passes it when the one before did not. With
+/// <see cref="LagOver"/>, it fires instead when a row that passes the filter has waited longer than that
+/// for the database to hold it: once for each wait.
 /// Fired again within <see cref="Throttle"/>, it sounds once when the throttle allows, saying how many.
 /// </summary>
-public sealed record AlertRule(string Id, string Name, Tab Tab, FilterSpec Filter, string Sound, TimeSpan Throttle, bool Muted)
+public sealed record AlertRule(
+    string Id, string Name, Tab Tab, FilterSpec Filter, string Sound, TimeSpan Throttle, bool Muted, TimeSpan? LagOver = null)
 {
     /// <summary>The throttles a rule may have.</summary>
     public static readonly TimeSpan[] Throttles =
         [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(1)];
 
+    /// <summary>The waits for the database a rule may fire after.</summary>
+    public static readonly TimeSpan[] Lags =
+        [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30)];
+
     public bool Matches(IRow row) => Filter.Columns.All(f => f.Matches(row));
 
     /// <summary>As the browser keeps it: the filter as a view's readable link.</summary>
     public SavedRule Save() => new(
-        Id, Name, new ViewLink(Tab, Tab.DefaultSort, Filter, Tab.HiddenAtFirst, null).Query(), Sound, Throttle.TotalSeconds, Muted);
+        Id, Name, new ViewLink(Tab, Tab.DefaultSort, Filter, Tab.HiddenAtFirst, null).Query(), Sound, Throttle.TotalSeconds, Muted,
+        LagOver?.TotalSeconds);
 
     /// <summary>A rule the browser kept, on one of <paramref name="tabs"/>.</summary>
     /// <exception cref="ArgumentException">It is not a rule: said why.</exception>
@@ -81,9 +89,15 @@ public sealed record AlertRule(string Id, string Name, Tab Tab, FilterSpec Filte
         }
 
         var throttle = Throttles.FirstOrDefault(t => t.TotalSeconds >= saved.ThrottleSeconds, Throttles[^1]);
-        return new AlertRule(saved.Id, saved.Name, view.Tab, view.Filter, sound, throttle, saved.Muted);
+        var lag = saved.LagOverSeconds is { } seconds
+            ? Lags.FirstOrDefault(l => l.TotalSeconds == seconds) is { Ticks: > 0 } known
+                ? known
+                : throw new ArgumentException($"the alert '{saved.Name}' waits {seconds} s for the database, which is not one of the waits offered")
+            : (TimeSpan?)null;
+        return new AlertRule(saved.Id, saved.Name, view.Tab, view.Filter, sound, throttle, saved.Muted, lag);
     }
 }
 
 /// <summary>An alert as the browser keeps it, in its local settings.</summary>
-public sealed record SavedRule(string Id, string Name, string View, string Sound, double ThrottleSeconds, bool Muted);
+public sealed record SavedRule(
+    string Id, string Name, string View, string Sound, double ThrottleSeconds, bool Muted, double? LagOverSeconds = null);

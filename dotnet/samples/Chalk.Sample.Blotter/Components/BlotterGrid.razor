@@ -16,7 +16,7 @@
     @if (Alerts is not null)
     {
         <span class="alerts-wrap">
-            <button type="button" class="icon-button" aria-expanded="@_alerting" title="Alerts: a sound when a row comes to pass a filter" aria-label="@(Alerts.Unseen ? "Alerts, some unseen" : "Alerts")" @onclick="ToggleAlerts">
+            <button type="button" class="icon-button" aria-expanded="@_alerting" title="Alerts: a sound when a row comes to pass a filter, or waits too long for the database" aria-label="@(Alerts.Unseen ? "Alerts, some unseen" : "Alerts")" @onclick="ToggleAlerts">
                 <Bell Muted="!Alerts.SoundOn && !Alerts.Rules.IsEmpty" />
                 @if (Alerts.Unseen)
                 {
@@ -173,7 +173,11 @@
                         }
                     </HeaderTemplate>
                     <ChildContent>
-                        @if (context.Row is Fill fill && context.Parent is not null)
+                        @if (column.Lag)
+                        {
+                            @LagCell(context.Reconciliation)
+                        }
+                        else if (context.Row is Fill fill && context.Parent is not null)
                         {
                             @if (column.Kind == ColumnKind.Time)
                             {
@@ -336,6 +340,10 @@
     private QuickGrid<BlotterRow>? _grid;
     private ElementReference _scroller;
     private DotNetObjectReference<BlotterGrid>? _self;
+
+    // Whether a row shown is still waiting for the database, and the clock that shows its lag again.
+    private bool _counting;
+    private Timer? _ticker;
     private GridItemsProvider<BlotterRow> _provider = default!;
     private PageView _pages = default!;
     private LiveScope? _scope;
@@ -396,6 +404,7 @@
         _pages = Host.Pages.View(_sort);
         _provider = ProvideAsync;
         Host.Published += OnPublished;
+        _ticker = new Timer(_ => { if (_counting) OnPublished(0); }, null, 1000, 1000);
         await AcquireAsync(_filter);
     }
 
@@ -679,6 +688,13 @@
                 }
             }
 
+            foreach (var row in shown)
+            {
+                row.Reconciliation = state.Reconciling.TryGetValue(row.Row.Id, out var reconciliation) ? reconciliation : null;
+            }
+
+            // A lag still counting is shown again in a second, whether or not the feed sends anything.
+            _counting = shown.Any(r => r.Reconciliation is { Reconciled: false });
             _flashes.Seen(state.IngestedThrough, now);
             _fillFlashes.Seen(state.IngestedThrough, now);
             _opened = opened;
@@ -826,6 +842,26 @@
     {
         var space = shown.IndexOf(' ');
         <span class="cell time @flash" title="@full"><span class="date">@shown[..space]</span>@shown[space..]</span>
+    };
+
+    /// <summary>
+    /// A row's reconciliation lag: counting, while the database has not been seen to hold it; muted, once
+    /// it has, until the row leaves the tail; a dash for a row the tail does not hold.
+    /// </summary>
+    private static RenderFragment LagCell(Reconciliation? reconciliation) => __builder =>
+    {
+        if (reconciliation is not { } r)
+        {
+            <span class="cell lag">@Column.Nought</span>
+        }
+        else if (r.Reconciled)
+        {
+            <span class="cell lag done" title="The database was seen to hold it @Column.Seconds(r.Lag(DateTime.UtcNow)) after the exchange sent it">@Column.Seconds(r.Lag(DateTime.UtcNow))</span>
+        }
+        else
+        {
+            <span class="cell lag waiting" title="Sent at @r.Since.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture); the database has not been seen to hold it yet">@Column.Seconds(r.Lag(DateTime.UtcNow))</span>
+        }
     };
 
     private string NestedCell(Column column, Fill fill, bool full = false) => column.Name switch
@@ -1096,6 +1132,7 @@
     public async ValueTask DisposeAsync()
     {
         Host.Published -= OnPublished;
+        _ticker?.Dispose();
         _arrivals?.Dispose();
         if (_scope is not null)
         {

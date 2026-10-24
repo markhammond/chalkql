@@ -38,7 +38,7 @@ public sealed class Column
     private Column(
         string name, string title, ColumnKind kind, Type type, Func<IRow, object> value, Comparison<IRow> compare,
         Func<IRow, string> show, IReadOnlyList<string>? choices, string? description = null, Func<IRow, string>? detail = null,
-        bool derived = false)
+        bool derived = false, bool lag = false)
     {
         Type = type;
         Name = name;
@@ -49,7 +49,8 @@ public sealed class Column
         Compare = compare;
         Show = show;
         Detail = detail ?? show;
-        Derived = derived;
+        Derived = derived || lag;
+        Lag = lag;
         Choices = choices ?? [];
     }
 
@@ -89,6 +90,12 @@ public sealed class Column
     /// so a page is neither sorted nor filtered by it.
     /// </summary>
     public bool Derived { get; }
+
+    /// <summary>
+    /// How long the database took to hold the row, as the host saw it: not the row's at all, so the grid
+    /// shows it from the state it read the row in. Derived, so neither sorted nor filtered by.
+    /// </summary>
+    public bool Lag { get; }
 
     /// <summary>The values of a <see cref="ColumnKind.Choice"/> column.</summary>
     public IReadOnlyList<string> Choices { get; }
@@ -135,6 +142,18 @@ public sealed class Column
     public static Column Shown<T>(string name, string title, Func<T, string> show, bool numeric, string? description = null) where T : IRow => new(
         name, title, numeric ? ColumnKind.Number : ColumnKind.Text, typeof(string), r => show((T)r),
         (a, b) => string.CompareOrdinal(show((T)a), show((T)b)), r => show((T)r), null, description, derived: true);
+
+    /// <summary>A row's reconciliation lag, see <see cref="Lag"/>.</summary>
+    public static Column Reconciled(string name, string title, string description) => new(
+        name, title, ColumnKind.Number, typeof(string), _ => Nought, (_, _) => 0, _ => Nought, null, description, lag: true);
+
+    /// <summary>A lag as the grid shows it: tenths of a second under ten, whole seconds under ten minutes, then minutes.</summary>
+    public static string Seconds(TimeSpan lag) => lag.TotalSeconds switch
+    {
+        < 10 => lag.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) + "\u202Fs",
+        < 600 => lag.TotalSeconds.ToString("0", CultureInfo.InvariantCulture) + "\u202Fs",
+        _ => lag.TotalMinutes.ToString("0", CultureInfo.InvariantCulture) + "\u202Fmin",
+    };
 
     /// <summary>What a value of nought shows as: a dash, which the eye passes over.</summary>
     public const string Nought = "–";

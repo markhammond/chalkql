@@ -11,7 +11,8 @@ public sealed record AlertEvent(long Seq, string RuleId, string RuleName, string
 /// <summary>
 /// The alerts of every browser, evaluated by the host from the streams, not by the page: every order
 /// version and fill the streams send is weighed against each rule as the host reads it, however far
-/// behind a page's grid has fallen, and whether or not a page is open. A browser's alerts wait, in
+/// behind a page's grid has fallen, and whether or not a page is open; and four times a second, what
+/// the tail is waiting for the database to hold is weighed against the rules that watch the wait. A browser's alerts wait, in
 /// order, until a page of it has sounded them; a browser no page has opened for
 /// <see cref="KeepFor"/> is let go, alerts and all.
 /// </summary>
@@ -51,8 +52,10 @@ public sealed class AlertDesk : IDisposable
 
     private void Tick(DateTime now)
     {
+        var reconciling = _host.Reconciling;
         foreach (var (browser, session) in _sessions)
         {
+            session.Weigh(reconciling, now);
             session.Flush(now);
             if (session.Unattended(now) > KeepFor)
             {
@@ -106,7 +109,8 @@ public sealed class AlertSession(string browser)
 
             foreach (var rule in _rules)
             {
-                if (!_states.TryGetValue(rule.Id, out var state) || state.Rule.Filter.Name != rule.Filter.Name || state.Rule.Tab != rule.Tab)
+                if (!_states.TryGetValue(rule.Id, out var state) || state.Rule.Filter.Name != rule.Filter.Name || state.Rule.Tab != rule.Tab
+                    || state.Rule.LagOver != rule.LagOver)
                 {
                     _states[rule.Id] = new RuleState(rule);
                 }
@@ -127,6 +131,12 @@ public sealed class AlertSession(string browser)
             foreach (var state in _states.Values)
             {
                 var rule = state.Rule;
+                if (rule.LagOver is not null)
+                {
+                    // Weighed by the wait, not by what arrives.
+                    continue;
+                }
+
                 if (rule.Tab == Tabs.Orders)
                 {
                     foreach (var version in versions)
@@ -155,6 +165,46 @@ public sealed class AlertSession(string browser)
                     }
                 }
 
+                if (state.Due(now))
+                {
+                    fired.Add(Sound(state, now));
+                }
+            }
+        }
+
+        Raise(fired);
+    }
+
+    /// <summary>
+    /// Weighs the tail's rows against the rules that watch the wait for the database: a row that passes
+    /// the filter and has waited longer than the rule allows fires it, once for each wait. A row
+    /// reconciled since the last look, but later than allowed, fires it too.
+    /// </summary>
+    public void Weigh(ImmutableDictionary<Guid, Reconciliation> reconciling, DateTime now)
+    {
+        List<AlertEvent> fired = [];
+        lock (_gate)
+        {
+            foreach (var state in _states.Values)
+            {
+                if (state.Rule.LagOver is not { } over)
+                {
+                    continue;
+                }
+
+                var rule = state.Rule;
+                foreach (var (id, reconciliation) in reconciling)
+                {
+                    var lag = reconciliation.Lag(now);
+                    if (lag > over && reconciliation.Row is Order == (rule.Tab == Tabs.Orders) && rule.Matches(reconciliation.Row)
+                        && state.Waits.Add((id, reconciliation.Since)))
+                    {
+                        state.Hit(reconciliation.Row, lag);
+                    }
+                }
+
+                // A wait is remembered while the tail holds it, so the set is as big as the tail at most.
+                state.Waits.RemoveWhere(w => !reconciling.TryGetValue(w.Id, out var r) || r.Since != w.Since);
                 if (state.Due(now))
                 {
                     fired.Add(Sound(state, now));
@@ -227,7 +277,8 @@ public sealed class AlertSession(string browser)
     {
         var rule = state.Rule;
         var alert = new AlertEvent(
-            ++_seq, rule.Id, rule.Name, rule.Sound, rule.Muted, rule.Tab.Name, state.Gathered, rule.Tab.Describe(state.Latest!), now);
+            ++_seq, rule.Id, rule.Name, rule.Sound, rule.Muted, rule.Tab.Name, state.Gathered,
+            rule.Tab.Describe(state.Latest!) + (state.LatestLag is { } lag ? $" · {Column.Seconds(lag)} waiting for the database" : ""), now);
         state.Gathered = 0;
         state.SoundedAt = now;
         _waiting.Add(alert);
@@ -253,16 +304,23 @@ public sealed class AlertSession(string browser)
 
         public HashSet<Guid> Matching { get; } = [];
 
+        /// <summary>The waits that have fired the rule: each row's, by when it began.</summary>
+        public HashSet<(Guid Id, DateTime Since)> Waits { get; } = [];
+
         public int Gathered { get; set; }
 
         public IRow? Latest { get; private set; }
 
+        /// <summary>How long <see cref="Latest"/> had waited for the database, for a rule that watches the wait.</summary>
+        public TimeSpan? LatestLag { get; private set; }
+
         public DateTime SoundedAt { get; set; } = DateTime.MinValue;
 
-        public void Hit(IRow row)
+        public void Hit(IRow row, TimeSpan? lag = null)
         {
             Gathered++;
             Latest = row;
+            LatestLag = lag;
         }
 
         public bool Due(DateTime now) => Gathered > 0 && now - SoundedAt >= Rule.Throttle;

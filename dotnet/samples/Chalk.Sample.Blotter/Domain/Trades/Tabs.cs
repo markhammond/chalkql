@@ -15,6 +15,10 @@ public static class Tabs
 
     public static readonly IReadOnlyList<Tab> All = [Orders, Fills];
 
+    private const string Recon =
+        "How long the database took to hold what the streams sent, from the exchange's time: counting while it has not, "
+        + "a dash once the row has left the tail";
+
     private static Tab MakeOrders()
     {
         var key = Column.Uuid<Order>("order_id", "Order", o => o.OrderId);
@@ -40,6 +44,7 @@ public static class Tabs
                 Column.Number<Order>("markup_bps", "Markup", o => o.MarkupBps, 1),
                 Column.Choice<Order>("status", "Status", o => o.Status, Reference.Statuses),
                 Column.Time<Order>("event_time", "Updated", o => o.EventTime),
+                Column.Reconciled("recon", "Recon", Recon),
             ],
             key,
             time,
@@ -77,6 +82,7 @@ public static class Tabs
                 Column.Price<Fill>("price", "Price", f => f.Price),
                 Column.Price<Fill>("mid", "Mid", f => f.Mid),
                 Column.Number<Fill>("markup_bps", "Markup", f => f.MarkupBps, 1),
+                Column.Reconciled("recon", "Recon", Recon),
             ],
             key,
             time,

@@ -1,3 +1,5 @@
+using Chalk.Sample.Blotter.Live;
+
 namespace Chalk.Sample.Blotter.Components;
 
 /// <summary>
@@ -16,6 +18,9 @@ public sealed class BlotterRow(IRow row, string?[] flash, string? rowClass, Guid
 
     /// <summary>For a fill nested under its order, the order's id.</summary>
     public Guid? Parent { get; } = parent;
+
+    /// <summary>How long the database has taken to hold the row, if it is in the tail of the state read.</summary>
+    public Reconciliation? Reconciliation { get; internal set; }
 
     /// <summary>The grid's key: an order and a fill never share one.</summary>
     public string Key => Parent is null ? $"r{Row.Id}" : $"f{Row.Id}";

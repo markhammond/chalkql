@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Chalk.Sample.Blotter.Live;
 using Chalk.Sample.Blotter.Grid;
 using Chalk.Sample.Blotter.Domain;
@@ -70,12 +71,47 @@ public sealed class AlertSessionTests
     }
 
     [Fact]
+    public void A_rule_that_watches_the_wait_fires_once_for_each_row_that_waits_too_long_for_the_database()
+    {
+        var (session, fired) = Session(Rule(Tabs.Orders, ("client", "CEDAR")) with { LagOver = TimeSpan.FromSeconds(2) });
+        var slow = Order(Guid.CreateVersion7(), 1, "New");
+        var quick = Order(Guid.CreateVersion7(), 1, "New");
+        var other = Order(Guid.CreateVersion7(), 1, "New") with { Client = "FERN" };
+        var tail = ImmutableDictionary<Guid, Reconciliation>.Empty
+            .Add(slow.OrderId, new Reconciliation(slow, Now, null))
+            .Add(quick.OrderId, new Reconciliation(quick, Now, Now.AddSeconds(1)))
+            .Add(other.OrderId, new Reconciliation(other, Now, null));
+
+        // What arrives does not fire it: only the wait does.
+        session.Note([slow, quick, other], [], Now);
+        session.Weigh(tail, Now.AddSeconds(1));
+        Assert.Empty(fired);
+
+        session.Weigh(tail, Now.AddSeconds(3));
+        session.Weigh(tail, Now.AddSeconds(10));
+        Assert.Equal([1], fired.Select(a => a.Count));
+        Assert.Contains("3.0\u202Fs waiting for the database", fired[0].Latest, StringComparison.Ordinal);
+
+        // A new version starts a new wait, which may fire again.
+        var next = slow with { Version = 2 };
+        session.Weigh(tail.SetItem(slow.OrderId, new Reconciliation(next, Now.AddSeconds(10), null)), Now.AddSeconds(13));
+        Assert.Equal([1, 1], fired.Select(a => a.Count));
+    }
+
+    [Fact]
     public void A_rule_kept_by_the_browser_reads_back_the_same_and_one_not_understood_is_refused()
     {
-        var rule = Rule(Tabs.Fills, ("client", "CEDAR")) with { Sound = "bangecho", Throttle = TimeSpan.FromSeconds(30), Muted = true };
+        var rule = Rule(Tabs.Fills, ("client", "CEDAR")) with
+        {
+            Sound = "bangecho", Throttle = TimeSpan.FromSeconds(30), Muted = true, LagOver = TimeSpan.FromSeconds(5),
+        };
         var back = AlertRule.Load(rule.Save(), Tabs.All);
 
-        Assert.Equal((rule.Tab, rule.Filter.Name, rule.Sound, rule.Throttle, rule.Muted), (back.Tab, back.Filter.Name, back.Sound, back.Throttle, back.Muted));
+        Assert.Equal(
+            (rule.Tab, rule.Filter.Name, rule.Sound, rule.Throttle, rule.Muted, rule.LagOver),
+            (back.Tab, back.Filter.Name, back.Sound, back.Throttle, back.Muted, back.LagOver));
+        Assert.Null(AlertRule.Load(rule.Save() with { LagOverSeconds = null }, Tabs.All).LagOver);
+        Assert.Throws<ArgumentException>(() => AlertRule.Load(rule.Save() with { LagOverSeconds = 7 }, Tabs.All));
         Assert.Throws<ArgumentException>(() => AlertRule.Load(rule.Save() with { Sound = "Gong" }, Tabs.All));
         Assert.Equal("kaching", AlertRule.Load(rule.Save() with { Sound = "Register" }, Tabs.All).Sound);
         Assert.Throws<ArgumentException>(() => AlertRule.Load(rule.Save() with { View = "sort=-client" }, Tabs.All));

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
 using System.Threading.Channels;
@@ -145,6 +146,9 @@ public sealed class BlotterHost : IAsyncDisposable
     /// On the ingest loop: a handler only takes note.
     /// </summary>
     public event Action<IReadOnlyList<Order>, IReadOnlyList<Fill>>? Arrived;
+
+    /// <summary>How long the database has taken to hold each row in the tail, as of the latest state.</summary>
+    public ImmutableDictionary<Guid, Reconciliation> Reconciling => _tail.Reconciling;
 
     /// <summary>Counters for the page's status bar, refreshed by the loop.</summary>
     public BlotterStatus Status { get; private set; } = new();
@@ -624,7 +628,7 @@ public sealed class BlotterHost : IAsyncDisposable
             var stored = current.GetValueOrDefault(entry.Live.OrderId);
             if (stored is not null && stored.Version >= entry.Live.Version)
             {
-                entry.ConfirmedAt ??= now;
+                _tail.Confirm(entry, now);
                 if (now - entry.ConfirmedAt >= _options.EvictAfter)
                 {
                     deletes.Add(TailRow.Of(entry.Live, entry.Base));
