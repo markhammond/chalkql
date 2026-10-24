@@ -1,15 +1,8 @@
 using System.Collections.Immutable;
-using System.Globalization;
 using System.Text;
+using Chalk.Sample.Blotter.Grid;
 
-namespace Chalk.Sample.Blotter.Grid;
-
-/// <summary>
-/// A path from a tab's rows to another tab's, by a column that holds the other's key: a fill's order,
-/// by its <c>order_id</c>. A condition reads the other row's columns as <c>order.status</c>, and the
-/// host joins for it.
-/// </summary>
-public sealed record TabPath(string Name, Tab Target, string Via, string Description);
+namespace Chalk.Sample.Blotter.Alerts;
 
 /// <summary>Where in a condition's text: from the first character to the one after the last.</summary>
 public readonly record struct TextSpan(int From, int To);
@@ -189,19 +182,6 @@ public sealed class Condition
     }
 
     public override string ToString() => Text;
-
-    /// <summary>A literal of a column's type, as a condition writes it.</summary>
-    public static string Literal(Column column, object value) => value switch
-    {
-        string text => Quote(text),
-        Guid id => $"CAST({Quote(id.ToString())} AS UUID)",
-        DateTime time => string.Create(CultureInfo.InvariantCulture, $"TIMESTAMP '{time:yyyy-MM-dd HH:mm:ss.ffffff}'"),
-        double number => number.ToString("R", CultureInfo.InvariantCulture),
-        IFormattable number => number.ToString(null, CultureInfo.InvariantCulture),
-        _ => throw new ArgumentException($"{column.Title} takes no literal of {value.GetType().Name}", nameof(value)),
-    };
-
-    public static string Quote(string text) => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'";
 
     private static bool Same(string name, Token token) =>
         token.Kind == TokenKind.Quoted ? name == token.Text : name.Equals(token.Text, StringComparison.OrdinalIgnoreCase);

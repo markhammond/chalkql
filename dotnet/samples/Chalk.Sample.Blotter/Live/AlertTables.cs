@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using Chalk.Client;
 using Chalk.Sample.Blotter.Domain;
+using Chalk.Sample.Blotter.Alerts;
 using Chalk.Sample.Blotter.Grid;
 using Chalk.Sources.Poco;
 

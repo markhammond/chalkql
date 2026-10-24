@@ -85,3 +85,10 @@ public sealed class Tab
 
     public override string ToString() => Name;
 }
+
+/// <summary>
+/// A path from a tab's rows to another tab's, by a column that holds the other's key: a fill's order,
+/// by its <c>order_id</c>. A condition reads the other row's columns as <c>order.status</c>, and the
+/// host joins for it.
+/// </summary>
+public sealed record TabPath(string Name, Tab Target, string Via, string Description);

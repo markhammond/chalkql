@@ -293,31 +293,31 @@ public sealed class FilterSpec
             if (!filter.Values.IsEmpty)
             {
                 var values = filter.Values
-                    .Select(v => column.Kind == ColumnKind.Id ? Grid.Condition.Literal(column, Guid.TryParse(v, out var id) ? id : Guid.Empty) : Grid.Condition.Quote(v))
+                    .Select(v => column.Kind == ColumnKind.Id ? column.Literal(Guid.TryParse(v, out var id) ? id : Guid.Empty) : Column.Quote(v))
                     .ToList();
                 conditions.Add(filter.Match == TextMatch.StartsWith && column.Kind != ColumnKind.Id
-                    ? "(" + string.Join(" OR ", filter.Values.Select(v => $"{column.Name} LIKE {Grid.Condition.Quote(Escape(v) + "%")}" + (Escape(v) != v ? " ESCAPE '\\'" : ""))) + ")"
+                    ? "(" + string.Join(" OR ", filter.Values.Select(v => $"{column.Name} LIKE {Column.Quote(Escape(v) + "%")}" + (Escape(v) != v ? " ESCAPE '\\'" : ""))) + ")"
                     : values.Count == 1 ? $"{column.Name} = {values[0]}" : $"{column.Name} IN ({string.Join(", ", values)})");
             }
 
             if (filter.Min is { } min)
             {
-                conditions.Add($"{column.Name} >= {Grid.Condition.Literal(column, column.Bind(min))}");
+                conditions.Add($"{column.Name} >= {column.Literal(column.Bind(min))}");
             }
 
             if (filter.Max is { } max)
             {
-                conditions.Add($"{column.Name} <= {Grid.Condition.Literal(column, column.Bind(max))}");
+                conditions.Add($"{column.Name} <= {column.Literal(column.Bind(max))}");
             }
 
             if (filter.From is { } from)
             {
-                conditions.Add($"{column.Name} >= {Grid.Condition.Literal(column, from)}");
+                conditions.Add($"{column.Name} >= {column.Literal(from)}");
             }
 
             if (filter.To is { } to)
             {
-                conditions.Add($"{column.Name} < {Grid.Condition.Literal(column, to)}");
+                conditions.Add($"{column.Name} < {column.Literal(to)}");
             }
         }
 

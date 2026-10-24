@@ -3,6 +3,7 @@ using System.Globalization;
 using Chalk.Sample.Blotter.Live;
 using Chalk.Sample.Blotter.Fixtures;
 using Chalk.Sample.Blotter.Domain;
+using Chalk.Sample.Blotter.Alerts;
 using Chalk.Sample.Blotter.Grid;
 using Chalk.Sample.Blotter.Postgres;
 using Microsoft.Extensions.Logging.Abstractions;

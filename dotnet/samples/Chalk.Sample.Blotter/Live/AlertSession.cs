@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Chalk.Sample.Blotter.Alerts;
 using Chalk.Sample.Blotter.Grid;
 
 namespace Chalk.Sample.Blotter.Live;

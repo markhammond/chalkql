@@ -1,6 +1,7 @@
 using System.Globalization;
+using Chalk.Sample.Blotter.Grid;
 
-namespace Chalk.Sample.Blotter.Grid;
+namespace Chalk.Sample.Blotter.Alerts;
 
 /// <summary>
 /// The sounds an alert can make: short recordings in <c>wwwroot/sounds</c>, mono, 8-bit, at no more than

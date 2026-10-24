@@ -74,6 +74,20 @@ public sealed class Column
         _ => (object)value,
     };
 
+    /// <summary>A value of the column's type as SQL writes it: in a condition, or the filters as one.</summary>
+    public string Literal(object value) => value switch
+    {
+        string text => Quote(text),
+        Guid id => $"CAST({Quote(id.ToString())} AS UUID)",
+        DateTime time => string.Create(CultureInfo.InvariantCulture, $"TIMESTAMP '{time:yyyy-MM-dd HH:mm:ss.ffffff}'"),
+        double number => number.ToString("R", CultureInfo.InvariantCulture),
+        IFormattable number => number.ToString(null, CultureInfo.InvariantCulture),
+        _ => throw new ArgumentException($"{Title} takes no literal of {value.GetType().Name}", nameof(value)),
+    };
+
+    /// <summary>Text as a SQL string literal.</summary>
+    public static string Quote(string text) => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'";
+
     /// <summary>Right-aligned in the grid.</summary>
     public bool Numeric => Kind is ColumnKind.Integer or ColumnKind.Number;
 

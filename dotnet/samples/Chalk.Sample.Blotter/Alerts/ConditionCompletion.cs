@@ -1,6 +1,7 @@
 using System.Globalization;
+using Chalk.Sample.Blotter.Grid;
 
-namespace Chalk.Sample.Blotter.Grid;
+namespace Chalk.Sample.Blotter.Alerts;
 
 /// <summary>One suggestion: what the list shows, what it inserts, and what it is.</summary>
 /// <param name="Type">How the editor marks it: <c>property</c> a column, <c>namespace</c> a path, <c>keyword</c>, <c>text</c> a value.</param>
@@ -112,7 +113,7 @@ public static class ConditionCompletion
         Column column, string typed, Func<Column, string, CancellationToken, Task<IReadOnlyList<string>>> values, CancellationToken ct)
     {
         var found = column.Kind == ColumnKind.Choice ? column.Choices : await values(column, typed, ct).ConfigureAwait(false);
-        return found.Select(v => new Suggestion(v, "text", column.Title, Apply: Condition.Quote(v)));
+        return found.Select(v => new Suggestion(v, "text", column.Title, Apply: Column.Quote(v)));
     }
 
     private static Suggestion Of(Column column, TabPath? path) => new(
