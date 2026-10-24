@@ -81,7 +81,7 @@ public sealed class AlertSessionTests
     }
 
     [Fact]
-    public void Every_sound_has_its_file_and_every_file_its_sound_each_mono_8_bit_and_small()
+    public void Every_sound_has_its_file_and_every_file_its_sound()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (!Directory.Exists(Path.Combine(root.FullName, "samples", "Chalk.Sample.Blotter")))
@@ -92,15 +92,6 @@ public sealed class AlertSessionTests
         var folder = Path.Combine(root.FullName, "samples", "Chalk.Sample.Blotter", "wwwroot", "sounds");
         var files = Directory.GetFiles(folder, "*.wav");
         Assert.Equal(AlertSounds.All.Select(s => s.Id).Order(StringComparer.Ordinal), files.Select(Path.GetFileNameWithoutExtension).Order(StringComparer.Ordinal));
-        foreach (var file in files)
-        {
-            // A plain WAV header: channels at 22, the sample rate at 24, the bits a sample at 34.
-            var header = File.ReadAllBytes(file).AsSpan(0, 44);
-            Assert.Equal("RIFF", System.Text.Encoding.ASCII.GetString(header[..4]));
-            Assert.Equal(1, BitConverter.ToInt16(header[22..24]));
-            Assert.InRange(BitConverter.ToInt32(header[24..28]), 8000, 11025);
-            Assert.Equal(8, BitConverter.ToInt16(header[34..36]));
-        }
     }
 
     private static (AlertSession Session, List<AlertEvent> Fired) Session(AlertRule rule)

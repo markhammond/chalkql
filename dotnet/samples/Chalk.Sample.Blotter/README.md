@@ -1,12 +1,14 @@
-# Chalk.Sample.Blotter — a virtual trade blotter
+# Virtual blotter: a live grid over data you do not own
 
-A Blazor Server page with two QuickGrid tabs: **client orders** (five million by default), each with
-its fills nested beneath it, and the **fills** themselves. Both live in PostgreSQL, which the host
-cannot hold in memory, while the house keeps taking orders and filling them. Each tab scrolls through
-all of its rows, sorts by any columns, filters on any column, and flashes what changes. The host keeps
-what it holds within a memory budget, the smallest that serves of 8, 16, 32 and 64 MB unless you set
-one (on the page, or at start), stops any statement after
-5 s, and never shows an order at an older version than one it knows of to stay within either.
+A trade blotter in Blazor Server and QuickGrid, over five million client orders and their fills in
+PostgreSQL, while the house keeps taking orders and filling them. Every tab scrolls through all of its
+rows, sorts by any columns, filters on any column, flashes what changes, and sounds alerts. The host
+holds no copy of the corpus: it keeps what it holds inside a memory budget of a few megabytes, stops
+any statement after 5 s, and never shows an order at an older version than one it knows of.
+
+It is written for product engineers who have to put a live view in front of a system they did not
+design. It is built as a **bolt-on**: it asks almost nothing of the database or the streams, and shows
+what that costs and what ChalkQL makes of it.
 
 ```bash
 JAVA_HOME=/path/to/jdk-21 dotnet run -c Release --project dotnet/samples/Chalk.Sample.Blotter
@@ -14,7 +16,9 @@ JAVA_HOME=/path/to/jdk-21 dotnet run -c Release --project dotnet/samples/Chalk.S
 
 Then open `http://localhost:5910`. The sample starts a PostgreSQL server of its own, in a temporary
 directory, from PostgreSQL 16 or later installed on the machine (`brew install postgresql@16`), and
-deletes it when it stops; one left by a sample that was killed is swept away by the next. Options:
+deletes it when it stops; one left by a sample that was killed is swept away by the next. ChalkQL's
+planner runs on a JDK 21+, which `PlannerProcess` starts itself: set `JAVA_HOME`, or install Homebrew's
+`openjdk@21`, which the sample looks for.
 
 | Option | Default | |
 |---|---|---|
@@ -28,8 +32,98 @@ deletes it when it stops; one left by a sample that was killed is swept away by 
 | `--link-keys /path/to/folder` | `Chalk.Sample.Blotter/link-keys` under the user's local application data | where the keys that shroud shared links are kept (below) |
 | `--probe` | | no web app: prints the estimates, then checks random pages of both tabs for 45 s (`PROBE_SECONDS`) (below) |
 
-ChalkQL's planner runs on a JDK 21+, which `PlannerProcess` starts itself: set `JAVA_HOME`, or install
-Homebrew's `openjdk@21`, which the sample looks for.
+## A bolt-on, on purpose
+
+Most live views are added to systems that already exist: a database someone else owns, feeds someone
+else publishes. So the blotter assumes the least it can. Of the database it asks only what any reader
+could: rows found by key, sorted and filtered, and an estimate of a query's size. Of the streams, only
+that they deliver what is sent after a reader subscribes.
+
+It does **not** assume:
+
+- a watermark, a commit sequence or a log position on any row;
+- a snapshot, or reads repeatable across statements;
+- that the streams and the tables agree, or which runs ahead: a version may be in the database before
+  the stream sends it, or sent long before the database writes it;
+- that the table of current orders keeps up with the table of versions (`--current lagging` runs them
+  apart on purpose);
+- that the two streams agree with each other: a fill often arrives before its order;
+- that a stream replays anything sent before the subscription;
+- an index for every sort a reader picks, or a cheap count.
+
+What it takes on instead, in the host:
+
+- **A tail**: what the streams have sent that the database has not been seen to hold, confirmed by
+  key lookups every half second and let go five seconds after.
+- **A merge**: every page is the database read live, with the tail laid over it, each order once, at
+  the newest version either side knows.
+- **A gap fill** at start and on resuming, for versions that were in flight when it subscribed.
+- **Positions it learns**: a live table has none, so each grid ties the positions it has read to the
+  rows found there, and reads from their keys.
+- **Estimates rather than counts**, refined off the page's path, and the end of a tab learned from
+  reads that reach it.
+
+Each is described under [How it works](#how-it-works), with what it costs.
+
+## With a free hand: mechanical sympathy
+
+Given a free hand over the source, a blotter would be built with more sympathy for the machine
+underneath, and most of the host's work above would go:
+
+- **A commit sequence on every row, and the stream's watermark in step with it.** The tail could let a
+  row go the moment the database's watermark passes it: no confirmation lookups, no grace period, no
+  windows whose life is tied to that grace.
+- **The stream taken from the database's own log** (logical replication, change data capture). Stream
+  and table would agree by construction: no order behind its fills, no database ahead of the stream,
+  no gap fill.
+- **Reads at a snapshot that matches the watermark.** Every merge would be exact, rather than "the
+  newest version either side knows".
+- **A stream that replays from an offset.** Starting, and serving again after a refusal, would need
+  no 30 s gap fill and no kept tail.
+- **Indexes, or a column store, for the sorts readers use, and counts kept as rows change.** No sort
+  of the whole table, no count that reads it, and the 5 s limit would seldom bite.
+- **The current table kept in the same transaction as the versions** (the sample's default trigger),
+  never by a job that runs behind.
+- **A dense sequence in the default order.** A jump to a far position would be exact, not placed by
+  `OFFSET`.
+
+The sample does without all of these so that it works where none is on offer, and each item above
+marks a place where the host approximates or does extra work because of it.
+
+## What ChalkQL brings
+
+ChalkQL is the engine under every read: one SQL dialect over the PostgreSQL tables and the host's own
+in-memory tables, planned by Apache Calcite in a sidecar process and executed in the host's own. What
+it does here that would otherwise be hand-written:
+
+- **One statement across a database and live memory.** The tail is three keyed POCO tables
+  (`live.tail`, `live.order_versions`, `live.tail_fills`) in the same engine as `blotter.*` in
+  PostgreSQL. An order's page reads its history as one `UNION` of `blotter.order_versions` and
+  `live.order_versions`, and the versions only the tail has with one `NOT IN` across the two.
+- **Pushdown planned from what the host declares.** The sample tells ChalkQL each table's key, its
+  indexes, its row count, and that its text is collated byte by byte. With that, the planner pushes the
+  filter, the sort, the keyset seek and the limit into PostgreSQL's SQL, and keeps in the host only what
+  PostgreSQL cannot do. "How this tab is answered", under the grid, shows the plan.
+- **Standing views over the live data, kept current incrementally, inside a budget.** Each live scope
+  (one per tab and filter in use) is a ChalkQL view over the tail: it takes the rows the filter can
+  see, and on every change takes only the difference, rather than rerunning. Each has a state budget,
+  and refuses rather than grow past it. `--maintenance recompute` trades a little more work an update
+  for about a quarter of the memory.
+- **Atomic refreshes.** The ingest loop changes the three tail tables as one engine version, so every
+  view and every page sees a tail that is whole, never one table ahead of another.
+- **Prepared statements, bound exactly.** Every page's SQL is prepared once and run with its key and
+  filter as parameters, each given as its column's own .NET type; ChalkQL checks a parameter's type
+  exactly against its column's, rather than converting a value that might then compare differently in
+  the database and in the host.
+- **A time limit per source** (`SourceOptions.QueryTimeout`), which cancels a statement that runs past
+  it. The sample also gives its reading connections PostgreSQL's own `statement_timeout`, so the
+  database stops the work too.
+
+**Not exercised here: entitlements.** ChalkQL's policy layer decides which rows and which columns a
+caller may see, applies that to every statement and every standing view as it is planned (pushed down
+into the database's SQL, not filtered afterwards), and audits who read what. A real blotter would
+scope rows to a desk or a client and hide columns such as markup from some readers. This sample
+serves every reader everything, so none of it is shown.
 
 ## The domain
 
@@ -70,139 +164,108 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
 
 ## What you see
 
-- **Two tabs.** Client orders, and fills. Each has its own sort, filters and position.
-- **A virtual grid.** QuickGrid's `Virtualize` asks for rows by position, and the host answers for any
-  position in the millions (below).
-- **Fills nested under their orders.** The chevron in the first column opens an order's fills beneath it,
-  newest first and each marked ↳, as rows of the grid's one list (`Virtualize` wants every row one height);
-  the order's own row does not move. They stay open while new fills arrive. A fill that came before
-  its order is there once the order comes.
-- **From a fill to its order.** Hovering a fill's order shows the order as both sides know it now. The
-  card also says when the order has not arrived yet, or when its latest version does not count this
-  fill yet. The link opens the order's page: every version and every fill, read from the database and
-  the live tail in one statement each.
-- **Sorting by any columns.** A click on a header sorts by that column, descending; a second click
-  turns it ascending; a third takes it out of the sort, back to the tab's own order, newest first, in
-  which only Time shows an arrow, muted, as no one chose it. A click on Time there turns it ascending,
-  as it is descending already. A shift-click does the same within a sort by several columns, adding
-  the column last, and the header shows each column's place in it. QuickGrid sorts by one column itself; its multi-column sort is a pull request
-  ([dotnet/aspnetcore#62604](https://github.com/dotnet/aspnetcore/pull/62604)) not yet merged, so the
-  page draws its own headers.
-- **A filter on every column.** The funnel in each header opens the column's filter, and it fills in
-  while the column is filtered. Active filters show as pills above the grid; × removes one, and
-  "Clear all" removes them all.
-  - Ids (order, fill): typed or pasted as pills, matched exactly.
-  - Text (client, ClOrdId, instrument): pick values, or type them as pills (Enter or a comma adds one,
-    × removes one, the cross at the end clears them), matched exactly or by what they **start with**.
-    The chooser offers the column's most frequent values over the period of interest (the tab's time
-    filter, or the last day), 50 at most, read from the database and narrowed as you type.
-  - Region, channel, side, status: tick the values.
-  - Numbers: at least, at most. Times: from, to (UTC).
-- **The cost, on request.** "How this tab is answered", under the grid, shows the page's SQL, ChalkQL's
-  plan for it, and PostgreSQL's own plan of the same page with the filter's values written in: newest
-  first, a read of a hundred rows down the index; sorted by a column no index has, the whole table.
-- **A time limit.** Every statement is stopped after 5 s, and a page that hits it says so. The status
-  bar under the grid shows the limit, beside PostgreSQL's size, and counts the statements stopped.
-- **Columns hold their widths.** Each column keeps the width it first took with rows in it, so the
-  headings do not shift as the grid scrolls; a value wider than its column is cut short with an
-  ellipsis.
-- **Time first, and frozen.** Each tab leads with its time, `Time`: when the client placed the order,
-  or when the order was filled. The first columns stay in place as the grid scrolls sideways, so every
-  row can still be told apart: the expander, Time and Order on the orders tab; Time and Fill on the
-  fills tab.
-- **Choosing columns.** "Columns" at the right of the tab bar shows or hides any column but the frozen
-  ones. Ver, Region, Channel and Filled start hidden.
-- **Shown only.** Fill % (of an order) is worked out from the row in the host: shown, not sorted or
-  filtered by, and refused if asked to be.
-- **Times with their date, cut from the left.** A time shows as `… 03:26:23`, an ellipsis where its
-  date is; on hover, it shows in full, date and microseconds, as an order's page does.
-- **Numbers as finance writes them:** no zero before the point of a fraction, none after its last digit
-  that counts (.25, not 0.2500), and a dash for nought. Prices are rounded to six significant figures,
-  and written in scientific notation (1.23457e-5) where they would take more than eight digits. Every
-  value is in the system's monospace, its zeros slashed. Columns 2em apart, each with a gutter at its left that
-  holds its heading's funnel; a heading keeps room for its sort arrow whether or not its column is
-  sorted.
-- **To an order's page.** An order's id opens its page: every version and every fill, read from the
+**The grid**
+
+- **Two tabs**, client orders and fills, each with its own sort, filters and position. QuickGrid's
+  `Virtualize` asks for rows by position, and the host answers for any position in the millions.
+- **Fills nested under their orders.** The chevron opens an order's fills beneath it, newest first,
+  each marked ↳, as rows of the grid's one list (`Virtualize` wants every row one height); the order's
+  own row does not move. They stay open while new fills arrive. A fill that came before its order is
+  there once the order comes. Hovering a fill's order shows the order as both sides know it now, and
+  says when the order has not arrived yet, or does not count this fill yet.
+- **An order's page.** An order's id opens its page: every version and every fill, read from the
   database and the live tail in one statement each. A fill's id opens its order's page, that fill
   marked. The ↗ after the id shows while the pointer is on its row.
-- **A new sort or filter dims the grid** until its first page is in.
-- **Flashes.** The cells of a row that changed flash for 2.4 s, and an order or fill the streams have
-  just sent flashes whole for 3 s. A row scrolled into view does not flash.
-- **Copy and share.** On the tab bar, ⧉ copies the rows in view, at least half of each, under the
-  headings of the columns shown: as text with a tab between values, which a sheet takes as cells, and
-  as a table. Each value is as the grid shows it, but a time has its date and an id is whole. The link
-  icon opens a menu: **Copy private link** (shrouded, below) or **Copy readable link** (everything in
-  plain text); either opens the view in a new window. The link holds everything, and
-  nothing is kept for it: the tab, the sort, the filters, the columns hidden when they are not those
-  hidden at first, and, scrolled away from the live top, the row first in full view, by its keyset
-  (its value of each column sorted by, then its key). Opened, the row's place is counted, and the grid
-  is scrolled there and held, counting what has arrived above it since; at the live top, the link
-  holds no row and follows the top. A link not understood is refused whole, saying what, and the
-  blotter opens as it always does. For example:
-  `/?tab=fills&sort=-client,qty&hide=&f.side=Buy&f.qty.min=0.1&f.instrument.starts=B&at.client=FERN&at.qty=0.5&at.fill_id=…`.
-- **Shrouded links.** A private link shows none of the view's data: the filters'
-  values and the row held at, which are data, go in one opaque `s=`, encrypted and signed with ASP.NET
-  Data Protection; the tab, the sort and the hidden columns, only how the view is laid out, stay as
-  they are (`/?sort=-client&s=CfDJ8…`). The keys are kept in a folder (`--link-keys`), so a link opens
-  after a restart; they rotate every 90 days, the old ones kept to open what they shrouded. A link may
-  give any filter or the row held at as is, shrouded, or some of each, but not one part both ways; a
-  shrouded part altered, or shrouded by another blotter's keys, is refused. The keys are kept as they
-  are, not encrypted at rest: the folder is what keeps them private.
-- **New rows push down at the top.** Scrolled away from the top, the rows in view stay where they are,
-  and an "N new above" badge counts what has arrived. Scrolling up within 200 rows of the top lets
-  them in, 30 at a time, above the rows in view, which stay where they are (the grid moves every
-  position it holds, and the scroll with it, by as many rows), so scrolling on up reveals them in turn
-  and the badge counts down. A click on the badge, or reaching the top however fast, goes back to the
-  live top, where new rows push down again.
-- **Rows cut by the grid's edges fade.** A band two thirds of a row high over the bottom edge, and over the top
-  edge under the headings once the grid is scrolled down: plain CSS over the grid, nothing run as it
-  scrolls. At the top, the newest row stays clear.
-- **Above the grid**, whether the host is serving and what it holds against the budget. **Vital
-  statistics**, under the grid, closed at first: the feed, and how many order versions the order
-  stream is holding back behind the fills; how `orders_current` is kept (and, by the lagging job, how
-  far behind it is); PostgreSQL's size, how far it is behind the streams and the statement time limit;
-  the tail and what of it is confirmed; the statements run and stopped, and the reads and lookups pages
-  made; and the confirmations, what they let go, and the gap fill. Closed, none of it is rendered, and
-  the host does not ask PostgreSQL its size.
-- **Chevrons** are drawn, one size wherever they are, set in em. Vital statistics and how the tab is
-  answered open from one row under the grid.
-- **"N new above"** sits across the top edge of the grid, over no more than the top quarter of the
-  headings, so they and the first row stay readable.
-- **Simulate burst** (shown, with the stalls, while the pointer is on the page) makes 3,000 changes at once; **Stall database 20 s** stops the database writing
-  while the streams go on; in lagging mode, **Stall orders_current 20 s** stops only the job that keeps
-  it. Do them with a small budget chosen on the page to see the host refuse.
+- **Time first, and frozen.** Each tab leads with its time: when the client placed the order, or when
+  the order was filled. The expander, Time and Order (or Time and Fill) stay in place as the grid
+  scrolls sideways. A time shows as `… 03:26:23`, an ellipsis where its date is; on hover, it shows in
+  full, date and microseconds.
+- **Columns hold their widths**, the widths they first took with rows in them, so headings do not
+  shift as the grid scrolls; a value wider than its column is cut short with an ellipsis. "Columns"
+  shows or hides any column but the frozen ones; Ver, Region, Channel and Filled start hidden. Fill %
+  is worked out from the row in the host: shown, never sorted or filtered by, and refused if asked to
+  be.
+- **Numbers as finance writes them:** no zero before the point of a fraction and none after its last
+  digit that counts (.25, not 0.2500), a dash for nought, prices to six significant figures and in
+  scientific notation past eight digits. Every value is in the system's monospace, zeros slashed.
+- **Flashes.** The cells of a row that changed flash for 2.4 s, and an order or fill just sent flashes
+  whole for 3 s. A row scrolled into view does not flash. Rows cut by the grid's edges fade.
 
-- **Alerts.** The bell on the tab bar opens the alerts: each is a tab's filters, saved, with a sound
-  (one of 22 short recordings: ka-ching, coin, chimes, cowbell, laser, ship's horn, …) and a throttle. A new one takes the tab's filters as they are;
-  each can be heard (▶), muted or removed. They are kept in the browser's local settings.
-  - **The host evaluates them, from the streams, not the page:** every order version and fill the
-    streams send is weighed against each rule as the host reads it, however far behind a grid has
-    fallen. A fill fires a rule when it passes its filter; an order, when a version of it comes to
-    pass the filter, and not again until it has left it. Fired again within its throttle, a rule
-    gathers its rows and sounds once the throttle allows, saying how many (×26).
-  - **None is missed:** a browser's alerts wait, in order, until a page of it has sounded them. Closed
-    and opened again within 10 minutes, a page says what fired meanwhile, and sounds it once a rule;
-    the host keeps a browser's alerts, and evaluates its rules, that long after its last page closes.
-  - **Sound** is a recording in `wwwroot/sounds`: mono, 8-bit, at no more than 11,025 samples a second
-    (about 280 KB for all 22). The host serves each, with the page's other static assets, at an
-    address with its version in it (`sounds/kaching.pd1r8b6lth.wav`), which a browser may keep for
-    good; a page fetches a sound the first time it plays it, decodes it once, and plays it through Web
-    Audio, so alerts at once mix. A browser lets a page make sound only once someone has clicked on
-    it: with alerts set to sound, the page opens with a splash that asks (Enable sound, or Not now).
-  - **Unseen alerts** show as a red dot, not a count, since what matters is that something fired and
-    what: on the bell, until the alerts are opened; and, in the background, on the page's icon, until
-    the page is looked at. The title stays as it is. With "Notify in the background"
-    ticked and the browser's leave, the system shows a notification, which, like the alert itself,
-    says how many rows (×26) and the latest.
-  - **Scrolled away from the live top,** the "N new above" pill shows a bell once an alert has fired
-    on the tab since, struck through while the page may not make sound. Alerts sound wherever the
-    grid is.
+**Sorting and filtering**
+
+- **Any columns.** A click sorts by a column, descending; again, ascending; again, back to the tab's
+  own order, newest first, which Time shows with a muted arrow. A shift-click does the same within a
+  sort by several columns, and the header shows each column's place in it. QuickGrid sorts by one
+  column itself; its multi-column sort is a pull request
+  ([dotnet/aspnetcore#62604](https://github.com/dotnet/aspnetcore/pull/62604)) not yet merged, so the
+  page draws its own headers.
+- **A filter on every column.** The funnel before each heading opens the column's filter. Active
+  filters show as pills above the grid.
+  - Ids (order, fill): typed or pasted, matched exactly.
+  - Text (client, ClOrdId, instrument): picked or typed, matched exactly or by what they **start
+    with**. The chooser offers the column's most frequent values over the period of interest (the
+    tab's time filter, or the last day), read from the database and narrowed as you type.
+  - Region, channel, side, status: ticked. Numbers: at least, at most. Times: from, to (UTC).
+- **The cost, on request.** "How this tab is answered" shows the page's SQL, ChalkQL's plan, and
+  PostgreSQL's own plan of the same page: newest first, a read of a hundred rows down an index; sorted
+  by a column no index has, the whole table.
+- **A time limit.** Every statement is stopped after 5 s. A page that hits it says so, and keeps the
+  rows it had, faded under the reason, rather than emptying the grid.
+
+**Live**
+
+- **New rows push down at the top.** Scrolled away, the rows in view stay where they are, and an
+  "N new above" pill counts what has arrived. Scrolling up near the top lets them in, 30 at a time,
+  above the rows in view, which stay put; reaching the top, however fast, goes back to the live top.
+- **Above the grid**, whether the host is serving and what it holds against its budget. **Vital
+  statistics**, under it and closed at first: the feed, how `orders_current` is kept, PostgreSQL's size
+  and lag, the tail, the statements run and stopped, and the confirmations. Closed, none of it is read.
+- **Simulate burst** makes 3,000 changes at once; **Stall database 20 s** stops the database writing
+  while the streams go on; in lagging mode, **Stall orders_current 20 s** stops only its job. Both show
+  while the pointer is on the page. Try them with a small budget chosen on the page to see the host
+  refuse.
+
+**Copy and share**
+
+- **Copy** (⧉) puts the rows in view on the clipboard, as tab-separated text, which a sheet takes as
+  cells, and as a table. Times keep their date and ids are whole.
+- **Share** copies a link that opens the same view in a new window: the tab, the sort, the filters,
+  the hidden columns, and, scrolled away from the live top, the first row in view by its keyset (its
+  value of each column sorted by, then its key). Opened, the row's place is counted, and the grid is
+  scrolled there and held. Nothing is kept for a link, and a link not understood is refused whole,
+  saying what. For example:
+  `/?tab=fills&sort=-client,qty&hide=&f.side=Buy&f.qty.min=0.1&f.instrument.starts=B&at.client=FERN&at.qty=0.5&at.fill_id=…`.
+- **Private or readable.** A private link shows none of the view's data: the filters' values and the
+  row held at go in one opaque `s=`, encrypted and signed with ASP.NET Data Protection; the tab, the
+  sort and the hidden columns stay readable (`/?sort=-client&s=CfDJ8…`). The keys are kept in a folder
+  (`--link-keys`, not encrypted at rest), so links open after a restart; they rotate every 90 days, and
+  old ones are kept to open what they shrouded. A link may give any part as is or shrouded, but not
+  both ways; a shrouded part altered, or from another blotter's keys, is refused.
+
+**Alerts**
+
+- **A saved filter with a sound.** The bell on the tab bar opens the alerts: each is a tab's filters,
+  saved in the browser, with one of 22 short recorded sounds and a throttle. A new one takes the tab's
+  filters as they are; each can be heard, muted or removed.
+- **Evaluated by the host, from the streams.** Every order version and fill the streams send is
+  weighed against each rule as the host reads it, however far behind a grid has fallen and whether or
+  not a page is open. A fill fires a rule when it passes the filter; an order, when a version of it
+  comes to pass the filter, and not again until it has left it. Within its throttle, a rule gathers
+  its rows and sounds once, saying how many (×26).
+- **None missed.** A browser's alerts wait until a page of it has sounded them. A page opened again
+  within 10 minutes says what fired meanwhile.
+- **Sound** is a recording in `wwwroot/sounds`, mono and 8-bit (about 280 KB for all 22), served at a
+  versioned address the browser keeps for good, fetched the first time it plays and mixed through Web
+  Audio. A browser lets a page make sound only once someone has clicked on it, so with alerts set to
+  sound the page opens with a splash that asks.
+- **Unseen alerts** show as a red dot, not a count: on the bell until the alerts are opened, and, in
+  the background, on the page's icon until the page is looked at. With "Notify in the background"
+  ticked and the browser's leave, the system shows a notification. Scrolled away from the live top,
+  the "N new above" pill shows a bell once an alert has fired on the tab.
+
+Escape closes whatever is open over the page.
 
 ## How it works
-
-The blotter is a **bolt-on**. It asks of the database what any reader could: rows found by key, sorted
-and filtered. It asks for no watermark, no snapshot, and no promise about when `orders_current`
-catches up with `order_versions`.
 
 Each tab is two halves, merged.
 
@@ -217,6 +280,7 @@ Each tab is two halves, merged.
 the database holds at the tail's version or later, and a fill it holds, is confirmed, and leaves the
 tail five seconds later. That is a second longer than a window of the database's rows is kept (below),
 so no page merges a database read from before a version landed with a tail that has already let it go.
+A version the database holds already when the stream sends it never enters the tail.
 
 **Reading a page.** A page is read from a key: the database's first rows at or after it in the tab's
 order, then every tail row between that key and the last row read. The read decides nothing past its
@@ -226,33 +290,31 @@ longer passes the filter. A tail row placed in the stretch whose database row wa
 up: if the database has moved past the tail meanwhile, the database's row stands, wherever it sorts.
 So each order appears once, at the newest version either side knows. The read is written so that
 PostgreSQL can start an index at the key: the condition is spelled column by column, with the leading
-column's bound repeated alone in front.
+column's bound repeated alone in front. Every limit is a literal, rounded up to a power of two, so
+PostgreSQL plans for the rows a page needs, and the prepared statements stay few.
 
 **Positions.** `Virtualize` asks by position, and a live database has no fixed positions. Each grid
 keeps positions it has read, each tied to the row found there (`PageView`). A page near one is read
 from that row's key, forwards, or backwards in the reversed order for rows above it. At the top,
 positions are counted from the first row on every state, so new rows push the rest down. Scrolled
-away, they hold. A jump far from every position known (dragging the scrollbar) is placed by the
-database's own `OFFSET`, which knows nothing of the tail, so positions deep in a tab are approximate,
-as the total is. Each page is still read whole from one key, so a page never repeats or skips a row.
+away, they hold. A jump far from every position known (dragging the scroll bar) is placed by the
+database's own `OFFSET`, which knows nothing of the tail, so positions deep in a tab are approximate.
+Each page is still read whole from one key, so a page never repeats or skips a row.
 
 **Windows and read-ahead.** What the database returns is kept for four seconds as a window: a run of
 its rows in one order from one key, shared by every reader of the same tab, filter and sort. A read a
-window covers is answered from it, with the tail laid over it afresh, so the tail's rows stay as
-current as the stream. A sort whose reads take longer than 25 ms (no index serves it, and the database
-sorts the whole table) is read in windows of 2,048 rows, which cost the database about what a page
-does. After each page, the window after the one it came from, in the direction of scrolling, is read
-in the background and joined onto it. The grid also renders 60 rows beyond the view either side. At
-5 million orders, scrolling a ClOrdId sort 30 rows at a time, two steps in thirty showed placeholder
-rows, briefly, and the database was read about once in ten.
+window covers is answered from it, with the tail laid over it afresh. A sort whose reads take longer
+than 25 ms (no index serves it, and the database sorts the whole table) is read in windows of 2,048
+rows, which cost the database about what a page does. After each page, the next window in the
+direction of scrolling is read in the background. The grid also renders 60 rows beyond the view
+either side. At 5 million orders, scrolling a ClOrdId sort 30 rows at a time, two steps in thirty
+showed placeholder rows, briefly, and the database was read about once in ten.
 
 **Starting, and the gap fill.** The host subscribes to the streams, and then sends the database one
 last request: every version `order_versions` holds from the last 30 s. It takes each as if the stream
 had sent it, and lets go at once of those `orders_current` already shows. A version that was in flight
-when the host subscribed, sent before the subscription and written before the gap fill, is then shown
-even though `orders_current` does not have it yet. One sent before the subscription and written after
-the gap fill shows when `orders_current` has it. Fills need no gap fill: the blotter reads them from the
-table they are written to.
+when the host subscribed is then shown even if `orders_current` does not have it yet. Fills need no
+gap fill: the blotter reads them from the table they are written to.
 
 **Live scopes.** For each tab and distinct filter on the open pages, a ChalkQL standing view over the
 tail (`LiveScope`) holds what the filter can see. For orders, that is every order that passes the
@@ -261,36 +323,30 @@ in one statement. For fills, it is every fill in the tail that passes. Pages tha
 one scope, whatever they sort by and wherever they are scrolled. A page sorts its scope in the host,
 which is cheap because a scope is a slice of the tail, never of the corpus.
 
-**Finding the budget.** Unless `--budget-mb` sets one, the host starts at 8 MB, and whatever would be
-refused for want of budget (a scope that would not fit, or a tail grown past it) raises the budget to
-the next of 16, 32 and 64 MB instead. It never lowers it. Past 64 MB, or once a budget is chosen on the
-page (4 MB is there too, to see the host refuse), a refusal is a refusal.
-
-**Counts.** No page waits for a count. The grid is sized at once by PostgreSQL's estimate (`EXPLAIN`,
-a few milliseconds), and the true range is refined off the page's path: once a reader scrolls away from
-the live top, the rows are counted, on a connection of their own for up to 60 s, and again every 30 s
-while pages use the filter (a count past 60 s is given up, and the estimate stays). At the live top the
-estimate alone sizes the scroll bar, and nothing is counted. Reads learn the rest: one that comes back
-short of what it asked for has found the last row, and the grid ends there; one that finds more at the
-end the grid had goes on a screenful further.
+**Sizes, without counting.** No page waits for a count. A grid is sized at once by PostgreSQL's
+estimate (`EXPLAIN`, a few milliseconds). Once a reader scrolls away from the live top, the rows are
+counted off the page's path, on a connection of their own, for up to 60 s, and again every 30 s while
+pages use the filter; a count past 60 s is given up, and the estimate stays. Reads learn the rest: one
+that comes back short has found the last row, and the grid ends there; one that finds more past the
+end goes on a screenful further. PostgreSQL once estimated a filter at 1,989 rows that passes 32,170;
+the count put the scroll bar right, and the end was where the reads found it.
 
 **What arrives above a held view** is counted from the streams, not the database. The host hands every
-batch it reads off the streams to the counter, whether or not the tail takes it (the tail does not take
-a version the database holds already). Each row is weighed against what it was: what the counter last
-saw of it, the tail's rows when the view was held, or, for an order it had not seen, its version as of
-then, looked up by key in `order_versions`; an order placed since, or a fill, is new. A shared link's row
-is still placed by a count, once, with PostgreSQL's estimate if that count is too slow.
-
-A page that cannot be read leaves the rows shown, faded under the reason, rather than emptying the grid.
+batch it reads off the streams to the counter, whether or not the tail takes it. Each row is weighed
+against what it was: what the counter last saw of it, the tail's rows when the view was held, or, for
+an order it had not seen, its version as of then, looked up by key in `order_versions`; an order placed
+since, or a fill, is new. A shared link's row is still placed by a count, once, with PostgreSQL's
+estimate if that count is too slow.
 
 **The budget** covers what the host holds: the tail, in ChalkQL and in the host; the scopes' views and
-their states; and the windows, counts and fills it keeps for a moment, which may hold a quarter of the
-budget at most and give way first to the tail and the scopes. Past it, the scopes no page is using
-give way first. If that is not enough, because the database is too far behind, the host stops serving
-and says why. It never drops a version to stay in budget. While it refuses, it keeps reading the
-streams and keeps the last 30 s of what they send. It serves again once `orders_current`'s newest order
-is within 5 s of the stream's, from what it kept and a new gap fill, and the pages take their scopes
-again by themselves.
+their states; and the windows and fills it keeps for a moment, which may hold a quarter of the budget
+at most and give way first. Unless `--budget-mb` sets one, the host starts at 8 MB, and whatever would
+be refused for want of budget raises it to the next of 16, 32 and 64 MB instead; it never lowers it.
+Past 64 MB, or once a budget is chosen on the page, a refusal is a refusal. If the scopes no page is
+using giving way is not enough, because the database is too far behind, the host stops serving and
+says why. It never drops a version to stay in budget. While it refuses, it keeps reading the streams,
+keeps what the database has not been seen to hold, and serves again once `orders_current`'s newest
+order is within 5 s of the stream's, from what it kept and a new gap fill.
 
 ## What correct means here
 
@@ -311,46 +367,44 @@ That is exact only while nothing moves, so `--probe` and
   order, none twice, each passing the filter.
 - **Held still**, in rounds: the market paused, a burst the stalled database cannot write, the host
   caught up with the streams. Every page must then be the oracle's, row for row: once with the tail
-  covering the database, and again once the database has written everything. A page at the top is
-  compared from the top; a page deep in a tab, from its own first row.
+  covering the database, and again once the database has written everything.
 
-The pages use random filters on one or two columns of every kind (picked values, starts-with, ranges,
-times), random sorts of one to three columns, and random positions. On 2026-10-23, at 200,000 orders,
-in both `--current` modes, every page under load held its invariants and every page held still matched
-the oracle. The tests also cover:
+The pages use random filters on one or two columns of every kind, random sorts of one to three
+columns, and random positions. On 2026-10-23, at 200,000 orders, in both `--current` modes, every page
+under load held its invariants and every page held still matched the oracle. The tests also cover
+fills that arrive before their orders, the gap fill, the time limit, the budget's refusals and serving
+again, rows held in place while rows arrive above them, the count of what arrives above a held view
+against the merged page (exact, for sorts on columns that never change and on ones that do), estimates
+and counts off the page's path, and an order's history read from both sides.
 
-- fills that arrive before their orders;
-- the gap fill, with `orders_current` five seconds behind;
-- the time limit;
-- the budget's refusals, and serving again;
-- rows held in place while rows arrive above them;
-- an order's history and fills read from both sides.
-
-`SortSpecTests`, `FilterSpecTests`, `FlashesTests` and `NestingTests` cover the host-side rules.
+`SortSpecTests`, `FilterSpecTests`, `ColumnsTests`, `ViewLinkTests`, `AlertSessionTests`, `FlashesTests`
+and `NestingTests` cover the host's own rules: sorting, filtering, number formats, links and their
+shrouding, alerts and their throttles.
 
 ## What it found in ChalkQL
 
-Registered in the design log as F273–F276; design 79 proposes what the owner asked for next.
+Registered in the design log as F273–F277; design 79 proposes what comes next.
 
 - **F273.** A pushed-down query names a table by its catalog name, not its registered remote name, so
   the sample registers its tables in ChalkQL under the PostgreSQL schema's own name, `blotter`.
 - **F274.** A DuckDB `TIMESTAMP` that discovery finds without a precision is typed `TIMESTAMP(9)`, finer
-  than DuckDB keeps, so the planner sorted on it locally. Found when the sample ran on DuckDB; the
-  sample declares its columns with `TIMESTAMP(6)`.
+  than DuckDB keeps, so the planner sorted on it locally. Found when the sample ran on DuckDB.
 - **F275.** Discovery in a schema the database lacks fails with a SQLite pragma error.
 - **F276.** An incremental scope holds about 440 bytes a tail row where a recomputing one holds about
   100 (`--maintenance recompute` to compare).
+- **F277.** A standing view keeps the memory of its largest update after its rows go.
 - **Design 79** (proposed, not built): what a statement examines per source, refusing at prepare when
   no access path keeps the rows read under a ceiling the host sets, and a time limit for a whole
   statement and for a view's update. Until then the sample asks PostgreSQL for its estimate, and
-  cancels statements after 5 s itself.
+  stops statements after 5 s itself.
 
 ## Not here, yet
 
+- Entitlements (above).
 - Free-text search.
 - A refusal by cost (design 79).
 - Tapline. On Blazor Server the grid renders on the server, and ChalkQL's views already give each
   reader what changed. Tapline would carry the same answers to a WebAssembly grid, headless clients or
   many nodes. `LiveScope`, `ScopeState` and `Pages` are the seam.
 - Memory figures are the host's own estimates of what it holds, and the views' own count of their
-  state. The status bar shows the process's managed heap beside them for comparison.
+  state. The vital statistics show the process's managed heap beside them for comparison.
