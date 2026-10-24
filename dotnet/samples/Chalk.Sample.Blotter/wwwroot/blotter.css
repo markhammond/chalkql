@@ -191,7 +191,8 @@ h2 { font-size: 14px; margin: 8px 0 0; }
 }
 .tab.selected { border-color: var(--line); background: var(--panel); color: var(--ink); font-weight: 600; margin-bottom: -1px; }
 
-.toolbar { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; min-height: 28px; }
+/* The filters' pills: about half the space above and below them that the page keeps between its parts. */
+.toolbar { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: -4px 0; }
 .pill {
     display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border-radius: 999px;
     background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
@@ -201,7 +202,7 @@ h2 { font-size: 14px; margin: 8px 0 0; }
 .pill button:hover { color: var(--bad); }
 .filter-pill { cursor: pointer; }
 /* The copy and share buttons, and what they say for a moment once clicked. */
-.icon-button { position: relative; border: none; background: transparent; color: var(--muted); padding: 2px 5px; display: inline-flex; align-items: center; cursor: pointer; }
+.icon-button { position: relative; align-self: center; border: none; background: transparent; color: var(--muted); padding: 2px 5px; display: inline-flex; align-items: center; cursor: pointer; }
 .icon-button:hover { color: var(--accent); }
 .icon-button svg { fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .icon-button[data-said]::after {

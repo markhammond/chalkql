@@ -14,10 +14,10 @@
     <span class="spacer"></span>
     @* Both copy in the browser itself, in the click: a clipboard takes nothing written later. *@
     <button type="button" class="icon-button" title="Copy the rows in view, to paste into a sheet or a message" aria-label="Copy the rows in view" onclick="blotter.copyRows(this)">
-        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="5.5" y="5.5" width="8.5" height="8.5" rx="1.5" /><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5" /></svg>
+        <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><rect x="5.5" y="5.5" width="8.5" height="8.5" rx="1.5" /><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5" /></svg>
     </button>
     <button type="button" class="icon-button" title="Copy a link to this view: its sort, filters and columns, and the row at the top unless it follows the live top" aria-label="Copy a link to this view" onclick="blotter.shareView(this)">
-        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M6.5 9.5l3-3" /><path d="M7.2 4.3l1.1-1.1a2.9 2.9 0 0 1 4.1 4.1l-1.1 1.1" /><path d="M8.8 11.7l-1.1 1.1a2.9 2.9 0 0 1-4.1-4.1l1.1-1.1" /></svg>
+        <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M6.5 9.5l3-3" /><path d="M7.2 4.3l1.1-1.1a2.9 2.9 0 0 1 4.1 4.1l-1.1 1.1" /><path d="M8.8 11.7l-1.1 1.1a2.9 2.9 0 0 1-4.1-4.1l1.1-1.1" /></svg>
     </button>
     <span class="chooser-wrap">
         <button type="button" class="link-button" aria-expanded="@_choosing" @onclick="() => _choosing = !_choosing">Columns <Chevron Down="true" Open="_choosing" /></button>
