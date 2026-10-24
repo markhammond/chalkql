@@ -88,10 +88,10 @@ public sealed class FlashesTests
     }
 
     private static Order Make(long id, int version, DateTime at) => new(
-        SortSpecTests.Id(id), version, at, at, $"CEDAR-{id}", "CEDAR", "Americas", "FIX", "BTC/USD Perp", "Buy", 1, 0, 0, 6, "New");
+        SortSpecTests.Id(id), version, at, at, $"CEDAR-{id}", "CEDAR", "Americas", "FIX", "BTC/USD Perp", "Buy", 1, 0, 0, 0, 6, "New");
 
     private static Fill Fill(long id, DateTime at) => new(
-        SortSpecTests.Id(id), SortSpecTests.Id(9), at, "CEDAR-9", "CEDAR", "Americas", "FIX", "BTC/USD Perp", "Buy", 0.05, 65_000, 64_990, 6);
+        SortSpecTests.Id(id), SortSpecTests.Id(9), at, "CEDAR-9", "CEDAR", "Americas", "FIX", "BTC/USD Perp", "Buy", 0.05, 65_000, 3_250, 64_990, 6);
 
     private static int IndexOf(string column) => Tabs.Orders.Columns.ToList().IndexOf(Tabs.Orders.Named(column));
 }

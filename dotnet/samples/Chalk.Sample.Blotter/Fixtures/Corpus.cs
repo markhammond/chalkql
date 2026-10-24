@@ -38,11 +38,11 @@ public static class Corpus
 
         var first = new Order(
             id, 1, time, time, clOrdId, reference, region, channel, Reference.Instruments[asset], side,
-            lots * lot, 0, 0, markup, Reference.Statuses[0]);
+            lots * lot, 0, 0, 0, markup, Reference.Statuses[0]);
         var versions = new List<Order>(5) { first };
         var made = new List<Fill>(3);
         var fillable = lots * (cancelled ? 0.6 : 1);
-        double filled = 0, cost = 0;
+        double filled = 0, cost = 0, amount = 0;
         for (var k = 1; k <= fills; k++)
         {
             var share = Math.Floor(fillable * k / fills) - Math.Floor(fillable * (k - 1) / fills);
@@ -55,17 +55,20 @@ public static class Corpus
             var qty = share * lot;
             var mid = Math.Round(px * (1 + (Uniform(u, 10 + (ulong)k) - 0.5) * 0.002), 6);
             var fillPrice = Math.Round(mid * (1 + (side == "Buy" ? 1 : -1) * markup / 10_000), 4);
+            var amt = Math.Round(qty * fillPrice, 2);
             filled += qty;
             cost += qty * fillPrice;
+            amount = Math.Round(amount + amt, 2);
             made.Add(new Fill(
                 UuidV7(at, (u << 2) + (ulong)k), id, at, clOrdId, reference, region, channel, first.Instrument, side,
-                qty, fillPrice, mid, markup));
+                qty, fillPrice, amt, mid, markup));
             versions.Add(versions[^1] with
             {
                 Version = versions.Count + 1,
                 EventTime = at,
                 FilledQty = filled,
                 AvgPrice = Math.Round(cost / filled, 4),
+                FilledAmt = amount,
                 Status = filled >= first.Qty - 1e-9 ? Reference.Statuses[2] : Reference.Statuses[1],
             });
         }

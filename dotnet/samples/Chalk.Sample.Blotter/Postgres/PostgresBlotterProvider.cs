@@ -122,6 +122,7 @@ public sealed class PostgresBlotterProvider : IBlotterProvider
         Column("qty", ChalkType.Float64()),
         Column("filled_qty", ChalkType.Float64()),
         Column("avg_price", ChalkType.Float64()),
+        Column("filled_amt", ChalkType.Float64()),
         Column("markup_bps", ChalkType.Float64()),
         Column("status", ChalkType.String()),
     ];
@@ -139,6 +140,7 @@ public sealed class PostgresBlotterProvider : IBlotterProvider
         Column("side", ChalkType.String()),
         Column("qty", ChalkType.Float64()),
         Column("price", ChalkType.Float64()),
+        Column("amt", ChalkType.Float64()),
         Column("mid", ChalkType.Float64()),
         Column("markup_bps", ChalkType.Float64()),
     ];

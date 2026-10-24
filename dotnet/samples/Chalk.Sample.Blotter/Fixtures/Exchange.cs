@@ -437,7 +437,7 @@ public sealed class Exchange : IAsyncDisposable
             var order = new Order(
                 Guid.CreateVersion7(new DateTimeOffset(time, TimeSpan.Zero)), 1, time, time, $"{reference}-{_orders++}", reference,
                 region, channel, Reference.Instruments[asset],
-                Reference.Sides[_random.Next(2)], (1 + _random.Next(6)) * Reference.Assets[asset].Lot, 0, 0,
+                Reference.Sides[_random.Next(2)], (1 + _random.Next(6)) * Reference.Assets[asset].Lot, 0, 0, 0,
                 Reference.MarkupBps(channel), Reference.Statuses[0]);
             orders.Add(order);
             if (_random.NextDouble() < _options.FilledAtOnce)
@@ -477,17 +477,19 @@ public sealed class Exchange : IAsyncDisposable
             var mid = Math.Round(_mids[asset], 6);
             var price = Math.Round(mid * (1 + (before.Side == "Buy" ? 1 : -1) * before.MarkupBps / 10_000), 4);
             var filled = before.FilledQty + qty;
+            var amt = Math.Round(qty * price, 2);
             after = before with
             {
                 Version = before.Version + 1,
                 EventTime = time,
                 FilledQty = filled,
                 AvgPrice = Math.Round((before.AvgPrice * before.FilledQty + price * qty) / filled, 4),
+                FilledAmt = Math.Round(before.FilledAmt + amt, 2),
                 Status = filled >= before.Qty - 1e-9 ? Reference.Statuses[2] : Reference.Statuses[1],
             };
             fills.Add(new Fill(
                 Guid.CreateVersion7(new DateTimeOffset(time, TimeSpan.Zero)), after.OrderId, time, after.ClOrdId, after.Client, after.Region, after.Channel,
-                after.Instrument, after.Side, qty, price, mid, after.MarkupBps));
+                after.Instrument, after.Side, qty, price, amt, mid, after.MarkupBps));
         }
 
         orders.Add(after);

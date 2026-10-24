@@ -25,6 +25,7 @@ public sealed class PostgresTradeRepository(string connectionString) : ITradeRep
         qty         double precision NOT NULL,
         filled_qty  double precision NOT NULL,
         avg_price   double precision NOT NULL,
+        filled_amt  double precision NOT NULL,
         markup_bps  double precision NOT NULL,
         status      text COLLATE "C" NOT NULL
         """;
@@ -33,7 +34,7 @@ public sealed class PostgresTradeRepository(string connectionString) : ITradeRep
     private const string Upsert = """
         ON CONFLICT (order_id) DO UPDATE SET
             version = EXCLUDED.version, event_time = EXCLUDED.event_time, filled_qty = EXCLUDED.filled_qty,
-            avg_price = EXCLUDED.avg_price, status = EXCLUDED.status
+            avg_price = EXCLUDED.avg_price, filled_amt = EXCLUDED.filled_amt, status = EXCLUDED.status
         WHERE orders_current.version < EXCLUDED.version
         """;
 
@@ -61,6 +62,7 @@ public sealed class PostgresTradeRepository(string connectionString) : ITradeRep
             side        text COLLATE "C" NOT NULL,
             qty         double precision NOT NULL,
             price       double precision NOT NULL,
+            amt         double precision NOT NULL,
             mid         double precision NOT NULL,
             markup_bps  double precision NOT NULL
         );
@@ -219,6 +221,7 @@ public sealed class PostgresTradeRepository(string connectionString) : ITradeRep
         import.Write(o.Qty, NpgsqlDbType.Double);
         import.Write(o.FilledQty, NpgsqlDbType.Double);
         import.Write(o.AvgPrice, NpgsqlDbType.Double);
+        import.Write(o.FilledAmt, NpgsqlDbType.Double);
         import.Write(o.MarkupBps, NpgsqlDbType.Double);
         import.Write(o.Status, NpgsqlDbType.Text);
     }
@@ -237,6 +240,7 @@ public sealed class PostgresTradeRepository(string connectionString) : ITradeRep
         import.Write(f.Side, NpgsqlDbType.Text);
         import.Write(f.Qty, NpgsqlDbType.Double);
         import.Write(f.Price, NpgsqlDbType.Double);
+        import.Write(f.Amt, NpgsqlDbType.Double);
         import.Write(f.Mid, NpgsqlDbType.Double);
         import.Write(f.MarkupBps, NpgsqlDbType.Double);
     }

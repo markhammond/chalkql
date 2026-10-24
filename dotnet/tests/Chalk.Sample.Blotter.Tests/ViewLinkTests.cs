@@ -36,7 +36,7 @@ public sealed class ViewLinkTests
             new ColumnFilter { Column = Orders.Named("order_time"), From = Cells.Micros(new DateTime(2026, 10, 24, 1, 2, 3).AddTicks(45670)) },
         ]);
         var at = new Order(
-            Guid.CreateVersion7(), 3, default, default, "CEDAR-1", "CEDAR", "", "", "", "", 0.15, 0, 0, 0, "");
+            Guid.CreateVersion7(), 3, default, default, "CEDAR-1", "CEDAR", "", "", "", "", 0.15, 0, 0, 0, 0, "");
         var link = new ViewLink(Orders, sort, filter, new HashSet<string> { "region" }, at);
 
         var back = ViewLink.Parse("?" + link.Query(), Tabs.All);
@@ -54,7 +54,7 @@ public sealed class ViewLinkTests
     {
         var fills = Tabs.Fills;
         var at = new Fill(Guid.CreateVersion7(), Guid.CreateVersion7(), Cells.Micros(new DateTime(2026, 10, 24, 3, 4, 5).AddTicks(123450)),
-            "", "", "", "", "", "", 0, 0, 0, 0);
+            "", "", "", "", "", "", 0, 0, 0, 0, 0);
         var link = new ViewLink(fills, fills.DefaultSort, FilterSpec.None, new HashSet<string>(), at);
 
         var back = ViewLink.Parse(link.Query(), Tabs.All);
@@ -122,7 +122,7 @@ public sealed class ViewLinkTests
     {
         var sort = SortSpec.Of(Orders, new SortColumn(Orders.Named("client"), Descending: true));
         var filter = FilterSpec.Of([new ColumnFilter { Column = Orders.Named("client"), Values = ["CEDAR"] }]);
-        var at = new Order(Guid.CreateVersion7(), 1, default, default, "", "CEDAR", "", "", "", "", 0, 0, 0, 0, "");
+        var at = new Order(Guid.CreateVersion7(), 1, default, default, "", "CEDAR", "", "", "", "", 0, 0, 0, 0, 0, "");
         return (new ViewLink(Orders, sort, filter, new HashSet<string> { "region" }, at), at);
     }
 

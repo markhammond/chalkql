@@ -171,8 +171,8 @@ public sealed class AlertSessionTests
     private static string View(AlertRule rule) => AlertViewSpec.Of(rule).Name;
 
     private static Order Order(Guid id, int version, string status) =>
-        new(id, version, Now, Now, "CEDAR-1", "CEDAR", "EMEA", "API", "BTC/USD Perp", "Buy", 2, 0, 0, 0, status);
+        new(id, version, Now, Now, "CEDAR-1", "CEDAR", "EMEA", "API", "BTC/USD Perp", "Buy", 2, 0, 0, 0, 0, status);
 
     private static Fill Fill(string client) =>
-        new(Guid.CreateVersion7(), Guid.CreateVersion7(), Now, client + "-1", client, "EMEA", "API", "BTC/USD Perp", "Buy", 1, 100, 100, 0);
+        new(Guid.CreateVersion7(), Guid.CreateVersion7(), Now, client + "-1", client, "EMEA", "API", "BTC/USD Perp", "Buy", 1, 100, 100, 100, 0);
 }

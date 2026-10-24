@@ -130,9 +130,10 @@ client and hide columns such as markup from some readers; this sample serves eve
 Twelve clients trade the house's linear perpetuals (`BTC/USD Perp` and seven others) in US dollars, each
 in its region and through various channels, at the mark plus its channel's markup. A **client order** is
 versioned: a fill or cancel is a new version, numbered one higher, carrying its filled quantity,
-weighted average fill price and status. A **fill** never changes, and carries its order's details
-(client, region, channel, instrument, side), so it can be filtered without its order. Orders and fills
-have UUIDs, and the host relies on no order among them: ids only break ties, so sorts are deterministic.
+weighted average fill price, filled amount and status. A **fill** never changes, and carries its amount
+(quantity times price, taken as the notional in US dollars) and its order's details (client, region,
+channel, instrument, side), so it can be filtered without its order. Orders and fills have UUIDs, and
+the host relies on no order among them: ids only break ties, so sorts are deterministic.
 
 Order versions and fills arrive on **two streams**, each mostly in time order, neither waiting for the
 other. The order stream runs up to 600 ms behind the fills, and a quarter of new orders fill at once,
@@ -146,6 +147,9 @@ those in the database before hearing of them. The ingestion jobs already write r
 with its own lag, so the database may hold an order's third version before its second; versions only
 rise within an order, and the trigger and the lagging job keep the higher. The vital statistics count
 rows sent late and after the database.
+
+> **Disclaimer:**
+> Illustrative only, shortcuts were taken.
 
 ## The database
 

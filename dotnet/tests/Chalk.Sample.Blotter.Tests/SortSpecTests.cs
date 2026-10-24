@@ -160,5 +160,5 @@ public sealed class SortSpecTests
 
     internal static Order Make(long id, string instrument, double price) => new(
         Id(id), 1, new DateTime(2026, 10, 23, 9, 0, 0), new DateTime(2026, 10, 23, 9, 0, 0), $"CEDAR-{id}", "CEDAR",
-        "Americas", "FIX", instrument, "Buy", 1, 0, price, 6, "New");
+        "Americas", "FIX", instrument, "Buy", 1, 0, price, 0, 6, "New");
 }

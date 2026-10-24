@@ -58,6 +58,6 @@ public sealed class NestingTests
 
     private static Opened Open(long position, int fills) => new(
         position,
-        new Order(SortSpecTests.Id(position), 2, default, default, "", "", "", "", "", "Buy", 1, 1, 1, 6, "Filled"),
-        [.. Enumerable.Range(0, fills).Select(i => new Fill(SortSpecTests.Id(100 + i), SortSpecTests.Id(position), default, "", "", "", "", "", "Buy", 1, 1, 1, 6))]);
+        new Order(SortSpecTests.Id(position), 2, default, default, "", "", "", "", "", "Buy", 1, 1, 1, 1, 6, "Filled"),
+        [.. Enumerable.Range(0, fills).Select(i => new Fill(SortSpecTests.Id(100 + i), SortSpecTests.Id(position), default, "", "", "", "", "", "Buy", 1, 1, 1, 1, 6))]);
 }

@@ -665,6 +665,7 @@
         "version" or "filled_qty" => "",
         "order_time" or "event_time" => full ? Tabs.Fills.Named("event_time").Detail(fill) : Tabs.Fills.Named("event_time").Show(fill),
         "avg_price" => Tabs.Fills.Named("price").Show(fill),
+        "filled_amt" => Tabs.Fills.Named("amt").Show(fill),
         "status" => "fill",
         var name when Tabs.Fills.Columns.Any(c => c.Name == name) => Tabs.Fills.Named(name).Show(fill),
         _ => "",

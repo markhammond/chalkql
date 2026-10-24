@@ -43,7 +43,7 @@ public sealed class TailTests
     public void A_fill_waits_from_its_own_time_and_the_wait_goes_with_it()
     {
         var tail = new Tail();
-        var fill = new Fill(Guid.CreateVersion7(), Guid.CreateVersion7(), Now, "CEDAR-1", "CEDAR", "EMEA", "API", "BTC/USD Perp", "Buy", 1, 100, 100, 0);
+        var fill = new Fill(Guid.CreateVersion7(), Guid.CreateVersion7(), Now, "CEDAR-1", "CEDAR", "EMEA", "API", "BTC/USD Perp", "Buy", 1, 100, 100, 100, 0);
         tail.AddFill(fill);
         tail.ConfirmFill(fill.FillId, Now.AddSeconds(2));
         tail.ConfirmFill(fill.FillId, Now.AddSeconds(9));
@@ -57,5 +57,5 @@ public sealed class TailTests
     private static readonly Guid Id = Guid.CreateVersion7();
 
     private static Order Order(int version, DateTime at) =>
-        new(Id, version, at, Now, "CEDAR-1", "CEDAR", "EMEA", "API", "BTC/USD Perp", "Buy", 2, 0, 0, 0, "New");
+        new(Id, version, at, Now, "CEDAR-1", "CEDAR", "EMEA", "API", "BTC/USD Perp", "Buy", 2, 0, 0, 0, 0, "New");
 }

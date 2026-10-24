@@ -28,6 +28,7 @@ public sealed record TailRow
     public required double Qty { get; init; }
     public required double FilledQty { get; init; }
     public required double AvgPrice { get; init; }
+    public required double FilledAmt { get; init; }
     public required double MarkupBps { get; init; }
     public required string Status { get; init; }
 
@@ -44,11 +45,12 @@ public sealed record TailRow
     public required double BaseQty { get; init; }
     public required double BaseFilledQty { get; init; }
     public required double BaseAvgPrice { get; init; }
+    public required double BaseFilledAmt { get; init; }
     public required double BaseMarkupBps { get; init; }
     public required string BaseStatus { get; init; }
 
     /// <summary>A rough size in memory, for the budget, counted twice: once here, once in ChalkQL's copy.</summary>
-    public const int Bytes = 2 * 200;
+    public const int Bytes = 2 * 216;
 
     public static TailRow Of(Order live, Order? database)
     {
@@ -58,11 +60,11 @@ public sealed record TailRow
             OrderId = live.OrderId, Version = live.Version, EventTime = live.EventTime, OrderTime = live.OrderTime,
             ClOrdId = live.ClOrdId, Client = live.Client, Region = live.Region, Channel = live.Channel,
             Instrument = live.Instrument, Side = live.Side, Qty = live.Qty, FilledQty = live.FilledQty,
-            AvgPrice = live.AvgPrice, MarkupBps = live.MarkupBps, Status = live.Status,
+            AvgPrice = live.AvgPrice, FilledAmt = live.FilledAmt, MarkupBps = live.MarkupBps, Status = live.Status,
             BaseOrderId = b.OrderId, BaseVersion = database?.Version ?? 0, BaseEventTime = b.EventTime,
             BaseOrderTime = b.OrderTime, BaseClOrdId = b.ClOrdId, BaseClient = b.Client, BaseRegion = b.Region,
             BaseChannel = b.Channel, BaseInstrument = b.Instrument, BaseSide = b.Side, BaseQty = b.Qty,
-            BaseFilledQty = b.FilledQty, BaseAvgPrice = b.AvgPrice, BaseMarkupBps = b.MarkupBps, BaseStatus = b.Status,
+            BaseFilledQty = b.FilledQty, BaseAvgPrice = b.AvgPrice, BaseFilledAmt = b.FilledAmt, BaseMarkupBps = b.MarkupBps, BaseStatus = b.Status,
         };
     }
 }

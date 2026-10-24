@@ -9,7 +9,8 @@ namespace Chalk.Sample.Blotter.Domain;
 /// One version of a client's order with the house, as the feed sends it and the database stores it:
 /// on a perpetual, in US dollars, through one of the client's channels, at the mark plus the
 /// channel's markup. The house works it in fills; each fill, and a cancel, is a new version of the
-/// order, numbered one higher. Versions are ordered per order only.
+/// order, numbered one higher. Versions are ordered per order only. <see cref="FilledAmt"/> is the
+/// sum of its fills' amounts: the notional filled, in US dollars, as the house stamps it.
 /// </summary>
 public sealed record Order(
     Guid OrderId,
@@ -25,16 +26,17 @@ public sealed record Order(
     double Qty,
     double FilledQty,
     double AvgPrice,
+    double FilledAmt,
     double MarkupBps,
     string Status) : IRow
 {
     /// <summary>The columns, in the order every statement selects them.</summary>
     public const string Select =
         "order_id, version, event_time, order_time, cl_ord_id, client, region, channel, instrument, side, qty, "
-        + "filled_qty, avg_price, markup_bps, status";
+        + "filled_qty, avg_price, filled_amt, markup_bps, status";
 
     /// <summary>A rough size in memory, for the budget: the object and its fields; the text is interned.</summary>
-    public const int Bytes = 136;
+    public const int Bytes = 144;
 
     public Guid Id => OrderId;
 
@@ -53,7 +55,8 @@ public sealed record Order(
         Cells.Double(batch.Column(11), row),
         Cells.Double(batch.Column(12), row),
         Cells.Double(batch.Column(13), row),
-        Cells.Text(batch.Column(14), row));
+        Cells.Double(batch.Column(14), row),
+        Cells.Text(batch.Column(15), row));
 
     public static Order Read(DbDataReader reader) => new(
         reader.GetGuid(0),
@@ -70,10 +73,11 @@ public sealed record Order(
         reader.GetDouble(11),
         reader.GetDouble(12),
         reader.GetDouble(13),
-        string.Intern(reader.GetString(14)));
+        reader.GetDouble(14),
+        string.Intern(reader.GetString(15)));
 
     public object?[] Values() =>
-        [OrderId, Version, EventTime, OrderTime, ClOrdId, Client, Region, Channel, Instrument, Side, Qty, FilledQty, AvgPrice, MarkupBps, Status];
+        [OrderId, Version, EventTime, OrderTime, ClOrdId, Client, Region, Channel, Instrument, Side, Qty, FilledQty, AvgPrice, FilledAmt, MarkupBps, Status];
 
     public override string ToString() => string.Create(
         CultureInfo.InvariantCulture,
@@ -81,8 +85,9 @@ public sealed record Order(
 }
 
 /// <summary>
-/// One fill of a client order: the order's quantity the house filled at once, at a price. Fills are
-/// append-only: a fill never changes, and the order it fills gets a new version beside it.
+/// One fill of a client order: the order's quantity the house filled at once, at a price, and the
+/// amount, <c>qty × price</c>, the notional in US dollars. Fills are append-only: a fill never
+/// changes, and the order it fills gets a new version beside it.
 /// </summary>
 public sealed record Fill(
     Guid FillId,
@@ -96,13 +101,14 @@ public sealed record Fill(
     string Side,
     double Qty,
     double Price,
+    double Amt,
     double Mid,
     double MarkupBps) : IRow
 {
     public const string Select =
-        "fill_id, order_id, event_time, cl_ord_id, client, region, channel, instrument, side, qty, price, mid, markup_bps";
+        "fill_id, order_id, event_time, cl_ord_id, client, region, channel, instrument, side, qty, price, amt, mid, markup_bps";
 
-    public const int Bytes = 120;
+    public const int Bytes = 128;
 
     public Guid Id => FillId;
 
@@ -121,7 +127,8 @@ public sealed record Fill(
         Cells.Double(batch.Column(9), row),
         Cells.Double(batch.Column(10), row),
         Cells.Double(batch.Column(11), row),
-        Cells.Double(batch.Column(12), row));
+        Cells.Double(batch.Column(12), row),
+        Cells.Double(batch.Column(13), row));
 
     public static Fill Read(DbDataReader reader) => new(
         reader.GetGuid(0),
@@ -136,10 +143,11 @@ public sealed record Fill(
         reader.GetDouble(9),
         reader.GetDouble(10),
         reader.GetDouble(11),
-        reader.GetDouble(12));
+        reader.GetDouble(12),
+        reader.GetDouble(13));
 
     public object?[] Values() =>
-        [FillId, OrderId, EventTime, ClOrdId, Client, Region, Channel, Instrument, Side, Qty, Price, Mid, MarkupBps];
+        [FillId, OrderId, EventTime, ClOrdId, Client, Region, Channel, Instrument, Side, Qty, Price, Amt, Mid, MarkupBps];
 
     public override string ToString() => string.Create(
         CultureInfo.InvariantCulture, $"fill #{FillId} of #{OrderId} {Side} {Qty} {Instrument} @ {Price}");
