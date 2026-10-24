@@ -112,8 +112,8 @@ thead th {
 }
 /* Columns are 1.5em apart: three-quarters of an em either side of each value. */
 .sort {
-    all: unset; display: flex; gap: 4px; align-items: center; width: 100%;
-    padding: 7px 2px 7px 0.75em; cursor: pointer; box-sizing: border-box; user-select: none;
+    all: unset; display: flex; gap: 2px; align-items: center; width: 100%;
+    padding: 7px 1px 7px 0.75em; cursor: pointer; box-sizing: border-box; user-select: none;
 }
 .sort .arrow.unsorted { visibility: hidden; }
 .sort .arrow { color: var(--accent); font-size: 11px; }
@@ -124,8 +124,9 @@ tbody tr { height: 30px; }
 tbody tr:nth-child(even) { background: var(--row-alt); }
 td { padding: 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
 td .cell { display: block; padding: 0 0.75em; line-height: 29px; overflow: hidden; text-overflow: ellipsis; }
-/* Numbers in the system's monospace, as ids are, so their digits line up down a column. */
-td.num .cell { text-align: right; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+/* Every column in the page's one font; its digits are all one width (the table's tabular-nums), so
+   numbers still line up down a column. */
+td.num .cell { text-align: right; }
 td a { color: var(--accent); text-decoration: none; }
 
 .side-Buy { color: var(--good); }
@@ -194,9 +195,9 @@ h2 { font-size: 14px; margin: 8px 0 0; }
    hidden, it still keeps its place, so nothing moves when it shows. */
 .head { display: flex; align-items: center; justify-content: flex-start; cursor: pointer; }
 .head.num { justify-content: flex-end; }
-.head .sort { flex: 0 1 auto; width: auto; min-width: 0; padding-right: 2px; }
+.head .sort { flex: 0 1 auto; width: auto; min-width: 0; padding-right: 1px; }
 .funnel {
-    border: none; background: transparent; padding: 4px 0.75em 4px 0; cursor: pointer; display: flex; align-items: center;
+    border: none; background: transparent; padding: 4px 0.5em 4px 0; cursor: pointer; display: flex; align-items: center;
     visibility: hidden;
 }
 .head:hover .funnel, .funnel:focus-visible, .funnel.on, .funnel.open { visibility: visible; }
@@ -246,7 +247,6 @@ table[data-pinned] .frozen-last { box-shadow: inset -1px 0 0 var(--line); }
 /* Room before the chevron's box; after it, the next cell's own padding. */
 td.expander, th.expander { width: 0.85em; text-align: center; padding: 0 0 0 0.75em; }
 tr.child td { background: color-mix(in srgb, var(--accent) 5%, var(--panel)); color: var(--muted); font-size: 12px; }
-td .cell.id, .id { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }
 .cell.link a { text-decoration: underline dotted; }
 
 .hover-card {

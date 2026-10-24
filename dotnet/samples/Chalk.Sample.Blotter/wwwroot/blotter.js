@@ -45,7 +45,7 @@ window.blotter = {
         // A heading keeps room for its sort arrow whether or not the column is sorted; a little more
         // for the rank a sort by several columns adds.
         const heads = [...table.querySelectorAll("thead th")];
-        const widths = heads.map(th => th.getBoundingClientRect().width + (th.classList.contains("expander") ? 0 : 4));
+        const widths = heads.map(th => th.getBoundingClientRect().width + (th.classList.contains("expander") ? 0 : 2));
         heads.forEach((th, i) => { th.style.width = `${widths[i]}px`; });
         table.style.minWidth = `${widths.reduce((sum, width) => sum + width, 0)}px`;
         table.style.tableLayout = "fixed";
