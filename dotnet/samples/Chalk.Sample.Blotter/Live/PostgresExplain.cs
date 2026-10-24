@@ -1,12 +1,9 @@
 using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Globalization;
 using System.Text.Json;
-using Npgsql;
 
 namespace Chalk.Sample.Blotter.Live;
-
-/// <summary>PostgreSQL's estimate of a page: the rows it expects to read and to sort, and its plan.</summary>
-public sealed record PostgresEstimate(double RowsRead, double RowsSorted, string PlanText);
 
 /// <summary>
 /// Asks PostgreSQL what a page would cost, with <c>EXPLAIN</c> on the page's own SQL, its filter's values
@@ -23,27 +20,29 @@ public sealed record PostgresEstimate(double RowsRead, double RowsSorted, string
 /// is the limit times the table over the rows that pass.
 /// </para>
 /// <para>
-/// It is an estimate for showing, and statements past the time limit are still stopped.
+/// It is an estimate for showing, and statements past the time limit are still stopped: it reads
+/// through plain ADO.NET, on <paramref name="reading"/>, whose connections carry the page's time limit,
+/// and counts on <paramref name="counting"/>, whose connections carry the limit it is asked for. Only
+/// the SQL is PostgreSQL's.
 /// </para>
 /// </remarks>
-public sealed class PostgresExplain(string connectionString)
+public sealed class PostgresExplain(DbDataSource reading, Func<TimeSpan, DbDataSource> counting) : IRowEstimates
 {
     private readonly ConcurrentDictionary<string, double> _tuples = new(StringComparer.Ordinal);
 
-    public async Task<PostgresEstimate> EstimateAsync(Tab tab, FilterSpec filter, SortSpec order, int limit, CancellationToken ct)
+    public async Task<ReadEstimate> EstimateAsync(Tab tab, FilterSpec filter, SortSpec order, int limit, CancellationToken ct)
     {
         var sql = string.Create(CultureInfo.InvariantCulture,
             $"SELECT {tab.Select} FROM {tab.Table} WHERE {filter.Literal()} ORDER BY {order.OrderBy()} LIMIT {limit}");
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(ct).ConfigureAwait(false);
+        await using var connection = await reading.OpenConnectionAsync(ct).ConfigureAwait(false);
         string json;
-        await using (var command = new NpgsqlCommand("EXPLAIN (FORMAT JSON) " + sql, connection))
+        await using (var command = Command(connection, "EXPLAIN (FORMAT JSON) " + sql))
         {
             json = (string)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
         }
 
         var text = new List<string>();
-        await using (var command = new NpgsqlCommand("EXPLAIN " + sql, connection))
+        await using (var command = Command(connection, "EXPLAIN " + sql))
         await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -75,46 +74,68 @@ public sealed class PostgresExplain(string connectionString)
             }
         }
 
-        return new PostgresEstimate(
+        return new ReadEstimate(
             read, sorted is { } s ? s.GetProperty("Plan Rows").GetDouble() : 0, string.Join('\n', text));
     }
 
     /// <summary>
-    /// The rows PostgreSQL expects <c>WHERE <paramref name="where"/></c> to select from
-    /// <paramref name="table"/>: its estimate, from its statistics, in a few milliseconds, where a
-    /// count may read the table.
+    /// The rows PostgreSQL expects the filter to select: its estimate, from its statistics, in a few
+    /// milliseconds, where a count may read the table.
     /// </summary>
-    public async Task<long> RowsAsync(string table, string where, CancellationToken ct)
+    public Task<long> RowsAsync(Tab tab, FilterSpec filter, CancellationToken ct) =>
+        PlanRowsAsync(tab.Table, filter.Literal(), ct);
+
+    public Task<long> RowsBeforeAsync(FilterSpec filter, SortSpec order, IRow key, CancellationToken ct)
     {
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(ct).ConfigureAwait(false);
-        await using var command = new NpgsqlCommand($"EXPLAIN (FORMAT JSON) SELECT 1 FROM {table} WHERE {where}", connection);
+        var values = new Dictionary<string, object?>();
+        var before = SourceQueries.Before(order, key, values);
+
+        // The key's values written in, the longest names first, so that @k1 is not taken for the start of @k10.
+        foreach (var (name, value) in values.OrderByDescending(v => v.Key.Length).ThenByDescending(v => v.Key, StringComparer.Ordinal))
+        {
+            before = before.Replace("@" + name, Literal(value), StringComparison.Ordinal);
+        }
+
+        return PlanRowsAsync(order.Tab.Table, $"{filter.Literal()} AND ({before})", ct);
+    }
+
+    /// <summary>
+    /// The rows the filter selects, counted, on a connection whose statements may run up to
+    /// <paramref name="limit"/>: a count off any page's path, longer than a page may take.
+    /// </summary>
+    public async Task<long> CountAsync(Tab tab, FilterSpec filter, TimeSpan limit, CancellationToken ct)
+    {
+        await using var connection = await counting(limit).OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var command = Command(connection, $"SELECT COUNT(*) FROM {tab.Table} WHERE {filter.Literal()}");
+        return (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+    }
+
+    private async Task<long> PlanRowsAsync(string table, string where, CancellationToken ct)
+    {
+        await using var connection = await reading.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var command = Command(connection, $"EXPLAIN (FORMAT JSON) SELECT 1 FROM {table} WHERE {where}");
         var json = (string)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
         using var plan = JsonDocument.Parse(json);
         return (long)plan.RootElement[0].GetProperty("Plan").GetProperty("Plan Rows").GetDouble();
     }
 
-    /// <summary>
-    /// The rows <c>WHERE <paramref name="where"/></c> selects from <paramref name="table"/>, counted, on
-    /// a connection of its own whose statements may run up to <paramref name="limit"/>: a count off any
-    /// page's path, longer than a page may take.
-    /// </summary>
-    public async Task<long> CountAsync(string table, string where, TimeSpan limit, CancellationToken ct)
+    private static DbCommand Command(DbConnection connection, string sql)
     {
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(ct).ConfigureAwait(false);
-        var milliseconds = (int)limit.TotalMilliseconds;
-        await using (var set = new NpgsqlCommand($"SET statement_timeout = {milliseconds}", connection))
-        {
-            await set.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
-
-        await using var command = new NpgsqlCommand($"SELECT COUNT(*) FROM {table} WHERE {where}", connection)
-        {
-            CommandTimeout = (int)limit.TotalSeconds + 5,
-        };
-        return (long)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+        var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return command;
     }
+
+    /// <summary>A value written into SQL as PostgreSQL takes it.</summary>
+    private static string Literal(object? value) => value switch
+    {
+        DateTime time => string.Create(CultureInfo.InvariantCulture, $"TIMESTAMP '{time:yyyy-MM-dd HH:mm:ss.ffffff}'"),
+        Guid id => $"'{id}'::uuid",
+        string text => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'",
+        double number => number.ToString("R", CultureInfo.InvariantCulture),
+        IFormattable other => other.ToString(null, CultureInfo.InvariantCulture),
+        _ => throw new ArgumentException($"no SQL literal for {value?.GetType().Name ?? "null"}", nameof(value)),
+    };
 
     private static bool IsSort(JsonElement node) =>
         node.GetProperty("Node Type").GetString() is "Sort" or "Incremental Sort";
@@ -161,7 +182,7 @@ public sealed class PostgresExplain(string connectionString)
     }
 
     /// <summary>What a scan reads run to completion: the table for a sequential scan or an index scanned whole; else what its condition selects.</summary>
-    private async Task<double> ScanReadsAsync(NpgsqlConnection connection, JsonElement scan, CancellationToken ct)
+    private async Task<double> ScanReadsAsync(DbConnection connection, JsonElement scan, CancellationToken ct)
     {
         var bounded = scan.TryGetProperty("Index Cond", out _) || scan.TryGetProperty("Recheck Cond", out _);
         return bounded
@@ -169,7 +190,7 @@ public sealed class PostgresExplain(string connectionString)
             : await TuplesAsync(connection, scan, ct).ConfigureAwait(false);
     }
 
-    private async Task<double> TuplesAsync(NpgsqlConnection connection, JsonElement scan, CancellationToken ct)
+    private async Task<double> TuplesAsync(DbConnection connection, JsonElement scan, CancellationToken ct)
     {
         var schema = scan.TryGetProperty("Schema", out var s) ? s.GetString() : "blotter";
         var name = $"{schema}.{scan.GetProperty("Relation Name").GetString()}";
@@ -178,8 +199,10 @@ public sealed class PostgresExplain(string connectionString)
             return known;
         }
 
-        await using var command = new NpgsqlCommand("SELECT reltuples FROM pg_class WHERE oid = @name::regclass", connection);
-        command.Parameters.AddWithValue("name", name);
+        await using var command = Command(connection, "SELECT reltuples FROM pg_class WHERE oid = @name::regclass");
+        var parameter = command.CreateParameter();
+        (parameter.ParameterName, parameter.Value) = ("name", name);
+        command.Parameters.Add(parameter);
         var tuples = Convert.ToDouble(await command.ExecuteScalarAsync(ct).ConfigureAwait(false), CultureInfo.InvariantCulture);
         _tuples[name] = tuples;
         return tuples;

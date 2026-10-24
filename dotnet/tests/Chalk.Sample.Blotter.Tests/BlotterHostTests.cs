@@ -513,6 +513,61 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         }
     }
 
+    [Fact]
+    public async Task A_provider_given_in_the_options_is_the_one_the_host_reads_through_and_disposes_of()
+    {
+        Counted? counted = null;
+        await using (var host = await StartAsync(new BlotterOptions
+        {
+            Orders = 20_000,
+            Exchange = Quiet(),
+            Provider = async ct => counted = new Counted(await PostgresBlotterProvider.StartAsync(
+                Environment.GetEnvironmentVariable("CHALK_TEST_POSTGRES"), null, ct)),
+        }))
+        {
+            Assert.Same(counted, host.Provider);
+            Assert.Equal(1, counted!.Opened);
+
+            // Pages, estimates and the database's size all come through it.
+            var scope = await host.AcquireAsync(Tabs.Orders, FilterSpec.None, CancellationToken.None);
+            var page = await host.Pages.View(Tabs.Orders.DefaultSort).GetAsync(scope.State, 0, 20, CancellationToken.None);
+            Assert.Equal(20, page.Rows.Length);
+            Assert.Equal("Counted", (await host.Queries.EstimateAsync(FilterSpec.None, Tabs.Orders.DefaultSort, CancellationToken.None)).EstimatedBy);
+            Assert.True(counted.SizeBytes() > 0);
+            await host.ReleaseAsync(scope);
+        }
+
+        Assert.True(counted.Disposed);
+    }
+
+    /// <summary>A provider that hands everything to PostgreSQL's, counting what the host asks of it.</summary>
+    private sealed class Counted(IBlotterProvider inner) : IBlotterProvider
+    {
+        public int Opened { get; private set; }
+
+        public bool Disposed { get; private set; }
+
+        public string Name => "Counted";
+
+        public ITradeStore Store => inner.Store;
+
+        public DatabaseReads Open(TableRows rows, TimeSpan timeLimit)
+        {
+            Opened++;
+            return inner.Open(rows, timeLimit);
+        }
+
+        public bool StoppedAtTimeLimit(Exception failure) => inner.StoppedAtTimeLimit(failure);
+
+        public long? SizeBytes() => inner.SizeBytes();
+
+        public async ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            await inner.DisposeAsync();
+        }
+    }
+
     /// <summary>A scope, once the host serves again: a page asks again after a refusal, as this does.</summary>
     private static async Task<LiveScope> AcquireWhenServingAsync(BlotterHost host, Tab tab)
     {

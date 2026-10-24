@@ -36,7 +36,11 @@ public static class Oracle
         Seeder seeded, Exchange market, ScopeState state, SortSpec order, IRow? from, int count)
     {
         var tab = state.Tab;
-        using var connection = seeded.Store.Open();
+
+        // The truth is worked out in the database itself, in its own SQL: PostgreSQL's, here.
+        var store = seeded.Store as PostgresTradeStore
+            ?? throw new NotSupportedException($"the oracle works out pages in PostgreSQL, not in {seeded.Store.GetType().Name}");
+        using var connection = store.Open();
         using var transaction = connection.BeginTransaction();
         Execute(connection, tab.Overrides
             ? "CREATE TEMP TABLE sent (LIKE blotter.order_versions) ON COMMIT DROP"
@@ -47,14 +51,14 @@ public static class Oracle
             {
                 foreach (var order1 in market.Orders.Read(state.Mark.OrdersRead))
                 {
-                    TradeStore.WriteOrder(import, order1);
+                    PostgresTradeStore.WriteOrder(import, order1);
                 }
             }
             else
             {
                 foreach (var fill in market.Fills.Read(state.Mark.FillsRead))
                 {
-                    TradeStore.WriteFill(import, fill);
+                    PostgresTradeStore.WriteFill(import, fill);
                 }
             }
 

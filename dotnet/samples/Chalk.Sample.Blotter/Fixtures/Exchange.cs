@@ -92,7 +92,7 @@ public sealed class Exchange : IAsyncDisposable
     private readonly Queue<(Order Order, DateTime Release)> _held = new();
     private readonly PriorityQueue<Order, DateTime> _lateOrders = new();
     private readonly PriorityQueue<Fill, DateTime> _lateFills = new();
-    private readonly TradeStore _store;
+    private readonly ITradeStore _store;
     private readonly Action<IReadOnlyList<Order>> _writeOrders;
     private volatile bool _disordered;
     private long _sentLate;
@@ -108,7 +108,7 @@ public sealed class Exchange : IAsyncDisposable
     private volatile bool _paused;
 
     public Exchange(
-        TradeStore store, ExchangeOptions options, long orders, DateTime lastEventTime, List<Order> open, CurrentSync sync)
+        ITradeStore store, ExchangeOptions options, long orders, DateTime lastEventTime, List<Order> open, CurrentSync sync)
     {
         _options = options;
         _store = store;

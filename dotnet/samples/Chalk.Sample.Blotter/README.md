@@ -117,8 +117,8 @@ otherwise write by hand:
   filter as parameters, each as its column's own .NET type; ChalkQL checks the type exactly rather than
   converting a value that might then compare differently in the database and the host.
 - **A time limit per source** (`SourceOptions.QueryTimeout`) cancels a statement that overruns. The
-  sample also sets PostgreSQL's `statement_timeout` on its reading connections, so the database stops
-  too.
+  sample's reading connections come from an ADO.NET `DbDataSource` that sets PostgreSQL's
+  `statement_timeout` on each, so the database stops too.
 
 **Not exercised here: entitlements.** ChalkQL's policy layer decides which rows and columns a caller may
 see, applies that to every statement and standing view as it is planned (pushed into the database's
@@ -294,13 +294,21 @@ Press Escape to close whatever is open over the page.
 | Folder | |
 |---|---|
 | `Grid` | what any live grid over a versioned table needs: rows (`IRow`, `KeyRow`), columns and formats, tabs, sorts, filters, view links and their shrouding, alert rules and conditions |
-| `Domain` | the trades: client orders and fills (`Trades`), their two tabs, reference data, and `TradeStore`, the trade model in PostgreSQL |
+| `Domain` | the trades: client orders and fills (`Trades`), their two tabs, reference data, and `ITradeStore`, the tables as the house writes them, with `PostgresTradeStore` |
 | `Fixtures` | stand-ins for a real house: the generated corpus and `Seeder`, the simulated `Exchange` and its streams (`Feed`), the lagging ingestion jobs, and the sample's own PostgreSQL server |
-| `Live` | the bolt-on: tail, merge, live scopes, pages and positions, counts, alert views and their tables, and the host that runs them |
+| `Live` | the bolt-on: tail, merge, live scopes, pages and positions, counts, alert views and their tables, the host that runs them, and `IBlotterProvider`, the database it reads, with `PostgresBlotterProvider` |
 | `Components` | the Blazor pages, the grid and the condition editor |
 
 `Grid` knows nothing of trades, nor `Domain` of live display; `Live` and the grid component still speak
 of orders and fills.
+
+**Another database.** Implement `IBlotterProvider` and pass it as `BlotterOptions.Provider`. It gives
+the host a ChalkQL source over the three tables, every statement stopped at the time limit; optionally
+the database's own estimates and counts (`IRowEstimates`; without them, the host counts through
+ChalkQL on the page's path); whether a failure was the database's own time limit; and its size. The
+tables must be append-only, as above, and compare text byte by byte. To run the simulated house on it
+too, implement `ITradeStore`: the tables, a bulk load, and the two ways of keeping `orders_current`.
+The PostgreSQL pair is the example; the test oracle works in PostgreSQL alone.
 
 ## How it works
 

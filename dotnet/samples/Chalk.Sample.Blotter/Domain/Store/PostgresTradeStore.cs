@@ -1,36 +1,14 @@
-using System.Globalization;
 using Npgsql;
 using NpgsqlTypes;
 
 namespace Chalk.Sample.Blotter.Domain;
 
-/// <summary>How <c>orders_current</c> keeps up with <c>order_versions</c>.</summary>
-public enum CurrentSync
-{
-    /// <summary>A trigger on <c>order_versions</c> upserts the order's row in the statement that writes the version.</summary>
-    Trigger,
-
-    /// <summary>A job of its own applies the versions some time after they are written, and stalls now and then.</summary>
-    Lagging,
-}
-
 /// <summary>
-/// The system of record, in PostgreSQL: every version of every client order (<c>order_versions</c>),
-/// every fill (<c>fills</c>), and <c>orders_current</c>, one row per order at its latest version, which
-/// the blotter reads live. The blotter is a bolt-on: it asks of these tables what any reader could —
-/// rows found by key, sorted and filtered — and nothing about when <c>orders_current</c> catches up.
+/// The system of record in PostgreSQL, as the simulated house writes it (see <see cref="ITradeStore"/>):
+/// <c>UNLOGGED</c> tables, text collated <c>"C"</c>, loaded with binary <c>COPY</c>, and
+/// <c>orders_current</c> kept by a trigger or by a job's upserts.
 /// </summary>
-/// <remarks>
-/// <para>
-/// The tables are <c>UNLOGGED</c>. A corpus is best loaded into them before any index or trigger
-/// exists (<see cref="CreateTables"/>, then <see cref="CreateIndexesAsync"/> and <see cref="KeepCurrent"/>).
-/// </para>
-/// <para>
-/// Text columns are collated <c>"C"</c>, byte by byte, whatever the database's own collation: the
-/// host merges the database's rows with its own and must order text exactly as the database does.
-/// </para>
-/// </remarks>
-public sealed class TradeStore(string connectionString)
+public sealed class PostgresTradeStore(string connectionString) : ITradeStore
 {
     private const string OrderColumns = """
         order_id    uuid             NOT NULL,
@@ -67,7 +45,6 @@ public sealed class TradeStore(string connectionString)
         return connection;
     }
 
-    /// <summary>Creates the three tables, empty, with no index or trigger yet: the fastest to load.</summary>
     public void CreateTables() => Execute($"""
         CREATE UNLOGGED TABLE order_versions ({OrderColumns});
         CREATE UNLOGGED TABLE orders_current ({OrderColumns});
@@ -108,7 +85,6 @@ public sealed class TradeStore(string connectionString)
         Execute("ANALYZE order_versions; ANALYZE orders_current; ANALYZE fills");
     }
 
-    /// <summary>From now on keeps <c>orders_current</c> as <paramref name="sync"/> says: by a trigger, or left to a job.</summary>
     public void KeepCurrent(CurrentSync sync)
     {
         if (sync == CurrentSync.Trigger)
@@ -126,7 +102,11 @@ public sealed class TradeStore(string connectionString)
         }
     }
 
-    /// <summary>The orders still open, latest version each, for the exchange to work.</summary>
+    /// <summary>
+    /// A bulk load on three connections, one per table, so that the three <c>COPY</c>s stream side by side.
+    /// </summary>
+    public ITradeLoad BeginLoad() => new Load(this);
+
     public List<Order> OpenOrders()
     {
         using var connection = Open();
@@ -142,14 +122,12 @@ public sealed class TradeStore(string connectionString)
         return open;
     }
 
-    /// <summary>Writes order versions as an ingestion job would; under the trigger, <c>orders_current</c> moves with them.</summary>
     public void WriteOrders(IReadOnlyList<Order> versions) =>
         Copy("order_versions", versions, WriteOrder);
 
     public void WriteFills(IReadOnlyList<Fill> fills) =>
         Copy("fills", fills, WriteFill);
 
-    /// <summary>What the lagging job does with a batch: each order's row moves to the newest version in it, never back.</summary>
     public void UpsertCurrent(IReadOnlyList<Order> versions)
     {
         if (versions.Count == 0)
@@ -181,14 +159,6 @@ public sealed class TradeStore(string connectionString)
         }
 
         transaction.Commit();
-    }
-
-    /// <summary>The database's size on disk, as PostgreSQL reports it.</summary>
-    public long SizeBytes()
-    {
-        using var connection = Open();
-        using var command = new NpgsqlCommand("SELECT pg_database_size(current_database())", connection);
-        return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
     public void Execute(string sql)
@@ -251,5 +221,45 @@ public sealed class TradeStore(string connectionString)
         import.Write(f.Price, NpgsqlDbType.Double);
         import.Write(f.Mid, NpgsqlDbType.Double);
         import.Write(f.MarkupBps, NpgsqlDbType.Double);
+    }
+
+    private sealed class Load : ITradeLoad
+    {
+        private readonly NpgsqlConnection[] _connections;
+        private readonly NpgsqlBinaryImporter _versions;
+        private readonly NpgsqlBinaryImporter _current;
+        private readonly NpgsqlBinaryImporter _fills;
+
+        public Load(PostgresTradeStore store)
+        {
+            _connections = [store.Open(), store.Open(), store.Open()];
+            _versions = _connections[0].BeginBinaryImport("COPY order_versions FROM STDIN (FORMAT BINARY)");
+            _current = _connections[1].BeginBinaryImport("COPY orders_current FROM STDIN (FORMAT BINARY)");
+            _fills = _connections[2].BeginBinaryImport("COPY fills FROM STDIN (FORMAT BINARY)");
+        }
+
+        public void AddVersion(Order version) => WriteOrder(_versions, version);
+
+        public void AddCurrent(Order order) => WriteOrder(_current, order);
+
+        public void AddFill(Fill fill) => WriteFill(_fills, fill);
+
+        public void Complete()
+        {
+            _versions.Complete();
+            _current.Complete();
+            _fills.Complete();
+        }
+
+        public void Dispose()
+        {
+            _versions.Dispose();
+            _current.Dispose();
+            _fills.Dispose();
+            foreach (var connection in _connections)
+            {
+                connection.Dispose();
+            }
+        }
     }
 }

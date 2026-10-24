@@ -19,6 +19,12 @@ public sealed record BlotterOptions
     /// <summary>The <c>bin</c> directory of a PostgreSQL installation to start a server from; found if not given.</summary>
     public string? PostgresBinaries { get; init; }
 
+    /// <summary>
+    /// Opens a different database to read, in place of PostgreSQL (<see cref="Postgres"/> and
+    /// <see cref="PostgresBinaries"/> are then unused); the host disposes of it when it stops.
+    /// </summary>
+    public Func<CancellationToken, Task<IBlotterProvider>>? Provider { get; init; }
+
     /// <summary>How <c>orders_current</c> keeps up with <c>order_versions</c>.</summary>
     public CurrentSync Current { get; init; } = CurrentSync.Trigger;
 

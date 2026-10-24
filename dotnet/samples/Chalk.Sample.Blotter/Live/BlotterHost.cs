@@ -11,7 +11,6 @@ using Chalk.Sources;
 using Chalk.Sources.Ado;
 using Chalk.Sources.Poco;
 using Microsoft.Extensions.Logging;
-using Npgsql;
 
 namespace Chalk.Sample.Blotter.Live;
 
@@ -68,8 +67,7 @@ public sealed class BlotterHost : IAsyncDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly List<Order> _keptOrders = [];
     private readonly List<Fill> _keptFills = [];
-    private PgServer? _server;
-    private TradeStore? _store;
+    private IBlotterProvider? _provider;
     private Exchange? _exchange;
     private PlannerProcess? _planner;
     private ChalkEngine? _engine;
@@ -119,7 +117,10 @@ public sealed class BlotterHost : IAsyncDisposable
     public Exchange Exchange => _exchange ?? throw new InvalidOperationException("the host has not started");
 
     /// <summary>The database, for the checks that read it directly.</summary>
-    public TradeStore Store => _store ?? throw new InvalidOperationException("the host has not started");
+    public ITradeStore Store => _provider?.Store ?? throw new InvalidOperationException("the host has not started");
+
+    /// <summary>The database the host reads.</summary>
+    public IBlotterProvider Provider => _provider ?? throw new InvalidOperationException("the host has not started");
 
     /// <summary>How the database was seeded: what the corpus holds, and the latest event in it.</summary>
     public Seeder Seeded { get; private set; } = null!;
@@ -197,23 +198,25 @@ public sealed class BlotterHost : IAsyncDisposable
         var started = Stopwatch.GetTimestamp();
         Seeder? seeding = null;
         await using (Spinner.Start(() => seeding is null
-            ? "Starting PostgreSQL"
+            ? "Starting the database"
             : seeding.Written < _options.Orders
                 ? string.Create(CultureInfo.InvariantCulture,
-                    $"Seeding PostgreSQL: {seeding.Stage}, {seeding.Written:N0} of {_options.Orders:N0} ({100.0 * seeding.Written / Math.Max(1, _options.Orders):F0}%)")
-                : $"Seeding PostgreSQL: {seeding.Stage}"))
+                    $"Seeding {_provider!.Name}: {seeding.Stage}, {seeding.Written:N0} of {_options.Orders:N0} ({100.0 * seeding.Written / Math.Max(1, _options.Orders):F0}%)")
+                : $"Seeding {_provider!.Name}: {seeding.Stage}"))
         {
-            _server = await PgServer.StartAsync(_options.Postgres, _options.PostgresBinaries, ct).ConfigureAwait(false);
-            seeding = new Seeder(new TradeStore(_server.ConnectionString));
+            _provider = _options.Provider is { } open
+                ? await open(ct).ConfigureAwait(false)
+                : await PostgresBlotterProvider.StartAsync(_options.Postgres, _options.PostgresBinaries, ct).ConfigureAwait(false);
+            seeding = new Seeder(_provider.Store);
             await seeding.GenerateAsync(
                 _options.Orders, Cells.Micros(DateTime.UtcNow), TimeSpan.FromDays(5), openTail: 2000, _options.Current, ct).ConfigureAwait(false);
         }
 
         var store = seeding.Store;
-        (_store, Seeded) = (store, seeding);
+        Seeded = seeding;
         _log.LogInformation(
-            "loaded {Orders:N0} orders, {Versions:N0} versions and {Fills:N0} fills into PostgreSQL in {Load:F1} s, indexed in {Index:F1} s",
-            seeding.Orders, seeding.Versions, seeding.Fills, seeding.LoadTime.TotalSeconds, seeding.IndexTime.TotalSeconds);
+            "loaded {Orders:N0} orders, {Versions:N0} versions and {Fills:N0} fills into {Database} in {Load:F1} s, indexed in {Index:F1} s",
+            seeding.Orders, seeding.Versions, seeding.Fills, _provider.Name, seeding.LoadTime.TotalSeconds, seeding.IndexTime.TotalSeconds);
 
         // The market starts before the blotter: events are in flight, sent and not yet written, when
         // the blotter subscribes, as they would be at any real start.
@@ -222,34 +225,7 @@ public sealed class BlotterHost : IAsyncDisposable
 
         _planner = await PlannerProcess.StartAsync(new PlannerProcessOptions { JavaHome = JavaHome() }).ConfigureAwait(false);
 
-        // The tables' text is collated "C", so the database sorts and compares strings byte by byte,
-        // as the host does; told so, ChalkQL pushes sorts and ranges on text down.
-        var profile = DialectProfiles.PostgreSql.With(stringCollation: StringCollation.Binary);
-        var connectionString = Reading(_server.ConnectionString, _options.QueryTimeLimit);
-        var database = new AdoSourceBuilder("db", () => new NpgsqlConnection(connectionString), "blotter")
-            .Dialect(profile)
-            .Capabilities(AdoCapabilities.For(profile))
-
-            // No statement may run longer than the host's time limit, in the database or in ChalkQL.
-            .Options(new SourceOptions { QueryTimeout = _options.QueryTimeLimit })
-
-            // Declared rather than discovered, with the indexes and the sizes the planner prices by.
-            // ChalkQL's schema is the database's, because a pushed query names a table by its
-            // catalog name (F273).
-            .AddTable("orders_current", OrderColumns, configure: t => t
-                .UniqueKey("order_id")
-                .Index("orders_current_newest", false, "order_time", "order_id")
-                .RowCount(seeding.Orders))
-            .AddTable("order_versions", OrderColumns, configure: t => t
-                .UniqueKey("order_id", "version")
-                .Index("order_versions_recent", false, "event_time")
-                .RowCount(seeding.Versions))
-            .AddTable("fills", FillColumns, configure: t => t
-                .UniqueKey("fill_id")
-                .Index("fills_by_order", false, "order_id")
-                .Index("fills_newest", false, "event_time", "fill_id")
-                .RowCount(seeding.Fills))
-            .Build();
+        var reads = _provider.Open(new TableRows(seeding.Orders, seeding.Versions, seeding.Fills), _options.QueryTimeLimit);
         var live = new PocoSourceBuilder("live", schemaName: "live")
             .NamingPolicy(PocoNamingPolicy.SnakeCase)
             .AddTable("tail", (IReadOnlyList<TailRow>)[], out PocoTable<TailRow> tail, t => t.Keyed(r => r.OrderId))
@@ -271,13 +247,13 @@ public sealed class BlotterHost : IAsyncDisposable
         _engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
         {
             ContextId = "blotter",
-            Sources = [database, live],
+            Sources = [reads.Source, live],
             Planner = _planner.CreatePlanner(),
 
             // Alert views of the wait read the time as @now: the clock every refresh moves.
             Clock = "now",
         }, ct).ConfigureAwait(false);
-        Queries = new SourceQueries(_engine, _options.QueryTimeLimit, new PostgresExplain(connectionString));
+        Queries = new SourceQueries(_engine, _options.QueryTimeLimit, reads.Estimates, _provider.StoppedAtTimeLimit, _provider.Name);
         Pages = new Pages(Queries)
         {
             MaxKeptRows = PageRows(),
@@ -447,9 +423,9 @@ public sealed class BlotterHost : IAsyncDisposable
             await _planner.DisposeAsync().ConfigureAwait(false);
         }
 
-        if (_server is not null)
+        if (_provider is not null)
         {
-            await _server.DisposeAsync().ConfigureAwait(false);
+            await _provider.DisposeAsync().ConfigureAwait(false);
         }
 
         _stop.Dispose();
@@ -1046,17 +1022,7 @@ public sealed class BlotterHost : IAsyncDisposable
         };
     }
 
-    private long SafeDatabaseBytes()
-    {
-        try
-        {
-            return _store?.SizeBytes() ?? 0;
-        }
-        catch (NpgsqlException)
-        {
-            return Status.DatabaseBytes;
-        }
-    }
+    private long SafeDatabaseBytes() => _provider?.SizeBytes() ?? Status.DatabaseBytes;
 
     /// <summary>While no budget is chosen, raises it to the next step, if there is one.</summary>
     private bool RaiseBudget(string why)
@@ -1096,62 +1062,6 @@ public sealed class BlotterHost : IAsyncDisposable
         var bytes = _scopes.Values.Sum(s => s.ViewBytes + s.State.Bytes);
         var perRow = rows > 256 ? bytes / rows : 512;
         return Math.Max(256 << 10, _tail.Count * perRow);
-    }
-
-    /// <summary>An order version's columns as the database holds them: times to the microsecond.</summary>
-    private static readonly ColumnDescriptor[] OrderColumns =
-    [
-        Column("order_id", ChalkType.Uuid()),
-        Column("version", ChalkType.Int32()),
-        Column("event_time", ChalkType.Timestamp(6)),
-        Column("order_time", ChalkType.Timestamp(6)),
-        Column("cl_ord_id", ChalkType.String()),
-        Column("client", ChalkType.String()),
-        Column("region", ChalkType.String()),
-        Column("channel", ChalkType.String()),
-        Column("instrument", ChalkType.String()),
-        Column("side", ChalkType.String()),
-        Column("qty", ChalkType.Float64()),
-        Column("filled_qty", ChalkType.Float64()),
-        Column("avg_price", ChalkType.Float64()),
-        Column("markup_bps", ChalkType.Float64()),
-        Column("status", ChalkType.String()),
-    ];
-
-    private static readonly ColumnDescriptor[] FillColumns =
-    [
-        Column("fill_id", ChalkType.Uuid()),
-        Column("order_id", ChalkType.Uuid()),
-        Column("event_time", ChalkType.Timestamp(6)),
-        Column("cl_ord_id", ChalkType.String()),
-        Column("client", ChalkType.String()),
-        Column("region", ChalkType.String()),
-        Column("channel", ChalkType.String()),
-        Column("instrument", ChalkType.String()),
-        Column("side", ChalkType.String()),
-        Column("qty", ChalkType.Float64()),
-        Column("price", ChalkType.Float64()),
-        Column("mid", ChalkType.Float64()),
-        Column("markup_bps", ChalkType.Float64()),
-    ];
-
-    private static ColumnDescriptor Column(string name, ChalkType type) => new() { Name = name, Type = type };
-
-    /// <summary>
-    /// The connection string the blotter reads with: every statement on it is stopped by PostgreSQL
-    /// itself at the time limit (<c>statement_timeout</c>), so a read past it frees the server's
-    /// workers too, and Npgsql gives up connecting or waiting at the same limit. The seed, the
-    /// market's writers and the oracle connect without it: building an index takes longer.
-    /// </summary>
-    private static string Reading(string connectionString, TimeSpan limit)
-    {
-        var seconds = (int)Math.Ceiling(limit.TotalSeconds);
-        return new NpgsqlConnectionStringBuilder(connectionString)
-        {
-            Timeout = seconds,
-            CommandTimeout = seconds,
-            Options = string.Create(CultureInfo.InvariantCulture, $"-c statement_timeout={(long)limit.TotalMilliseconds}"),
-        }.ConnectionString;
     }
 
     internal static string Megabytes(long bytes) => string.Create(CultureInfo.InvariantCulture, $"{bytes / 1048576.0:F1} MB");

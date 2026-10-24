@@ -29,7 +29,9 @@ public sealed record PageEstimate(
 /// prepared once per shape and bound per call; the sort, the filter and the limit are pushed down into
 /// the database's own SQL. Every one runs under the host's time limit, so no statement can run away.
 /// </summary>
-public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit, PostgresExplain? explain = null)
+public sealed partial class SourceQueries(
+    ChalkEngine engine, TimeSpan timeLimit, IRowEstimates? explain = null, Func<Exception, bool>? stoppedByDatabase = null,
+    string database = "the database")
 {
     /// <summary>The list sizes a lookup is padded to, so that a few plans serve every batch.</summary>
     private static readonly int[] LookupSizes = [16, 64, 256, 1024];
@@ -112,49 +114,22 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
             .ConfigureAwait(false);
 
     /// <summary>
-    /// How many rows of the database pass the filter, counted off any page's path: by PostgreSQL directly,
-    /// for up to <paramref name="limit"/>, where a page's count has the time limit; through ChalkQL where
-    /// there is no PostgreSQL to ask.
+    /// How many rows of the database pass the filter, counted off any page's path: by the database
+    /// directly, for up to <paramref name="limit"/>, where a page's count has the time limit; through
+    /// ChalkQL where the database gives no counts of its own.
     /// </summary>
     public async Task<long> CountLaterAsync(Tab tab, FilterSpec filter, TimeSpan limit, CancellationToken ct) =>
         explain is null
             ? await CountAsync(tab, filter, ct).ConfigureAwait(false)
-            : await explain.CountAsync(tab.Table, filter.Literal(), limit, ct).ConfigureAwait(false);
+            : await explain.CountAsync(tab, filter, limit, ct).ConfigureAwait(false);
 
-    /// <summary>About how many rows of the database pass the filter, by PostgreSQL's estimate; none without one.</summary>
+    /// <summary>About how many rows of the database pass the filter, by the database's estimate; none without one.</summary>
     public async Task<long?> EstimateRowsAsync(Tab tab, FilterSpec filter, CancellationToken ct) =>
-        explain is null ? null : await explain.RowsAsync(tab.Table, filter.Literal(), ct).ConfigureAwait(false);
+        explain is null ? null : await explain.RowsAsync(tab, filter, ct).ConfigureAwait(false);
 
-    /// <summary>About how many rows of the database pass the filter and sort before <paramref name="key"/>, by PostgreSQL's estimate.</summary>
-    public async Task<long?> EstimateBeforeAsync(FilterSpec filter, SortSpec order, IRow key, CancellationToken ct)
-    {
-        if (explain is null)
-        {
-            return null;
-        }
-
-        var values = new Dictionary<string, object?>();
-        var before = Before(order, key, values);
-
-        // The key's values written in, the longest names first, so that @k1 is not taken for the start of @k10.
-        foreach (var (name, value) in values.OrderByDescending(v => v.Key.Length).ThenByDescending(v => v.Key, StringComparer.Ordinal))
-        {
-            before = before.Replace("@" + name, Literal(value), StringComparison.Ordinal);
-        }
-
-        return await explain.RowsAsync(order.Tab.Table, $"{filter.Literal()} AND ({before})", ct).ConfigureAwait(false);
-    }
-
-    /// <summary>A value written into SQL as PostgreSQL takes it.</summary>
-    private static string Literal(object? value) => value switch
-    {
-        DateTime time => string.Create(CultureInfo.InvariantCulture, $"TIMESTAMP '{time:yyyy-MM-dd HH:mm:ss.ffffff}'"),
-        Guid id => $"'{id}'::uuid",
-        string text => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'",
-        double number => number.ToString("R", CultureInfo.InvariantCulture),
-        IFormattable other => other.ToString(null, CultureInfo.InvariantCulture),
-        _ => throw new ArgumentException($"no SQL literal for {value?.GetType().Name ?? "null"}", nameof(value)),
-    };
+    /// <summary>About how many rows of the database pass the filter and sort before <paramref name="key"/>, by the database's estimate.</summary>
+    public async Task<long?> EstimateBeforeAsync(FilterSpec filter, SortSpec order, IRow key, CancellationToken ct) =>
+        explain is null ? null : await explain.RowsBeforeAsync(filter, order, key, ct).ConfigureAwait(false);
 
     /// <summary>How many rows of the database pass the filter and sort before <paramref name="key"/>.</summary>
     public async Task<long> CountBeforeAsync(FilterSpec filter, SortSpec order, IRow key, CancellationToken ct)
@@ -328,8 +303,8 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
 
     /// <summary>
     /// What the tab's first page under <paramref name="filter"/> and <paramref name="order"/> is expected
-    /// to cost: where ChalkQL runs the sort and the filter, from its plan; and the rows read, from
-    /// PostgreSQL's own <c>EXPLAIN</c> when the database is PostgreSQL, or else from ChalkQL's plan.
+    /// to cost: where ChalkQL runs the sort and the filter, from its plan; and the rows read, from the
+    /// database's own estimate when it gives one, or else from ChalkQL's plan.
     /// </summary>
     public async Task<PageEstimate> EstimateAsync(FilterSpec filter, SortSpec order, CancellationToken ct, int limit = FirstPage)
     {
@@ -343,13 +318,13 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
             return estimate;
         }
 
-        var postgres = await explain.EstimateAsync(order.Tab, filter, order, Rounded(limit), ct).ConfigureAwait(false);
+        var own = await explain.EstimateAsync(order.Tab, filter, order, Rounded(limit), ct).ConfigureAwait(false);
         return estimate with
         {
-            RowsRead = postgres.RowsRead,
-            RowsSorted = postgres.RowsSorted,
-            EstimatedBy = "PostgreSQL",
-            PlanText = text + "\n-- PostgreSQL's plan of the same page, its filter's values written in\n" + postgres.PlanText,
+            RowsRead = own.RowsRead,
+            RowsSorted = own.RowsSorted,
+            EstimatedBy = database,
+            PlanText = text + $"\n-- {database}'s plan of the same page, its filter's values written in\n" + own.PlanText,
         };
     }
 
@@ -526,27 +501,13 @@ public sealed partial class SourceQueries(ChalkEngine engine, TimeSpan timeLimit
             // The caller moved on, and the statement was stopped for it, however that reads.
             throw new OperationCanceledException(ct);
         }
-        catch (Exception late) when (late is SourceTimeoutException || StoppedByDatabase(late))
+        catch (Exception late) when (late is SourceTimeoutException || stoppedByDatabase?.Invoke(late) == true)
         {
-            // The database source keeps the same limit, and so does PostgreSQL: either may be the
-            // one to stop the statement.
+            // The database source keeps the same limit, and so may the database itself: either may
+            // be the one to stop the statement.
             Interlocked.Increment(ref _timedOut);
             throw new QueryTimeLimitException(what, timeLimit, late);
         }
-    }
-
-    /// <summary>Whether PostgreSQL stopped the statement at its <c>statement_timeout</c>, however the source wrapped it.</summary>
-    private static bool StoppedByDatabase(Exception failure)
-    {
-        for (var at = failure; at is not null; at = at.InnerException)
-        {
-            if (at is Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.QueryCanceled })
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private Task<PreparedQuery> PrepareAsync(string sql, CancellationToken ct)

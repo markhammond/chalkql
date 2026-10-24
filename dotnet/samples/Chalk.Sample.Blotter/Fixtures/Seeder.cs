@@ -4,15 +4,15 @@ using System.Globalization;
 namespace Chalk.Sample.Blotter.Fixtures;
 
 /// <summary>
-/// Seeds a <see cref="TradeStore"/> with a generated corpus: client orders worked over a span of time,
-/// with their versions and fills (<see cref="Corpus"/>), written with binary <c>COPY</c> on several
-/// connections at once before any index or trigger exists; then indexed, and kept current from then on.
+/// Seeds an <see cref="ITradeStore"/> with a generated corpus: client orders worked over a span of time,
+/// with their versions and fills (<see cref="Corpus"/>), bulk loaded by several writers at once before any
+/// index or trigger exists; then indexed, and kept current from then on.
 /// </summary>
-public sealed class Seeder(TradeStore store)
+public sealed class Seeder(ITradeStore store)
 {
     private long _written;
 
-    public TradeStore Store => store;
+    public ITradeStore Store => store;
 
     /// <summary>How long <see cref="GenerateAsync"/> took to write the corpus, and then to index it.</summary>
     public TimeSpan LoadTime { get; private set; }
@@ -50,17 +50,11 @@ public sealed class Seeder(TradeStore store)
         var spacing = Math.Max(1, (long)(span.TotalMicroseconds / Math.Max(1, orders)));
         var origin = Cells.Micros(end - TimeSpan.FromMicroseconds(spacing * orders));
         var parts = Math.Clamp(Environment.ProcessorCount / 2, 1, 6);
-        Stage = string.Create(CultureInfo.InvariantCulture, $"writing {orders:N0} orders, their versions and fills with COPY");
+        Stage = string.Create(CultureInfo.InvariantCulture, $"writing {orders:N0} orders, their versions and fills");
         var size = (orders + parts - 1) / parts;
         var counted = await Task.WhenAll(Enumerable.Range(0, parts).Select(p => Task.Run(() =>
         {
-            // Each part on three connections, one per table, so the three COPYs stream side by side.
-            using var versions = store.Open();
-            using var current = store.Open();
-            using var fills = store.Open();
-            using var versionsIn = versions.BeginBinaryImport("COPY order_versions FROM STDIN (FORMAT BINARY)");
-            using var currentIn = current.BeginBinaryImport("COPY orders_current FROM STDIN (FORMAT BINARY)");
-            using var fillsIn = fills.BeginBinaryImport("COPY fills FROM STDIN (FORMAT BINARY)");
+            using var load = store.BeginLoad();
             long versionCount = 0, fillCount = 0;
             var latest = DateTime.MinValue;
             for (var n = p * size; n < Math.Min(orders, (p + 1) * size); n++)
@@ -69,13 +63,13 @@ public sealed class Seeder(TradeStore store)
                 var (made, filled) = Corpus.Make(n, origin, spacing, open: n >= orders - openTail);
                 foreach (var version in made)
                 {
-                    TradeStore.WriteOrder(versionsIn, version);
+                    load.AddVersion(version);
                 }
 
-                TradeStore.WriteOrder(currentIn, made[^1]);
+                load.AddCurrent(made[^1]);
                 foreach (var fill in filled)
                 {
-                    TradeStore.WriteFill(fillsIn, fill);
+                    load.AddFill(fill);
                 }
 
                 versionCount += made.Length;
@@ -88,9 +82,7 @@ public sealed class Seeder(TradeStore store)
                 latest = made[^1].EventTime > latest ? made[^1].EventTime : latest;
             }
 
-            versionsIn.Complete();
-            currentIn.Complete();
-            fillsIn.Complete();
+            load.Complete();
             return (versionCount, fillCount, latest);
         }, ct))).ConfigureAwait(false);
         Orders = orders;
