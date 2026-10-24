@@ -36,9 +36,10 @@ window.blotter = {
             return false;
         }
 
-        // Each with room beyond what it took for a sort's arrow and rank, which come and go.
+        // A heading keeps room for its sort arrow whether or not the column is sorted; a little more
+        // for the rank a sort by several columns adds.
         const heads = [...table.querySelectorAll("thead th")];
-        const widths = heads.map(th => th.getBoundingClientRect().width + (th.classList.contains("expander") ? 0 : 16));
+        const widths = heads.map(th => th.getBoundingClientRect().width + (th.classList.contains("expander") ? 0 : 4));
         heads.forEach((th, i) => { th.style.width = `${widths[i]}px`; });
         table.style.minWidth = `${widths.reduce((sum, width) => sum + width, 0)}px`;
         table.style.tableLayout = "fixed";
@@ -54,13 +55,29 @@ window.blotter = {
                 left += widths[i];
             }
         });
+        document.getElementById(`${table.id}-pins`)?.remove();
         const style = document.createElement("style");
+        style.id = `${table.id}-pins`;
         style.textContent = rules.join("\n");
         document.head.appendChild(style);
 
         // An attribute of the page's own, which the grid does not render and so never resets.
         table.dataset.pinned = "";
         return true;
+    },
+
+    // Lets the columns size themselves again, as a different set of them needs; freezeColumns fixes them anew.
+    unfreezeColumns(element) {
+        const table = element.querySelector("table");
+        if (!table) {
+            return;
+        }
+
+        table.querySelectorAll("thead th").forEach(th => { th.style.width = ""; });
+        table.style.minWidth = "";
+        table.style.tableLayout = "";
+        delete table.dataset.pinned;
+        document.getElementById(`${table.id}-pins`)?.remove();
     },
 
     scrollToTop(element) {

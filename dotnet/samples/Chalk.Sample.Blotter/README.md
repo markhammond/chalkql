@@ -105,8 +105,14 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   ellipsis.
 - **Time first, and frozen.** Each tab leads with its time, `Time`: when the client placed the order,
   or when the order was filled. The first columns stay in place as the grid scrolls sideways, so every
-  row can still be told apart: the expander, Time and Order on the orders tab; Time, Fill and Order on
-  the fills tab.
+  row can still be told apart: the expander, Time and Order on the orders tab; Time and Fill on the
+  fills tab.
+- **Choosing columns.** "Columns" at the right of the tab bar shows or hides any column but the frozen
+  ones. Ver, Region and Channel start hidden. Columns 1.5em apart, a heading keeping room for its sort
+  arrow whether or not its column is sorted.
+- **To an order's page.** The ↗ beside an order's id opens its page: every version and every fill,
+  read from the database and the live tail in one statement each. The ↗ beside a fill's id opens its
+  order's page, that fill marked.
 - **A new sort or filter dims the grid** until its first page is in.
 - **Flashes.** The cells of a row that changed flash, and an order or fill the streams have just sent
   flashes whole. A row scrolled into view does not flash.

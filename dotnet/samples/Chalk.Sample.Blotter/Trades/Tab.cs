@@ -141,6 +141,6 @@ public sealed class Tab
             (batch, row) => Fill.Read(batch, row),
             reader => Fill.Read(reader),
             overrides: false,
-            frozen: 3);
+            frozen: 2);
     }
 }

@@ -72,7 +72,7 @@
             <tbody>
                 @foreach (var fill in _fills)
                 {
-                    <tr>
+                    <tr class="@(fill.FillId == Fill ? "marked" : null)">
                         @foreach (var column in Tab.Fills.Columns)
                         {
                             <td>@column.Show(fill)</td>
@@ -87,6 +87,10 @@
 @code {
     [Parameter]
     public Guid OrderId { get; set; }
+
+    /// <summary>A fill to mark, when the order's page was opened from that fill.</summary>
+    [SupplyParameterFromQuery]
+    public Guid? Fill { get; set; }
 
     private Order[] _versions = [];
     private Fill[] _fills = [];

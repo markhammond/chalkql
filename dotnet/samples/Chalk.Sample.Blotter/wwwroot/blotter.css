@@ -95,10 +95,12 @@ thead th {
     position: sticky; top: 0; z-index: 2; background: var(--panel);
     border-bottom: 1px solid var(--line); text-align: left; padding: 0; font-weight: 600;
 }
+/* Columns are 1.5em apart: three-quarters of an em either side of each value. */
 .sort {
     all: unset; display: flex; gap: 4px; align-items: center; width: 100%;
-    padding: 7px 8px; cursor: pointer; box-sizing: border-box; user-select: none;
+    padding: 7px 2px 7px 0.75em; cursor: pointer; box-sizing: border-box; user-select: none;
 }
+.sort .arrow.unsorted { visibility: hidden; }
 .sort .arrow { color: var(--accent); font-size: 11px; }
 .sort .rank { color: var(--muted); font-size: 10px; }
 th.num .sort { justify-content: flex-end; }
@@ -106,7 +108,7 @@ th.num .sort { justify-content: flex-end; }
 tbody tr { height: 30px; }
 tbody tr:nth-child(even) { background: var(--row-alt); }
 td { padding: 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
-td .cell { display: block; padding: 0 8px; line-height: 29px; overflow: hidden; text-overflow: ellipsis; }
+td .cell { display: block; padding: 0 0.75em; line-height: 29px; overflow: hidden; text-overflow: ellipsis; }
 /* Numbers in the system's monospace, as ids are, so their digits line up down a column. */
 td.num .cell { text-align: right; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
 td a { color: var(--accent); text-decoration: none; }
@@ -134,6 +136,7 @@ details pre {
 
 .history { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .history td, .history th { padding: 4px 10px; }
+.history tr.marked td { background: color-mix(in srgb, var(--accent) 18%, var(--panel)); }
 .history th { position: static; }
 .changed { color: var(--accent); font-weight: 600; }
 .wide { overflow-x: auto; }
@@ -144,6 +147,13 @@ h2 { font-size: 14px; margin: 8px 0 0; }
 
 .tabs { display: flex; gap: 4px 8px; border-bottom: 1px solid var(--line); align-items: flex-end; flex-wrap: wrap; }
 .tabs .chip { margin-bottom: 4px; }
+.chooser-wrap { position: relative; align-self: center; }
+.column-chooser {
+    position: absolute; right: 0; top: 100%; z-index: 20; display: grid; gap: 4px; min-width: 140px;
+    padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    box-shadow: 0 4px 16px rgb(0 0 0 / 0.15); font-size: 12px;
+}
+.column-chooser label { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
 .tab {
     border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; background: transparent;
     padding: 6px 14px; color: var(--muted);
@@ -168,7 +178,7 @@ h2 { font-size: 14px; margin: 8px 0 0; }
 .head.num { justify-content: flex-end; }
 .head .sort { flex: 0 1 auto; width: auto; min-width: 0; padding-right: 2px; }
 .funnel {
-    border: none; background: transparent; padding: 4px 6px 4px 0; cursor: pointer; display: flex; align-items: center;
+    border: none; background: transparent; padding: 4px 0.75em 4px 0; cursor: pointer; display: flex; align-items: center;
     visibility: hidden;
 }
 .head:hover .funnel, .funnel:focus-visible, .funnel.on, .funnel.open { visibility: visible; }

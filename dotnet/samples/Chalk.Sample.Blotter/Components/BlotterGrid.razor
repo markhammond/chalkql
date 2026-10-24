@@ -10,6 +10,24 @@
         var t = tab;
         <button role="tab" aria-selected="@(t == Tab)" class="tab @(t == Tab ? "selected" : "")" @onclick="() => Select.InvokeAsync(t)">@t.Title</button>
     }
+    <span class="spacer"></span>
+    <span class="chooser-wrap">
+        <button type="button" class="link-button" aria-expanded="@_choosing" @onclick="() => _choosing = !_choosing">Columns ▾</button>
+        @if (_choosing)
+        {
+            <div class="column-chooser" role="group" aria-label="Columns shown">
+                @for (var c = Tab.Frozen; c < Tab.Columns.Count; c++)
+                {
+                    var column = Tab.Columns[c];
+                    <label>
+                        <input type="checkbox" checked="@(!_hiddenColumns.Contains(column.Name))"
+                               @onchange="e => ShowColumnAsync(column, e.Value is true)" />
+                        @column.Title
+                    </label>
+                }
+            </div>
+        }
+    </span>
 </div>
 
 @if (!_filter.Columns.IsEmpty)
@@ -78,6 +96,11 @@
             {
                 var index = c;
                 var column = Tab.Columns[c];
+                if (_hiddenColumns.Contains(column.Name))
+                {
+                    continue;
+                }
+
                 <TemplateColumn TGridItem="BlotterRow" Title="@column.Title" Class="@ColumnClass(column, index)">
                     <HeaderTemplate>
                         @* The whole heading sorts, its label button too (a click on it reaches the heading); the funnel does not. *@
@@ -85,13 +108,11 @@
                              title="@(column.Description is { } about ? about + ". " : "")Click to sort by @column.Title, descending, then ascending, then not; shift-click to do the same within a sort by several columns">
                             <button class="sort" type="button">
                                 @column.Title
-                                @if (_sort.RankOf(column) is var rank and > 0)
+                                @* The arrow keeps its place when the column is not sorted, so the heading is as wide either way. *@
+                                <span class="arrow @(_sort.RankOf(column) > 0 ? "" : "unsorted")">@(_sort.IsDescending(column) || _sort.RankOf(column) == 0 ? "▼" : "▲")</span>
+                                @if (_sort.RankOf(column) is var rank and > 0 && _sort.Chosen.Length > 1)
                                 {
-                                    <span class="arrow">@(_sort.IsDescending(column) ? "▼" : "▲")</span>
-                                    @if (_sort.Chosen.Length > 1)
-                                    {
-                                        <span class="rank">@rank</span>
-                                    }
+                                    <span class="rank">@rank</span>
                                 }
                             </button>
                             <button type="button" class="funnel @(_filter.For(column) is not null ? "on" : "") @(_editing == column ? "open" : "")"
@@ -107,8 +128,18 @@
                         }
                         else if (column.Name == "version")
                         {
-                            <span class="cell @context.Flash[index]">
-                                <a href="order/@context.Row.Id" target="_blank" title="Every version of this order, and its fills">v@(context.Row.Version) ↗</a>
+                            <span class="cell @context.Flash[index]">v@(context.Row.Version)</span>
+                        }
+                        else if (column == Tab.Key && context.Row is Order own)
+                        {
+                            <span class="cell id @context.Flash[index]" title="@own.OrderId">
+                                @own.OrderId <a href="order/@own.OrderId" target="_blank" title="Every version of this order, and its fills">↗</a>
+                            </span>
+                        }
+                        else if (column == Tab.Key && context.Row is Fill thisFill)
+                        {
+                            <span class="cell id @context.Flash[index]" title="@thisFill.FillId">
+                                @thisFill.FillId <a href="order/@thisFill.OrderId?fill=@thisFill.FillId" target="_blank" title="Its order: every version, and every fill, this one marked">↗</a>
                             </span>
                         }
                         else if (column.Name == "order_id" && context.Row is Fill parentOf)
@@ -191,6 +222,10 @@
 
     private const double RowHeight = 30;
     private Flashes _flashes = default!;
+
+    // Columns the reader has hidden, by name; the frozen ones, which tell the rows apart, are always shown.
+    private HashSet<string> _hiddenColumns = [];
+    private bool _choosing;
     private Flashes _fillFlashes = new(Tab.Fills.Columns);
     private QuickGrid<BlotterRow>? _grid;
     private ElementReference _scroller;
@@ -241,6 +276,7 @@
     protected override async Task OnInitializedAsync()
     {
         _flashes = new Flashes(Tab.Columns);
+        _hiddenColumns = Tab.Overrides ? ["version", "region", "channel"] : ["region", "channel"];
         _sort = Tab.DefaultSort;
         _pages = Host.Pages.View(_sort);
         _provider = ProvideAsync;
@@ -471,6 +507,19 @@
     // Columns keep the widths they first took with rows in them: the table does not size them again
     // for the rows each render brings, so headings do not shift as the grid scrolls.
     private bool _frozen;
+
+    /// <summary>Shows or hides a column; the columns are measured and frozen again with the new set.</summary>
+    private async Task ShowColumnAsync(Column column, bool shown)
+    {
+        if (shown ? !_hiddenColumns.Remove(column.Name) : !_hiddenColumns.Add(column.Name))
+        {
+            return;
+        }
+
+        _frozen = false;
+        await JS.InvokeVoidAsync("blotter.unfreezeColumns", _scroller);
+        await RefreshAsync();
+    }
 
     private async Task FreezeColumnsAsync()
     {
