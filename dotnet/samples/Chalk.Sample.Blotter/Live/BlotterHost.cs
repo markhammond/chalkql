@@ -76,12 +76,10 @@ public sealed class BlotterHost : IAsyncDisposable
     private PocoTable<TailRow>? _tailTable;
     private PocoTable<Fill>? _fillsTable;
     private PocoTable<Order>? _versionsTable;
-    private PocoTable<Order>? _arrivedOrdersTable;
-    private PocoTable<Fill>? _arrivedFillsTable;
-
-    // What the streams sent, kept a while for alert conditions to read, oldest first.
-    private readonly Queue<(DateTime At, List<Order> Versions, List<Fill> Fills)> _arrived = new();
-    private long _arrivedRows;
+    private AlertTables? _alerts;
+    private long _lastRefresh;
+    private string _alertsWatched = "";
+    private DateTimeOffset _clock = DateTimeOffset.MinValue;
     private ChannelReader<Order[]>? _orderFeed;
     private ChannelReader<Fill[]>? _fillFeed;
     private Task? _loop;
@@ -149,24 +147,44 @@ public sealed class BlotterHost : IAsyncDisposable
     /// <summary>
     /// Raised with every batch the host reads off the streams, as it reads it: each order version and
     /// fill sent, whether or not the tail takes it (it does not, when the database holds it already).
-    /// On the ingest loop: a handler only takes note.
+    /// On the catch-up loop: a handler only takes note.
     /// </summary>
     public event Action<IReadOnlyList<Order>, IReadOnlyList<Fill>>? Arrived;
 
     /// <summary>
-    /// Whether to keep what the streams send in <c>live.arrived_orders</c> and <c>live.arrived_fills</c>,
-    /// for <see cref="ArrivedFor"/>, for alert conditions to read: while any browser has an alert.
+    /// Raised on the catch-up loop as rows enter an alert view: the view, and each row with how long it
+    /// had waited for the database, for a view of the wait. A handler only takes note.
     /// </summary>
-    public bool KeepArrivals { get; set; }
+    public event Action<AlertViewSpec, IReadOnlyList<(IRow Row, TimeSpan? Lag)>>? AlertsEntered;
 
-    /// <summary>How long what the streams sent stays in the arrival tables.</summary>
-    public static readonly TimeSpan ArrivedFor = TimeSpan.FromSeconds(10);
+    /// <summary>How often the clock moves while nothing arrives, for the alert views that watch the wait.</summary>
+    public static readonly TimeSpan AlertTick = TimeSpan.FromMilliseconds(250);
 
     /// <summary>
-    /// Raised on the ingest loop once what the streams sent is in the arrival tables, at the refresh
-    /// that put it there: an alert condition run after this reads it.
+    /// The alert views the browsers' rules need: on the catch-up loop, those not open are opened, each
+    /// within the host's budget, and those no rule needs any more are closed.
     /// </summary>
-    public event Action<IReadOnlyList<Order>, IReadOnlyList<Fill>>? ArrivalsKept;
+    public void WatchAlerts(IReadOnlyCollection<AlertViewSpec> specs)
+    {
+        var names = string.Join("\u0001", specs.Select(s => s.Name).Distinct().Order(StringComparer.Ordinal));
+        if (names == _alertsWatched || _engine is null)
+        {
+            return;
+        }
+
+        _alertsWatched = names;
+        _ = OnLoopAsync(async () =>
+        {
+            await _alerts!.WatchAsync(specs, _engine, _budget, _stop.Token).ConfigureAwait(false);
+            return true;
+        });
+    }
+
+    /// <summary>How many alert views are open.</summary>
+    public int AlertViewsOpen => _alerts?.Count ?? 0;
+
+    /// <summary>The alert views ChalkQL would not make, and what it said, by the view's name.</summary>
+    public ImmutableDictionary<string, string> AlertsRefused => _alerts?.Refused ?? ImmutableDictionary<string, string>.Empty;
 
     /// <summary>How long the database has taken to hold each row in the tail, as of the latest state.</summary>
     public ImmutableDictionary<Guid, Reconciliation> Reconciling => _tail.Reconciling;
@@ -241,15 +259,12 @@ public sealed class BlotterHost : IAsyncDisposable
                 out PocoTable<Order> versions,
                 t => t.Keyed(v => v.OrderId, v => v.Version))
             .AddTable("tail_fills", (IReadOnlyList<Fill>)[], out PocoTable<Fill> fills, t => t.Keyed(f => f.FillId))
-            .AddTable(
-                "arrived_orders",
-                (IReadOnlyList<Order>)[],
-                out PocoTable<Order> arrivedOrders,
-                t => t.Keyed(v => v.OrderId, v => v.Version))
             .AddTable("arrived_fills", (IReadOnlyList<Fill>)[], out PocoTable<Fill> arrivedFills, t => t.Keyed(f => f.FillId))
+            .AddTable("latest_orders", (IReadOnlyList<Order>)[], out PocoTable<Order> latestOrders, t => t.Keyed(o => o.OrderId))
+            .AddTable("waits", (IReadOnlyList<Wait>)[], out PocoTable<Wait> waits, t => t.Keyed(w => w.Id))
             .Build();
-        _arrivedOrdersTable = arrivedOrders;
-        _arrivedFillsTable = arrivedFills;
+        _alerts = new AlertTables(arrivedFills, latestOrders, waits);
+        _alerts.Entered += (spec, rows) => AlertsEntered?.Invoke(spec, rows);
         _tailTable = tail;
         _versionsTable = versions;
         _fillsTable = fills;
@@ -258,6 +273,9 @@ public sealed class BlotterHost : IAsyncDisposable
             ContextId = "blotter",
             Sources = [database, live],
             Planner = _planner.CreatePlanner(),
+
+            // Alert views of the wait read the time as @now: the clock every refresh moves.
+            Clock = "now",
         }, ct).ConfigureAwait(false);
         Queries = new SourceQueries(_engine, _options.QueryTimeLimit, new PostgresExplain(connectionString));
         Pages = new Pages(Queries)
@@ -404,6 +422,11 @@ public sealed class BlotterHost : IAsyncDisposable
             }
         }
 
+        if (_alerts is not null)
+        {
+            await _alerts.DisposeAsync().ConfigureAwait(false);
+        }
+
         foreach (var scope in _scopes.Values)
         {
             await scope.DisposeAsync().ConfigureAwait(false);
@@ -433,9 +456,10 @@ public sealed class BlotterHost : IAsyncDisposable
     }
 
     /// <summary>
-    /// The one loop: takes what the streams have sent, refreshes the tail with it, brings every scope to
-    /// the refresh, and publishes; between batches, runs what pages asked of it, and looks the tail up in
-    /// the database when that is due.
+    /// The catch-up loop, the one loop: it keeps the host caught up with both sides. It takes what the
+    /// streams have sent, refreshes the tail and the alert tables with it, brings every scope and alert
+    /// view to the refresh, and publishes; between batches, it runs what pages asked of it, and looks the
+    /// tail up in the database when that is due, which a refresh carries to the views as well.
     /// </summary>
     private async Task RunAsync(CancellationToken ct)
     {
@@ -458,6 +482,12 @@ public sealed class BlotterHost : IAsyncDisposable
                         _lastConfirm = Stopwatch.GetTimestamp();
                         await ConfirmAsync(ct).ConfigureAwait(false);
                     }
+
+                    // A wait grows while nothing arrives: the views that watch it see the clock move.
+                    if (_alerts!.WatchesTime && Stopwatch.GetElapsedTime(_lastRefresh) >= AlertTick)
+                    {
+                        await RefreshAsync(_ => { }, _ordersThrough, _fillsThrough, ct).ConfigureAwait(false);
+                    }
                 }
                 else if (State == BlotterState.Refusing)
                 {
@@ -478,8 +508,8 @@ public sealed class BlotterHost : IAsyncDisposable
             }
             catch (Exception failure)
             {
-                _log.LogError(failure, "the ingest loop failed; serving stops until the database has caught up");
-                await StopServingAsync($"the ingest loop failed: {failure.Message}").ConfigureAwait(false);
+                _log.LogError(failure, "the catch-up loop failed; serving stops until the database has caught up");
+                await StopServingAsync($"the catch-up loop failed: {failure.Message}").ConfigureAwait(false);
             }
         }
     }
@@ -521,8 +551,6 @@ public sealed class BlotterHost : IAsyncDisposable
         var versionsIn = new List<Order>(moreOrders);
         var fillsIn = new List<Fill>(moreFills);
         var (ordersThrough, fillsThrough) = (_ordersThrough, _fillsThrough);
-        List<Order> arrivedVersions = [];
-        List<Fill> arrivedFills = [];
         if (_orderFeed is not null && _fillFeed is not null)
         {
             var sent = versionsIn.Count;
@@ -546,10 +574,7 @@ public sealed class BlotterHost : IAsyncDisposable
             if (versionsIn.Count > sent || fillsIn.Count > sentFills)
             {
                 Arrived?.Invoke(versionsIn[sent..], fillsIn[sentFills..]);
-                if (KeepArrivals)
-                {
-                    (arrivedVersions, arrivedFills) = (versionsIn[sent..], fillsIn[sentFills..]);
-                }
+                _alerts!.Note(versionsIn[sent..], fillsIn[sentFills..]);
             }
         }
 
@@ -602,17 +627,8 @@ public sealed class BlotterHost : IAsyncDisposable
             upserts[version.OrderId] = TailRow.Of(version, entry.Base);
         }
 
-        // What the streams sent goes into the arrival tables at the same refresh, and what has been
-        // there long enough leaves; all of it, once no alert wants it.
-        var expired = new List<(DateTime At, List<Order> Versions, List<Fill> Fills)>();
-        var keepFrom = KeepArrivals ? DateTime.UtcNow - ArrivedFor : DateTime.MaxValue;
-        while (_arrived.TryPeek(out var oldest) && oldest.At < keepFrom)
-        {
-            expired.Add(_arrived.Dequeue());
-        }
-
-        var arrivals = arrivedVersions.Count + arrivedFills.Count;
-        if (upserts.Count > 0 || fills.Count > 0 || arrivals > 0 || expired.Count > 0)
+        // What the streams sent goes into the alert tables in the same refresh as the tail.
+        if (upserts.Count > 0 || fills.Count > 0 || _alerts!.Pending)
         {
             var tailRows = upserts.Values.ToList();
             await RefreshAsync(refresh =>
@@ -627,33 +643,7 @@ public sealed class BlotterHost : IAsyncDisposable
                     refresh.Upsert(_fillsTable!, fills);
                 }
 
-                if (expired.SelectMany(e => e.Versions).ToList() is [_, ..] goneVersions)
-                {
-                    refresh.Delete(_arrivedOrdersTable!, goneVersions);
-                }
-
-                if (expired.SelectMany(e => e.Fills).ToList() is [_, ..] goneFills)
-                {
-                    refresh.Delete(_arrivedFillsTable!, goneFills);
-                }
-
-                if (arrivedVersions.Count > 0)
-                {
-                    refresh.Upsert(_arrivedOrdersTable!, arrivedVersions);
-                }
-
-                if (arrivedFills.Count > 0)
-                {
-                    refresh.Upsert(_arrivedFillsTable!, arrivedFills);
-                }
             }, ordersThrough, fillsThrough, ct).ConfigureAwait(false);
-            _arrivedRows += arrivals - expired.Sum(e => e.Versions.Count + e.Fills.Count);
-            if (arrivals > 0)
-            {
-                _arrived.Enqueue((DateTime.UtcNow, arrivedVersions, arrivedFills));
-                ArrivalsKept?.Invoke(arrivedVersions, arrivedFills);
-            }
-
             Status = Status with
             {
                 LastRefreshMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds,
@@ -937,14 +927,26 @@ public sealed class BlotterHost : IAsyncDisposable
     private async Task RefreshAsync(Action<RefreshBuilder> changes, DateTime ordersThrough, DateTime fillsThrough, CancellationToken ct)
     {
         var next = _version + 1;
-        await _engine!.RefreshAsync(refresh => changes(refresh.Version(next)), ct).ConfigureAwait(false);
+        var now = DateTime.UtcNow;
+
+        // The clock moves only forward, by a tick at least, however the wall clock steps.
+        _clock = now > _clock ? now : _clock.AddTicks(1);
+        await _engine!.RefreshAsync(refresh =>
+        {
+            changes(refresh.Version(next));
+            _alerts!.AddTo(refresh, _tail, now);
+            refresh.AdvanceClock(_clock);
+        }, ct).ConfigureAwait(false);
         _version = next;
+        _lastRefresh = Stopwatch.GetTimestamp();
         (_ordersThrough, _fillsThrough) = (ordersThrough, fillsThrough);
         var mark = Mark();
         foreach (var scope in _scopes.Values)
         {
             await scope.UpdateAsync(_tail, _version, mark, ct).ConfigureAwait(false);
         }
+
+        await _alerts!.UpdateAsync(_tail, ct).ConfigureAwait(false);
 
         Published?.Invoke(_version);
     }
@@ -983,7 +985,7 @@ public sealed class BlotterHost : IAsyncDisposable
         }
     }
 
-    /// <summary>Runs <paramref name="work"/> on the ingest loop, between refreshes, and returns its result.</summary>
+    /// <summary>Runs <paramref name="work"/> on the catch-up loop, between refreshes, and returns its result.</summary>
     private Task<T> OnLoopAsync<T>(Func<Task<T>> work)
     {
         var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1076,7 +1078,7 @@ public sealed class BlotterHost : IAsyncDisposable
 
     /// <summary>What the host cannot give back without dropping a version: the tail, and the scopes over it.</summary>
     private long LiveBytes() =>
-        _tail.Bytes + _scopes.Values.Sum(s => s.ViewBytes + s.State.Bytes) + Interlocked.Read(ref _arrivedRows) * 2 * Order.Bytes;
+        _tail.Bytes + _scopes.Values.Sum(s => s.ViewBytes + s.State.Bytes) + (_alerts?.Bytes ?? 0);
 
     /// <summary>The rows the kept windows may hold: their share of the budget, or what the tail and the scopes leave, whichever is less.</summary>
     private long PageRows()

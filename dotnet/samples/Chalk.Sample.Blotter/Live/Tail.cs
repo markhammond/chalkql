@@ -106,7 +106,7 @@ public readonly record struct Reconciliation(IRow Row, DateTime Since, DateTime?
 /// The live tail: every order whose latest version from the stream the database has not been seen to
 /// hold yet, and every fill the database has not been seen to hold. A row leaves once a lookup has
 /// found it in the database and some time has passed since (<see cref="BlotterOptions.EvictAfter"/>).
-/// Changed only by the host's ingest loop.
+/// Changed only by the host's catch-up loop.
 /// </summary>
 public sealed class Tail
 {

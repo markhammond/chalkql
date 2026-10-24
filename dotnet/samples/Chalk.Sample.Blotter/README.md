@@ -1,28 +1,27 @@
 # Virtual blotter: an unobtrusive live grid
 
 A trade blotter in Blazor Server and QuickGrid, over five million client orders and their fills in
-PostgreSQL, while the house keeps taking orders and filling them. Every tab scrolls through all of its
-rows, sorts by any columns, filters on any column, flashes what changes, and sounds alerts. The host
-holds no copy of the corpus: it keeps what it holds inside a memory budget of a few megabytes, stops
-any statement after 5 s, and never shows an order at an older version than one it knows of.
+PostgreSQL, while the house keeps accepting and filling orders. Every tab scrolls through all of its
+rows, sorts by any columns, filters on any column, flashes what changed, and drives alerts. The host
+holds no copy of the corpus: it maintains an ephemeral memory cache to within a budget of a few megabytes, 
+stops slow queries after 5 seconds, and never shows an order at an older version than one it knows of.
 
-## A bolt-on, on purpose
+## A bolt-on compromise
 
-Most live views are added to existing systems: someone else's database with an external feeds. 
-So the blotter is built as a **bolt-on**, imposing the fewest assumptions. Of the
-database it asks only what is reasonable: rows found by key, sorted and filtered, and an estimate
-of a query's size. Of the streams, only that they deliver what is sent after a reader subscribes. ChalkQL
-can then make the most it.
+Most live views are layered onto existing systems: someone else's database and external feed. 
+And so the blotter is intentionally built as **bolt-on** machinery, imposing the fewest prerequisites. 
+Of the database it asks only what is reasonable: rows found by key, sorted and filtered at source, with
+an estimate of a query's size. Of the streams, only that it is reliable and delivers what
+is sent after a reader subscribes. ChalkQL can then make the most it.
 
 ```bash
 JAVA_HOME=/path/to/jdk-21 dotnet run -c Release --project dotnet/samples/Chalk.Sample.Blotter
 ```
 
 Then open `http://localhost:5910`. The sample starts a PostgreSQL server of its own, in a temporary
-directory, from PostgreSQL 16 or later installed on the machine (`brew install postgresql@16`), and
-deletes it when it stops; one left by a sample that was killed is swept away by the next. ChalkQL's
-planner runs on a JDK 21+, which `PlannerProcess` starts itself: set `JAVA_HOME`, or install Homebrew's
-`openjdk@21`, which the sample looks for.
+directory, from PostgreSQL 16 or later installed on the machine, and deletes it when it stops; 
+one left by a sample that was killed is swept away by the next. ChalkQL's planner runs on a JDK 21+, 
+which `PlannerProcess` starts itself, expecting `JAVA_HOME` to be set.
 
 | Option | Default | |
 |---|---|---|
@@ -78,7 +77,7 @@ What it takes on instead, in the host:
 
 Each is described under [How it works](#how-it-works), with what it costs.
 
-## What ChalkQL brings
+## What ChalkQL brings to the table
 
 ChalkQL is the engine under every read: one SQL dialect over the PostgreSQL tables and the host's own
 in-memory tables, planned by Apache Calcite in a sidecar process and executed in the host's own. What
@@ -97,7 +96,7 @@ it does here that would otherwise be hand-written:
   see, and on every change takes only the difference, rather than rerunning. Each has a state budget,
   and refuses rather than grow past it. `--maintenance recompute` trades a little more work an update
   for about a quarter of the memory.
-- **Atomic refreshes.** The ingest loop changes the three tail tables as one engine version, so every
+- **Atomic refreshes.** The catch-up loop changes the three tail tables as one engine version, so every
   view and every page sees a tail that is whole, never one table ahead of another.
 - **Prepared statements, bound exactly.** Every page's SQL is prepared once and run with its key and
   filter as parameters, each given as its column's own .NET type; ChalkQL checks a parameter's type
@@ -115,14 +114,13 @@ serves every reader everything, so none of it is shown.
 
 ## The domain
 
-The reference data is the Tapline PivotTable sample's: twelve clients trading the house's linear
-perpetuals (`BTC/USD Perp` and seven others) in US dollars, each in its region and through its
-channels (FIX, API, GUI, Mobile, Voice), at the mark plus its channel's markup. A **client order** is
-versioned: a fill or a cancel is a new version, numbered one higher, with its filled quantity, its
-average price (the fills', weighted) and its status (New, Partial, Filled, Cancelled). A **fill** never
-changes, and carries its order's details (client, region, channel, instrument, side), so a fill can be
-filtered without its order. Orders and fills are identified by UUIDs (version 7), and nothing in the
-host relies on their order: ids only break ties in a sort.
+Twelve clients trading the house's linear perpetuals (`BTC/USD Perp` and seven others) in US dollars, 
+each in its region and through various channels, at the mark plus its channel's markup. 
+A **client order** is versioned: a fill or a cancel is a new version, numbered one higher, with its 
+filled quantity, the weighted average filled price, and its status. A **fill** never changes, and 
+carries its order's details (client, region, channel, instrument, side), so a fill can be filtered 
+without its order. Orders and fills are identified by UUIDs, and nothing in the host relies on their 
+order: ids only break ties to ensure sort order is deterministic.
 
 Order versions and fills come on **two streams**, each mostly in its own time order and neither
 waiting for the other. The order stream runs up to 600 ms behind the fills, and a quarter of new
@@ -154,9 +152,9 @@ sometimes stall. `orders_current` keeps up one of two ways (`--current`):
 - **lagging**: a job of its own applies what `order_versions` has been written, 0.5 s to 4 s later,
   and stalls now and then, so the two tables are often out of step.
 
-The corpus is generated in C#, each order worked out from its number alone, and written with binary
-`COPY` on several connections at once before any index or trigger exists; then the indexes are built
-in parallel. Five million orders, about 12.5 million versions and 8.8 million fills load in seconds.
+The corpus is generated procedurally, each order worked out from its number alone, and bulk loaded 
+on several connections at once before any index or trigger exists; then the indexes are built in 
+parallel. Five million orders, about 12.5 million versions and 8.8 million fills load in seconds.
 
 ## What you see
 
@@ -176,14 +174,8 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   the order was filled. The expander, Time and Order (or Time and Fill) stay in place as the grid
   scrolls sideways. A time shows as `… 03:26:23`, an ellipsis where its date is; on hover, it shows in
   full, date and microseconds.
-- **Columns hold their widths**, the widths they first took with rows in them, so headings do not
-  shift as the grid scrolls; a value wider than its column is cut short with an ellipsis. "Columns"
-  shows or hides any column but the frozen ones; Ver, Region, Channel and Filled start hidden. Fill %
-  is worked out from the row in the host: shown, never sorted or filtered by, and refused if asked to
-  be.
-- **Numbers as finance writes them:** no zero before the point of a fraction and none after its last
-  digit that counts (.25, not 0.2500), a dash for nought, prices to six significant figures and in
-  scientific notation past eight digits. Every value is in the system's monospace, zeros slashed.
+- **Computed columns.** Fill % is worked out from the row in the host: shown, never sorted or filtered 
+  by, and refused if asked to be.
 - **Flashes.** The cells of a row that changed flash for 2.4 s, and an order or fill just sent flashes
   whole for 3 s. A row scrolled into view does not flash. Rows cut by the grid's edges fade.
 - **Recon: how far behind the database is, row by row.** For each order and fill in the tail, how long
@@ -256,18 +248,21 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   name, and values after one, a choice's own or a text column's most frequent of the last day, read
   through ChalkQL. It marks names it does not know where they are, and then asks ChalkQL to prepare the
   statement and shows what ChalkQL refuses. A condition ChalkQL refuses is not added.
-- **Run by ChalkQL, from the streams.** What the streams send goes into two in-memory tables,
-  `live.arrived_orders` and `live.arrived_fills`, kept ten seconds while any browser has an alert, at the
-  same refresh as the tail. Each distinct condition is then the `WHERE` of one statement over them,
-  run once for every browser that has it, however far behind a grid has fallen and whether or not a
-  page is open. A path is a join to the tail and to `orders_current` by key, the newer version
-  standing. A fill fires a rule when it passes the condition; an order, when a version of it comes to
-  pass it, and not again until it has left it. Within its throttle, a rule gathers its rows and sounds
-  once, saying how many (×26).
+- **Incremental views, kept by ChalkQL.** Each distinct condition is a standing view, maintained
+  incrementally, shared by every rule in any browser that has it, and a row entering the view fires
+  them. The views read only the host's own tables, which the catch-up loop changes in the same refresh
+  as the tail, while any browser has an alert: `live.arrived_fills`, every fill the streams sent in the
+  last ten seconds; `live.latest_orders`, every order at the newest version the streams sent, until it
+  has not changed for ten minutes; and `live.waits`, since when each row in the tail has waited for
+  the database. A path joins `live.latest_orders`, so a fill that arrives before its order enters the
+  view, and fires, when the order does. The views are keyed, so a row fires once however the host
+  hears of it; an order fires as a version of it comes to pass the condition, and not again until it
+  has left it. Within its throttle, a rule gathers its rows and sounds once, saying how many (×26).
 - **Or on a wait.** A rule may fire instead once a row that passes its condition has waited more than
   1, 2, 5, 10 or 30 s for the database (its Recon): once for each wait, a newer version starting a new
-  one. Four times a second, the rows past the wait are weighed by ChalkQL against the tail, each
-  version once. Stall the database to hear one.
+  one. Its view reads the tail beside `live.waits` and the engine's clock, `@now`, which every refresh
+  moves, and the catch-up loop moves four times a second while such a view is open. Stall the database
+  to hear one.
 - **None missed.** A browser's alerts wait until a page of it has sounded them. A page opened again
   within 10 minutes says what fired meanwhile.
 - **Sound** is a recording in `wwwroot/sounds`, mono and 8-bit (about 280 KB for all 22), served at a
@@ -297,8 +292,8 @@ component still speak of orders and fills.
 ## How it works
 
 Who does what, lane by lane: the house writes to PostgreSQL late, and streams to the host at once; the
-host reads PostgreSQL live, lays its tail over each page, and weighs every row the streams send
-against the alerts.
+host reads PostgreSQL live, lays its tail over each page, and keeps a standing view of each alert's
+condition over what the streams send.
 
 ```mermaid
 flowchart TB
@@ -322,8 +317,9 @@ flowchart TB
         Tail["Tail<br/>sent, not yet seen in the database"]
         Scopes["Live scopes<br/>a standing view per filter"]
         Pages["Pages<br/>keyset reads, merged with the tail"]
-        Desk["Alert desk<br/>each row against each rule"]
+        Desk["Alert views<br/>one per condition, incremental"]
         Tail -->|"one refresh, one version"| Scopes
+        Tail -->|"the same refresh: what arrived, and each wait"| Desk
         Scopes --> Pages
     end
 
@@ -336,7 +332,6 @@ flowchart TB
     Jobs --> Versions
     Jobs --> FillsTable
     Exchange -->|"order and fill streams"| Tail
-    Exchange -->|"order and fill streams"| Desk
     Current -->|"pushed down: filter, sort, seek, limit"| Pages
     FillsTable -->|"pushed down: filter, sort, seek, limit"| Pages
     Tail -.->|"confirmed by key every 0.5 s"| Current
@@ -528,11 +523,8 @@ marks a place where the host approximates or does extra work because of it.
   would be a feature of its own, switched on by choice, sized against the budget, and refused when
   the open orders do not fit. ChalkQL's engine clock (`@now`) lets a standing view's filter move
   with time, so the alert itself, "open for more than five minutes", can be one.
-- Alert conditions run as ChalkQL standing views rather than statements over each batch, so that an
-  access policy can apply to them; and paths, such as `order.status`, as a feature of ChalkQL itself.
-  As built here, the host writes a path as two joins, the database's side read for the keys the rows
-  name; ChalkQL plans that well while the local tables have rows, but while they are empty it plans a
-  nested loop and then refuses it, so a fill's condition along `order.` can be refused for a while.
+- Paths, such as `order.status`, as a feature of ChalkQL itself rather than the host's rewriting, and
+  along them to the database too: here, a fill's order is the one the streams sent.
 - A refusal by query cost estimate.
 - Use of Tapline could greatly improve scalability. On Blazor Server the grid renders on the server, and ChalkQL's views already give each
   reader what changed. Tapline would carry the same answers to a WebAssembly grid, headless clients or

@@ -35,7 +35,7 @@ public struct ScopeRow
 /// fails the scope rather than the host.
 /// </para>
 /// <para>
-/// The scope is driven from one place, the host's ingest loop: after each refresh it updates the view,
+/// The scope is driven from one place, the host's catch-up loop: after each refresh it updates the view,
 /// drains what changed, and publishes a new <see cref="ScopeState"/>. A state is immutable and whole,
 /// so a page can read one while the next is being made.
 /// </para>
@@ -265,7 +265,7 @@ public sealed class ScopeState
         var byId = new Dictionary<Guid, IRow>(rows.Count);
         foreach (var (id, row) in rows)
         {
-            // The view's rows and the tail are of one epoch, because the ingest loop changes the
+            // The view's rows and the tail are of one epoch, because the catch-up loop changes the
             // tail, refreshes the engine and updates the scopes one after the other. A version that
             // does not match is a bug, and a page built on it would be wrong, so it stops here.
             if (!tab.Overrides)

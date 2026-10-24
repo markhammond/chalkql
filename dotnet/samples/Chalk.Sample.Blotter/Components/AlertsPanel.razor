@@ -27,7 +27,13 @@
             {
                 var r = rule;
                 <tr>
-                    <td><b>@r.Name</b><div class="muted">@r.Tab.Title: @if (r.Condition.IsEmpty) { <span>every row</span> } else { <code>@r.Condition.Text</code> }</div></td>
+                    <td>
+                        <b>@r.Name</b><div class="muted">@r.Tab.Title: @if (r.Condition.IsEmpty) { <span>every row</span> } else { <code>@r.Condition.Text</code> }</div>
+                        @if (Desk.Refusal(r) is { } notRunning)
+                        {
+                            <div class="alerts-refused" title="ChalkQL would not make this alert's view">Not running: @notRunning</div>
+                        }
+                    </td>
                     <td class="alerts-settings">
                         <select value="@When(r.LagOver)" aria-label="When it fires" @onchange="e => SaveAsync(r with { LagOver = Lag((string)e.Value!) })">
                             @WhenOptions
@@ -152,7 +158,7 @@
     private async Task AddAsync()
     {
         var condition = Condition.Parse(Tab, _condition);
-        _refused = await Desk.CheckAsync(condition, CancellationToken.None);
+        _refused = await Desk.CheckAsync(condition, Lag(_when), CancellationToken.None);
         if (_refused is not null)
         {
             return;

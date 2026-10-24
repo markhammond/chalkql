@@ -460,10 +460,10 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task Alert_conditions_are_run_by_ChalkQL_along_paths_and_on_the_wait_and_what_it_refuses_is_refused()
+    public async Task Alerts_are_incremental_views_along_paths_and_on_the_wait_and_what_ChalkQL_refuses_is_refused()
     {
         await using var host = await StartAsync(new BlotterOptions { Orders = 20_000, Exchange = Quiet() });
-        await using var desk = new AlertDesk(host, NullLogger<AlertDesk>.Instance);
+        using var desk = new AlertDesk(host);
         var session = desk.Open("browser");
         var fired = new List<AlertEvent>();
         session.Fired += alert => { lock (fired) fired.Add(alert); };
@@ -477,12 +477,13 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
             Rule("late", Tabs.Fills, "order.client = client", TimeSpan.FromSeconds(1)),
         ]);
 
-        // The desk keeps the arrival tables while an alert wants them.
-        await UntilAsync(() => host.KeepArrivals);
+        // The desk asks the host for a view per condition; the host opens them on its catch-up loop.
+        await UntilAsync(() => host.AlertViewsOpen == 4 || !host.AlertsRefused.IsEmpty);
+        Assert.True(host.AlertsRefused.IsEmpty, string.Join("\n", host.AlertsRefused.Values));
         host.Exchange.Send(400);
         await UntilAsync(() => Fired("partial") && Fired("filled"), TimeSpan.FromSeconds(15));
 
-        // A wait for the database fires the rule that watches it, and says how long.
+        // A wait for the database fires the rule that watches it, and says how long, by the engine's clock.
         host.Exchange.StallIngestion(TimeSpan.FromSeconds(5));
         host.Exchange.Send(100);
         await UntilAsync(() => Fired("late"), TimeSpan.FromSeconds(15));
@@ -493,10 +494,15 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
             output.WriteLine(string.Join("\n", fired.Select(a => $"{a.RuleId} ×{a.Count}: {a.Latest}")));
         }
 
+        // A rule dropped closes its view.
+        session.SetRules([Rule("filled", Tabs.Orders, "status = 'Filled'")]);
+        await UntilAsync(() => host.AlertViewsOpen == 1);
+
         // What ChalkQL refuses, the desk refuses before a browser keeps it.
-        Assert.Null(await desk.CheckAsync(Condition.Parse(Tabs.Fills, "order.status IN ('New', 'Partial') AND price > 0"), CancellationToken.None));
-        Assert.NotNull(await desk.CheckAsync(Condition.Parse(Tabs.Fills, "qty = 'x'"), CancellationToken.None));
-        Assert.Equal("Fills has no column 'nope'", await desk.CheckAsync(Condition.Parse(Tabs.Fills, "nope = 1"), CancellationToken.None));
+        Assert.Null(await desk.CheckAsync(Condition.Parse(Tabs.Fills, "order.status IN ('New', 'Partial') AND price > 0"), null, CancellationToken.None));
+        Assert.Null(await desk.CheckAsync(Condition.Parse(Tabs.Fills, "order.status = 'New'"), TimeSpan.FromSeconds(5), CancellationToken.None));
+        Assert.NotNull(await desk.CheckAsync(Condition.Parse(Tabs.Fills, "qty = 'x'"), null, CancellationToken.None));
+        Assert.Equal("Fills has no column 'nope'", await desk.CheckAsync(Condition.Parse(Tabs.Fills, "nope = 1"), null, CancellationToken.None));
 
         bool Fired(string rule)
         {

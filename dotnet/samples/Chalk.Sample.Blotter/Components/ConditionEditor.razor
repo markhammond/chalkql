@@ -67,7 +67,7 @@
             return [];
         }
 
-        return await Desk.CheckAsync(condition, CancellationToken.None) is { } refused
+        return await Desk.CheckAsync(condition, null, CancellationToken.None) is { } refused
             ? [new Problem(0, text.Length, "error", refused)]
             : [];
     }
