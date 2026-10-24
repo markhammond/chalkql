@@ -37,11 +37,12 @@ public sealed class Column
 
     private Column(
         string name, string title, ColumnKind kind, Type type, Func<IRow, object> value, Comparison<IRow> compare,
-        Func<IRow, string> show, IReadOnlyList<string>? choices)
+        Func<IRow, string> show, IReadOnlyList<string>? choices, string? description = null)
     {
         Type = type;
         Name = name;
         Title = title;
+        Description = description;
         Kind = kind;
         _value = value;
         Compare = compare;
@@ -52,6 +53,9 @@ public sealed class Column
     public string Name { get; }
 
     public string Title { get; }
+
+    /// <summary>What the column holds, where its title alone leaves it open; shown on its heading.</summary>
+    public string? Description { get; }
 
     public ColumnKind Kind { get; }
 
@@ -103,9 +107,9 @@ public sealed class Column
         name, title, ColumnKind.Choice, typeof(string), r => value((T)r), (a, b) => string.CompareOrdinal(value((T)a), value((T)b)),
         r => value((T)r), choices);
 
-    public static Column Time<T>(string name, string title, Func<T, DateTime> value) where T : IRow => new(
+    public static Column Time<T>(string name, string title, Func<T, DateTime> value, string? description = null) where T : IRow => new(
         name, title, ColumnKind.Time, typeof(DateTime), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
-        r => value((T)r).ToString("MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture), null);
+        r => value((T)r).ToString("MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture), null, description);
 
     public override string ToString() => Name;
 }

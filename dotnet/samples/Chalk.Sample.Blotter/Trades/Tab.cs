@@ -17,8 +17,9 @@ public sealed class Tab
 {
     private Tab(
         string name, string title, IReadOnlyList<Column> columns, Column key, Column time, string table,
-        string select, Func<RecordBatch, int, IRow> read, Func<DbDataReader, IRow> readDb, bool overrides)
+        string select, Func<RecordBatch, int, IRow> read, Func<DbDataReader, IRow> readDb, bool overrides, int frozen)
     {
+        Frozen = frozen;
         Name = name;
         Title = title;
         Columns = columns;
@@ -37,6 +38,12 @@ public sealed class Tab
 
     /// <summary>Every column, in the grid's order.</summary>
     public IReadOnlyList<Column> Columns { get; }
+
+    /// <summary>
+    /// How many of <see cref="Columns"/>, from the first, stay in place while the grid scrolls sideways:
+    /// enough to tell which row is which.
+    /// </summary>
+    public int Frozen { get; }
 
     /// <summary>The unique key, which breaks every tie in a sort.</summary>
     public Column Key { get; }
@@ -74,14 +81,14 @@ public sealed class Tab
     private static Tab MakeOrders()
     {
         var key = Column.Uuid<Order>("order_id", "Order", o => o.OrderId);
-        var time = Column.Time<Order>("order_time", "Ordered", o => o.OrderTime);
+        var time = Column.Time<Order>("order_time", "Time", o => o.OrderTime, "When the client placed the order");
         return new Tab(
             "orders",
             "Client orders",
             [
+                time,
                 key,
                 Column.Int<Order>("version", "Ver", o => o.Version),
-                time,
                 Column.Text<Order>("cl_ord_id", "ClOrdId", o => o.ClOrdId),
                 Column.Text<Order>("client", "Client", o => o.Client),
                 Column.Choice<Order>("region", "Region", o => o.Region, Reference.Regions),
@@ -101,20 +108,21 @@ public sealed class Tab
             Order.Select,
             (batch, row) => Order.Read(batch, row),
             reader => Order.Read(reader),
-            overrides: true);
+            overrides: true,
+            frozen: 2);
     }
 
     private static Tab MakeFills()
     {
         var key = Column.Uuid<Fill>("fill_id", "Fill", f => f.FillId);
-        var time = Column.Time<Fill>("event_time", "Filled at", f => f.EventTime);
+        var time = Column.Time<Fill>("event_time", "Time", f => f.EventTime, "When the order was filled");
         return new Tab(
             "fills",
             "Fills",
             [
+                time,
                 key,
                 Column.Uuid<Fill>("order_id", "Order", f => f.OrderId),
-                time,
                 Column.Text<Fill>("cl_ord_id", "ClOrdId", f => f.ClOrdId),
                 Column.Text<Fill>("client", "Client", f => f.Client),
                 Column.Choice<Fill>("region", "Region", f => f.Region, Reference.Regions),
@@ -132,6 +140,7 @@ public sealed class Tab
             Fill.Select,
             (batch, row) => Fill.Read(batch, row),
             reader => Fill.Read(reader),
-            overrides: false);
+            overrides: false,
+            frozen: 3);
     }
 }

@@ -103,6 +103,10 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
 - **Columns hold their widths.** Each column keeps the width it first took with rows in it, so the
   headings do not shift as the grid scrolls; a value wider than its column is cut short with an
   ellipsis.
+- **Time first, and frozen.** Each tab leads with its time, `Time`: when the client placed the order,
+  or when the order was filled. The first columns stay in place as the grid scrolls sideways, so every
+  row can still be told apart: the expander, Time and Order on the orders tab; Time, Fill and Order on
+  the fills tab.
 - **A new sort or filter dims the grid** until its first page is in.
 - **Flashes.** The cells of a row that changed flash, and an order or fill the streams have just sent
   flashes whole. A row scrolled into view does not flash.

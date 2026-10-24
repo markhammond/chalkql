@@ -117,8 +117,10 @@ td a { color: var(--accent); text-decoration: none; }
 /* Two names for one animation: a cell that changes again swaps between them, which restarts it. */
 @keyframes flash-a { from { background: var(--flash); } to { background: transparent; } }
 @keyframes flash-b { from { background: var(--flash); } to { background: transparent; } }
-@keyframes new-a { from { background: var(--flash-new); } to { background: transparent; } }
-@keyframes new-b { from { background: var(--flash-new); } to { background: transparent; } }
+/* A new row flashes as a shade over its cells, not as their background: a frozen cell keeps its own,
+   so what scrolls beneath it never shows through. */
+@keyframes new-a { from { box-shadow: inset 0 0 0 999px var(--flash-new); } to { box-shadow: inset 0 0 0 999px transparent; } }
+@keyframes new-b { from { box-shadow: inset 0 0 0 999px var(--flash-new); } to { box-shadow: inset 0 0 0 999px transparent; } }
 .cell.flash-a { animation: flash-a 1.6s ease-out; }
 .cell.flash-b { animation: flash-b 1.6s ease-out; }
 tr.new-a td { animation: new-a 2s ease-out; }
@@ -200,6 +202,13 @@ h2 { font-size: 14px; margin: 8px 0 0; }
 .chevron { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.12s ease; }
 .chevron.open { transform: rotate(90deg); }
 /* 12px before the chevron; after it, the order cell's own 8px. */
+/* Frozen columns, once the widths are fixed: they stay in place as the grid scrolls sideways, over
+   what scrolls beneath them, so they keep a background of their own; a rule marks where they end. */
+table[data-pinned] .frozen { position: sticky; z-index: 1; background: var(--panel); }
+table[data-pinned] thead th.frozen { z-index: 3; }
+table[data-pinned] tbody tr:nth-child(even) td.frozen { background: var(--row-alt); }
+table[data-pinned] tbody tr.child td.frozen { background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
+table[data-pinned] .frozen-last { box-shadow: inset -1px 0 0 var(--line); }
 td.expander, th.expander { width: 9px; text-align: center; padding: 0 0 0 12px; }
 tr.child td { background: color-mix(in srgb, var(--accent) 5%, var(--panel)); color: var(--muted); font-size: 12px; }
 td .cell.id, .id { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }

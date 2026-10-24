@@ -42,6 +42,24 @@ window.blotter = {
         heads.forEach((th, i) => { th.style.width = `${widths[i]}px`; });
         table.style.minWidth = `${widths.reduce((sum, width) => sum + width, 0)}px`;
         table.style.tableLayout = "fixed";
+
+        // The frozen columns stay in place as the grid scrolls sideways, each as far from the left as
+        // the frozen columns before it are wide: known now the widths are fixed.
+        table.id ||= `blotter-${Math.random().toString(36).slice(2)}`;
+        const rules = [];
+        let left = 0;
+        heads.forEach((th, i) => {
+            if (th.classList.contains("frozen")) {
+                rules.push(`#${table.id} tr > :nth-child(${i + 1}) { left: ${left}px; }`);
+                left += widths[i];
+            }
+        });
+        const style = document.createElement("style");
+        style.textContent = rules.join("\n");
+        document.head.appendChild(style);
+
+        // An attribute of the page's own, which the grid does not render and so never resets.
+        table.dataset.pinned = "";
         return true;
     },
 
