@@ -52,8 +52,8 @@ public sealed class SortSpec : IComparer<IRow>, IEquatable<SortSpec>
     public string Name { get; }
 
     /// <summary>
-    /// The tab's own order, newest first, which the user has not chosen: no column shows as sorted,
-    /// and a click on any column, the time column too, sorts by it descending.
+    /// The tab's own order, newest first, which the user has not chosen: no column ranks as sorted, the
+    /// time column shows its arrow muted, and a click on it sorts ascending, as it is descending already.
     /// </summary>
     public bool IsDefault { get; private init; }
 
@@ -70,6 +70,11 @@ public sealed class SortSpec : IComparer<IRow>, IEquatable<SortSpec>
     /// </summary>
     public SortSpec Click(Column column, bool shift)
     {
+        if (IsDefault && column == Tab.Time)
+        {
+            return new SortSpec(Tab, [new SortColumn(column, Descending: false)]);
+        }
+
         var chosen = IsDefault ? [] : Chosen;
         var at = chosen.IndexOf(chosen.FirstOrDefault(k => k.Column == column));
         if (!shift && (at < 0 || chosen.Length > 1))
@@ -106,6 +111,9 @@ public sealed class SortSpec : IComparer<IRow>, IEquatable<SortSpec>
     }
 
     public bool IsDescending(Column column) => !IsDefault && Chosen.Any(k => k.Column == column && k.Descending);
+
+    /// <summary>Whether <paramref name="column"/> is what the tab's own order sorts by: shown, but muted, as not chosen.</summary>
+    public bool ByDefault(Column column) => IsDefault && column == Tab.Time;
 
     /// <summary>Every key turned round: read from a row in this order, the rows before it, nearest first.</summary>
     public SortSpec Reversed() => new(

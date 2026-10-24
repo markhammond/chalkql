@@ -62,24 +62,28 @@ public sealed class SortSpecTests
     }
 
     [Fact]
-    public void Newest_first_shows_no_column_sorted_and_time_cycles_like_any_column()
+    public void Newest_first_shows_time_by_default_and_a_click_on_it_goes_ascending_then_back()
     {
         var time = Orders.Time;
         var none = Orders.DefaultSort;
 
         Assert.True(none.IsDefault);
         Assert.Equal(0, none.RankOf(time));
-        Assert.False(none.IsDescending(time));
+        Assert.True(none.ByDefault(time));
+        Assert.False(none.ByDefault(Orders.Named("client")));
 
-        var descending = none.Click(time, shift: false);
-        Assert.False(descending.IsDefault);
-        Assert.Equal(none.Name, descending.Name);
-        Assert.Equal(1, descending.RankOf(time));
-        Assert.True(descending.IsDescending(time));
-
-        var ascending = descending.Click(time, shift: false);
+        // Descending already, by default: the first click turns it round.
+        var ascending = none.Click(time, shift: false);
+        Assert.False(ascending.IsDefault);
+        Assert.False(ascending.ByDefault(time));
         Assert.Equal("order_time,order_id desc", ascending.Name);
+        Assert.Equal(1, ascending.RankOf(time));
         Assert.True(ascending.Click(time, shift: false).IsDefault);
+
+        // Descending, chosen within another sort, cycles like any column.
+        var both = none.Click(Orders.Named("client"), shift: false).Click(time, shift: true);
+        Assert.Equal("client desc,order_time desc,order_id desc", both.Name);
+        Assert.Equal("client desc,order_time,order_id desc", both.Click(time, shift: true).Name);
     }
 
     [Fact]

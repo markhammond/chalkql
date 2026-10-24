@@ -81,7 +81,7 @@ public sealed class Column
     /// <summary>The value as the grid shows it.</summary>
     public Func<IRow, string> Show { get; }
 
-    /// <summary>The value in full, as an order's own page shows it: a time to the microsecond.</summary>
+    /// <summary>The value in full, as an order's own page and a time's hover show it: a time to the microsecond.</summary>
     public Func<IRow, string> Detail { get; }
 
     /// <summary>
@@ -128,16 +128,13 @@ public sealed class Column
 
     public static Column Time<T>(string name, string title, Func<T, DateTime> value, string? description = null) where T : IRow => new(
         name, title, ColumnKind.Time, typeof(DateTime), r => value((T)r), (a, b) => value((T)a).CompareTo(value((T)b)),
-        r => value((T)r).ToString("HH:mm:ss", CultureInfo.InvariantCulture), null, description,
-        r => value((T)r).ToString("HH:mm:ss.ffffff", CultureInfo.InvariantCulture));
+        r => value((T)r).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture), null, description,
+        r => value((T)r).ToString("yyyy-MM-dd HH:mm:ss.ffffff", CultureInfo.InvariantCulture));
 
     /// <summary>A value worked out from others and only shown, see <see cref="Derived"/>: right-aligned if <paramref name="numeric"/>.</summary>
     public static Column Shown<T>(string name, string title, Func<T, string> show, bool numeric, string? description = null) where T : IRow => new(
         name, title, numeric ? ColumnKind.Number : ColumnKind.Text, typeof(string), r => show((T)r),
         (a, b) => string.CompareOrdinal(show((T)a), show((T)b)), r => show((T)r), null, description, derived: true);
-
-    /// <summary>The date of a time, apart from it.</summary>
-    public static string Date(DateTime time) => time.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
     /// <summary>What a value of nought shows as: a dash, which the eye passes over.</summary>
     public const string Nought = "–";

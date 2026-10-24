@@ -122,7 +122,7 @@
                             <button class="sort" type="button">
                                 @column.Title
                                 @* The arrow keeps its place when the column is not sorted, so the heading is as wide either way. *@
-                                <span class="arrow @(_sort.RankOf(column) > 0 ? "" : "unsorted")">@(_sort.IsDescending(column) || _sort.RankOf(column) == 0 ? "▼" : "▲")</span>
+                                <span class="arrow @(_sort.RankOf(column) > 0 ? "" : _sort.ByDefault(column) ? "default" : "unsorted")">@(_sort.IsDescending(column) || _sort.RankOf(column) == 0 ? "▼" : "▲")</span>
                                 @if (_sort.RankOf(column) is var rank and > 0 && _sort.Chosen.Length > 1)
                                 {
                                     <span class="rank">@rank</span>
@@ -135,7 +135,14 @@
                     <ChildContent>
                         @if (context.Row is Fill fill && context.Parent is not null)
                         {
-                            <span class="cell @(column.Kind == ColumnKind.Id ? "id" : "")">@NestedCell(column, fill)</span>
+                            @if (column.Kind == ColumnKind.Time)
+                            {
+                                @TimeCell(NestedCell(column, fill), NestedCell(column, fill, full: true), "")
+                            }
+                            else
+                            {
+                                <span class="cell @(column.Kind == ColumnKind.Id ? "id" : "")">@NestedCell(column, fill)</span>
+                            }
                         }
                         else if (column.Name == "version")
                         {
@@ -165,7 +172,14 @@
                         }
                         else
                         {
-                            <span class="cell @(column.Kind == ColumnKind.Id ? "id" : "") @context.Flash[index]" title="@(column.Kind == ColumnKind.Id ? column.Show(context.Row) : null)">@column.Show(context.Row)</span>
+                            if (column.Kind == ColumnKind.Time)
+                            {
+                                @TimeCell(column.Show(context.Row), column.Detail(context.Row), context.Flash[index])
+                            }
+                            else
+                            {
+                                <span class="cell @(column.Kind == ColumnKind.Id ? "id" : "") @context.Flash[index]" title="@(column.Kind == ColumnKind.Id ? column.Show(context.Row) : null)">@column.Show(context.Row)</span>
+                            }
                         }
                     </ChildContent>
                 </TemplateColumn>
@@ -308,7 +322,7 @@
     protected override async Task OnInitializedAsync()
     {
         _flashes = new Flashes(Tab.Columns);
-        _hiddenColumns = Tab.Overrides ? ["version", "region", "channel", "filled_qty", "date"] : ["region", "channel", "date"];
+        _hiddenColumns = Tab.Overrides ? ["version", "region", "channel", "filled_qty"] : ["region", "channel"];
         _sort = Tab.DefaultSort;
         _pages = Host.Pages.View(_sort);
         _provider = ProvideAsync;
@@ -624,11 +638,22 @@
         index == Tab.Frozen - 1 ? "frozen-last" : null,
     }.Where(c => c is not null));
 
-    private string NestedCell(Column column, Fill fill) => column.Name switch
+    /// <summary>
+    /// A time with its date cut off at the left: the date, in a box an ellipsis wide, shown as one,
+    /// then the time of day, whole, after a space; on hover, the time in full, date and microseconds.
+    /// The date is still there, to copy.
+    /// </summary>
+    private static RenderFragment TimeCell(string shown, string full, string? flash) => __builder =>
+    {
+        var space = shown.IndexOf(' ');
+        <span class="cell time @flash" title="@full"><span class="date">@shown[..space]</span>@shown[space..]</span>
+    };
+
+    private string NestedCell(Column column, Fill fill, bool full = false) => column.Name switch
     {
         "order_id" => $"↳ fill {fill.FillId}",
         "version" or "filled_qty" => "",
-        "order_time" or "event_time" => Tab.Fills.Named("event_time").Show(fill),
+        "order_time" or "event_time" => full ? Tab.Fills.Named("event_time").Detail(fill) : Tab.Fills.Named("event_time").Show(fill),
         "avg_price" => Tab.Fills.Named("price").Show(fill),
         "status" => "fill",
         var name when Tab.Fills.Columns.Any(c => c.Name == name) => Tab.Fills.Named(name).Show(fill),

@@ -120,6 +120,8 @@ thead th {
     padding: 7px 1px 7px 1.25em; cursor: pointer; box-sizing: border-box; user-select: none; white-space: nowrap;
 }
 .sort .arrow.unsorted { visibility: hidden; }
+/* The tab's own order, newest first: shown, but muted, as no one chose it. */
+.sort .arrow.default { color: var(--muted); opacity: 0.6; }
 .sort .arrow { color: var(--accent); font-size: 11px; }
 .sort .rank { color: var(--muted); font-size: 10px; }
 th.num .sort { justify-content: flex-end; }
@@ -129,6 +131,12 @@ tbody tr:nth-child(even) { background: var(--row-alt); }
 td { padding: 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
 td .cell { display: block; padding: 0 0.75em 0 1.25em; line-height: 29px; overflow: hidden; text-overflow: ellipsis; }
 td.num .cell { text-align: right; }
+/* A time is its date, cut to an ellipsis, then its time of day after a space; the date shows on hover.
+   The date is there, to copy, in a box one character wide, but the browser's own ellipsis would keep
+   its first digit in so small a box: its text is hidden, and an ellipsis drawn over it. */
+td .cell.time { display: flex; white-space: pre; }
+td .cell.time .date { position: relative; width: 1ch; overflow: hidden; color: transparent; }
+td .cell.time .date::before { content: "…"; position: absolute; left: 0; color: var(--muted); }
 td a { color: var(--accent); text-decoration: none; }
 /* An id that opens its order's page: the whole id is the link, in the row's own colour; its arrow
    shows while the pointer is anywhere on the row, and keeps its place when hidden. */

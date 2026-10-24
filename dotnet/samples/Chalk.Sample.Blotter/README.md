@@ -82,7 +82,8 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   the live tail in one statement each.
 - **Sorting by any columns.** A click on a header sorts by that column, descending; a second click
   turns it ascending; a third takes it out of the sort, back to the tab's own order, newest first, in
-  which no header shows an arrow. A shift-click does the same within a sort by several columns, adding
+  which only Time shows an arrow, muted, as no one chose it. A click on Time there turns it ascending,
+  as it is descending already. A shift-click does the same within a sort by several columns, adding
   the column last, and the header shows each column's place in it. QuickGrid sorts by one column itself; its multi-column sort is a pull request
   ([dotnet/aspnetcore#62604](https://github.com/dotnet/aspnetcore/pull/62604)) not yet merged, so the
   page draws its own headers.
@@ -109,10 +110,11 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   row can still be told apart: the expander, Time and Order on the orders tab; Time and Fill on the
   fills tab.
 - **Choosing columns.** "Columns" at the right of the tab bar shows or hides any column but the frozen
-  ones. Ver, Region, Channel, Filled and Date start hidden.
-- **Shown only.** Fill % (of an order) and Date are worked out from the row in the host: shown, not
-  sorted or filtered by, and refused if asked to be. The grid shows times to the second; an order's page
-  shows them to the microsecond, with the date apart.
+  ones. Ver, Region, Channel and Filled start hidden.
+- **Shown only.** Fill % (of an order) is worked out from the row in the host: shown, not sorted or
+  filtered by, and refused if asked to be.
+- **Times with their date, cut from the left.** A time shows as `… 03:26:23`, an ellipsis where its
+  date is; on hover, it shows in full, date and microseconds, as an order's page does.
 - **Numbers as finance writes them:** no zero before the point of a fraction, none after its last digit
   that counts (.25, not 0.2500), and a dash for nought. Prices are rounded to six significant figures,
   and written in scientific notation (1.23457e-5) where they would take more than eight digits. Every

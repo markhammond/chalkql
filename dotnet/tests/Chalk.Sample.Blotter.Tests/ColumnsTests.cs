@@ -39,15 +39,15 @@ public sealed class ColumnsTests
     }
 
     [Fact]
-    public void The_grid_shows_times_to_the_second_and_an_order_page_to_the_microsecond()
+    public void The_grid_shows_times_with_their_date_to_the_second_and_an_order_page_to_the_microsecond()
     {
         var time = Tab.Fills.Named("event_time");
         var fill = new Fill(
             Guid.CreateVersion7(), Guid.CreateVersion7(), new DateTime(2026, 10, 24, 3, 4, 5, 678, 901, DateTimeKind.Utc),
             "ACORN-1", "ACORN", "EMEA", "API", "BTC/USD Perp", "Buy", 1, 2, 2, 0);
 
-        Assert.Equal("03:04:05", time.Show(fill));
-        Assert.Equal("03:04:05.678901", time.Detail(fill));
-        Assert.Equal("2026-10-24", Tab.Fills.Named("date").Show(fill));
+        Assert.Equal("2026-10-24 03:04:05", time.Show(fill));
+        Assert.Equal("2026-10-24 03:04:05.678901", time.Detail(fill));
+        Assert.DoesNotContain(Tab.All.SelectMany(t => t.Columns), c => c.Name == "date");
     }
 }
