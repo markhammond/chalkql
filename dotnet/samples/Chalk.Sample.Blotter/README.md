@@ -5,14 +5,14 @@ PostgreSQL, while the house keeps accepting and filling orders. Every tab scroll
 rows, sorts by any columns, filters on any column, flashes what changed, and drives alerts. The host
 holds no copy of the corpus: it maintains an ephemeral memory cache to within a budget of a few megabytes
 (see [What ChalkQL brings to the table](#what-chalkql-brings-to-the-table)),
-which each query capped to 5 seconds, and never shows an order at an older version than one it knows of.
+with each query capped at 5 s, and never shows an order at an older version than one it knows of.
 
 ## A bolt-on compromise
 
 Most live views are layered onto existing systems: someone else's database and external feed.
 And so the blotter is intentionally built as **bolt-on** machinery, imposing the fewest prerequisites.
 Of the database it asks only what is reasonable: rows found by key, sorted and filtered at source, with
-an estimate of a query's size. Of the streams, only that it is reliable and delivers what
+an estimate of a query's size. Of the streams, only that they are reliable and deliver what
 is sent after a reader subscribes. ChalkQL can then make the most of it, as
 [What ChalkQL brings to the table](#what-chalkql-brings-to-the-table) describes.
 
