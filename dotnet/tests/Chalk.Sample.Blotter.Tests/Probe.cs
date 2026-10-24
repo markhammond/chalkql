@@ -126,7 +126,7 @@ internal static class Probe
         try
         {
             market.Send(2000);
-            await UntilAsync(() => market.Quiet, TimeSpan.FromSeconds(10));
+            await UntilAsync(() => market.Quiet, TimeSpan.FromSeconds(30));
             await host.CaughtUpAsync(CancellationToken.None);
             foreach (var behind in new[] { true, false })
             {

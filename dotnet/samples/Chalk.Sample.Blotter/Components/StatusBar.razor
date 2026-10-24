@@ -22,6 +22,11 @@ else
 <span class="chip" title="Changes a second the house is making now, and the versions and fills the streams have sent">
     <span class="label">feed</span><b>@Status.FeedRate.ToString("N0", CultureInfo.InvariantCulture)/s</b>
     <span class="label">sent</span>@Status.Published.ToString("N0", CultureInfo.InvariantCulture)
+    @if (Status.SentLate + Status.SentAfterDatabase > 0)
+    {
+        <span class="label">late</span>@Status.SentLate.ToString("N0", CultureInfo.InvariantCulture)
+        <span class="label">after the database</span>@Status.SentAfterDatabase.ToString("N0", CultureInfo.InvariantCulture)
+    }
 </span>
 <span class="chip" title="Order versions that have happened and that the order stream, running behind the fills, has not sent yet">
     <span class="label">orders behind fills</span><b>@Status.OrdersHeld.ToString("N0", CultureInfo.InvariantCulture)</b>

@@ -61,6 +61,10 @@
         <Actions>
                 <button @onclick="Burst" title="The house takes and fills 3,000 orders at once">Simulate burst</button>
                 <button @onclick="Stall" title="The database writes nothing for 20 s, while the streams go on">Stall database 20 s</button>
+                <button @onclick="ToggleDisorder" aria-pressed="@Host.Exchange.Disordered"
+                        title="Out of order: a few rows on each stream sent late, by a delay mostly short and now and then long; and a few written to the database before they are sent">
+                    Out of order: @(Host.Exchange.Disordered ? "on" : "off")
+                </button>
                 @if (Host.Options.Current == CurrentSync.Lagging)
                 {
                     <button @onclick="StallCurrent" title="The job that keeps orders_current applies nothing for 20 s, while order_versions is written">Stall orders_current 20 s</button>
@@ -244,6 +248,8 @@
     private void Burst() => Host.Exchange.Send(3000);
 
     private void Stall() => Host.Exchange.StallIngestion(TimeSpan.FromSeconds(20));
+
+    private void ToggleDisorder() => Host.Exchange.Disordered = !Host.Exchange.Disordered;
 
     private void StallCurrent() => Host.Exchange.StallCurrent(TimeSpan.FromSeconds(20));
 

@@ -288,7 +288,7 @@ public sealed class BlotterHost : IAsyncDisposable
             while (true)
             {
                 var scope = await LiveScope.CreateAsync(_engine!, tab, filter, _budget, _options.Maintenance, ct).ConfigureAwait(false);
-                await scope.UpdateAsync(_tail, _version, _ordersThrough, _fillsThrough, ct).ConfigureAwait(false);
+                await scope.UpdateAsync(_tail, _version, Mark(), ct).ConfigureAwait(false);
                 if (scope.Fault is { } fault)
                 {
                     await scope.DisposeAsync().ConfigureAwait(false);
@@ -853,6 +853,10 @@ public sealed class BlotterHost : IAsyncDisposable
         }, _ordersThrough, _fillsThrough, CancellationToken.None).ConfigureAwait(false);
     }
 
+    /// <summary>How far the host has read each stream, now: by time, and by count.</summary>
+    private StreamMark Mark() =>
+        new(_ordersThrough, _fillsThrough, Interlocked.Read(ref _ordersRead), Interlocked.Read(ref _fillsRead));
+
     /// <summary>One refresh of the engine, then every scope brought to it, then the pages told.</summary>
     private async Task RefreshAsync(Action<RefreshBuilder> changes, DateTime ordersThrough, DateTime fillsThrough, CancellationToken ct)
     {
@@ -860,9 +864,10 @@ public sealed class BlotterHost : IAsyncDisposable
         await _engine!.RefreshAsync(refresh => changes(refresh.Version(next)), ct).ConfigureAwait(false);
         _version = next;
         (_ordersThrough, _fillsThrough) = (ordersThrough, fillsThrough);
+        var mark = Mark();
         foreach (var scope in _scopes.Values)
         {
-            await scope.UpdateAsync(_tail, _version, _ordersThrough, _fillsThrough, ct).ConfigureAwait(false);
+            await scope.UpdateAsync(_tail, _version, mark, ct).ConfigureAwait(false);
         }
 
         Published?.Invoke(_version);
@@ -939,6 +944,8 @@ public sealed class BlotterHost : IAsyncDisposable
             FeedRate = _exchange?.CurrentRate ?? 0,
             Published = (_exchange?.Orders.Published ?? 0) + (_exchange?.Fills.Published ?? 0),
             OrdersHeld = _exchange?.OrdersHeld ?? 0,
+            SentLate = _exchange?.SentLate ?? 0,
+            SentAfterDatabase = _exchange?.SentAfterDatabase ?? 0,
             TailOrders = _tail.Count,
             TailFills = _tail.FillCount,
             TailConfirmed = _tail.Confirmed,
@@ -1102,6 +1109,11 @@ public sealed record BlotterStatus
 
     /// <summary>Order versions that have happened and that the order stream, running behind the fills, has not sent yet.</summary>
     public int OrdersHeld { get; init; }
+
+    /// <summary>Rows the streams have sent late, and after the database had written them, while out of order.</summary>
+    public long SentLate { get; init; }
+
+    public long SentAfterDatabase { get; init; }
 
     public int NotYetIngested { get; init; }
 

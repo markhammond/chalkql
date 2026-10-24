@@ -30,6 +30,33 @@ public sealed record ExchangeOptions
     /// <summary>How far back the streams can replay.</summary>
     public TimeSpan FeedRetention { get; init; } = TimeSpan.FromMinutes(30);
 
+    /// <summary>
+    /// Whether the streams are out of order: some rows sent late (<see cref="Disorder"/>), and some
+    /// written to the database before they are sent (<see cref="DatabaseFirst"/>). The page can turn it
+    /// on and off as the exchange runs.
+    /// </summary>
+    public bool Disordered { get; init; }
+
+    /// <summary>
+    /// Of the rows each stream sends, while out of order, the share sent late: after rows that happened
+    /// after them, by a delay most often short and now and then long (log-normal about
+    /// <see cref="LateMedian"/>, at most <see cref="LateMost"/>). The database writes them as usual.
+    /// </summary>
+    public double Disorder { get; init; } = 0.02;
+
+    public TimeSpan LateMedian { get; init; } = TimeSpan.FromMilliseconds(400);
+
+    public TimeSpan LateMost { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Of the rows each stream sends, while out of order, the share the database writes first, at once,
+    /// and the stream sends some time after (log-normal about <see cref="DatabaseFirstMedian"/>): the
+    /// blotter finds them in the database before it hears of them.
+    /// </summary>
+    public double DatabaseFirst { get; init; } = 0.01;
+
+    public TimeSpan DatabaseFirstMedian { get; init; } = TimeSpan.FromMilliseconds(200);
+
     public IngestLag Lag { get; init; } = new();
 
     /// <summary>
@@ -63,6 +90,13 @@ public sealed class Exchange : IAsyncDisposable
     private readonly IngestWriter<Fill> _fillWriter;
     private readonly IngestWriter<Order>? _currentWriter;
     private readonly Queue<(Order Order, DateTime Release)> _held = new();
+    private readonly PriorityQueue<Order, DateTime> _lateOrders = new();
+    private readonly PriorityQueue<Fill, DateTime> _lateFills = new();
+    private readonly TradeStore _store;
+    private readonly Action<IReadOnlyList<Order>> _writeOrders;
+    private volatile bool _disordered;
+    private long _sentLate;
+    private long _sentAfterDatabase;
     private readonly CancellationTokenSource _stop = new();
     private readonly Lock _gate = new();
     private readonly double[] _mids;
@@ -77,6 +111,8 @@ public sealed class Exchange : IAsyncDisposable
         TradeStore store, ExchangeOptions options, long orders, DateTime lastEventTime, List<Order> open, CurrentSync sync)
     {
         _options = options;
+        _store = store;
+        _disordered = options.Disordered;
         _random = new Random(options.Seed);
         _open = open;
         _orders = orders;
@@ -92,13 +128,14 @@ public sealed class Exchange : IAsyncDisposable
         {
             var current = new IngestWriter<Order>(store.UpsertCurrent, options.CurrentLag, options.Seed + 3);
             _currentWriter = current;
-            _orderWriter = new IngestWriter<Order>(
-                written => { store.WriteOrders(written); current.Enqueue([.. written]); }, options.Lag, options.Seed + 1);
+            _writeOrders = written => { store.WriteOrders(written); current.Enqueue([.. written]); };
         }
         else
         {
-            _orderWriter = new IngestWriter<Order>(store.WriteOrders, options.Lag, options.Seed + 1);
+            _writeOrders = store.WriteOrders;
         }
+
+        _orderWriter = new IngestWriter<Order>(_writeOrders, options.Lag, options.Seed + 1);
 
         _fillWriter = new IngestWriter<Fill>(store.WriteFills, options.Lag, options.Seed + 2);
     }
@@ -130,6 +167,30 @@ public sealed class Exchange : IAsyncDisposable
         }
     }
 
+    /// <summary>Rows sent late, or written first, that the streams have not sent yet.</summary>
+    public int LateHeld
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _lateOrders.Count + _lateFills.Count;
+            }
+        }
+    }
+
+    /// <summary>Rows the streams have sent late, so far, and rows sent after the database had written them.</summary>
+    public long SentLate => Interlocked.Read(ref _sentLate);
+
+    public long SentAfterDatabase => Interlocked.Read(ref _sentAfterDatabase);
+
+    /// <summary>Whether the streams are out of order now: see <see cref="ExchangeOptions.Disordered"/>.</summary>
+    public bool Disordered
+    {
+        get => _disordered;
+        set => _disordered = value;
+    }
+
     public bool IngestionStalled => _orderWriter.Stalled || _fillWriter.Stalled;
 
     public bool CurrentStalled => _currentWriter?.Stalled ?? false;
@@ -152,8 +213,8 @@ public sealed class Exchange : IAsyncDisposable
 
     public void Resume() => _paused = false;
 
-    /// <summary>Whether the streams have sent everything that has happened: paused, and nothing held for the skew.</summary>
-    public bool Quiet => _paused && OrdersHeld == 0;
+    /// <summary>Whether the streams have sent everything that has happened: paused, and nothing held for the skew or sent late.</summary>
+    public bool Quiet => _paused && OrdersHeld == 0 && LateHeld == 0;
 
     /// <summary>Whether every row sent is in the database, <c>orders_current</c> included.</summary>
     public bool Written => NotYetIngested == 0 && CurrentWaiting == 0;
@@ -185,10 +246,34 @@ public sealed class Exchange : IAsyncDisposable
                 Next(orders, fills);
             }
 
-            // The stream first, then the database: what is in the database has always been sent.
-            var batch = fills.ToArray();
-            Fills.Publish(batch);
-            _fillWriter.Enqueue(batch);
+            // The stream first, then the database, but for a row sent late, or one the database
+            // writes first, when the streams are out of order.
+            var now = DateTime.UtcNow;
+            var (onTime, written, first) = (new List<Fill>(fills.Count), new List<Fill>(fills.Count), new List<Fill>());
+            foreach (var fill in fills)
+            {
+                switch (Route())
+                {
+                    case Way.Late:
+                        written.Add(fill);
+                        _lateFills.Enqueue(fill, now + Late(_options.LateMedian));
+                        _sentLate++;
+                        break;
+                    case Way.DatabaseFirst:
+                        first.Add(fill);
+                        _lateFills.Enqueue(fill, now + Late(_options.DatabaseFirstMedian));
+                        _sentAfterDatabase++;
+                        break;
+                    default:
+                        onTime.Add(fill);
+                        written.Add(fill);
+                        break;
+                }
+            }
+
+            _store.WriteFills(first);
+            Fills.Publish([.. onTime]);
+            _fillWriter.Enqueue([.. written]);
             foreach (var order in orders)
             {
                 // Held for a skew of its own, but never sent before a version that happened before it.
@@ -203,18 +288,86 @@ public sealed class Exchange : IAsyncDisposable
         return ([.. orders], [.. fills]);
     }
 
-    /// <summary>Sends every held order version whose time has come, in the order they happened.</summary>
+    /// <summary>
+    /// Sends every held order version whose time has come, in the order they happened, but for one sent
+    /// late or written first, when the streams are out of order; and every row sent late, or written
+    /// first, whose time has come.
+    /// </summary>
     private void ReleaseOrders(DateTime now)
     {
-        var due = new List<Order>();
+        var (onTime, written, first) = (new List<Order>(), new List<Order>(), new List<Order>());
         while (_held.TryPeek(out var held) && held.Release <= now)
         {
-            due.Add(_held.Dequeue().Order);
+            var order = _held.Dequeue().Order;
+            switch (Route())
+            {
+                case Way.Late:
+                    written.Add(order);
+                    _lateOrders.Enqueue(order, now + Late(_options.LateMedian));
+                    _sentLate++;
+                    break;
+                case Way.DatabaseFirst:
+                    first.Add(order);
+                    _lateOrders.Enqueue(order, now + Late(_options.DatabaseFirstMedian));
+                    _sentAfterDatabase++;
+                    break;
+                default:
+                    onTime.Add(order);
+                    written.Add(order);
+                    break;
+            }
         }
 
-        var batch = due.ToArray();
-        Orders.Publish(batch);
-        _orderWriter.Enqueue(batch);
+        if (first.Count > 0)
+        {
+            _writeOrders(first);
+        }
+
+        Orders.Publish([.. onTime]);
+        _orderWriter.Enqueue([.. written]);
+        Orders.Publish(Due(_lateOrders, now));
+        Fills.Publish(Due(_lateFills, now));
+    }
+
+    private enum Way
+    {
+        OnTime,
+        Late,
+        DatabaseFirst,
+    }
+
+    /// <summary>How a row goes out: on time, late, or after the database has written it.</summary>
+    private Way Route()
+    {
+        if (!_disordered)
+        {
+            return Way.OnTime;
+        }
+
+        var draw = _random.NextDouble();
+        return draw < _options.DatabaseFirst ? Way.DatabaseFirst
+            : draw < _options.DatabaseFirst + _options.Disorder ? Way.Late
+            : Way.OnTime;
+    }
+
+    /// <summary>A delay about <paramref name="median"/>: log-normal, so mostly short and now and then long; at most <see cref="ExchangeOptions.LateMost"/>.</summary>
+    private TimeSpan Late(TimeSpan median)
+    {
+        // A standard normal, by Box and Muller.
+        var normal = Math.Sqrt(-2 * Math.Log(1 - _random.NextDouble())) * Math.Cos(2 * Math.PI * _random.NextDouble());
+        var delay = median * Math.Exp(normal);
+        return delay < _options.LateMost ? delay : _options.LateMost;
+    }
+
+    private static T[] Due<T>(PriorityQueue<T, DateTime> late, DateTime now)
+    {
+        var due = new List<T>();
+        while (late.TryPeek(out _, out var at) && at <= now)
+        {
+            due.Add(late.Dequeue());
+        }
+
+        return [.. due];
     }
 
     public async ValueTask DisposeAsync()

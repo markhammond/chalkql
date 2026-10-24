@@ -121,7 +121,7 @@ public sealed class LiveScope : IAsyncDisposable, IViewSink<ScopeKey, ScopeRow>
     /// Brings the view to the engine's latest epoch, takes what changed, and publishes the state it
     /// now holds, with each row resolved from the tail.
     /// </summary>
-    internal async Task UpdateAsync(Tail tail, long epoch, DateTime ordersThrough, DateTime fillsThrough, CancellationToken ct)
+    internal async Task UpdateAsync(Tail tail, long epoch, StreamMark mark, CancellationToken ct)
     {
         if (Fault is not null)
         {
@@ -135,7 +135,7 @@ public sealed class LiveScope : IAsyncDisposable, IViewSink<ScopeKey, ScopeRow>
             {
             }
 
-            Volatile.Write(ref _state, ScopeState.Of(Tab, Filter, epoch, ordersThrough, fillsThrough, tail, _rows));
+            Volatile.Write(ref _state, ScopeState.Of(Tab, Filter, epoch, mark, tail, _rows));
         }
         catch (Exception failure) when (failure is not OperationCanceledException)
         {
@@ -181,8 +181,7 @@ public sealed class ScopeState
         FilterSpec filter,
         long epoch,
         bool ready,
-        DateTime ordersThrough,
-        DateTime fillsThrough,
+        StreamMark mark,
         IRow[] live,
         IRow[] overridden,
         HashSet<Guid> overriddenIds,
@@ -194,8 +193,7 @@ public sealed class ScopeState
         Filter = filter;
         Epoch = epoch;
         Ready = ready;
-        OrdersThrough = ordersThrough;
-        FillsThrough = fillsThrough;
+        Mark = mark;
         Live = live;
         Overridden = overridden;
         OverriddenIds = overriddenIds;
@@ -214,15 +212,17 @@ public sealed class ScopeState
     /// <summary>Whether the scope has taken its first refresh: an empty state, before then, is no answer.</summary>
     public bool Ready { get; }
 
+    /// <summary>How far the host had read each stream when this state was taken.</summary>
+    public StreamMark Mark { get; }
+
     /// <summary>
-    /// How far the host had read the order stream: every version sent from its subscription up to this
-    /// time is in this state, in the tail or in the database. Because the stream is read in order,
-    /// nothing after it is.
+    /// The latest time of an order version the host had read. Mostly, everything sent before it has
+    /// been read too; but a version sent late can still come.
     /// </summary>
-    public DateTime OrdersThrough { get; }
+    public DateTime OrdersThrough => Mark.OrdersThrough;
 
     /// <summary>The same for the fill stream, which is read apart from the orders and may run ahead of them.</summary>
-    public DateTime FillsThrough { get; }
+    public DateTime FillsThrough => Mark.FillsThrough;
 
     /// <summary>How far the host had read the stream of this state's tab.</summary>
     public DateTime IngestedThrough => Tab.Overrides ? OrdersThrough : FillsThrough;
@@ -248,11 +248,11 @@ public sealed class ScopeState
     public long Bytes => 64L * (Live.Length + Overridden.Length) + 48L * (OverriddenIds.Count + Tail.Count);
 
     internal static ScopeState Empty(Tab tab, FilterSpec filter) =>
-        new(tab, filter, 0, false, default, default, [], [], [], [], ImmutableDictionary<Guid, Order>.Empty,
+        new(tab, filter, 0, false, default, [], [], [], [], ImmutableDictionary<Guid, Order>.Empty,
             ImmutableDictionary<Guid, ImmutableList<Fill>>.Empty);
 
     internal static ScopeState Of(
-        Tab tab, FilterSpec filter, long epoch, DateTime ordersThrough, DateTime fillsThrough, Tail tail, Dictionary<Guid, ScopeRow> rows)
+        Tab tab, FilterSpec filter, long epoch, StreamMark mark, Tail tail, Dictionary<Guid, ScopeRow> rows)
     {
         var live = new List<IRow>(rows.Count);
         var overridden = new List<IRow>();
@@ -301,7 +301,7 @@ public sealed class ScopeState
         }
 
         return new ScopeState(
-            tab, filter, epoch, true, ordersThrough, fillsThrough, [.. live], [.. overridden], overriddenIds, byId, tail.Latest,
+            tab, filter, epoch, true, mark, [.. live], [.. overridden], overriddenIds, byId, tail.Latest,
             tail.FillsByOrder);
     }
 
@@ -379,3 +379,9 @@ public sealed class SortedScope
         return low;
     }
 }
+
+/// <summary>
+/// How far the host had read each stream: the latest event time read on each, and how many rows,
+/// counted from the stream's start. The count is exact whatever order rows arrive in; the time is not.
+/// </summary>
+public readonly record struct StreamMark(DateTime OrdersThrough, DateTime FillsThrough, long OrdersRead, long FillsRead);

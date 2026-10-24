@@ -23,11 +23,13 @@ namespace Chalk.Sample.Blotter.Tests;
 public sealed class BlotterHostTests(ITestOutputHelper output)
 {
     [Theory]
-    [InlineData(CurrentSync.Trigger)]
-    [InlineData(CurrentSync.Lagging)]
-    public async Task Pages_held_still_match_the_oracle_row_for_row_behind_and_caught_up(CurrentSync sync)
+    [InlineData(CurrentSync.Trigger, false)]
+    [InlineData(CurrentSync.Lagging, false)]
+    [InlineData(CurrentSync.Trigger, true)]
+    [InlineData(CurrentSync.Lagging, true)]
+    public async Task Pages_held_still_match_the_oracle_row_for_row_behind_and_caught_up(CurrentSync sync, bool disordered)
     {
-        await using var host = await StartAsync(Roomy() with { Orders = 40_000, Current = sync, Exchange = Busy() });
+        await using var host = await StartAsync(Roomy() with { Orders = 40_000, Current = sync, Exchange = disordered ? Disordered() : Busy() });
         var random = new Random(11);
         var (checks, wrong) = (0, 0);
         for (var round = 0; round < 3; round++)
@@ -42,17 +44,23 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         Assert.True(wrong == 0, $"{wrong} of {checks} pages differed from the oracle: see the FAIL lines in the output");
         Assert.True(checks >= 20, $"only {checks} pages were checked, none wrong");
         Assert.True(host.Status.Evicted > 0, $"the tail never emptied into the database ({checks} pages checked, none wrong)");
+        Assert.True(!disordered || (host.Exchange.SentLate > 0 && host.Exchange.SentAfterDatabase > 0),
+            $"out of order, yet {host.Exchange.SentLate} rows were sent late and {host.Exchange.SentAfterDatabase} after the database");
     }
 
-    [Fact]
-    public async Task Pages_read_while_the_market_runs_keep_their_rows_in_order_once_each_and_filtered()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Pages_read_while_the_market_runs_keep_their_rows_in_order_once_each_and_filtered(bool disordered)
     {
-        await using var host = await StartAsync(Roomy() with { Orders = 40_000, Exchange = Busy() });
+        await using var host = await StartAsync(Roomy() with { Orders = 40_000, Exchange = disordered ? Disordered() : Busy() });
 
         var (checks, wrong) = await Probe.UnderLoadAsync(host, new Random(13), TimeSpan.FromSeconds(10));
 
         Assert.Equal(0, wrong);
         Assert.True(checks >= 20, $"only {checks} pages were checked");
+        Assert.True(!disordered || (host.Exchange.SentLate > 0 && host.Exchange.SentAfterDatabase > 0),
+            $"out of order, yet {host.Exchange.SentLate} rows were sent late and {host.Exchange.SentAfterDatabase} after the database");
     }
 
     [Fact]
@@ -492,6 +500,15 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
 
     // Room for whatever a busy market leaves the tail holding: what these check is the pages, not the budget.
     private static BlotterOptions Roomy() => new() { BudgetBytes = 64L << 20, FindBudget = false };
+
+    // Busy, and out of order: a tenth of each stream's rows sent late, a twentieth written to the database first.
+    private static ExchangeOptions Disordered() => Busy() with
+    {
+        Disordered = true,
+        Disorder = 0.1,
+        DatabaseFirst = 0.05,
+        LateMost = TimeSpan.FromSeconds(3),
+    };
 
     private static ExchangeOptions Busy() => new()
     {

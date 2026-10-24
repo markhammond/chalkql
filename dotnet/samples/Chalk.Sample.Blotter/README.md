@@ -28,6 +28,7 @@ planner runs on a JDK 21+, which `PlannerProcess` starts itself: set `JAVA_HOME`
 |---|---|---|
 | `--orders 500k` | `5m` | the corpus loaded at start: orders, their versions and their fills |
 | `--current lagging` | `trigger` | how `orders_current` keeps up with `order_versions` (below) |
+| `--disorder 0.02` | off | out of order from the start: that share of each stream's rows sent late, and half as many written to the database before they are sent (below); the page can turn it on and off |
 | `--postgres "Host=…;Username=…;Database=…"` | | a server of your own instead: the sample makes a schema `blotter` there, refuses if one exists, and drops it when it stops |
 | `--pg-bin /path/to/postgresql/bin` | found | the installation to start a server from |
 | `--budget-mb 32` | found | the host's memory budget, fixed; without it, the host finds one (below); the page can change it while it runs |
@@ -57,9 +58,10 @@ It does need to assume records are append-only:
 - **Nothing is deleted.** The streams carry versions and fills, not removals, so the host has no way to
   learn that a row has gone. `order_versions` and `fills` only grow; `orders_current` changes in place,
   but only to a higher version.
-- **Each stream sends everything after a reader subscribes, in the order it happened.** The host reads
-  "everything up to here" from where it has read a stream, and the gap fill and the count of what
-  arrives above a held view rely on it.
+- **Each stream sends everything after a reader subscribes**, mostly in the order it happened. A row
+  may come late, after rows that happened later, or after the database has written it, and pages stay
+  correct; but the count of what arrives above a held view is then right only once the late rows land,
+  and the gap fill reaches back 30 s, so a row should not be later than that.
 - **A key is never reused** for another order or fill.
 
 What it takes on instead, in the host:
@@ -122,10 +124,18 @@ changes, and carries its order's details (client, region, channel, instrument, s
 filtered without its order. Orders and fills are identified by UUIDs (version 7), and nothing in the
 host relies on their order: ids only break ties in a sort.
 
-Order versions and fills come on **two streams**, each in its own time order and neither waiting for
-the other. The order stream runs up to 600 ms behind the fills, and a quarter of new orders are filled
-at once, so a fill often arrives **before its order**, or before the version that counts it. The
-streams are reliable from the moment a reader subscribes, and do not replay.
+Order versions and fills come on **two streams**, each mostly in its own time order and neither
+waiting for the other. The order stream runs up to 600 ms behind the fills, and a quarter of new
+orders are filled at once, so a fill often arrives **before its order**, or before the version that
+counts it. The streams are reliable from the moment a reader subscribes, and do not replay.
+
+**Out of order** (`--disorder`, or the page's "Out of order" button): a share of each stream's rows is
+sent late, after rows that happened later, by a delay that is log-normal about 400 ms, now and then
+seconds, never more than 10; and half that share is written to the database first, at once, and sent
+about 200 ms later, so the blotter finds those in the database before it hears of them. The ingestion
+jobs already write rows out of order, each with a lag of its own, so the database may hold an order's
+third version before its second; versions only ever rise within an order, and the trigger and the
+lagging job keep the higher one. The vital statistics count the rows sent late and after the database.
 
 ## The database
 

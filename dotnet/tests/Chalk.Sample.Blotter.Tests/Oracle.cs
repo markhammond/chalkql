@@ -45,14 +45,14 @@ public static class Oracle
         {
             if (tab.Overrides)
             {
-                foreach (var order1 in market.Orders.Through(state.OrdersThrough))
+                foreach (var order1 in market.Orders.Read(state.Mark.OrdersRead))
                 {
                     TradeStore.WriteOrder(import, order1);
                 }
             }
             else
             {
-                foreach (var fill in market.Fills.Through(state.FillsThrough))
+                foreach (var fill in market.Fills.Read(state.Mark.FillsRead))
                 {
                     TradeStore.WriteFill(import, fill);
                 }

@@ -6,8 +6,8 @@ namespace Chalk.Sample.Blotter.Fixtures;
 /// A real-time stream: every row, as it happens, to every subscriber. It is reliable — a subscriber
 /// misses nothing from the moment it subscribes — but it does not replay: what was sent before a
 /// subscription is the database's to tell. Order versions and fills come on two streams of their
-/// own, each in its own time order and neither waiting for the other, so a fill can arrive before the
-/// order it fills.
+/// own, neither waiting for the other, so a fill can arrive before the order it fills; each mostly in
+/// time order, but a row sent late arrives after rows that happened later.
 /// </summary>
 /// <remarks>
 /// The stream keeps what it has sent for a while, but only for checking: the oracle reads it to know
@@ -19,6 +19,9 @@ public sealed class Feed<T> where T : IRow
     private readonly List<T> _log = [];
     private readonly List<Channel<T[]>> _subscribers = [];
     private readonly TimeSpan _retention;
+
+    // Rows trimmed from the front of the log: the log's first row is the stream's row this many in.
+    private long _dropped;
 
     public Feed(string name, TimeSpan retention)
     {
@@ -47,12 +50,17 @@ public sealed class Feed<T> where T : IRow
         }
     }
 
-    /// <summary>Every row the stream still keeps sent at or before <paramref name="through"/>: for checking.</summary>
-    public T[] Through(DateTime through)
+    /// <summary>
+    /// The first <paramref name="count"/> rows the stream published, counted from its start, as far as
+    /// it still keeps them: for checking. By count, not by time, since a row sent late is published
+    /// after rows that happened later.
+    /// </summary>
+    public T[] Read(long count)
     {
         lock (_gate)
         {
-            return _log.GetRange(0, FirstAfter(through)).ToArray();
+            var kept = (int)Math.Clamp(count - _dropped, 0, _log.Count);
+            return _log.GetRange(0, kept).ToArray();
         }
     }
 
@@ -64,7 +72,7 @@ public sealed class Feed<T> where T : IRow
         }
     }
 
-    /// <summary>Publishes a batch, in event-time order and after everything published before, to every subscriber at once.</summary>
+    /// <summary>Publishes a batch, after everything published before, to every subscriber at once.</summary>
     internal void Publish(T[] batch)
     {
         if (batch.Length == 0)
@@ -81,31 +89,15 @@ public sealed class Feed<T> where T : IRow
                 subscriber.Writer.TryWrite(batch);
             }
 
-            // Trimmed in bulk, so the log is copied down rarely rather than on every batch.
+            // Trimmed in bulk, half at a time once the middle is past the retention, so the log is
+            // copied down rarely rather than on every batch; what is dropped is counted.
             var horizon = batch[^1].EventTime - _retention;
             if (_log.Count > 4096 && _log[_log.Count / 2].EventTime < horizon)
             {
-                _log.RemoveRange(0, FirstAfter(horizon));
+                var dropped = _log.Count / 2;
+                _log.RemoveRange(0, dropped);
+                _dropped += dropped;
             }
         }
-    }
-
-    private int FirstAfter(DateTime after)
-    {
-        int low = 0, high = _log.Count;
-        while (low < high)
-        {
-            var middle = (low + high) >>> 1;
-            if (_log[middle].EventTime <= after)
-            {
-                low = middle + 1;
-            }
-            else
-            {
-                high = middle;
-            }
-        }
-
-        return low;
     }
 }

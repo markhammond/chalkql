@@ -9,6 +9,7 @@ using Chalk.Sample.Blotter.Domain;
 using Chalk.Sample.Blotter.Grid;
 
 var budget = Number(Argument(args, "--budget-mb"));
+var disorder = Argument(args, "--disorder") is { } share ? double.Parse(share, CultureInfo.InvariantCulture) : (double?)null;
 var options = new BlotterOptions
 {
     Orders = Number(Argument(args, "--orders")) ?? 5_000_000,
@@ -23,6 +24,11 @@ var options = new BlotterOptions
         "lagging" => CurrentSync.Lagging,
         var other => throw new ArgumentException($"--current takes trigger or lagging, not '{other}'"),
     },
+
+    // Out of order from the start: that share of rows sent late, and half as many written to the database first.
+    Exchange = disorder is { } late
+        ? new ExchangeOptions { Disordered = true, Disorder = late, DatabaseFirst = late / 2 }
+        : new ExchangeOptions(),
 };
 
 var builder = WebApplication.CreateBuilder(args);
