@@ -122,11 +122,13 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   position it holds, and the scroll with it, by as many rows), so scrolling on up reveals them in turn
   and the badge counts down. A click on the badge, or reaching the top however fast, goes back to the
   live top, where new rows push down again.
-- **The status bar**: how `orders_current` is kept and, when by the lagging job, how far behind it is;
-  how far the database is behind the streams; how many order versions the order stream is holding back
-  behind the fills; the tail and what of it is confirmed; what the host holds against the budget; the
-  database's size; the statements run and stopped; the reads and lookups pages made; the confirmations
-  and what they let go; and the gap fill.
+- **The status bars.** Above the grid: whether the host is serving, how `orders_current` is kept (and,
+  by the lagging job, how far behind it is), the feed, how many order versions the order stream is
+  holding back behind the fills, and what the host holds against the budget. Under it: PostgreSQL's
+  size, how far it is behind the streams and the statement time limit; the tail and what of it is
+  confirmed; the statements run and stopped, and the reads and lookups pages made; and the
+  confirmations, what they let go, and the gap fill.
+- **"N new above"** sits across the line under the headings, so the first row shows beneath it.
 - **Simulate burst** makes 3,000 changes at once; **Stall database 20 s** stops the database writing
   while the streams go on; in lagging mode, **Stall orders_current 20 s** stops only the job that keeps
   it. Do them with a small budget to see the host refuse.

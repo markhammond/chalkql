@@ -13,20 +13,9 @@
         <span class="label @(Status.CurrentStalled ? "stalled" : "")">behind by</span>@Status.CurrentWaiting.ToString("N0", CultureInfo.InvariantCulture)
     }
 </span>
-<span class="chip @(Status.IngestionStalled ? "stalled" : "")" title="How long ago the oldest row the database has not been seen to hold was sent, and how many rows the streams have sent that it has still to write">
-    <span class="label">database behind</span><b>@Seconds(Status.Behind)</b>
-    <span class="label">waiting</span>@Status.NotYetIngested.ToString("N0", CultureInfo.InvariantCulture)
-</span>
 <span class="chip" title="Changes a second the house is making now, and the versions and fills the streams have sent">
     <span class="label">feed</span><b>@Status.FeedRate.ToString("N0", CultureInfo.InvariantCulture)/s</b>
     <span class="label">sent</span>@Status.Published.ToString("N0", CultureInfo.InvariantCulture)
-</span>
-<span class="chip" title="Orders whose latest version the database has not been seen to hold, their versions, and the fills it has not been seen to hold; and of those, the ones it has now been seen to hold, about to leave">
-    <span class="label">tail</span><b>@Status.TailOrders.ToString("N0", CultureInfo.InvariantCulture)</b>
-    <span class="label">orders</span>@Status.TailVersions.ToString("N0", CultureInfo.InvariantCulture)
-    <span class="label">versions</span>@Status.TailFills.ToString("N0", CultureInfo.InvariantCulture)
-    <span class="label">fills</span>@Status.TailConfirmed.ToString("N0", CultureInfo.InvariantCulture)
-    <span class="label">confirmed</span>
 </span>
 <span class="chip" title="Order versions that have happened and that the order stream, running behind the fills, has not sent yet">
     <span class="label">orders behind fills</span><b>@Status.OrdersHeld.ToString("N0", CultureInfo.InvariantCulture)</b>
@@ -44,10 +33,18 @@
 }
 else
 {
-<span class="chip" title="PostgreSQL's database on disk, outside the host's budget; the process's managed heap, for comparison; and the longest any statement may run before it is stopped">
+<span class="chip @(Status.IngestionStalled ? "stalled" : "")" title="PostgreSQL's database on disk, outside the host's budget; how long ago the oldest row it has not been seen to hold was sent; the process's managed heap, for comparison; and the longest any statement may run before it is stopped">
     <span class="label">PostgreSQL</span><b>@Mb(Status.DatabaseBytes)</b>
+    <span class="label">behind</span>@Seconds(Status.Behind)
     <span class="label">heap</span>@Mb(Status.ManagedHeapBytes)
     <span class="label">statements stopped after</span>@Status.TimeLimit.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) s
+</span>
+<span class="chip" title="Orders whose latest version the database has not been seen to hold, their versions, and the fills it has not been seen to hold; and of those, the ones it has now been seen to hold, about to leave">
+    <span class="label">tail</span><b>@Status.TailOrders.ToString("N0", CultureInfo.InvariantCulture)</b>
+    <span class="label">orders</span>@Status.TailVersions.ToString("N0", CultureInfo.InvariantCulture)
+    <span class="label">versions</span>@Status.TailFills.ToString("N0", CultureInfo.InvariantCulture)
+    <span class="label">fills</span>@Status.TailConfirmed.ToString("N0", CultureInfo.InvariantCulture)
+    <span class="label">confirmed</span>
 </span>
 <span class="chip" title="Statements ChalkQL has run against the database, and those stopped at the time limit; reads of pages from the database, of which read ahead, and reads a kept window answered; lookups of the tail's rows a read placed; the last refresh">
     <span class="label">statements</span><b>@Status.Statements.ToString("N0", CultureInfo.InvariantCulture)</b>
