@@ -52,6 +52,23 @@ builder.Services.AddSingleton<AlertDesk>();
 
 var app = builder.Build();
 app.UseAntiforgery();
+// An alert's sound is addressed by its version (sounds/kaching.pd1r8b6lth.wav), so a browser may
+// keep it for good: a new file gets a new address. Set as the response starts, after the static
+// assets have set theirs, which run from a build rather than a publish say not to keep anything.
+app.Use((context, next) =>
+{
+    var path = context.Request.Path.Value ?? "";
+    if (path.StartsWith("/sounds/", StringComparison.Ordinal) && Path.GetFileNameWithoutExtension(path).Contains('.'))
+    {
+        context.Response.OnStarting(() =>
+        {
+            context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+            return Task.CompletedTask;
+        });
+    }
+
+    return next(context);
+});
 app.MapStaticAssets();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 await app.RunAsync();

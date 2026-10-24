@@ -58,9 +58,9 @@ public sealed class AlertSessionTests
         session.Note([], [Fill("CEDAR")], Now);
         session.Note([], [Fill("CEDAR")], Now.AddSeconds(1));
 
-        session.SetRules([rule with { Name = "renamed", Sound = AlertSound.Laser }]);
+        session.SetRules([rule with { Name = "renamed", Sound = "laserfire" }]);
         session.Flush(Now.AddSeconds(10));
-        Assert.Equal(("renamed", AlertSound.Laser, 1), (fired[^1].RuleName, fired[^1].Sound, fired[^1].Count));
+        Assert.Equal(("renamed", "laserfire", 1), (fired[^1].RuleName, fired[^1].Sound, fired[^1].Count));
 
         session.Note([], [Fill("CEDAR")], Now.AddSeconds(11));
         session.SetRules([Rule(Tab.Fills, ("client", "FERN")) with { Id = rule.Id }]);
@@ -71,12 +71,36 @@ public sealed class AlertSessionTests
     [Fact]
     public void A_rule_kept_by_the_browser_reads_back_the_same_and_one_not_understood_is_refused()
     {
-        var rule = Rule(Tab.Fills, ("client", "CEDAR")) with { Sound = AlertSound.Zap, Throttle = TimeSpan.FromSeconds(30), Muted = true };
+        var rule = Rule(Tab.Fills, ("client", "CEDAR")) with { Sound = "bangecho", Throttle = TimeSpan.FromSeconds(30), Muted = true };
         var back = AlertRule.Load(rule.Save());
 
         Assert.Equal((rule.Tab, rule.Filter.Name, rule.Sound, rule.Throttle, rule.Muted), (back.Tab, back.Filter.Name, back.Sound, back.Throttle, back.Muted));
         Assert.Throws<ArgumentException>(() => AlertRule.Load(rule.Save() with { Sound = "Gong" }));
+        Assert.Equal("kaching", AlertRule.Load(rule.Save() with { Sound = "Register" }).Sound);
         Assert.Throws<ArgumentException>(() => AlertRule.Load(rule.Save() with { View = "sort=-client" }));
+    }
+
+    [Fact]
+    public void Every_sound_has_its_file_and_every_file_its_sound_each_mono_8_bit_and_small()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (!Directory.Exists(Path.Combine(root.FullName, "samples", "Chalk.Sample.Blotter")))
+        {
+            root = root.Parent ?? throw new DirectoryNotFoundException("the sample's folder is not above the tests");
+        }
+
+        var folder = Path.Combine(root.FullName, "samples", "Chalk.Sample.Blotter", "wwwroot", "sounds");
+        var files = Directory.GetFiles(folder, "*.wav");
+        Assert.Equal(AlertSounds.All.Select(s => s.Id).Order(StringComparer.Ordinal), files.Select(Path.GetFileNameWithoutExtension).Order(StringComparer.Ordinal));
+        foreach (var file in files)
+        {
+            // A plain WAV header: channels at 22, the sample rate at 24, the bits a sample at 34.
+            var header = File.ReadAllBytes(file).AsSpan(0, 44);
+            Assert.Equal("RIFF", System.Text.Encoding.ASCII.GetString(header[..4]));
+            Assert.Equal(1, BitConverter.ToInt16(header[22..24]));
+            Assert.InRange(BitConverter.ToInt32(header[24..28]), 8000, 11025);
+            Assert.Equal(8, BitConverter.ToInt16(header[34..36]));
+        }
     }
 
     private static (AlertSession Session, List<AlertEvent> Fired) Session(AlertRule rule)
@@ -91,7 +115,7 @@ public sealed class AlertSessionTests
     private static AlertRule Rule(Tab tab, params (string Column, string Value)[] filters) => new(
         "rule", "a rule", tab,
         FilterSpec.Of(filters.Select(f => new ColumnFilter { Column = tab.Named(f.Column), Values = [f.Value] })),
-        AlertSound.Register, TimeSpan.FromSeconds(1), false);
+        AlertSounds.Default, TimeSpan.FromSeconds(1), false);
 
     private static Order Order(Guid id, int version, string status) =>
         new(id, version, Now, Now, "CEDAR-1", "CEDAR", "EMEA", "API", "BTC/USD Perp", "Buy", 2, 0, 0, 0, status);

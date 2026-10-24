@@ -5,7 +5,7 @@ using Chalk.Sample.Blotter.Trades;
 namespace Chalk.Sample.Blotter.Live;
 
 /// <summary>An alert fired: which rule, how many rows since it last sounded, and the latest of them.</summary>
-public sealed record AlertEvent(long Seq, string RuleId, string RuleName, AlertSound Sound, bool Muted, string Tab, int Count, string Latest, DateTime At);
+public sealed record AlertEvent(long Seq, string RuleId, string RuleName, string Sound, bool Muted, string Tab, int Count, string Latest, DateTime At);
 
 /// <summary>
 /// The alerts of every browser, evaluated by the host from the streams, not by the page: every order

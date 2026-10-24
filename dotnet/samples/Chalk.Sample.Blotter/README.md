@@ -173,7 +173,7 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   it. Do them with a small budget chosen on the page to see the host refuse.
 
 - **Alerts.** The bell on the tab bar opens the alerts: each is a tab's filters, saved, with a sound
-  (cash register, klaxon, zap or laser) and a throttle. A new one takes the tab's filters as they are;
+  (one of 22 short recordings: ka-ching, coin, chimes, cowbell, laser, ship's horn, …) and a throttle. A new one takes the tab's filters as they are;
   each can be heard (▶), muted or removed. They are kept in the browser's local settings.
   - **The host evaluates them, from the streams, not the page:** every order version and fill the
     streams send is weighed against each rule as the host reads it, however far behind a grid has
@@ -183,9 +183,12 @@ in parallel. Five million orders, about 12.5 million versions and 8.8 million fi
   - **None is missed:** a browser's alerts wait, in order, until a page of it has sounded them. Closed
     and opened again within 10 minutes, a page says what fired meanwhile, and sounds it once a rule;
     the host keeps a browser's alerts, and evaluates its rules, that long after its last page closes.
-  - **Sound** is drawn with Web Audio, so there is nothing to load, and alerts at once mix. A browser
-    lets a page make sound only once someone has clicked on it: with alerts set to sound, the page
-    opens with a splash that asks (Enable sound, or Not now).
+  - **Sound** is a recording in `wwwroot/sounds`: mono, 8-bit, at no more than 11,025 samples a second
+    (about 280 KB for all 22). The host serves each, with the page's other static assets, at an
+    address with its version in it (`sounds/kaching.pd1r8b6lth.wav`), which a browser may keep for
+    good; a page fetches a sound the first time it plays it, decodes it once, and plays it through Web
+    Audio, so alerts at once mix. A browser lets a page make sound only once someone has clicked on
+    it: with alerts set to sound, the page opens with a splash that asks (Enable sound, or Not now).
   - **Unseen alerts** show as a red dot, not a count, since what matters is that something fired and
     what: on the bell, until the alerts are opened; and, in the background, on the page's icon, until
     the page is looked at. The title stays as it is. With "Notify in the background"

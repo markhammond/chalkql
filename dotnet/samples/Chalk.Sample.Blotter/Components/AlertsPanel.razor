@@ -27,10 +27,10 @@
                 <tr>
                     <td><b>@r.Name</b><div class="muted">@r.Tab.Title: @Describe(r.Filter)</div></td>
                     <td>
-                        <select value="@r.Sound" aria-label="Sound" @onchange="e => SaveAsync(r with { Sound = Enum.Parse<AlertSound>((string)e.Value!) })">
-                            @foreach (var sound in Enum.GetValues<AlertSound>())
+                        <select value="@r.Sound" aria-label="Sound" @onchange="e => SaveAsync(r with { Sound = (string)e.Value! })">
+                            @foreach (var (id, label) in AlertSounds.All)
                             {
-                                <option value="@sound">@Named(sound)</option>
+                                <option value="@id">@label</option>
                             }
                         </select>
                     </td>
@@ -52,15 +52,22 @@
         </table>
     }
 
+    @* An alert's condition is the tab's filters: an example of setting them, before the row that adds it. *@
+    <p class="alerts-how muted">
+        An alert fires on the rows that pass this tab's filters. Set them with the column funnels first: for example
+        @(Tab.Overrides ? "Client CEDAR, Side Buy and Qty at least 10, for CEDAR buying 10 or more;" : "Client CEDAR and Instrument starting BTC, for every CEDAR fill in BTC;")
+        then add it here.
+    </p>
     <div class="alerts-new">
         <span class="muted">New alert on @Tab.Title, @Describe(Filter):</span>
-        <input type="text" placeholder="@DefaultName()" @bind="_name" aria-label="Name" />
+        <input type="text" placeholder="@NamePlaceholder()" @bind="_name" aria-label="Name" />
         <select @bind="_sound" aria-label="Sound">
-            @foreach (var sound in Enum.GetValues<AlertSound>())
+            @foreach (var (id, label) in AlertSounds.All)
             {
-                <option value="@sound">@Named(sound)</option>
+                <option value="@id">@label</option>
             }
         </select>
+        <button type="button" class="icon-button" title="Hear it" aria-label="Hear the sound chosen" onclick="blotterAlerts.play(this.previousElementSibling.value)">▶</button>
         <select @bind="_throttle" aria-label="At most once every">
             @foreach (var throttle in AlertRule.Throttles)
             {
@@ -83,8 +90,13 @@
     public FilterSpec Filter { get; set; } = default!;
 
     private string _name = "";
-    private AlertSound _sound = AlertSound.Register;
+    private string _sound = AlertSounds.Default;
     private double _throttle = 3;
+
+    // With no filters set, the name box shows an example of a name, as the line above shows one of a condition.
+    private string NamePlaceholder() => Filter.Columns.IsEmpty
+        ? (Tab.Overrides ? "e.g. CEDAR buys of 10 or more" : "e.g. CEDAR fills in BTC")
+        : Describe(Filter);
 
     private string DefaultName() => Filter.Columns.IsEmpty
         ? (Tab.Overrides ? "Any order" : "Any fill")
@@ -105,14 +117,6 @@
 
     private static string Describe(FilterSpec filter) =>
         filter.Columns.IsEmpty ? "every row" : string.Join("; ", filter.Columns.Select(f => f.Describe()));
-
-    private static string Named(AlertSound sound) => sound switch
-    {
-        AlertSound.Register => "Cash register",
-        AlertSound.Klaxon => "Klaxon",
-        AlertSound.Zap => "Zap",
-        _ => "Laser",
-    };
 
     private static string Seconds(TimeSpan throttle) =>
         throttle.TotalSeconds < 60 ? $"{throttle.TotalSeconds:0} s" : $"{throttle.TotalMinutes:0} min";

@@ -938,6 +938,24 @@
 
     private void OpenEditor(Column column) => _editing = _editing == column ? null : column;
 
+    /// <summary>Escape: whatever is open over the grid closes, the filter editor, the alerts and the columns.</summary>
+    [JSInvokable]
+    public void OnEscape()
+    {
+        if (_editing is null && !_alerting && !_choosing)
+        {
+            return;
+        }
+
+        (_editing, _alerting, _choosing) = (null, false, false);
+        if (Alerts is not null)
+        {
+            Alerts.Looking = false;
+        }
+
+        StateHasChanged();
+    }
+
     private async Task ApplyFilterAsync(ColumnFilter filter) => await FilterAsync(_filter.With(filter));
 
     private async Task RemoveFilterAsync(Column column) => await FilterAsync(_filter.Without(column));

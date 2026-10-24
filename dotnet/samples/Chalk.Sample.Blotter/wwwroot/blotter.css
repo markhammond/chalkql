@@ -226,6 +226,7 @@ main:not(:hover) .actions:not(:focus-within) { opacity: 0; pointer-events: none;
 .alerts-list { width: 100%; border-collapse: collapse; }
 .alerts-list td { padding: 4px 6px 4px 0; border-top: 1px solid var(--line); vertical-align: top; }
 .alerts-actions { white-space: nowrap; text-align: right; }
+.alerts-how { margin: 0; }
 .alerts-new { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .alerts-panel select, .alerts-panel input[type=text] { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
 .splash { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: rgb(0 0 0 / 0.25); }

@@ -12,6 +12,14 @@
     <Routes @rendermode="InteractiveServer" />
     <script src="_framework/blazor.web.js"></script>
     <script src="@Assets["blotter.js"]"></script>
+    @* Each sound's versioned address: the host serves it to be kept for good, and a new file gets a new address. *@
+    <script>window.blotterSoundUrls = @((MarkupString)SoundUrls());</script>
     <script src="@Assets["alerts.js"]"></script>
 </body>
 </html>
+
+@code {
+    // Ids and addresses the host makes, nothing a reader typed: safe to write into the script as JSON.
+    private string SoundUrls() =>
+        System.Text.Json.JsonSerializer.Serialize(AlertSounds.All.ToDictionary(s => s.Id, s => Assets[AlertSounds.Path(s.Id)]));
+}

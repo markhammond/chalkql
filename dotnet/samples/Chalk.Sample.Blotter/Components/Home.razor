@@ -197,6 +197,17 @@
         StateHasChanged();
     }
 
+    /// <summary>Escape: the splash that asks for sound closes, as Not now.</summary>
+    [JSInvokable]
+    public void OnEscape()
+    {
+        if (_book.Session is not null && !_book.Answered)
+        {
+            _book.Answered = true;
+            StateHasChanged();
+        }
+    }
+
     /// <summary>The page may make sound now, or may not.</summary>
     [JSInvokable]
     public void SoundEnabled(bool on)

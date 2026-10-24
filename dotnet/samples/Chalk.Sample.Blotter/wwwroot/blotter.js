@@ -17,7 +17,7 @@ window.blotter = {
         // For checking from a script, where a page in the background is sent no scroll events.
         element.reportScroll = report;
 
-        // For the share button, which asks the page for its link.
+        // For the share button, which asks the page for its link, and for Escape.
         element.page = page;
 
         // Scrolled down, the row cut by the top edge fades; at the top, the newest row does not.
@@ -227,3 +227,15 @@ window.blotter = {
         setTimeout(finish, 2000);
     },
 };
+
+// Escape closes what is open over the page: the link menu here, the grid's editor, alerts and column
+// chooser on the grid, and the splash that asks for sound.
+document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") {
+        return;
+    }
+
+    document.querySelectorAll(".share-wrap[data-open]").forEach(wrap => wrap.removeAttribute("data-open"));
+    document.querySelector(".scroller")?.page?.invokeMethodAsync("OnEscape");
+    window.blotterAlerts?.escape();
+});

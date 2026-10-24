@@ -22,67 +22,20 @@ window.blotterAlerts = (() => {
         }
     };
 
-    // The sounds, drawn with Web Audio: nothing to load, and every alert at once mixes as it plays.
-    const tone = (at, type, from, to, length, peak) => {
-        const oscillator = audio.createOscillator();
-        const gain = audio.createGain();
-        oscillator.type = type;
-        oscillator.frequency.setValueAtTime(from, at);
-        if (to !== from) {
-            oscillator.frequency.exponentialRampToValueAtTime(to, at + length);
+    // The sounds, recordings the host serves (window.blotterSoundUrls, set by the page): each fetched the
+    // first time it plays and decoded once, the browser keeping the file. Played through Web Audio, so
+    // alerts at once mix.
+    const loaded = new Map();
+    const load = id => {
+        let buffer = loaded.get(id);
+        if (!buffer) {
+            buffer = fetch(window.blotterSoundUrls[id])
+                .then(response => response.ok ? response.arrayBuffer() : Promise.reject(new Error(`${id}: ${response.status}`)))
+                .then(bytes => audio.decodeAudioData(bytes));
+            buffer.catch(() => loaded.delete(id));
+            loaded.set(id, buffer);
         }
-        gain.gain.setValueAtTime(0.0001, at);
-        gain.gain.exponentialRampToValueAtTime(peak, at + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.0001, at + length);
-        oscillator.connect(gain).connect(audio.destination);
-        oscillator.start(at);
-        oscillator.stop(at + length + 0.05);
-    };
-    const noise = (at, length, from, to, peak) => {
-        const buffer = audio.createBuffer(1, Math.ceil(audio.sampleRate * length), audio.sampleRate);
-        const data = buffer.getChannelData(0);
-        for (let i = 0; i < data.length; i++) {
-            data[i] = Math.random() * 2 - 1;
-        }
-        const source = audio.createBufferSource();
-        source.buffer = buffer;
-        const band = audio.createBiquadFilter();
-        band.type = "bandpass";
-        band.Q.value = 2;
-        band.frequency.setValueAtTime(from, at);
-        band.frequency.exponentialRampToValueAtTime(to, at + length);
-        const gain = audio.createGain();
-        gain.gain.setValueAtTime(peak, at);
-        gain.gain.exponentialRampToValueAtTime(0.0001, at + length);
-        source.connect(band).connect(gain).connect(audio.destination);
-        source.start(at);
-    };
-    const sounds = {
-        // A drawer's clunk, then two bright bells: cha-ching.
-        Register(at) {
-            noise(at, 0.08, 900, 300, 0.5);
-            for (const [delay, pitch] of [[0.09, 2093], [0.22, 2637]]) {
-                tone(at + delay, "sine", pitch, pitch, 0.6, 0.25);
-                tone(at + delay, "sine", pitch * 2.76, pitch * 2.76, 0.25, 0.06);
-            }
-        },
-        // An alarm rising twice.
-        Klaxon(at) {
-            for (const delay of [0, 0.45]) {
-                tone(at + delay, "sawtooth", 420, 840, 0.38, 0.12);
-                tone(at + delay, "square", 210, 420, 0.38, 0.05);
-            }
-        },
-        // A crackle falling away, under a sharp drop.
-        Zap(at) {
-            noise(at, 0.35, 6000, 300, 0.6);
-            tone(at, "square", 1600, 90, 0.3, 0.12);
-        },
-        // A ray-gun shot: a falling sweep, and its echo.
-        Laser(at) {
-            tone(at, "sawtooth", 2400, 180, 0.32, 0.14);
-            tone(at + 0.12, "sawtooth", 2400, 180, 0.32, 0.05);
-        },
+        return buffer;
     };
 
     // The page's icon, drawn: a blotter's rows, and a red dot on them while an alert is unseen.
@@ -152,11 +105,21 @@ window.blotterAlerts = (() => {
             }
         },
 
+        // Escape, for the page: the splash closes.
+        escape() {
+            page?.invokeMethodAsync("OnEscape");
+        },
+
         play(sound) {
-            if (audio?.state !== "running" || !sounds[sound]) {
+            if (audio?.state !== "running" || !window.blotterSoundUrls?.[sound]) {
                 return false;
             }
-            sounds[sound](audio.currentTime + 0.02);
+            load(sound).then(buffer => {
+                const source = audio.createBufferSource();
+                source.buffer = buffer;
+                source.connect(audio.destination);
+                source.start();
+            }, failure => console.warn("an alert's sound could not be played", failure));
             return true;
         },
 
