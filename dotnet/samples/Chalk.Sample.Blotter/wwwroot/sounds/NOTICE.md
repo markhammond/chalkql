@@ -1,7 +1,7 @@
 # The alert sounds
 
-The 22 recordings here (`*.wav`) are not part of Chalk, and the Apache License 2.0 that covers the
-rest of this repository does not apply to them.
+The 22 recordings here (`*.wav`) are not part of ChalkQL, and the Elastic License 2.0 that covers
+the rest of this repository does not apply to them.
 
 They were collected more than fifteen years ago, from sources that can no longer be traced, and are
 believed to be in the public domain or to carry no licence. They are included so that the sample can

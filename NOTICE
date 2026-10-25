@@ -9,9 +9,9 @@ distributions and are not redistributed here.
 --------------------------------------------------------------------------------
 
 The blotter sample includes sound recordings that are not part of this product
-and are not covered by the Apache License 2.0. Their sources can no longer be
-traced; they are believed to be in the public domain or to carry no licence, and
-may not be used for any commercial purpose:
+and are not covered by its licence, the Elastic License 2.0. Their sources can no
+longer be traced; they are believed to be in the public domain or to carry no
+licence, and may not be used for any commercial purpose:
 
     dotnet/samples/Chalk.Sample.Blotter/wwwroot/sounds/*.wav   (see NOTICE.md there)
 

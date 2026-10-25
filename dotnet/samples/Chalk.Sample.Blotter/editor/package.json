@@ -2,7 +2,7 @@
   "name": "blotter-condition-editor",
   "private": true,
   "description": "The alerts panel's SQL condition editor: CodeMirror 6, bundled once into wwwroot/condition-editor.js, which is committed, so the sample needs no Node to run.",
-  "license": "Apache-2.0",
+  "license": "Elastic-2.0",
   "scripts": {
     "build": "esbuild condition-editor.js --bundle --minify --format=iife --legal-comments=eof --target=es2020 --outfile=../wwwroot/condition-editor.js"
   },
