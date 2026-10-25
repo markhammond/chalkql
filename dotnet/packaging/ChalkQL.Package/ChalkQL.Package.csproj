@@ -23,15 +23,15 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      ChalkQL 0.6.1 makes long-running hosts leaner: execution arenas keep what their executions need, and standing views stop accumulating memory for rows they no longer hold.
+      ChalkQL 0.6.2 refuses two mistakes it used to mishandle: text compared with a number it cannot be read as, and instants a nanosecond timestamp cannot reach.
 
-      - **Arenas:** `ExecutionArena.WorkingSetBytes` reports what a repeated execution needs retained to rent nothing from the heap. An arena now keeps its working set, with `ArenaOptions.WorkingSetMargin` (1% by default) as room, up to `RetainBytes`, which becomes a ceiling on memory rather than a measure of need. Arenas that need little hold little; a ceiling is all a host sets.
-      - **Managed output:** a projection's, filter's or join's batches are copied out of the arena at their exact size, so repeated statements stop rebuilding output in fresh heap arrays.
-      - **Standing views:** a maintained view whose state has mostly emptied rebuilds itself, and long-lived views hold far less spare room: stores grow by half rather than doubling, and key maps give memory back when they compact.
-      - **Compatibility:** additive API only. Arenas now retain less memory by default; set `RetainBytes` as the ceiling you want.
+      - **Text beside a number:** `qty = 'x'`, where `qty` is a number, is refused while the statement is validated, at the text, coded `SqlValidation`, rather than failing as a planner `Internal` error. The same holds for `&lt;&gt;`, the orderings, `IN`, `NOT IN` and `BETWEEN`. Text that reads as the number, `qty = '1.5'`, stands.
+      - **Text beside a time:** `ts = '2026-01-08 12:00:00+02:00'`, which failed with the same internal error, now runs: ChalkQL's cast reads the text when the statement runs, and names any it cannot read.
+      - **Nanosecond timestamps:** a .NET time converted to a nanosecond timestamp is refused if it falls before 1677-09-21 or after 2262-04-11, where it wrapped into a wrong instant.
+      - **Compatibility:** no change to the API, the protocol or the IR. A 0.6.1 planner serves a 0.6.2 client, without the new refusals.
 
       Full release notes:
-      https://github.com/markhammond/chalkql/releases/tag/v0.6.1
+      https://github.com/markhammond/chalkql/releases/tag/v0.6.2
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>

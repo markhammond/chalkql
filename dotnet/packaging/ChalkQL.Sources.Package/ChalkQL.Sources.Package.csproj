@@ -13,14 +13,14 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      ChalkQL.Sources 0.6.1 accompanies ChalkQL 0.6.1.
+      ChalkQL.Sources 0.6.2 accompanies ChalkQL 0.6.2.
 
-      - **POCO tables:** string and validity buffers published as managed output are copied out at their exact size, so the source's staging stays pooled across batches.
+      - **POCO timestamps:** a `DateTime` member at the default `TIMESTAMP(9)` holding an instant after 2262-04-11, such as 9999-12-31 for "never", is refused where its table is built or refreshed, naming the table and member, where it was stored as a wrong instant (1816-03-29). Declare such a member `[ChalkColumn(Precision = 6)]`.
 
-      Requires exactly ChalkQL 0.6.1.
+      Requires exactly ChalkQL 0.6.2.
 
       Full release notes:
-      https://github.com/markhammond/chalkql/releases/tag/v0.6.1
+      https://github.com/markhammond/chalkql/releases/tag/v0.6.2
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>
