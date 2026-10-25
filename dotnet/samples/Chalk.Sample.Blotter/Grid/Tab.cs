@@ -4,13 +4,13 @@ using Apache.Arrow;
 namespace Chalk.Sample.Blotter.Grid;
 
 /// <summary>
-/// A tab of the grid: the table its rows are read from, how they are keyed, sorted by default and
-/// shown. What its rows are is the domain's business: it gives the tab its columns and its readers.
+///     A tab of the grid: the table its rows are read from, how they are keyed, sorted by default and
+///     shown. What its rows are is the domain's business: it gives the tab its columns and its readers.
 /// </summary>
 /// <remarks>
-/// Rows that change are versioned, and a row the live tail holds stands in for the database's row of
-/// the same key when its version is newer (<see cref="Overrides"/>). Rows that never change are the
-/// same row on either side, and nothing is overridden.
+///     Rows that change are versioned, and a row the live tail holds stands in for the database's row of
+///     the same key when its version is newer (<see cref="Overrides" />). Rows that never change are the
+///     same row on either side, and nothing is overridden.
 /// </remarks>
 public sealed class Tab
 {
@@ -44,8 +44,8 @@ public sealed class Tab
     public IReadOnlyList<Column> Columns { get; }
 
     /// <summary>
-    /// How many of <see cref="Columns"/>, from the first, stay in place while the grid scrolls sideways:
-    /// enough to tell which row is which.
+    ///     How many of <see cref="Columns" />, from the first, stay in place while the grid scrolls sideways:
+    ///     enough to tell which row is which.
     /// </summary>
     public int Frozen { get; }
 
@@ -80,15 +80,21 @@ public sealed class Tab
     /// <summary>The paths from this tab's rows to other tabs' rows, which a condition reads along.</summary>
     public IReadOnlyList<TabPath> Paths { get; }
 
-    public Column Named(string name) =>
-        Columns.FirstOrDefault(c => c.Name == name) ?? throw new ArgumentException($"{Name} has no column '{name}'", nameof(name));
+    public Column Named(string name)
+    {
+        return Columns.FirstOrDefault(c => c.Name == name) ??
+               throw new ArgumentException($"{Name} has no column '{name}'", nameof(name));
+    }
 
-    public override string ToString() => Name;
+    public override string ToString()
+    {
+        return Name;
+    }
 }
 
 /// <summary>
-/// A path from a tab's rows to another tab's, by a column that holds the other's key: a fill's order,
-/// by its <c>order_id</c>. A condition reads the other row's columns as <c>order.status</c>, and the
-/// host joins for it.
+///     A path from a tab's rows to another tab's, by a column that holds the other's key: a fill's order,
+///     by its <c>order_id</c>. A condition reads the other row's columns as <c>order.status</c>, and the
+///     host joins for it.
 /// </summary>
 public sealed record TabPath(string Name, Tab Target, string Via, string Description);

@@ -1,34 +1,36 @@
 using System.Globalization;
 using Chalk.Incremental;
-using Microsoft.AspNetCore.DataProtection;
 using Chalk.Sample.Blotter;
 using Chalk.Sample.Blotter.Components;
-using Chalk.Sample.Blotter.Live;
 using Chalk.Sample.Blotter.Fixtures;
-using Chalk.Sample.Blotter.Domain;
-using Chalk.Sample.Blotter.Grid;
+using Chalk.Sample.Blotter.Live;
+using Microsoft.AspNetCore.DataProtection;
 
 var budget = Number(Argument(args, "--budget-mb"));
-var disorder = Argument(args, "--disorder") is { } share ? double.Parse(share, CultureInfo.InvariantCulture) : (double?)null;
+var disorder = Argument(args, "--disorder") is { } share
+    ? double.Parse(share, CultureInfo.InvariantCulture)
+    : (double?)null;
 var options = new BlotterOptions
 {
     Orders = Number(Argument(args, "--orders")) ?? 5_000_000,
     BudgetBytes = (budget ?? 8) << 20,
     FindBudget = budget is null,
-    Maintenance = Argument(args, "--maintenance") == "recompute" ? ViewMaintenance.Recompute : ViewMaintenance.Incremental,
+    Maintenance = Argument(args, "--maintenance") == "recompute"
+        ? ViewMaintenance.Recompute
+        : ViewMaintenance.Incremental,
     Postgres = Argument(args, "--postgres"),
     PostgresBinaries = Argument(args, "--pg-bin"),
     Current = Argument(args, "--current") switch
     {
         null or "trigger" => CurrentSync.Trigger,
         "lagging" => CurrentSync.Lagging,
-        var other => throw new ArgumentException($"--current takes trigger or lagging, not '{other}'"),
+        var other => throw new ArgumentException($"--current takes trigger or lagging, not '{other}'")
     },
 
     // Out of order from the start: that share of rows sent late, and half as many written to the database first.
     Exchange = disorder is { } late
         ? new ExchangeOptions { Disordered = true, Disorder = late, DatabaseFirst = late / 2 }
-        : new ExchangeOptions(),
+        : new ExchangeOptions()
 };
 
 var builder = WebApplication.CreateBuilder(args);
@@ -45,7 +47,8 @@ builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 // The keys that shroud the values in a view's link, kept in a folder so that a link opens after a
 // restart: rotated every 90 days, an old one kept to open what it shrouded.
 var linkKeys = Argument(args, "--link-keys")
-    ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Chalk.Sample.Blotter", "link-keys");
+               ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                   "Chalk.Sample.Blotter", "link-keys");
 builder.Services.AddDataProtection()
     .SetApplicationName("Chalk.Sample.Blotter")
     .PersistKeysToFileSystem(new DirectoryInfo(linkKeys));
@@ -61,13 +64,11 @@ app.Use((context, next) =>
 {
     var path = context.Request.Path.Value ?? "";
     if (path.StartsWith("/sounds/", StringComparison.Ordinal) && Path.GetFileNameWithoutExtension(path).Contains('.'))
-    {
         context.Response.OnStarting(() =>
         {
             context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
             return Task.CompletedTask;
         });
-    }
 
     return next(context);
 });
@@ -85,10 +86,7 @@ static string? Argument(string[] args, string name)
 // 5M, 500k and 20m are all numbers of orders here.
 static long? Number(string? text)
 {
-    if (string.IsNullOrWhiteSpace(text))
-    {
-        return null;
-    }
+    if (string.IsNullOrWhiteSpace(text)) return null;
 
     var scale = char.ToLowerInvariant(text[^1]) switch { 'k' => 1_000L, 'm' => 1_000_000L, _ => 1L };
     var digits = scale == 1 ? text : text[..^1];

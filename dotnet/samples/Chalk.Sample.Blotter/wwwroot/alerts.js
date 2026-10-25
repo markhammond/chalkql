@@ -45,7 +45,7 @@ window.blotterAlerts = (() => {
         + `<path d="M8 12h16M8 17h16M8 22h10" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>`
         + (dot ? `<circle cx="25" cy="8" r="7" fill="#e5383b" stroke="#fff" stroke-width="2"/>` : "")
         + `</svg>`);
-    const link = document.querySelector("link[rel~='icon']") ?? document.head.appendChild(Object.assign(document.createElement("link"), { rel: "icon" }));
+    const link = document.querySelector("link[rel~='icon']") ?? document.head.appendChild(Object.assign(document.createElement("link"), {rel: "icon"}));
     link.type = "image/svg+xml";
     link.href = icon(false);
 
@@ -134,8 +134,15 @@ window.blotterAlerts = (() => {
                 if (notify && "Notification" in window && Notification.permission === "granted") {
                     // The notification is the alert itself: how many rows, and the latest.
                     const words = `${alert.ruleName}${alert.count > 1 ? ` ×${alert.count}` : ""}`;
-                    const shown = new Notification(`Blotter: ${words}`, { body: alert.latest, tag: alert.ruleId, renotify: true });
-                    shown.onclick = () => { window.focus(); shown.close(); };
+                    const shown = new Notification(`Blotter: ${words}`, {
+                        body: alert.latest,
+                        tag: alert.ruleId,
+                        renotify: true
+                    });
+                    shown.onclick = () => {
+                        window.focus();
+                        shown.close();
+                    };
                 }
             }
         },

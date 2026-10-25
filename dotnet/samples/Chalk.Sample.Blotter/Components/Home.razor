@@ -12,7 +12,7 @@
 <main>
     <div class="bar">
         <h1>Virtual blotter</h1>
-        <StatusBar Status="_status" Budget="Host.Budget" BudgetChanged="SetBudgetAsync" />
+        <StatusBar Status="_status" Budget="Host.Budget" BudgetChanged="SetBudgetAsync"/>
     </div>
 
     @if (_linkRefused is not null)
@@ -45,7 +45,8 @@
         <div class="splash" role="dialog" aria-label="Sound alerts">
             <div class="splash-card">
                 <b>This blotter sounds alerts</b>
-                <p>@(_book.Rules.Count(r => !r.Muted) is 1 ? "An alert is" : $"{_book.Rules.Count(r => !r.Muted)} alerts are") set to sound. The browser lets the page make sound once you allow it.</p>
+                <p>@(_book.Rules.Count(r => !r.Muted) is 1 ? "An alert is" : $"{_book.Rules.Count(r => !r.Muted)} alerts are") set
+                    to sound. The browser lets the page make sound once you allow it.</p>
                 <div class="splash-buttons">
                     <button type="button" class="primary" onclick="blotterAlerts.enableSound()">Enable sound</button>
                     <button type="button" @onclick="() => _book.Answered = true">Not now</button>
@@ -56,30 +57,38 @@
 
     <BlotterGrid @key="_tab" Tab="_tab" Link="_link" Alerts="_book" Select="t => { _tab = t; _link = null; }">
         <Toggles>
-            <button type="button" class="link-button disclosure" aria-expanded="@_vitals" @onclick="ToggleVitals"><Chevron Open="_vitals" /> Vital statistics</button>
+            <button type="button" class="link-button disclosure" aria-expanded="@_vitals" @onclick="ToggleVitals">
+                <Chevron Open="_vitals"/>
+                Vital statistics
+            </button>
         </Toggles>
         <Actions>
-                <button @onclick="Burst" title="The house takes and fills 3,000 orders at once">Simulate burst</button>
-                <button @onclick="Stall" title="The database writes nothing for 20 s, while the streams go on">Stall database 20 s</button>
-                <button @onclick="ToggleDisorder" aria-pressed="@Host.Exchange.Disordered"
-                        title="Out of order: a few rows on each stream sent late, by a delay mostly short and now and then long; and a few written to the database before they are sent">
-                    Out of order: @(Host.Exchange.Disordered ? "on" : "off")
+            <button @onclick="Burst" title="The house takes and fills 3,000 orders at once">Simulate burst</button>
+            <button @onclick="Stall" title="The database writes nothing for 20 s, while the streams go on">Stall
+                database 20 s
+            </button>
+            <button @onclick="ToggleDisorder" aria-pressed="@Host.Exchange.Disordered"
+                    title="Out of order: a few rows on each stream sent late, by a delay mostly short and now and then long; and a few written to the database before they are sent">
+                Out of order: @(Host.Exchange.Disordered ? "on" : "off")
+            </button>
+            <button @onclick="ToggleOutage" aria-pressed="@Host.Exchange.Paused"
+                    title="Outage: the house takes and works no orders, so nothing new reaches the streams or the database, and an alert of none in a window fires">
+                Outage: @(Host.Exchange.Paused ? "on" : "off")
+            </button>
+            @if (Host.Options.Current == CurrentSync.Lagging)
+            {
+                <button @onclick="StallCurrent"
+                        title="The job that keeps orders_current applies nothing for 20 s, while order_versions is written">
+                    Stall orders_current 20 s
                 </button>
-                <button @onclick="ToggleOutage" aria-pressed="@Host.Exchange.Paused"
-                        title="Outage: the house takes and works no orders, so nothing new reaches the streams or the database, and an alert of none in a window fires">
-                    Outage: @(Host.Exchange.Paused ? "on" : "off")
-                </button>
-                @if (Host.Options.Current == CurrentSync.Lagging)
-                {
-                    <button @onclick="StallCurrent" title="The job that keeps orders_current applies nothing for 20 s, while order_versions is written">Stall orders_current 20 s</button>
-                }
+            }
         </Actions>
         <Below>
             @* Closed, the statistics are not on the page at all, so nothing in them is rendered as they change. *@
             @if (_vitals)
             {
                 <div class="bar telemetry">
-                    <StatusBar Status="_status" Telemetry="true" />
+                    <StatusBar Status="_status" Telemetry="true"/>
                 </div>
             }
         </Below>
@@ -121,7 +130,11 @@
         }
 
         _status = Host.Status;
-        _timer = new Timer(_ => InvokeAsync(() => { _status = Host.Status; StateHasChanged(); }), null, 1000, 1000);
+        _timer = new Timer(_ => InvokeAsync(() =>
+        {
+            _status = Host.Status;
+            StateHasChanged();
+        }), null, 1000, 1000);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -165,7 +178,7 @@
         if (waiting.Count > 0)
         {
             _away = $"While no page of this browser was open, alerts fired for {waiting.Sum(a => a.Count):N0} rows: "
-                + string.Join(", ", waiting.GroupBy(a => a.RuleName).Select(g => $"{g.Key} ×{g.Sum(a => a.Count):N0}"));
+                    + string.Join(", ", waiting.GroupBy(a => a.RuleName).Select(g => $"{g.Key} ×{g.Sum(a => a.Count):N0}"));
             foreach (var latest in waiting.GroupBy(a => a.RuleId).Select(g => g.Last()))
             {
                 await SoundAsync(latest);
@@ -178,19 +191,22 @@
     }
 
     /// <summary>An alert the host fired: counted for the bell, sounded by the page, and then let go.</summary>
-    private void OnFired(AlertEvent alert) => _ = InvokeAsync(async () =>
+    private void OnFired(AlertEvent alert)
     {
-        try
+        _ = InvokeAsync(async () =>
         {
-            await SoundAsync(alert);
-            _book.Session?.Acknowledge(alert.Seq);
-            StateHasChanged();
-        }
-        catch (JSDisconnectedException)
-        {
-            // The page went: the alert waits for the next one.
-        }
-    });
+            try
+            {
+                await SoundAsync(alert);
+                _book.Session?.Acknowledge(alert.Seq);
+                StateHasChanged();
+            }
+            catch (JSDisconnectedException)
+            {
+                // The page went: the alert waits for the next one.
+            }
+        });
+    }
 
     private async Task SoundAsync(AlertEvent alert)
     {
@@ -249,11 +265,20 @@
         Host.WatchVitals(_vitals);
     }
 
-    private void Burst() => Host.Exchange.Send(3000);
+    private void Burst()
+    {
+        Host.Exchange.Send(3000);
+    }
 
-    private void Stall() => Host.Exchange.StallIngestion(TimeSpan.FromSeconds(20));
+    private void Stall()
+    {
+        Host.Exchange.StallIngestion(TimeSpan.FromSeconds(20));
+    }
 
-    private void ToggleDisorder() => Host.Exchange.Disordered = !Host.Exchange.Disordered;
+    private void ToggleDisorder()
+    {
+        Host.Exchange.Disordered = !Host.Exchange.Disordered;
+    }
 
     private void ToggleOutage()
     {
@@ -267,7 +292,10 @@
         }
     }
 
-    private void StallCurrent() => Host.Exchange.StallCurrent(TimeSpan.FromSeconds(20));
+    private void StallCurrent()
+    {
+        Host.Exchange.StallCurrent(TimeSpan.FromSeconds(20));
+    }
 
     public void Dispose()
     {
@@ -285,4 +313,5 @@
             Host.WatchVitals(false);
         }
     }
+
 }

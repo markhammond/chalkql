@@ -7,21 +7,21 @@ public enum CurrentSync
     Trigger,
 
     /// <summary>A job of its own applies the versions some time after they are written, and stalls now and then.</summary>
-    Lagging,
+    Lagging
 }
 
 /// <summary>
-/// The system of record, as the simulated house writes it: every version of every client order
-/// (<c>order_versions</c>), every fill (<c>fills</c>), and <c>orders_current</c>, one row per order at its
-/// latest version. A real deployment has none of this: someone else's system writes the tables, and
-/// the host only reads them (<see cref="Live.IBlotterProvider"/>).
+///     The system of record, as the simulated house writes it: every version of every client order
+///     (<c>order_versions</c>), every fill (<c>fills</c>), and <c>orders_current</c>, one row per order at its
+///     latest version. A real deployment has none of this: someone else's system writes the tables, and
+///     the host only reads them (<see cref="Live.IBlotterProvider" />).
 /// </summary>
 /// <remarks>
-/// A corpus is best loaded before any index or trigger exists: <see cref="CreateTables"/>, then
-/// <see cref="BeginLoad"/> on as many writers as suit, then <see cref="CreateIndexesAsync"/> and
-/// <see cref="KeepCurrent"/>. Text must be compared byte by byte, whatever the database's own
-/// collation: the host merges the database's rows with its own and orders text exactly as the
-/// database does.
+///     A corpus is best loaded before any index or trigger exists: <see cref="CreateTables" />, then
+///     <see cref="BeginLoad" /> on as many writers as suit, then <see cref="CreateIndexesAsync" /> and
+///     <see cref="KeepCurrent" />. Text must be compared byte by byte, whatever the database's own
+///     collation: the host merges the database's rows with its own and orders text exactly as the
+///     database does.
 /// </remarks>
 public interface ITradeRepository
 {
@@ -31,7 +31,7 @@ public interface ITradeRepository
     /// <summary>The keys and the indexes the blotter reads by, and whatever the planner needs to know of them.</summary>
     Task CreateIndexesAsync(CancellationToken ct);
 
-    /// <summary>From now on keeps <c>orders_current</c> as <paramref name="sync"/> says: by a trigger, or left to a job.</summary>
+    /// <summary>From now on keeps <c>orders_current</c> as <paramref name="sync" /> says: by a trigger, or left to a job.</summary>
     void KeepCurrent(CurrentSync sync);
 
     /// <summary>A bulk load into all three tables, one of several that may run side by side.</summary>

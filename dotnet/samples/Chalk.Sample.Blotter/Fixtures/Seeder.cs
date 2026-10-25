@@ -4,9 +4,9 @@ using System.Globalization;
 namespace Chalk.Sample.Blotter.Fixtures;
 
 /// <summary>
-/// Seeds an <see cref="ITradeRepository"/> with a generated corpus: client orders worked over a span of time,
-/// with their versions and fills (<see cref="Corpus"/>), bulk loaded by several writers at once before any
-/// index or trigger exists; then indexed, and kept current from then on.
+///     Seeds an <see cref="ITradeRepository" /> with a generated corpus: client orders worked over a span of time,
+///     with their versions and fills (<see cref="Corpus" />), bulk loaded by several writers at once before any
+///     index or trigger exists; then indexed, and kept current from then on.
 /// </summary>
 public sealed class Seeder(ITradeRepository repository)
 {
@@ -14,7 +14,7 @@ public sealed class Seeder(ITradeRepository repository)
 
     public ITradeRepository Repository => repository;
 
-    /// <summary>How long <see cref="GenerateAsync"/> took to write the corpus, and then to index it.</summary>
+    /// <summary>How long <see cref="GenerateAsync" /> took to write the corpus, and then to index it.</summary>
     public TimeSpan LoadTime { get; private set; }
 
     public TimeSpan IndexTime { get; private set; }
@@ -29,16 +29,16 @@ public sealed class Seeder(ITradeRepository repository)
     /// <summary>The latest event in the corpus: everything after it, the exchange wrote.</summary>
     public DateTime LoadedThrough { get; private set; }
 
-    /// <summary>What <see cref="GenerateAsync"/> is doing now, for a console to show while it waits.</summary>
+    /// <summary>What <see cref="GenerateAsync" /> is doing now, for a console to show while it waits.</summary>
     public string Stage { get; private set; } = "";
 
-    /// <summary>Orders <see cref="GenerateAsync"/> has written so far.</summary>
+    /// <summary>Orders <see cref="GenerateAsync" /> has written so far.</summary>
     public long Written => Interlocked.Read(ref _written);
 
     /// <summary>
-    /// Creates the tables and fills them with <paramref name="orders"/> client orders worked over the
-    /// <paramref name="span"/> before <paramref name="end"/>, the newest <paramref name="openTail"/> left
-    /// new; indexes them; and from then on keeps <c>orders_current</c> as <paramref name="sync"/> says.
+    ///     Creates the tables and fills them with <paramref name="orders" /> client orders worked over the
+    ///     <paramref name="span" /> before <paramref name="end" />, the newest <paramref name="openTail" /> left
+    ///     new; indexes them; and from then on keeps <c>orders_current</c> as <paramref name="sync" /> says.
     /// </summary>
     public async Task GenerateAsync(
         long orders, DateTime end, TimeSpan span, int openTail, CurrentSync sync, CancellationToken ct)
@@ -60,24 +60,15 @@ public sealed class Seeder(ITradeRepository repository)
             for (var n = p * size; n < Math.Min(orders, (p + 1) * size); n++)
             {
                 ct.ThrowIfCancellationRequested();
-                var (made, filled) = Corpus.Make(n, origin, spacing, open: n >= orders - openTail);
-                foreach (var version in made)
-                {
-                    load.AddVersion(version);
-                }
+                var (made, filled) = Corpus.Make(n, origin, spacing, n >= orders - openTail);
+                foreach (var version in made) load.AddVersion(version);
 
                 load.AddCurrent(made[^1]);
-                foreach (var fill in filled)
-                {
-                    load.AddFill(fill);
-                }
+                foreach (var fill in filled) load.AddFill(fill);
 
                 versionCount += made.Length;
                 fillCount += filled.Length;
-                if ((n & 4095) == 4095)
-                {
-                    Interlocked.Add(ref _written, 4096);
-                }
+                if ((n & 4095) == 4095) Interlocked.Add(ref _written, 4096);
 
                 latest = made[^1].EventTime > latest ? made[^1].EventTime : latest;
             }

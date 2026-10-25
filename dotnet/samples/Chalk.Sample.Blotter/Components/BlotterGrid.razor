@@ -10,14 +10,17 @@
     @foreach (var tab in Tabs.All)
     {
         var t = tab;
-        <button role="tab" aria-selected="@(t == Tab)" class="tab @(t == Tab ? "selected" : "")" @onclick="() => Select.InvokeAsync(t)">@t.Title</button>
+        <button role="tab" aria-selected="@(t == Tab)" class="tab @(t == Tab ? "selected" : "")"
+                @onclick="() => Select.InvokeAsync(t)">@t.Title</button>
     }
     <span class="spacer"></span>
     @if (Alerts is not null)
     {
         <span class="alerts-wrap">
-            <button type="button" class="icon-button" aria-expanded="@_alerting" title="Alerts: a sound when a row comes to pass a filter, or waits too long for the database" aria-label="@(Alerts.Unseen ? "Alerts, some unseen" : "Alerts")" @onclick="ToggleAlerts">
-                <Bell Muted="!Alerts.SoundOn && !Alerts.Rules.IsEmpty" />
+            <button type="button" class="icon-button" aria-expanded="@_alerting"
+                    title="Alerts: a sound when a row comes to pass a filter, or waits too long for the database"
+                    aria-label="@(Alerts.Unseen ? "Alerts, some unseen" : "Alerts")" @onclick="ToggleAlerts">
+                <Bell Muted="!Alerts.SoundOn && !Alerts.Rules.IsEmpty"/>
                 @if (Alerts.Unseen)
                 {
                     @* An alert has fired since the alerts were last looked at. *@
@@ -26,26 +29,39 @@
             </button>
             @if (_alerting)
             {
-                <AlertsPanel Book="Alerts" Tab="Tab" Filter="_filter" />
+                <AlertsPanel Book="Alerts" Tab="Tab" Filter="_filter"/>
             }
         </span>
     }
     @* Both copy in the browser itself, in the click: a clipboard takes nothing written later. *@
-    <button type="button" class="icon-button" title="Copy the rows in view, to paste into a sheet or a message" aria-label="Copy the rows in view" onclick="blotter.copyRows(this)">
-        <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><rect x="5.5" y="5.5" width="8.5" height="8.5" rx="1.5" /><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5" /></svg>
+    <button type="button" class="icon-button" title="Copy the rows in view, to paste into a sheet or a message"
+            aria-label="Copy the rows in view" onclick="blotter.copyRows(this)">
+        <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+            <rect x="5.5" y="5.5" width="8.5" height="8.5" rx="1.5"/>
+            <path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5"/>
+        </svg>
     </button>
     @* The menu opens and closes in the browser alone, so a choice in it is still the click a clipboard asks for. *@
     <span class="share-wrap">
-        <button type="button" class="icon-button" title="Copy a link to this view: its sort, filters and columns, and the row at the top unless it follows the live top" aria-label="Copy a link to this view" aria-haspopup="menu" onclick="blotter.toggleShare(this)">
-            <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M6.5 9.5l3-3" /><path d="M7.2 4.3l1.1-1.1a2.9 2.9 0 0 1 4.1 4.1l-1.1 1.1" /><path d="M8.8 11.7l-1.1 1.1a2.9 2.9 0 0 1-4.1-4.1l1.1-1.1" /></svg>
+        <button type="button" class="icon-button"
+                title="Copy a link to this view: its sort, filters and columns, and the row at the top unless it follows the live top"
+                aria-label="Copy a link to this view" aria-haspopup="menu" onclick="blotter.toggleShare(this)">
+            <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M6.5 9.5l3-3"/><path
+                    d="M7.2 4.3l1.1-1.1a2.9 2.9 0 0 1 4.1 4.1l-1.1 1.1"/><path
+                    d="M8.8 11.7l-1.1 1.1a2.9 2.9 0 0 1-4.1-4.1l1.1-1.1"/></svg>
         </button>
         <span class="share-menu" role="menu">
-            <button type="button" role="menuitem" title="The filters' values and the row at the top shrouded: the link shows only the tab, the sort and the columns" onclick="blotter.shareView(this, true)">Copy private link</button>
-            <button type="button" role="menuitem" title="Everything in plain text, the filters' values and the row at the top included" onclick="blotter.shareView(this, false)">Copy readable link</button>
+            <button type="button" role="menuitem"
+                    title="The filters' values and the row at the top shrouded: the link shows only the tab, the sort and the columns"
+                    onclick="blotter.shareView(this, true)">Copy private link</button>
+            <button type="button" role="menuitem"
+                    title="Everything in plain text, the filters' values and the row at the top included"
+                    onclick="blotter.shareView(this, false)">Copy readable link</button>
         </span>
     </span>
     <span class="chooser-wrap">
-        <button type="button" class="link-button" aria-expanded="@_choosing" @onclick="() => _choosing = !_choosing">Columns <Chevron Down="true" Open="_choosing" /></button>
+        <button type="button" class="link-button" aria-expanded="@_choosing" @onclick="() => _choosing = !_choosing">Columns <Chevron
+                Down="true" Open="_choosing"/></button>
         @if (_choosing)
         {
             <div class="column-chooser" role="group" aria-label="Columns shown">
@@ -54,7 +70,7 @@
                     var column = Tab.Columns[c];
                     <label>
                         <input type="checkbox" checked="@(!_hiddenColumns.Contains(column.Name))"
-                               @onchange="e => ShowColumnAsync(column, e.Value is true)" />
+                               @onchange="e => ShowColumnAsync(column, e.Value is true)"/>
                         @column.Title
                     </label>
                 }
@@ -65,23 +81,24 @@
 
 @if (!_filter.Columns.IsEmpty)
 {
-<div class="toolbar">
-    @foreach (var filter in _filter.Columns)
-    {
-        var f = filter;
-        <span class="pill filter-pill" @onclick="() => OpenEditor(f.Column)">
+    <div class="toolbar">
+        @foreach (var filter in _filter.Columns)
+        {
+            var f = filter;
+            <span class="pill filter-pill" @onclick="() => OpenEditor(f.Column)">
             @f.Describe()
-            <button type="button" aria-label="Remove the filter on @f.Column.Title" @onclick="() => RemoveFilterAsync(f.Column)" @onclick:stopPropagation>×</button>
+                <button type="button" aria-label="Remove the filter on @f.Column.Title"
+                        @onclick="() => RemoveFilterAsync(f.Column)" @onclick:stopPropagation>×</button>
         </span>
-    }
-    <button type="button" class="link-button" @onclick="ClearFiltersAsync">Clear all</button>
-</div>
+        }
+        <button type="button" class="link-button" @onclick="ClearFiltersAsync">Clear all</button>
+    </div>
 }
 
 @if (_editing is { } editing)
 {
     <FilterEditor Tab="Tab" Column="editing" Current="_filter.For(editing)" Within="PeriodOfInterest()"
-                  Apply="ApplyFilterAsync" Close="() => _editing = null" />
+                  Apply="ApplyFilterAsync" Close="() => _editing = null"/>
 }
 
 @if (_refusal is not null)
@@ -107,15 +124,17 @@
             @if (Alerts is not null && Alerts.FiredOn(Tab) > _firedAtHold)
             {
                 @* Alerts fired since the grid was held: among the rows above, most likely. *@
-                <Bell Muted="!Alerts.SoundOn" />
+                <Bell Muted="!Alerts.SoundOn"/>
             }
             @above.ToString("N0", CultureInfo.InvariantCulture) new above
         </button>
     }
 
     <div class="scroller @(_waiting || _refusal is not null || _failure is not null ? "waiting" : "")" @ref="_scroller">
-        <QuickGrid TGridItem="BlotterRow" @ref="_grid" Class="@(Tab.Overrides ? "nested" : null)" ItemsProvider="_provider" Virtualize="true" ItemSize="(float)GridRows.RowHeight"
-                   OverscanCount="60" ItemKey="r => r.Key" RowClass="@(r => r.Parent is null ? r.RowClass : "child " + r.RowClass)">
+        <QuickGrid TGridItem="BlotterRow" @ref="_grid" Class="@(Tab.Overrides ? "nested" : null)"
+                   ItemsProvider="_provider" Virtualize="true" ItemSize="(float)GridRows.RowHeight"
+                   OverscanCount="60" ItemKey="r => r.Key"
+                   RowClass="@(r => r.Parent is null ? r.RowClass : "child " + r.RowClass)">
             @if (Tab.Overrides)
             {
                 // The expander has a column of its own, so that opening an order moves nothing in its
@@ -123,9 +142,10 @@
                 <TemplateColumn TGridItem="BlotterRow" Title="" Class="expander frozen">
                     @if (context.Parent is null && context.Row is Order order)
                     {
-                        <button type="button" class="toggle" aria-label="@(_rows.IsOpen(order.OrderId) ? "Hide" : "Show") the fills of order @order.OrderId"
+                        <button type="button" class="toggle"
+                                aria-label="@(_rows.IsOpen(order.OrderId) ? "Hide" : "Show") the fills of order @order.OrderId"
                                 @onclick="() => ToggleAsync(order)">
-                            <Chevron Open="_rows.IsOpen(order.OrderId)" />
+                            <Chevron Open="_rows.IsOpen(order.OrderId)"/>
                         </button>
                     }
                 </TemplateColumn>
@@ -144,32 +164,38 @@
                         @if (column.Derived)
                         {
                             @* Only shown: worked out in the host from the row, so neither sorted nor filtered by. *@
-                            <div class="head shown @(column.Numeric ? "num" : "")" title="@column.Description; worked out from the row, so not sorted or filtered by">
+                            <div class="head shown @(column.Numeric ? "num" : "")"
+                                 title="@column.Description; worked out from the row, so not sorted or filtered by">
                                 <span class="sort">@column.Title</span>
                             </div>
                         }
                         else
                         {
-                        @* The whole heading sorts, its label button too (a click on it reaches the heading); the funnel does not.
+                            @* The whole heading sorts, its label button too (a click on it reaches the heading); the funnel does not.
                            The funnel sits just before the label, in the gutter every column keeps at its left. *@
-                        <div class="head @(column.Numeric ? "num" : "")" @onclick="e => SortAsync(column, e.ShiftKey)"
-                             title="@(column.Description is { } about ? about + ". " : "")Click to sort by @column.Title, descending, then ascending, then not; shift-click to do the same within a sort by several columns">
+                            <div class="head @(column.Numeric ? "num" : "")"
+                                 @onclick="e => SortAsync(column, e.ShiftKey)"
+                                 title="@(column.Description is { } about ? about + ". " : "")Click to sort by @column.Title, descending, then ascending, then not; shift-click to do the same within a sort by several columns">
                             <span class="label">
-                            <button type="button" class="funnel @(_filter.For(column) is not null ? "on" : "") @(_editing == column ? "open" : "")"
-                                    title="Filter @column.Title" aria-label="Filter @column.Title" @onclick="() => OpenEditor(column)" @onclick:stopPropagation>
-                                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M1.5 2h13l-5 6.2V14l-3-1.6V8.2z" /></svg>
+                            <button type="button"
+                                    class="funnel @(_filter.For(column) is not null ? "on" : "") @(_editing == column ? "open" : "")"
+                                    title="Filter @column.Title" aria-label="Filter @column.Title"
+                                    @onclick="() => OpenEditor(column)" @onclick:stopPropagation>
+                                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path
+                                        d="M1.5 2h13l-5 6.2V14l-3-1.6V8.2z"/></svg>
                             </button>
                             <button class="sort" type="button">
                                 @column.Title
                                 @* The arrow keeps its place when the column is not sorted, so the heading is as wide either way. *@
-                                <span class="arrow @(_sort.RankOf(column) > 0 ? "" : _sort.ByDefault(column) ? "default" : "unsorted")">@(_sort.IsDescending(column) || _sort.RankOf(column) == 0 ? "▼" : "▲")</span>
+                                <span
+                                    class="arrow @(_sort.RankOf(column) > 0 ? "" : _sort.ByDefault(column) ? "default" : "unsorted")">@(_sort.IsDescending(column) || _sort.RankOf(column) == 0 ? "▼" : "▲")</span>
                                 @if (_sort.RankOf(column) is var rank and > 0 && _sort.Chosen.Length > 1)
                                 {
                                     <span class="rank">@rank</span>
                                 }
                             </button>
                             </span>
-                        </div>
+                            </div>
                         }
                     </HeaderTemplate>
                     <ChildContent>
@@ -185,7 +211,8 @@
                             }
                             else
                             {
-                                <span class="cell @(column.Kind == ColumnKind.Id ? "id" : "")">@NestedCell(column, fill)</span>
+                                <span
+                                    class="cell @(column.Kind == ColumnKind.Id ? "id" : "")">@NestedCell(column, fill)</span>
                             }
                         }
                         else if (column.Name == "version")
@@ -195,24 +222,30 @@
                         else if (column == Tab.Key && context.Row is Order own)
                         {
                             <span class="cell id @context.Flash[index]" title="@own.OrderId">
-                                <a class="go" href="order/@own.OrderId" target="_blank" title="@own.OrderId: every version of this order, and its fills">@own.OrderId <span class="arrow">↗</span></a>
+                                <a class="go" href="order/@own.OrderId" target="_blank"
+                                   title="@own.OrderId: every version of this order, and its fills">@own.OrderId <span
+                                        class="arrow">↗</span></a>
                             </span>
                         }
                         else if (column == Tab.Key && context.Row is Fill thisFill)
                         {
                             <span class="cell id @context.Flash[index]" title="@thisFill.FillId">
-                                <a class="go" href="order/@thisFill.OrderId?fill=@thisFill.FillId" target="_blank" title="@thisFill.FillId: its order, every version and every fill, this one marked">@thisFill.FillId <span class="arrow">↗</span></a>
+                                <a class="go" href="order/@thisFill.OrderId?fill=@thisFill.FillId" target="_blank"
+                                   title="@thisFill.FillId: its order, every version and every fill, this one marked">@thisFill.FillId <span
+                                        class="arrow">↗</span></a>
                             </span>
                         }
                         else if (column.Name == "order_id" && context.Row is Fill parentOf)
                         {
-                            <span class="cell link id" @onmouseenter="e => HoverAsync(e, parentOf)" @onmouseleave="Unhover">
+                            <span class="cell link id" @onmouseenter="e => HoverAsync(e, parentOf)"
+                                  @onmouseleave="Unhover">
                                 <a href="order/@parentOf.OrderId" target="_blank">@column.Show(context.Row)</a>
                             </span>
                         }
                         else if (column.Name == "side")
                         {
-                            <span class="cell side-@column.Show(context.Row) @context.Flash[index]">@column.Show(context.Row)</span>
+                            <span
+                                class="cell side-@column.Show(context.Row) @context.Flash[index]">@column.Show(context.Row)</span>
                         }
                         else
                         {
@@ -222,7 +255,8 @@
                             }
                             else
                             {
-                                <span class="cell @(column.Kind == ColumnKind.Id ? "id" : "") @context.Flash[index]" title="@(column.Kind == ColumnKind.Id ? column.Show(context.Row) : null)">@column.Show(context.Row)</span>
+                                <span class="cell @(column.Kind == ColumnKind.Id ? "id" : "") @context.Flash[index]"
+                                      title="@(column.Kind == ColumnKind.Id ? column.Show(context.Row) : null)">@column.Show(context.Row)</span>
                             }
                         }
                     </ChildContent>
@@ -261,8 +295,10 @@
 @* Under the grid, one row: what opens beneath it, side by side while closed, then what the page acts with. *@
 <div class="bar controls">
     @Toggles
-    <button type="button" class="link-button disclosure" aria-expanded="@_explaining" @onclick="() => _explaining = !_explaining">
-        <Chevron Open="_explaining" /> How this tab is answered
+    <button type="button" class="link-button disclosure" aria-expanded="@_explaining"
+            @onclick="() => _explaining = !_explaining">
+        <Chevron Open="_explaining"/>
+        How this tab is answered
     </button>
     <span class="spacer"></span>
     <span class="actions">@Actions</span>
@@ -272,26 +308,28 @@
 
 @if (_explaining)
 {
-<div class="explain">
-    <p>
-        Each page is read live from PostgreSQL (@(Tab.Overrides ? "orders_current, one row per order" : "fills")) through ChalkQL,
-        from the key of a row already shown, with the sort, the filter and the limit pushed down; and merged with this
-        filter's live scope, a ChalkQL standing view over the tail: what the streams have sent that the database has not
-        been seen to hold yet.
-    </p>
-    <pre>@SourceQueries.ReadSql(Tab, _filter, _sort, fromKey: true)</pre>
-    <pre>@LiveScope.Sql(Tab, _filter)</pre>
-    <button @onclick="ShowPlansAsync">Show the plans</button>
-    @if (_plans is not null)
-    {
-        <pre>@_plans</pre>
-    }
-</div>
+    <div class="explain">
+        <p>
+            Each page is read live from PostgreSQL (@(Tab.Overrides ? "orders_current, one row per order" : "fills"))
+            through ChalkQL,
+            from the key of a row already shown, with the sort, the filter and the limit pushed down; and merged with
+            this
+            filter's live scope, a ChalkQL standing view over the tail: what the streams have sent that the database has
+            not
+            been seen to hold yet.
+        </p>
+        <pre>@SourceQueries.ReadSql(Tab, _filter, _sort, fromKey: true)</pre>
+        <pre>@LiveScope.Sql(Tab, _filter)</pre>
+        <button @onclick="ShowPlansAsync">Show the plans</button>
+        @if (_plans is not null)
+        {
+            <pre>@_plans</pre>
+        }
+    </div>
 }
 
 @code {
-    [Parameter, EditorRequired]
-    public Tab Tab { get; set; } = default!;
+    [Parameter, EditorRequired] public Tab Tab { get; set; } = default!;
 
     /// <summary>Toggles of the page's own, on the row under the table before this one's.</summary>
     [Parameter]
@@ -376,7 +414,10 @@
         _rows = new GridRows(Host, Tab, _sort);
         _provider = ProvideAsync;
         Host.Published += OnPublished;
-        _ticker = new Timer(_ => { if (_rows.Counting) OnPublished(0); }, null, 1000, 1000);
+        _ticker = new Timer(_ =>
+        {
+            if (_rows.Counting) OnPublished(0);
+        }, null, 1000, 1000);
         await AcquireAsync(_filter);
     }
 
@@ -394,8 +435,8 @@
     }
 
     /// <summary>
-    /// Opens the grid where a link was made: the row it was held at counted to its place, the grid
-    /// scrolled there and held, as if the reader had scrolled there; what arrives above is counted.
+    ///     Opens the grid where a link was made: the row it was held at counted to its place, the grid
+    ///     scrolled there and held, as if the reader had scrolled there; what arrives above is counted.
     /// </summary>
     private async Task HoldAtAsync(IRow at)
     {
@@ -432,9 +473,9 @@
     }
 
     /// <summary>
-    /// A link to this view, for the share button: the sort, the filters, the columns hidden, and,
-    /// scrolled away from the live top, the first row wholly in view, by its keyset; the filters'
-    /// values and the row shrouded, if the link is to be private.
+    ///     A link to this view, for the share button: the sort, the filters, the columns hidden, and,
+    ///     scrolled away from the live top, the first row wholly in view, by its keyset; the filters'
+    ///     values and the row shrouded, if the link is to be private.
     /// </summary>
     [JSInvokable]
     public async Task<string> ShareLink(double scrollTop, bool shrouded)
@@ -443,7 +484,7 @@
         if (_rows.Held && scrollTop >= GridRows.RowHeight / 2 && _scope?.State is { Ready: true } state)
         {
             at = await _rows.RowAtAsync(state, scrollTop, CancellationToken.None)
-                ?? throw new InvalidOperationException("the row in view could not be read");
+                 ?? throw new InvalidOperationException("the row in view could not be read");
         }
 
         // Private, the filters' values and the row held at, which are data, are shrouded.
@@ -490,11 +531,11 @@
     }
 
     /// <summary>
-    /// Lets in up to <see cref="RevealAtOnce"/> of the rows that arrived above: every position the grid
-    /// holds moves down by as many, and the scroll with them, so the rows in view stay where they are
-    /// and the new ones are there to scroll up to. No more than the grid renders beyond the view, so the
-    /// rows in view are on the page already when the scroll moves; and none again until the page says
-    /// it has moved the scroll (<see cref="OnRevealed"/>), so two lots never stack.
+    ///     Lets in up to <see cref="RevealAtOnce" /> of the rows that arrived above: every position the grid
+    ///     holds moves down by as many, and the scroll with them, so the rows in view stay where they are
+    ///     and the new ones are there to scroll up to. No more than the grid renders beyond the view, so the
+    ///     rows in view are on the page already when the scroll moves; and none again until the page says
+    ///     it has moved the scroll (<see cref="OnRevealed" />), so two lots never stack.
     /// </summary>
     private async Task RevealAsync()
     {
@@ -583,9 +624,9 @@
     }
 
     /// <summary>
-    /// A page that could not be read leaves the rows shown as they are, faded under the reason, rather
-    /// than emptying the grid: the grid lets a request go, and keeps what it has, when it is cancelled
-    /// with the request's own token.
+    ///     A page that could not be read leaves the rows shown as they are, faded under the reason, rather
+    ///     than emptying the grid: the grid lets a request go, and keeps what it has, when it is cancelled
+    ///     with the request's own token.
     /// </summary>
     private static OperationCanceledException Keep(CancellationToken request) => new(request);
 
@@ -620,18 +661,21 @@
         _frozen = await JS.InvokeAsync<bool>("blotter.freezeColumns", _scroller);
     }
 
-    /// <summary>A column's classes: right-aligned for numbers; frozen for the first few, which stay in place as the grid scrolls sideways.</summary>
+    /// <summary>
+    ///     A column's classes: right-aligned for numbers; frozen for the first few, which stay in place as the grid
+    ///     scrolls sideways.
+    /// </summary>
     private string ColumnClass(Column column, int index) => string.Join(' ', new[]
     {
         column.Numeric ? "num" : null,
         index < Tab.Frozen ? "frozen" : null,
-        index == Tab.Frozen - 1 ? "frozen-last" : null,
+        index == Tab.Frozen - 1 ? "frozen-last" : null
     }.Where(c => c is not null));
 
     /// <summary>
-    /// A time with its date cut off at the left: the date, in a box an ellipsis wide, shown as one,
-    /// then the time of day, whole, after a space; on hover, the time in full, date and microseconds.
-    /// The date is still there, to copy.
+    ///     A time with its date cut off at the left: the date, in a box an ellipsis wide, shown as one,
+    ///     then the time of day, whole, after a space; on hover, the time in full, date and microseconds.
+    ///     The date is still there, to copy.
     /// </summary>
     private static RenderFragment TimeCell(string shown, string full, string? flash) => __builder =>
     {
@@ -640,8 +684,8 @@
     };
 
     /// <summary>
-    /// A row's reconciliation lag: counting, while the database has not been seen to hold it; muted, once
-    /// it has, until the row leaves the tail; a dash for a row the tail does not hold.
+    ///     A row's reconciliation lag: counting, while the database has not been seen to hold it; muted, once
+    ///     it has, until the row leaves the tail; a dash for a row the tail does not hold.
     /// </summary>
     private static RenderFragment LagCell(Reconciliation? reconciliation) => __builder =>
     {
@@ -651,11 +695,13 @@
         }
         else if (r.Reconciled)
         {
-            <span class="cell lag done" title="The database was seen to hold it @Column.Seconds(r.Lag(DateTime.UtcNow)) after the exchange sent it">@Column.Seconds(r.Lag(DateTime.UtcNow))</span>
+            <span class="cell lag done"
+                  title="The database was seen to hold it @Column.Seconds(r.Lag(DateTime.UtcNow)) after the exchange sent it">@Column.Seconds(r.Lag(DateTime.UtcNow))</span>
         }
         else
         {
-            <span class="cell lag waiting" title="Sent at @r.Since.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture); the database has not been seen to hold it yet">@Column.Seconds(r.Lag(DateTime.UtcNow))</span>
+            <span class="cell lag waiting"
+                  title="Sent at @r.Since.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture); the database has not been seen to hold it yet">@Column.Seconds(r.Lag(DateTime.UtcNow))</span>
         }
     };
 
@@ -668,7 +714,7 @@
         "filled_amt" => Tabs.Fills.Named("amt").Show(fill),
         "status" => "fill",
         var name when Tabs.Fills.Columns.Any(c => c.Name == name) => Tabs.Fills.Named(name).Show(fill),
-        _ => "",
+        _ => ""
     };
 
     private async Task ToggleAsync(Order order)
@@ -678,8 +724,8 @@
     }
 
     /// <summary>
-    /// The fill's order, as both sides know it now: its latest version, from the database or the tail.
-    /// The order, or the version that counts the fill, may not have arrived yet, and the card says so.
+    ///     The fill's order, as both sides know it now: its latest version, from the database or the tail.
+    ///     The order, or the version that counts the fill, may not have arrived yet, and the card says so.
     /// </summary>
     private async Task HoverAsync(MouseEventArgs mouse, Fill fill)
     {
@@ -736,8 +782,7 @@
                     // At most ten pages a second, however fast the feed is: changes in between are
                     // in the scope's next state, not lost.
                     await Task.Delay(100);
-                }
-                while (_dirty);
+                } while (_dirty);
             }
             finally
             {
@@ -855,7 +900,10 @@
         await ReloadAsync();
     }
 
-    /// <summary>A page of the sort and filter chosen at <paramref name="reloads"/> failed: said, unless a newer one has been chosen since.</summary>
+    /// <summary>
+    ///     A page of the sort and filter chosen at <paramref name="reloads" /> failed: said, unless a newer one has been
+    ///     chosen since.
+    /// </summary>
     private void Fail(long reloads, string why)
     {
         if (reloads != _reloads)
@@ -913,4 +961,5 @@
 
         _self?.Dispose();
     }
+
 }

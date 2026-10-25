@@ -3,18 +3,21 @@ using System.Collections.Immutable;
 namespace Chalk.Sample.Blotter.Live;
 
 /// <summary>
-/// One order in the live tail: its latest version from the stream, beside the row the database last
-/// showed for it in <c>orders_current</c>.
+///     One order in the live tail: its latest version from the stream, beside the row the database last
+///     showed for it in <c>orders_current</c>.
 /// </summary>
 /// <remarks>
-/// Every column is here twice, the stream's version's and the database's (<c>base_</c>), so that a live
-/// scope can test a filter against both in one statement: an order whose database row passes the
-/// filter has a row in the database's pages that the tail now overrides, wherever its new version
-/// lands. <see cref="BaseVersion"/> is zero when the database has no row for the order yet, and its other
-/// columns then repeat the stream's.
+///     Every column is here twice, the stream's version's and the database's (<c>base_</c>), so that a live
+///     scope can test a filter against both in one statement: an order whose database row passes the
+///     filter has a row in the database's pages that the tail now overrides, wherever its new version
+///     lands. <see cref="BaseVersion" /> is zero when the database has no row for the order yet, and its other
+///     columns then repeat the stream's.
 /// </remarks>
 public sealed record TailRow
 {
+    /// <summary>A rough size in memory, for the budget, counted twice: once here, once in ChalkQL's copy.</summary>
+    public const int Bytes = 2 * 216;
+
     public required Guid OrderId { get; init; }
     public required int Version { get; init; }
     public required DateTime EventTime { get; init; }
@@ -49,13 +52,10 @@ public sealed record TailRow
     public required double BaseMarkupBps { get; init; }
     public required string BaseStatus { get; init; }
 
-    /// <summary>A rough size in memory, for the budget, counted twice: once here, once in ChalkQL's copy.</summary>
-    public const int Bytes = 2 * 216;
-
     public static TailRow Of(Order live, Order? database)
     {
         var b = database ?? live;
-        return new()
+        return new TailRow
         {
             OrderId = live.OrderId, Version = live.Version, EventTime = live.EventTime, OrderTime = live.OrderTime,
             ClOrdId = live.ClOrdId, Client = live.Client, Region = live.Region, Channel = live.Channel,
@@ -64,7 +64,8 @@ public sealed record TailRow
             BaseOrderId = b.OrderId, BaseVersion = database?.Version ?? 0, BaseEventTime = b.EventTime,
             BaseOrderTime = b.OrderTime, BaseClOrdId = b.ClOrdId, BaseClient = b.Client, BaseRegion = b.Region,
             BaseChannel = b.Channel, BaseInstrument = b.Instrument, BaseSide = b.Side, BaseQty = b.Qty,
-            BaseFilledQty = b.FilledQty, BaseAvgPrice = b.AvgPrice, BaseFilledAmt = b.FilledAmt, BaseMarkupBps = b.MarkupBps, BaseStatus = b.Status,
+            BaseFilledQty = b.FilledQty, BaseAvgPrice = b.AvgPrice, BaseFilledAmt = b.FilledAmt,
+            BaseMarkupBps = b.MarkupBps, BaseStatus = b.Status
         };
     }
 }
@@ -78,43 +79,48 @@ public sealed class TailEntry(Order live, Order? database)
     /// <summary>The order's row in <c>orders_current</c> when last looked up, or null when it had none.</summary>
     public Order? Base { get; internal set; } = database;
 
-    /// <summary>The versions the stream has sent that are newer than <see cref="Base"/>, oldest first.</summary>
+    /// <summary>The versions the stream has sent that are newer than <see cref="Base" />, oldest first.</summary>
     public List<Order> Versions { get; } = [];
 
-    /// <summary>When a lookup first found the database at <see cref="Live"/>'s version or later; null until then.</summary>
+    /// <summary>When a lookup first found the database at <see cref="Live" />'s version or later; null until then.</summary>
     public DateTime? ConfirmedAt { get; internal set; }
 }
 
 /// <summary>
-/// How long the database took to hold what the streams sent of one order or fill (<see cref="Row"/>, at its
-/// latest version): from the time of the
-/// oldest version it was not seen to hold (a fill's own time) until a lookup found it there, or until
-/// now while none has.
+///     How long the database took to hold what the streams sent of one order or fill (<see cref="Row" />, at its
+///     latest version): from the time of the
+///     oldest version it was not seen to hold (a fill's own time) until a lookup found it there, or until
+///     now while none has.
 /// </summary>
 /// <remarks>
-/// Times are the exchange's, so a message the stream sent late counts its lateness too: the lag is how
-/// long the two sides took to agree, whichever was behind. Lookups run every
-/// <see cref="BlotterOptions.ConfirmEvery"/>, so a lag is known to within one.
+///     Times are the exchange's, so a message the stream sent late counts its lateness too: the lag is how
+///     long the two sides took to agree, whichever was behind. Lookups run every
+///     <see cref="BlotterOptions.ConfirmEvery" />, so a lag is known to within one.
 /// </remarks>
 public readonly record struct Reconciliation(IRow Row, DateTime Since, DateTime? At)
 {
     /// <summary>A lookup has found the database holding it.</summary>
     public bool Reconciled => At is not null;
 
-    public TimeSpan Lag(DateTime now) => (At ?? now) - Since is var lag && lag > TimeSpan.Zero ? lag : TimeSpan.Zero;
+    public TimeSpan Lag(DateTime now)
+    {
+        return (At ?? now) - Since is var lag && lag > TimeSpan.Zero ? lag : TimeSpan.Zero;
+    }
 }
 
 /// <summary>
-/// The live tail: every order whose latest version from the stream the database has not been seen to
-/// hold yet, and every fill the database has not been seen to hold. A row leaves once a lookup has
-/// found it in the database and some time has passed since (<see cref="BlotterOptions.EvictAfter"/>).
-/// Changed only by the host's catch-up loop.
+///     The live tail: every order whose latest version from the stream the database has not been seen to
+///     hold yet, and every fill the database has not been seen to hold. A row leaves once a lookup has
+///     found it in the database and some time has passed since (<see cref="BlotterOptions.EvictAfter" />).
+///     Changed only by the host's catch-up loop.
 /// </summary>
 public sealed class Tail
 {
-    private readonly Dictionary<Guid, TailEntry> _orders = [];
+    // A key, its value and its node in an immutable dictionary, roughly.
+    private const long ReconcilingBytes = 96;
     private readonly Dictionary<Guid, Fill> _fills = [];
     private readonly Dictionary<Guid, DateTime> _fillsConfirmed = [];
+    private readonly Dictionary<Guid, TailEntry> _orders = [];
 
     public int Count => _orders.Count;
 
@@ -124,8 +130,8 @@ public sealed class Tail
     public long VersionCount { get; private set; }
 
     /// <summary>
-    /// Every order's latest version in the tail, whatever filter it passes: immutable, so a page that
-    /// reads one state decides by it which of the database's rows the tail overrides.
+    ///     Every order's latest version in the tail, whatever filter it passes: immutable, so a page that
+    ///     reads one state decides by it which of the database's rows the tail overrides.
     /// </summary>
     public ImmutableDictionary<Guid, Order> Latest { get; private set; } = ImmutableDictionary<Guid, Order>.Empty;
 
@@ -134,27 +140,21 @@ public sealed class Tail
         ImmutableDictionary<Guid, ImmutableList<Fill>>.Empty;
 
     /// <summary>
-    /// Each order and fill in the tail, by id, and how long the database has taken to hold it:
-    /// immutable, so a page shows the lag of the state it read. It holds the tail's rows and no others,
-    /// added and let go with them, so it is bounded as the tail is, by the budget.
+    ///     Each order and fill in the tail, by id, and how long the database has taken to hold it:
+    ///     immutable, so a page shows the lag of the state it read. It holds the tail's rows and no others,
+    ///     added and let go with them, so it is bounded as the tail is, by the budget.
     /// </summary>
     public ImmutableDictionary<Guid, Reconciliation> Reconciling { get; private set; } =
         ImmutableDictionary<Guid, Reconciliation>.Empty;
 
     /// <summary>
-    /// What the tail holds, in bytes: its rows here and in ChalkQL, its versions and its fills in both,
-    /// and what each has taken to reconcile.
+    ///     What the tail holds, in bytes: its rows here and in ChalkQL, its versions and its fills in both,
+    ///     and what each has taken to reconcile.
     /// </summary>
     public long Bytes =>
-        _orders.Count * ((long)TailRow.Bytes + 64) + VersionCount * 2L * Order.Bytes + _fills.Count * 2L * (Fill.Bytes + 48)
+        _orders.Count * ((long)TailRow.Bytes + 64) + VersionCount * 2L * Order.Bytes +
+        _fills.Count * 2L * (Fill.Bytes + 48)
         + Reconciling.Count * ReconcilingBytes;
-
-    // A key, its value and its node in an immutable dictionary, roughly.
-    private const long ReconcilingBytes = 96;
-
-    public TailEntry? Get(Guid orderId) => _orders.GetValueOrDefault(orderId);
-
-    public Fill? GetFill(Guid fillId) => _fills.GetValueOrDefault(fillId);
 
     public IEnumerable<TailEntry> Entries => _orders.Values;
 
@@ -170,15 +170,21 @@ public sealed class Tail
         {
             DateTime? oldest = null;
             foreach (var (_, reconciliation) in Reconciling)
-            {
                 if (!reconciliation.Reconciled && (oldest is null || reconciliation.Since < oldest))
-                {
                     oldest = reconciliation.Since;
-                }
-            }
 
             return oldest;
         }
+    }
+
+    public TailEntry? Get(Guid orderId)
+    {
+        return _orders.GetValueOrDefault(orderId);
+    }
+
+    public Fill? GetFill(Guid fillId)
+    {
+        return _fills.GetValueOrDefault(fillId);
     }
 
     internal void Set(TailEntry entry, Order version)
@@ -190,7 +196,9 @@ public sealed class Tail
         Latest = Latest.SetItem(version.OrderId, version);
 
         // Still waiting on an older version, the order has waited since then.
-        var since = Reconciling.TryGetValue(version.OrderId, out var was) && !was.Reconciled ? was.Since : version.EventTime;
+        var since = Reconciling.TryGetValue(version.OrderId, out var was) && !was.Reconciled
+            ? was.Since
+            : version.EventTime;
         Reconciling = Reconciling.SetItem(version.OrderId, new Reconciliation(version, since, null));
     }
 
@@ -205,7 +213,10 @@ public sealed class Tail
         }
     }
 
-    /// <summary>The database's row for an entry, newer than it was: the versions the database now holds leave, the latest stays.</summary>
+    /// <summary>
+    ///     The database's row for an entry, newer than it was: the versions the database now holds leave, the latest
+    ///     stays.
+    /// </summary>
     internal List<Order> Rebase(TailEntry entry, Order? database)
     {
         entry.Base = database;
@@ -215,10 +226,9 @@ public sealed class Tail
 
         // The database holds the older versions now: the order waits since the oldest it does not.
         var id = entry.Live.OrderId;
-        if (entry.ConfirmedAt is null && entry.Versions.Where(v => v.Version > (database?.Version ?? 0)).ToList() is [_, ..] waiting)
-        {
+        if (entry.ConfirmedAt is null && entry.Versions.Where(v => v.Version > (database?.Version ?? 0)).ToList() is
+                [_, ..] waiting)
             Reconciling = Reconciling.SetItem(id, new Reconciliation(entry.Live, waiting.Min(v => v.EventTime), null));
-        }
 
         return gone;
     }
@@ -241,15 +251,15 @@ public sealed class Tail
             fill.OrderId, FillsByOrder.GetValueOrDefault(fill.OrderId, ImmutableList<Fill>.Empty).Add(fill));
     }
 
-    internal DateTime? FillConfirmedAt(Guid fillId) =>
-        _fillsConfirmed.TryGetValue(fillId, out var at) ? at : null;
+    internal DateTime? FillConfirmedAt(Guid fillId)
+    {
+        return _fillsConfirmed.TryGetValue(fillId, out var at) ? at : null;
+    }
 
     internal void ConfirmFill(Guid fillId, DateTime at)
     {
         if (_fillsConfirmed.TryAdd(fillId, at))
-        {
             Reconciling = Reconciling.SetItem(fillId, Reconciling[fillId] with { At = at });
-        }
     }
 
     internal void RemoveFill(Fill fill)

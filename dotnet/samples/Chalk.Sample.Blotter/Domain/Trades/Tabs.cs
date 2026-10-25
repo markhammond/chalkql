@@ -4,20 +4,20 @@ using System.Globalization;
 namespace Chalk.Sample.Blotter.Domain;
 
 /// <summary>
-/// The blotter's two tabs: client orders, which change, read live from <c>orders_current</c> and
-/// overridden by newer versions in the tail; and their fills, which never change.
+///     The blotter's two tabs: client orders, which change, read live from <c>orders_current</c> and
+///     overridden by newer versions in the tail; and their fills, which never change.
 /// </summary>
 public static class Tabs
 {
+    private const string Recon =
+        "How long the database took to hold what the streams sent, from the exchange's time: counting while it has not, "
+        + "a dash once the row has left the tail";
+
     public static readonly Tab Orders = MakeOrders();
 
     public static readonly Tab Fills = MakeFills();
 
     public static readonly IReadOnlyList<Tab> All = [Orders, Fills];
-
-    private const string Recon =
-        "How long the database took to hold what the streams sent, from the exchange's time: counting while it has not, "
-        + "a dash once the row has left the tail";
 
     private static Tab MakeOrders()
     {
@@ -39,25 +39,29 @@ public static class Tabs
                 Column.Number<Order>("qty", "Qty", o => o.Qty, 4),
                 Column.Number<Order>("filled_qty", "Filled", o => o.FilledQty, 4),
                 // Narrow no-break space, and no-break space: a heading stays on one line.
-                Column.Shown<Order>("filled_pct", "Fill\u202F%", o => o.Qty > 0 && o.FilledQty > 0 ? Column.Finance(100 * o.FilledQty / o.Qty, 1) + "%" : Column.Nought, numeric: true, "How much of the order is filled"),
+                Column.Shown<Order>("filled_pct", "Fill\u202F%",
+                    o => o.Qty > 0 && o.FilledQty > 0
+                        ? Column.Finance(100 * o.FilledQty / o.Qty, 1) + "%"
+                        : Column.Nought, true, "How much of the order is filled"),
                 Column.Price<Order>("avg_price", "Avg\u00A0px", o => o.AvgPrice),
                 Column.Number<Order>("filled_amt", "Filled\u00A0amt", o => o.FilledAmt, 2),
                 Column.Number<Order>("markup_bps", "Markup", o => o.MarkupBps, 1),
                 Column.Choice<Order>("status", "Status", o => o.Status, Reference.Statuses),
                 Column.Time<Order>("event_time", "Updated", o => o.EventTime),
-                Column.Reconciled("recon", "Recon", Recon),
+                Column.Reconciled("recon", "Recon", Recon)
             ],
             key,
             time,
             "blotter.orders_current",
             Order.Select,
             (batch, row) => Order.Read(batch, row),
-            overrides: true,
-            frozen: 2,
-            hiddenAtFirst: ImmutableHashSet.Create(StringComparer.Ordinal, "version", "region", "channel", "filled_qty"),
-            home: true,
-            describe: row => row is Order o
-                ? string.Create(CultureInfo.InvariantCulture, $"{o.Client} {o.Side} {Column.Finance(o.Qty, 4)} {o.Instrument} · {o.Status}")
+            true,
+            2,
+            ImmutableHashSet.Create(StringComparer.Ordinal, "version", "region", "channel", "filled_qty"),
+            true,
+            row => row is Order o
+                ? string.Create(CultureInfo.InvariantCulture,
+                    $"{o.Client} {o.Side} {Column.Finance(o.Qty, 4)} {o.Instrument} · {o.Status}")
                 : row.Id.ToString());
     }
 
@@ -83,19 +87,24 @@ public static class Tabs
                 Column.Number<Fill>("amt", "Amt", f => f.Amt, 2),
                 Column.Price<Fill>("mid", "Mid", f => f.Mid),
                 Column.Number<Fill>("markup_bps", "Markup", f => f.MarkupBps, 1),
-                Column.Reconciled("recon", "Recon", Recon),
+                Column.Reconciled("recon", "Recon", Recon)
             ],
             key,
             time,
             "blotter.fills",
             Fill.Select,
             (batch, row) => Fill.Read(batch, row),
-            overrides: false,
-            frozen: 2,
-            hiddenAtFirst: ImmutableHashSet.Create(StringComparer.Ordinal, "region", "channel"),
-            paths: [new TabPath("order", Orders, "order_id", "The fill's order, at the newest version the host or the database knows")],
+            false,
+            2,
+            ImmutableHashSet.Create(StringComparer.Ordinal, "region", "channel"),
+            paths:
+            [
+                new TabPath("order", Orders, "order_id",
+                    "The fill's order, at the newest version the host or the database knows")
+            ],
             describe: row => row is Fill f
-                ? string.Create(CultureInfo.InvariantCulture, $"{f.Client} {f.Side} {Column.Finance(f.Qty, 4)} {f.Instrument} @ {Column.Significant(f.Price)}")
+                ? string.Create(CultureInfo.InvariantCulture,
+                    $"{f.Client} {f.Side} {Column.Finance(f.Qty, 4)} {f.Instrument} @ {Column.Significant(f.Price)}")
                 : row.Id.ToString());
     }
 }

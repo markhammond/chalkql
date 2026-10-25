@@ -1,22 +1,22 @@
 namespace Chalk.Sample.Blotter.Fixtures;
 
 /// <summary>
-/// The history the sample starts with: client orders worked over the days before it starts, each
-/// worked out from its number alone, so a corpus of one size is the same corpus every time and any
-/// part of it can be made on its own, in parallel with the rest.
+///     The history the sample starts with: client orders worked over the days before it starts, each
+///     worked out from its number alone, so a corpus of one size is the same corpus every time and any
+///     part of it can be made on its own, in parallel with the rest.
 /// </summary>
 /// <remarks>
-/// An order is filled in up to three fills that split its lots, at prices around a mid with its
-/// channel's markup on top; its average price is the fills', weighted; one in fifty is cancelled with
-/// some of its lots unfilled. The newest few are left new, for the exchange to work from its first
-/// second. Ids are version 7 UUIDs: the time they were made, then bits hashed from the order's number.
+///     An order is filled in up to three fills that split its lots, at prices around a mid with its
+///     channel's markup on top; its average price is the fills', weighted; one in fifty is cancelled with
+///     some of its lots unfilled. The newest few are left new, for the exchange to work from its first
+///     second. Ids are version 7 UUIDs: the time they were made, then bits hashed from the order's number.
 /// </remarks>
 public static class Corpus
 {
     private static readonly double[] ClientWeights = [.. Reference.Clients.Select((_, i) => 1.0 / (i + 1))];
     private static readonly double[] AssetWeights = [.. Reference.Assets.Select(a => a.Weight)];
 
-    /// <summary>Order <paramref name="n"/>: its versions oldest first, and its fills.</summary>
+    /// <summary>Order <paramref name="n" />: its versions oldest first, and its fills.</summary>
     public static (Order[] Versions, Fill[] Fills) Make(long n, DateTime origin, long spacingMicros, bool open)
     {
         var u = (ulong)n;
@@ -46,10 +46,7 @@ public static class Corpus
         for (var k = 1; k <= fills; k++)
         {
             var share = Math.Floor(fillable * k / fills) - Math.Floor(fillable * (k - 1) / fills);
-            if (share <= 0)
-            {
-                continue;
-            }
+            if (share <= 0) continue;
 
             var at = time.AddMilliseconds(750 * k);
             var qty = share * lot;
@@ -69,50 +66,45 @@ public static class Corpus
                 FilledQty = filled,
                 AvgPrice = Math.Round(cost / filled, 4),
                 FilledAmt = amount,
-                Status = filled >= first.Qty - 1e-9 ? Reference.Statuses[2] : Reference.Statuses[1],
+                Status = filled >= first.Qty - 1e-9 ? Reference.Statuses[2] : Reference.Statuses[1]
             });
         }
 
         if (cancelled)
-        {
             versions.Add(versions[^1] with
             {
                 Version = versions.Count + 1,
                 EventTime = time.AddMilliseconds(750 * (fills + 1)),
-                Status = Reference.Statuses[3],
+                Status = Reference.Statuses[3]
             });
-        }
 
         return ([.. versions], [.. made]);
     }
 
     /// <summary>
-    /// A version 7 UUID for <paramref name="time"/>: its Unix milliseconds, the version, twelve bits and
-    /// then sixty-two hashed from <paramref name="n"/>, and the variant.
+    ///     A version 7 UUID for <paramref name="time" />: its Unix milliseconds, the version, twelve bits and
+    ///     then sixty-two hashed from <paramref name="n" />, and the variant.
     /// </summary>
     public static Guid UuidV7(DateTime time, ulong n)
     {
         Span<byte> bytes = stackalloc byte[16];
         var milliseconds = (ulong)(time - DateTime.UnixEpoch).Ticks / TimeSpan.TicksPerMillisecond;
-        for (var i = 0; i < 6; i++)
-        {
-            bytes[i] = (byte)(milliseconds >> (8 * (5 - i)));
-        }
+        for (var i = 0; i < 6; i++) bytes[i] = (byte)(milliseconds >> (8 * (5 - i)));
 
         var a = Mix(n * 0x9E37 + 71);
         var b = Mix(n * 0x9E37 + 73);
         bytes[6] = (byte)(0x70 | (int)(a & 0x0F));
         bytes[7] = (byte)(a >> 8);
         bytes[8] = (byte)(0x80 | (int)(b & 0x3F));
-        for (var i = 9; i < 16; i++)
-        {
-            bytes[i] = (byte)(b >> (8 * (i - 8)));
-        }
+        for (var i = 9; i < 16; i++) bytes[i] = (byte)(b >> (8 * (i - 8)));
 
-        return new Guid(bytes, bigEndian: true);
+        return new Guid(bytes, true);
     }
 
-    private static double Uniform(ulong n, ulong salt) => (Mix(n * 0x100 + salt) >> 11) * (1.0 / (1UL << 53));
+    private static double Uniform(ulong n, ulong salt)
+    {
+        return (Mix(n * 0x100 + salt) >> 11) * (1.0 / (1UL << 53));
+    }
 
     /// <summary>SplitMix64: a hash good enough to stand in for a random draw, and the same every time.</summary>
     private static ulong Mix(ulong x)
@@ -127,12 +119,8 @@ public static class Corpus
     {
         var r = uniform * weights.Sum();
         for (var i = 0; i < weights.Length - 1; i++)
-        {
             if ((r -= weights[i]) < 0)
-            {
                 return i;
-            }
-        }
 
         return weights.Length - 1;
     }

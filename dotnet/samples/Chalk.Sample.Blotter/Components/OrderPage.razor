@@ -22,38 +22,40 @@
 
     @if (_versions.Length == 0 && _fills.Length > 0)
     {
-        <p class="muted">Its fills have arrived; the order itself has not yet. The fills stream runs ahead of the order stream.</p>
+        <p class="muted">Its fills have arrived; the order itself has not yet. The fills stream runs ahead of the order
+            stream.</p>
     }
 
     <h2>Versions</h2>
     <p class="muted">
-        One statement over both sides: <code>blotter.order_versions</code> in PostgreSQL, and <code>live.order_versions</code>,
+        One statement over both sides: <code>blotter.order_versions</code> in PostgreSQL, and
+        <code>live.order_versions</code>,
         the versions the stream has sent that the database has not been seen to hold yet. A version in both is one row.
     </p>
     <div class="wide">
         <table class="history">
             <thead>
+            <tr>
+                @foreach (var column in Tabs.Orders.Columns)
+                {
+                    <th>@column.Title</th>
+                }
+                <th>Where</th>
+            </tr>
+            </thead>
+            <tbody>
+            @for (var i = 0; i < _versions.Length; i++)
+            {
+                var version = _versions[i];
+                var older = i + 1 < _versions.Length ? _versions[i + 1] : null;
                 <tr>
                     @foreach (var column in Tabs.Orders.Columns)
                     {
-                        <th>@column.Title</th>
+                        <td class="@(older is not null && column.Detail(older) != column.Detail(version) ? "changed" : null)">@column.Detail(version)</td>
                     }
-                    <th>Where</th>
+                    <td>@(_tailOnly.Contains(version.Version) ? "tail only" : "database")</td>
                 </tr>
-            </thead>
-            <tbody>
-                @for (var i = 0; i < _versions.Length; i++)
-                {
-                    var version = _versions[i];
-                    var older = i + 1 < _versions.Length ? _versions[i + 1] : null;
-                    <tr>
-                        @foreach (var column in Tabs.Orders.Columns)
-                        {
-                            <td class="@(older is not null && column.Detail(older) != column.Detail(version) ? "changed" : null)">@column.Detail(version)</td>
-                        }
-                        <td>@(_tailOnly.Contains(version.Version) ? "tail only" : "database")</td>
-                    </tr>
-                }
+            }
             </tbody>
         </table>
     </div>
@@ -62,31 +64,30 @@
     <div class="wide">
         <table class="history">
             <thead>
-                <tr>
-                    @foreach (var column in Tabs.Fills.Columns)
-                    {
-                        <th>@column.Title</th>
-                    }
-                </tr>
+            <tr>
+                @foreach (var column in Tabs.Fills.Columns)
+                {
+                    <th>@column.Title</th>
+                }
+            </tr>
             </thead>
             <tbody>
-                @foreach (var fill in _fills)
-                {
-                    <tr class="@(fill.FillId == Fill ? "marked" : null)">
-                        @foreach (var column in Tabs.Fills.Columns)
-                        {
-                            <td>@column.Detail(fill)</td>
-                        }
-                    </tr>
-                }
+            @foreach (var fill in _fills)
+            {
+                <tr class="@(fill.FillId == Fill ? "marked" : null)">
+                    @foreach (var column in Tabs.Fills.Columns)
+                    {
+                        <td>@column.Detail(fill)</td>
+                    }
+                </tr>
+            }
             </tbody>
         </table>
     </div>
 </main>
 
 @code {
-    [Parameter]
-    public Guid OrderId { get; set; }
+    [Parameter] public Guid OrderId { get; set; }
 
     /// <summary>A fill to mark, when the order's page was opened from that fill.</summary>
     [SupplyParameterFromQuery]
@@ -143,5 +144,9 @@
         });
     }
 
-    public void Dispose() => Host.Published -= OnPublished;
+    public void Dispose()
+    {
+        Host.Published -= OnPublished;
+    }
+
 }

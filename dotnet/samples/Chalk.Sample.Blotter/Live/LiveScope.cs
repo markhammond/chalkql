@@ -21,29 +21,29 @@ public struct ScopeRow
 }
 
 /// <summary>
-/// The part of a tab's tail one filter can see, kept current by a ChalkQL standing view: every order
-/// in the tail whose latest version passes the filter, or whose row in the database last did; every
-/// fill in the tail that passes it. Pages that filter alike share one scope, whatever they sort by and
-/// wherever they have scrolled to; each sorts its scope in the host, which is cheap because a scope is
-/// a slice of the tail, never of the corpus.
+///     The part of a tab's tail one filter can see, kept current by a ChalkQL standing view: every order
+///     in the tail whose latest version passes the filter, or whose row in the database last did; every
+///     fill in the tail that passes it. Pages that filter alike share one scope, whatever they sort by and
+///     wherever they have scrolled to; each sorts its scope in the host, which is cheap because a scope is
+///     a slice of the tail, never of the corpus.
 /// </summary>
 /// <remarks>
-/// <para>
-/// The view is maintained incrementally by default: a refresh's upserts reach it as the rows they
-/// changed, and an update costs what changed rather than what the tail holds. Its state counts
-/// against the host's budget, and an update past its own <see cref="ViewOptions{TKey, TRow}.StateBudget"/>
-/// fails the scope rather than the host.
-/// </para>
-/// <para>
-/// The scope is driven from one place, the host's catch-up loop: after each refresh it updates the view,
-/// drains what changed, and publishes a new <see cref="ScopeState"/>. A state is immutable and whole,
-/// so a page can read one while the next is being made.
-/// </para>
+///     <para>
+///         The view is maintained incrementally by default: a refresh's upserts reach it as the rows they
+///         changed, and an update costs what changed rather than what the tail holds. Its state counts
+///         against the host's budget, and an update past its own <see cref="ViewOptions{TKey, TRow}.StateBudget" />
+///         fails the scope rather than the host.
+///     </para>
+///     <para>
+///         The scope is driven from one place, the host's catch-up loop: after each refresh it updates the view,
+///         drains what changed, and publishes a new <see cref="ScopeState" />. A state is immutable and whole,
+///         so a page can read one while the next is being made.
+///     </para>
 /// </remarks>
 public sealed class LiveScope : IAsyncDisposable, IViewSink<ScopeKey, ScopeRow>
 {
-    private readonly StandingView<ScopeKey, ScopeRow> _view;
     private readonly Dictionary<Guid, ScopeRow> _rows = [];
+    private readonly StandingView<ScopeKey, ScopeRow> _view;
     private ViewCursor _cursor = ViewCursor.Start;
     private ScopeState _state;
 
@@ -83,19 +83,46 @@ public sealed class LiveScope : IAsyncDisposable, IViewSink<ScopeKey, ScopeRow>
     /// <summary>A failure that ended the scope: a page on it shows this, and asks for a new scope.</summary>
     public Exception? Fault { get; private set; }
 
-    public static string Sql(Tab tab, FilterSpec filter) => tab.Overrides
-        ? $"""
-          SELECT order_id, version, base_version,
-                 CASE WHEN {filter.Where()} THEN 1 ELSE 0 END AS live_match,
-                 CASE WHEN base_version > 0 AND {filter.Where("base_")} THEN 1 ELSE 0 END AS base_match
-          FROM live.tail
-          WHERE ({filter.Where()}) OR (base_version > 0 AND {filter.Where("base_")})
-          """
-        : $"""
-          SELECT fill_id, 1 AS version, 0 AS base_version, 1 AS live_match, 0 AS base_match
-          FROM live.tail_fills
-          WHERE {filter.Where()}
-          """;
+    public ValueTask DisposeAsync()
+    {
+        return _view.DisposeAsync();
+    }
+
+    void IViewSink<ScopeKey, ScopeRow>.Reset()
+    {
+        _rows.Clear();
+    }
+
+    void IViewSink<ScopeKey, ScopeRow>.Upsert(in ScopeKey key, in ScopeRow row)
+    {
+        _rows[key.Id] = row;
+    }
+
+    void IViewSink<ScopeKey, ScopeRow>.Delete(in ScopeKey key)
+    {
+        _rows.Remove(key.Id);
+    }
+
+    void IViewSink<ScopeKey, ScopeRow>.Commit(long version, uint checksum)
+    {
+    }
+
+    public static string Sql(Tab tab, FilterSpec filter)
+    {
+        return tab.Overrides
+            ? $"""
+               SELECT order_id, version, base_version,
+                      CASE WHEN {filter.Where()} THEN 1 ELSE 0 END AS live_match,
+                      CASE WHEN base_version > 0 AND {filter.Where("base_")} THEN 1 ELSE 0 END AS base_match
+               FROM live.tail
+               WHERE ({filter.Where()}) OR (base_version > 0 AND {filter.Where("base_")})
+               """
+            : $"""
+               SELECT fill_id, 1 AS version, 0 AS base_version, 1 AS live_match, 0 AS base_match
+               FROM live.tail_fills
+               WHERE {filter.Where()}
+               """;
+    }
 
     internal static async Task<LiveScope> CreateAsync(
         ChalkEngine engine, Tab tab, FilterSpec filter, long budget, ViewMaintenance maintenance, CancellationToken ct)
@@ -112,21 +139,18 @@ public sealed class LiveScope : IAsyncDisposable, IViewSink<ScopeKey, ScopeRow>
 
             // A reader of this view is the scope itself, drained after every update: it never falls
             // far enough behind for a reset to be cheaper than the changes.
-            ResetWhen = double.PositiveInfinity,
+            ResetWhen = double.PositiveInfinity
         }, ct).ConfigureAwait(false);
         return new LiveScope(tab, filter, view);
     }
 
     /// <summary>
-    /// Brings the view to the engine's latest epoch, takes what changed, and publishes the state it
-    /// now holds, with each row resolved from the tail.
+    ///     Brings the view to the engine's latest epoch, takes what changed, and publishes the state it
+    ///     now holds, with each row resolved from the tail.
     /// </summary>
     internal async Task UpdateAsync(Tail tail, long epoch, StreamMark mark, CancellationToken ct)
     {
-        if (Fault is not null)
-        {
-            return;
-        }
+        if (Fault is not null) return;
 
         try
         {
@@ -143,18 +167,6 @@ public sealed class LiveScope : IAsyncDisposable, IViewSink<ScopeKey, ScopeRow>
         }
     }
 
-    public ValueTask DisposeAsync() => _view.DisposeAsync();
-
-    void IViewSink<ScopeKey, ScopeRow>.Reset() => _rows.Clear();
-
-    void IViewSink<ScopeKey, ScopeRow>.Upsert(in ScopeKey key, in ScopeRow row) => _rows[key.Id] = row;
-
-    void IViewSink<ScopeKey, ScopeRow>.Delete(in ScopeKey key) => _rows.Remove(key.Id);
-
-    void IViewSink<ScopeKey, ScopeRow>.Commit(long version, uint checksum)
-    {
-    }
-
     private static void Map(in ViewRow row, out ScopeKey key, out ScopeRow value)
     {
         key = new ScopeKey { Id = (Guid)row.GetValue(0)! };
@@ -163,14 +175,14 @@ public sealed class LiveScope : IAsyncDisposable, IViewSink<ScopeKey, ScopeRow>
             Version = row.GetInt32(1),
             BaseVersion = row.GetInt32(2),
             LiveMatch = row.GetInt32(3) == 1,
-            BaseMatch = row.GetInt32(4) == 1,
+            BaseMatch = row.GetInt32(4) == 1
         };
     }
 }
 
 /// <summary>
-/// A live scope as of one epoch: the tail's rows that pass its filter now, and the database rows the
-/// tail overrides that passed it when last looked up. Immutable; sorted per order on first use.
+///     A live scope as of one epoch: the tail's rows that pass its filter now, and the database rows the
+///     tail overrides that passed it when last looked up. Immutable; sorted per order on first use.
 /// </summary>
 public sealed class ScopeState
 {
@@ -218,8 +230,8 @@ public sealed class ScopeState
     public StreamMark Mark { get; }
 
     /// <summary>
-    /// The latest time of an order version the host had read. Mostly, everything sent before it has
-    /// been read too; but a version sent late can still come.
+    ///     The latest time of an order version the host had read. Mostly, everything sent before it has
+    ///     been read too; but a version sent late can still come.
     /// </summary>
     public DateTime OrdersThrough => Mark.OrdersThrough;
 
@@ -252,9 +264,11 @@ public sealed class ScopeState
     /// <summary>A rough size in memory, for the budget.</summary>
     public long Bytes => 64L * (Live.Length + Overridden.Length) + 48L * (OverriddenIds.Count + Tail.Count);
 
-    internal static ScopeState Empty(Tab tab, FilterSpec filter) =>
-        new(tab, filter, 0, false, default, [], [], [], [], ImmutableDictionary<Guid, Order>.Empty,
+    internal static ScopeState Empty(Tab tab, FilterSpec filter)
+    {
+        return new ScopeState(tab, filter, 0, false, default, [], [], [], [], ImmutableDictionary<Guid, Order>.Empty,
             ImmutableDictionary<Guid, ImmutableList<Fill>>.Empty, ImmutableDictionary<Guid, Reconciliation>.Empty);
+    }
 
     internal static ScopeState Of(
         Tab tab, FilterSpec filter, long epoch, StreamMark mark, Tail tail, Dictionary<Guid, ScopeRow> rows)
@@ -270,7 +284,8 @@ public sealed class ScopeState
             // does not match is a bug, and a page built on it would be wrong, so it stops here.
             if (!tab.Overrides)
             {
-                var fill = tail.GetFill(id) ?? throw new InvalidOperationException($"the scope holds fill {id}, which the tail does not");
+                var fill = tail.GetFill(id) ??
+                           throw new InvalidOperationException($"the scope holds fill {id}, which the tail does not");
                 byId[id] = fill;
                 live.Add(fill);
 
@@ -284,19 +299,15 @@ public sealed class ScopeState
                 continue;
             }
 
-            var entry = tail.Get(id) ?? throw new InvalidOperationException($"the scope holds order {id}, which the tail does not");
+            var entry = tail.Get(id) ??
+                        throw new InvalidOperationException($"the scope holds order {id}, which the tail does not");
             if (entry.Live.Version != row.Version || (entry.Base?.Version ?? 0) != row.BaseVersion)
-            {
                 throw new InvalidOperationException(
                     $"the scope holds order {id} at v{row.Version} over v{row.BaseVersion}, "
                     + $"the tail at v{entry.Live.Version} over v{entry.Base?.Version ?? 0}");
-            }
 
             byId[id] = entry.Live;
-            if (row.LiveMatch)
-            {
-                live.Add(entry.Live);
-            }
+            if (row.LiveMatch) live.Add(entry.Live);
 
             if (row.BaseMatch)
             {
@@ -310,8 +321,11 @@ public sealed class ScopeState
             tail.FillsByOrder, tail.Reconciling);
     }
 
-    /// <summary>The scope's rows in <paramref name="order"/>.</summary>
-    public SortedScope Sorted(SortSpec order) => _sorted.GetOrAdd(order, o => new SortedScope(this, o));
+    /// <summary>The scope's rows in <paramref name="order" />.</summary>
+    public SortedScope Sorted(SortSpec order)
+    {
+        return _sorted.GetOrAdd(order, o => new SortedScope(this, o));
+    }
 }
 
 /// <summary>A scope's rows in one order, and how many of each sort before a given row.</summary>
@@ -332,13 +346,22 @@ public sealed class SortedScope
 
     public IRow[] Overridden { get; }
 
-    /// <summary>How many of the tail's live rows sort before <paramref name="key"/>.</summary>
-    public int LiveBefore(IRow key) => Before(Live, key);
+    /// <summary>How many of the tail's live rows sort before <paramref name="key" />.</summary>
+    public int LiveBefore(IRow key)
+    {
+        return Before(Live, key);
+    }
 
-    /// <summary>How many overridden database rows sort before <paramref name="key"/>.</summary>
-    public int OverriddenBefore(IRow key) => Before(Overridden, key);
+    /// <summary>How many overridden database rows sort before <paramref name="key" />.</summary>
+    public int OverriddenBefore(IRow key)
+    {
+        return Before(Overridden, key);
+    }
 
-    /// <summary>The tail's live rows from <paramref name="key"/> on (or after it), up to and including <paramref name="last"/>.</summary>
+    /// <summary>
+    ///     The tail's live rows from <paramref name="key" /> on (or after it), up to and including
+    ///     <paramref name="last" />.
+    /// </summary>
     public ArraySegment<IRow> LiveBetween(IRow? key, bool inclusive, IRow? last)
     {
         var from = key is null ? 0 : inclusive ? Before(Live, key) : After(Live, key);
@@ -353,13 +376,9 @@ public sealed class SortedScope
         {
             var middle = (low + high) >>> 1;
             if (Order.Compare(rows[middle], key) <= 0)
-            {
                 low = middle + 1;
-            }
             else
-            {
                 high = middle;
-            }
         }
 
         return low;
@@ -372,13 +391,9 @@ public sealed class SortedScope
         {
             var middle = (low + high) >>> 1;
             if (Order.Compare(rows[middle], key) < 0)
-            {
                 low = middle + 1;
-            }
             else
-            {
                 high = middle;
-            }
         }
 
         return low;
@@ -386,7 +401,11 @@ public sealed class SortedScope
 }
 
 /// <summary>
-/// How far the host had read each stream: the latest event time read on each, and how many rows,
-/// counted from the stream's start. The count is exact whatever order rows arrive in; the time is not.
+///     How far the host had read each stream: the latest event time read on each, and how many rows,
+///     counted from the stream's start. The count is exact whatever order rows arrive in; the time is not.
 /// </summary>
-public readonly record struct StreamMark(DateTime OrdersThrough, DateTime FillsThrough, long OrdersRead, long FillsRead);
+public readonly record struct StreamMark(
+    DateTime OrdersThrough,
+    DateTime FillsThrough,
+    long OrdersRead,
+    long FillsRead);

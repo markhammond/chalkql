@@ -12,7 +12,7 @@ window.blotter = {
                 pending = true;
                 setTimeout(report, 50);
             }
-        }, { passive: true });
+        }, {passive: true});
 
         // For checking from a script, where a page in the background is sent no scroll events.
         element.reportScroll = report;
@@ -24,7 +24,7 @@ window.blotter = {
         const frame = element.parentElement;
         element.addEventListener("scroll", () => {
             frame.toggleAttribute("data-scrolled", element.scrollTop > 0);
-        }, { passive: true });
+        }, {passive: true});
     },
 
     // Fixes every column at the width it has now, with rows in it, and lays the table out by those
@@ -49,7 +49,9 @@ window.blotter = {
         // for the rank a sort by several columns adds.
         const heads = [...table.querySelectorAll("thead th")];
         const widths = heads.map(th => th.getBoundingClientRect().width + (th.classList.contains("expander") ? 0 : 2));
-        heads.forEach((th, i) => { th.style.width = `${widths[i]}px`; });
+        heads.forEach((th, i) => {
+            th.style.width = `${widths[i]}px`;
+        });
         table.style.minWidth = `${widths.reduce((sum, width) => sum + width, 0)}px`;
         table.style.tableLayout = "fixed";
 
@@ -82,7 +84,9 @@ window.blotter = {
             return;
         }
 
-        table.querySelectorAll("thead th").forEach(th => { th.style.width = ""; });
+        table.querySelectorAll("thead th").forEach(th => {
+            th.style.width = "";
+        });
         table.style.minWidth = "";
         table.style.tableLayout = "";
         delete table.dataset.pinned;
@@ -90,7 +94,7 @@ window.blotter = {
     },
 
     scrollToTop(element) {
-        element.scrollTo({ top: 0, behavior: "instant" });
+        element.scrollTo({top: 0, behavior: "instant"});
     },
 
     // Scrolls to a place, once the grid is tall enough to: it may not be yet, its rows' count just read.
@@ -98,7 +102,7 @@ window.blotter = {
     scrollTo(element, top) {
         let tries = 0;
         const go = () => {
-            element.scrollTo({ top, behavior: "instant" });
+            element.scrollTo({top, behavior: "instant"});
             if (Math.abs(element.scrollTop - top) > 1 && ++tries < 40) {
                 setTimeout(go, 50);
             } else {
@@ -143,8 +147,8 @@ window.blotter = {
         const html = "<table><thead><tr>" + titles.map(t => `<th>${escape(t)}</th>`).join("") + "</tr></thead><tbody>"
             + rows.map(row => "<tr>" + row.map(v => `<td>${escape(v)}</td>`).join("") + "</tr>").join("") + "</tbody></table>";
         navigator.clipboard.write([new ClipboardItem({
-            "text/plain": new Blob([text], { type: "text/plain" }),
-            "text/html": new Blob([html], { type: "text/html" }),
+            "text/plain": new Blob([text], {type: "text/plain"}),
+            "text/html": new Blob([html], {type: "text/html"}),
         })]).then(
             () => this.say(button, `${rows.length} rows copied`),
             failure => this.say(button, `Not copied: ${failure.message}`));
@@ -173,7 +177,7 @@ window.blotter = {
         const scroller = document.querySelector(".scroller");
         const link = scroller.page.invokeMethodAsync("ShareLink", scroller.scrollTop, shrouded);
         navigator.clipboard.write([new ClipboardItem({
-            "text/plain": link.then(url => new Blob([url], { type: "text/plain" })),
+            "text/plain": link.then(url => new Blob([url], {type: "text/plain"})),
         })]).then(
             () => this.say(icon, shrouded ? "Private link copied" : "Readable link copied"),
             failure => this.say(icon, `Not copied: ${failure.message}`));
@@ -223,7 +227,7 @@ window.blotter = {
                 finish();
             }
         });
-        observer.observe(element, { childList: true, subtree: true, characterData: true });
+        observer.observe(element, {childList: true, subtree: true, characterData: true});
         setTimeout(finish, 2000);
     },
 };

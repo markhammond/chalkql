@@ -7,10 +7,10 @@ public enum BlotterState
     Live,
 
     /// <summary>
-    /// What the host would have to hold to serve correctly does not fit the budget: the tail that
-    /// covers the database's lag, and the scopes over it. Nothing is served until it would fit.
+    ///     What the host would have to hold to serve correctly does not fit the budget: the tail that
+    ///     covers the database's lag, and the scopes over it. Nothing is served until it would fit.
     /// </summary>
-    Refusing,
+    Refusing
 }
 
 /// <summary>A refusal, said once: what the host will not do, and why.</summary>

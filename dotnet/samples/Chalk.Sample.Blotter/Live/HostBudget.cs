@@ -1,12 +1,10 @@
-using Microsoft.Extensions.Logging;
-
 namespace Chalk.Sample.Blotter.Live;
 
 /// <summary>
-/// The host's memory budget: the bytes it may hold, and, until one is chosen on the page or given at
-/// start, the steps it raises itself through rather than refuse for want of it
-/// (<see cref="BlotterOptions.BudgetSteps"/>). It never lowers itself; what gives way when the host is
-/// past it is the host's to decide.
+///     The host's memory budget: the bytes it may hold, and, until one is chosen on the page or given at
+///     start, the steps it raises itself through rather than refuse for want of it
+///     (<see cref="BlotterOptions.BudgetSteps" />). It never lowers itself; what gives way when the host is
+///     past it is the host's to decide.
 /// </summary>
 public sealed class HostBudget(BlotterOptions options, ILogger log)
 {
@@ -26,19 +24,17 @@ public sealed class HostBudget(BlotterOptions options, ILogger log)
     public bool TryRaise(string why)
     {
         var next = options.BudgetSteps.FirstOrDefault(step => step > Bytes);
-        if (!_finding || next == 0)
-        {
-            return false;
-        }
+        if (!_finding || next == 0) return false;
 
-        log.LogInformation("raising the budget from {From} to {To}: {Why}", BlotterHost.Megabytes(Bytes), BlotterHost.Megabytes(next), why);
+        log.LogInformation("raising the budget from {From} to {To}: {Why}", BlotterHost.Megabytes(Bytes),
+            BlotterHost.Megabytes(next), why);
         Interlocked.Exchange(ref _bytes, next);
         return true;
     }
 
     /// <summary>
-    /// The rows the kept windows may hold: their share of the budget, or what the host's other holdings
-    /// (<paramref name="liveBytes"/>) leave, whichever is less.
+    ///     The rows the kept windows may hold: their share of the budget, or what the host's other holdings
+    ///     (<paramref name="liveBytes" />) leave, whichever is less.
     /// </summary>
     public long PageRows(long liveBytes)
     {

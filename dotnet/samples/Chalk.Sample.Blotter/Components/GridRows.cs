@@ -3,16 +3,16 @@ using Chalk.Sample.Blotter.Live;
 namespace Chalk.Sample.Blotter.Components;
 
 /// <summary>
-/// The rows one grid shows, worked out from a scope's state, with no Blazor in it: the rows at the
-/// grid's positions, read from the database and the tail; the fills of opened orders nested under them;
-/// flashes and reconciliation lags on each row; how far the rows run; and, while the grid is held away
-/// from the live top, what has arrived above it and how much of that has been let in.
+///     The rows one grid shows, worked out from a scope's state, with no Blazor in it: the rows at the
+///     grid's positions, read from the database and the tail; the fills of opened orders nested under them;
+///     flashes and reconciliation lags on each row; how far the rows run; and, while the grid is held away
+///     from the live top, what has arrived above it and how much of that has been let in.
 /// </summary>
 /// <remarks>
-/// The component asks it for rows by position (<see cref="ReadAsync"/>) and tells it what the reader
-/// did: scrolled away (<see cref="HoldAsync"/>), came back to the top (<see cref="Release"/>), scrolled
-/// up near the top (<see cref="Reveal"/>), opened an order (<see cref="Toggle"/>), or chose a new sort or
-/// filter (<see cref="Reset"/>).
+///     The component asks it for rows by position (<see cref="ReadAsync" />) and tells it what the reader
+///     did: scrolled away (<see cref="HoldAsync" />), came back to the top (<see cref="Release" />), scrolled
+///     up near the top (<see cref="Reveal" />), opened an order (<see cref="Toggle" />), or chose a new sort or
+///     filter (<see cref="Reset" />).
 /// </remarks>
 public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDisposable
 {
@@ -21,31 +21,31 @@ public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDispo
 
     // How much further the rows run when a read finds more past the end the grid has: a screenful.
     private const int GrowBy = 60;
+    private readonly Flashes _fillFlashes = new(Tabs.Fills.Columns);
 
     private readonly Flashes _flashes = new(tab.Columns);
-    private readonly Flashes _fillFlashes = new(Tabs.Fills.Columns);
 
     // The orders opened to show their fills, by id, each with the version last seen; and where a read
     // last found each, which is where its fills are let in.
     private readonly Dictionary<Guid, Order> _open = [];
     private readonly Dictionary<Guid, long> _openAt = [];
-    private IReadOnlyList<Opened> _opened = [];
-
-    private PageView _pages = host.Pages.View(order);
 
     // Counts, from the streams, what arrives above the held rows; none while the grid follows the top.
     private ArrivalsAbove? _arrivals;
-
-    // Arrived above and not let in yet; let in and perhaps not scrolled up to yet; and let in in all,
-    // which moves every position the grid holds.
-    private long _hidden;
-    private long _revealed;
-    private long _shifted;
+    private bool _counted;
 
     // How far the rows really end from where the database's estimate or count puts the end: learned
     // from reads that reach the end. A count that replaces the estimate starts it again.
     private long _endLearned;
-    private bool _counted;
+
+    // Arrived above and not let in yet; let in and perhaps not scrolled up to yet; and let in in all,
+    // which moves every position the grid holds.
+    private long _hidden;
+    private IReadOnlyList<Opened> _opened = [];
+
+    private PageView _pages = host.Pages.View(order);
+    private long _revealed;
+    private long _shifted;
 
     /// <summary>Whether the grid is held away from the live top, its positions fixed.</summary>
     public bool Held => _pages.Held;
@@ -56,28 +56,41 @@ public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDispo
     /// <summary>Whether a row shown is still waiting for the database, so that its lag is worth showing again in a second.</summary>
     public bool Counting { get; private set; }
 
-    public bool IsOpen(Guid orderId) => _open.ContainsKey(orderId);
+    public void Dispose()
+    {
+        StopCounting();
+    }
+
+    public bool IsOpen(Guid orderId)
+    {
+        return _open.ContainsKey(orderId);
+    }
 
     /// <summary>Opens an order's fills under it, or closes them.</summary>
     public void Toggle(Order order)
     {
         if (!_open.Remove(order.OrderId))
-        {
             _open[order.OrderId] = order;
-        }
         else
-        {
             _openAt.Remove(order.OrderId);
-        }
     }
 
     /// <summary>What arrived above the rows in view: not let in yet, or let in and not yet scrolled up to.</summary>
-    public long NewAbove(double scrollTop) => _hidden + Math.Min(_revealed, (long)(scrollTop / RowHeight));
+    public long NewAbove(double scrollTop)
+    {
+        return _hidden + Math.Min(_revealed, (long)(scrollTop / RowHeight));
+    }
 
-    /// <summary>Whether, scrolled up to <paramref name="scrollTop"/>, there are rows to let in.</summary>
-    public bool CanReveal(double scrollTop, int near) => _pages.Held && _hidden > 0 && scrollTop / RowHeight < near;
+    /// <summary>Whether, scrolled up to <paramref name="scrollTop" />, there are rows to let in.</summary>
+    public bool CanReveal(double scrollTop, int near)
+    {
+        return _pages.Held && _hidden > 0 && scrollTop / RowHeight < near;
+    }
 
-    /// <summary>The row of the tab at the top of the view, scrolled to <paramref name="scrollTop"/>, read afresh; null at the end.</summary>
+    /// <summary>
+    ///     The row of the tab at the top of the view, scrolled to <paramref name="scrollTop" />, read afresh; null at the
+    ///     end.
+    /// </summary>
     public async Task<IRow?> RowAtAsync(ScopeState state, double scrollTop, CancellationToken ct)
     {
         var slot = Nesting.Locate((long)Math.Ceiling(scrollTop / RowHeight), _opened);
@@ -86,8 +99,8 @@ public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDispo
     }
 
     /// <summary>
-    /// Holds the grid where it is, scrolled away from the top: positions hold from here on, the row in
-    /// view is read so the view's place is held by its key, and what arrives above is counted.
+    ///     Holds the grid where it is, scrolled away from the top: positions hold from here on, the row in
+    ///     view is read so the view's place is held by its key, and what arrives above is counted.
     /// </summary>
     public async Task HoldAsync(ScopeState state, double scrollTop, Func<ScopeState> current)
     {
@@ -114,17 +127,14 @@ public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDispo
     }
 
     /// <summary>
-    /// Lets in up to <paramref name="most"/> of the rows that arrived above: every position the grid holds
-    /// moves down by as many, so the rows in view stay where they are. Returns how many were let in.
+    ///     Lets in up to <paramref name="most" /> of the rows that arrived above: every position the grid holds
+    ///     moves down by as many, so the rows in view stay where they are. Returns how many were let in.
     /// </summary>
     public long Reveal(int most)
     {
         var rows = Math.Min(_hidden, most);
         _pages.Shift(rows);
-        foreach (var id in _openAt.Keys.ToList())
-        {
-            _openAt[id] += rows;
-        }
+        foreach (var id in _openAt.Keys.ToList()) _openAt[id] += rows;
 
         _hidden -= rows;
         _revealed += rows;
@@ -148,21 +158,23 @@ public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDispo
     }
 
     /// <summary>
-    /// The rows at positions <paramref name="start"/> on, <paramref name="count"/> of them, under
-    /// <paramref name="state"/>; how many rows the grid has in all, opened orders' fills counted; and how
-    /// many have arrived above and not been let in.
+    ///     The rows at positions <paramref name="start" /> on, <paramref name="count" /> of them, under
+    ///     <paramref name="state" />; how many rows the grid has in all, opened orders' fills counted; and how
+    ///     many have arrived above and not been let in.
     /// </summary>
-    /// <exception cref="OperationCanceledException">Rows were let in above while this was read: its rows are placed by positions the grid no longer has.</exception>
-    public async Task<(List<BlotterRow> Rows, int Total, long Hidden)> ReadAsync(ScopeState state, int start, int count, CancellationToken ct)
+    /// <exception cref="OperationCanceledException">
+    ///     Rows were let in above while this was read: its rows are placed by
+    ///     positions the grid no longer has.
+    /// </exception>
+    public async Task<(List<BlotterRow> Rows, int Total, long Hidden)> ReadAsync(ScopeState state, int start, int count,
+        CancellationToken ct)
     {
         var shifted = _shifted;
 
         // What has arrived above the held rows, from the streams: the rows that crossed the topmost row
         // the view knows since the last state, up or down.
         if (_arrivals is not null && _pages.First is { } top)
-        {
             _hidden = Math.Max(0, _hidden + await _arrivals.TakeAsync(top.Row, ct));
-        }
 
         var hidden = _hidden;
         var counted = host.Pages.IsCounted(state);
@@ -175,7 +187,7 @@ public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDispo
 
         // Following the live top, the estimate sizes the scroll bar well enough: rows are counted only once
         // the reader scrolls away.
-        var estimated = Math.Max(0, await host.Pages.TotalAsync(state, ct, count: _pages.Held) - hidden);
+        var estimated = Math.Max(0, await host.Pages.TotalAsync(state, ct, _pages.Held) - hidden);
         var rows = Math.Max(0, estimated + _endLearned);
 
         // The opened orders are let in where a read last found them. A read that finds one somewhere else,
@@ -196,10 +208,7 @@ public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDispo
             page = positions.Count == 0
                 ? null
                 : await _pages.GetAsync(state, positions[0], asked + (atEnd ? 1 : 0), ct);
-            if (!Learn(page, shifted))
-            {
-                break;
-            }
+            if (!Learn(page, shifted)) break;
         }
 
         // Where the rows end, learned from the read: one short of what it asked for found the last row; one
@@ -219,29 +228,20 @@ public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDispo
             }
         }
 
-        if (shifted != _shifted)
-        {
-            throw new OperationCanceledException(ct);
-        }
+        if (shifted != _shifted) throw new OperationCanceledException(ct);
 
         var now = DateTime.UtcNow;
         var shown = new List<BlotterRow>(slots.Count);
         foreach (var slot in slots)
-        {
             if (slot.Under is { } under)
-            {
                 shown.Add(_fillFlashes.Decorate(under.Fills[slot.Fill], now, under.Order.OrderId));
-            }
             else if (page is not null && slot.Position - page.Start is var at && at >= 0 && at < page.Rows.Length)
-            {
                 shown.Add(_flashes.Decorate(page.Rows[at], now));
-            }
-        }
 
         foreach (var row in shown)
-        {
-            row.Reconciliation = state.Reconciling.TryGetValue(row.Row.Id, out var reconciliation) ? reconciliation : null;
-        }
+            row.Reconciliation = state.Reconciling.TryGetValue(row.Row.Id, out var reconciliation)
+                ? reconciliation
+                : null;
 
         Counting = shown.Any(r => r.Reconciliation is { Reconciled: false });
         _flashes.Seen(state.IngestedThrough, now);
@@ -249,8 +249,6 @@ public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDispo
         _opened = opened;
         return (shown, (int)Math.Min(int.MaxValue, Nesting.Total(rows, opened)), hidden);
     }
-
-    public void Dispose() => StopCounting();
 
     private void Count(Func<ScopeState> current)
     {
@@ -269,12 +267,8 @@ public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDispo
     {
         var opened = new List<Opened>();
         foreach (var (id, position) in _openAt.ToList())
-        {
             if (position < rows && _open.TryGetValue(id, out var order))
-            {
                 opened.Add(new Opened(position, order, await host.Pages.FillsOfAsync(state, id, ct)));
-            }
-        }
 
         return [.. opened.OrderBy(o => o.Position)];
     }
@@ -283,14 +277,11 @@ public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDispo
     private bool Learn(Page? page, long shifted)
     {
         if (page is null || shifted != _shifted)
-        {
             // Rows were let in above while it was read: its positions are no longer the grid's.
             return false;
-        }
 
         var changed = false;
         for (var i = 0; i < page.Rows.Length; i++)
-        {
             if (page.Rows[i] is Order order && _open.ContainsKey(order.OrderId))
             {
                 _open[order.OrderId] = order;
@@ -300,7 +291,6 @@ public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDispo
                     changed = true;
                 }
             }
-        }
 
         foreach (var (id, position) in _openAt.ToList())
         {

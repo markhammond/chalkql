@@ -3,22 +3,22 @@ using System.Threading.Channels;
 namespace Chalk.Sample.Blotter.Fixtures;
 
 /// <summary>
-/// A real-time stream: every row, as it happens, to every subscriber. It is reliable — a subscriber
-/// misses nothing from the moment it subscribes — but it does not replay: what was sent before a
-/// subscription is the database's to tell. Order versions and fills come on two streams of their
-/// own, neither waiting for the other, so a fill can arrive before the order it fills; each mostly in
-/// time order, but a row sent late arrives after rows that happened later.
+///     A real-time stream: every row, as it happens, to every subscriber. It is reliable — a subscriber
+///     misses nothing from the moment it subscribes — but it does not replay: what was sent before a
+///     subscription is the database's to tell. Order versions and fills come on two streams of their
+///     own, neither waiting for the other, so a fill can arrive before the order it fills; each mostly in
+///     time order, but a row sent late arrives after rows that happened later.
 /// </summary>
 /// <remarks>
-/// The stream keeps what it has sent for a while, but only for checking: the oracle reads it to know
-/// what a subscriber has been sent. A subscriber never sees it.
+///     The stream keeps what it has sent for a while, but only for checking: the oracle reads it to know
+///     what a subscriber has been sent. A subscriber never sees it.
 /// </remarks>
 public sealed class Feed<T> where T : IRow
 {
     private readonly Lock _gate = new();
     private readonly List<T> _log = [];
-    private readonly List<Channel<T[]>> _subscribers = [];
     private readonly TimeSpan _retention;
+    private readonly List<Channel<T[]>> _subscribers = [];
 
     // Rows trimmed from the front of the log: the log's first row is the stream's row this many in.
     private long _dropped;
@@ -36,8 +36,8 @@ public sealed class Feed<T> where T : IRow
     public long Published { get; private set; }
 
     /// <summary>
-    /// Subscribes from now: every batch the reader gets was published after this call, and
-    /// <paramref name="before"/> is how many rows were published before it.
+    ///     Subscribes from now: every batch the reader gets was published after this call, and
+    ///     <paramref name="before" /> is how many rows were published before it.
     /// </summary>
     public ChannelReader<T[]> Subscribe(out long before)
     {
@@ -51,9 +51,9 @@ public sealed class Feed<T> where T : IRow
     }
 
     /// <summary>
-    /// The first <paramref name="count"/> rows the stream published, counted from its start, as far as
-    /// it still keeps them: for checking. By count, not by time, since a row sent late is published
-    /// after rows that happened later.
+    ///     The first <paramref name="count" /> rows the stream published, counted from its start, as far as
+    ///     it still keeps them: for checking. By count, not by time, since a row sent late is published
+    ///     after rows that happened later.
     /// </summary>
     public T[] Read(long count)
     {
@@ -75,19 +75,13 @@ public sealed class Feed<T> where T : IRow
     /// <summary>Publishes a batch, after everything published before, to every subscriber at once.</summary>
     internal void Publish(T[] batch)
     {
-        if (batch.Length == 0)
-        {
-            return;
-        }
+        if (batch.Length == 0) return;
 
         lock (_gate)
         {
             _log.AddRange(batch);
             Published += batch.Length;
-            foreach (var subscriber in _subscribers)
-            {
-                subscriber.Writer.TryWrite(batch);
-            }
+            foreach (var subscriber in _subscribers) subscriber.Writer.TryWrite(batch);
 
             // Trimmed in bulk, half at a time once the middle is past the retention, so the log is
             // copied down rarely rather than on every batch; what is dropped is counted.

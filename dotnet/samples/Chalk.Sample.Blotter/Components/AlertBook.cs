@@ -1,15 +1,13 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using Chalk.Sample.Blotter.Live;
 using Chalk.Sample.Blotter.Alerts;
-using Chalk.Sample.Blotter.Grid;
-using Chalk.Sample.Blotter.Domain;
+using Chalk.Sample.Blotter.Live;
 
 namespace Chalk.Sample.Blotter.Components;
 
 /// <summary>
-/// A page's alerts: its browser's rules and alerts, which the host keeps and evaluates; whether this
-/// page may sound them, and notify; and how many have fired on each tab, for the bell.
+///     A page's alerts: its browser's rules and alerts, which the host keeps and evaluates; whether this
+///     page may sound them, and notify; and how many have fired on each tab, for the bell.
 /// </summary>
 public sealed class AlertBook
 {
@@ -31,14 +29,17 @@ public sealed class AlertBook
     /// <summary>Keeps the rules: with the host, and in the browser's local settings.</summary>
     public Func<IReadOnlyList<AlertRule>, Task> SaveAsync { get; set; } = _ => Task.CompletedTask;
 
-    /// <summary>How many rows have fired alerts on <paramref name="tab"/> since the page opened.</summary>
-    public long FiredOn(Tab tab) => _fired.GetValueOrDefault(tab.Name);
-
     /// <summary>Whether an alert has fired since the alerts were last looked at, for the red dot on the bell.</summary>
     public bool Unseen { get; private set; }
 
     /// <summary>Whether the alerts panel is open, where an alert is seen as it fires.</summary>
     public bool Looking { get; set; }
+
+    /// <summary>How many rows have fired alerts on <paramref name="tab" /> since the page opened.</summary>
+    public long FiredOn(Tab tab)
+    {
+        return _fired.GetValueOrDefault(tab.Name);
+    }
 
     public void Count(AlertEvent alert)
     {
@@ -47,5 +48,8 @@ public sealed class AlertBook
     }
 
     /// <summary>The alerts were looked at: the bell's dot goes.</summary>
-    public void Seen() => Unseen = false;
+    public void Seen()
+    {
+        Unseen = false;
+    }
 }

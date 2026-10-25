@@ -25,13 +25,17 @@
                 @foreach (var value in _values)
                 {
                     var v = value;
-                    <span class="pill">@v <button type="button" aria-label="Remove @v" @onclick="() => Remove(v)" @onclick:stopPropagation>×</button></span>
+                    <span class="pill">@v <button type="button" aria-label="Remove @v" @onclick="() => Remove(v)"
+                                                  @onclick:stopPropagation>×</button></span>
                 }
-                <input @ref="_input" type="text" value="@_typed" placeholder="@(_values.Count == 0 ? "type a value, Enter to add" : "")"
-                       @oninput="TypedAsync" @onkeydown="KeyAsync" />
+                <input @ref="_input" type="text" value="@_typed"
+                       placeholder="@(_values.Count == 0 ? "type a value, Enter to add" : "")"
+                       @oninput="TypedAsync" @onkeydown="KeyAsync"/>
                 @if (_values.Count > 0 || _typed.Length > 0)
                 {
-                    <button type="button" class="clear-input" aria-label="Clear" @onclick="ClearInput" @onclick:stopPropagation>×</button>
+                    <button type="button" class="clear-input" aria-label="Clear" @onclick="ClearInput"
+                            @onclick:stopPropagation>×
+                    </button>
                 }
             </div>
             <div class="chooser">
@@ -66,22 +70,23 @@
                 @foreach (var choice in Column.Choices)
                 {
                     var c = choice;
-                    <label><input type="checkbox" checked="@_values.Contains(c)" @onchange="e => Tick(c, (bool)e.Value!)" /> @c</label>
+                    <label><input type="checkbox" checked="@_values.Contains(c)"
+                                  @onchange="e => Tick(c, (bool)e.Value!)"/> @c</label>
                 }
             </div>
             break;
 
         case ColumnKind.Integer or ColumnKind.Number:
             <div class="range">
-                <label>at least <input type="number" step="any" @bind="_min" /></label>
-                <label>at most <input type="number" step="any" @bind="_max" /></label>
+                <label>at least <input type="number" step="any" @bind="_min"/></label>
+                <label>at most <input type="number" step="any" @bind="_max"/></label>
             </div>
             break;
 
         case ColumnKind.Time:
             <div class="range">
-                <label>from <input type="datetime-local" step="1" @bind="_from" /></label>
-                <label>to <input type="datetime-local" step="1" @bind="_to" /></label>
+                <label>from <input type="datetime-local" step="1" @bind="_from"/></label>
+                <label>to <input type="datetime-local" step="1" @bind="_to"/></label>
                 <span class="muted">UTC</span>
             </div>
             break;
@@ -89,25 +94,21 @@
 </div>
 
 @code {
-    [Parameter, EditorRequired]
-    public Tab Tab { get; set; } = default!;
+    [Parameter][EditorRequired] public Tab Tab { get; set; } = default!;
 
-    [Parameter, EditorRequired]
-    public Column Column { get; set; } = default!;
+    [Parameter][EditorRequired] public Column Column { get; set; } = default!;
 
     /// <summary>The column's filter now, if any.</summary>
     [Parameter]
     public ColumnFilter? Current { get; set; }
 
     /// <summary>The period whose rows the chooser offers values from.</summary>
-    [Parameter, EditorRequired]
+    [Parameter][EditorRequired]
     public (DateTime From, DateTime To) Within { get; set; }
 
-    [Parameter]
-    public EventCallback<ColumnFilter> Apply { get; set; }
+    [Parameter] public EventCallback<ColumnFilter> Apply { get; set; }
 
-    [Parameter]
-    public EventCallback Close { get; set; }
+    [Parameter] public EventCallback Close { get; set; }
 
     private const int Offered = 50;
     private readonly List<string> _values = [];
@@ -173,8 +174,8 @@
     }
 
     /// <summary>
-    /// The column's values among the rows of the period, the most frequent first, starting with what
-    /// is typed: read when the editor opens and as the reader types, the latest read winning.
+    ///     The column's values among the rows of the period, the most frequent first, starting with what
+    ///     is typed: read when the editor opens and as the reader types, the latest read winning.
     /// </summary>
     private async Task ReadChoicesAsync()
     {
@@ -213,7 +214,10 @@
         }
     }
 
-    private void Remove(string value) => _values.Remove(value);
+    private void Remove(string value)
+    {
+        _values.Remove(value);
+    }
 
     private void Tick(string value, bool on)
     {
@@ -234,7 +238,10 @@
         await ReadChoicesAsync();
     }
 
-    private async Task FocusAsync() => await _input.FocusAsync();
+    private async Task FocusAsync()
+    {
+        await _input.FocusAsync();
+    }
 
     private async Task ApplyAsync()
     {
@@ -251,11 +258,18 @@
             Min = _min,
             Max = _max,
             From = _from,
-            To = _to,
+            To = _to
         });
     }
 
-    private Task ClearAsync() => Apply.InvokeAsync(new ColumnFilter { Column = Column });
+    private Task ClearAsync()
+    {
+        return Apply.InvokeAsync(new ColumnFilter { Column = Column });
+    }
 
-    public void Dispose() => _reading?.Cancel();
+    public void Dispose()
+    {
+        _reading?.Cancel();
+    }
+
 }

@@ -17,18 +17,18 @@ public sealed record IngestLag
 }
 
 /// <summary>
-/// One ingestion job into the database: rows land some time after the stream has sent them, in no
-/// particular order, each with its own lag. Nothing tells a reader how far a job has got; the
-/// blotter finds out by looking rows up.
+///     One ingestion job into the database: rows land some time after the stream has sent them, in no
+///     particular order, each with its own lag. Nothing tells a reader how far a job has got; the
+///     blotter finds out by looking rows up.
 /// </summary>
 internal sealed class IngestWriter<T> where T : IRow
 {
-    private readonly Lock _gate = new();
     private readonly PriorityQueue<T, DateTime> _due = new();
-    private readonly Action<IReadOnlyList<T>> _write;
+    private readonly Lock _gate = new();
     private readonly IngestLag _lag;
     private readonly Random _random;
     private readonly DateTime _started = DateTime.UtcNow;
+    private readonly Action<IReadOnlyList<T>> _write;
     private DateTime _stalledUntil;
 
     public IngestWriter(Action<IReadOnlyList<T>> write, IngestLag lag, int seed)
@@ -53,7 +53,10 @@ internal sealed class IngestWriter<T> where T : IRow
     /// <summary>Whether the ingestion is stalled now.</summary>
     public bool Stalled => StallEnds(DateTime.UtcNow) is not null;
 
-    /// <summary>Holds every write back until <paramref name="until"/>, rows already waiting included; a time past ends a stall.</summary>
+    /// <summary>
+    ///     Holds every write back until <paramref name="until" />, rows already waiting included; a time past ends a
+    ///     stall.
+    /// </summary>
     public void StallUntil(DateTime until)
     {
         lock (_gate)
@@ -92,24 +95,15 @@ internal sealed class IngestWriter<T> where T : IRow
                 }
             }
 
-            if (ready.Count > 0)
-            {
-                _write(ready);
-            }
+            if (ready.Count > 0) _write(ready);
         }
     }
 
     private DateTime? StallEnds(DateTime at)
     {
-        if (at < _stalledUntil)
-        {
-            return _stalledUntil;
-        }
+        if (at < _stalledUntil) return _stalledUntil;
 
-        if (_lag.StallEvery <= TimeSpan.Zero)
-        {
-            return null;
-        }
+        if (_lag.StallEvery <= TimeSpan.Zero) return null;
 
         var into = (at - _started).Ticks % _lag.StallEvery.Ticks;
         var stallStarts = _lag.StallEvery - _lag.StallFor;

@@ -11,7 +11,7 @@ public sealed record ExchangeOptions
 
     public TimeSpan BurstFor { get; init; } = TimeSpan.FromSeconds(2);
 
-    /// <summary>The rate in a burst, as a multiple of <see cref="Rate"/>.</summary>
+    /// <summary>The rate in a burst, as a multiple of <see cref="Rate" />.</summary>
     public double BurstFactor { get; init; } = 10;
 
     /// <summary>Of the changes, the share that are new orders rather than fills.</summary>
@@ -21,9 +21,9 @@ public sealed record ExchangeOptions
     public double FilledAtOnce { get; init; } = 0.25;
 
     /// <summary>
-    /// The most the order stream runs behind the fills stream: each order version is sent up to this
-    /// long after it happened, while its fill is sent at once. So a fill often arrives before the order
-    /// it fills, and before the version that counts it.
+    ///     The most the order stream runs behind the fills stream: each order version is sent up to this
+    ///     long after it happened, while its fill is sent at once. So a fill often arrives before the order
+    ///     it fills, and before the version that counts it.
     /// </summary>
     public TimeSpan OrderSkew { get; init; } = TimeSpan.FromMilliseconds(600);
 
@@ -31,16 +31,16 @@ public sealed record ExchangeOptions
     public TimeSpan FeedRetention { get; init; } = TimeSpan.FromMinutes(30);
 
     /// <summary>
-    /// Whether the streams are out of order: some rows sent late (<see cref="Disorder"/>), and some
-    /// written to the database before they are sent (<see cref="DatabaseFirst"/>). The page can turn it
-    /// on and off as the exchange runs.
+    ///     Whether the streams are out of order: some rows sent late (<see cref="Disorder" />), and some
+    ///     written to the database before they are sent (<see cref="DatabaseFirst" />). The page can turn it
+    ///     on and off as the exchange runs.
     /// </summary>
     public bool Disordered { get; init; }
 
     /// <summary>
-    /// Of the rows each stream sends, while out of order, the share sent late: after rows that happened
-    /// after them, by a delay most often short and now and then long (log-normal about
-    /// <see cref="LateMedian"/>, at most <see cref="LateMost"/>). The database writes them as usual.
+    ///     Of the rows each stream sends, while out of order, the share sent late: after rows that happened
+    ///     after them, by a delay most often short and now and then long (log-normal about
+    ///     <see cref="LateMedian" />, at most <see cref="LateMost" />). The database writes them as usual.
     /// </summary>
     public double Disorder { get; init; } = 0.02;
 
@@ -49,9 +49,9 @@ public sealed record ExchangeOptions
     public TimeSpan LateMost { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Of the rows each stream sends, while out of order, the share the database writes first, at once,
-    /// and the stream sends some time after (log-normal about <see cref="DatabaseFirstMedian"/>): the
-    /// blotter finds them in the database before it hears of them.
+    ///     Of the rows each stream sends, while out of order, the share the database writes first, at once,
+    ///     and the stream sends some time after (log-normal about <see cref="DatabaseFirstMedian" />): the
+    ///     blotter finds them in the database before it hears of them.
     /// </summary>
     public double DatabaseFirst { get; init; } = 0.01;
 
@@ -60,55 +60,56 @@ public sealed record ExchangeOptions
     public IngestLag Lag { get; init; } = new();
 
     /// <summary>
-    /// How far the job that keeps <c>orders_current</c> runs behind <c>order_versions</c>, when it is
-    /// a job of its own (<see cref="CurrentSync.Lagging"/>) rather than a trigger.
+    ///     How far the job that keeps <c>orders_current</c> runs behind <c>order_versions</c>, when it is
+    ///     a job of its own (<see cref="CurrentSync.Lagging" />) rather than a trigger.
     /// </summary>
     public IngestLag CurrentLag { get; init; } = new()
     {
         Min = TimeSpan.FromMilliseconds(500),
         Max = TimeSpan.FromSeconds(4),
         StallEvery = TimeSpan.FromSeconds(45),
-        StallFor = TimeSpan.FromSeconds(10),
+        StallFor = TimeSpan.FromSeconds(10)
     };
 
     public int Seed { get; init; } = 20261023;
 }
 
 /// <summary>
-/// The simulated outside world: the house taking client orders and filling them; two streams, one of
-/// order versions and one of fills, each sending its rows as they happen and neither waiting for the
-/// other; and the ingestion jobs that write each to the database some time later, and, when
-/// <c>orders_current</c> is kept by a job rather than a trigger, that job. The blotter sees all of it
-/// only through the streams and the database.
+///     The simulated outside world: the house taking client orders and filling them; two streams, one of
+///     order versions and one of fills, each sending its rows as they happen and neither waiting for the
+///     other; and the ingestion jobs that write each to the database some time later, and, when
+///     <c>orders_current</c> is kept by a job rather than a trigger, that job. The blotter sees all of it
+///     only through the streams and the database.
 /// </summary>
 public sealed class Exchange : IAsyncDisposable
 {
-    private readonly ExchangeOptions _options;
-    private readonly Random _random;
-    private readonly List<Order> _open;
-    private readonly IngestWriter<Order> _orderWriter;
-    private readonly IngestWriter<Fill> _fillWriter;
+    private readonly double[] _clientWeights;
     private readonly IngestWriter<Order>? _currentWriter;
+    private readonly IngestWriter<Fill> _fillWriter;
+    private readonly Lock _gate = new();
     private readonly Queue<(Order Order, DateTime Release)> _held = new();
-    private readonly PriorityQueue<Order, DateTime> _lateOrders = new();
     private readonly PriorityQueue<Fill, DateTime> _lateFills = new();
+    private readonly PriorityQueue<Order, DateTime> _lateOrders = new();
+    private readonly double[] _mids;
+    private readonly List<Order> _open;
+    private readonly ExchangeOptions _options;
+    private readonly IngestWriter<Order> _orderWriter;
+    private readonly Random _random;
     private readonly ITradeRepository _repository;
+    private readonly CancellationTokenSource _stop = new();
     private readonly Action<IReadOnlyList<Order>> _writeOrders;
     private volatile bool _disordered;
-    private long _sentLate;
-    private long _sentAfterDatabase;
-    private readonly CancellationTokenSource _stop = new();
-    private readonly Lock _gate = new();
-    private readonly double[] _mids;
-    private readonly double[] _clientWeights;
-    private Task? _running;
-    private long _orders;
     private DateTime _lastEventTime;
     private DateTime _lastRelease;
+    private long _orders;
     private volatile bool _paused;
+    private Task? _running;
+    private long _sentAfterDatabase;
+    private long _sentLate;
 
     public Exchange(
-        ITradeRepository repository, ExchangeOptions options, long orders, DateTime lastEventTime, List<Order> open, CurrentSync sync)
+        ITradeRepository repository, ExchangeOptions options, long orders, DateTime lastEventTime, List<Order> open,
+        CurrentSync sync)
     {
         _options = options;
         _repository = repository;
@@ -128,7 +129,11 @@ public sealed class Exchange : IAsyncDisposable
         {
             var current = new IngestWriter<Order>(repository.UpsertCurrent, options.CurrentLag, options.Seed + 3);
             _currentWriter = current;
-            _writeOrders = written => { repository.WriteOrders(written); current.Enqueue([.. written]); };
+            _writeOrders = written =>
+            {
+                repository.WriteOrders(written);
+                current.Enqueue([.. written]);
+            };
         }
         else
         {
@@ -184,7 +189,7 @@ public sealed class Exchange : IAsyncDisposable
 
     public long SentAfterDatabase => Interlocked.Read(ref _sentAfterDatabase);
 
-    /// <summary>Whether the streams are out of order now: see <see cref="ExchangeOptions.Disordered"/>.</summary>
+    /// <summary>Whether the streams are out of order now: see <see cref="ExchangeOptions.Disordered" />.</summary>
     public bool Disordered
     {
         get => _disordered;
@@ -195,6 +200,36 @@ public sealed class Exchange : IAsyncDisposable
 
     public bool CurrentStalled => _currentWriter?.Stalled ?? false;
 
+    /// <summary>Whether the house has stopped taking and working orders.</summary>
+    public bool Paused => _paused;
+
+    /// <summary>
+    ///     Whether the streams have sent everything that has happened: paused, and nothing held for the skew or sent
+    ///     late.
+    /// </summary>
+    public bool Quiet => _paused && OrdersHeld == 0 && LateHeld == 0;
+
+    /// <summary>Whether every row sent is in the database, <c>orders_current</c> included.</summary>
+    public bool Written => NotYetIngested == 0 && CurrentWaiting == 0;
+
+    /// <summary>The rate the exchange is running at now, changes a second.</summary>
+    public double CurrentRate { get; private set; }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _stop.CancelAsync().ConfigureAwait(false);
+        if (_running is not null)
+            try
+            {
+                await _running.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+        _stop.Dispose();
+    }
+
     /// <summary>The database writes nothing for a while; the streams go on. Zero ends a stall.</summary>
     public void StallIngestion(TimeSpan time)
     {
@@ -203,27 +238,24 @@ public sealed class Exchange : IAsyncDisposable
     }
 
     /// <summary>The lagging job applies nothing to <c>orders_current</c> for a while. Zero ends a stall.</summary>
-    public void StallCurrent(TimeSpan time) => _currentWriter?.StallUntil(DateTime.UtcNow + time);
+    public void StallCurrent(TimeSpan time)
+    {
+        _currentWriter?.StallUntil(DateTime.UtcNow + time);
+    }
 
     /// <summary>
-    /// The house stops taking and working orders, for checks that need the streams quiet; versions
-    /// held for the order stream's skew still go out, and the database goes on writing.
+    ///     The house stops taking and working orders, for checks that need the streams quiet; versions
+    ///     held for the order stream's skew still go out, and the database goes on writing.
     /// </summary>
-    public void Pause() => _paused = true;
+    public void Pause()
+    {
+        _paused = true;
+    }
 
-    public void Resume() => _paused = false;
-
-    /// <summary>Whether the house has stopped taking and working orders.</summary>
-    public bool Paused => _paused;
-
-    /// <summary>Whether the streams have sent everything that has happened: paused, and nothing held for the skew or sent late.</summary>
-    public bool Quiet => _paused && OrdersHeld == 0 && LateHeld == 0;
-
-    /// <summary>Whether every row sent is in the database, <c>orders_current</c> included.</summary>
-    public bool Written => NotYetIngested == 0 && CurrentWaiting == 0;
-
-    /// <summary>The rate the exchange is running at now, changes a second.</summary>
-    public double CurrentRate { get; private set; }
+    public void Resume()
+    {
+        _paused = false;
+    }
 
     public void Start()
     {
@@ -235,8 +267,8 @@ public sealed class Exchange : IAsyncDisposable
     }
 
     /// <summary>
-    /// Makes <paramref name="count"/> changes at once, now: for tests, and for a page that wants a burst.
-    /// The fills are sent at once; the order versions when the order stream's skew lets them go.
+    ///     Makes <paramref name="count" /> changes at once, now: for tests, and for a page that wants a burst.
+    ///     The fills are sent at once; the order versions when the order stream's skew lets them go.
     /// </summary>
     public (Order[] Orders, Fill[] Fills) Send(int count)
     {
@@ -244,17 +276,13 @@ public sealed class Exchange : IAsyncDisposable
         var fills = new List<Fill>(count);
         lock (_gate)
         {
-            for (var i = 0; i < count; i++)
-            {
-                Next(orders, fills);
-            }
+            for (var i = 0; i < count; i++) Next(orders, fills);
 
             // The stream first, then the database, but for a row sent late, or one the database
             // writes first, when the streams are out of order.
             var now = DateTime.UtcNow;
             var (onTime, written, first) = (new List<Fill>(fills.Count), new List<Fill>(fills.Count), new List<Fill>());
             foreach (var fill in fills)
-            {
                 switch (Route())
                 {
                     case Way.Late:
@@ -272,7 +300,6 @@ public sealed class Exchange : IAsyncDisposable
                         written.Add(fill);
                         break;
                 }
-            }
 
             _repository.WriteFills(first);
             Fills.Publish([.. onTime]);
@@ -292,9 +319,9 @@ public sealed class Exchange : IAsyncDisposable
     }
 
     /// <summary>
-    /// Sends every held order version whose time has come, in the order they happened, but for one sent
-    /// late or written first, when the streams are out of order; and every row sent late, or written
-    /// first, whose time has come.
+    ///     Sends every held order version whose time has come, in the order they happened, but for one sent
+    ///     late or written first, when the streams are out of order; and every row sent late, or written
+    ///     first, whose time has come.
     /// </summary>
     private void ReleaseOrders(DateTime now)
     {
@@ -321,10 +348,7 @@ public sealed class Exchange : IAsyncDisposable
             }
         }
 
-        if (first.Count > 0)
-        {
-            _writeOrders(first);
-        }
+        if (first.Count > 0) _writeOrders(first);
 
         Orders.Publish([.. onTime]);
         _orderWriter.Enqueue([.. written]);
@@ -332,20 +356,10 @@ public sealed class Exchange : IAsyncDisposable
         Fills.Publish(Due(_lateFills, now));
     }
 
-    private enum Way
-    {
-        OnTime,
-        Late,
-        DatabaseFirst,
-    }
-
     /// <summary>How a row goes out: on time, late, or after the database has written it.</summary>
     private Way Route()
     {
-        if (!_disordered)
-        {
-            return Way.OnTime;
-        }
+        if (!_disordered) return Way.OnTime;
 
         var draw = _random.NextDouble();
         return draw < _options.DatabaseFirst ? Way.DatabaseFirst
@@ -353,7 +367,10 @@ public sealed class Exchange : IAsyncDisposable
             : Way.OnTime;
     }
 
-    /// <summary>A delay about <paramref name="median"/>: log-normal, so mostly short and now and then long; at most <see cref="ExchangeOptions.LateMost"/>.</summary>
+    /// <summary>
+    ///     A delay about <paramref name="median" />: log-normal, so mostly short and now and then long; at most
+    ///     <see cref="ExchangeOptions.LateMost" />.
+    /// </summary>
     private TimeSpan Late(TimeSpan median)
     {
         // A standard normal, by Box and Muller.
@@ -365,29 +382,9 @@ public sealed class Exchange : IAsyncDisposable
     private static T[] Due<T>(PriorityQueue<T, DateTime> late, DateTime now)
     {
         var due = new List<T>();
-        while (late.TryPeek(out _, out var at) && at <= now)
-        {
-            due.Add(late.Dequeue());
-        }
+        while (late.TryPeek(out _, out var at) && at <= now) due.Add(late.Dequeue());
 
         return [.. due];
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        await _stop.CancelAsync().ConfigureAwait(false);
-        if (_running is not null)
-        {
-            try
-            {
-                await _running.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        }
-
-        _stop.Dispose();
     }
 
     private async Task TradeAsync(CancellationToken ct)
@@ -398,33 +395,28 @@ public sealed class Exchange : IAsyncDisposable
         var owed = 0.0;
         while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
         {
-            var into = _options.BurstEvery > TimeSpan.Zero ? (DateTime.UtcNow - started).Ticks % _options.BurstEvery.Ticks : 0;
+            var into = _options.BurstEvery > TimeSpan.Zero
+                ? (DateTime.UtcNow - started).Ticks % _options.BurstEvery.Ticks
+                : 0;
             var bursting = _options.BurstEvery > TimeSpan.Zero && into < _options.BurstFor.Ticks;
             CurrentRate = _options.Rate * (bursting ? _options.BurstFactor : 1);
             owed += CurrentRate * tick.TotalSeconds;
             var count = _paused ? 0 : (int)owed;
             owed -= _paused ? owed : count;
             if (count > 0)
-            {
                 Send(count);
-            }
             else
-            {
                 lock (_gate)
                 {
                     ReleaseOrders(DateTime.UtcNow);
                 }
-            }
         }
     }
 
     /// <summary>One change: a new order (filled at once, now and then), a fill, or a cancel.</summary>
     private void Next(List<Order> orders, List<Fill> fills)
     {
-        for (var a = 0; a < _mids.Length; a++)
-        {
-            _mids[a] *= 1 + (_random.NextDouble() - 0.5) * 0.0004;
-        }
+        for (var a = 0; a < _mids.Length; a++) _mids[a] *= 1 + (_random.NextDouble() - 0.5) * 0.0004;
 
         var fill = _open.Count > 0 && (_random.NextDouble() >= _options.NewShare || _open.Count > 5000);
         if (!fill)
@@ -435,19 +427,16 @@ public sealed class Exchange : IAsyncDisposable
             var asset = Pick([.. Reference.Assets.Select(a => a.Weight)]);
             var time = Tick();
             var order = new Order(
-                Guid.CreateVersion7(new DateTimeOffset(time, TimeSpan.Zero)), 1, time, time, $"{reference}-{_orders++}", reference,
+                Guid.CreateVersion7(new DateTimeOffset(time, TimeSpan.Zero)), 1, time, time, $"{reference}-{_orders++}",
+                reference,
                 region, channel, Reference.Instruments[asset],
                 Reference.Sides[_random.Next(2)], (1 + _random.Next(6)) * Reference.Assets[asset].Lot, 0, 0, 0,
                 Reference.MarkupBps(channel), Reference.Statuses[0]);
             orders.Add(order);
             if (_random.NextDouble() < _options.FilledAtOnce)
-            {
-                Work(order, orders, fills, cancel: false);
-            }
+                Work(order, orders, fills, false);
             else
-            {
                 _open.Add(order);
-            }
 
             return;
         }
@@ -456,7 +445,7 @@ public sealed class Exchange : IAsyncDisposable
         var before = _open[at];
         _open[at] = _open[^1];
         _open.RemoveAt(_open.Count - 1);
-        Work(before, orders, fills, cancel: _random.NextDouble() < 0.03);
+        Work(before, orders, fills, _random.NextDouble() < 0.03);
     }
 
     /// <summary>Fills or cancels an order, and keeps it open if it is still working.</summary>
@@ -485,18 +474,16 @@ public sealed class Exchange : IAsyncDisposable
                 FilledQty = filled,
                 AvgPrice = Math.Round((before.AvgPrice * before.FilledQty + price * qty) / filled, 4),
                 FilledAmt = Math.Round(before.FilledAmt + amt, 2),
-                Status = filled >= before.Qty - 1e-9 ? Reference.Statuses[2] : Reference.Statuses[1],
+                Status = filled >= before.Qty - 1e-9 ? Reference.Statuses[2] : Reference.Statuses[1]
             };
             fills.Add(new Fill(
-                Guid.CreateVersion7(new DateTimeOffset(time, TimeSpan.Zero)), after.OrderId, time, after.ClOrdId, after.Client, after.Region, after.Channel,
+                Guid.CreateVersion7(new DateTimeOffset(time, TimeSpan.Zero)), after.OrderId, time, after.ClOrdId,
+                after.Client, after.Region, after.Channel,
                 after.Instrument, after.Side, qty, price, amt, mid, after.MarkupBps));
         }
 
         orders.Add(after);
-        if (after.Status is not ("Filled" or "Cancelled"))
-        {
-            _open.Add(after);
-        }
+        if (after.Status is not ("Filled" or "Cancelled")) _open.Add(after);
     }
 
     /// <summary>The next event time: one clock, strictly increasing, never two changes at one microsecond.</summary>
@@ -511,15 +498,21 @@ public sealed class Exchange : IAsyncDisposable
     {
         var r = _random.NextDouble() * weights.Sum();
         for (var i = 0; i < weights.Length - 1; i++)
-        {
             if ((r -= weights[i]) < 0)
-            {
                 return i;
-            }
-        }
 
         return weights.Length - 1;
     }
 
-    private string Pick((string Name, double Weight)[] names) => names[Pick([.. names.Select(n => n.Weight)])].Name;
+    private string Pick((string Name, double Weight)[] names)
+    {
+        return names[Pick([.. names.Select(n => n.Weight)])].Name;
+    }
+
+    private enum Way
+    {
+        OnTime,
+        Late,
+        DatabaseFirst
+    }
 }

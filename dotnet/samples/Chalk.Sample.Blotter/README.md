@@ -24,17 +24,17 @@ see [Getting a working tree](../../../CONTRIBUTING.md#getting-a-working-tree) to
 sample starts its own PostgreSQL server in a temporary directory and deletes it on stopping; the next
 run sweeps away any left by a killed one.
 
-| Option | Default | |
-|---|---|---|
-| `--orders 500k` | `5m` | corpus size: orders, with their versions and fills |
-| `--current lagging` | `trigger` | how `orders_current` keeps up with `order_versions` (below) |
-| `--disorder 0.02` | off | start out of order: send that share of each stream's rows late, and write half as many to the database before sending them (below); toggle it on the page |
-| `--postgres "Host=…;Username=…;Database=…"` | | use your own server: the sample creates schema `blotter`, refuses if it exists, and drops it on stopping |
-| `--pg-bin /path/to/postgresql/bin` | found | the installation to start a server from |
-| `--budget-mb 32` | found | fix the memory budget; without it, the host finds one (below); change it on the page while running |
-| `--maintenance recompute` | `incremental` | how live scopes keep current (below) |
-| `--urls http://localhost:5911` | `http://localhost:5910` | |
-| `--link-keys /path/to/folder` | `Chalk.Sample.Blotter/link-keys` under local application data | where the keys that shroud shared links live (below) |
+| Option                                      | Default                                                       |                                                                                                                                                           |
+|---------------------------------------------|---------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--orders 500k`                             | `5m`                                                          | corpus size: orders, with their versions and fills                                                                                                        |
+| `--current lagging`                         | `trigger`                                                     | how `orders_current` keeps up with `order_versions` (below)                                                                                               |
+| `--disorder 0.02`                           | off                                                           | start out of order: send that share of each stream's rows late, and write half as many to the database before sending them (below); toggle it on the page |
+| `--postgres "Host=…;Username=…;Database=…"` |                                                               | use your own server: the sample creates schema `blotter`, refuses if it exists, and drops it on stopping                                                  |
+| `--pg-bin /path/to/postgresql/bin`          | found                                                         | the installation to start a server from                                                                                                                   |
+| `--budget-mb 32`                            | found                                                         | fix the memory budget; without it, the host finds one (below); change it on the page while running                                                        |
+| `--maintenance recompute`                   | `incremental`                                                 | how live scopes keep current (below)                                                                                                                      |
+| `--urls http://localhost:5911`              | `http://localhost:5910`                                       |                                                                                                                                                           |
+| `--link-keys /path/to/folder`               | `Chalk.Sample.Blotter/link-keys` under local application data | where the keys that shroud shared links live (below)                                                                                                      |
 
 It does **not** assume:
 
@@ -94,13 +94,13 @@ otherwise write by hand:
   the plan.
 - **A small, ephemeral memory, held to one budget.** The host copies none of the corpus, holding only
   what the database cannot answer yet or has just answered:
-  - the tail: rows the streams sent that the database has not been seen to hold, each released 5 s
-    after it has;
-  - live scopes: one standing view per tab and filter in use, closed 20 s after its last page;
-  - windows of recent reads, kept 4 s and shared by readers of the same sort and filter, within a
-    quarter of the budget;
-  - while any browser has an alert, the alert views and their tables: fills for 10 s, orders until
-    unchanged for 10 minutes, each tail row's wait, and, for counts, matches by slice of time.
+    - the tail: rows the streams sent that the database has not been seen to hold, each released 5 s
+      after it has;
+    - live scopes: one standing view per tab and filter in use, closed 20 s after its last page;
+    - windows of recent reads, kept 4 s and shared by readers of the same sort and filter, within a
+      quarter of the budget;
+    - while any browser has an alert, the alert views and their tables: fills for 10 s, orders until
+      unchanged for 10 minutes, each tail row's wait, and, for counts, matches by slice of time.
 
   ChalkQL counts each view's state (`StateBytes`) and stops an update past its `StateBudget`, so the
   host can add the views to its own tables and hold the lot to one budget, 8 MB to start. Past it,
@@ -127,9 +127,12 @@ client and hide columns such as markup from some readers; this sample serves eve
 
 ## The domain model
 
-Twelve clients trade the house's linear perpetuals (`BTC/USD Perp` and seven others) in US dollars, each
-in its region and through various channels, at the mark plus its channel's markup. A **client order** is
-versioned: a fill or cancel is a new version, numbered one higher, carrying its filled quantity,
+> **Disclaimer:**
+> Illustrative only, shortcuts were taken.
+
+Twelve clients trade the house's linear perpetuals (`BTC/USD Perp` and seven others) always in US dollars, 
+each in its region and through various channels, at the mark plus its channel's markup. A **client order** 
+is versioned: a fill or cancel is a new version, numbered one higher, carrying its filled quantity,
 weighted average fill price, filled amount and status. A **fill** never changes, and carries its amount
 (quantity times price, taken as the notional in US dollars) and its order's details (client, region,
 channel, instrument, side), so it can be filtered without its order. Orders and fills have UUIDs, and
@@ -147,9 +150,6 @@ those in the database before hearing of them. The ingestion jobs already write r
 with its own lag, so the database may hold an order's third version before its second; versions only
 rise within an order, and the trigger and the lagging job keep the higher. The vital statistics count
 rows sent late and after the database.
-
-> **Disclaimer:**
-> Illustrative only, shortcuts were taken.
 
 ## The database
 
@@ -213,11 +213,11 @@ million orders, about 12.5 million versions and 8.8 million fills load in second
   own headers.
 - **A filter on every column.** Click the funnel before a heading to filter that column; active filters
   show as pills above the grid.
-  - Ids (order, fill): type or paste; matched exactly.
-  - Text (client, ClOrdId, instrument): pick or type; matched exactly or by **prefix**. The chooser
-    offers the column's most frequent values over the period of interest (the tab's time filter, or the
-    last day), read from the database and narrowed as you type.
-  - Region, channel, side, status: tick. Numbers: at least, at most. Times: from, to (UTC).
+    - Ids (order, fill): type or paste; matched exactly.
+    - Text (client, ClOrdId, instrument): pick or type; matched exactly or by **prefix**. The chooser
+      offers the column's most frequent values over the period of interest (the tab's time filter, or the
+      last day), read from the database and narrowed as you type.
+    - Region, channel, side, status: tick. Numbers: at least, at most. Times: from, to (UTC).
 - **The cost, on request.** Open "How this tab is answered" for the page's SQL, ChalkQL's plan and
   PostgreSQL's own plan: newest first, a hundred rows read down an index; sorted by an unindexed column,
   the whole table.
@@ -304,15 +304,15 @@ Press Escape to close whatever is open over the page.
 
 ## The code
 
-| Folder | |
-|---|---|
-| `Grid` | what any live grid over a versioned table needs: rows (`IRow`, `KeyRow`), columns and formats, tabs and the paths between them, sorts, filters, view links and their shrouding |
-| `Alerts` | what any alert over a tab needs: rules and their sounds, counts in a window (`AlertRule`, `AlertCount`), and conditions in SQL over the tab's columns and paths, with their completion (`Condition`, `ConditionCompletion`) |
-| `Domain` | the trades: client orders and fills (`Trades`), their two tabs, reference data, and `ITradeRepository`, the tables as the house writes them |
-| `Fixtures` | stand-ins for a real house: the generated corpus and `Seeder`, the simulated `Exchange` and its streams (`Feed`), the lagging ingestion jobs, and `IHouseDatabase`, the database the house runs on |
-| `Live` | the bolt-on: tail, merge, live scopes, pages and positions, counts, alert views and their tables, the host that runs them, and `IBlotterProvider`, the database it reads |
-| `Postgres` | everything PostgreSQL: the provider the host reads through and its estimates (`PostgresBlotterProvider`, `PostgresExplain`), the repository the house writes (`PostgresTradeRepository`), the house database that pairs them (`PostgresHouseDatabase`), the sample's own server (`PgServer`), and SQL written for PostgreSQL directly (`PostgresSql`) |
-| `Components` | the Blazor pages, the grid and the condition editor |
+| Folder       |                                                                                                                                                                                                                                                                                                                                                       |
+|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Grid`       | what any live grid over a versioned table needs: rows (`IRow`, `KeyRow`), columns and formats, tabs and the paths between them, sorts, filters, view links and their shrouding                                                                                                                                                                        |
+| `Alerts`     | what any alert over a tab needs: rules and their sounds, counts in a window (`AlertRule`, `AlertCount`), and conditions in SQL over the tab's columns and paths, with their completion (`Condition`, `ConditionCompletion`)                                                                                                                           |
+| `Domain`     | the trades: client orders and fills (`Trades`), their two tabs, reference data, and `ITradeRepository`, the tables as the house writes them                                                                                                                                                                                                           |
+| `Fixtures`   | stand-ins for a real house: the generated corpus and `Seeder`, the simulated `Exchange` and its streams (`Feed`), the lagging ingestion jobs, and `IHouseDatabase`, the database the house runs on                                                                                                                                                    |
+| `Live`       | the bolt-on: tail, merge, live scopes, pages and positions, counts, alert views and their tables, the host that runs them, and `IBlotterProvider`, the database it reads                                                                                                                                                                              |
+| `Postgres`   | everything PostgreSQL: the provider the host reads through and its estimates (`PostgresBlotterProvider`, `PostgresExplain`), the repository the house writes (`PostgresTradeRepository`), the house database that pairs them (`PostgresHouseDatabase`), the sample's own server (`PgServer`), and SQL written for PostgreSQL directly (`PostgresSql`) |
+| `Components` | the Blazor pages, the grid and the condition editor                                                                                                                                                                                                                                                                                                   |
 
 `Grid` and `Alerts` know nothing of trades, nor `Domain` of live display, nor `Grid` of alerts; `Live` and
 the grid component still speak of orders and fills.

@@ -9,18 +9,15 @@
 <div class="condition-editor" @ref="_element"></div>
 
 @code {
-    [Parameter, EditorRequired]
-    public Tab Tab { get; set; } = default!;
+    [Parameter][EditorRequired] public Tab Tab { get; set; } = default!;
 
     /// <summary>The condition as written; set by the page, it replaces what the editor holds.</summary>
     [Parameter]
     public string Text { get; set; } = "";
 
-    [Parameter]
-    public EventCallback<string> TextChanged { get; set; }
+    [Parameter] public EventCallback<string> TextChanged { get; set; }
 
-    [Parameter]
-    public string Placeholder { get; set; } = "";
+    [Parameter] public string Placeholder { get; set; } = "";
 
     private ElementReference _element;
     private DotNetObjectReference<ConditionEditor>? _self;
@@ -49,8 +46,10 @@
     }
 
     [JSInvokable]
-    public async Task<Suggestions> Complete(string text, int cursor) =>
-        await ConditionCompletion.CompleteAsync(Tab, text, cursor, ValuesAsync, CancellationToken.None);
+    public async Task<Suggestions> Complete(string text, int cursor)
+    {
+        return await ConditionCompletion.CompleteAsync(Tab, text, cursor, ValuesAsync, CancellationToken.None);
+    }
 
     /// <summary>What is wrong, and where: the names the host does not know, then what ChalkQL makes of the rest.</summary>
     [JSInvokable]
@@ -85,7 +84,10 @@
         _self?.Dispose();
     }
 
-    /// <summary>A text column's values, the most frequent of the last day first: of the tab whose column it is, along a path or not.</summary>
+    /// <summary>
+    ///     A text column's values, the most frequent of the last day first: of the tab whose column it is, along a path
+    ///     or not.
+    /// </summary>
     private async Task<IReadOnlyList<string>> ValuesAsync(Column column, string typed, CancellationToken ct)
     {
         var tab = Tabs.All.First(t => t.Columns.Contains(column));
@@ -105,4 +107,5 @@
 
     /// <summary>A diagnostic, as the editor marks it.</summary>
     public sealed record Problem(int From, int To, string Severity, string Message);
+
 }

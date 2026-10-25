@@ -7,8 +7,9 @@
 <div class="alerts-panel" role="dialog" aria-label="Alerts">
     <div class="alerts-head">
         <b>Alerts</b>
-        <label title="A system notification for each alert while this page is in the background, if the browser allows it">
-            <input type="checkbox" checked="@Book.Notify" onchange="blotterAlerts.setNotify(this.checked)" />
+        <label
+            title="A system notification for each alert while this page is in the background, if the browser allows it">
+            <input type="checkbox" checked="@Book.Notify" onchange="blotterAlerts.setNotify(this.checked)"/>
             Notify in the background
         </label>
         @if (!Book.SoundOn)
@@ -29,15 +30,27 @@
                 var r = rule;
                 <tr>
                     <td>
-                        <b>@r.Name</b><div class="muted">@r.Tab.Title: @if (r.Condition.IsEmpty) { <span>every row</span> } else { <code>@r.Condition.Text</code> }</div>
+                        <b>@r.Name</b>
+                        <div class="muted">@r.Tab.Title:
+                            @if (r.Condition.IsEmpty)
+                            {
+                                <span>every row</span>
+                            }
+                            else
+                            {
+                                <code>@r.Condition.Text</code>
+                            }
+                        </div>
                         @if (Desk.Refusal(r) is { } notRunning)
                         {
-                            <div class="alerts-refused" title="ChalkQL would not make this alert's view">Not running: @notRunning</div>
+                            <div class="alerts-refused" title="ChalkQL would not make this alert's view">Not
+                                running: @notRunning</div>
                         }
                     </td>
                     <td class="alerts-settings">
-                        <AlertWhen LagOver="r.LagOver" Count="r.Count" Changed="when => SaveWhenAsync(r, when)" />
-                        <select value="@r.Sound" aria-label="Sound" @onchange="e => SaveAsync(r with { Sound = (string)e.Value! })">
+                        <AlertWhen LagOver="r.LagOver" Count="r.Count" Changed="when => SaveWhenAsync(r, when)"/>
+                        <select value="@r.Sound" aria-label="Sound"
+                                @onchange="e => SaveAsync(r with { Sound = (string)e.Value! })">
                             @foreach (var (id, label) in AlertSounds.All)
                             {
                                 <option value="@id">@label</option>
@@ -45,17 +58,22 @@
                         </select>
                         @if (r.Count is null)
                         {
-                            <select value="@r.Throttle.TotalSeconds" aria-label="At most once every" @onchange="e => SaveAsync(r with { Throttle = TimeSpan.FromSeconds(double.Parse((string)e.Value!, CultureInfo.InvariantCulture)) })">
+                            <select value="@r.Throttle.TotalSeconds" aria-label="At most once every"
+                                    @onchange="e => SaveAsync(r with { Throttle = TimeSpan.FromSeconds(double.Parse((string)e.Value!, CultureInfo.InvariantCulture)) })">
                                 @foreach (var throttle in AlertRule.Throttles)
                                 {
-                                    <option value="@throttle.TotalSeconds">at most every @AlertCount.Span(throttle)</option>
+                                    <option value="@throttle.TotalSeconds">at most
+                                        every @AlertCount.Span(throttle)</option>
                                 }
                             </select>
                         }
                     </td>
                     <td class="alerts-actions">
-                        <button type="button" class="icon-button" title="Hear it" aria-label="Hear @r.Name" onclick="blotterAlerts.play('@r.Sound')">▶</button>
-                        <button type="button" class="link-button" @onclick="() => SaveAsync(r with { Muted = !r.Muted })">@(r.Muted ? "Unmute" : "Mute")</button>
+                        <button type="button" class="icon-button" title="Hear it" aria-label="Hear @r.Name"
+                                onclick="blotterAlerts.play('@r.Sound')">▶
+                        </button>
+                        <button type="button" class="link-button"
+                                @onclick="() => SaveAsync(r with { Muted = !r.Muted })">@(r.Muted ? "Unmute" : "Mute")</button>
                         <button type="button" class="link-button" @onclick="() => RemoveAsync(r)">Remove</button>
                     </td>
                 </tr>
@@ -67,23 +85,26 @@
     <p class="alerts-how muted">
         An alert fires on the rows that pass its condition, as they arrive, once the database is too far behind
         them (see the Recon column), or on how many pass within a sliding window: at least so many, or none. An
-        order counts each time a newer version of it passes. Write the condition in SQL over this tab's columns@(Tab.Paths.Count > 0 ? ", and along " + string.Join(", ", Tab.Paths.Select(p => p.Name + ".")) : ""),
+        order counts each time a newer version of it passes. Write the condition in SQL over this tab's
+        columns@(Tab.Paths.Count > 0 ? ", and along " + string.Join(", ", Tab.Paths.Select(p => p.Name + ".")) : ""),
         or set the column funnels first and start from those: for example
         <code>@(Tab.Overrides ? "client = 'CEDAR' AND side = 'Buy' AND qty >= 10" : "order.status = 'Partial' AND instrument LIKE 'BTC%'")</code>.
         ChalkQL runs it.
     </p>
     <div class="alerts-new">
         <span class="muted">New alert on @Tab.Title:</span>
-        <ConditionEditor Tab="Tab" @bind-Text="_condition" Placeholder="every row; ctrl-space for what may come next" />
-        <input type="text" placeholder="@NamePlaceholder()" @bind="_name" aria-label="Name" />
-        <AlertWhen LagOver="_lagOver" Count="_count" Changed="when => (_lagOver, _count) = when" />
+        <ConditionEditor Tab="Tab" @bind-Text="_condition" Placeholder="every row; ctrl-space for what may come next"/>
+        <input type="text" placeholder="@NamePlaceholder()" @bind="_name" aria-label="Name"/>
+        <AlertWhen LagOver="_lagOver" Count="_count" Changed="when => (_lagOver, _count) = when"/>
         <select @bind="_sound" aria-label="Sound">
             @foreach (var (id, label) in AlertSounds.All)
             {
                 <option value="@id">@label</option>
             }
         </select>
-        <button type="button" class="icon-button" title="Hear it" aria-label="Hear the sound chosen" onclick="blotterAlerts.play(this.previousElementSibling.value)">▶</button>
+        <button type="button" class="icon-button" title="Hear it" aria-label="Hear the sound chosen"
+                onclick="blotterAlerts.play(this.previousElementSibling.value)">▶
+        </button>
         @if (_count is null)
         {
             <select @bind="_throttle" aria-label="At most once every">
@@ -102,14 +123,12 @@
 </div>
 
 @code {
-    [Parameter, EditorRequired]
-    public AlertBook Book { get; set; } = default!;
+    [Parameter][EditorRequired] public AlertBook Book { get; set; } = default!;
 
-    [Parameter, EditorRequired]
-    public Tab Tab { get; set; } = default!;
+    [Parameter][EditorRequired] public Tab Tab { get; set; } = default!;
 
     /// <summary>The tab's filters now, which a new alert takes.</summary>
-    [Parameter, EditorRequired]
+    [Parameter][EditorRequired]
     public FilterSpec Filter { get; set; } = default!;
 
     private string _name = "";
@@ -133,12 +152,15 @@
     }
 
     // The name box shows the name an alert takes if none is typed.
-    private string NamePlaceholder() => DefaultName();
+    private string NamePlaceholder()
+    {
+        return DefaultName();
+    }
 
     private string DefaultName()
     {
         var text = _condition.Trim();
-        var named = text.Length == 0 ? (Tab.Overrides ? "Any order" : "Any fill")
+        var named = text.Length == 0 ? Tab.Overrides ? "Any order" : "Any fill"
             : !Filter.Columns.IsEmpty && text == Filter.Condition() ? Describe(Filter)
             : text.Length <= 40 ? text : text[..39] + "…";
         return named + (_lagOver is { } lag ? $", over {AlertCount.Span(lag)} behind" : _count is { } count ? ", " + count.Describe() : "");
@@ -156,20 +178,30 @@
 
         var rule = new AlertRule(
             Guid.NewGuid().ToString("N"), string.IsNullOrWhiteSpace(_name) ? DefaultName() : _name.Trim(), condition, _sound,
-            TimeSpan.FromSeconds(_throttle), Muted: false, _lagOver, _count);
+            TimeSpan.FromSeconds(_throttle), false, _lagOver, _count);
         _name = "";
         await Book.SaveAsync([.. Book.Rules, rule]);
     }
 
     // A count out of range is not kept: the rule keeps the one it had, and the count says what is wrong.
-    private Task SaveWhenAsync(AlertRule rule, (TimeSpan? LagOver, AlertCount? Count) when) =>
-        when.Count?.Problem() is null ? SaveAsync(rule with { LagOver = when.LagOver, Count = when.Count }) : Task.CompletedTask;
+    private Task SaveWhenAsync(AlertRule rule, (TimeSpan? LagOver, AlertCount? Count) when)
+    {
+        return when.Count?.Problem() is null ? SaveAsync(rule with { LagOver = when.LagOver, Count = when.Count }) : Task.CompletedTask;
+    }
 
-    private Task SaveAsync(AlertRule changed) => Book.SaveAsync([.. Book.Rules.Select(r => r.Id == changed.Id ? changed : r)]);
+    private Task SaveAsync(AlertRule changed)
+    {
+        return Book.SaveAsync([.. Book.Rules.Select(r => r.Id == changed.Id ? changed : r)]);
+    }
 
-    private Task RemoveAsync(AlertRule removed) => Book.SaveAsync([.. Book.Rules.Where(r => r.Id != removed.Id)]);
+    private Task RemoveAsync(AlertRule removed)
+    {
+        return Book.SaveAsync([.. Book.Rules.Where(r => r.Id != removed.Id)]);
+    }
 
-    private static string Describe(FilterSpec filter) =>
-        filter.Columns.IsEmpty ? "every row" : string.Join("; ", filter.Columns.Select(f => f.Describe()));
+    private static string Describe(FilterSpec filter)
+    {
+        return filter.Columns.IsEmpty ? "every row" : string.Join("; ", filter.Columns.Select(f => f.Describe()));
+    }
 
 }

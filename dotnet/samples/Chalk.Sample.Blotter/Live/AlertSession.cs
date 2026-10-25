@@ -1,16 +1,24 @@
 using System.Collections.Immutable;
 using Chalk.Sample.Blotter.Alerts;
-using Chalk.Sample.Blotter.Grid;
 
 namespace Chalk.Sample.Blotter.Live;
 
 /// <summary>An alert fired: which rule, how many rows since it last sounded, and the latest of them.</summary>
-public sealed record AlertEvent(long Seq, string RuleId, string RuleName, string Sound, bool Muted, string Tab, int Count, string Latest, DateTime At);
+public sealed record AlertEvent(
+    long Seq,
+    string RuleId,
+    string RuleName,
+    string Sound,
+    bool Muted,
+    string Tab,
+    int Count,
+    string Latest,
+    DateTime At);
 
 /// <summary>
-/// One browser's alerts: its rules, what each has fired and not yet sounded, and the alerts no page of
-/// it has sounded yet. A rule that fires within its throttle of sounding gathers its rows, and sounds
-/// once the throttle allows, saying how many.
+///     One browser's alerts: its rules, what each has fired and not yet sounded, and the alerts no page of
+///     it has sounded yet. A rule that fires within its throttle of sounding gathers its rows, and sounds
+///     once the throttle allows, saying how many.
 /// </summary>
 public sealed class AlertSession(string browser)
 {
@@ -20,10 +28,10 @@ public sealed class AlertSession(string browser)
     private readonly Lock _gate = new();
     private readonly Dictionary<string, RuleState> _states = new(StringComparer.Ordinal);
     private readonly List<AlertEvent> _waiting = [];
+    private DateTime _leftAt = DateTime.UtcNow;
+    private int _pages;
     private ImmutableArray<AlertRule> _rules = [];
     private long _seq;
-    private int _pages;
-    private DateTime _leftAt = DateTime.UtcNow;
 
     public string Browser => browser;
 
@@ -33,30 +41,21 @@ public sealed class AlertSession(string browser)
     public event Action<AlertEvent>? Fired;
 
     /// <summary>
-    /// Sets the rules. A rule whose condition is unchanged keeps what it has gathered; a new one, or a
-    /// changed one, starts from now.
+    ///     Sets the rules. A rule whose condition is unchanged keeps what it has gathered; a new one, or a
+    ///     changed one, starts from now.
     /// </summary>
     public void SetRules(IEnumerable<AlertRule> rules)
     {
         lock (_gate)
         {
             _rules = [.. rules];
-            foreach (var id in _states.Keys.Where(id => !_rules.Any(r => r.Id == id)).ToList())
-            {
-                _states.Remove(id);
-            }
+            foreach (var id in _states.Keys.Where(id => !_rules.Any(r => r.Id == id)).ToList()) _states.Remove(id);
 
             foreach (var rule in _rules)
-            {
                 if (!_states.TryGetValue(rule.Id, out var state) || state.View != AlertWindowSpec.NameOf(rule))
-                {
                     _states[rule.Id] = new RuleState(rule);
-                }
                 else
-                {
                     state.Rule = rule;
-                }
-            }
         }
     }
 
@@ -68,22 +67,19 @@ public sealed class AlertSession(string browser)
         {
             foreach (var state in _states.Values.Where(s => s.View == view))
             {
-                foreach (var (row, lag) in rows)
-                {
-                    state.Hit(row, lag);
-                }
+                foreach (var (row, lag) in rows) state.Hit(row, lag);
 
-                if (state.Due(now))
-                {
-                    fired.Add(Sound(state, now));
-                }
+                if (state.Due(now)) fired.Add(Sound(state, now));
             }
         }
 
         Raise(fired);
     }
 
-    /// <summary>A count view's row has entered it: each rule that counts with it fires, saying how many matches the window holds.</summary>
+    /// <summary>
+    ///     A count view's row has entered it: each rule that counts with it fires, saying how many matches the window
+    ///     holds.
+    /// </summary>
     public void Count(string view, long matches, DateTime now)
     {
         List<AlertEvent> fired = [];
@@ -120,7 +116,7 @@ public sealed class AlertSession(string browser)
         }
     }
 
-    /// <summary>A page has sounded every alert up to <paramref name="seq"/>.</summary>
+    /// <summary>A page has sounded every alert up to <paramref name="seq" />.</summary>
     public void Acknowledge(long seq)
     {
         lock (_gate)
@@ -164,25 +160,21 @@ public sealed class AlertSession(string browser)
             ? count.Kind == CountKind.AtLeast
                 ? $"{state.LatestMatches:N0} in the last {AlertCount.Span(count.Window)}"
                 : $"none in the last {AlertCount.Span(count.Window)}"
-            : rule.Tab.Describe(state.Latest!) + (state.LatestLag is { } lag ? $" · {Column.Seconds(lag)} waiting for the database" : "");
-        var alert = new AlertEvent(++_seq, rule.Id, rule.Name, rule.Sound, rule.Muted, rule.Tab.Name, state.Gathered, latest, now);
+            : rule.Tab.Describe(state.Latest!) +
+              (state.LatestLag is { } lag ? $" · {Column.Seconds(lag)} waiting for the database" : "");
+        var alert = new AlertEvent(++_seq, rule.Id, rule.Name, rule.Sound, rule.Muted, rule.Tab.Name, state.Gathered,
+            latest, now);
         state.Gathered = 0;
         state.SoundedAt = now;
         _waiting.Add(alert);
-        if (_waiting.Count > MostWaiting)
-        {
-            _waiting.RemoveAt(0);
-        }
+        if (_waiting.Count > MostWaiting) _waiting.RemoveAt(0);
 
         return alert;
     }
 
     private void Raise(List<AlertEvent> fired)
     {
-        foreach (var alert in fired)
-        {
-            Fired?.Invoke(alert);
-        }
+        foreach (var alert in fired) Fired?.Invoke(alert);
     }
 
     private sealed class RuleState(AlertRule rule)
@@ -196,7 +188,7 @@ public sealed class AlertSession(string browser)
 
         public IRow? Latest { get; private set; }
 
-        /// <summary>How long <see cref="Latest"/> had waited for the database, for a rule that watches the wait.</summary>
+        /// <summary>How long <see cref="Latest" /> had waited for the database, for a rule that watches the wait.</summary>
         public TimeSpan? LatestLag { get; private set; }
 
         public DateTime SoundedAt { get; set; } = DateTime.MinValue;
@@ -217,6 +209,9 @@ public sealed class AlertSession(string browser)
             LatestLag = lag;
         }
 
-        public bool Due(DateTime now) => Gathered > 0 && now - SoundedAt >= Rule.Throttle;
+        public bool Due(DateTime now)
+        {
+            return Gathered > 0 && now - SoundedAt >= Rule.Throttle;
+        }
     }
 }

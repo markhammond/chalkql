@@ -1,16 +1,15 @@
+using System.Data.Common;
 using System.Globalization;
 using Apache.Arrow;
-using Apache.Arrow.Arrays;
-using System.Data.Common;
 
 namespace Chalk.Sample.Blotter.Domain;
 
 /// <summary>
-/// One version of a client's order with the house, as the feed sends it and the database stores it:
-/// on a perpetual, in US dollars, through one of the client's channels, at the mark plus the
-/// channel's markup. The house works it in fills; each fill, and a cancel, is a new version of the
-/// order, numbered one higher. Versions are ordered per order only. <see cref="FilledAmt"/> is the
-/// sum of its fills' amounts: the notional filled, in US dollars, as the house stamps it.
+///     One version of a client's order with the house, as the feed sends it and the database stores it:
+///     on a perpetual, in US dollars, through one of the client's channels, at the mark plus the
+///     channel's markup. The house works it in fills; each fill, and a cancel, is a new version of the
+///     order, numbered one higher. Versions are ordered per order only. <see cref="FilledAmt" /> is the
+///     sum of its fills' amounts: the notional filled, in US dollars, as the house stamps it.
 /// </summary>
 public sealed record Order(
     Guid OrderId,
@@ -40,54 +39,69 @@ public sealed record Order(
 
     public Guid Id => OrderId;
 
-    public static Order Read(RecordBatch batch, int row) => new(
-        Cells.Uuid(batch.Column(0), row),
-        (int)Cells.Int64(batch.Column(1), row),
-        Cells.Time(batch.Column(2), row),
-        Cells.Time(batch.Column(3), row),
-        Cells.Text(batch.Column(4), row, intern: false),
-        Cells.Text(batch.Column(5), row),
-        Cells.Text(batch.Column(6), row),
-        Cells.Text(batch.Column(7), row),
-        Cells.Text(batch.Column(8), row),
-        Cells.Text(batch.Column(9), row),
-        Cells.Double(batch.Column(10), row),
-        Cells.Double(batch.Column(11), row),
-        Cells.Double(batch.Column(12), row),
-        Cells.Double(batch.Column(13), row),
-        Cells.Double(batch.Column(14), row),
-        Cells.Text(batch.Column(15), row));
+    public static Order Read(RecordBatch batch, int row)
+    {
+        return new Order(
+            Cells.Uuid(batch.Column(0), row),
+            (int)Cells.Int64(batch.Column(1), row),
+            Cells.Time(batch.Column(2), row),
+            Cells.Time(batch.Column(3), row),
+            Cells.Text(batch.Column(4), row, false),
+            Cells.Text(batch.Column(5), row),
+            Cells.Text(batch.Column(6), row),
+            Cells.Text(batch.Column(7), row),
+            Cells.Text(batch.Column(8), row),
+            Cells.Text(batch.Column(9), row),
+            Cells.Double(batch.Column(10), row),
+            Cells.Double(batch.Column(11), row),
+            Cells.Double(batch.Column(12), row),
+            Cells.Double(batch.Column(13), row),
+            Cells.Double(batch.Column(14), row),
+            Cells.Text(batch.Column(15), row));
+    }
 
-    public static Order Read(DbDataReader reader) => new(
-        reader.GetGuid(0),
-        reader.GetInt32(1),
-        Cells.Micros(reader.GetDateTime(2)),
-        Cells.Micros(reader.GetDateTime(3)),
-        reader.GetString(4),
-        string.Intern(reader.GetString(5)),
-        string.Intern(reader.GetString(6)),
-        string.Intern(reader.GetString(7)),
-        string.Intern(reader.GetString(8)),
-        string.Intern(reader.GetString(9)),
-        reader.GetDouble(10),
-        reader.GetDouble(11),
-        reader.GetDouble(12),
-        reader.GetDouble(13),
-        reader.GetDouble(14),
-        string.Intern(reader.GetString(15)));
+    public static Order Read(DbDataReader reader)
+    {
+        return new Order(
+            reader.GetGuid(0),
+            reader.GetInt32(1),
+            Cells.Micros(reader.GetDateTime(2)),
+            Cells.Micros(reader.GetDateTime(3)),
+            reader.GetString(4),
+            string.Intern(reader.GetString(5)),
+            string.Intern(reader.GetString(6)),
+            string.Intern(reader.GetString(7)),
+            string.Intern(reader.GetString(8)),
+            string.Intern(reader.GetString(9)),
+            reader.GetDouble(10),
+            reader.GetDouble(11),
+            reader.GetDouble(12),
+            reader.GetDouble(13),
+            reader.GetDouble(14),
+            string.Intern(reader.GetString(15)));
+    }
 
-    public object?[] Values() =>
-        [OrderId, Version, EventTime, OrderTime, ClOrdId, Client, Region, Channel, Instrument, Side, Qty, FilledQty, AvgPrice, FilledAmt, MarkupBps, Status];
+    public object?[] Values()
+    {
+        return
+        [
+            OrderId, Version, EventTime, OrderTime, ClOrdId, Client, Region, Channel, Instrument, Side, Qty, FilledQty,
+            AvgPrice, FilledAmt, MarkupBps, Status
+        ];
+    }
 
-    public override string ToString() => string.Create(
-        CultureInfo.InvariantCulture,
-        $"#{OrderId} v{Version} {Client} {Side} {Qty} {Instrument} filled {FilledQty} @ {AvgPrice} {Status}");
+    public override string ToString()
+    {
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"#{OrderId} v{Version} {Client} {Side} {Qty} {Instrument} filled {FilledQty} @ {AvgPrice} {Status}");
+    }
 }
 
 /// <summary>
-/// One fill of a client order: the order's quantity the house filled at once, at a price, and the
-/// amount, <c>qty × price</c>, the notional in US dollars. Fills are append-only: a fill never
-/// changes, and the order it fills gets a new version beside it.
+///     One fill of a client order: the order's quantity the house filled at once, at a price, and the
+///     amount, <c>qty × price</c>, the notional in US dollars. Fills are append-only: a fill never
+///     changes, and the order it fills gets a new version beside it.
 /// </summary>
 public sealed record Fill(
     Guid FillId,
@@ -114,41 +128,56 @@ public sealed record Fill(
 
     public int Version => 1;
 
-    public static Fill Read(RecordBatch batch, int row) => new(
-        Cells.Uuid(batch.Column(0), row),
-        Cells.Uuid(batch.Column(1), row),
-        Cells.Time(batch.Column(2), row),
-        Cells.Text(batch.Column(3), row, intern: false),
-        Cells.Text(batch.Column(4), row),
-        Cells.Text(batch.Column(5), row),
-        Cells.Text(batch.Column(6), row),
-        Cells.Text(batch.Column(7), row),
-        Cells.Text(batch.Column(8), row),
-        Cells.Double(batch.Column(9), row),
-        Cells.Double(batch.Column(10), row),
-        Cells.Double(batch.Column(11), row),
-        Cells.Double(batch.Column(12), row),
-        Cells.Double(batch.Column(13), row));
+    public static Fill Read(RecordBatch batch, int row)
+    {
+        return new Fill(
+            Cells.Uuid(batch.Column(0), row),
+            Cells.Uuid(batch.Column(1), row),
+            Cells.Time(batch.Column(2), row),
+            Cells.Text(batch.Column(3), row, false),
+            Cells.Text(batch.Column(4), row),
+            Cells.Text(batch.Column(5), row),
+            Cells.Text(batch.Column(6), row),
+            Cells.Text(batch.Column(7), row),
+            Cells.Text(batch.Column(8), row),
+            Cells.Double(batch.Column(9), row),
+            Cells.Double(batch.Column(10), row),
+            Cells.Double(batch.Column(11), row),
+            Cells.Double(batch.Column(12), row),
+            Cells.Double(batch.Column(13), row));
+    }
 
-    public static Fill Read(DbDataReader reader) => new(
-        reader.GetGuid(0),
-        reader.GetGuid(1),
-        Cells.Micros(reader.GetDateTime(2)),
-        reader.GetString(3),
-        string.Intern(reader.GetString(4)),
-        string.Intern(reader.GetString(5)),
-        string.Intern(reader.GetString(6)),
-        string.Intern(reader.GetString(7)),
-        string.Intern(reader.GetString(8)),
-        reader.GetDouble(9),
-        reader.GetDouble(10),
-        reader.GetDouble(11),
-        reader.GetDouble(12),
-        reader.GetDouble(13));
+    public static Fill Read(DbDataReader reader)
+    {
+        return new Fill(
+            reader.GetGuid(0),
+            reader.GetGuid(1),
+            Cells.Micros(reader.GetDateTime(2)),
+            reader.GetString(3),
+            string.Intern(reader.GetString(4)),
+            string.Intern(reader.GetString(5)),
+            string.Intern(reader.GetString(6)),
+            string.Intern(reader.GetString(7)),
+            string.Intern(reader.GetString(8)),
+            reader.GetDouble(9),
+            reader.GetDouble(10),
+            reader.GetDouble(11),
+            reader.GetDouble(12),
+            reader.GetDouble(13));
+    }
 
-    public object?[] Values() =>
-        [FillId, OrderId, EventTime, ClOrdId, Client, Region, Channel, Instrument, Side, Qty, Price, Amt, Mid, MarkupBps];
+    public object?[] Values()
+    {
+        return
+        [
+            FillId, OrderId, EventTime, ClOrdId, Client, Region, Channel, Instrument, Side, Qty, Price, Amt, Mid,
+            MarkupBps
+        ];
+    }
 
-    public override string ToString() => string.Create(
-        CultureInfo.InvariantCulture, $"fill #{FillId} of #{OrderId} {Side} {Qty} {Instrument} @ {Price}");
+    public override string ToString()
+    {
+        return string.Create(
+            CultureInfo.InvariantCulture, $"fill #{FillId} of #{OrderId} {Side} {Qty} {Instrument} @ {Price}");
+    }
 }

@@ -4,84 +4,82 @@ using System.Globalization;
 using System.Threading.Channels;
 using Chalk.Client;
 using Chalk.Sample.Blotter.Fixtures;
-using Chalk.Sample.Blotter.Domain;
 using Chalk.Sources.Poco;
-using Microsoft.Extensions.Logging;
 
 namespace Chalk.Sample.Blotter.Live;
 
 /// <summary>
-/// The blotter's host: the database and the simulated market, the ChalkQL engine over the database and
-/// the tail, and the one loop that changes the tail.
+///     The blotter's host: the database and the simulated market, the ChalkQL engine over the database and
+///     the tail, and the one loop that changes the tail.
 /// </summary>
 /// <remarks>
-/// <para>
-/// A page is the database read live and the tail laid over it. The tail is every order version and
-/// fill the streams have sent since the host subscribed that the database has not been seen to hold.
-/// The host looks the tail's rows up in the database every half second; a row the database holds, at
-/// its version or a later one, leaves the tail a little later. It asks nothing else of the database:
-/// no watermark, no snapshot, and no promise about when <c>orders_current</c> catches up with
-/// <c>order_versions</c>, so it serves alike whether a trigger keeps the two in step or a job runs
-/// behind.
-/// </para>
-/// <para>
-/// The streams do not replay. When the host starts serving it subscribes, and then asks the database
-/// once for every version written lately — the gap fill — and takes each as if the stream had sent
-/// it: a version sent before the subscription, written to <c>order_versions</c> but not yet to
-/// <c>orders_current</c>, is then shown all the same.
-/// </para>
-/// <para>
-/// When the database is so far behind that the tail and its scopes would outgrow the budget, the host
-/// stops serving and says why; it keeps reading the streams, and keeps the last of what they send.
-/// Once <c>orders_current</c> has caught up, it serves again, from what it kept and a new gap fill. It
-/// never drops a version to stay in budget.
-/// </para>
+///     <para>
+///         A page is the database read live and the tail laid over it. The tail is every order version and
+///         fill the streams have sent since the host subscribed that the database has not been seen to hold.
+///         The host looks the tail's rows up in the database every half second; a row the database holds, at
+///         its version or a later one, leaves the tail a little later. It asks nothing else of the database:
+///         no watermark, no snapshot, and no promise about when <c>orders_current</c> catches up with
+///         <c>order_versions</c>, so it serves alike whether a trigger keeps the two in step or a job runs
+///         behind.
+///     </para>
+///     <para>
+///         The streams do not replay. When the host starts serving it subscribes, and then asks the database
+///         once for every version written lately — the gap fill — and takes each as if the stream had sent
+///         it: a version sent before the subscription, written to <c>order_versions</c> but not yet to
+///         <c>orders_current</c>, is then shown all the same.
+///     </para>
+///     <para>
+///         When the database is so far behind that the tail and its scopes would outgrow the budget, the host
+///         stops serving and says why; it keeps reading the streams, and keeps the last of what they send.
+///         Once <c>orders_current</c> has caught up, it serves again, from what it kept and a new gap fill. It
+///         never drops a version to stay in budget.
+///     </para>
 /// </remarks>
 public sealed class BlotterHost : IAsyncDisposable
 {
-    private readonly BlotterOptions _options;
-    private readonly ILogger _log;
+    /// <summary>How often the clock moves while nothing arrives, for the alert views that watch the wait and the count views.</summary>
+    public static readonly TimeSpan AlertTick = TimeSpan.FromMilliseconds(250);
+
     private readonly Channel<Func<Task>> _actions = Channel.CreateUnbounded<Func<Task>>();
-    private readonly Tail _tail = new();
+    private readonly HostBudget _budget;
+    private readonly List<Fill> _keptFills = [];
+    private readonly List<Order> _keptOrders = [];
+    private readonly ILogger _log;
     private readonly Dictionary<string, LiveScope> _scopes = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _stop = new();
-    private readonly List<Order> _keptOrders = [];
-    private readonly List<Fill> _keptFills = [];
-    private readonly HostBudget _budget;
-    private IHouseDatabase? _house;
-    private IBlotterProvider? _provider;
-    private Exchange? _exchange;
-    private PlannerProcess? _planner;
-    private ChalkEngine? _engine;
-    private PocoTable<TailRow>? _tailTable;
-    private PocoTable<Fill>? _fillsTable;
-    private PocoTable<Order>? _versionsTable;
+    private readonly Tail _tail = new();
     private AlertTables? _alerts;
-    private long _lastRefresh;
     private string _alertsWatched = "";
     private DateTimeOffset _clock = DateTimeOffset.MinValue;
-    private ChannelReader<Order[]>? _orderFeed;
-    private ChannelReader<Fill[]>? _fillFeed;
-    private Task? _loop;
-    private long _version;
-    private DateTime _ordersThrough;
-    private DateTime _fillsThrough;
-    private DateTime _newestOrderSent;
-    private long _lastConfirm;
-    private long _lastResumeCheck;
-    private TimeSpan _refusedBehind;
     private int _disposed;
+    private ChalkEngine? _engine;
+    private Exchange? _exchange;
+    private ChannelReader<Fill[]>? _fillFeed;
+    private long _fillsRead;
+    private PocoTable<Fill>? _fillsTable;
+    private IHouseDatabase? _house;
+    private long _lastConfirm;
+    private long _lastRefresh;
+    private long _lastResumeCheck;
+    private Task? _loop;
+    private DateTime _newestOrderSent;
+    private ChannelReader<Order[]>? _orderFeed;
+
+    // Rows of each stream the host has read, counted from the start of the stream, as Published is.
+    private long _ordersRead;
+    private PlannerProcess? _planner;
+    private IBlotterProvider? _provider;
+    private TimeSpan _refusedBehind;
+    private PocoTable<TailRow>? _tailTable;
+    private long _version;
+    private PocoTable<Order>? _versionsTable;
 
     // Pages with the vital statistics open: the database's size, a query, is read only while there are any.
     private int _vitalsWatchers;
 
-    // Rows of each stream the host has read, counted from the start of the stream, as Published is.
-    private long _ordersRead;
-    private long _fillsRead;
-
     public BlotterHost(BlotterOptions options, ILogger<BlotterHost> log)
     {
-        _options = options;
+        Options = options;
         _log = log;
         _budget = new HostBudget(options, log);
     }
@@ -94,7 +92,8 @@ public sealed class BlotterHost : IAsyncDisposable
     public Exchange Exchange => _exchange ?? throw new InvalidOperationException("the host has not started");
 
     /// <summary>The database, for the checks that read it directly.</summary>
-    public ITradeRepository Repository => _house?.Repository ?? throw new InvalidOperationException("the host has not started");
+    public ITradeRepository Repository =>
+        _house?.Repository ?? throw new InvalidOperationException("the host has not started");
 
     /// <summary>The database the host reads.</summary>
     public IBlotterProvider Provider => _provider ?? throw new InvalidOperationException("the host has not started");
@@ -109,49 +108,99 @@ public sealed class BlotterHost : IAsyncDisposable
 
     public Pages Pages { get; private set; } = null!;
 
-    public BlotterOptions Options => _options;
+    public BlotterOptions Options { get; }
 
     /// <summary>The budget now; the page may change it.</summary>
     public long Budget => _budget.Bytes;
 
-    /// <summary>How far the host has read each stream: everything sent from its subscription to here is in the tail or the database.</summary>
-    public DateTime OrdersThrough => _ordersThrough;
+    /// <summary>
+    ///     How far the host has read each stream: everything sent from its subscription to here is in the tail or the
+    ///     database.
+    /// </summary>
+    public DateTime OrdersThrough { get; private set; }
 
-    public DateTime FillsThrough => _fillsThrough;
+    public DateTime FillsThrough { get; private set; }
+
+    /// <summary>How many alert views are open.</summary>
+    public int AlertViewsOpen => _alerts?.Count ?? 0;
+
+    /// <summary>The alert views ChalkQL would not make, and what it said, by the view's name.</summary>
+    public ImmutableDictionary<string, string> AlertsRefused =>
+        _alerts?.Refused ?? ImmutableDictionary<string, string>.Empty;
+
+    /// <summary>How long the database has taken to hold each row in the tail, as of the latest state.</summary>
+    public ImmutableDictionary<Guid, Reconciliation> Reconciling => _tail.Reconciling;
+
+    /// <summary>Counters for the page's status bar, refreshed by the loop.</summary>
+    public BlotterStatus Status { get; private set; } = new();
+
+    /// <summary>The scopes open now, for the status page.</summary>
+    public IReadOnlyList<LiveScope> Scopes => [.. _scopes.Values];
+
+    /// <summary>
+    ///     Stops everything the host started; the web app's service and its container both call it, and the second does
+    ///     nothing.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+
+        await _stop.CancelAsync().ConfigureAwait(false);
+        if (_loop is not null)
+            try
+            {
+                await _loop.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+        if (_alerts is not null) await _alerts.DisposeAsync().ConfigureAwait(false);
+
+        foreach (var scope in _scopes.Values) await scope.DisposeAsync().ConfigureAwait(false);
+
+        if (_exchange is not null) await _exchange.DisposeAsync().ConfigureAwait(false);
+
+        if (_engine is not null) await _engine.DisposeAsync().ConfigureAwait(false);
+
+        if (_planner is not null) await _planner.DisposeAsync().ConfigureAwait(false);
+
+        if (_house is not null) await _house.DisposeAsync().ConfigureAwait(false);
+
+        _stop.Dispose();
+    }
 
     /// <summary>Raised after every refresh the scopes have taken, with its version.</summary>
     public event Action<long>? Published;
 
     /// <summary>
-    /// Raised with every batch the host reads off the streams, as it reads it: each order version and
-    /// fill sent, whether or not the tail takes it (it does not, when the database holds it already).
-    /// On the catch-up loop: a handler only takes note.
+    ///     Raised with every batch the host reads off the streams, as it reads it: each order version and
+    ///     fill sent, whether or not the tail takes it (it does not, when the database holds it already).
+    ///     On the catch-up loop: a handler only takes note.
     /// </summary>
     public event Action<IReadOnlyList<Order>, IReadOnlyList<Fill>>? Arrived;
 
     /// <summary>
-    /// Raised on the catch-up loop as rows enter an alert view: the view, and each row with how long it
-    /// had waited for the database, for a view of the wait. A handler only takes note.
+    ///     Raised on the catch-up loop as rows enter an alert view: the view, and each row with how long it
+    ///     had waited for the database, for a view of the wait. A handler only takes note.
     /// </summary>
     public event Action<AlertViewSpec, IReadOnlyList<(IRow Row, TimeSpan? Lag)>>? AlertsEntered;
 
-    /// <summary>Raised on the catch-up loop as a count view's row enters it: the view, and the matches in its window. A handler only takes note.</summary>
+    /// <summary>
+    ///     Raised on the catch-up loop as a count view's row enters it: the view, and the matches in its window. A
+    ///     handler only takes note.
+    /// </summary>
     public event Action<AlertWindowSpec, long>? AlertsCounted;
 
-    /// <summary>How often the clock moves while nothing arrives, for the alert views that watch the wait and the count views.</summary>
-    public static readonly TimeSpan AlertTick = TimeSpan.FromMilliseconds(250);
-
     /// <summary>
-    /// The alert views and count views the browsers' rules need: on the catch-up loop, those not open
-    /// are opened, each within the host's budget, and those no rule needs any more are closed.
+    ///     The alert views and count views the browsers' rules need: on the catch-up loop, those not open
+    ///     are opened, each within the host's budget, and those no rule needs any more are closed.
     /// </summary>
     public void WatchAlerts(IReadOnlyCollection<AlertViewSpec> specs, IReadOnlyCollection<AlertWindowSpec> windows)
     {
-        var names = string.Join("\u0001", specs.Select(s => s.Name).Concat(windows.Select(w => w.Name)).Distinct().Order(StringComparer.Ordinal));
-        if (names == _alertsWatched || _engine is null)
-        {
-            return;
-        }
+        var names = string.Join("\u0001",
+            specs.Select(s => s.Name).Concat(windows.Select(w => w.Name)).Distinct().Order(StringComparer.Ordinal));
+        if (names == _alertsWatched || _engine is null) return;
 
         _alertsWatched = names;
         _ = OnLoopAsync(async () =>
@@ -161,31 +210,23 @@ public sealed class BlotterHost : IAsyncDisposable
         });
     }
 
-    /// <summary>How many alert views are open.</summary>
-    public int AlertViewsOpen => _alerts?.Count ?? 0;
-
-    /// <summary>The alert views ChalkQL would not make, and what it said, by the view's name.</summary>
-    public ImmutableDictionary<string, string> AlertsRefused => _alerts?.Refused ?? ImmutableDictionary<string, string>.Empty;
-
-    /// <summary>How long the database has taken to hold each row in the tail, as of the latest state.</summary>
-    public ImmutableDictionary<Guid, Reconciliation> Reconciling => _tail.Reconciling;
-
-    /// <summary>Counters for the page's status bar, refreshed by the loop.</summary>
-    public BlotterStatus Status { get; private set; } = new();
-
     public async Task StartAsync(CancellationToken ct)
     {
         var started = Stopwatch.GetTimestamp();
-        var parts = await HostStart.StartAsync(_options, _log, ct).ConfigureAwait(false);
+        var parts = await HostStart.StartAsync(Options, _log, ct).ConfigureAwait(false);
         (_house, _provider, Seeded, _exchange, _planner, _engine, Queries) =
-            (parts.House, parts.House.Provider, parts.Seeded, parts.Exchange, parts.Planner, parts.Engine, parts.Queries);
-        (_tailTable, _versionsTable, _fillsTable, _alerts) = (parts.Tables.Tail, parts.Tables.Versions, parts.Tables.Fills, parts.Tables.Alerts);
+            (parts.House, parts.House.Provider, parts.Seeded, parts.Exchange, parts.Planner, parts.Engine,
+                parts.Queries);
+        (_tailTable, _versionsTable, _fillsTable, _alerts) = (parts.Tables.Tail, parts.Tables.Versions,
+            parts.Tables.Fills, parts.Tables.Alerts);
         _alerts.Entered += (spec, rows) => AlertsEntered?.Invoke(spec, rows);
         _alerts.Counted += (spec, matches) => AlertsCounted?.Invoke(spec, matches);
         Pages = new Pages(Queries)
         {
             MaxKeptRows = PageRows(),
-            WindowFor = _options.EvictAfter > TimeSpan.FromSeconds(1) ? _options.EvictAfter - TimeSpan.FromSeconds(1) : TimeSpan.Zero,
+            WindowFor = Options.EvictAfter > TimeSpan.FromSeconds(1)
+                ? Options.EvictAfter - TimeSpan.FromSeconds(1)
+                : TimeSpan.Zero
         };
 
         await GoLiveAsync(ct).ConfigureAwait(false);
@@ -194,13 +235,14 @@ public sealed class BlotterHost : IAsyncDisposable
     }
 
     /// <summary>
-    /// The scope for <paramref name="filter"/> on <paramref name="tab"/>: an open one if a page already
-    /// filters alike, or a new one if the budget has room for it. Every page that takes one gives it
-    /// back with <see cref="ReleaseAsync"/>.
+    ///     The scope for <paramref name="filter" /> on <paramref name="tab" />: an open one if a page already
+    ///     filters alike, or a new one if the budget has room for it. Every page that takes one gives it
+    ///     back with <see cref="ReleaseAsync" />.
     /// </summary>
     /// <exception cref="BlotterRefusedException">The host is not serving, or the scope would not fit the budget.</exception>
-    public Task<LiveScope> AcquireAsync(Tab tab, FilterSpec filter, CancellationToken ct) =>
-        OnLoopAsync(async () =>
+    public Task<LiveScope> AcquireAsync(Tab tab, FilterSpec filter, CancellationToken ct)
+    {
+        return OnLoopAsync(async () =>
         {
             RefuseUnlessLive();
             var name = tab.Name + ": " + filter.Name;
@@ -211,48 +253,40 @@ public sealed class BlotterHost : IAsyncDisposable
                 return open;
             }
 
-            if (open is not null)
-            {
-                await CloseAsync(open).ConfigureAwait(false);
-            }
+            if (open is not null) await CloseAsync(open).ConfigureAwait(false);
 
             // A scope holds a row for each order or fill of the tail its filter can see, so it costs about
             // what the scopes open now cost per row, times the tail. Idle scopes make room first.
             var estimate = ScopeEstimate();
             foreach (var idle in _scopes.Values.Where(s => s.Pages == 0).ToList())
             {
-                if (LiveBytes() + estimate <= _budget.Bytes)
-                {
-                    break;
-                }
+                if (LiveBytes() + estimate <= _budget.Bytes) break;
 
                 await CloseAsync(idle).ConfigureAwait(false);
             }
 
-            while (LiveBytes() + estimate > _budget.Bytes && RaiseBudget($"another live scope would hold about {Megabytes(estimate)}"))
+            while (LiveBytes() + estimate > _budget.Bytes &&
+                   RaiseBudget($"another live scope would hold about {Megabytes(estimate)}"))
             {
             }
 
             if (LiveBytes() + estimate > _budget.Bytes)
-            {
                 throw new BlotterRefusedException(string.Create(CultureInfo.InvariantCulture,
                     $"no live scope for this filter: another would hold about {Megabytes(estimate)}, and the tail and "
                     + $"{_scopes.Count} open scopes already hold {Megabytes(LiveBytes())} of the {Megabytes(_budget.Bytes)} budget"));
-            }
 
             while (true)
             {
-                var scope = await LiveScope.CreateAsync(_engine!, tab, filter, _budget.Bytes, _options.Maintenance, ct).ConfigureAwait(false);
+                var scope = await LiveScope.CreateAsync(_engine!, tab, filter, _budget.Bytes, Options.Maintenance, ct)
+                    .ConfigureAwait(false);
                 await scope.UpdateAsync(_tail, _version, Mark(), ct).ConfigureAwait(false);
                 if (scope.Fault is { } fault)
                 {
                     await scope.DisposeAsync().ConfigureAwait(false);
-                    if (RaiseBudget($"the live scope for this filter could not start: {fault.Message}"))
-                    {
-                        continue;
-                    }
+                    if (RaiseBudget($"the live scope for this filter could not start: {fault.Message}")) continue;
 
-                    throw new BlotterRefusedException($"the live scope for this filter could not start: {fault.Message}");
+                    throw new BlotterRefusedException(
+                        $"the live scope for this filter could not start: {fault.Message}");
                 }
 
                 scope.Pages = 1;
@@ -260,34 +294,39 @@ public sealed class BlotterHost : IAsyncDisposable
                 return scope;
             }
         });
+    }
 
-    public Task ReleaseAsync(LiveScope scope) =>
-        OnLoopAsync(() =>
+    public Task ReleaseAsync(LiveScope scope)
+    {
+        return OnLoopAsync(() =>
         {
             scope.Pages = Math.Max(0, scope.Pages - 1);
-            if (scope.Pages == 0)
-            {
-                scope.Idle = DateTime.UtcNow;
-            }
+            if (scope.Pages == 0) scope.Idle = DateTime.UtcNow;
 
             return Task.FromResult(true);
         });
+    }
 
     /// <summary>Sets the budget. Open scopes keep the share they were made with until they close.</summary>
-    public Task SetBudgetAsync(long bytes) =>
-        OnLoopAsync(async () =>
+    public Task SetBudgetAsync(long bytes)
+    {
+        return OnLoopAsync(async () =>
         {
             _budget.Choose(bytes);
-            if (State == BlotterState.Live)
-            {
-                await KeepWithinBudgetAsync().ConfigureAwait(false);
-            }
+            if (State == BlotterState.Live) await KeepWithinBudgetAsync().ConfigureAwait(false);
 
             return true;
         });
+    }
 
-    /// <summary>A page opens (or closes) its vital statistics: the host reads what only they show while any page has them open.</summary>
-    public void WatchVitals(bool watching) => Interlocked.Add(ref _vitalsWatchers, watching ? 1 : -1);
+    /// <summary>
+    ///     A page opens (or closes) its vital statistics: the host reads what only they show while any page has them
+    ///     open.
+    /// </summary>
+    public void WatchVitals(bool watching)
+    {
+        Interlocked.Add(ref _vitalsWatchers, watching ? 1 : -1);
+    }
 
     /// <summary>Waits until the host has read everything the streams have sent so far, and its scopes have taken it.</summary>
     public async Task CaughtUpAsync(CancellationToken ct)
@@ -295,92 +334,30 @@ public sealed class BlotterHost : IAsyncDisposable
         var orders = _exchange!.Orders.Published;
         var fills = _exchange.Fills.Published;
         while (Interlocked.Read(ref _ordersRead) < orders || Interlocked.Read(ref _fillsRead) < fills)
-        {
             await Task.Delay(20, ct).ConfigureAwait(false);
-        }
 
         await OnLoopAsync(() => Task.FromResult(true)).ConfigureAwait(false);
     }
 
-    /// <summary>The scopes open now, for the status page.</summary>
-    public IReadOnlyList<LiveScope> Scopes => [.. _scopes.Values];
-
-    /// <summary>Stops everything the host started; the web app's service and its container both call it, and the second does nothing.</summary>
-    public async ValueTask DisposeAsync()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) == 1)
-        {
-            return;
-        }
-
-        await _stop.CancelAsync().ConfigureAwait(false);
-        if (_loop is not null)
-        {
-            try
-            {
-                await _loop.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        }
-
-        if (_alerts is not null)
-        {
-            await _alerts.DisposeAsync().ConfigureAwait(false);
-        }
-
-        foreach (var scope in _scopes.Values)
-        {
-            await scope.DisposeAsync().ConfigureAwait(false);
-        }
-
-        if (_exchange is not null)
-        {
-            await _exchange.DisposeAsync().ConfigureAwait(false);
-        }
-
-        if (_engine is not null)
-        {
-            await _engine.DisposeAsync().ConfigureAwait(false);
-        }
-
-        if (_planner is not null)
-        {
-            await _planner.DisposeAsync().ConfigureAwait(false);
-        }
-
-        if (_house is not null)
-        {
-            await _house.DisposeAsync().ConfigureAwait(false);
-        }
-
-        _stop.Dispose();
-    }
-
     /// <summary>
-    /// The catch-up loop, the one loop: it keeps the host caught up with both sides. It takes what the
-    /// streams have sent, refreshes the tail and the alert tables with it, brings every scope and alert
-    /// view to the refresh, and publishes; between batches, it runs what pages asked of it, and looks the
-    /// tail up in the database when that is due, which a refresh carries to the views as well.
+    ///     The catch-up loop, the one loop: it keeps the host caught up with both sides. It takes what the
+    ///     streams have sent, refreshes the tail and the alert tables with it, brings every scope and alert
+    ///     view to the refresh, and publishes; between batches, it runs what pages asked of it, and looks the
+    ///     tail up in the database when that is due, which a refresh carries to the views as well.
     /// </summary>
     private async Task RunAsync(CancellationToken ct)
     {
         var lastStatus = 0L;
         while (!ct.IsCancellationRequested)
-        {
             try
             {
                 await WaitForWorkAsync(ct).ConfigureAwait(false);
-                while (_actions.Reader.TryRead(out var action))
-                {
-                    await action().ConfigureAwait(false);
-                }
+                while (_actions.Reader.TryRead(out var action)) await action().ConfigureAwait(false);
 
                 if (State == BlotterState.Live)
                 {
                     await IngestAsync([], [], ct).ConfigureAwait(false);
-                    if (Stopwatch.GetElapsedTime(_lastConfirm) >= _options.ConfirmEvery)
+                    if (Stopwatch.GetElapsedTime(_lastConfirm) >= Options.ConfirmEvery)
                     {
                         _lastConfirm = Stopwatch.GetTimestamp();
                         await ConfirmAsync(ct).ConfigureAwait(false);
@@ -388,9 +365,7 @@ public sealed class BlotterHost : IAsyncDisposable
 
                     // A wait grows, and a window slides, while nothing arrives: the views that watch them see the clock move.
                     if (_alerts!.WatchesTime && Stopwatch.GetElapsedTime(_lastRefresh) >= AlertTick)
-                    {
-                        await RefreshAsync(_ => { }, _ordersThrough, _fillsThrough, ct).ConfigureAwait(false);
-                    }
+                        await RefreshAsync(_ => { }, OrdersThrough, FillsThrough, ct).ConfigureAwait(false);
                 }
                 else if (State == BlotterState.Refusing)
                 {
@@ -414,7 +389,6 @@ public sealed class BlotterHost : IAsyncDisposable
                 _log.LogError(failure, "the catch-up loop failed; serving stops until the database has caught up");
                 await StopServingAsync($"the catch-up loop failed: {failure.Message}").ConfigureAwait(false);
             }
-        }
     }
 
     private async Task WaitForWorkAsync(CancellationToken ct)
@@ -443,17 +417,18 @@ public sealed class BlotterHost : IAsyncDisposable
     }
 
     /// <summary>
-    /// Takes what the streams have sent, and <paramref name="moreOrders"/> and <paramref name="moreFills"/>
-    /// besides (the gap fill, and what was kept while refusing), into the tail: each order version the
-    /// database does not hold yet, and each fill. Returns how many versions it took.
+    ///     Takes what the streams have sent, and <paramref name="moreOrders" /> and <paramref name="moreFills" />
+    ///     besides (the gap fill, and what was kept while refusing), into the tail: each order version the
+    ///     database does not hold yet, and each fill. Returns how many versions it took.
     /// </summary>
-    private async Task<int> IngestAsync(IReadOnlyList<Order> moreOrders, IReadOnlyList<Fill> moreFills, CancellationToken ct)
+    private async Task<int> IngestAsync(IReadOnlyList<Order> moreOrders, IReadOnlyList<Fill> moreFills,
+        CancellationToken ct)
     {
         // The two streams are read apart: a fill can come before the order it fills, or before the
         // version that counts it, and is taken as it comes.
         var versionsIn = new List<Order>(moreOrders);
         var fillsIn = new List<Fill>(moreFills);
-        var (ordersThrough, fillsThrough) = (_ordersThrough, _fillsThrough);
+        var (ordersThrough, fillsThrough) = (OrdersThrough, FillsThrough);
         if (_orderFeed is not null && _fillFeed is not null)
         {
             var sent = versionsIn.Count;
@@ -481,21 +456,16 @@ public sealed class BlotterHost : IAsyncDisposable
             }
         }
 
-        if (versionsIn.Count == 0 && fillsIn.Count == 0)
-        {
-            return 0;
-        }
+        if (versionsIn.Count == 0 && fillsIn.Count == 0) return 0;
 
         var started = Stopwatch.GetTimestamp();
         var fills = new List<Fill>();
         foreach (var fill in fillsIn)
-        {
             if (_tail.GetFill(fill.FillId) is null)
             {
                 _tail.AddFill(fill);
                 fills.Add(fill);
             }
-        }
 
         // An order new to the tail is looked up: the database may hold this version already, or a
         // later one, and then the tail has nothing to add. Ids are UUIDs, in no order the host relies
@@ -511,10 +481,7 @@ public sealed class BlotterHost : IAsyncDisposable
             if (entry is null)
             {
                 var stored = current.GetValueOrDefault(version.OrderId);
-                if (stored is not null && stored.Version >= version.Version)
-                {
-                    continue;
-                }
+                if (stored is not null && stored.Version >= version.Version) continue;
 
                 entry = new TailEntry(version, stored);
             }
@@ -536,26 +503,19 @@ public sealed class BlotterHost : IAsyncDisposable
             var tailRows = upserts.Values.ToList();
             await RefreshAsync(refresh =>
             {
-                if (tailRows.Count > 0)
-                {
-                    refresh.Upsert(_tailTable!, tailRows).Upsert(_versionsTable!, versions);
-                }
+                if (tailRows.Count > 0) refresh.Upsert(_tailTable!, tailRows).Upsert(_versionsTable!, versions);
 
-                if (fills.Count > 0)
-                {
-                    refresh.Upsert(_fillsTable!, fills);
-                }
-
+                if (fills.Count > 0) refresh.Upsert(_fillsTable!, fills);
             }, ordersThrough, fillsThrough, ct).ConfigureAwait(false);
             Status = Status with
             {
                 LastRefreshMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds,
-                LastRefreshVersions = versions.Count + fills.Count,
+                LastRefreshVersions = versions.Count + fills.Count
             };
         }
         else
         {
-            (_ordersThrough, _fillsThrough) = (ordersThrough, fillsThrough);
+            (OrdersThrough, FillsThrough) = (ordersThrough, fillsThrough);
         }
 
         await KeepWithinBudgetAsync().ConfigureAwait(false);
@@ -563,19 +523,16 @@ public sealed class BlotterHost : IAsyncDisposable
     }
 
     /// <summary>
-    /// Looks every row of the tail up in the database. An order the database holds at the tail's
-    /// version or later, and a fill it holds, is confirmed, and leaves the tail once it has been for
-    /// <see cref="BlotterOptions.EvictAfter"/>; an order the database has moved on for, but not as far
-    /// as the tail, takes the database's row as its base.
+    ///     Looks every row of the tail up in the database. An order the database holds at the tail's
+    ///     version or later, and a fill it holds, is confirmed, and leaves the tail once it has been for
+    ///     <see cref="BlotterOptions.EvictAfter" />; an order the database has moved on for, but not as far
+    ///     as the tail, takes the database's row as its base.
     /// </summary>
     private async Task ConfirmAsync(CancellationToken ct)
     {
         var entries = _tail.Entries.ToList();
         var pending = _tail.Fills.ToList();
-        if (entries.Count == 0 && pending.Count == 0)
-        {
-            return;
-        }
+        if (entries.Count == 0 && pending.Count == 0) return;
 
         var current = entries.Count == 0
             ? []
@@ -594,7 +551,7 @@ public sealed class BlotterHost : IAsyncDisposable
             if (stored is not null && stored.Version >= entry.Live.Version)
             {
                 _tail.Confirm(entry, now);
-                if (now - entry.ConfirmedAt >= _options.EvictAfter)
+                if (now - entry.ConfirmedAt >= Options.EvictAfter)
                 {
                     deletes.Add(TailRow.Of(entry.Live, entry.Base));
                     versionDeletes.AddRange(entry.Versions);
@@ -618,67 +575,43 @@ public sealed class BlotterHost : IAsyncDisposable
         var fillDeletes = new List<Fill>();
         foreach (var fill in pending)
         {
-            if (held.Contains(fill.FillId))
-            {
-                _tail.ConfirmFill(fill.FillId, now);
-            }
+            if (held.Contains(fill.FillId)) _tail.ConfirmFill(fill.FillId, now);
 
-            if (_tail.FillConfirmedAt(fill.FillId) is { } at && now - at >= _options.EvictAfter)
+            if (_tail.FillConfirmedAt(fill.FillId) is { } at && now - at >= Options.EvictAfter)
             {
                 _tail.RemoveFill(fill);
                 fillDeletes.Add(fill);
             }
         }
 
-        if (upserts.Count == 0 && deletes.Count == 0 && versionDeletes.Count == 0 && fillDeletes.Count == 0)
-        {
-            return;
-        }
+        if (upserts.Count == 0 && deletes.Count == 0 && versionDeletes.Count == 0 && fillDeletes.Count == 0) return;
 
         await RefreshAsync(refresh =>
         {
-            if (upserts.Count > 0)
-            {
-                refresh.Upsert(_tailTable!, upserts);
-            }
+            if (upserts.Count > 0) refresh.Upsert(_tailTable!, upserts);
 
-            if (deletes.Count > 0)
-            {
-                refresh.Delete(_tailTable!, deletes);
-            }
+            if (deletes.Count > 0) refresh.Delete(_tailTable!, deletes);
 
-            if (versionDeletes.Count > 0)
-            {
-                refresh.Delete(_versionsTable!, versionDeletes);
-            }
+            if (versionDeletes.Count > 0) refresh.Delete(_versionsTable!, versionDeletes);
 
-            if (fillDeletes.Count > 0)
-            {
-                refresh.Delete(_fillsTable!, fillDeletes);
-            }
-        }, _ordersThrough, _fillsThrough, ct).ConfigureAwait(false);
+            if (fillDeletes.Count > 0) refresh.Delete(_fillsTable!, fillDeletes);
+        }, OrdersThrough, FillsThrough, ct).ConfigureAwait(false);
         Status = Status with { Evicted = Status.Evicted + deletes.Count + fillDeletes.Count };
     }
 
     /// <summary>
-    /// Past the budget, the scopes no page is using give way first. What is left cannot give way
-    /// without dropping a version, so if it is still too much the host stops serving and says why.
+    ///     Past the budget, the scopes no page is using give way first. What is left cannot give way
+    ///     without dropping a version, so if it is still too much the host stops serving and says why.
     /// </summary>
     private async Task KeepWithinBudgetAsync()
     {
         Pages.MaxKeptRows = PageRows();
-        if (LiveBytes() <= _budget.Bytes)
-        {
-            return;
-        }
+        if (LiveBytes() <= _budget.Bytes) return;
 
         foreach (var idle in _scopes.Values.Where(s => s.Pages == 0).ToList())
         {
             await CloseAsync(idle).ConfigureAwait(false);
-            if (LiveBytes() <= _budget.Bytes)
-            {
-                return;
-            }
+            if (LiveBytes() <= _budget.Bytes) return;
         }
 
         // While no budget is chosen, the host takes the next one up rather than refuse.
@@ -689,18 +622,21 @@ public sealed class BlotterHost : IAsyncDisposable
         }
 
         // What is in the tail is what the database has not been seen to hold: the gap the host covers.
-        var lag = _tail.OldestUnconfirmed is { } oldest ? DateTime.UtcNow - DateTime.SpecifyKind(oldest, DateTimeKind.Utc) : TimeSpan.Zero;
+        var lag = _tail.OldestUnconfirmed is { } oldest
+            ? DateTime.UtcNow - DateTime.SpecifyKind(oldest, DateTimeKind.Utc)
+            : TimeSpan.Zero;
         _refusedBehind = lag;
         await StopServingAsync(string.Create(CultureInfo.InvariantCulture,
-            $"the database is {lag.TotalSeconds:F0} s behind the streams: covering it takes a tail of "
-            + $"{_tail.Count:N0} orders and {_tail.FillCount:N0} fills, {Megabytes(_tail.Bytes)}, and {_scopes.Count} live scopes over it "
-            + $"{Megabytes(LiveBytes() - _tail.Bytes)}, more than the {Megabytes(_budget.Bytes)} budget")).ConfigureAwait(false);
+                $"the database is {lag.TotalSeconds:F0} s behind the streams: covering it takes a tail of "
+                + $"{_tail.Count:N0} orders and {_tail.FillCount:N0} fills, {Megabytes(_tail.Bytes)}, and {_scopes.Count} live scopes over it "
+                + $"{Megabytes(LiveBytes() - _tail.Bytes)}, more than the {Megabytes(_budget.Bytes)} budget"))
+            .ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Starts serving: subscribes to the streams if it has not, then sends the database one last
-    /// request, the gap fill, for every version written lately, and takes those with whatever was
-    /// kept while refusing as if the stream had sent them. Refused if the tail that makes does not fit.
+    ///     Starts serving: subscribes to the streams if it has not, then sends the database one last
+    ///     request, the gap fill, for every version written lately, and takes those with whatever was
+    ///     kept while refusing as if the stream had sent them. Refused if the tail that makes does not fit.
     /// </summary>
     private async Task GoLiveAsync(CancellationToken ct)
     {
@@ -709,10 +645,11 @@ public sealed class BlotterHost : IAsyncDisposable
             _orderFeed = _exchange!.Orders.Subscribe(out var ordersBefore);
             _fillFeed = _exchange.Fills.Subscribe(out var fillsBefore);
             (_ordersRead, _fillsRead) = (ordersBefore, fillsBefore);
-            (_ordersThrough, _fillsThrough) = (Cells.Micros(DateTime.UtcNow), Cells.Micros(DateTime.UtcNow));
+            (OrdersThrough, FillsThrough) = (Cells.Micros(DateTime.UtcNow), Cells.Micros(DateTime.UtcNow));
         }
 
-        var gap = await Queries.VersionsSinceAsync(Cells.Micros(DateTime.UtcNow - _options.GapFill), ct).ConfigureAwait(false);
+        var gap = await Queries.VersionsSinceAsync(Cells.Micros(DateTime.UtcNow - Options.GapFill), ct)
+            .ConfigureAwait(false);
         Order[] kept = [.. _keptOrders];
         Fill[] keptFills = [.. _keptFills];
         _keptOrders.Clear();
@@ -723,19 +660,21 @@ public sealed class BlotterHost : IAsyncDisposable
         var taken = await IngestAsync([.. gap, .. kept], keptFills, ct).ConfigureAwait(false);
         Status = ReadStatus() with { GapRead = gap.Length, GapFilled = Status.GapFilled + taken };
         if (State == BlotterState.Live)
-        {
-            _log.LogInformation("the gap fill read {Read:N0} versions written in the last {Seconds:F0} s; the tail took {Taken:N0}",
-                gap.Length, _options.GapFill.TotalSeconds, taken);
-        }
+            _log.LogInformation(
+                "the gap fill read {Read:N0} versions written in the last {Seconds:F0} s; the tail took {Taken:N0}",
+                gap.Length, Options.GapFill.TotalSeconds, taken);
     }
 
-    /// <summary>While refusing: what the streams send is kept, as far back as the gap fill reaches, for when serving starts again.</summary>
+    /// <summary>
+    ///     While refusing: what the streams send is kept, as far back as the gap fill reaches, for when serving starts
+    ///     again.
+    /// </summary>
     private void Keep()
     {
         while (_orderFeed!.TryRead(out var batch))
         {
             _keptOrders.AddRange(batch);
-            _ordersThrough = batch[^1].EventTime;
+            OrdersThrough = batch[^1].EventTime;
             Interlocked.Add(ref _ordersRead, batch.Length);
             NoteNewOrders(batch);
         }
@@ -743,34 +682,30 @@ public sealed class BlotterHost : IAsyncDisposable
         while (_fillFeed!.TryRead(out var batch))
         {
             _keptFills.AddRange(batch);
-            _fillsThrough = batch[^1].EventTime;
+            FillsThrough = batch[^1].EventTime;
             Interlocked.Add(ref _fillsRead, batch.Length);
         }
 
-        var horizon = Cells.Micros(DateTime.UtcNow - _options.GapFill);
+        var horizon = Cells.Micros(DateTime.UtcNow - Options.GapFill);
         _keptOrders.RemoveAll(o => o.EventTime < horizon);
         _keptFills.RemoveAll(f => f.EventTime < horizon);
     }
 
     /// <summary>
-    /// Serves again once <c>orders_current</c> has caught up: its newest order is no further behind
-    /// the newest the stream has sent than <see cref="BlotterOptions.ResumeWithin"/>, nor than half as
-    /// far as the database was behind when the host refused, so that it does not refuse again at once.
+    ///     Serves again once <c>orders_current</c> has caught up: its newest order is no further behind
+    ///     the newest the stream has sent than <see cref="BlotterOptions.ResumeWithin" />, nor than half as
+    ///     far as the database was behind when the host refused, so that it does not refuse again at once.
     /// </summary>
     private async Task ResumeWhenCaughtUpAsync(CancellationToken ct)
     {
-        if (Stopwatch.GetElapsedTime(_lastResumeCheck) < TimeSpan.FromSeconds(1))
-        {
-            return;
-        }
+        if (Stopwatch.GetElapsedTime(_lastResumeCheck) < TimeSpan.FromSeconds(1)) return;
 
         _lastResumeCheck = Stopwatch.GetTimestamp();
         var newest = await Queries.NewestOrderAsync(ct).ConfigureAwait(false);
-        var within = _refusedBehind > TimeSpan.Zero && _refusedBehind / 2 < _options.ResumeWithin ? _refusedBehind / 2 : _options.ResumeWithin;
-        if (newest is not null && _newestOrderSent - newest.OrderTime > within)
-        {
-            return;
-        }
+        var within = _refusedBehind > TimeSpan.Zero && _refusedBehind / 2 < Options.ResumeWithin
+            ? _refusedBehind / 2
+            : Options.ResumeWithin;
+        if (newest is not null && _newestOrderSent - newest.OrderTime > within) return;
 
         await GoLiveAsync(ct).ConfigureAwait(false);
         if (State == BlotterState.Live)
@@ -781,20 +716,17 @@ public sealed class BlotterHost : IAsyncDisposable
     }
 
     /// <summary>
-    /// Stops serving: empties the tail and closes every scope, so that nothing a page could read is
-    /// left half true. What of the tail the database has not been seen to hold is kept, and the streams
-    /// are still read, what they send kept after it, for when serving starts again: the gap fill finds
-    /// only what the database has written.
+    ///     Stops serving: empties the tail and closes every scope, so that nothing a page could read is
+    ///     left half true. What of the tail the database has not been seen to hold is kept, and the streams
+    ///     are still read, what they send kept after it, for when serving starts again: the gap fill finds
+    ///     only what the database has written.
     /// </summary>
     private async Task StopServingAsync(string why)
     {
         _log.LogWarning("refusing to serve: {Why}", why);
         State = BlotterState.Refusing;
         Refusal = why;
-        foreach (var scope in _scopes.Values.ToList())
-        {
-            await CloseAsync(scope).ConfigureAwait(false);
-        }
+        foreach (var scope in _scopes.Values.ToList()) await CloseAsync(scope).ConfigureAwait(false);
 
         var all = _tail.Entries.ToList();
         var deletes = all.Select(e => TailRow.Of(e.Live, e.Base)).ToList();
@@ -805,29 +737,24 @@ public sealed class BlotterHost : IAsyncDisposable
         _tail.Clear();
         await RefreshAsync(refresh =>
         {
-            if (deletes.Count > 0)
-            {
-                refresh.Delete(_tailTable!, deletes);
-            }
+            if (deletes.Count > 0) refresh.Delete(_tailTable!, deletes);
 
-            if (versionDeletes.Count > 0)
-            {
-                refresh.Delete(_versionsTable!, versionDeletes);
-            }
+            if (versionDeletes.Count > 0) refresh.Delete(_versionsTable!, versionDeletes);
 
-            if (fillDeletes.Count > 0)
-            {
-                refresh.Delete(_fillsTable!, fillDeletes);
-            }
-        }, _ordersThrough, _fillsThrough, CancellationToken.None).ConfigureAwait(false);
+            if (fillDeletes.Count > 0) refresh.Delete(_fillsTable!, fillDeletes);
+        }, OrdersThrough, FillsThrough, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>How far the host has read each stream, now: by time, and by count.</summary>
-    private StreamMark Mark() =>
-        new(_ordersThrough, _fillsThrough, Interlocked.Read(ref _ordersRead), Interlocked.Read(ref _fillsRead));
+    private StreamMark Mark()
+    {
+        return new StreamMark(OrdersThrough, FillsThrough, Interlocked.Read(ref _ordersRead),
+            Interlocked.Read(ref _fillsRead));
+    }
 
     /// <summary>One refresh of the engine, then every scope brought to it, then the pages told.</summary>
-    private async Task RefreshAsync(Action<RefreshBuilder> changes, DateTime ordersThrough, DateTime fillsThrough, CancellationToken ct)
+    private async Task RefreshAsync(Action<RefreshBuilder> changes, DateTime ordersThrough, DateTime fillsThrough,
+        CancellationToken ct)
     {
         var next = _version + 1;
         var now = DateTime.UtcNow;
@@ -842,12 +769,9 @@ public sealed class BlotterHost : IAsyncDisposable
         }, ct).ConfigureAwait(false);
         _version = next;
         _lastRefresh = Stopwatch.GetTimestamp();
-        (_ordersThrough, _fillsThrough) = (ordersThrough, fillsThrough);
+        (OrdersThrough, FillsThrough) = (ordersThrough, fillsThrough);
         var mark = Mark();
-        foreach (var scope in _scopes.Values)
-        {
-            await scope.UpdateAsync(_tail, _version, mark, ct).ConfigureAwait(false);
-        }
+        foreach (var scope in _scopes.Values) await scope.UpdateAsync(_tail, _version, mark, ct).ConfigureAwait(false);
 
         await _alerts!.UpdateAsync(_tail, ct).ConfigureAwait(false);
 
@@ -857,21 +781,16 @@ public sealed class BlotterHost : IAsyncDisposable
     private void NoteNewOrders(Order[] batch)
     {
         foreach (var order in batch)
-        {
             if (order.Version == 1 && order.OrderTime > _newestOrderSent)
-            {
                 _newestOrderSent = order.OrderTime;
-            }
-        }
     }
 
     private async Task CloseIdleScopesAsync()
     {
         foreach (var scope in _scopes.Values.Where(s => s.Pages == 0 && s.Idle is { } idle
-            && DateTime.UtcNow - idle > _options.ScopeGrace).ToList())
-        {
+                                                                     && DateTime.UtcNow - idle > Options.ScopeGrace)
+                     .ToList())
             await CloseAsync(scope).ConfigureAwait(false);
-        }
     }
 
     private async Task CloseAsync(LiveScope scope)
@@ -882,13 +801,10 @@ public sealed class BlotterHost : IAsyncDisposable
 
     private void RefuseUnlessLive()
     {
-        if (State != BlotterState.Live)
-        {
-            throw new BlotterRefusedException(Refusal ?? "the blotter is starting");
-        }
+        if (State != BlotterState.Live) throw new BlotterRefusedException(Refusal ?? "the blotter is starting");
     }
 
-    /// <summary>Runs <paramref name="work"/> on the catch-up loop, between refreshes, and returns its result.</summary>
+    /// <summary>Runs <paramref name="work" /> on the catch-up loop, between refreshes, and returns its result.</summary>
     private Task<T> OnLoopAsync<T>(Func<Task<T>> work)
     {
         var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -915,9 +831,11 @@ public sealed class BlotterHost : IAsyncDisposable
             State = State,
             Refusal = Refusal,
             Version = _version,
-            Sync = _options.Current,
-            TimeLimit = _options.QueryTimeLimit,
-            Behind = _tail.OldestUnconfirmed is { } oldest ? DateTime.UtcNow - DateTime.SpecifyKind(oldest, DateTimeKind.Utc) : null,
+            Sync = Options.Current,
+            TimeLimit = Options.QueryTimeLimit,
+            Behind = _tail.OldestUnconfirmed is { } oldest
+                ? DateTime.UtcNow - DateTime.SpecifyKind(oldest, DateTimeKind.Utc)
+                : null,
             NotYetIngested = _exchange?.NotYetIngested ?? 0,
             CurrentWaiting = _exchange?.CurrentWaiting ?? 0,
             IngestionStalled = _exchange?.IngestionStalled ?? false,
@@ -945,33 +863,35 @@ public sealed class BlotterHost : IAsyncDisposable
             Budget = _budget.Bytes,
             UsedBytes = _tail.Bytes + scopeBytes + Pages.Bytes + (_alerts?.Bytes ?? 0),
             DatabaseBytes = Volatile.Read(ref _vitalsWatchers) > 0 ? SafeDatabaseBytes() : Status.DatabaseBytes,
-            ManagedHeapBytes = GC.GetTotalMemory(forceFullCollection: false),
+            ManagedHeapBytes = GC.GetTotalMemory(false)
         };
     }
 
-    private long SafeDatabaseBytes() => _house?.Repository.SizeBytes() ?? Status.DatabaseBytes;
+    private long SafeDatabaseBytes()
+    {
+        return _house?.Repository.SizeBytes() ?? Status.DatabaseBytes;
+    }
 
     /// <summary>While no budget is chosen, raises it to the next step, and lets the kept windows grow with it.</summary>
     private bool RaiseBudget(string why)
     {
-        if (!_budget.TryRaise(why))
-        {
-            return false;
-        }
+        if (!_budget.TryRaise(why)) return false;
 
-        if (Pages is not null)
-        {
-            Pages.MaxKeptRows = PageRows();
-        }
+        if (Pages is not null) Pages.MaxKeptRows = PageRows();
 
         return true;
     }
 
     /// <summary>What the host cannot give back without dropping a version: the tail, and the scopes over it.</summary>
-    private long LiveBytes() =>
-        _tail.Bytes + _scopes.Values.Sum(s => s.ViewBytes + s.State.Bytes) + (_alerts?.Bytes ?? 0);
+    private long LiveBytes()
+    {
+        return _tail.Bytes + _scopes.Values.Sum(s => s.ViewBytes + s.State.Bytes) + (_alerts?.Bytes ?? 0);
+    }
 
-    private long PageRows() => _budget.PageRows(LiveBytes());
+    private long PageRows()
+    {
+        return _budget.PageRows(LiveBytes());
+    }
 
     /// <summary>What another scope would hold: a row for every order in the tail, at what the open ones cost a row.</summary>
     private long ScopeEstimate()
@@ -982,5 +902,8 @@ public sealed class BlotterHost : IAsyncDisposable
         return Math.Max(256 << 10, _tail.Count * perRow);
     }
 
-    internal static string Megabytes(long bytes) => string.Create(CultureInfo.InvariantCulture, $"{bytes / 1048576.0:F1} MB");
+    internal static string Megabytes(long bytes)
+    {
+        return string.Create(CultureInfo.InvariantCulture, $"{bytes / 1048576.0:F1} MB");
+    }
 }

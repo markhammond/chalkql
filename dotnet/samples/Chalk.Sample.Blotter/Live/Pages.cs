@@ -3,66 +3,44 @@ using System.Diagnostics;
 
 namespace Chalk.Sample.Blotter.Live;
 
-/// <summary>Rows <see cref="Start"/> on of a tab, out of about <see cref="Total"/>, as of <see cref="State"/>.</summary>
+/// <summary>Rows <see cref="Start" /> on of a tab, out of about <see cref="Total" />, as of <see cref="State" />.</summary>
 public sealed record Page(long Start, IRow[] Rows, long Total, ScopeState State);
 
 /// <summary>
-/// A tab's rows, read live from the database and merged with a live scope.
+///     A tab's rows, read live from the database and merged with a live scope.
 /// </summary>
 /// <remarks>
-/// <para>
-/// A tab is the database's rows that pass the filter, each order at the version <c>orders_current</c>
-/// holds, with the tail laid over them: an order the stream has sent a newer version of is shown at
-/// that version, where that version sorts, or not at all if it no longer passes. The database's row of
-/// an order newer than the tail's stands. So every order is shown once, at the newest version either
-/// side knows, however far <c>orders_current</c> runs behind the stream, or ahead of it.
-/// </para>
-/// <para>
-/// Rows are read from a key: the database's first rows at or after it in order, then every row of the
-/// tail between that key and the last row read. The read decides nothing past its last row, so a tail
-/// row beyond it waits for the next read. An order the tail has, read in the stretch at an older
-/// version, gives way to the tail's version; one whose tail version falls in the stretch but whose
-/// database row did not is looked up, because the database may have moved past the tail meanwhile.
-/// </para>
-/// <para>
-/// What the database returns is kept for a moment (<see cref="WindowFor"/>), as windows: runs of its rows
-/// in one order from one key, shared by every reader of the same tab, filter and sort. A read that a
-/// window covers is answered from it, and the tail is laid over it afresh each time, so the tail's rows
-/// are as current as the stream. A sort whose reads are slow, because no index serves it and the
-/// database sorts the whole table, is read in large windows, which cost the database about what a
-/// page does; and after each page the next window in the direction of scrolling is read ahead. Counts
-/// and an order's fills are kept for a moment too.
-/// </para>
-/// <para>
-/// A window is never older than the tail lets a row stay after the database was seen to hold it, less
-/// a margin: so no window is merged with a tail that has already let go of a version the window does
-/// not hold.
-/// </para>
+///     <para>
+///         A tab is the database's rows that pass the filter, each order at the version <c>orders_current</c>
+///         holds, with the tail laid over them: an order the stream has sent a newer version of is shown at
+///         that version, where that version sorts, or not at all if it no longer passes. The database's row of
+///         an order newer than the tail's stands. So every order is shown once, at the newest version either
+///         side knows, however far <c>orders_current</c> runs behind the stream, or ahead of it.
+///     </para>
+///     <para>
+///         Rows are read from a key: the database's first rows at or after it in order, then every row of the
+///         tail between that key and the last row read. The read decides nothing past its last row, so a tail
+///         row beyond it waits for the next read. An order the tail has, read in the stretch at an older
+///         version, gives way to the tail's version; one whose tail version falls in the stretch but whose
+///         database row did not is looked up, because the database may have moved past the tail meanwhile.
+///     </para>
+///     <para>
+///         What the database returns is kept for a moment (<see cref="WindowFor" />), as windows: runs of its rows
+///         in one order from one key, shared by every reader of the same tab, filter and sort. A read that a
+///         window covers is answered from it, and the tail is laid over it afresh each time, so the tail's rows
+///         are as current as the stream. A sort whose reads are slow, because no index serves it and the
+///         database sorts the whole table, is read in large windows, which cost the database about what a
+///         page does; and after each page the next window in the direction of scrolling is read ahead. Counts
+///         and an order's fills are kept for a moment too.
+///     </para>
+///     <para>
+///         A window is never older than the tail lets a row stay after the database was seen to hold it, less
+///         a margin: so no window is merged with a tail that has already let go of a version the window does
+///         not hold.
+///     </para>
 /// </remarks>
 public sealed class Pages(SourceQueries queries)
 {
-    /// <summary>How long PostgreSQL's estimate of a filter's rows is reused.</summary>
-    public static readonly TimeSpan EstimateFor = TimeSpan.FromSeconds(3);
-
-    /// <summary>How long a count, off any page's path, may run before it is given up.</summary>
-    public static readonly TimeSpan CountLimit = TimeSpan.FromSeconds(60);
-
-    /// <summary>How often a filter's rows are counted again, off any page's path, while pages use it.</summary>
-    public TimeSpan RecountAfter { get; init; } = TimeSpan.FromSeconds(30);
-
-    /// <summary>How long an order's fills in the database are reused.</summary>
-    public static readonly TimeSpan FillsFor = TimeSpan.FromSeconds(1);
-
-    /// <summary>
-    /// How long a window read from the database answers later reads: a second less than the tail keeps
-    /// a row after the database was seen to hold it (<see cref="BlotterOptions.EvictAfter"/>), which the
-    /// host sets it from. Zero keeps no windows.
-    /// </summary>
-    public TimeSpan WindowFor { get; init; } = TimeSpan.FromSeconds(4);
-
-    /// <summary>A read slower than this marks its sort as one to read in large windows.</summary>
-    public static readonly TimeSpan SlowRead = TimeSpan.FromMilliseconds(25);
-
     // Rows read beyond those asked for, so that the tail's overrides seldom leave a read short.
     private const int Slack = 32;
 
@@ -72,15 +50,38 @@ public sealed class Pages(SourceQueries queries)
     // Windows kept for one tab, filter and sort.
     private const int WindowsPerSort = 6;
 
+    /// <summary>How long PostgreSQL's estimate of a filter's rows is reused.</summary>
+    public static readonly TimeSpan EstimateFor = TimeSpan.FromSeconds(3);
+
+    /// <summary>How long a count, off any page's path, may run before it is given up.</summary>
+    public static readonly TimeSpan CountLimit = TimeSpan.FromSeconds(60);
+
+    /// <summary>How long an order's fills in the database are reused.</summary>
+    public static readonly TimeSpan FillsFor = TimeSpan.FromSeconds(1);
+
+    /// <summary>A read slower than this marks its sort as one to read in large windows.</summary>
+    public static readonly TimeSpan SlowRead = TimeSpan.FromMilliseconds(25);
+
+    private readonly ConcurrentDictionary<Guid, (DateTime At, Task<Fill[]> Fills)> _fills = new();
+
     // What is known of how many rows of the database pass each filter.
     private readonly ConcurrentDictionary<(string Tab, string Filter), Known> _known = new();
-    private readonly ConcurrentDictionary<Guid, (DateTime At, Task<Fill[]> Fills)> _fills = new();
     private readonly ConcurrentDictionary<(string Tab, string Filter, string Order), Shelf> _windows = new();
+    private long _keptRows;
     private long _lookups;
+    private long _readAheads;
     private long _rereads;
     private long _windowHits;
-    private long _readAheads;
-    private long _keptRows;
+
+    /// <summary>How often a filter's rows are counted again, off any page's path, while pages use it.</summary>
+    public TimeSpan RecountAfter { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    ///     How long a window read from the database answers later reads: a second less than the tail keeps
+    ///     a row after the database was seen to hold it (<see cref="BlotterOptions.EvictAfter" />), which the
+    ///     host sets it from. Zero keeps no windows.
+    /// </summary>
+    public TimeSpan WindowFor { get; init; } = TimeSpan.FromSeconds(4);
 
     public SourceQueries Queries => queries;
 
@@ -102,21 +103,25 @@ public sealed class Pages(SourceQueries queries)
     /// <summary>What the kept windows, counts and fills hold, roughly, in bytes.</summary>
     public long Bytes =>
         Interlocked.Read(ref _keptRows) * Order.Bytes
-        + _known.Count * 64L + _fills.Values.Sum(f => f.Fills.IsCompletedSuccessfully ? f.Fills.Result.Length * (long)Fill.Bytes : 0);
+        + _known.Count * 64L +
+        _fills.Values.Sum(f => f.Fills.IsCompletedSuccessfully ? f.Fills.Result.Length * (long)Fill.Bytes : 0);
 
     /// <summary>A reader's place in the tab: the pages it reads, by position.</summary>
-    public PageView View(SortSpec order) => new(this, order);
+    public PageView View(SortSpec order)
+    {
+        return new PageView(this, order);
+    }
 
     /// <summary>
-    /// About how many rows of the database pass the filter, at once: no page waits for a count. At first
-    /// PostgreSQL's estimate, which <c>EXPLAIN</c> gives in milliseconds; then, once a count off any
-    /// page's path has finished, that count, taken again every <see cref="RecountAfter"/> while pages
-    /// use the filter. A count past <see cref="CountLimit"/> is given up, and the estimate stays. It
-    /// only sizes the grid, which learns where its rows end from the reads that reach the end.
+    ///     About how many rows of the database pass the filter, at once: no page waits for a count. At first
+    ///     PostgreSQL's estimate, which <c>EXPLAIN</c> gives in milliseconds; then, once a count off any
+    ///     page's path has finished, that count, taken again every <see cref="RecountAfter" /> while pages
+    ///     use the filter. A count past <see cref="CountLimit" /> is given up, and the estimate stays. It
+    ///     only sizes the grid, which learns where its rows end from the reads that reach the end.
     /// </summary>
     /// <param name="count">
-    /// Whether to count, as well as estimate: not for a page that follows the live top, where the total
-    /// only sizes the scroll bar, and the estimate does that well enough.
+    ///     Whether to count, as well as estimate: not for a page that follows the live top, where the total
+    ///     only sizes the scroll bar, and the estimate does that well enough.
     /// </param>
     public async Task<long> DatabaseRowsAsync(ScopeState state, CancellationToken ct, bool count = true)
     {
@@ -126,17 +131,14 @@ public sealed class Pages(SourceQueries queries)
         Task<long> estimate;
         lock (known)
         {
-            if (count && !known.GaveUp && known.Counting is not { IsCompleted: false } && (known.Counted is null || now - known.CountedAt > RecountAfter))
-            {
+            if (count && !known.GaveUp && known.Counting is not { IsCompleted: false } &&
+                (known.Counted is null || now - known.CountedAt > RecountAfter))
                 known.Counting = CountLaterAsync(known, tab, filter);
-            }
 
-            if (known.Counted is { } counted)
-            {
-                return counted;
-            }
+            if (known.Counted is { } counted) return counted;
 
-            if (known.Estimate is null || known.Estimate.IsFaulted || (known.Estimate.IsCompleted && now - known.EstimatedAt > EstimateFor))
+            if (known.Estimate is null || known.Estimate.IsFaulted ||
+                (known.Estimate.IsCompleted && now - known.EstimatedAt > EstimateFor))
             {
                 known.Estimate = EstimateAsync(tab, filter);
                 known.EstimatedAt = now;
@@ -149,18 +151,23 @@ public sealed class Pages(SourceQueries queries)
     }
 
     /// <summary>Whether the filter's rows have been counted, rather than only estimated.</summary>
-    public bool IsCounted(ScopeState state) =>
-        _known.TryGetValue((state.Tab.Name, state.Filter.Name), out var known) && known.Counted is not null;
+    public bool IsCounted(ScopeState state)
+    {
+        return _known.TryGetValue((state.Tab.Name, state.Filter.Name), out var known) && known.Counted is not null;
+    }
 
-    private async Task<long> EstimateAsync(Tab tab, FilterSpec filter) =>
-        await queries.EstimateRowsAsync(tab, filter, CancellationToken.None).ConfigureAwait(false)
-        ?? await queries.CountAsync(tab, filter, CancellationToken.None).ConfigureAwait(false);
+    private async Task<long> EstimateAsync(Tab tab, FilterSpec filter)
+    {
+        return await queries.EstimateRowsAsync(tab, filter, CancellationToken.None).ConfigureAwait(false)
+               ?? await queries.CountAsync(tab, filter, CancellationToken.None).ConfigureAwait(false);
+    }
 
     private async Task CountLaterAsync(Known known, Tab tab, FilterSpec filter)
     {
         try
         {
-            var counted = await queries.CountLaterAsync(tab, filter, CountLimit, CancellationToken.None).ConfigureAwait(false);
+            var counted = await queries.CountLaterAsync(tab, filter, CountLimit, CancellationToken.None)
+                .ConfigureAwait(false);
             lock (known)
             {
                 known.Counted = counted;
@@ -178,7 +185,7 @@ public sealed class Pages(SourceQueries queries)
     }
 
     /// <summary>About how many rows the tab has: the database's, less the rows the tail overrides, plus the tail's.</summary>
-    /// <param name="count">See <see cref="DatabaseRowsAsync"/>.</param>
+    /// <param name="count">See <see cref="DatabaseRowsAsync" />.</param>
     public async Task<long> TotalAsync(ScopeState state, CancellationToken ct, bool count = true)
     {
         var rows = await DatabaseRowsAsync(state, ct, count).ConfigureAwait(false);
@@ -186,10 +193,11 @@ public sealed class Pages(SourceQueries queries)
     }
 
     /// <summary>
-    /// The tab's rows from <paramref name="key"/> on (or after it), or from the first, in
-    /// <paramref name="order"/>: at least <paramref name="count"/> of them if the tab has that many.
+    ///     The tab's rows from <paramref name="key" /> on (or after it), or from the first, in
+    ///     <paramref name="order" />: at least <paramref name="count" /> of them if the tab has that many.
     /// </summary>
-    public async Task<IRow[]> FromAsync(ScopeState state, SortSpec order, IRow? key, bool inclusive, int count, CancellationToken ct)
+    public async Task<IRow[]> FromAsync(ScopeState state, SortSpec order, IRow? key, bool inclusive, int count,
+        CancellationToken ct)
     {
         var sorted = state.Sorted(order);
         var limit = SourceQueries.Rounded(count + Slack);
@@ -213,17 +221,14 @@ public sealed class Pages(SourceQueries queries)
     }
 
     /// <summary>
-    /// Reads the window after <paramref name="after"/> in <paramref name="order"/> in the background,
-    /// unless a kept window already covers the next two pages: the next scroll is then answered at once.
+    ///     Reads the window after <paramref name="after" /> in <paramref name="order" /> in the background,
+    ///     unless a kept window already covers the next two pages: the next scroll is then answered at once.
     /// </summary>
     public void ReadAhead(ScopeState state, SortSpec order, IRow after, int count)
     {
         var shelf = ShelfOf(state, order);
-        var limit = SourceQueries.Rounded((2 * count) + Slack);
-        if (Take(shelf, order, after, false, limit) is not null)
-        {
-            return;
-        }
+        var limit = SourceQueries.Rounded(2 * count + Slack);
+        if (Take(shelf, order, after, false, limit) is not null) return;
 
         // On from the end of the window the page came from, so that the two join into one; nothing,
         // when that window reached the end of the tab.
@@ -231,27 +236,19 @@ public sealed class Pages(SourceQueries queries)
         lock (shelf.Gate)
         {
             var covering = shelf.Windows.LastOrDefault(w => !Expired(w) && Contains(w, order, after));
-            if (covering is { Full: false })
-            {
-                return;
-            }
+            if (covering is { Full: false }) return;
 
-            if (covering is { Rows.Length: > 0 })
-            {
-                from = covering.Rows[^1];
-            }
+            if (covering is { Rows.Length: > 0 }) from = covering.Rows[^1];
         }
 
-        if (Interlocked.Exchange(ref shelf.Reading, 1) == 1)
-        {
-            return;
-        }
+        if (Interlocked.Exchange(ref shelf.Reading, 1) == 1) return;
 
         _ = Task.Run(async () =>
         {
             try
             {
-                await ReadWindowAsync(shelf, state.Filter, order, from, false, limit, CancellationToken.None).ConfigureAwait(false);
+                await ReadWindowAsync(shelf, state.Filter, order, from, false, limit, CancellationToken.None)
+                    .ConfigureAwait(false);
                 Interlocked.Increment(ref _readAheads);
             }
             catch (Exception)
@@ -266,14 +263,15 @@ public sealed class Pages(SourceQueries queries)
     }
 
     /// <summary>
-    /// How many rows of the tab sort before <paramref name="key"/>, about: the database's count, with
-    /// the tail's corrections. A held page counts what has arrived above it with this.
+    ///     How many rows of the tab sort before <paramref name="key" />, about: the database's count, with
+    ///     the tail's corrections. A held page counts what has arrived above it with this.
     /// </summary>
     /// <param name="orEstimate">
-    /// Whether PostgreSQL's estimate will do if the count is stopped at the time limit: for placing a
-    /// row, yes; for counting what has arrived above it, which is a difference of two counts, no.
+    ///     Whether PostgreSQL's estimate will do if the count is stopped at the time limit: for placing a
+    ///     row, yes; for counting what has arrived above it, which is a difference of two counts, no.
     /// </param>
-    public async Task<long> RankAsync(ScopeState state, SortSpec order, IRow key, CancellationToken ct, bool orEstimate = false)
+    public async Task<long> RankAsync(ScopeState state, SortSpec order, IRow key, CancellationToken ct,
+        bool orEstimate = false)
     {
         var sorted = state.Sorted(order);
         long before;
@@ -283,10 +281,8 @@ public sealed class Pages(SourceQueries queries)
         }
         catch (QueryTimeLimitException) when (orEstimate)
         {
-            if (await queries.EstimateBeforeAsync(state.Filter, order, key, ct).ConfigureAwait(false) is not { } estimate)
-            {
-                throw;
-            }
+            if (await queries.EstimateBeforeAsync(state.Filter, order, key, ct).ConfigureAwait(false) is not
+                { } estimate) throw;
 
             before = estimate;
         }
@@ -301,23 +297,26 @@ public sealed class Pages(SourceQueries queries)
         var read = _fills.AddOrUpdate(
             orderId,
             _ => (now, queries.FillsOfAsync(orderId, CancellationToken.None)),
-            (_, was) => now - was.At > FillsFor || was.Fills.IsFaulted ? (now, queries.FillsOfAsync(orderId, CancellationToken.None)) : was);
+            (_, was) => now - was.At > FillsFor || was.Fills.IsFaulted
+                ? (now, queries.FillsOfAsync(orderId, CancellationToken.None))
+                : was);
         foreach (var stale in _fills.Where(f => now - f.Value.At > FillsFor * 10).Select(f => f.Key).ToList())
-        {
             _fills.TryRemove(stale, out _);
-        }
 
         var stored = await read.Fills.WaitAsync(ct).ConfigureAwait(false);
-        return [.. stored.Concat(state.FillsByOrder.GetValueOrDefault(orderId) ?? [])
-            .DistinctBy(f => f.FillId)
-            .OrderByDescending(f => f.EventTime)
-            .ThenByDescending(f => f.FillId)];
+        return
+        [
+            .. stored.Concat(state.FillsByOrder.GetValueOrDefault(orderId) ?? [])
+                .DistinctBy(f => f.FillId)
+                .OrderByDescending(f => f.EventTime)
+                .ThenByDescending(f => f.FillId)
+        ];
     }
 
     /// <summary>
-    /// The database's first <paramref name="limit"/> rows from <paramref name="key"/> on, from a kept
-    /// window when one covers them, or read in a window of their sort's size; and the last row the read
-    /// decides, or null when it reached the end.
+    ///     The database's first <paramref name="limit" /> rows from <paramref name="key" /> on, from a kept
+    ///     window when one covers them, or read in a window of their sort's size; and the last row the read
+    ///     decides, or null when it reached the end.
     /// </summary>
     private async Task<(IRow[] Read, IRow? Last)> DatabaseAsync(
         ScopeState state, SortSpec order, IRow? key, bool inclusive, int limit, CancellationToken ct)
@@ -331,13 +330,18 @@ public sealed class Pages(SourceQueries queries)
 
         var window = await ReadWindowAsync(shelf, state.Filter, order, key, inclusive, limit, ct).ConfigureAwait(false);
         return Slice(window, order, key, inclusive, limit)
-            ?? throw new InvalidOperationException("a window just read does not cover the read it was made for");
+               ?? throw new InvalidOperationException("a window just read does not cover the read it was made for");
     }
 
-    private Shelf ShelfOf(ScopeState state, SortSpec order) =>
-        _windows.GetOrAdd((state.Tab.Name, state.Filter.Name, order.Name), _ => new Shelf());
+    private Shelf ShelfOf(ScopeState state, SortSpec order)
+    {
+        return _windows.GetOrAdd((state.Tab.Name, state.Filter.Name, order.Name), _ => new Shelf());
+    }
 
-    /// <summary>Reads a window from <paramref name="key"/> on: twice the rows asked for, or a large window for a slow sort; and keeps it.</summary>
+    /// <summary>
+    ///     Reads a window from <paramref name="key" /> on: twice the rows asked for, or a large window for a slow sort;
+    ///     and keeps it.
+    /// </summary>
     private async Task<Window> ReadWindowAsync(
         Shelf shelf, FilterSpec filter, SortSpec order, IRow? key, bool inclusive, int limit, CancellationToken ct)
     {
@@ -357,20 +361,16 @@ public sealed class Pages(SourceQueries queries)
         {
             shelf.Windows.RemoveAll(w => Expired(w) && Forget(w));
             for (var i = shelf.Windows.Count - 1; i >= 0; i--)
-            {
                 if (Slice(shelf.Windows[i], order, key, inclusive, limit) is { } slice)
-                {
                     return slice;
-                }
-            }
         }
 
         return null;
     }
 
     /// <summary>
-    /// Keeps a window. One that starts just after another ends continues it, and the two are kept as one,
-    /// as old as the older: a page that spans both is answered from one window.
+    ///     Keeps a window. One that starts just after another ends continues it, and the two are kept as one,
+    ///     as old as the older: a page that spans both is answered from one window.
     /// </summary>
     private void Keep(Shelf shelf, SortSpec order, Window window)
     {
@@ -379,14 +379,16 @@ public sealed class Pages(SourceQueries queries)
             shelf.Windows.RemoveAll(w => Expired(w) && Forget(w));
             if (window.From is not null && !window.Inclusive)
             {
-                var before = shelf.Windows.FindIndex(w => w.Full && w.Rows.Length > 0 && order.Compare(w.Rows[^1], window.From) == 0);
+                var before = shelf.Windows.FindIndex(w =>
+                    w.Full && w.Rows.Length > 0 && order.Compare(w.Rows[^1], window.From) == 0);
                 if (before >= 0)
                 {
                     var joined = shelf.Windows[before];
                     Forget(joined);
                     shelf.Windows.RemoveAt(before);
                     window = new Window(
-                        joined.From, joined.Inclusive, [.. joined.Rows, .. window.Rows], window.Full, Math.Min(joined.ReadAt, window.ReadAt));
+                        joined.From, joined.Inclusive, [.. joined.Rows, .. window.Rows], window.Full,
+                        Math.Min(joined.ReadAt, window.ReadAt));
                 }
             }
 
@@ -399,46 +401,33 @@ public sealed class Pages(SourceQueries queries)
             }
         }
 
-        if (Interlocked.Read(ref _keptRows) > MaxKeptRows)
-        {
-            Trim();
-        }
+        if (Interlocked.Read(ref _keptRows) > MaxKeptRows) Trim();
     }
 
-    /// <summary>Lets the expired windows go, then the oldest, until the kept rows fit <see cref="MaxKeptRows"/>.</summary>
+    /// <summary>Lets the expired windows go, then the oldest, until the kept rows fit <see cref="MaxKeptRows" />.</summary>
     private void Trim()
     {
         foreach (var shelf in _windows.Values)
-        {
             lock (shelf.Gate)
             {
                 shelf.Windows.RemoveAll(w => Expired(w) && Forget(w));
             }
-        }
 
         while (Interlocked.Read(ref _keptRows) > MaxKeptRows)
         {
             var kept = new List<(Shelf Shelf, Window Window)>();
             foreach (var shelf in _windows.Values)
-            {
                 lock (shelf.Gate)
                 {
                     kept.AddRange(shelf.Windows.Select(w => (shelf, w)));
                 }
-            }
 
             var oldest = kept.OrderBy(x => x.Window.ReadAt).FirstOrDefault();
-            if (oldest.Shelf is null)
-            {
-                return;
-            }
+            if (oldest.Shelf is null) return;
 
             lock (oldest.Shelf.Gate)
             {
-                if (oldest.Shelf.Windows.Remove(oldest.Window))
-                {
-                    Forget(oldest.Window);
-                }
+                if (oldest.Shelf.Windows.Remove(oldest.Window)) Forget(oldest.Window);
             }
         }
     }
@@ -449,37 +438,32 @@ public sealed class Pages(SourceQueries queries)
         return true;
     }
 
-    private bool Expired(Window window) => Stopwatch.GetElapsedTime(window.ReadAt) > WindowFor;
+    private bool Expired(Window window)
+    {
+        return Stopwatch.GetElapsedTime(window.ReadAt) > WindowFor;
+    }
 
     /// <summary>
-    /// The first <paramref name="limit"/> rows of <paramref name="window"/> from <paramref name="key"/> on,
-    /// and the last of them; or all it has from there, with no last row, when it reached the end; or null
-    /// when it does not cover the read: it starts after the key, or runs out before the limit.
+    ///     The first <paramref name="limit" /> rows of <paramref name="window" /> from <paramref name="key" /> on,
+    ///     and the last of them; or all it has from there, with no last row, when it reached the end; or null
+    ///     when it does not cover the read: it starts after the key, or runs out before the limit.
     /// </summary>
     private static (IRow[] Read, IRow? Last)? Slice(Window window, SortSpec order, IRow? key, bool inclusive, int limit)
     {
         int from;
         if (key is null)
         {
-            if (window.From is not null)
-            {
-                return null;
-            }
+            if (window.From is not null) return null;
 
             from = 0;
         }
         else
         {
             if (window.From is not null && order.Compare(key, window.From) is var start
-                && (start < 0 || (start == 0 && inclusive && !window.Inclusive)))
-            {
+                                        && (start < 0 || (start == 0 && inclusive && !window.Inclusive)))
                 return null;
-            }
 
-            if (window.Full && window.Rows.Length > 0 && order.Compare(key, window.Rows[^1]) > 0)
-            {
-                return null;
-            }
+            if (window.Full && window.Rows.Length > 0 && order.Compare(key, window.Rows[^1]) > 0) return null;
 
             from = First(window.Rows, order, key, inclusive);
         }
@@ -494,13 +478,16 @@ public sealed class Pages(SourceQueries queries)
         return window.Full ? null : (window.Rows[from..], null);
     }
 
-    /// <summary>Whether <paramref name="row"/> falls among the rows <paramref name="window"/> read.</summary>
-    private static bool Contains(Window window, SortSpec order, IRow row) =>
-        window.Rows.Length > 0
-        && (window.From is null || order.Compare(row, window.From) is var start && (start > 0 || (start == 0 && window.Inclusive)))
-        && order.Compare(row, window.Rows[^1]) <= 0;
+    /// <summary>Whether <paramref name="row" /> falls among the rows <paramref name="window" /> read.</summary>
+    private static bool Contains(Window window, SortSpec order, IRow row)
+    {
+        return window.Rows.Length > 0
+               && (window.From is null || order.Compare(row, window.From) is var start &&
+                   (start > 0 || (start == 0 && window.Inclusive)))
+               && order.Compare(row, window.Rows[^1]) <= 0;
+    }
 
-    /// <summary>Where the first row at or after <paramref name="key"/> (or after it) is in <paramref name="rows"/>.</summary>
+    /// <summary>Where the first row at or after <paramref name="key" /> (or after it) is in <paramref name="rows" />.</summary>
     private static int First(IRow[] rows, SortSpec order, IRow key, bool inclusive)
     {
         int low = 0, high = rows.Length;
@@ -509,20 +496,17 @@ public sealed class Pages(SourceQueries queries)
             var middle = (low + high) >>> 1;
             var compared = order.Compare(rows[middle], key);
             if (compared < 0 || (compared == 0 && !inclusive))
-            {
                 low = middle + 1;
-            }
             else
-            {
                 high = middle;
-            }
         }
 
         return low;
     }
 
     private async Task<List<IRow>> MergeOrdersAsync(
-        ScopeState state, SortSpec order, IRow? key, bool inclusive, IRow? last, IRow[] read, ArraySegment<IRow> candidates,
+        ScopeState state, SortSpec order, IRow? key, bool inclusive, IRow? last, IRow[] read,
+        ArraySegment<IRow> candidates,
         CancellationToken ct)
     {
         var winners = new Dictionary<Guid, IRow>(read.Length + candidates.Count);
@@ -533,9 +517,7 @@ public sealed class Pages(SourceQueries queries)
 
             // An order the tail has as new or newer is the tail's to place, below, if it falls here at all.
             if (!(state.Latest.TryGetValue(row.Id, out var latest) && latest.Version >= row.Version))
-            {
                 winners[row.Id] = row;
-            }
         }
 
         // The tail's rows here whose database rows were not read: the database may have moved past
@@ -550,17 +532,11 @@ public sealed class Pages(SourceQueries queries)
 
         foreach (var candidate in candidates)
         {
-            if (readById.TryGetValue(candidate.Id, out var stored) && stored.Version > candidate.Version)
-            {
-                continue;
-            }
+            if (readById.TryGetValue(candidate.Id, out var stored) && stored.Version > candidate.Version) continue;
 
             if (current.TryGetValue(candidate.Id, out var now) && now.Version > candidate.Version)
             {
-                if (Within(order, now, key, inclusive, last) && state.Filter.Matches(now))
-                {
-                    winners[now.Id] = now;
-                }
+                if (Within(order, now, key, inclusive, last) && state.Filter.Matches(now)) winners[now.Id] = now;
 
                 continue;
             }
@@ -575,26 +551,22 @@ public sealed class Pages(SourceQueries queries)
     private static List<IRow> MergeFills(IRow[] read, ArraySegment<IRow> candidates)
     {
         var rows = new Dictionary<Guid, IRow>(read.Length + candidates.Count);
-        foreach (var row in read)
-        {
-            rows[row.Id] = row;
-        }
+        foreach (var row in read) rows[row.Id] = row;
 
-        foreach (var candidate in candidates)
-        {
-            rows.TryAdd(candidate.Id, candidate);
-        }
+        foreach (var candidate in candidates) rows.TryAdd(candidate.Id, candidate);
 
         return [.. rows.Values];
     }
 
-    private static bool Within(SortSpec order, IRow row, IRow? key, bool inclusive, IRow? last) =>
-        (key is null || order.Compare(row, key) is var from && (from > 0 || (inclusive && from == 0)))
-        && (last is null || order.Compare(row, last) <= 0);
+    private static bool Within(SortSpec order, IRow row, IRow? key, bool inclusive, IRow? last)
+    {
+        return (key is null || order.Compare(row, key) is var from && (from > 0 || (inclusive && from == 0)))
+               && (last is null || order.Compare(row, last) <= 0);
+    }
 
     /// <summary>
-    /// The database's rows in one order from one key (<see cref="From"/>, or the first row when null),
-    /// as they were when read; <see cref="Full"/> when the read stopped at its limit rather than at the end.
+    ///     The database's rows in one order from one key (<see cref="From" />, or the first row when null),
+    ///     as they were when read; <see cref="Full" /> when the read stopped at its limit rather than at the end.
     /// </summary>
     private sealed record Window(IRow? From, bool Inclusive, IRow[] Rows, bool Full, long ReadAt);
 
@@ -603,38 +575,38 @@ public sealed class Pages(SourceQueries queries)
     {
         public readonly Lock Gate = new();
         public readonly List<Window> Windows = [];
-        public volatile bool Slow;
         public int Reading;
+        public volatile bool Slow;
     }
 
     /// <summary>What is known of how many rows of the database pass one filter.</summary>
     private sealed class Known
     {
-        public Task<long>? Estimate;
-        public DateTime EstimatedAt;
         public long? Counted;
         public DateTime CountedAt;
         public Task? Counting;
+        public Task<long>? Estimate;
+        public DateTime EstimatedAt;
         public bool GaveUp;
     }
 }
 
 /// <summary>
-/// One reader's place in a tab: the positions it has read, each tied to the row found there, so that
-/// a page near one is read from that row's key rather than counted from the top.
+///     One reader's place in a tab: the positions it has read, each tied to the row found there, so that
+///     a page near one is read from that row's key rather than counted from the top.
 /// </summary>
 /// <remarks>
-/// <para>
-/// At the top, positions are counted from the first row, afresh on every state, so new rows push the
-/// rest down. Once the reader scrolls away (<see cref="Held"/>), the positions hold: a page is read from
-/// the nearest position known, so rows arriving above it do not move what is in view.
-/// </para>
-/// <para>
-/// Deep in a tab, positions are approximate. A jump far from every position known is placed by the
-/// database's own offset, which knows nothing of the tail; and rows arriving between two positions
-/// known shift what lies between them. But every page is read whole, from one key, so a page never
-/// repeats or skips a row, and every row in it is at the newest version known.
-/// </para>
+///     <para>
+///         At the top, positions are counted from the first row, afresh on every state, so new rows push the
+///         rest down. Once the reader scrolls away (<see cref="Held" />), the positions hold: a page is read from
+///         the nearest position known, so rows arriving above it do not move what is in view.
+///     </para>
+///     <para>
+///         Deep in a tab, positions are approximate. A jump far from every position known is placed by the
+///         database's own offset, which knows nothing of the tail; and rows arriving between two positions
+///         known shift what lies between them. But every page is read whole, from one key, so a page never
+///         repeats or skips a row, and every row in it is at the newest version known.
+///     </para>
 /// </remarks>
 public sealed class PageView(Pages pages, SortSpec order)
 {
@@ -643,9 +615,9 @@ public sealed class PageView(Pages pages, SortSpec order)
 
     // A position is kept for every so many rows read.
     private const int Every = 64;
+    private readonly SortedList<long, IRow> _anchors = [];
 
     private readonly Lock _gate = new();
-    private readonly SortedList<long, IRow> _anchors = [];
     private long _epoch = -1;
     private bool _held;
     private long _lastStart = -1;
@@ -664,26 +636,36 @@ public sealed class PageView(Pages pages, SortSpec order)
             lock (_gate)
             {
                 _held = value;
-                if (!value)
-                {
-                    _anchors.Clear();
-                }
+                if (!value) _anchors.Clear();
             }
         }
     }
 
-    /// <summary>Rows <paramref name="start"/> on, <paramref name="count"/> of them or as many as there are.</summary>
+    /// <summary>
+    ///     The topmost position known and its row: what arrived above the view is what sorts before it,
+    ///     counted from here rather than from a row further down, between which and the top rows the stream
+    ///     sent late may have landed.
+    /// </summary>
+    public (long At, IRow Row)? First
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _anchors.Count == 0 ? null : (_anchors.Keys[0], _anchors.Values[0]);
+            }
+        }
+    }
+
+    /// <summary>Rows <paramref name="start" /> on, <paramref name="count" /> of them or as many as there are.</summary>
     public async Task<Page> GetAsync(ScopeState state, long start, int count, CancellationToken ct)
     {
-        var total = await pages.TotalAsync(state, ct, count: _held).ConfigureAwait(false);
+        var total = await pages.TotalAsync(state, ct, _held).ConfigureAwait(false);
         (long At, IRow Key)? below, above;
         long shifted;
         lock (_gate)
         {
-            if (!_held && state.Epoch != _epoch)
-            {
-                _anchors.Clear();
-            }
+            if (!_held && state.Epoch != _epoch) _anchors.Clear();
 
             _epoch = state.Epoch;
             below = Floor(start);
@@ -701,17 +683,20 @@ public sealed class PageView(Pages pages, SortSpec order)
         }
         else if (below is { } b && start - b.At <= SeekWithin)
         {
-            window = await pages.FromAsync(state, order, b.Key, true, (int)(start - b.At) + count, ct).ConfigureAwait(false);
+            window = await pages.FromAsync(state, order, b.Key, true, (int)(start - b.At) + count, ct)
+                .ConfigureAwait(false);
             first = b.At;
         }
         else if (above is { } a && a.At - start <= SeekWithin)
         {
             // Read backwards from the position known below the page: the rows before it, nearest first.
-            var back = await pages.FromAsync(state, order.Reversed(), a.Key, false, (int)(a.At - start), ct).ConfigureAwait(false);
+            var back = await pages.FromAsync(state, order.Reversed(), a.Key, false, (int)(a.At - start), ct)
+                .ConfigureAwait(false);
             var ahead = start + count > a.At
-                ? await pages.FromAsync(state, order, a.Key, true, (int)(start + count - a.At), ct).ConfigureAwait(false)
+                ? await pages.FromAsync(state, order, a.Key, true, (int)(start + count - a.At), ct)
+                    .ConfigureAwait(false)
                 : [];
-            window = [.. Enumerable.Reverse(back), .. ahead];
+            window = [.. back.Reverse(), .. ahead];
             first = a.At - back.Length;
         }
         else if (!_held && start <= SeekWithin)
@@ -736,32 +721,14 @@ public sealed class PageView(Pages pages, SortSpec order)
         // The next window in the direction the reader is scrolling, read while they look at this one.
         var down = start >= Interlocked.Exchange(ref _lastStart, start);
         if (rows.Length > 0 && (down || start > 0))
-        {
             pages.ReadAhead(state, down ? order : order.Reversed(), down ? rows[^1] : rows[0], count);
-        }
 
         return new Page(first + skip, rows, total, state);
     }
 
     /// <summary>
-    /// The topmost position known and its row: what arrived above the view is what sorts before it,
-    /// counted from here rather than from a row further down, between which and the top rows the stream
-    /// sent late may have landed.
-    /// </summary>
-    public (long At, IRow Row)? First
-    {
-        get
-        {
-            lock (_gate)
-            {
-                return _anchors.Count == 0 ? null : (_anchors.Keys[0], _anchors.Values[0]);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Moves every position known down by <paramref name="rows"/>: room for rows that arrived above,
-    /// which reads backwards from the first position known then find.
+    ///     Moves every position known down by <paramref name="rows" />: room for rows that arrived above,
+    ///     which reads backwards from the first position known then find.
     /// </summary>
     public void Shift(long rows)
     {
@@ -769,10 +736,7 @@ public sealed class PageView(Pages pages, SortSpec order)
         {
             var moved = _anchors.Select(a => (a.Key + rows, a.Value)).ToList();
             _anchors.Clear();
-            foreach (var (at, row) in moved)
-            {
-                _anchors[at] = row;
-            }
+            foreach (var (at, row) in moved) _anchors[at] = row;
 
             _lastStart += rows;
             _shifted += rows;
@@ -780,8 +744,8 @@ public sealed class PageView(Pages pages, SortSpec order)
     }
 
     /// <summary>
-    /// Holds positions from <paramref name="at"/>, the place of <paramref name="row"/>: a view opened at a
-    /// row, from a link, rather than at the top. The rows above it are read backwards from it.
+    ///     Holds positions from <paramref name="at" />, the place of <paramref name="row" />: a view opened at a
+    ///     row, from a link, rather than at the top. The rows above it are read backwards from it.
     /// </summary>
     public void HoldAt(long at, IRow row)
     {
@@ -803,15 +767,12 @@ public sealed class PageView(Pages pages, SortSpec order)
     }
 
     /// <summary>
-    /// Keeps positions for the rows a read found from <paramref name="first"/> on, in the places they had
-    /// when it began; moved by any shift since, which the read did not see.
+    ///     Keeps positions for the rows a read found from <paramref name="first" /> on, in the places they had
+    ///     when it began; moved by any shift since, which the read did not see.
     /// </summary>
     private void Record(long first, IRow[] window, long shifted)
     {
-        if (window.Length == 0)
-        {
-            return;
-        }
+        if (window.Length == 0) return;
 
         lock (_gate)
         {
@@ -819,20 +780,12 @@ public sealed class PageView(Pages pages, SortSpec order)
             // What this read found replaces what earlier reads said of the same positions.
             var end = first + window.Length;
             for (var i = _anchors.Count - 1; i >= 0; i--)
-            {
                 if (_anchors.Keys[i] >= first && _anchors.Keys[i] < end)
-                {
                     _anchors.RemoveAt(i);
-                }
-            }
 
             for (var i = 0; i < window.Length; i++)
-            {
                 if (i == 0 || (first + i) % Every == 0 || i == window.Length - 1)
-                {
                     _anchors[first + i] = window[i];
-                }
-            }
         }
     }
 
@@ -843,13 +796,9 @@ public sealed class PageView(Pages pages, SortSpec order)
         {
             var middle = (low + high) >>> 1;
             if (_anchors.Keys[middle] <= position)
-            {
                 low = middle + 1;
-            }
             else
-            {
                 high = middle;
-            }
         }
 
         return low == 0 ? null : (_anchors.Keys[low - 1], _anchors.Values[low - 1]);
@@ -862,13 +811,9 @@ public sealed class PageView(Pages pages, SortSpec order)
         {
             var middle = (low + high) >>> 1;
             if (_anchors.Keys[middle] < position)
-            {
                 low = middle + 1;
-            }
             else
-            {
                 high = middle;
-            }
         }
 
         return low == _anchors.Count ? null : (_anchors.Keys[low], _anchors.Values[low]);

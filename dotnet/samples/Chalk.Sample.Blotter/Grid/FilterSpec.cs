@@ -11,12 +11,12 @@ public enum TextMatch
     AnyOf,
 
     /// <summary>The value starts with one of those given.</summary>
-    StartsWith,
+    StartsWith
 }
 
 /// <summary>
-/// One column's filter: values to match for text and choices, a range for numbers and times. An
-/// empty filter filters nothing.
+///     One column's filter: values to match for text and choices, a range for numbers and times. An
+///     empty filter filters nothing.
 /// </summary>
 public sealed record ColumnFilter
 {
@@ -39,9 +39,29 @@ public sealed record ColumnFilter
 
     public bool IsEmpty => Values.IsEmpty && Min is null && Max is null && From is null && To is null;
 
+    public string Name
+    {
+        get
+        {
+            var name = new StringBuilder(Column.Name);
+            if (!Values.IsEmpty)
+                name.Append(Match == TextMatch.StartsWith ? " starts " : " in ").AppendJoin('|', Values);
+
+            if (Min is { } min) name.Append(" >= ").Append(min.ToString("R", CultureInfo.InvariantCulture));
+
+            if (Max is { } max) name.Append(" <= ").Append(max.ToString("R", CultureInfo.InvariantCulture));
+
+            if (From is { } from) name.Append(" from ").Append(from.ToString("O", CultureInfo.InvariantCulture));
+
+            if (To is { } to) name.Append(" to ").Append(to.ToString("O", CultureInfo.InvariantCulture));
+
+            return name.ToString();
+        }
+    }
+
     /// <summary>
-    /// Whether <paramref name="row"/> passes, decided in the host exactly as the database decides the
-    /// SQL: values matched byte for byte, a number against its bound as the column binds it.
+    ///     Whether <paramref name="row" /> passes, decided in the host exactly as the database decides the
+    ///     SQL: values matched byte for byte, a number against its bound as the column binds it.
     /// </summary>
     public bool Matches(IRow row)
     {
@@ -53,58 +73,26 @@ public sealed record ColumnFilter
                 : Match == TextMatch.AnyOf
                     ? Values.Contains((string)value, StringComparer.Ordinal)
                     : Values.Any(v => ((string)value).StartsWith(v, StringComparison.Ordinal));
-            if (!passes)
-            {
-                return false;
-            }
+            if (!passes) return false;
         }
 
-        return (Min is not { } min || Convert.ToDouble(value, CultureInfo.InvariantCulture) >= Convert.ToDouble(Column.Bind(min), CultureInfo.InvariantCulture))
-            && (Max is not { } max || Convert.ToDouble(value, CultureInfo.InvariantCulture) <= Convert.ToDouble(Column.Bind(max), CultureInfo.InvariantCulture))
-            && (From is not { } from || (DateTime)value >= from)
-            && (To is not { } to || (DateTime)value < to);
+        return (Min is not { } min || Convert.ToDouble(value, CultureInfo.InvariantCulture) >=
+                   Convert.ToDouble(Column.Bind(min), CultureInfo.InvariantCulture))
+               && (Max is not { } max || Convert.ToDouble(value, CultureInfo.InvariantCulture) <=
+                   Convert.ToDouble(Column.Bind(max), CultureInfo.InvariantCulture))
+               && (From is not { } from || (DateTime)value >= from)
+               && (To is not { } to || (DateTime)value < to);
     }
 
     /// <summary>Canonical: values sorted and distinct, times to the microsecond.</summary>
-    public ColumnFilter Canonical() => this with
+    public ColumnFilter Canonical()
     {
-        Values = [.. Values.Where(v => v.Length > 0).Distinct().Order(StringComparer.Ordinal)],
-        From = From is { } from ? Cells.Micros(from) : null,
-        To = To is { } to ? Cells.Micros(to) : null,
-    };
-
-    public string Name
-    {
-        get
+        return this with
         {
-            var name = new StringBuilder(Column.Name);
-            if (!Values.IsEmpty)
-            {
-                name.Append(Match == TextMatch.StartsWith ? " starts " : " in ").AppendJoin('|', Values);
-            }
-
-            if (Min is { } min)
-            {
-                name.Append(" >= ").Append(min.ToString("R", CultureInfo.InvariantCulture));
-            }
-
-            if (Max is { } max)
-            {
-                name.Append(" <= ").Append(max.ToString("R", CultureInfo.InvariantCulture));
-            }
-
-            if (From is { } from)
-            {
-                name.Append(" from ").Append(from.ToString("O", CultureInfo.InvariantCulture));
-            }
-
-            if (To is { } to)
-            {
-                name.Append(" to ").Append(to.ToString("O", CultureInfo.InvariantCulture));
-            }
-
-            return name.ToString();
-        }
+            Values = [.. Values.Where(v => v.Length > 0).Distinct().Order(StringComparer.Ordinal)],
+            From = From is { } from ? Cells.Micros(from) : null,
+            To = To is { } to ? Cells.Micros(to) : null
+        };
     }
 
     /// <summary>What a person reads in the filter's pill.</summary>
@@ -117,34 +105,22 @@ public sealed record ColumnFilter
             parts.Add(Match == TextMatch.StartsWith ? $"starts {shown}" : shown);
         }
 
-        if (Min is { } min)
-        {
-            parts.Add("≥ " + min.ToString("#,0.####", CultureInfo.InvariantCulture));
-        }
+        if (Min is { } min) parts.Add("≥ " + min.ToString("#,0.####", CultureInfo.InvariantCulture));
 
-        if (Max is { } max)
-        {
-            parts.Add("≤ " + max.ToString("#,0.####", CultureInfo.InvariantCulture));
-        }
+        if (Max is { } max) parts.Add("≤ " + max.ToString("#,0.####", CultureInfo.InvariantCulture));
 
-        if (From is { } from)
-        {
-            parts.Add("from " + from.ToString("MM-dd HH:mm", CultureInfo.InvariantCulture));
-        }
+        if (From is { } from) parts.Add("from " + from.ToString("MM-dd HH:mm", CultureInfo.InvariantCulture));
 
-        if (To is { } to)
-        {
-            parts.Add("to " + to.ToString("MM-dd HH:mm", CultureInfo.InvariantCulture));
-        }
+        if (To is { } to) parts.Add("to " + to.ToString("MM-dd HH:mm", CultureInfo.InvariantCulture));
 
         return $"{Column.Title}: {string.Join(" ", parts)}";
     }
 }
 
 /// <summary>
-/// What a tab shows: a filter on any of its columns, all of which must hold. Every value is bound as
-/// a parameter, never written into the SQL, so one shape of filter is one prepared statement
-/// whatever values it holds.
+///     What a tab shows: a filter on any of its columns, all of which must hold. Every value is bound as
+///     a parameter, never written into the SQL, so one shape of filter is one prepared statement
+///     whatever values it holds.
 /// </summary>
 public sealed class FilterSpec
 {
@@ -166,35 +142,44 @@ public sealed class FilterSpec
     {
         ColumnFilter[] all = [.. filters];
         if (all.FirstOrDefault(f => f.Column.Derived)?.Column is { } shown)
-        {
-            throw new ArgumentException($"{shown.Title} is worked out from the row and only shown: nothing is filtered by it", nameof(filters));
-        }
+            throw new ArgumentException(
+                $"{shown.Title} is worked out from the row and only shown: nothing is filtered by it", nameof(filters));
 
-        return new([.. all.Select(f => f.Canonical()).Where(f => !f.IsEmpty).OrderBy(f => f.Column.Name, StringComparer.Ordinal)]);
+        return new FilterSpec([
+            .. all.Select(f => f.Canonical()).Where(f => !f.IsEmpty).OrderBy(f => f.Column.Name, StringComparer.Ordinal)
+        ]);
     }
 
-    public ColumnFilter? For(Column column) => Columns.FirstOrDefault(c => c.Column == column);
+    public ColumnFilter? For(Column column)
+    {
+        return Columns.FirstOrDefault(c => c.Column == column);
+    }
 
-    /// <summary>Whether <paramref name="row"/> passes every column's filter, decided in the host.</summary>
-    public bool Matches(IRow row) => Columns.All(c => c.Matches(row));
+    /// <summary>Whether <paramref name="row" /> passes every column's filter, decided in the host.</summary>
+    public bool Matches(IRow row)
+    {
+        return Columns.All(c => c.Matches(row));
+    }
 
-    /// <summary>This filter with <paramref name="filter"/> in place of its column's, or without it when it is empty.</summary>
-    public FilterSpec With(ColumnFilter filter) =>
-        Of([.. Columns.Where(c => c.Column != filter.Column), filter]);
+    /// <summary>This filter with <paramref name="filter" /> in place of its column's, or without it when it is empty.</summary>
+    public FilterSpec With(ColumnFilter filter)
+    {
+        return Of([.. Columns.Where(c => c.Column != filter.Column), filter]);
+    }
 
-    public FilterSpec Without(Column column) => Of(Columns.Where(c => c.Column != column));
+    public FilterSpec Without(Column column)
+    {
+        return Of(Columns.Where(c => c.Column != column));
+    }
 
     /// <summary>
-    /// The conditions, joined by <c>AND</c>, over columns named with <paramref name="prefix"/>; <c>TRUE</c>
-    /// when there are none. Two prefixes share one set of parameters: an order's live scope tests the
-    /// order's version in the tail and its row in the snapshot against the same values.
+    ///     The conditions, joined by <c>AND</c>, over columns named with <paramref name="prefix" />; <c>TRUE</c>
+    ///     when there are none. Two prefixes share one set of parameters: an order's live scope tests the
+    ///     order's version in the tail and its row in the snapshot against the same values.
     /// </summary>
     public string Where(string prefix = "")
     {
-        if (Columns.IsEmpty)
-        {
-            return "TRUE";
-        }
+        if (Columns.IsEmpty) return "TRUE";
 
         var conditions = new List<string>();
         foreach (var filter in Columns)
@@ -202,37 +187,24 @@ public sealed class FilterSpec
             var column = prefix + filter.Column.Name;
             var name = filter.Column.Name;
             if (!filter.Values.IsEmpty)
-            {
                 conditions.Add(filter.Match == TextMatch.AnyOf || filter.Column.Kind == ColumnKind.Id
                     ? $"{column} IN @{name}_in"
-                    : "(" + string.Join(" OR ", filter.Values.Select((_, i) => $"{column} LIKE @{name}_p{i} ESCAPE '\\'")) + ")");
-            }
+                    : "(" + string.Join(" OR ",
+                        filter.Values.Select((_, i) => $"{column} LIKE @{name}_p{i} ESCAPE '\\'")) + ")");
 
-            if (filter.Min is not null)
-            {
-                conditions.Add($"{column} >= @{name}_min");
-            }
+            if (filter.Min is not null) conditions.Add($"{column} >= @{name}_min");
 
-            if (filter.Max is not null)
-            {
-                conditions.Add($"{column} <= @{name}_max");
-            }
+            if (filter.Max is not null) conditions.Add($"{column} <= @{name}_max");
 
-            if (filter.From is not null)
-            {
-                conditions.Add($"{column} >= @{name}_from");
-            }
+            if (filter.From is not null) conditions.Add($"{column} >= @{name}_from");
 
-            if (filter.To is not null)
-            {
-                conditions.Add($"{column} < @{name}_to");
-            }
+            if (filter.To is not null) conditions.Add($"{column} < @{name}_to");
         }
 
         return string.Join(" AND ", conditions);
     }
 
-    /// <summary>The values <see cref="Where"/> names, each of its column's own type.</summary>
+    /// <summary>The values <see cref="Where" /> names, each of its column's own type.</summary>
     public Dictionary<string, object?> Parameters()
     {
         var values = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -242,42 +214,23 @@ public sealed class FilterSpec
             if (!filter.Values.IsEmpty)
             {
                 if (filter.Column.Kind == ColumnKind.Id)
-                {
                     // An id typed that is not one matches nothing; it is not bound.
-                    values[$"{name}_in"] = filter.Values.Select(v => Guid.TryParse(v, out var id) ? id : Guid.Empty).ToArray();
-                }
+                    values[$"{name}_in"] = filter.Values.Select(v => Guid.TryParse(v, out var id) ? id : Guid.Empty)
+                        .ToArray();
                 else if (filter.Match == TextMatch.AnyOf)
-                {
                     values[$"{name}_in"] = filter.Values.ToArray();
-                }
                 else
-                {
                     for (var i = 0; i < filter.Values.Length; i++)
-                    {
                         values[$"{name}_p{i}"] = Escape(filter.Values[i]) + "%";
-                    }
-                }
             }
 
-            if (filter.Min is { } min)
-            {
-                values[$"{name}_min"] = filter.Column.Bind(min);
-            }
+            if (filter.Min is { } min) values[$"{name}_min"] = filter.Column.Bind(min);
 
-            if (filter.Max is { } max)
-            {
-                values[$"{name}_max"] = filter.Column.Bind(max);
-            }
+            if (filter.Max is { } max) values[$"{name}_max"] = filter.Column.Bind(max);
 
-            if (filter.From is { } from)
-            {
-                values[$"{name}_from"] = from;
-            }
+            if (filter.From is { } from) values[$"{name}_from"] = from;
 
-            if (filter.To is { } to)
-            {
-                values[$"{name}_to"] = to;
-            }
+            if (filter.To is { } to) values[$"{name}_to"] = to;
         }
 
         return values;
@@ -293,42 +246,43 @@ public sealed class FilterSpec
             if (!filter.Values.IsEmpty)
             {
                 var values = filter.Values
-                    .Select(v => column.Kind == ColumnKind.Id ? column.Literal(Guid.TryParse(v, out var id) ? id : Guid.Empty) : Column.Quote(v))
+                    .Select(v =>
+                        column.Kind == ColumnKind.Id
+                            ? column.Literal(Guid.TryParse(v, out var id) ? id : Guid.Empty)
+                            : Column.Quote(v))
                     .ToList();
                 conditions.Add(filter.Match == TextMatch.StartsWith && column.Kind != ColumnKind.Id
-                    ? "(" + string.Join(" OR ", filter.Values.Select(v => $"{column.Name} LIKE {Column.Quote(Escape(v) + "%")}" + (Escape(v) != v ? " ESCAPE '\\'" : ""))) + ")"
-                    : values.Count == 1 ? $"{column.Name} = {values[0]}" : $"{column.Name} IN ({string.Join(", ", values)})");
+                    ? "(" + string.Join(" OR ",
+                        filter.Values.Select(v =>
+                            $"{column.Name} LIKE {Column.Quote(Escape(v) + "%")}" +
+                            (Escape(v) != v ? " ESCAPE '\\'" : ""))) + ")"
+                    : values.Count == 1
+                        ? $"{column.Name} = {values[0]}"
+                        : $"{column.Name} IN ({string.Join(", ", values)})");
             }
 
-            if (filter.Min is { } min)
-            {
-                conditions.Add($"{column.Name} >= {column.Literal(column.Bind(min))}");
-            }
+            if (filter.Min is { } min) conditions.Add($"{column.Name} >= {column.Literal(column.Bind(min))}");
 
-            if (filter.Max is { } max)
-            {
-                conditions.Add($"{column.Name} <= {column.Literal(column.Bind(max))}");
-            }
+            if (filter.Max is { } max) conditions.Add($"{column.Name} <= {column.Literal(column.Bind(max))}");
 
-            if (filter.From is { } from)
-            {
-                conditions.Add($"{column.Name} >= {column.Literal(from)}");
-            }
+            if (filter.From is { } from) conditions.Add($"{column.Name} >= {column.Literal(from)}");
 
-            if (filter.To is { } to)
-            {
-                conditions.Add($"{column.Name} < {column.Literal(to)}");
-            }
+            if (filter.To is { } to) conditions.Add($"{column.Name} < {column.Literal(to)}");
         }
 
         return string.Join(" AND ", conditions);
     }
 
-    public override string ToString() => Name;
+    public override string ToString()
+    {
+        return Name;
+    }
 
     /// <summary>A typed value matched literally by <c>LIKE … ESCAPE '\'</c>: its wildcards and the escape itself escaped.</summary>
-    private static string Escape(string text) =>
-        text.Replace("\\", "\\\\", StringComparison.Ordinal)
+    private static string Escape(string text)
+    {
+        return text.Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("%", "\\%", StringComparison.Ordinal)
             .Replace("_", "\\_", StringComparison.Ordinal);
+    }
 }
