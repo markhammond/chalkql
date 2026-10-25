@@ -92,6 +92,32 @@ public sealed record ColumnFilter
         To = To is { } to ? Cells.Micros(to) : null
     };
 
+    /// <summary>
+    ///     Equal by value, its values compared in order: a record compares an <see cref="ImmutableArray{T}" />
+    ///     by the array it wraps, so two filters of the same values would otherwise differ.
+    /// </summary>
+    public bool Equals(ColumnFilter? other) =>
+        other is not null
+        && Column == other.Column && Match == other.Match && Min == other.Min && Max == other.Max && From == other.From && To == other.To
+        && Values.AsSpan().SequenceEqual(other.Values.AsSpan());
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(Column);
+        hash.Add(Match);
+        hash.Add(Min);
+        hash.Add(Max);
+        hash.Add(From);
+        hash.Add(To);
+        foreach (var value in Values)
+        {
+            hash.Add(value, StringComparer.Ordinal);
+        }
+
+        return hash.ToHashCode();
+    }
+
     /// <summary>What a person reads in the filter's pill.</summary>
     public string Describe()
     {

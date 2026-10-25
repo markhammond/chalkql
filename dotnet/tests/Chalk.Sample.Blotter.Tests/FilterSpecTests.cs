@@ -110,6 +110,20 @@ public sealed class FilterSpecTests
     }
 
     [Fact]
+    public void Column_filters_of_the_same_values_are_equal_whatever_arrays_hold_them()
+    {
+        var client = Orders.Named("client");
+        var one = new ColumnFilter { Column = client, Values = ["CEDAR", "FERN"] };
+        var other = new ColumnFilter { Column = client, Values = [.. new[] { "CEDAR", "FERN" }] };
+
+        Assert.Equal(one, other);
+        Assert.Equal(one.GetHashCode(), other.GetHashCode());
+        Assert.NotEqual(one, other with { Values = ["FERN", "CEDAR"] });
+        Assert.NotEqual(one, other with { Match = TextMatch.StartsWith });
+        Assert.NotEqual(one, other with { Values = ["CEDAR"] });
+    }
+
+    [Fact]
     public void The_plans_estimates_say_how_many_rows_are_read_and_sorted_and_where()
     {
         const string pushed = """
