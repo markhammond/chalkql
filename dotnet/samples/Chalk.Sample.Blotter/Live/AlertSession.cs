@@ -209,9 +209,6 @@ public sealed class AlertSession(string browser)
             LatestLag = lag;
         }
 
-        public bool Due(DateTime now)
-        {
-            return Gathered > 0 && now - SoundedAt >= Rule.Throttle;
-        }
+        public bool Due(DateTime now) => Gathered > 0 && now - SoundedAt >= Rule.Throttle;
     }
 }

@@ -25,41 +25,26 @@ public interface IRow
 public static class Cells
 {
     /// <summary>A time truncated to the microsecond, as the database keeps it, and of no kind.</summary>
-    public static DateTime Micros(DateTime time)
-    {
-        return new DateTime(time.Ticks - time.Ticks % 10, DateTimeKind.Unspecified);
-    }
+    public static DateTime Micros(DateTime time) => new DateTime(time.Ticks - time.Ticks % 10, DateTimeKind.Unspecified);
 
-    public static long Int64(IArrowArray array, int row)
+    public static long Int64(IArrowArray array, int row) => array switch
     {
-        return array switch
-        {
-            Int64Array a => a.GetValue(row)!.Value,
-            Int32Array a => a.GetValue(row)!.Value,
-            _ => throw new InvalidOperationException($"expected an integer, got {array.GetType().Name}")
-        };
-    }
+        Int64Array a => a.GetValue(row)!.Value,
+        Int32Array a => a.GetValue(row)!.Value,
+        _ => throw new InvalidOperationException($"expected an integer, got {array.GetType().Name}")
+    };
 
     /// <summary>A UUID: sixteen bytes, big-endian, as every ChalkQL source writes one.</summary>
-    public static Guid Uuid(IArrowArray array, int row)
-    {
-        return new Guid(((FixedSizeBinaryArray)array).GetBytes(row), true);
-    }
+    public static Guid Uuid(IArrowArray array, int row) => new Guid(((FixedSizeBinaryArray)array).GetBytes(row), true);
 
-    public static double Double(IArrowArray array, int row)
+    public static double Double(IArrowArray array, int row) => array switch
     {
-        return array switch
-        {
-            DoubleArray a => a.GetValue(row)!.Value,
-            Int64Array a => a.GetValue(row)!.Value,
-            _ => throw new InvalidOperationException($"expected a number, got {array.GetType().Name}")
-        };
-    }
+        DoubleArray a => a.GetValue(row)!.Value,
+        Int64Array a => a.GetValue(row)!.Value,
+        _ => throw new InvalidOperationException($"expected a number, got {array.GetType().Name}")
+    };
 
-    public static DateTime Time(IArrowArray array, int row)
-    {
-        return Micros(((TimestampArray)array).GetTimestamp(row)!.Value.UtcDateTime);
-    }
+    public static DateTime Time(IArrowArray array, int row) => Micros(((TimestampArray)array).GetTimestamp(row)!.Value.UtcDateTime);
 
     // The text columns hold a few hundred distinct values between them, so every row shares one
     // string per value rather than holding its own; an order's own reference is its own.

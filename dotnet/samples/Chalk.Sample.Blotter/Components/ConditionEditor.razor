@@ -46,10 +46,7 @@
     }
 
     [JSInvokable]
-    public async Task<Suggestions> Complete(string text, int cursor)
-    {
-        return await ConditionCompletion.CompleteAsync(Tab, text, cursor, ValuesAsync, CancellationToken.None);
-    }
+    public async Task<Suggestions> Complete(string text, int cursor) => await ConditionCompletion.CompleteAsync(Tab, text, cursor, ValuesAsync, CancellationToken.None);
 
     /// <summary>What is wrong, and where: the names the host does not know, then what ChalkQL makes of the rest.</summary>
     [JSInvokable]

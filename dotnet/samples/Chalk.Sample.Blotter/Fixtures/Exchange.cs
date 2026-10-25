@@ -238,33 +238,21 @@ public sealed class Exchange : IAsyncDisposable
     }
 
     /// <summary>The lagging job applies nothing to <c>orders_current</c> for a while. Zero ends a stall.</summary>
-    public void StallCurrent(TimeSpan time)
-    {
-        _currentWriter?.StallUntil(DateTime.UtcNow + time);
-    }
+    public void StallCurrent(TimeSpan time) => _currentWriter?.StallUntil(DateTime.UtcNow + time);
 
     /// <summary>
     ///     The house stops taking and working orders, for checks that need the streams quiet; versions
     ///     held for the order stream's skew still go out, and the database goes on writing.
     /// </summary>
-    public void Pause()
-    {
-        _paused = true;
-    }
+    public void Pause() => _paused = true;
 
-    public void Resume()
-    {
-        _paused = false;
-    }
+    public void Resume() => _paused = false;
 
-    public void Start()
-    {
-        _running = Task.WhenAll(
+    public void Start() => _running = Task.WhenAll(
             Task.Run(() => TradeAsync(_stop.Token)),
             Task.Run(() => _orderWriter.RunAsync(_stop.Token)),
             Task.Run(() => _fillWriter.RunAsync(_stop.Token)),
             _currentWriter is { } current ? Task.Run(() => current.RunAsync(_stop.Token)) : Task.CompletedTask);
-    }
 
     /// <summary>
     ///     Makes <paramref name="count" /> changes at once, now: for tests, and for a page that wants a burst.
@@ -504,10 +492,7 @@ public sealed class Exchange : IAsyncDisposable
         return weights.Length - 1;
     }
 
-    private string Pick((string Name, double Weight)[] names)
-    {
-        return names[Pick([.. names.Select(n => n.Weight)])].Name;
-    }
+    private string Pick((string Name, double Weight)[] names) => names[Pick([.. names.Select(n => n.Weight)])].Name;
 
     private enum Way
     {

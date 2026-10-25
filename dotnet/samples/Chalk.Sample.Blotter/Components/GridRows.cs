@@ -56,15 +56,9 @@ public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDispo
     /// <summary>Whether a row shown is still waiting for the database, so that its lag is worth showing again in a second.</summary>
     public bool Counting { get; private set; }
 
-    public void Dispose()
-    {
-        StopCounting();
-    }
+    public void Dispose() => StopCounting();
 
-    public bool IsOpen(Guid orderId)
-    {
-        return _open.ContainsKey(orderId);
-    }
+    public bool IsOpen(Guid orderId) => _open.ContainsKey(orderId);
 
     /// <summary>Opens an order's fills under it, or closes them.</summary>
     public void Toggle(Order order)
@@ -76,16 +70,10 @@ public sealed class GridRows(BlotterHost host, Tab tab, SortSpec order) : IDispo
     }
 
     /// <summary>What arrived above the rows in view: not let in yet, or let in and not yet scrolled up to.</summary>
-    public long NewAbove(double scrollTop)
-    {
-        return _hidden + Math.Min(_revealed, (long)(scrollTop / RowHeight));
-    }
+    public long NewAbove(double scrollTop) => _hidden + Math.Min(_revealed, (long)(scrollTop / RowHeight));
 
     /// <summary>Whether, scrolled up to <paramref name="scrollTop" />, there are rows to let in.</summary>
-    public bool CanReveal(double scrollTop, int near)
-    {
-        return _pages.Held && _hidden > 0 && scrollTop / RowHeight < near;
-    }
+    public bool CanReveal(double scrollTop, int near) => _pages.Held && _hidden > 0 && scrollTop / RowHeight < near;
 
     /// <summary>
     ///     The row of the tab at the top of the view, scrolled to <paramref name="scrollTop" />, read afresh; null at the

@@ -36,10 +36,7 @@ public sealed class AlertBook
     public bool Looking { get; set; }
 
     /// <summary>How many rows have fired alerts on <paramref name="tab" /> since the page opened.</summary>
-    public long FiredOn(Tab tab)
-    {
-        return _fired.GetValueOrDefault(tab.Name);
-    }
+    public long FiredOn(Tab tab) => _fired.GetValueOrDefault(tab.Name);
 
     public void Count(AlertEvent alert)
     {
@@ -48,8 +45,5 @@ public sealed class AlertBook
     }
 
     /// <summary>The alerts were looked at: the bell's dot goes.</summary>
-    public void Seen()
-    {
-        Unseen = false;
-    }
+    public void Seen() => Unseen = false;
 }

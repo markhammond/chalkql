@@ -160,17 +160,11 @@ public sealed class Condition
         return sql.Append(Text, at, Text.Length - at).ToString();
     }
 
-    public override string ToString()
-    {
-        return Text;
-    }
+    public override string ToString() => Text;
 
-    private static bool Same(string name, Token token)
-    {
-        return token.Kind == TokenKind.Quoted
+    private static bool Same(string name, Token token) => token.Kind == TokenKind.Quoted
             ? name == token.Text
             : name.Equals(token.Text, StringComparison.OrdinalIgnoreCase);
-    }
 
     private static Column? Resolve(Tab tab, Token token, out string? error)
     {
@@ -184,10 +178,7 @@ public sealed class Condition
         return error is null ? column : null;
     }
 
-    private static string Offer(IEnumerable<string> names)
-    {
-        return names.ToList() is [_, ..] some ? "; it has " + string.Join(", ", some) : "";
-    }
+    private static string Offer(IEnumerable<string> names) => names.ToList() is [_, ..] some ? "; it has " + string.Join(", ", some) : "";
 
     /// <summary>The condition's tokens, and what cannot be one.</summary>
     internal static List<Token> Tokens(string text, out List<ConditionError> errors)

@@ -44,22 +44,16 @@ public static class PostgresSql
     }
 
     /// <summary>A value written into SQL as PostgreSQL takes it.</summary>
-    public static string Literal(object? value)
+    public static string Literal(object? value) => value switch
     {
-        return value switch
-        {
-            DateTime time => string.Create(CultureInfo.InvariantCulture,
-                $"TIMESTAMP '{time:yyyy-MM-dd HH:mm:ss.ffffff}'"),
-            Guid id => $"'{id}'::uuid",
-            string text => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'",
-            double number => number.ToString("R", CultureInfo.InvariantCulture),
-            IFormattable other => other.ToString(null, CultureInfo.InvariantCulture),
-            _ => throw new ArgumentException($"no SQL literal for {value?.GetType().Name ?? "null"}", nameof(value))
-        };
-    }
+        DateTime time => string.Create(CultureInfo.InvariantCulture,
+            $"TIMESTAMP '{time:yyyy-MM-dd HH:mm:ss.ffffff}'"),
+        Guid id => $"'{id}'::uuid",
+        string text => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'",
+        double number => number.ToString("R", CultureInfo.InvariantCulture),
+        IFormattable other => other.ToString(null, CultureInfo.InvariantCulture),
+        _ => throw new ArgumentException($"no SQL literal for {value?.GetType().Name ?? "null"}", nameof(value))
+    };
 
-    private static string Quote(string text)
-    {
-        return "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'";
-    }
+    private static string Quote(string text) => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'";
 }

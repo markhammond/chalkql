@@ -48,54 +48,34 @@
     [Parameter]
     public EventCallback<(TimeSpan? LagOver, AlertCount? Count)> Changed { get; set; }
 
-    private string Kind()
+    private string Kind() => Count switch
     {
-        return Count switch
-        {
-            { Kind: CountKind.AtLeast } => "at-least",
-            { Kind: CountKind.None } => "none",
-            _ => LagOver is { } lag ? Seconds(lag) : ""
-        };
-    }
+        { Kind: CountKind.AtLeast } => "at-least",
+        { Kind: CountKind.None } => "none",
+        _ => LagOver is { } lag ? Seconds(lag) : ""
+    };
 
-    private Task ChooseAsync(string kind)
+    private Task ChooseAsync(string kind) => kind switch
     {
-        return kind switch
-        {
-            "" => Changed.InvokeAsync((null, null)),
-            "at-least" => Changed.InvokeAsync((null, new AlertCount(CountKind.AtLeast, Count?.Matches ?? 5, Count?.Window ?? TimeSpan.FromMinutes(1)))),
-            "none" => Changed.InvokeAsync((null, new AlertCount(CountKind.None, Count?.Matches ?? 5, Count?.Window ?? TimeSpan.FromMinutes(1)))),
-            var seconds => Changed.InvokeAsync((TimeSpan.FromSeconds(double.Parse(seconds, CultureInfo.InvariantCulture)), null))
-        };
-    }
+        "" => Changed.InvokeAsync((null, null)),
+        "at-least" => Changed.InvokeAsync((null, new AlertCount(CountKind.AtLeast, Count?.Matches ?? 5, Count?.Window ?? TimeSpan.FromMinutes(1)))),
+        "none" => Changed.InvokeAsync((null, new AlertCount(CountKind.None, Count?.Matches ?? 5, Count?.Window ?? TimeSpan.FromMinutes(1)))),
+        var seconds => Changed.InvokeAsync((TimeSpan.FromSeconds(double.Parse(seconds, CultureInfo.InvariantCulture)), null))
+    };
 
-    private Task ChangeAsync(AlertCount count)
-    {
-        return Changed.InvokeAsync((null, count));
-    }
+    private Task ChangeAsync(AlertCount count) => Changed.InvokeAsync((null, count));
 
-    private static string Seconds(TimeSpan lag)
-    {
-        return lag.TotalSeconds.ToString(CultureInfo.InvariantCulture);
-    }
+    private static string Seconds(TimeSpan lag) => lag.TotalSeconds.ToString(CultureInfo.InvariantCulture);
 
     // A window in whole minutes is shown in minutes; any other, in seconds.
-    private static (int Amount, string Unit) Amount(TimeSpan window)
-    {
-        return window.Ticks % TimeSpan.TicksPerMinute == 0 && window >= TimeSpan.FromMinutes(1)
+    private static (int Amount, string Unit) Amount(TimeSpan window) =>
+        window.Ticks % TimeSpan.TicksPerMinute == 0 && window >= TimeSpan.FromMinutes(1)
             ? ((int)window.TotalMinutes, "min")
             : ((int)window.TotalSeconds, "s");
-    }
 
-    private static TimeSpan Window(int amount, string unit)
-    {
-        return unit == "min" ? TimeSpan.FromMinutes(amount) : TimeSpan.FromSeconds(amount);
-    }
+    private static TimeSpan Window(int amount, string unit) => unit == "min" ? TimeSpan.FromMinutes(amount) : TimeSpan.FromSeconds(amount);
 
     // What is not a whole number reads as none, which the count then says is out of range.
-    private static int Whole(object? value)
-    {
-        return int.TryParse(value as string, NumberStyles.Integer, CultureInfo.InvariantCulture, out var whole) ? whole : 0;
-    }
+    private static int Whole(object? value) => int.TryParse(value as string, NumberStyles.Integer, CultureInfo.InvariantCulture, out var whole) ? whole : 0;
 
 }

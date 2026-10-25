@@ -107,10 +107,7 @@ public sealed class Pages(SourceQueries queries)
         _fills.Values.Sum(f => f.Fills.IsCompletedSuccessfully ? f.Fills.Result.Length * (long)Fill.Bytes : 0);
 
     /// <summary>A reader's place in the tab: the pages it reads, by position.</summary>
-    public PageView View(SortSpec order)
-    {
-        return new PageView(this, order);
-    }
+    public PageView View(SortSpec order) => new PageView(this, order);
 
     /// <summary>
     ///     About how many rows of the database pass the filter, at once: no page waits for a count. At first
@@ -151,16 +148,10 @@ public sealed class Pages(SourceQueries queries)
     }
 
     /// <summary>Whether the filter's rows have been counted, rather than only estimated.</summary>
-    public bool IsCounted(ScopeState state)
-    {
-        return _known.TryGetValue((state.Tab.Name, state.Filter.Name), out var known) && known.Counted is not null;
-    }
+    public bool IsCounted(ScopeState state) => _known.TryGetValue((state.Tab.Name, state.Filter.Name), out var known) && known.Counted is not null;
 
-    private async Task<long> EstimateAsync(Tab tab, FilterSpec filter)
-    {
-        return await queries.EstimateRowsAsync(tab, filter, CancellationToken.None).ConfigureAwait(false)
+    private async Task<long> EstimateAsync(Tab tab, FilterSpec filter) => await queries.EstimateRowsAsync(tab, filter, CancellationToken.None).ConfigureAwait(false)
                ?? await queries.CountAsync(tab, filter, CancellationToken.None).ConfigureAwait(false);
-    }
 
     private async Task CountLaterAsync(Known known, Tab tab, FilterSpec filter)
     {
@@ -333,10 +324,7 @@ public sealed class Pages(SourceQueries queries)
                ?? throw new InvalidOperationException("a window just read does not cover the read it was made for");
     }
 
-    private Shelf ShelfOf(ScopeState state, SortSpec order)
-    {
-        return _windows.GetOrAdd((state.Tab.Name, state.Filter.Name, order.Name), _ => new Shelf());
-    }
+    private Shelf ShelfOf(ScopeState state, SortSpec order) => _windows.GetOrAdd((state.Tab.Name, state.Filter.Name, order.Name), _ => new Shelf());
 
     /// <summary>
     ///     Reads a window from <paramref name="key" /> on: twice the rows asked for, or a large window for a slow sort;
@@ -438,10 +426,7 @@ public sealed class Pages(SourceQueries queries)
         return true;
     }
 
-    private bool Expired(Window window)
-    {
-        return Stopwatch.GetElapsedTime(window.ReadAt) > WindowFor;
-    }
+    private bool Expired(Window window) => Stopwatch.GetElapsedTime(window.ReadAt) > WindowFor;
 
     /// <summary>
     ///     The first <paramref name="limit" /> rows of <paramref name="window" /> from <paramref name="key" /> on,
@@ -479,13 +464,10 @@ public sealed class Pages(SourceQueries queries)
     }
 
     /// <summary>Whether <paramref name="row" /> falls among the rows <paramref name="window" /> read.</summary>
-    private static bool Contains(Window window, SortSpec order, IRow row)
-    {
-        return window.Rows.Length > 0
+    private static bool Contains(Window window, SortSpec order, IRow row) => window.Rows.Length > 0
                && (window.From is null || order.Compare(row, window.From) is var start &&
                    (start > 0 || (start == 0 && window.Inclusive)))
                && order.Compare(row, window.Rows[^1]) <= 0;
-    }
 
     /// <summary>Where the first row at or after <paramref name="key" /> (or after it) is in <paramref name="rows" />.</summary>
     private static int First(IRow[] rows, SortSpec order, IRow key, bool inclusive)
@@ -558,11 +540,8 @@ public sealed class Pages(SourceQueries queries)
         return [.. rows.Values];
     }
 
-    private static bool Within(SortSpec order, IRow row, IRow? key, bool inclusive, IRow? last)
-    {
-        return (key is null || order.Compare(row, key) is var from && (from > 0 || (inclusive && from == 0)))
+    private static bool Within(SortSpec order, IRow row, IRow? key, bool inclusive, IRow? last) => (key is null || order.Compare(row, key) is var from && (from > 0 || (inclusive && from == 0)))
                && (last is null || order.Compare(row, last) <= 0);
-    }
 
     /// <summary>
     ///     The database's rows in one order from one key (<see cref="From" />, or the first row when null),

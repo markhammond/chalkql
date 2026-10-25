@@ -67,21 +67,12 @@ public sealed class SortSpec : IComparer<IRow>, IEquatable<SortSpec>
         return 0;
     }
 
-    public bool Equals(SortSpec? other)
-    {
-        return other is not null && other.Tab == Tab && other.Name == Name;
-    }
+    public bool Equals(SortSpec? other) => other is not null && other.Tab == Tab && other.Name == Name;
 
-    public static SortSpec Of(Tab tab, params SortColumn[] keys)
-    {
-        return new SortSpec(tab, [.. keys]);
-    }
+    public static SortSpec Of(Tab tab, params SortColumn[] keys) => new SortSpec(tab, [.. keys]);
 
     /// <summary>The tab's own order: by its time, newest first.</summary>
-    public static SortSpec Default(Tab tab)
-    {
-        return new SortSpec(tab, [new SortColumn(tab.Time, true)]) { IsDefault = true };
-    }
+    public static SortSpec Default(Tab tab) => new SortSpec(tab, [new SortColumn(tab.Time, true)]) { IsDefault = true };
 
     /// <summary>
     ///     A header click, which cycles its column through descending, ascending and out of the sort. A
@@ -115,43 +106,22 @@ public sealed class SortSpec : IComparer<IRow>, IEquatable<SortSpec>
         return 0;
     }
 
-    public bool IsDescending(Column column)
-    {
-        return !IsDefault && Chosen.Any(k => k.Column == column && k.Descending);
-    }
+    public bool IsDescending(Column column) => !IsDefault && Chosen.Any(k => k.Column == column && k.Descending);
 
     /// <summary>Whether <paramref name="column" /> is what the tab's own order sorts by: shown, but muted, as not chosen.</summary>
-    public bool ByDefault(Column column)
-    {
-        return IsDefault && column == Tab.Time;
-    }
+    public bool ByDefault(Column column) => IsDefault && column == Tab.Time;
 
     /// <summary>Every key turned round: read from a row in this order, the rows before it, nearest first.</summary>
-    public SortSpec Reversed()
-    {
-        return new SortSpec(
+    public SortSpec Reversed() => new SortSpec(
             Tab, [.. Chosen.Select(k => k with { Descending = !k.Descending })],
             [.. Keys.Select(k => k with { Descending = !k.Descending })]);
-    }
 
     /// <summary>The <c>ORDER BY</c> list.</summary>
-    public string OrderBy()
-    {
-        return string.Join(", ", Keys.Select(k => k.Column.Name + (k.Descending ? " DESC" : " ASC")));
-    }
+    public string OrderBy() => string.Join(", ", Keys.Select(k => k.Column.Name + (k.Descending ? " DESC" : " ASC")));
 
-    public override bool Equals(object? obj)
-    {
-        return Equals(obj as SortSpec);
-    }
+    public override bool Equals(object? obj) => Equals(obj as SortSpec);
 
-    public override int GetHashCode()
-    {
-        return HashCode.Combine(Tab.Name, Name);
-    }
+    public override int GetHashCode() => HashCode.Combine(Tab.Name, Name);
 
-    public override string ToString()
-    {
-        return Name;
-    }
+    public override string ToString() => Name;
 }

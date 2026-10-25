@@ -36,9 +36,6 @@ public sealed class PostgresHouseDatabase : IHouseDatabase
     ///     <paramref name="binaries" />, or from the first PostgreSQL 16 or later found on this machine.
     /// </summary>
     public static async Task<PostgresHouseDatabase> StartAsync(string? connectionString, string? binaries,
-        CancellationToken ct)
-    {
-        return new PostgresHouseDatabase(
+        CancellationToken ct) => new PostgresHouseDatabase(
             await PgServer.StartAsync(connectionString, binaries, ct).ConfigureAwait(false));
-    }
 }

@@ -36,10 +36,7 @@ internal sealed class Spinner : IAsyncDisposable
     ///     A spinner showing <paramref name="status" />, read again on every turn; or nothing, when the output is not a
     ///     console.
     /// </summary>
-    public static IAsyncDisposable Start(Func<string> status)
-    {
-        return Console.IsOutputRedirected ? new Nothing() : new Spinner(status);
-    }
+    public static IAsyncDisposable Start(Func<string> status) => Console.IsOutputRedirected ? new Nothing() : new Spinner(status);
 
     private async Task TurnAsync()
     {
@@ -68,9 +65,6 @@ internal sealed class Spinner : IAsyncDisposable
 
     private sealed class Nothing : IAsyncDisposable
     {
-        public ValueTask DisposeAsync()
-        {
-            return ValueTask.CompletedTask;
-        }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

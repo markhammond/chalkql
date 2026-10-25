@@ -138,9 +138,7 @@ public static class ConditionCompletion
         return found.Select(v => new Suggestion(v, "text", column.Title, Apply: Column.Quote(v)));
     }
 
-    private static Suggestion Of(Column column, TabPath? path)
-    {
-        return new Suggestion(
+    private static Suggestion Of(Column column, TabPath? path) => new Suggestion(
             column.Name, "property",
             column.Kind switch
             {
@@ -153,7 +151,6 @@ public static class ConditionCompletion
             (path is null ? "" : path.Target.Title + ": ") + column.Title.Replace(' ', ' ').Replace(' ', ' ')
                                                            + (column.Description is { } about ? ". " + about : ""),
             Boost: path is null ? 1 : 0);
-    }
 
     private static IEnumerable<Suggestion> Operators(Column column)
     {
@@ -180,16 +177,10 @@ public static class ConditionCompletion
         yield return new Suggestion("IS NULL", "keyword", "along a path, nothing yet");
     }
 
-    private static List<Suggestion> Filter(string prefix, IEnumerable<Suggestion> options)
-    {
-        return [.. options.Where(o => o.Label.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))];
-    }
+    private static List<Suggestion> Filter(string prefix, IEnumerable<Suggestion> options) => [.. options.Where(o => o.Label.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))];
 
-    private static bool IsWord(Condition.Token token, params string[] words)
-    {
-        return token.Kind == Condition.TokenKind.Word &&
+    private static bool IsWord(Condition.Token token, params string[] words) => token.Kind == Condition.TokenKind.Word &&
                words.Any(w => w.Equals(token.Text, StringComparison.OrdinalIgnoreCase));
-    }
 
     /// <summary>The column the token at <paramref name="at" /> names, alone or at a path's end.</summary>
     private static Column? Named(Tab tab, List<Condition.Token> tokens, int at)

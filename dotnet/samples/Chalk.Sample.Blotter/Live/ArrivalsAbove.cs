@@ -51,10 +51,7 @@ public sealed class ArrivalsAbove : IDisposable
     /// <summary>Whether the count was given up, its reader having stopped taking it.</summary>
     public bool GaveUp { get; private set; }
 
-    public void Dispose()
-    {
-        _host.Arrived -= Note;
-    }
+    public void Dispose() => _host.Arrived -= Note;
 
     /// <summary>How many more rows sort above <paramref name="top" /> than at the last count; fewer, if negative.</summary>
     public async Task<long> TakeAsync(IRow top, CancellationToken ct)
@@ -107,8 +104,5 @@ public sealed class ArrivalsAbove : IDisposable
         foreach (var row in _order.Tab.Overrides ? (IEnumerable<IRow>)versions : fills) _arrived.Enqueue(row);
     }
 
-    private int Above(IRow row, IRow top)
-    {
-        return _filter.Columns.All(f => f.Matches(row)) && _order.Compare(row, top) < 0 ? 1 : 0;
-    }
+    private int Above(IRow row, IRow top) => _filter.Columns.All(f => f.Matches(row)) && _order.Compare(row, top) < 0 ? 1 : 0;
 }

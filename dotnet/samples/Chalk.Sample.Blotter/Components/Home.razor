@@ -191,22 +191,19 @@
     }
 
     /// <summary>An alert the host fired: counted for the bell, sounded by the page, and then let go.</summary>
-    private void OnFired(AlertEvent alert)
+    private void OnFired(AlertEvent alert) => _ = InvokeAsync(async () =>
     {
-        _ = InvokeAsync(async () =>
+        try
         {
-            try
-            {
-                await SoundAsync(alert);
-                _book.Session?.Acknowledge(alert.Seq);
-                StateHasChanged();
-            }
-            catch (JSDisconnectedException)
-            {
-                // The page went: the alert waits for the next one.
-            }
-        });
-    }
+            await SoundAsync(alert);
+            _book.Session?.Acknowledge(alert.Seq);
+            StateHasChanged();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The page went: the alert waits for the next one.
+        }
+    });
 
     private async Task SoundAsync(AlertEvent alert)
     {
@@ -265,20 +262,11 @@
         Host.WatchVitals(_vitals);
     }
 
-    private void Burst()
-    {
-        Host.Exchange.Send(3000);
-    }
+    private void Burst() => Host.Exchange.Send(3000);
 
-    private void Stall()
-    {
-        Host.Exchange.StallIngestion(TimeSpan.FromSeconds(20));
-    }
+    private void Stall() => Host.Exchange.StallIngestion(TimeSpan.FromSeconds(20));
 
-    private void ToggleDisorder()
-    {
-        Host.Exchange.Disordered = !Host.Exchange.Disordered;
-    }
+    private void ToggleDisorder() => Host.Exchange.Disordered = !Host.Exchange.Disordered;
 
     private void ToggleOutage()
     {
@@ -292,10 +280,7 @@
         }
     }
 
-    private void StallCurrent()
-    {
-        Host.Exchange.StallCurrent(TimeSpan.FromSeconds(20));
-    }
+    private void StallCurrent() => Host.Exchange.StallCurrent(TimeSpan.FromSeconds(20));
 
     public void Dispose()
     {

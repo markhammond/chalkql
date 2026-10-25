@@ -329,21 +329,15 @@ public sealed class AlertTables(
         if (why is not null) Refused = Refused.SetItem(name, why);
     }
 
-    private IRow? Resolve(AlertViewSpec spec, Guid id, Tail tail)
+    private IRow? Resolve(AlertViewSpec spec, Guid id, Tail tail) => (spec.Condition.Tab.Overrides, spec.LagOver is null) switch
     {
-        return (spec.Condition.Tab.Overrides, spec.LagOver is null) switch
-        {
-            (true, true) => _orders.TryGetValue(id, out var kept) ? kept.Order : null,
-            (true, false) => tail.Get(id)?.Live,
-            (false, true) => _fills.GetValueOrDefault(id),
-            (false, false) => tail.GetFill(id)
-        };
-    }
+        (true, true) => _orders.TryGetValue(id, out var kept) ? kept.Order : null,
+        (true, false) => tail.Get(id)?.Live,
+        (false, true) => _fills.GetValueOrDefault(id),
+        (false, false) => tail.GetFill(id)
+    };
 
-    private static Wait Of(Guid id, Reconciliation wait)
-    {
-        return new Wait(id, Cells.Micros(wait.Since), wait.At is { } at ? Cells.Micros(at) : Never);
-    }
+    private static Wait Of(Guid id, Reconciliation wait) => new Wait(id, Cells.Micros(wait.Since), wait.At is { } at ? Cells.Micros(at) : Never);
 
     /// <summary>
     ///     The matches one alert view saw, by slice of one width, since it began: what count views of

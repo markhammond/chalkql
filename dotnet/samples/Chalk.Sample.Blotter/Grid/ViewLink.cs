@@ -75,11 +75,8 @@ public sealed record ViewLink(Tab Tab, SortSpec Sort, FilterSpec Filter, IReadOn
 
         return Join(pairs);
 
-        static string Join(IEnumerable<(string Key, string Value)> pairs)
-        {
-            return string.Join("&",
+        static string Join(IEnumerable<(string Key, string Value)> pairs) => string.Join("&",
                 pairs.Select(p => Uri.EscapeDataString(p.Key) + "=" + Uri.EscapeDataString(p.Value)));
-        }
 
         void Add(string key, object? value)
         {
@@ -206,31 +203,19 @@ public sealed record ViewLink(Tab Tab, SortSpec Sort, FilterSpec Filter, IReadOn
         return new ViewLink(tab, sort, filtered, hidden, at);
     }
 
-    private static Column Named(Tab tab, string name)
-    {
-        return tab.Columns.FirstOrDefault(c => c.Name == name) ?? throw Refuse($"{tab.Title} has no column '{name}'");
-    }
+    private static Column Named(Tab tab, string name) => tab.Columns.FirstOrDefault(c => c.Name == name) ?? throw Refuse($"{tab.Title} has no column '{name}'");
 
-    private static string Single(string key, ImmutableArray<string> values)
-    {
-        return values.Length == 1 ? values[0] : throw Refuse($"'{key}' is given {values.Length} times");
-    }
+    private static string Single(string key, ImmutableArray<string> values) => values.Length == 1 ? values[0] : throw Refuse($"'{key}' is given {values.Length} times");
 
-    private static ArgumentException Refuse(string why)
-    {
-        return new ArgumentException($"the link is not a view of the blotter: {why}");
-    }
+    private static ArgumentException Refuse(string why) => new ArgumentException($"the link is not a view of the blotter: {why}");
 
-    private static string Write(object value)
+    private static string Write(object value) => value switch
     {
-        return value switch
-        {
-            DateTime time => time.ToString(TimeFormat, CultureInfo.InvariantCulture),
-            double number => number.ToString("R", CultureInfo.InvariantCulture),
-            IFormattable other => other.ToString(null, CultureInfo.InvariantCulture),
-            _ => value.ToString() ?? ""
-        };
-    }
+        DateTime time => time.ToString(TimeFormat, CultureInfo.InvariantCulture),
+        double number => number.ToString("R", CultureInfo.InvariantCulture),
+        IFormattable other => other.ToString(null, CultureInfo.InvariantCulture),
+        _ => value.ToString() ?? ""
+    };
 
     /// <summary>A value of <paramref name="column" />, as <paramref name="type" />, from the link.</summary>
     private static object Read(Column column, Type type, string text)

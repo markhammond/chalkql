@@ -40,9 +40,7 @@ public sealed class PostgresTradeRepository(string connectionString) : ITradeRep
 
     public string ConnectionString { get; } = connectionString;
 
-    public void CreateTables()
-    {
-        Execute($"""
+    public void CreateTables() => Execute($"""
                  CREATE UNLOGGED TABLE order_versions ({OrderColumns});
                  CREATE UNLOGGED TABLE orders_current ({OrderColumns});
                  CREATE UNLOGGED TABLE fills (
@@ -62,7 +60,6 @@ public sealed class PostgresTradeRepository(string connectionString) : ITradeRep
                      markup_bps  double precision NOT NULL
                  );
                  """);
-    }
 
     /// <summary>
     ///     The keys and the indexes the blotter reads by, each built on a connection of its own (PostgreSQL
@@ -102,10 +99,7 @@ public sealed class PostgresTradeRepository(string connectionString) : ITradeRep
     /// <summary>
     ///     A bulk load on three connections, one per table, so that the three <c>COPY</c>s stream side by side.
     /// </summary>
-    public ITradeLoad BeginLoad()
-    {
-        return new Load(this);
-    }
+    public ITradeLoad BeginLoad() => new Load(this);
 
     public List<Order> OpenOrders()
     {
@@ -119,15 +113,9 @@ public sealed class PostgresTradeRepository(string connectionString) : ITradeRep
         return open;
     }
 
-    public void WriteOrders(IReadOnlyList<Order> versions)
-    {
-        Copy("order_versions", versions, WriteOrder);
-    }
+    public void WriteOrders(IReadOnlyList<Order> versions) => Copy("order_versions", versions, WriteOrder);
 
-    public void WriteFills(IReadOnlyList<Fill> fills)
-    {
-        Copy("fills", fills, WriteFill);
-    }
+    public void WriteFills(IReadOnlyList<Fill> fills) => Copy("fills", fills, WriteFill);
 
     public void UpsertCurrent(IReadOnlyList<Order> versions)
     {
@@ -256,20 +244,11 @@ public sealed class PostgresTradeRepository(string connectionString) : ITradeRep
             _fills = _connections[2].BeginBinaryImport("COPY fills FROM STDIN (FORMAT BINARY)");
         }
 
-        public void AddVersion(Order version)
-        {
-            WriteOrder(_versions, version);
-        }
+        public void AddVersion(Order version) => WriteOrder(_versions, version);
 
-        public void AddCurrent(Order order)
-        {
-            WriteOrder(_current, order);
-        }
+        public void AddCurrent(Order order) => WriteOrder(_current, order);
 
-        public void AddFill(Fill fill)
-        {
-            WriteFill(_fills, fill);
-        }
+        public void AddFill(Fill fill) => WriteFill(_fills, fill);
 
         public void Complete()
         {

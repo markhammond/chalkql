@@ -23,9 +23,6 @@
 @code {
 
     // Ids and addresses the host makes, nothing a reader typed: safe to write into the script as JSON.
-    private string SoundUrls()
-    {
-        return JsonSerializer.Serialize(AlertSounds.All.ToDictionary(s => s.Id, s => Assets[AlertSounds.Path(s.Id)]));
-    }
+    private string SoundUrls() => JsonSerializer.Serialize(AlertSounds.All.ToDictionary(s => s.Id, s => Assets[AlertSounds.Path(s.Id)]));
 
 }

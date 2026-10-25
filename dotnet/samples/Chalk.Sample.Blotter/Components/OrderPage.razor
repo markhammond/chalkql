@@ -144,9 +144,6 @@
         });
     }
 
-    public void Dispose()
-    {
-        Host.Published -= OnPublished;
-    }
+    public void Dispose() => Host.Published -= OnPublished;
 
 }

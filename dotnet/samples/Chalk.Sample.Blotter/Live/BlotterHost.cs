@@ -240,93 +240,81 @@ public sealed class BlotterHost : IAsyncDisposable
     ///     back with <see cref="ReleaseAsync" />.
     /// </summary>
     /// <exception cref="BlotterRefusedException">The host is not serving, or the scope would not fit the budget.</exception>
-    public Task<LiveScope> AcquireAsync(Tab tab, FilterSpec filter, CancellationToken ct)
-    {
-        return OnLoopAsync(async () =>
-        {
-            RefuseUnlessLive();
-            var name = tab.Name + ": " + filter.Name;
-            if (_scopes.TryGetValue(name, out var open) && open.Fault is null)
-            {
-                open.Pages++;
-                open.Idle = null;
-                return open;
-            }
+    public Task<LiveScope> AcquireAsync(Tab tab, FilterSpec filter, CancellationToken ct) => OnLoopAsync(async () =>
+                                                                                                  {
+                                                                                                      RefuseUnlessLive();
+                                                                                                      var name = tab.Name + ": " + filter.Name;
+                                                                                                      if (_scopes.TryGetValue(name, out var open) && open.Fault is null)
+                                                                                                      {
+                                                                                                          open.Pages++;
+                                                                                                          open.Idle = null;
+                                                                                                          return open;
+                                                                                                      }
 
-            if (open is not null) await CloseAsync(open).ConfigureAwait(false);
+                                                                                                      if (open is not null) await CloseAsync(open).ConfigureAwait(false);
 
-            // A scope holds a row for each order or fill of the tail its filter can see, so it costs about
-            // what the scopes open now cost per row, times the tail. Idle scopes make room first.
-            var estimate = ScopeEstimate();
-            foreach (var idle in _scopes.Values.Where(s => s.Pages == 0).ToList())
-            {
-                if (LiveBytes() + estimate <= _budget.Bytes) break;
+                                                                                                      // A scope holds a row for each order or fill of the tail its filter can see, so it costs about
+                                                                                                      // what the scopes open now cost per row, times the tail. Idle scopes make room first.
+                                                                                                      var estimate = ScopeEstimate();
+                                                                                                      foreach (var idle in _scopes.Values.Where(s => s.Pages == 0).ToList())
+                                                                                                      {
+                                                                                                          if (LiveBytes() + estimate <= _budget.Bytes) break;
 
-                await CloseAsync(idle).ConfigureAwait(false);
-            }
+                                                                                                          await CloseAsync(idle).ConfigureAwait(false);
+                                                                                                      }
 
-            while (LiveBytes() + estimate > _budget.Bytes &&
-                   RaiseBudget($"another live scope would hold about {Megabytes(estimate)}"))
-            {
-            }
+                                                                                                      while (LiveBytes() + estimate > _budget.Bytes &&
+                                                                                                             RaiseBudget($"another live scope would hold about {Megabytes(estimate)}"))
+                                                                                                      {
+                                                                                                      }
 
-            if (LiveBytes() + estimate > _budget.Bytes)
-                throw new BlotterRefusedException(string.Create(CultureInfo.InvariantCulture,
-                    $"no live scope for this filter: another would hold about {Megabytes(estimate)}, and the tail and "
-                    + $"{_scopes.Count} open scopes already hold {Megabytes(LiveBytes())} of the {Megabytes(_budget.Bytes)} budget"));
+                                                                                                      if (LiveBytes() + estimate > _budget.Bytes)
+                                                                                                          throw new BlotterRefusedException(string.Create(CultureInfo.InvariantCulture,
+                                                                                                              $"no live scope for this filter: another would hold about {Megabytes(estimate)}, and the tail and "
+                                                                                                              + $"{_scopes.Count} open scopes already hold {Megabytes(LiveBytes())} of the {Megabytes(_budget.Bytes)} budget"));
 
-            while (true)
-            {
-                var scope = await LiveScope.CreateAsync(_engine!, tab, filter, _budget.Bytes, Options.Maintenance, ct)
-                    .ConfigureAwait(false);
-                await scope.UpdateAsync(_tail, _version, Mark(), ct).ConfigureAwait(false);
-                if (scope.Fault is { } fault)
-                {
-                    await scope.DisposeAsync().ConfigureAwait(false);
-                    if (RaiseBudget($"the live scope for this filter could not start: {fault.Message}")) continue;
+                                                                                                      while (true)
+                                                                                                      {
+                                                                                                          var scope = await LiveScope.CreateAsync(_engine!, tab, filter, _budget.Bytes, Options.Maintenance, ct)
+                                                                                                              .ConfigureAwait(false);
+                                                                                                          await scope.UpdateAsync(_tail, _version, Mark(), ct).ConfigureAwait(false);
+                                                                                                          if (scope.Fault is { } fault)
+                                                                                                          {
+                                                                                                              await scope.DisposeAsync().ConfigureAwait(false);
+                                                                                                              if (RaiseBudget($"the live scope for this filter could not start: {fault.Message}")) continue;
 
-                    throw new BlotterRefusedException(
-                        $"the live scope for this filter could not start: {fault.Message}");
-                }
+                                                                                                              throw new BlotterRefusedException(
+                                                                                                                  $"the live scope for this filter could not start: {fault.Message}");
+                                                                                                          }
 
-                scope.Pages = 1;
-                _scopes[name] = scope;
-                return scope;
-            }
-        });
-    }
+                                                                                                          scope.Pages = 1;
+                                                                                                          _scopes[name] = scope;
+                                                                                                          return scope;
+                                                                                                      }
+                                                                                                  });
 
-    public Task ReleaseAsync(LiveScope scope)
-    {
-        return OnLoopAsync(() =>
-        {
-            scope.Pages = Math.Max(0, scope.Pages - 1);
-            if (scope.Pages == 0) scope.Idle = DateTime.UtcNow;
+    public Task ReleaseAsync(LiveScope scope) => OnLoopAsync(() =>
+                                                      {
+                                                          scope.Pages = Math.Max(0, scope.Pages - 1);
+                                                          if (scope.Pages == 0) scope.Idle = DateTime.UtcNow;
 
-            return Task.FromResult(true);
-        });
-    }
+                                                          return Task.FromResult(true);
+                                                      });
 
     /// <summary>Sets the budget. Open scopes keep the share they were made with until they close.</summary>
-    public Task SetBudgetAsync(long bytes)
-    {
-        return OnLoopAsync(async () =>
-        {
-            _budget.Choose(bytes);
-            if (State == BlotterState.Live) await KeepWithinBudgetAsync().ConfigureAwait(false);
+    public Task SetBudgetAsync(long bytes) => OnLoopAsync(async () =>
+                                                   {
+                                                       _budget.Choose(bytes);
+                                                       if (State == BlotterState.Live) await KeepWithinBudgetAsync().ConfigureAwait(false);
 
-            return true;
-        });
-    }
+                                                       return true;
+                                                   });
 
     /// <summary>
     ///     A page opens (or closes) its vital statistics: the host reads what only they show while any page has them
     ///     open.
     /// </summary>
-    public void WatchVitals(bool watching)
-    {
-        Interlocked.Add(ref _vitalsWatchers, watching ? 1 : -1);
-    }
+    public void WatchVitals(bool watching) => Interlocked.Add(ref _vitalsWatchers, watching ? 1 : -1);
 
     /// <summary>Waits until the host has read everything the streams have sent so far, and its scopes have taken it.</summary>
     public async Task CaughtUpAsync(CancellationToken ct)
@@ -746,11 +734,8 @@ public sealed class BlotterHost : IAsyncDisposable
     }
 
     /// <summary>How far the host has read each stream, now: by time, and by count.</summary>
-    private StreamMark Mark()
-    {
-        return new StreamMark(OrdersThrough, FillsThrough, Interlocked.Read(ref _ordersRead),
+    private StreamMark Mark() => new StreamMark(OrdersThrough, FillsThrough, Interlocked.Read(ref _ordersRead),
             Interlocked.Read(ref _fillsRead));
-    }
 
     /// <summary>One refresh of the engine, then every scope brought to it, then the pages told.</summary>
     private async Task RefreshAsync(Action<RefreshBuilder> changes, DateTime ordersThrough, DateTime fillsThrough,
@@ -867,10 +852,7 @@ public sealed class BlotterHost : IAsyncDisposable
         };
     }
 
-    private long SafeDatabaseBytes()
-    {
-        return _house?.Repository.SizeBytes() ?? Status.DatabaseBytes;
-    }
+    private long SafeDatabaseBytes() => _house?.Repository.SizeBytes() ?? Status.DatabaseBytes;
 
     /// <summary>While no budget is chosen, raises it to the next step, and lets the kept windows grow with it.</summary>
     private bool RaiseBudget(string why)
@@ -883,15 +865,9 @@ public sealed class BlotterHost : IAsyncDisposable
     }
 
     /// <summary>What the host cannot give back without dropping a version: the tail, and the scopes over it.</summary>
-    private long LiveBytes()
-    {
-        return _tail.Bytes + _scopes.Values.Sum(s => s.ViewBytes + s.State.Bytes) + (_alerts?.Bytes ?? 0);
-    }
+    private long LiveBytes() => _tail.Bytes + _scopes.Values.Sum(s => s.ViewBytes + s.State.Bytes) + (_alerts?.Bytes ?? 0);
 
-    private long PageRows()
-    {
-        return _budget.PageRows(LiveBytes());
-    }
+    private long PageRows() => _budget.PageRows(LiveBytes());
 
     /// <summary>What another scope would hold: a row for every order in the tail, at what the open ones cost a row.</summary>
     private long ScopeEstimate()
@@ -902,8 +878,5 @@ public sealed class BlotterHost : IAsyncDisposable
         return Math.Max(256 << 10, _tail.Count * perRow);
     }
 
-    internal static string Megabytes(long bytes)
-    {
-        return string.Create(CultureInfo.InvariantCulture, $"{bytes / 1048576.0:F1} MB");
-    }
+    internal static string Megabytes(long bytes) => string.Create(CultureInfo.InvariantCulture, $"{bytes / 1048576.0:F1} MB");
 }

@@ -85,15 +85,12 @@ public sealed record ColumnFilter
     }
 
     /// <summary>Canonical: values sorted and distinct, times to the microsecond.</summary>
-    public ColumnFilter Canonical()
+    public ColumnFilter Canonical() => this with
     {
-        return this with
-        {
-            Values = [.. Values.Where(v => v.Length > 0).Distinct().Order(StringComparer.Ordinal)],
-            From = From is { } from ? Cells.Micros(from) : null,
-            To = To is { } to ? Cells.Micros(to) : null
-        };
-    }
+        Values = [.. Values.Where(v => v.Length > 0).Distinct().Order(StringComparer.Ordinal)],
+        From = From is { } from ? Cells.Micros(from) : null,
+        To = To is { } to ? Cells.Micros(to) : null
+    };
 
     /// <summary>What a person reads in the filter's pill.</summary>
     public string Describe()
@@ -150,27 +147,15 @@ public sealed class FilterSpec
         ]);
     }
 
-    public ColumnFilter? For(Column column)
-    {
-        return Columns.FirstOrDefault(c => c.Column == column);
-    }
+    public ColumnFilter? For(Column column) => Columns.FirstOrDefault(c => c.Column == column);
 
     /// <summary>Whether <paramref name="row" /> passes every column's filter, decided in the host.</summary>
-    public bool Matches(IRow row)
-    {
-        return Columns.All(c => c.Matches(row));
-    }
+    public bool Matches(IRow row) => Columns.All(c => c.Matches(row));
 
     /// <summary>This filter with <paramref name="filter" /> in place of its column's, or without it when it is empty.</summary>
-    public FilterSpec With(ColumnFilter filter)
-    {
-        return Of([.. Columns.Where(c => c.Column != filter.Column), filter]);
-    }
+    public FilterSpec With(ColumnFilter filter) => Of([.. Columns.Where(c => c.Column != filter.Column), filter]);
 
-    public FilterSpec Without(Column column)
-    {
-        return Of(Columns.Where(c => c.Column != column));
-    }
+    public FilterSpec Without(Column column) => Of(Columns.Where(c => c.Column != column));
 
     /// <summary>
     ///     The conditions, joined by <c>AND</c>, over columns named with <paramref name="prefix" />; <c>TRUE</c>
@@ -273,16 +258,10 @@ public sealed class FilterSpec
         return string.Join(" AND ", conditions);
     }
 
-    public override string ToString()
-    {
-        return Name;
-    }
+    public override string ToString() => Name;
 
     /// <summary>A typed value matched literally by <c>LIKE … ESCAPE '\'</c>: its wildcards and the escape itself escaped.</summary>
-    private static string Escape(string text)
-    {
-        return text.Replace("\\", "\\\\", StringComparison.Ordinal)
+    private static string Escape(string text) => text.Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("%", "\\%", StringComparison.Ordinal)
             .Replace("_", "\\_", StringComparison.Ordinal);
-    }
 }

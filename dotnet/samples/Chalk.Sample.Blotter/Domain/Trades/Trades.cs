@@ -39,9 +39,7 @@ public sealed record Order(
 
     public Guid Id => OrderId;
 
-    public static Order Read(RecordBatch batch, int row)
-    {
-        return new Order(
+    public static Order Read(RecordBatch batch, int row) => new Order(
             Cells.Uuid(batch.Column(0), row),
             (int)Cells.Int64(batch.Column(1), row),
             Cells.Time(batch.Column(2), row),
@@ -58,11 +56,8 @@ public sealed record Order(
             Cells.Double(batch.Column(13), row),
             Cells.Double(batch.Column(14), row),
             Cells.Text(batch.Column(15), row));
-    }
 
-    public static Order Read(DbDataReader reader)
-    {
-        return new Order(
+    public static Order Read(DbDataReader reader) => new Order(
             reader.GetGuid(0),
             reader.GetInt32(1),
             Cells.Micros(reader.GetDateTime(2)),
@@ -79,23 +74,15 @@ public sealed record Order(
             reader.GetDouble(13),
             reader.GetDouble(14),
             string.Intern(reader.GetString(15)));
-    }
 
-    public object?[] Values()
-    {
-        return
-        [
+    public object?[] Values() => [
             OrderId, Version, EventTime, OrderTime, ClOrdId, Client, Region, Channel, Instrument, Side, Qty, FilledQty,
             AvgPrice, FilledAmt, MarkupBps, Status
         ];
-    }
 
-    public override string ToString()
-    {
-        return string.Create(
+    public override string ToString() => string.Create(
             CultureInfo.InvariantCulture,
             $"#{OrderId} v{Version} {Client} {Side} {Qty} {Instrument} filled {FilledQty} @ {AvgPrice} {Status}");
-    }
 }
 
 /// <summary>
@@ -128,9 +115,7 @@ public sealed record Fill(
 
     public int Version => 1;
 
-    public static Fill Read(RecordBatch batch, int row)
-    {
-        return new Fill(
+    public static Fill Read(RecordBatch batch, int row) => new Fill(
             Cells.Uuid(batch.Column(0), row),
             Cells.Uuid(batch.Column(1), row),
             Cells.Time(batch.Column(2), row),
@@ -145,11 +130,8 @@ public sealed record Fill(
             Cells.Double(batch.Column(11), row),
             Cells.Double(batch.Column(12), row),
             Cells.Double(batch.Column(13), row));
-    }
 
-    public static Fill Read(DbDataReader reader)
-    {
-        return new Fill(
+    public static Fill Read(DbDataReader reader) => new Fill(
             reader.GetGuid(0),
             reader.GetGuid(1),
             Cells.Micros(reader.GetDateTime(2)),
@@ -164,20 +146,12 @@ public sealed record Fill(
             reader.GetDouble(11),
             reader.GetDouble(12),
             reader.GetDouble(13));
-    }
 
-    public object?[] Values()
-    {
-        return
-        [
+    public object?[] Values() => [
             FillId, OrderId, EventTime, ClOrdId, Client, Region, Channel, Instrument, Side, Qty, Price, Amt, Mid,
             MarkupBps
         ];
-    }
 
-    public override string ToString()
-    {
-        return string.Create(
+    public override string ToString() => string.Create(
             CultureInfo.InvariantCulture, $"fill #{FillId} of #{OrderId} {Side} {Qty} {Instrument} @ {Price}");
-    }
 }

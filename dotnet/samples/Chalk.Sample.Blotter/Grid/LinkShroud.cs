@@ -15,10 +15,7 @@ public sealed class LinkShroud(IDataProtectionProvider provider)
     private readonly IDataProtector _protector = provider.CreateProtector("Chalk.Sample.Blotter.ViewLink.v1");
 
     /// <summary>Text, shrouded: URL-safe, and different every time, though it opens the same.</summary>
-    public string Shroud(string text)
-    {
-        return _protector.Protect(text);
-    }
+    public string Shroud(string text) => _protector.Protect(text);
 
     /// <summary>The text a value shrouds.</summary>
     /// <exception cref="ArgumentException">The value was altered, or shrouded by keys the host does not have.</exception>

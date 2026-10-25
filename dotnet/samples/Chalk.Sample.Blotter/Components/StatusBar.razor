@@ -91,21 +91,12 @@ else
 
     [Parameter] public EventCallback<long> BudgetChanged { get; set; }
 
-    private Task ChangeAsync(ChangeEventArgs change)
-    {
-        return BudgetChanged.InvokeAsync(long.Parse((string)change.Value!, CultureInfo.InvariantCulture) << 20);
-    }
+    private Task ChangeAsync(ChangeEventArgs change) => BudgetChanged.InvokeAsync(long.Parse((string)change.Value!, CultureInfo.InvariantCulture) << 20);
 
-    private static string Mb(long bytes)
-    {
-        return BlotterHost.Megabytes(bytes);
-    }
+    private static string Mb(long bytes) => BlotterHost.Megabytes(bytes);
 
-    private static string Seconds(TimeSpan? time)
-    {
-        return time is { } t
-            ? t.TotalSeconds.ToString("F1", CultureInfo.InvariantCulture) + " s"
-            : "–";
-    }
+    private static string Seconds(TimeSpan? time) => time is { } t
+        ? t.TotalSeconds.ToString("F1", CultureInfo.InvariantCulture) + " s"
+        : "–";
 
 }

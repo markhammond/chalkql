@@ -152,10 +152,7 @@
     }
 
     // The name box shows the name an alert takes if none is typed.
-    private string NamePlaceholder()
-    {
-        return DefaultName();
-    }
+    private string NamePlaceholder() => DefaultName();
 
     private string DefaultName()
     {
@@ -184,24 +181,13 @@
     }
 
     // A count out of range is not kept: the rule keeps the one it had, and the count says what is wrong.
-    private Task SaveWhenAsync(AlertRule rule, (TimeSpan? LagOver, AlertCount? Count) when)
-    {
-        return when.Count?.Problem() is null ? SaveAsync(rule with { LagOver = when.LagOver, Count = when.Count }) : Task.CompletedTask;
-    }
+    private Task SaveWhenAsync(AlertRule rule, (TimeSpan? LagOver, AlertCount? Count) when) =>
+        when.Count?.Problem() is null ? SaveAsync(rule with { LagOver = when.LagOver, Count = when.Count }) : Task.CompletedTask;
 
-    private Task SaveAsync(AlertRule changed)
-    {
-        return Book.SaveAsync([.. Book.Rules.Select(r => r.Id == changed.Id ? changed : r)]);
-    }
+    private Task SaveAsync(AlertRule changed) => Book.SaveAsync([.. Book.Rules.Select(r => r.Id == changed.Id ? changed : r)]);
 
-    private Task RemoveAsync(AlertRule removed)
-    {
-        return Book.SaveAsync([.. Book.Rules.Where(r => r.Id != removed.Id)]);
-    }
+    private Task RemoveAsync(AlertRule removed) => Book.SaveAsync([.. Book.Rules.Where(r => r.Id != removed.Id)]);
 
-    private static string Describe(FilterSpec filter)
-    {
-        return filter.Columns.IsEmpty ? "every row" : string.Join("; ", filter.Columns.Select(f => f.Describe()));
-    }
+    private static string Describe(FilterSpec filter) => filter.Columns.IsEmpty ? "every row" : string.Join("; ", filter.Columns.Select(f => f.Describe()));
 
 }

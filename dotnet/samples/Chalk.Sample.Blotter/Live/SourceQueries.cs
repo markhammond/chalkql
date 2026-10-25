@@ -69,15 +69,10 @@ public sealed partial class SourceQueries(
     ///     rather than bound, the planner knows how many rows a read returns; rounded, a few plans serve
     ///     every read.
     /// </summary>
-    public static int Rounded(int rows)
-    {
-        return (int)Math.Max(64, BitOperations.RoundUpToPowerOf2((uint)Math.Max(1, rows)));
-    }
+    public static int Rounded(int rows) => (int)Math.Max(64, BitOperations.RoundUpToPowerOf2((uint)Math.Max(1, rows)));
 
     /// <summary>A read of a tab, for the page's "how" panel: from a key on, as every page after the first is read.</summary>
-    public static string ReadSql(Tab tab, FilterSpec filter, SortSpec order, bool fromKey, int limit = FirstPage)
-    {
-        return string.Create(
+    public static string ReadSql(Tab tab, FilterSpec filter, SortSpec order, bool fromKey, int limit = FirstPage) => string.Create(
             CultureInfo.InvariantCulture, $"""
                                            SELECT {tab.Select}
                                            FROM {tab.Table}
@@ -85,7 +80,6 @@ public sealed partial class SourceQueries(
                                            ORDER BY {order.OrderBy()}
                                            LIMIT {Rounded(limit)}
                                            """);
-    }
 
     /// <summary>
     ///     The first rows of the database that pass the filter in order, from <paramref name="from" /> on (or
@@ -124,39 +118,27 @@ public sealed partial class SourceQueries(
     }
 
     /// <summary>How many rows of the database pass the filter.</summary>
-    public async Task<long> CountAsync(Tab tab, FilterSpec filter, CancellationToken ct)
-    {
-        return await CountAsync($"SELECT COUNT(*) AS n FROM {tab.Table} WHERE {filter.Where()}", filter.Parameters(),
+    public async Task<long> CountAsync(Tab tab, FilterSpec filter, CancellationToken ct) => await CountAsync($"SELECT COUNT(*) AS n FROM {tab.Table} WHERE {filter.Where()}", filter.Parameters(),
                 ct)
             .ConfigureAwait(false);
-    }
 
     /// <summary>
     ///     How many rows of the database pass the filter, counted off any page's path: by the database
     ///     directly, for up to <paramref name="limit" />, where a page's count has the time limit; through
     ///     ChalkQL where the database gives no counts of its own.
     /// </summary>
-    public async Task<long> CountLaterAsync(Tab tab, FilterSpec filter, TimeSpan limit, CancellationToken ct)
-    {
-        return explain is null
+    public async Task<long> CountLaterAsync(Tab tab, FilterSpec filter, TimeSpan limit, CancellationToken ct) => explain is null
             ? await CountAsync(tab, filter, ct).ConfigureAwait(false)
             : await explain.CountAsync(tab, filter, limit, ct).ConfigureAwait(false);
-    }
 
     /// <summary>About how many rows of the database pass the filter, by the database's estimate; none without one.</summary>
-    public async Task<long?> EstimateRowsAsync(Tab tab, FilterSpec filter, CancellationToken ct)
-    {
-        return explain is null ? null : await explain.RowsAsync(tab, filter, ct).ConfigureAwait(false);
-    }
+    public async Task<long?> EstimateRowsAsync(Tab tab, FilterSpec filter, CancellationToken ct) => explain is null ? null : await explain.RowsAsync(tab, filter, ct).ConfigureAwait(false);
 
     /// <summary>
     ///     About how many rows of the database pass the filter and sort before <paramref name="key" />, by the database's
     ///     estimate.
     /// </summary>
-    public async Task<long?> EstimateBeforeAsync(FilterSpec filter, SortSpec order, IRow key, CancellationToken ct)
-    {
-        return explain is null ? null : await explain.RowsBeforeAsync(filter, order, key, ct).ConfigureAwait(false);
-    }
+    public async Task<long?> EstimateBeforeAsync(FilterSpec filter, SortSpec order, IRow key, CancellationToken ct) => explain is null ? null : await explain.RowsBeforeAsync(filter, order, key, ct).ConfigureAwait(false);
 
     /// <summary>How many rows of the database pass the filter and sort before <paramref name="key" />.</summary>
     public async Task<long> CountBeforeAsync(FilterSpec filter, SortSpec order, IRow key, CancellationToken ct)
@@ -199,22 +181,15 @@ public sealed partial class SourceQueries(
     }
 
     /// <summary>Which of these fills the database holds.</summary>
-    public async Task<HashSet<Guid>> FillsHeldAsync(IReadOnlyList<Guid> fillIds, CancellationToken ct)
-    {
-        return
-        [
+    public async Task<HashSet<Guid>> FillsHeldAsync(IReadOnlyList<Guid> fillIds, CancellationToken ct) => [
             .. (await LookupAsync(
                     Tabs.Fills, $"SELECT {Fill.Select} FROM blotter.fills WHERE fill_id IN @ids", fillIds, ct)
                 .ConfigureAwait(false))
             .Select(f => f.Id)
         ];
-    }
 
     /// <summary>An order's fills in the database, oldest first.</summary>
-    public async Task<Fill[]> FillsOfAsync(Guid orderId, CancellationToken ct)
-    {
-        return
-        [
+    public async Task<Fill[]> FillsOfAsync(Guid orderId, CancellationToken ct) => [
             .. (await RowsAsync(
                 Tabs.Fills,
                 $"SELECT {Fill.Select} FROM blotter.fills WHERE order_id = @order ORDER BY event_time",
@@ -222,16 +197,12 @@ public sealed partial class SourceQueries(
                 "an order's fills",
                 ct).ConfigureAwait(false)).Cast<Fill>()
         ];
-    }
 
     /// <summary>
     ///     Every version of one order, newest first: those the database has, and those only the tail has
     ///     yet, in one statement over both. A version in both is the same row, and the union keeps one.
     /// </summary>
-    public async Task<Order[]> HistoryAsync(Guid orderId, CancellationToken ct)
-    {
-        return
-        [
+    public async Task<Order[]> HistoryAsync(Guid orderId, CancellationToken ct) => [
             .. (await RowsAsync(
                 Tabs.Orders,
                 $"""
@@ -244,16 +215,12 @@ public sealed partial class SourceQueries(
                 "an order's history",
                 ct).ConfigureAwait(false)).Cast<Order>()
         ];
-    }
 
     /// <summary>
     ///     Every fill of one order, newest first: those the database has and those only the tail has yet,
     ///     in one statement over both; a fill in both is one row.
     /// </summary>
-    public async Task<Fill[]> AllFillsOfAsync(Guid orderId, CancellationToken ct)
-    {
-        return
-        [
+    public async Task<Fill[]> AllFillsOfAsync(Guid orderId, CancellationToken ct) => [
             .. (await RowsAsync(
                 Tabs.Fills,
                 $"""
@@ -266,7 +233,6 @@ public sealed partial class SourceQueries(
                 "an order's fills",
                 ct).ConfigureAwait(false)).Cast<Fill>()
         ];
-    }
 
     /// <summary>The versions of one order the tail has and the database does not show yet.</summary>
     public async Task<HashSet<int>> TailOnlyAsync(Guid orderId, CancellationToken ct)
@@ -287,10 +253,7 @@ public sealed partial class SourceQueries(
     ///     The gap fill: every order version <c>order_versions</c> holds with an event time at or after
     ///     <paramref name="since" />, oldest first, for the host to take as if the stream had sent it.
     /// </summary>
-    public async Task<Order[]> VersionsSinceAsync(DateTime since, CancellationToken ct)
-    {
-        return
-        [
+    public async Task<Order[]> VersionsSinceAsync(DateTime since, CancellationToken ct) => [
             .. (await RowsAsync(
                 Tabs.Orders,
                 $"SELECT {Order.Select} FROM blotter.order_versions WHERE event_time >= @since ORDER BY event_time",
@@ -298,18 +261,14 @@ public sealed partial class SourceQueries(
                 "the gap fill",
                 ct).ConfigureAwait(false)).Cast<Order>()
         ];
-    }
 
     /// <summary>The newest order <c>orders_current</c> has: how far it has caught up with new orders.</summary>
-    public async Task<Order?> NewestOrderAsync(CancellationToken ct)
-    {
-        return (await RowsAsync(
+    public async Task<Order?> NewestOrderAsync(CancellationToken ct) => (await RowsAsync(
             Tabs.Orders,
             $"SELECT {Order.Select} FROM blotter.orders_current ORDER BY order_time DESC, order_id DESC LIMIT 1",
             [],
             "the newest order",
             ct).ConfigureAwait(false)).Cast<Order>().FirstOrDefault();
-    }
 
     /// <summary>
     ///     A text column's values over a period, the most frequent first, each with how many rows hold
@@ -391,12 +350,9 @@ public sealed partial class SourceQueries(
         var physical = plan[(plan.IndexOf("-- physical", StringComparison.Ordinal) is var at and >= 0 ? at : 0)..]
             .Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
-        double Rows(string line)
-        {
-            return RowCount().Match(line) is { Success: true } m
+        double Rows(string line) => RowCount().Match(line) is { Success: true } m
                 ? double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture)
                 : double.NaN;
-        }
 
         var scan = physical.FirstOrDefault(l => l.TrimStart().StartsWith("SourceScan", StringComparison.Ordinal));
         var crossing = physical.FirstOrDefault(l =>
@@ -428,10 +384,7 @@ public sealed partial class SourceQueries(
     }
 
     /// <summary>The condition "sorts before <paramref name="key" />" under <paramref name="order" />.</summary>
-    public static string Before(SortSpec order, IRow key, Dictionary<string, object?> values)
-    {
-        return Seek(order.Reversed(), key, false, values);
-    }
+    public static string Before(SortSpec order, IRow key, Dictionary<string, object?> values) => Seek(order.Reversed(), key, false, values);
 
     /// <summary>
     ///     Written out column by column (<c>a &gt; @k0 OR (a = @k0 AND b &lt; @k1 …)</c>), with the first

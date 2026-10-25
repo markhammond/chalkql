@@ -37,10 +37,7 @@ public sealed class AlertDesk : IDisposable
     }
 
     /// <summary>The alerts of the browser <paramref name="browser" />, its own id: kept since its last page, or new.</summary>
-    public AlertSession Open(string browser)
-    {
-        return _sessions.GetOrAdd(browser, b => new AlertSession(b));
-    }
+    public AlertSession Open(string browser) => _sessions.GetOrAdd(browser, b => new AlertSession(b));
 
     /// <summary>
     ///     What is wrong with a condition, before a browser keeps it: a name the host does not know, or
@@ -59,11 +56,8 @@ public sealed class AlertDesk : IDisposable
     }
 
     /// <summary>What ChalkQL said when it would not make the rule's view, or the alert view a count reads; null while it runs.</summary>
-    public string? Refusal(AlertRule rule)
-    {
-        return _host.AlertsRefused.GetValueOrDefault(AlertWindowSpec.NameOf(rule)) ??
+    public string? Refusal(AlertRule rule) => _host.AlertsRefused.GetValueOrDefault(AlertWindowSpec.NameOf(rule)) ??
                _host.AlertsRefused.GetValueOrDefault(AlertViewSpec.Of(rule).Name);
-    }
 
     private void OnEntered(AlertViewSpec view, IReadOnlyList<(IRow Row, TimeSpan? Lag)> rows)
     {

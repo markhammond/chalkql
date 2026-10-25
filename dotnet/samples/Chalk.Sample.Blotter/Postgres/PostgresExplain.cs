@@ -78,10 +78,7 @@ public sealed class PostgresExplain(DbDataSource reading, Func<TimeSpan, DbDataS
     ///     The rows PostgreSQL expects the filter to select: its estimate, from its statistics, in a few
     ///     milliseconds, where a count may read the table.
     /// </summary>
-    public Task<long> RowsAsync(Tab tab, FilterSpec filter, CancellationToken ct)
-    {
-        return PlanRowsAsync(tab.Table, PostgresSql.Where(filter), ct);
-    }
+    public Task<long> RowsAsync(Tab tab, FilterSpec filter, CancellationToken ct) => PlanRowsAsync(tab.Table, PostgresSql.Where(filter), ct);
 
     public Task<long> RowsBeforeAsync(FilterSpec filter, SortSpec order, IRow key, CancellationToken ct)
     {
@@ -124,10 +121,7 @@ public sealed class PostgresExplain(DbDataSource reading, Func<TimeSpan, DbDataS
         return command;
     }
 
-    private static bool IsSort(JsonElement node)
-    {
-        return node.GetProperty("Node Type").GetString() is "Sort" or "Incremental Sort";
-    }
+    private static bool IsSort(JsonElement node) => node.GetProperty("Node Type").GetString() is "Sort" or "Incremental Sort";
 
     private static JsonElement? Find(JsonElement node, Func<JsonElement, bool> test)
     {

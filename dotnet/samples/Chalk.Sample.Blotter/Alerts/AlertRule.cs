@@ -36,21 +36,12 @@ public static class AlertSounds
         ("flush", "Flush")
     ];
 
-    public static bool Exists(string id)
-    {
-        return All.Any(s => s.Id == id);
-    }
+    public static bool Exists(string id) => All.Any(s => s.Id == id);
 
-    public static string Label(string id)
-    {
-        return All.FirstOrDefault(s => s.Id == id).Label ?? id;
-    }
+    public static string Label(string id) => All.FirstOrDefault(s => s.Id == id).Label ?? id;
 
     /// <summary>Where the page finds a sound, before the host gives it its versioned address.</summary>
-    public static string Path(string id)
-    {
-        return $"sounds/{id}.wav";
-    }
+    public static string Path(string id) => $"sounds/{id}.wav";
 }
 
 /// <summary>Whether a count fires on enough matches in its window, or on none.</summary>
@@ -73,29 +64,20 @@ public sealed record AlertCount(CountKind Kind, int Matches, TimeSpan Window)
     public static readonly TimeSpan LongestWindow = TimeSpan.FromMinutes(60);
 
     /// <summary>What is wrong with it, or null: a window out of range or not whole seconds, or too few or many matches.</summary>
-    public string? Problem()
-    {
-        return Window < ShortestWindow || Window > LongestWindow
+    public string? Problem() => Window < ShortestWindow || Window > LongestWindow
             ? $"a window runs from {Span(ShortestWindow)} to {Span(LongestWindow)}"
             : Window.Ticks % TimeSpan.TicksPerSecond != 0
                 ? "a window is a whole number of seconds"
                 : Kind == CountKind.AtLeast && Matches is < 1 or > MostMatches
                     ? $"at least runs from 1 to {MostMatches:N0} matches"
                     : null;
-    }
 
-    public string Describe()
-    {
-        return Kind == CountKind.AtLeast ? $"at least {Matches:N0} in {Span(Window)}" : $"none in {Span(Window)}";
-    }
+    public string Describe() => Kind == CountKind.AtLeast ? $"at least {Matches:N0} in {Span(Window)}" : $"none in {Span(Window)}";
 
     /// <summary>A window as the page writes it: whole minutes in minutes, otherwise seconds.</summary>
-    public static string Span(TimeSpan window)
-    {
-        return window.TotalSeconds >= 60 && window.Ticks % TimeSpan.TicksPerMinute == 0
+    public static string Span(TimeSpan window) => window.TotalSeconds >= 60 && window.Ticks % TimeSpan.TicksPerMinute == 0
             ? $"{window.TotalMinutes:0} min"
             : $"{window.TotalSeconds:0} s";
-    }
 }
 
 /// <summary>
@@ -134,13 +116,10 @@ public sealed record AlertRule(
     public Tab Tab => Condition.Tab;
 
     /// <summary>As the browser keeps it.</summary>
-    public SavedRule Save()
-    {
-        return new SavedRule(
+    public SavedRule Save() => new SavedRule(
             Id, Name, null, Sound, Throttle.TotalSeconds, Muted, LagOver?.TotalSeconds, Tab.Name, Condition.Text,
             Count switch { null => null, { Kind: CountKind.AtLeast } => "at-least", _ => "none" }, Count?.Matches,
             Count?.Window.TotalSeconds);
-    }
 
     /// <summary>
     ///     A rule the browser kept, on one of <paramref name="tabs" />. One kept before conditions were

@@ -83,33 +83,19 @@ public sealed class LiveScope : IAsyncDisposable, IViewSink<ScopeKey, ScopeRow>
     /// <summary>A failure that ended the scope: a page on it shows this, and asks for a new scope.</summary>
     public Exception? Fault { get; private set; }
 
-    public ValueTask DisposeAsync()
-    {
-        return _view.DisposeAsync();
-    }
+    public ValueTask DisposeAsync() => _view.DisposeAsync();
 
-    void IViewSink<ScopeKey, ScopeRow>.Reset()
-    {
-        _rows.Clear();
-    }
+    void IViewSink<ScopeKey, ScopeRow>.Reset() => _rows.Clear();
 
-    void IViewSink<ScopeKey, ScopeRow>.Upsert(in ScopeKey key, in ScopeRow row)
-    {
-        _rows[key.Id] = row;
-    }
+    void IViewSink<ScopeKey, ScopeRow>.Upsert(in ScopeKey key, in ScopeRow row) => _rows[key.Id] = row;
 
-    void IViewSink<ScopeKey, ScopeRow>.Delete(in ScopeKey key)
-    {
-        _rows.Remove(key.Id);
-    }
+    void IViewSink<ScopeKey, ScopeRow>.Delete(in ScopeKey key) => _rows.Remove(key.Id);
 
     void IViewSink<ScopeKey, ScopeRow>.Commit(long version, uint checksum)
     {
     }
 
-    public static string Sql(Tab tab, FilterSpec filter)
-    {
-        return tab.Overrides
+    public static string Sql(Tab tab, FilterSpec filter) => tab.Overrides
             ? $"""
                SELECT order_id, version, base_version,
                       CASE WHEN {filter.Where()} THEN 1 ELSE 0 END AS live_match,
@@ -122,7 +108,6 @@ public sealed class LiveScope : IAsyncDisposable, IViewSink<ScopeKey, ScopeRow>
                FROM live.tail_fills
                WHERE {filter.Where()}
                """;
-    }
 
     internal static async Task<LiveScope> CreateAsync(
         ChalkEngine engine, Tab tab, FilterSpec filter, long budget, ViewMaintenance maintenance, CancellationToken ct)
@@ -264,11 +249,8 @@ public sealed class ScopeState
     /// <summary>A rough size in memory, for the budget.</summary>
     public long Bytes => 64L * (Live.Length + Overridden.Length) + 48L * (OverriddenIds.Count + Tail.Count);
 
-    internal static ScopeState Empty(Tab tab, FilterSpec filter)
-    {
-        return new ScopeState(tab, filter, 0, false, default, [], [], [], [], ImmutableDictionary<Guid, Order>.Empty,
+    internal static ScopeState Empty(Tab tab, FilterSpec filter) => new ScopeState(tab, filter, 0, false, default, [], [], [], [], ImmutableDictionary<Guid, Order>.Empty,
             ImmutableDictionary<Guid, ImmutableList<Fill>>.Empty, ImmutableDictionary<Guid, Reconciliation>.Empty);
-    }
 
     internal static ScopeState Of(
         Tab tab, FilterSpec filter, long epoch, StreamMark mark, Tail tail, Dictionary<Guid, ScopeRow> rows)
@@ -322,10 +304,7 @@ public sealed class ScopeState
     }
 
     /// <summary>The scope's rows in <paramref name="order" />.</summary>
-    public SortedScope Sorted(SortSpec order)
-    {
-        return _sorted.GetOrAdd(order, o => new SortedScope(this, o));
-    }
+    public SortedScope Sorted(SortSpec order) => _sorted.GetOrAdd(order, o => new SortedScope(this, o));
 }
 
 /// <summary>A scope's rows in one order, and how many of each sort before a given row.</summary>
@@ -347,16 +326,10 @@ public sealed class SortedScope
     public IRow[] Overridden { get; }
 
     /// <summary>How many of the tail's live rows sort before <paramref name="key" />.</summary>
-    public int LiveBefore(IRow key)
-    {
-        return Before(Live, key);
-    }
+    public int LiveBefore(IRow key) => Before(Live, key);
 
     /// <summary>How many overridden database rows sort before <paramref name="key" />.</summary>
-    public int OverriddenBefore(IRow key)
-    {
-        return Before(Overridden, key);
-    }
+    public int OverriddenBefore(IRow key) => Before(Overridden, key);
 
     /// <summary>
     ///     The tail's live rows from <paramref name="key" /> on (or after it), up to and including

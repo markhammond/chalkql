@@ -40,9 +40,8 @@ public sealed class Column
 
     private Column(
         string name, string title, ColumnKind kind, Type type, Func<IRow, object> value, Comparison<IRow> compare,
-        Func<IRow, string> show, IReadOnlyList<string>? choices, string? description = null,
-        Func<IRow, string>? detail = null,
-        bool derived = false, bool lag = false)
+        Func<IRow, string> show, IReadOnlyList<string>? choices, 
+        string? description = null, Func<IRow, string>? detail = null, bool derived = false, bool lag = false)
     {
         Type = type;
         Name = name;
@@ -97,142 +96,103 @@ public sealed class Column
     public IReadOnlyList<string> Choices { get; }
 
     /// <summary>A number typed into a range, as the column binds it.</summary>
-    public object Bind(double value)
+    public object Bind(double value) => Type switch
     {
-        return Type switch
-        {
-            _ when Type == typeof(int) => (int)value,
-            _ when Type == typeof(long) => (long)value,
-            _ => (object)value
-        };
-    }
+        _ when Type == typeof(int) => (int)value,
+        _ when Type == typeof(long) => (long)value,
+        _ => (object)value
+    };
 
     /// <summary>A value of the column's type as SQL writes it: in a condition, or the filters as one.</summary>
-    public string Literal(object value)
+    public string Literal(object value) => value switch
     {
-        return value switch
-        {
-            string text => Quote(text),
-            Guid id => $"CAST({Quote(id.ToString())} AS UUID)",
-            DateTime time => string.Create(CultureInfo.InvariantCulture,
-                $"TIMESTAMP '{time:yyyy-MM-dd HH:mm:ss.ffffff}'"),
-            double number => number.ToString("R", CultureInfo.InvariantCulture),
-            IFormattable number => number.ToString(null, CultureInfo.InvariantCulture),
-            _ => throw new ArgumentException($"{Title} takes no literal of {value.GetType().Name}", nameof(value))
-        };
-    }
+        string text => Quote(text),
+        Guid id => $"CAST({Quote(id.ToString())} AS UUID)",
+        DateTime time => string.Create(CultureInfo.InvariantCulture,
+            $"TIMESTAMP '{time:yyyy-MM-dd HH:mm:ss.ffffff}'"),
+        double number => number.ToString("R", CultureInfo.InvariantCulture),
+        IFormattable number => number.ToString(null, CultureInfo.InvariantCulture),
+        _ => throw new ArgumentException($"{Title} takes no literal of {value.GetType().Name}", nameof(value))
+    };
 
     /// <summary>Text as a SQL string literal.</summary>
-    public static string Quote(string text)
-    {
-        return "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'";
-    }
+    public static string Quote(string text) => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'";
 
     /// <summary>The row's value, as a parameter binds it: the column's own CLR type.</summary>
-    public object Value(IRow row)
-    {
-        return _value(row);
-    }
+    public object Value(IRow row) => _value(row);
 
-    public static Column Uuid<T>(string name, string title, Func<T, Guid> value) where T : IRow
-    {
-        return new Column(
+    public static Column Uuid<T>(string name, string title, Func<T, Guid> value) where T : IRow 
+        => new Column(
             name, title, ColumnKind.Id, typeof(Guid), r => Of(r, name, value),
             (a, b) => Of(a, name, value).CompareTo(Of(b, name, value)),
             r => Of(r, name, value).ToString(), null);
-    }
 
-    public static Column Long<T>(string name, string title, Func<T, long> value) where T : IRow
-    {
-        return new Column(
+    public static Column Long<T>(string name, string title, Func<T, long> value) where T : IRow 
+        => new Column(
             name, title, ColumnKind.Integer, typeof(long), r => Of(r, name, value),
             (a, b) => Of(a, name, value).CompareTo(Of(b, name, value)),
             r => Of(r, name, value).ToString("#,0", CultureInfo.InvariantCulture), null);
-    }
 
-    public static Column Int<T>(string name, string title, Func<T, int> value) where T : IRow
-    {
-        return new Column(
+    public static Column Int<T>(string name, string title, Func<T, int> value) where T : IRow 
+        => new Column(
             name, title, ColumnKind.Integer, typeof(int), r => Of(r, name, value),
             (a, b) => Of(a, name, value).CompareTo(Of(b, name, value)),
             r => Of(r, name, value).ToString("#,0", CultureInfo.InvariantCulture), null);
-    }
 
     /// <param name="decimals">The most decimal places shown.</param>
-    public static Column Number<T>(string name, string title, Func<T, double> value, int decimals) where T : IRow
-    {
-        return new Column(
+    public static Column Number<T>(string name, string title, Func<T, double> value, int decimals) where T : IRow 
+        => new Column(
             name, title, ColumnKind.Number, typeof(double), r => Of(r, name, value),
             (a, b) => Of(a, name, value).CompareTo(Of(b, name, value)),
             r => Finance(Of(r, name, value), decimals), null);
-    }
 
     /// <summary>A price: to six significant figures, see <see cref="Significant" />.</summary>
     public static Column Price<T>(string name, string title, Func<T, double> value) where T : IRow
-    {
-        return new Column(
+        => new Column(
             name, title, ColumnKind.Number, typeof(double), r => Of(r, name, value),
             (a, b) => Of(a, name, value).CompareTo(Of(b, name, value)),
             r => Significant(Of(r, name, value)), null);
-    }
 
-    public static Column Text<T>(string name, string title, Func<T, string> value) where T : IRow
-    {
-        return new Column(
+    public static Column Text<T>(string name, string title, Func<T, string> value) where T : IRow 
+        => new Column(
             name, title, ColumnKind.Text, typeof(string), r => Of(r, name, value),
             (a, b) => string.CompareOrdinal(Of(a, name, value), Of(b, name, value)),
             r => Of(r, name, value), null);
-    }
 
     public static Column Choice<T>(string name, string title, Func<T, string> value, IReadOnlyList<string> choices)
-        where T : IRow
-    {
-        return new Column(
+        where T : IRow => new Column(
             name, title, ColumnKind.Choice, typeof(string), r => Of(r, name, value),
             (a, b) => string.CompareOrdinal(Of(a, name, value), Of(b, name, value)),
             r => Of(r, name, value), choices);
-    }
 
     public static Column Time<T>(string name, string title, Func<T, DateTime> value, string? description = null)
-        where T : IRow
-    {
-        return new Column(
+        where T : IRow => new Column(
             name, title, ColumnKind.Time, typeof(DateTime), r => Of(r, name, value),
             (a, b) => Of(a, name, value).CompareTo(Of(b, name, value)),
             r => Of(r, name, value).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture), null, description,
             r => Of(r, name, value).ToString("yyyy-MM-dd HH:mm:ss.ffffff", CultureInfo.InvariantCulture));
-    }
 
     /// <summary>
     ///     A value worked out from others and only shown, see <see cref="Derived" />: right-aligned if
     ///     <paramref name="numeric" />.
     /// </summary>
     public static Column Shown<T>(string name, string title, Func<T, string> show, bool numeric,
-        string? description = null) where T : IRow
-    {
-        return new Column(
+        string? description = null) where T : IRow => new Column(
             name, title, numeric ? ColumnKind.Number : ColumnKind.Text, typeof(string), r => show((T)r),
             (a, b) => string.CompareOrdinal(show((T)a), show((T)b)), r => show((T)r), null, description, derived: true);
-    }
 
     /// <summary>A row's reconciliation lag, see <see cref="Lag" />.</summary>
-    public static Column Reconciled(string name, string title, string description)
-    {
-        return new Column(
+    public static Column Reconciled(string name, string title, string description) => new Column(
             name, title, ColumnKind.Number, typeof(string), _ => Nought, (_, _) => 0, _ => Nought, null, description,
             lag: true);
-    }
 
     /// <summary>A lag as the grid shows it: tenths of a second under ten, whole seconds under ten minutes, then minutes.</summary>
-    public static string Seconds(TimeSpan lag)
+    public static string Seconds(TimeSpan lag) => lag.TotalSeconds switch
     {
-        return lag.TotalSeconds switch
-        {
-            < 10 => lag.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) + "\u202Fs",
-            < 600 => lag.TotalSeconds.ToString("0", CultureInfo.InvariantCulture) + "\u202Fs",
-            _ => lag.TotalMinutes.ToString("0", CultureInfo.InvariantCulture) + "\u202Fmin"
-        };
-    }
+        < 10 => lag.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) + "\u202Fs",
+        < 600 => lag.TotalSeconds.ToString("0", CultureInfo.InvariantCulture) + "\u202Fs",
+        _ => lag.TotalMinutes.ToString("0", CultureInfo.InvariantCulture) + "\u202Fmin"
+    };
 
     /// <summary>
     ///     A quantity as finance writes it: no zero before the point of a fraction, and none after its
@@ -272,15 +232,9 @@ public sealed class Column
     ///     A row's value of the column named <paramref name="name" />: from the row, or from a
     ///     <see cref="KeyRow" />, which gives only some columns' values, by name.
     /// </summary>
-    private static TValue Of<T, TValue>(IRow row, string name, Func<T, TValue> value) where T : IRow
-    {
-        return row is KeyRow key ? (TValue)key.Values[name] : value((T)row);
-    }
+    private static TValue Of<T, TValue>(IRow row, string name, Func<T, TValue> value) where T : IRow => row is KeyRow key ? (TValue)key.Values[name] : value((T)row);
 
-    public override string ToString()
-    {
-        return Name;
-    }
+    public override string ToString() => Name;
 }
 
 /// <summary>

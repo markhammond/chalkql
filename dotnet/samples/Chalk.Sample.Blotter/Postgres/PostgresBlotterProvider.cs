@@ -126,23 +126,17 @@ public sealed class PostgresBlotterProvider : IBlotterProvider
     }
 
     /// <summary>A connection factory whose every statement the server stops at <paramref name="limit" />.</summary>
-    private NpgsqlDataSource Limited(TimeSpan limit)
-    {
-        return _limited.GetOrAdd(limit, l =>
-        {
-            var seconds = (int)Math.Ceiling(l.TotalSeconds);
-            return NpgsqlDataSource.Create(new NpgsqlConnectionStringBuilder(_connectionString)
-            {
-                Timeout = seconds,
-                CommandTimeout = seconds + 5,
-                Options = string.Create(CultureInfo.InvariantCulture,
-                    $"-c statement_timeout={(long)l.TotalMilliseconds}")
-            }.ConnectionString);
-        });
-    }
+    private NpgsqlDataSource Limited(TimeSpan limit) => _limited.GetOrAdd(limit, l =>
+                                                             {
+                                                                 var seconds = (int)Math.Ceiling(l.TotalSeconds);
+                                                                 return NpgsqlDataSource.Create(new NpgsqlConnectionStringBuilder(_connectionString)
+                                                                 {
+                                                                     Timeout = seconds,
+                                                                     CommandTimeout = seconds + 5,
+                                                                     Options = string.Create(CultureInfo.InvariantCulture,
+                                                                         $"-c statement_timeout={(long)l.TotalMilliseconds}")
+                                                                 }.ConnectionString);
+                                                             });
 
-    private static ColumnDescriptor Column(string name, ChalkType type)
-    {
-        return new ColumnDescriptor { Name = name, Type = type };
-    }
+    private static ColumnDescriptor Column(string name, ChalkType type) => new ColumnDescriptor { Name = name, Type = type };
 }

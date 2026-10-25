@@ -73,10 +73,7 @@ public sealed class PgServer : IAsyncDisposable
     }
 
     /// <summary>Whether a server can be started here: a PostgreSQL installation is found, or named and there.</summary>
-    public static bool CanStart(string? binaries = null)
-    {
-        return binaries is null ? FindBinaries() is not null : File.Exists(Path.Combine(binaries, "pg_ctl"));
-    }
+    public static bool CanStart(string? binaries = null) => binaries is null ? FindBinaries() is not null : File.Exists(Path.Combine(binaries, "pg_ctl"));
 
     /// <summary>
     ///     A server: the one <paramref name="connectionString" /> names, if given; otherwise one started from

@@ -102,10 +102,7 @@ public readonly record struct Reconciliation(IRow Row, DateTime Since, DateTime?
     /// <summary>A lookup has found the database holding it.</summary>
     public bool Reconciled => At is not null;
 
-    public TimeSpan Lag(DateTime now)
-    {
-        return (At ?? now) - Since is var lag && lag > TimeSpan.Zero ? lag : TimeSpan.Zero;
-    }
+    public TimeSpan Lag(DateTime now) => (At ?? now) - Since is var lag && lag > TimeSpan.Zero ? lag : TimeSpan.Zero;
 }
 
 /// <summary>
@@ -177,15 +174,9 @@ public sealed class Tail
         }
     }
 
-    public TailEntry? Get(Guid orderId)
-    {
-        return _orders.GetValueOrDefault(orderId);
-    }
+    public TailEntry? Get(Guid orderId) => _orders.GetValueOrDefault(orderId);
 
-    public Fill? GetFill(Guid fillId)
-    {
-        return _fills.GetValueOrDefault(fillId);
-    }
+    public Fill? GetFill(Guid fillId) => _fills.GetValueOrDefault(fillId);
 
     internal void Set(TailEntry entry, Order version)
     {
@@ -251,10 +242,7 @@ public sealed class Tail
             fill.OrderId, FillsByOrder.GetValueOrDefault(fill.OrderId, ImmutableList<Fill>.Empty).Add(fill));
     }
 
-    internal DateTime? FillConfirmedAt(Guid fillId)
-    {
-        return _fillsConfirmed.TryGetValue(fillId, out var at) ? at : null;
-    }
+    internal DateTime? FillConfirmedAt(Guid fillId) => _fillsConfirmed.TryGetValue(fillId, out var at) ? at : null;
 
     internal void ConfirmFill(Guid fillId, DateTime at)
     {

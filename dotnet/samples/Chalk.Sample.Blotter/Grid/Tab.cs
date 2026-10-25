@@ -80,16 +80,10 @@ public sealed class Tab
     /// <summary>The paths from this tab's rows to other tabs' rows, which a condition reads along.</summary>
     public IReadOnlyList<TabPath> Paths { get; }
 
-    public Column Named(string name)
-    {
-        return Columns.FirstOrDefault(c => c.Name == name) ??
+    public Column Named(string name) => Columns.FirstOrDefault(c => c.Name == name) ??
                throw new ArgumentException($"{Name} has no column '{name}'", nameof(name));
-    }
 
-    public override string ToString()
-    {
-        return Name;
-    }
+    public override string ToString() => Name;
 }
 
 /// <summary>

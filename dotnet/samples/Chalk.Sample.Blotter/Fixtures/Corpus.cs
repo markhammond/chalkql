@@ -101,10 +101,7 @@ public static class Corpus
         return new Guid(bytes, true);
     }
 
-    private static double Uniform(ulong n, ulong salt)
-    {
-        return (Mix(n * 0x100 + salt) >> 11) * (1.0 / (1UL << 53));
-    }
+    private static double Uniform(ulong n, ulong salt) => (Mix(n * 0x100 + salt) >> 11) * (1.0 / (1UL << 53));
 
     /// <summary>SplitMix64: a hash good enough to stand in for a random draw, and the same every time.</summary>
     private static ulong Mix(ulong x)

@@ -214,10 +214,7 @@
         }
     }
 
-    private void Remove(string value)
-    {
-        _values.Remove(value);
-    }
+    private void Remove(string value) => _values.Remove(value);
 
     private void Tick(string value, bool on)
     {
@@ -238,10 +235,7 @@
         await ReadChoicesAsync();
     }
 
-    private async Task FocusAsync()
-    {
-        await _input.FocusAsync();
-    }
+    private async Task FocusAsync() => await _input.FocusAsync();
 
     private async Task ApplyAsync()
     {
@@ -262,14 +256,8 @@
         });
     }
 
-    private Task ClearAsync()
-    {
-        return Apply.InvokeAsync(new ColumnFilter { Column = Column });
-    }
+    private Task ClearAsync() => Apply.InvokeAsync(new ColumnFilter { Column = Column });
 
-    public void Dispose()
-    {
-        _reading?.Cancel();
-    }
+    public void Dispose() => _reading?.Cancel();
 
 }

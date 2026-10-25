@@ -23,10 +23,7 @@ public readonly record struct Slot(long Position, Opened? Under, int Fill)
 public static class Nesting
 {
     /// <summary>How many rows the grid has: the tab's, and the fills of the opened orders among them.</summary>
-    public static long Total(long rows, IReadOnlyList<Opened> opened)
-    {
-        return rows + opened.Where(o => o.Position >= 0 && o.Position < rows).Sum(o => (long)o.Fills.Length);
-    }
+    public static long Total(long rows, IReadOnlyList<Opened> opened) => rows + opened.Where(o => o.Position >= 0 && o.Position < rows).Sum(o => (long)o.Fills.Length);
 
     /// <summary>The grid's rows <paramref name="start" /> to <paramref name="start" /> + <paramref name="count" />, as slots.</summary>
     /// <param name="opened">The opened orders in view, in order of position.</param>
@@ -59,8 +56,5 @@ public static class Nesting
     }
 
     /// <summary>The grid position of the tab's row at <paramref name="position" />.</summary>
-    public static long GridPosition(long position, IReadOnlyList<Opened> opened)
-    {
-        return position + opened.Where(o => o.Position >= 0 && o.Position < position).Sum(o => (long)o.Fills.Length);
-    }
+    public static long GridPosition(long position, IReadOnlyList<Opened> opened) => position + opened.Where(o => o.Position >= 0 && o.Position < position).Sum(o => (long)o.Fills.Length);
 }

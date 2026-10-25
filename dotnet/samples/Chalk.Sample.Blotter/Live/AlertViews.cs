@@ -18,10 +18,7 @@ public sealed record AlertViewSpec(Condition Condition, TimeSpan? LagOver)
                               ? "\nlag " + lag.TotalSeconds.ToString(CultureInfo.InvariantCulture)
                               : "");
 
-    public static AlertViewSpec Of(AlertRule rule)
-    {
-        return new AlertViewSpec(rule.Condition, rule.LagOver);
-    }
+    public static AlertViewSpec Of(AlertRule rule) => new AlertViewSpec(rule.Condition, rule.LagOver);
 
     /// <summary>
     ///     The view's statement, over the host's tables only. On arrival, a fill is read from
@@ -82,20 +79,11 @@ public struct AlertKey : IEquatable<AlertKey>
     public DateTime Since;
     public long Version;
 
-    public readonly bool Equals(AlertKey other)
-    {
-        return Id == other.Id && Since == other.Since;
-    }
+    public readonly bool Equals(AlertKey other) => Id == other.Id && Since == other.Since;
 
-    public readonly override bool Equals(object? obj)
-    {
-        return obj is AlertKey other && Equals(other);
-    }
+    public readonly override bool Equals(object? obj) => obj is AlertKey other && Equals(other);
 
-    public readonly override int GetHashCode()
-    {
-        return HashCode.Combine(Id, Since);
-    }
+    public readonly override int GetHashCode() => HashCode.Combine(Id, Since);
 }
 
 /// <summary>
@@ -131,15 +119,9 @@ public sealed class AlertView : IAsyncDisposable, IViewSink<AlertKey, AlertKey>
     /// <summary>The view's state, in bytes, by its own count.</summary>
     public long Bytes => _view.StateBytes;
 
-    public ValueTask DisposeAsync()
-    {
-        return _view.DisposeAsync();
-    }
+    public ValueTask DisposeAsync() => _view.DisposeAsync();
 
-    void IViewSink<AlertKey, AlertKey>.Reset()
-    {
-        _present.Clear();
-    }
+    void IViewSink<AlertKey, AlertKey>.Reset() => _present.Clear();
 
     void IViewSink<AlertKey, AlertKey>.Upsert(in AlertKey key, in AlertKey row)
     {
@@ -152,10 +134,7 @@ public sealed class AlertView : IAsyncDisposable, IViewSink<AlertKey, AlertKey>
         if (_started && (entered || newer)) _matches++;
     }
 
-    void IViewSink<AlertKey, AlertKey>.Delete(in AlertKey key)
-    {
-        _present.Remove(key);
-    }
+    void IViewSink<AlertKey, AlertKey>.Delete(in AlertKey key) => _present.Remove(key);
 
     void IViewSink<AlertKey, AlertKey>.Commit(long version, uint checksum)
     {
@@ -222,16 +201,10 @@ public sealed record AlertWindowSpec(AlertViewSpec Matcher, AlertCount Count)
     /// </summary>
     public TimeSpan Slice => TimeSpan.FromSeconds(Math.Max(1, Math.Ceiling(Count.Window.TotalSeconds / 60)));
 
-    public static AlertWindowSpec? Of(AlertRule rule)
-    {
-        return rule.Count is { } count ? new AlertWindowSpec(AlertViewSpec.Of(rule), count) : null;
-    }
+    public static AlertWindowSpec? Of(AlertRule rule) => rule.Count is { } count ? new AlertWindowSpec(AlertViewSpec.Of(rule), count) : null;
 
     /// <summary>The name of the view a rule's alerts come from: its count's, if it counts, or its condition's.</summary>
-    public static string NameOf(AlertRule rule)
-    {
-        return Of(rule)?.Name ?? AlertViewSpec.Of(rule).Name;
-    }
+    public static string NameOf(AlertRule rule) => Of(rule)?.Name ?? AlertViewSpec.Of(rule).Name;
 
     /// <summary>
     ///     The view's statement: the matches the counter has counted in the slices that started within the
@@ -279,15 +252,9 @@ public sealed class CountView : IAsyncDisposable, IViewSink<int, long>
     /// <summary>The view's state, in bytes, by its own count.</summary>
     public long Bytes => _view.StateBytes;
 
-    public ValueTask DisposeAsync()
-    {
-        return _view.DisposeAsync();
-    }
+    public ValueTask DisposeAsync() => _view.DisposeAsync();
 
-    void IViewSink<int, long>.Reset()
-    {
-        _present = false;
-    }
+    void IViewSink<int, long>.Reset() => _present = false;
 
     void IViewSink<int, long>.Upsert(in int key, in long matches)
     {
@@ -298,10 +265,7 @@ public sealed class CountView : IAsyncDisposable, IViewSink<int, long>
         }
     }
 
-    void IViewSink<int, long>.Delete(in int key)
-    {
-        _present = false;
-    }
+    void IViewSink<int, long>.Delete(in int key) => _present = false;
 
     void IViewSink<int, long>.Commit(long version, uint checksum)
     {
