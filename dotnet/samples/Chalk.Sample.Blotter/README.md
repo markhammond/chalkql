@@ -296,7 +296,8 @@ million orders, about 12.5 million versions and 8.8 million fills load in second
 - **Sound**: recordings in `wwwroot/sounds`, mono and 8-bit (about 280 KB for all 22), served at
   versioned addresses the browser keeps for good, fetched on first play and mixed through Web Audio.
   Browsers allow sound only after a click, so with alerts set to sound the page opens with a splash
-  asking for it.
+  asking for it. The recordings are not Chalk's and not under its licence, and may not be used
+  commercially (`wwwroot/sounds/NOTICE.md`).
 - **Unseen alerts** show as a red dot, not a count: on the bell until you open the alerts and, in the
   background, on the page's icon until you look. Tick "Notify in the background", with the browser's
   permission, for system notifications. Away from the live top, the "N new above" pill shows a bell
