@@ -503,7 +503,10 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         // What ChalkQL refuses, the desk refuses before a browser keeps it.
         Assert.Null(await desk.CheckAsync(Condition.Parse(Tabs.Fills, "order.status IN ('New', 'Partial') AND price > 0"), null, CancellationToken.None));
         Assert.Null(await desk.CheckAsync(Condition.Parse(Tabs.Fills, "order.status = 'New'"), TimeSpan.FromSeconds(5), CancellationToken.None));
-        Assert.NotNull(await desk.CheckAsync(Condition.Parse(Tabs.Fills, "qty = 'x'"), null, CancellationToken.None));
+        Assert.Contains(
+            "the text 'x' cannot be read as a DOUBLE, which qty is",
+            await desk.CheckAsync(Condition.Parse(Tabs.Fills, "qty = 'x'"), null, CancellationToken.None),
+            StringComparison.Ordinal);
         Assert.Equal("Fills has no column 'nope'", await desk.CheckAsync(Condition.Parse(Tabs.Fills, "nope = 1"), null, CancellationToken.None));
 
         bool Fired(string rule)
