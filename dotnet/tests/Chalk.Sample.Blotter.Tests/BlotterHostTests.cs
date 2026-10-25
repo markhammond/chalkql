@@ -717,7 +717,10 @@ public sealed class BlotterHostTests(ITestOutputHelper output)
         var given = Environment.GetEnvironmentVariable("CHALK_TEST_POSTGRES");
         if (string.IsNullOrWhiteSpace(given) && !PgServer.CanStart())
         {
-            Assert.Skip("no PostgreSQL: install PostgreSQL 16 or later, or set CHALK_TEST_POSTGRES to a connection string");
+            // Where the run requires PostgreSQL, as CI does, a missing one fails rather than skips.
+            const string missing = "no PostgreSQL: install PostgreSQL 16 or later, or set CHALK_TEST_POSTGRES to a connection string";
+            Assert.SkipWhen(Environment.GetEnvironmentVariable("CHALK_TEST_POSTGRES_REQUIRED") != "1", missing);
+            Assert.Fail(missing);
         }
 
         var host = new BlotterHost(options with { Postgres = given }, NullLogger<BlotterHost>.Instance);
