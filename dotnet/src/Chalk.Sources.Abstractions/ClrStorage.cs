@@ -95,6 +95,10 @@ internal static class ClrStorage
     /// count — <see cref="DateTime.Ticks"/>, or <see cref="DateTimeOffset.UtcTicks"/> for a
     /// TIMESTAMP_TZ. Nanoseconds are exact; a coarser unit drops the remainder, toward zero.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// A nanosecond lane, and an instant a 64-bit count of nanoseconds cannot reach: before 1677-09-21 or
+    /// after 2262-04-11. Refused rather than wrapped, which would turn a far future into a far past.
+    /// </exception>
     public static long UnitsOf(long ticks, int precision)
     {
         var sinceEpoch = ticks - UnixEpochTicks;
@@ -102,7 +106,14 @@ internal static class ClrStorage
         {
             <= 3 => sinceEpoch / 10_000L,
             <= 6 => sinceEpoch / 10L,
-            _ => sinceEpoch * 100L,
+            _ => sinceEpoch is <= long.MaxValue / 100L and >= long.MinValue / 100L
+                ? sinceEpoch * 100L
+                : throw new ArgumentOutOfRangeException(
+                    nameof(ticks),
+                    new DateTime(ticks).ToString("O", CultureInfo.InvariantCulture),
+                    $"TIMESTAMP({precision}) counts nanoseconds since 1970-01-01 in 64 bits, from 1677-09-21 to "
+                    + "2262-04-11, and this instant lies outside that: declare it with a coarser precision, such as "
+                    + "TIMESTAMP(6), which reaches any instant a DateTime holds"),
         };
     }
 

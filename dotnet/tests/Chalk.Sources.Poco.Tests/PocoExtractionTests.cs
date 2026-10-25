@@ -189,6 +189,30 @@ public sealed class PocoExtractionTests
     }
 
     [Fact]
+    public async Task A_DateTime_past_what_nanoseconds_reach_is_loud_and_one_declared_in_microseconds_is_kept()
+    {
+        var never = new DateTime(9999, 12, 31);
+
+        // Wrapped, the far future would read as a far past, and compare as one.
+        var error = await Assert.ThrowsAnyAsync<ArgumentOutOfRangeException>(async () =>
+        {
+            var source = new PocoSourceBuilder("mem").AddTable("t", new List<InNanos> { new(never) }).Build();
+            await PocoTestSupport.ColumnAsync(source, "t", 0, 4096, projection: [0]);
+        });
+        Assert.Contains("table 't' member 'Until'", error.Message, StringComparison.Ordinal);
+        Assert.Contains("2262-04-11", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Precision = 6", error.Message, StringComparison.Ordinal);
+
+        var kept = new PocoSourceBuilder("mem").AddTable("t", new List<InMicros> { new(never) }).Build();
+        var values = await PocoTestSupport.ColumnAsync(kept, "t", 0, 4096, projection: [0]);
+        Assert.Equal((never.Ticks - UnixEpochTicks) / 10L, Assert.Single(values));
+    }
+
+    private sealed record InNanos(DateTime Until);
+
+    private sealed record InMicros([property: ChalkColumn(Precision = 6)] DateTime Until);
+
+    [Fact]
     public async Task A_decimal_too_wide_for_its_precision_is_loud()
     {
         var rows = new List<AttributedRow> { new() { Fee = 123_456_789_012_345.5m } };
