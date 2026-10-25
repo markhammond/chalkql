@@ -52,7 +52,7 @@ internal static class HostStart
                 started.Add(house);
                 seeding = new Seeder(house.Repository);
                 await seeding.GenerateAsync(
-                        options.Orders, Cells.Micros(DateTime.UtcNow), TimeSpan.FromDays(5), 2000, options.Current, ct)
+                        options.Orders, Cells.Micros(options.Time.GetUtcNow().UtcDateTime), TimeSpan.FromDays(5), 2000, options.Current, ct)
                     .ConfigureAwait(false);
             }
 
@@ -64,9 +64,9 @@ internal static class HostStart
                 seeding.IndexTime.TotalSeconds);
 
             var exchange = new Exchange(repository, options.Exchange, options.Orders, seeding.LoadedThrough,
-                repository.OpenOrders(), options.Current);
+                repository.OpenOrders(), options.Current, options.Time);
             started.Add(exchange);
-            exchange.Start();
+            if (!options.Stepped) exchange.Start();
 
             var planner = await PlannerProcess.StartAsync(new PlannerProcessOptions()).ConfigureAwait(false);
             started.Add(planner);
@@ -103,7 +103,7 @@ internal static class HostStart
                 provider.StoppedAtTimeLimit, provider.Name);
             return new HostParts(
                 house, seeding, exchange, planner, engine,
-                new LiveTables(tail, versions, fills, new AlertTables(arrivedFills, latestOrders, waits, matchCounts)),
+                new LiveTables(tail, versions, fills, new AlertTables(arrivedFills, latestOrders, waits, matchCounts, options.Time)),
                 queries);
         }
         catch

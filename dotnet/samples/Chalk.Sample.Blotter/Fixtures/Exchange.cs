@@ -93,6 +93,7 @@ public sealed class Exchange : IAsyncDisposable
     private readonly double[] _mids;
     private readonly List<Order> _open;
     private readonly ExchangeOptions _options;
+    private readonly TimeProvider _time;
     private readonly IngestWriter<Order> _orderWriter;
     private readonly Random _random;
     private readonly ITradeRepository _repository;
@@ -109,8 +110,9 @@ public sealed class Exchange : IAsyncDisposable
 
     public Exchange(
         ITradeRepository repository, ExchangeOptions options, long orders, DateTime lastEventTime, List<Order> open,
-        CurrentSync sync)
+        CurrentSync sync, TimeProvider time)
     {
+        _time = time;
         _options = options;
         _repository = repository;
         _disordered = options.Disordered;
@@ -127,7 +129,7 @@ public sealed class Exchange : IAsyncDisposable
         // A lagging orders_current is worked from what order_versions has been written, some time after.
         if (sync == CurrentSync.Lagging)
         {
-            var current = new IngestWriter<Order>(repository.UpsertCurrent, options.CurrentLag, options.Seed + 3);
+            var current = new IngestWriter<Order>(repository.UpsertCurrent, options.CurrentLag, options.Seed + 3, time);
             _currentWriter = current;
             _writeOrders = written =>
             {
@@ -140,9 +142,9 @@ public sealed class Exchange : IAsyncDisposable
             _writeOrders = repository.WriteOrders;
         }
 
-        _orderWriter = new IngestWriter<Order>(_writeOrders, options.Lag, options.Seed + 1);
+        _orderWriter = new IngestWriter<Order>(_writeOrders, options.Lag, options.Seed + 1, time);
 
-        _fillWriter = new IngestWriter<Fill>(repository.WriteFills, options.Lag, options.Seed + 2);
+        _fillWriter = new IngestWriter<Fill>(repository.WriteFills, options.Lag, options.Seed + 2, time);
     }
 
     /// <summary>How <c>orders_current</c> keeps up.</summary>
@@ -233,12 +235,12 @@ public sealed class Exchange : IAsyncDisposable
     /// <summary>The database writes nothing for a while; the streams go on. Zero ends a stall.</summary>
     public void StallIngestion(TimeSpan time)
     {
-        _orderWriter.StallUntil(DateTime.UtcNow + time);
-        _fillWriter.StallUntil(DateTime.UtcNow + time);
+        _orderWriter.StallUntil(Now + time);
+        _fillWriter.StallUntil(Now + time);
     }
 
     /// <summary>The lagging job applies nothing to <c>orders_current</c> for a while. Zero ends a stall.</summary>
-    public void StallCurrent(TimeSpan time) => _currentWriter?.StallUntil(DateTime.UtcNow + time);
+    public void StallCurrent(TimeSpan time) => _currentWriter?.StallUntil(Now + time);
 
     /// <summary>
     ///     The house stops taking and working orders, for checks that need the streams quiet; versions
@@ -247,6 +249,24 @@ public sealed class Exchange : IAsyncDisposable
     public void Pause() => _paused = true;
 
     public void Resume() => _paused = false;
+
+    /// <summary>
+    ///     For a test that turns the house by hand: what is due by now goes out, the order versions the
+    ///     stream's skew held and the rows the ingestion jobs owe the database.
+    /// </summary>
+    internal void Turn()
+    {
+        lock (_gate)
+        {
+            ReleaseOrders(Now);
+        }
+
+        _orderWriter.WriteDue();
+        _fillWriter.WriteDue();
+        _currentWriter?.WriteDue();
+    }
+
+    private DateTime Now => _time.GetUtcNow().UtcDateTime;
 
     public void Start() => _running = Task.WhenAll(
             Task.Run(() => TradeAsync(_stop.Token)),
@@ -268,7 +288,7 @@ public sealed class Exchange : IAsyncDisposable
 
             // The stream first, then the database, but for a row sent late, or one the database
             // writes first, when the streams are out of order.
-            var now = DateTime.UtcNow;
+            var now = Now;
             var (onTime, written, first) = (new List<Fill>(fills.Count), new List<Fill>(fills.Count), new List<Fill>());
             foreach (var fill in fills)
                 switch (Route())
@@ -300,7 +320,7 @@ public sealed class Exchange : IAsyncDisposable
                 _held.Enqueue((order, _lastRelease));
             }
 
-            ReleaseOrders(DateTime.UtcNow);
+            ReleaseOrders(Now);
         }
 
         return ([.. orders], [.. fills]);
@@ -378,13 +398,13 @@ public sealed class Exchange : IAsyncDisposable
     private async Task TradeAsync(CancellationToken ct)
     {
         var tick = TimeSpan.FromMilliseconds(10);
-        using var timer = new PeriodicTimer(tick);
-        var started = DateTime.UtcNow;
+        using var timer = new PeriodicTimer(tick, _time);
+        var started = Now;
         var owed = 0.0;
         while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
         {
             var into = _options.BurstEvery > TimeSpan.Zero
-                ? (DateTime.UtcNow - started).Ticks % _options.BurstEvery.Ticks
+                ? (Now - started).Ticks % _options.BurstEvery.Ticks
                 : 0;
             var bursting = _options.BurstEvery > TimeSpan.Zero && into < _options.BurstFor.Ticks;
             CurrentRate = _options.Rate * (bursting ? _options.BurstFactor : 1);
@@ -396,7 +416,7 @@ public sealed class Exchange : IAsyncDisposable
             else
                 lock (_gate)
                 {
-                    ReleaseOrders(DateTime.UtcNow);
+                    ReleaseOrders(Now);
                 }
         }
     }
@@ -477,7 +497,7 @@ public sealed class Exchange : IAsyncDisposable
     /// <summary>The next event time: one clock, strictly increasing, never two changes at one microsecond.</summary>
     private DateTime Tick()
     {
-        var now = Cells.Micros(DateTime.UtcNow);
+        var now = Cells.Micros(Now);
         _lastEventTime = now > _lastEventTime ? now : _lastEventTime.AddTicks(10);
         return _lastEventTime;
     }

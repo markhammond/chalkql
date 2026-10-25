@@ -39,7 +39,7 @@ public sealed record Page(long Start, IRow[] Rows, long Total, ScopeState State)
 ///         not hold.
 ///     </para>
 /// </remarks>
-public sealed class Pages(SourceQueries queries)
+public sealed class Pages(SourceQueries queries, TimeProvider time)
 {
     // Rows read beyond those asked for, so that the tail's overrides seldom leave a read short.
     private const int Slack = 32;
@@ -124,7 +124,7 @@ public sealed class Pages(SourceQueries queries)
     {
         var (tab, filter) = (state.Tab, state.Filter);
         var known = _known.GetOrAdd((tab.Name, filter.Name), _ => new Known());
-        var now = DateTime.UtcNow;
+        var now = time.GetUtcNow().UtcDateTime;
         Task<long> estimate;
         lock (known)
         {
@@ -162,7 +162,7 @@ public sealed class Pages(SourceQueries queries)
             lock (known)
             {
                 known.Counted = counted;
-                known.CountedAt = DateTime.UtcNow;
+                known.CountedAt = time.GetUtcNow().UtcDateTime;
             }
         }
         catch (Exception)
@@ -284,7 +284,7 @@ public sealed class Pages(SourceQueries queries)
     /// <summary>An order's fills as of a state, newest first: the database's, read a moment ago at most, and the tail's.</summary>
     public async Task<Fill[]> FillsOfAsync(ScopeState state, Guid orderId, CancellationToken ct)
     {
-        var now = DateTime.UtcNow;
+        var now = time.GetUtcNow().UtcDateTime;
         var read = _fills.AddOrUpdate(
             orderId,
             _ => (now, queries.FillsOfAsync(orderId, CancellationToken.None)),
@@ -334,9 +334,9 @@ public sealed class Pages(SourceQueries queries)
         Shelf shelf, FilterSpec filter, SortSpec order, IRow? key, bool inclusive, int limit, CancellationToken ct)
     {
         var size = SourceQueries.Rounded(shelf.Slow ? Math.Max(limit, LargeWindow) : 2 * limit);
-        var readAt = Stopwatch.GetTimestamp();
+        var readAt = time.GetTimestamp();
         var rows = await queries.ReadAsync(filter, order, key, inclusive, size, ct).ConfigureAwait(false);
-        shelf.Slow = Stopwatch.GetElapsedTime(readAt) > SlowRead;
+        shelf.Slow = time.GetElapsedTime(readAt) > SlowRead;
         var window = new Window(key, inclusive, rows, rows.Length == size, readAt);
         Keep(shelf, order, window);
         return window;
@@ -426,7 +426,7 @@ public sealed class Pages(SourceQueries queries)
         return true;
     }
 
-    private bool Expired(Window window) => Stopwatch.GetElapsedTime(window.ReadAt) > WindowFor;
+    private bool Expired(Window window) => time.GetElapsedTime(window.ReadAt) > WindowFor;
 
     /// <summary>
     ///     The first <paramref name="limit" /> rows of <paramref name="window" /> from <paramref name="key" /> on,

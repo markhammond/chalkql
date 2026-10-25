@@ -20,7 +20,7 @@ public sealed record AlertEvent(
 ///     it has sounded yet. A rule that fires within its throttle of sounding gathers its rows, and sounds
 ///     once the throttle allows, saying how many.
 /// </summary>
-public sealed class AlertSession(string browser)
+public sealed class AlertSession(string browser, TimeProvider? time = null)
 {
     // Kept for a page to sound; past this many, the oldest go.
     private const int MostWaiting = 1000;
@@ -28,7 +28,8 @@ public sealed class AlertSession(string browser)
     private readonly Lock _gate = new();
     private readonly Dictionary<string, RuleState> _states = new(StringComparer.Ordinal);
     private readonly List<AlertEvent> _waiting = [];
-    private DateTime _leftAt = DateTime.UtcNow;
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private DateTime _leftAt = (time ?? TimeProvider.System).GetUtcNow().UtcDateTime;
     private int _pages;
     private ImmutableArray<AlertRule> _rules = [];
     private long _seq;
@@ -140,7 +141,7 @@ public sealed class AlertSession(string browser)
         lock (_gate)
         {
             _pages = Math.Max(0, _pages - 1);
-            _leftAt = DateTime.UtcNow;
+            _leftAt = _time.GetUtcNow().UtcDateTime;
         }
     }
 

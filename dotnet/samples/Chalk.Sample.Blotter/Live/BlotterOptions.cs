@@ -75,6 +75,13 @@ public sealed record BlotterOptions
     /// </summary>
     public TimeSpan GapFill { get; init; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    ///     The haircut on the gap fill: how long a version sent before the host subscribed may still be in
+    ///     transit to the database. The one gap fill waits this long after subscribing, so that it finds
+    ///     those too, and reaches back <see cref="GapFill" /> from the subscription, not from the read.
+    /// </summary>
+    public TimeSpan GapFillHaircut { get; init; } = TimeSpan.FromSeconds(5);
+
     /// <summary>Of the budget, the most the windows of rows kept for pages may hold; they give way to the tail and the scopes.</summary>
     public double PageShare { get; init; } = 0.25;
 
@@ -83,4 +90,17 @@ public sealed record BlotterOptions
 
     /// <summary>Serve again once <c>orders_current</c> is no more than this far behind the stream.</summary>
     public TimeSpan ResumeWithin { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>How often the engine's clock moves while nothing arrives, for the alert views that watch it.</summary>
+    public TimeSpan ClockEvery { get; init; } = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>The clock the host and the simulated house read and wait on: the system's, but in tests.</summary>
+    public TimeProvider Time { get; init; } = TimeProvider.System;
+
+    /// <summary>
+    ///     For tests: the catch-up loop and the house's loops do not run of themselves, and a test turns
+    ///     them instead (<see cref="BlotterHost.TurnAsync" />, <see cref="Exchange.Turn" />), each turn at
+    ///     the instant the clock says.
+    /// </summary>
+    internal bool Stepped { get; init; }
 }

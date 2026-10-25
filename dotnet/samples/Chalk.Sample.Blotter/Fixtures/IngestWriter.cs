@@ -27,12 +27,15 @@ internal sealed class IngestWriter<T> where T : IRow
     private readonly Lock _gate = new();
     private readonly IngestLag _lag;
     private readonly Random _random;
-    private readonly DateTime _started = DateTime.UtcNow;
+    private readonly DateTime _started;
+    private readonly TimeProvider _time;
     private readonly Action<IReadOnlyList<T>> _write;
     private DateTime _stalledUntil;
 
-    public IngestWriter(Action<IReadOnlyList<T>> write, IngestLag lag, int seed)
+    public IngestWriter(Action<IReadOnlyList<T>> write, IngestLag lag, int seed, TimeProvider time)
     {
+        _time = time;
+        _started = Now;
         _write = write;
         _lag = lag;
         _random = new Random(seed);
@@ -51,7 +54,7 @@ internal sealed class IngestWriter<T> where T : IRow
     }
 
     /// <summary>Whether the ingestion is stalled now.</summary>
-    public bool Stalled => StallEnds(DateTime.UtcNow) is not null;
+    public bool Stalled => StallEnds(Now) is not null;
 
     /// <summary>
     ///     Holds every write back until <paramref name="until" />, rows already waiting included; a time past ends a
@@ -67,7 +70,7 @@ internal sealed class IngestWriter<T> where T : IRow
 
     public void Enqueue(T[] batch)
     {
-        var now = DateTime.UtcNow;
+        var now = Now;
         lock (_gate)
         {
             foreach (var row in batch)
@@ -80,24 +83,29 @@ internal sealed class IngestWriter<T> where T : IRow
 
     public async Task RunAsync(CancellationToken ct)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
-        while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
-        {
-            var now = DateTime.UtcNow;
-            List<T> ready = [];
-            lock (_gate)
-            {
-                // A stall holds back what falls due during it; when it ends, that is written at once.
-                while (StallEnds(now) is null && _due.TryPeek(out var row, out var due) && due <= now)
-                {
-                    _due.Dequeue();
-                    ready.Add(row);
-                }
-            }
-
-            if (ready.Count > 0) _write(ready);
-        }
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50), _time);
+        while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false)) WriteDue();
     }
+
+    /// <summary>Writes every row due by now, unless a stall holds them.</summary>
+    public void WriteDue()
+    {
+        var now = Now;
+        List<T> ready = [];
+        lock (_gate)
+        {
+            // A stall holds back what falls due during it; when it ends, that is written at once.
+            while (StallEnds(now) is null && _due.TryPeek(out var row, out var due) && due <= now)
+            {
+                _due.Dequeue();
+                ready.Add(row);
+            }
+        }
+
+        if (ready.Count > 0) _write(ready);
+    }
+
+    private DateTime Now => _time.GetUtcNow().UtcDateTime;
 
     private DateTime? StallEnds(DateTime at)
     {

@@ -5,7 +5,14 @@ using Chalk.Sources.Poco;
 namespace Chalk.Sample.Blotter.Live;
 
 /// <summary>How long a row has waited for the database, as <c>live.waits</c> holds it: until it was held, or for good.</summary>
-public sealed record Wait(Guid Id, DateTime Since, DateTime Until);
+/// <remarks>
+///     In microseconds, as the tables are: a wait with no end runs to 9999, which nanoseconds, the
+///     default, do not reach.
+/// </remarks>
+public sealed record Wait(
+    Guid Id,
+    [property: ChalkColumn(Precision = 6)] DateTime Since,
+    [property: ChalkColumn(Precision = 6)] DateTime Until);
 
 /// <summary>
 ///     The tables alert views read, and the views. Kept only while some browser has an alert, and
@@ -31,7 +38,8 @@ public sealed class AlertTables(
     PocoTable<Fill> arrivedFills,
     PocoTable<Order> latestOrders,
     PocoTable<Wait> waits,
-    PocoTable<MatchCount> matchCounts)
+    PocoTable<MatchCount> matchCounts,
+    TimeProvider time)
     : IAsyncDisposable
 {
     /// <summary>How long a fill stays in <c>live.arrived_fills</c>: long enough for its order to arrive.</summary>
@@ -53,7 +61,7 @@ public sealed class AlertTables(
 
     private readonly Dictionary<string, AlertView> _views = new(StringComparer.Ordinal);
     private int _lastCounter;
-    private DateTime _ordersSwept = DateTime.UtcNow;
+    private DateTime _ordersSwept = time.GetUtcNow().UtcDateTime;
     private ImmutableDictionary<Guid, Reconciliation> _waitsShown = ImmutableDictionary<Guid, Reconciliation>.Empty;
 
     /// <summary>How many alert views are open, count views among them.</summary>
@@ -197,7 +205,7 @@ public sealed class AlertTables(
     /// </summary>
     public async Task UpdateAsync(Tail tail, CancellationToken ct)
     {
-        var now = DateTime.UtcNow;
+        var now = time.GetUtcNow().UtcDateTime;
         foreach (var view in _views.Values.ToList())
         {
             AlertViewUpdate update;
@@ -283,7 +291,7 @@ public sealed class AlertTables(
                 Refused = Refused.SetItem(name, refused.Message);
             }
 
-        var now = DateTime.UtcNow;
+        var now = time.GetUtcNow().UtcDateTime;
         foreach (var (name, window) in wantedCounts.Where(w =>
                      !_counts.ContainsKey(w.Key) && !Refused.ContainsKey(w.Key)))
         {

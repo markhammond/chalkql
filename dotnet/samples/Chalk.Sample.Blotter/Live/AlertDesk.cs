@@ -19,14 +19,16 @@ public sealed class AlertDesk : IDisposable
 
     private readonly BlotterHost _host;
     private readonly ConcurrentDictionary<string, AlertSession> _sessions = new(StringComparer.Ordinal);
-    private readonly Timer _timer;
+    private readonly ITimer _timer;
+
+    private DateTime Now => _host.Options.Time.GetUtcNow().UtcDateTime;
 
     public AlertDesk(BlotterHost host)
     {
         _host = host;
         host.AlertsEntered += OnEntered;
         host.AlertsCounted += OnCounted;
-        _timer = new Timer(_ => Tick(DateTime.UtcNow), null, 250, 250);
+        _timer = host.Options.Time.CreateTimer(_ => Tick(Now), null, TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(250));
     }
 
     public void Dispose()
@@ -37,7 +39,7 @@ public sealed class AlertDesk : IDisposable
     }
 
     /// <summary>The alerts of the browser <paramref name="browser" />, its own id: kept since its last page, or new.</summary>
-    public AlertSession Open(string browser) => _sessions.GetOrAdd(browser, b => new AlertSession(b));
+    public AlertSession Open(string browser) => _sessions.GetOrAdd(browser, b => new AlertSession(b, _host.Options.Time));
 
     /// <summary>
     ///     What is wrong with a condition, before a browser keeps it: a name the host does not know, or
@@ -61,13 +63,13 @@ public sealed class AlertDesk : IDisposable
 
     private void OnEntered(AlertViewSpec view, IReadOnlyList<(IRow Row, TimeSpan? Lag)> rows)
     {
-        var now = DateTime.UtcNow;
+        var now = Now;
         foreach (var session in _sessions.Values) session.Enter(view.Name, rows, now);
     }
 
     private void OnCounted(AlertWindowSpec view, long matches)
     {
-        var now = DateTime.UtcNow;
+        var now = Now;
         foreach (var session in _sessions.Values) session.Count(view.Name, matches, now);
     }
 

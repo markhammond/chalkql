@@ -37,8 +37,6 @@ namespace Chalk.Sample.Blotter.Live;
 /// </remarks>
 public sealed class BlotterHost : IAsyncDisposable
 {
-    /// <summary>How often the clock moves while nothing arrives, for the alert views that watch the wait and the count views.</summary>
-    public static readonly TimeSpan AlertTick = TimeSpan.FromMilliseconds(250);
 
     private readonly Channel<Func<Task>> _actions = Channel.CreateUnbounded<Func<Task>>();
     private readonly HostBudget _budget;
@@ -60,6 +58,7 @@ public sealed class BlotterHost : IAsyncDisposable
     private IHouseDatabase? _house;
     private long _lastConfirm;
     private long _lastRefresh;
+    private long _lastStatus;
     private long _lastResumeCheck;
     private Task? _loop;
     private DateTime _newestOrderSent;
@@ -109,6 +108,9 @@ public sealed class BlotterHost : IAsyncDisposable
     public Pages Pages { get; private set; } = null!;
 
     public BlotterOptions Options { get; }
+
+    /// <summary>Now, by the host's clock, in the tables' wall-clock time.</summary>
+    private DateTime Now => Options.Time.GetUtcNow().UtcDateTime;
 
     /// <summary>The budget now; the page may change it.</summary>
     public long Budget => _budget.Bytes;
@@ -221,13 +223,16 @@ public sealed class BlotterHost : IAsyncDisposable
             parts.Tables.Fills, parts.Tables.Alerts);
         _alerts.Entered += (spec, rows) => AlertsEntered?.Invoke(spec, rows);
         _alerts.Counted += (spec, matches) => AlertsCounted?.Invoke(spec, matches);
-        Pages = new Pages(Queries)
+        Pages = new Pages(Queries, Options.Time)
         {
             MaxKeptRows = PageRows(),
             WindowFor = Options.EvictAfter > TimeSpan.FromSeconds(1)
                 ? Options.EvictAfter - TimeSpan.FromSeconds(1)
                 : TimeSpan.Zero
         };
+
+        // A test turning the host by hand goes live when it chooses, and turns the loop itself.
+        if (Options.Stepped) return;
 
         await GoLiveAsync(ct).ConfigureAwait(false);
         _log.LogInformation("serving after {Seconds:F1} s", Stopwatch.GetElapsedTime(started).TotalSeconds);
@@ -296,7 +301,7 @@ public sealed class BlotterHost : IAsyncDisposable
     public Task ReleaseAsync(LiveScope scope) => OnLoopAsync(() =>
                                                       {
                                                           scope.Pages = Math.Max(0, scope.Pages - 1);
-                                                          if (scope.Pages == 0) scope.Idle = DateTime.UtcNow;
+                                                          if (scope.Pages == 0) scope.Idle = Now;
 
                                                           return Task.FromResult(true);
                                                       });
@@ -335,38 +340,11 @@ public sealed class BlotterHost : IAsyncDisposable
     /// </summary>
     private async Task RunAsync(CancellationToken ct)
     {
-        var lastStatus = 0L;
         while (!ct.IsCancellationRequested)
             try
             {
                 await WaitForWorkAsync(ct).ConfigureAwait(false);
-                while (_actions.Reader.TryRead(out var action)) await action().ConfigureAwait(false);
-
-                if (State == BlotterState.Live)
-                {
-                    await IngestAsync([], [], ct).ConfigureAwait(false);
-                    if (Stopwatch.GetElapsedTime(_lastConfirm) >= Options.ConfirmEvery)
-                    {
-                        _lastConfirm = Stopwatch.GetTimestamp();
-                        await ConfirmAsync(ct).ConfigureAwait(false);
-                    }
-
-                    // A wait grows, and a window slides, while nothing arrives: the views that watch them see the clock move.
-                    if (_alerts!.WatchesTime && Stopwatch.GetElapsedTime(_lastRefresh) >= AlertTick)
-                        await RefreshAsync(_ => { }, OrdersThrough, FillsThrough, ct).ConfigureAwait(false);
-                }
-                else if (State == BlotterState.Refusing)
-                {
-                    Keep();
-                    await ResumeWhenCaughtUpAsync(ct).ConfigureAwait(false);
-                }
-
-                await CloseIdleScopesAsync().ConfigureAwait(false);
-                if (Stopwatch.GetElapsedTime(lastStatus).TotalMilliseconds > 500)
-                {
-                    lastStatus = Stopwatch.GetTimestamp();
-                    Status = ReadStatus();
-                }
+                await TurnAsync(ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -379,10 +357,47 @@ public sealed class BlotterHost : IAsyncDisposable
             }
     }
 
+    /// <summary>
+    ///     One turn of the catch-up loop, at the instant the clock says: what pages asked of it, what the
+    ///     streams sent, a lookup of the tail if one is due, a refresh for the views that watch the clock,
+    ///     scopes past their grace closed. A test of a host started <see cref="BlotterOptions.Stepped" />
+    ///     calls it in place of the loop.
+    /// </summary>
+    internal async Task TurnAsync(CancellationToken ct = default)
+    {
+        while (_actions.Reader.TryRead(out var action)) await action().ConfigureAwait(false);
+
+        if (State == BlotterState.Live)
+        {
+            await IngestAsync([], [], ct).ConfigureAwait(false);
+            if (Options.Time.GetElapsedTime(_lastConfirm) >= Options.ConfirmEvery)
+            {
+                _lastConfirm = Options.Time.GetTimestamp();
+                await ConfirmAsync(ct).ConfigureAwait(false);
+            }
+
+            // A wait grows, and a window slides, while nothing arrives: the views that watch them see the clock move.
+            if (_alerts!.WatchesTime && Options.Time.GetElapsedTime(_lastRefresh) >= Options.ClockEvery)
+                await RefreshAsync(_ => { }, OrdersThrough, FillsThrough, ct).ConfigureAwait(false);
+        }
+        else if (State == BlotterState.Refusing)
+        {
+            Keep();
+            await ResumeWhenCaughtUpAsync(ct).ConfigureAwait(false);
+        }
+
+        await CloseIdleScopesAsync().ConfigureAwait(false);
+        if (Options.Time.GetElapsedTime(_lastStatus).TotalMilliseconds > 500)
+        {
+            _lastStatus = Options.Time.GetTimestamp();
+            Status = ReadStatus();
+        }
+    }
+
     private async Task WaitForWorkAsync(CancellationToken ct)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromMilliseconds(100));
+        using var after = new CancellationTokenSource(TimeSpan.FromMilliseconds(100), Options.Time);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct, after.Token);
         var (orders, fills) = (_orderFeed, _fillFeed);
         try
         {
@@ -397,7 +412,7 @@ public sealed class BlotterHost : IAsyncDisposable
 
             // Batches that arrive together are refreshed together: a burst costs a few refreshes
             // rather than one per version.
-            await Task.Delay(TimeSpan.FromMilliseconds(20), ct).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromMilliseconds(20), Options.Time, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -529,7 +544,7 @@ public sealed class BlotterHost : IAsyncDisposable
         var held = unconfirmed.Count == 0 ? [] : await Queries.FillsHeldAsync(unconfirmed, ct).ConfigureAwait(false);
         Status = Status with { Confirmations = Status.Confirmations + 1 };
 
-        var now = DateTime.UtcNow;
+        var now = Now;
         var upserts = new List<TailRow>();
         var deletes = new List<TailRow>();
         var versionDeletes = new List<Order>();
@@ -611,7 +626,7 @@ public sealed class BlotterHost : IAsyncDisposable
 
         // What is in the tail is what the database has not been seen to hold: the gap the host covers.
         var lag = _tail.OldestUnconfirmed is { } oldest
-            ? DateTime.UtcNow - DateTime.SpecifyKind(oldest, DateTimeKind.Utc)
+            ? Now - DateTime.SpecifyKind(oldest, DateTimeKind.Utc)
             : TimeSpan.Zero;
         _refusedBehind = lag;
         await StopServingAsync(string.Create(CultureInfo.InvariantCulture,
@@ -626,17 +641,26 @@ public sealed class BlotterHost : IAsyncDisposable
     ///     request, the gap fill, for every version written lately, and takes those with whatever was
     ///     kept while refusing as if the stream had sent them. Refused if the tail that makes does not fit.
     /// </summary>
-    private async Task GoLiveAsync(CancellationToken ct)
+    /// <remarks>
+    ///     A version the stream sent just before the subscription may still be in transit to the database:
+    ///     neither the stream nor a gap fill read at once would bring it. So the first time, the one gap
+    ///     fill waits out the haircut (<see cref="BlotterOptions.GapFillHaircut" />), while the stream is
+    ///     kept, and reaches back from the subscription. Serving again after a refusal needs no wait: the
+    ///     streams were read all along.
+    /// </remarks>
+    internal async Task GoLiveAsync(CancellationToken ct)
     {
+        var from = Now;
         if (_orderFeed is null || _fillFeed is null)
         {
             _orderFeed = _exchange!.Orders.Subscribe(out var ordersBefore);
             _fillFeed = _exchange.Fills.Subscribe(out var fillsBefore);
             (_ordersRead, _fillsRead) = (ordersBefore, fillsBefore);
-            (OrdersThrough, FillsThrough) = (Cells.Micros(DateTime.UtcNow), Cells.Micros(DateTime.UtcNow));
+            (OrdersThrough, FillsThrough) = (Cells.Micros(Now), Cells.Micros(Now));
+            await Task.Delay(Options.GapFillHaircut, Options.Time, ct).ConfigureAwait(false);
         }
 
-        var gap = await Queries.VersionsSinceAsync(Cells.Micros(DateTime.UtcNow - Options.GapFill), ct)
+        var gap = await Queries.VersionsSinceAsync(Cells.Micros(from - Options.GapFill), ct)
             .ConfigureAwait(false);
         Order[] kept = [.. _keptOrders];
         Fill[] keptFills = [.. _keptFills];
@@ -646,6 +670,10 @@ public sealed class BlotterHost : IAsyncDisposable
         State = BlotterState.Live;
         Refusal = null;
         var taken = await IngestAsync([.. gap, .. kept], keptFills, ct).ConfigureAwait(false);
+
+        // Nothing taken, nothing refreshed: the views that read the engine's clock need it set before they open.
+        if (_version == 0) await RefreshAsync(_ => { }, OrdersThrough, FillsThrough, ct).ConfigureAwait(false);
+
         Status = ReadStatus() with { GapRead = gap.Length, GapFilled = Status.GapFilled + taken };
         if (State == BlotterState.Live)
             _log.LogInformation(
@@ -674,7 +702,7 @@ public sealed class BlotterHost : IAsyncDisposable
             Interlocked.Add(ref _fillsRead, batch.Length);
         }
 
-        var horizon = Cells.Micros(DateTime.UtcNow - Options.GapFill);
+        var horizon = Cells.Micros(Now - Options.GapFill);
         _keptOrders.RemoveAll(o => o.EventTime < horizon);
         _keptFills.RemoveAll(f => f.EventTime < horizon);
     }
@@ -686,9 +714,9 @@ public sealed class BlotterHost : IAsyncDisposable
     /// </summary>
     private async Task ResumeWhenCaughtUpAsync(CancellationToken ct)
     {
-        if (Stopwatch.GetElapsedTime(_lastResumeCheck) < TimeSpan.FromSeconds(1)) return;
+        if (Options.Time.GetElapsedTime(_lastResumeCheck) < TimeSpan.FromSeconds(1)) return;
 
-        _lastResumeCheck = Stopwatch.GetTimestamp();
+        _lastResumeCheck = Options.Time.GetTimestamp();
         var newest = await Queries.NewestOrderAsync(ct).ConfigureAwait(false);
         var within = _refusedBehind > TimeSpan.Zero && _refusedBehind / 2 < Options.ResumeWithin
             ? _refusedBehind / 2
@@ -742,7 +770,7 @@ public sealed class BlotterHost : IAsyncDisposable
         CancellationToken ct)
     {
         var next = _version + 1;
-        var now = DateTime.UtcNow;
+        var now = Now;
 
         // The clock moves only forward, by a tick at least, however the wall clock steps.
         _clock = now > _clock ? now : _clock.AddTicks(1);
@@ -753,7 +781,7 @@ public sealed class BlotterHost : IAsyncDisposable
             refresh.AdvanceClock(_clock);
         }, ct).ConfigureAwait(false);
         _version = next;
-        _lastRefresh = Stopwatch.GetTimestamp();
+        _lastRefresh = Options.Time.GetTimestamp();
         (OrdersThrough, FillsThrough) = (ordersThrough, fillsThrough);
         var mark = Mark();
         foreach (var scope in _scopes.Values) await scope.UpdateAsync(_tail, _version, mark, ct).ConfigureAwait(false);
@@ -773,7 +801,7 @@ public sealed class BlotterHost : IAsyncDisposable
     private async Task CloseIdleScopesAsync()
     {
         foreach (var scope in _scopes.Values.Where(s => s.Pages == 0 && s.Idle is { } idle
-                                                                     && DateTime.UtcNow - idle > Options.ScopeGrace)
+                                                                     && Now - idle > Options.ScopeGrace)
                      .ToList())
             await CloseAsync(scope).ConfigureAwait(false);
     }
@@ -819,7 +847,7 @@ public sealed class BlotterHost : IAsyncDisposable
             Sync = Options.Current,
             TimeLimit = Options.QueryTimeLimit,
             Behind = _tail.OldestUnconfirmed is { } oldest
-                ? DateTime.UtcNow - DateTime.SpecifyKind(oldest, DateTimeKind.Utc)
+                ? Now - DateTime.SpecifyKind(oldest, DateTimeKind.Utc)
                 : null,
             NotYetIngested = _exchange?.NotYetIngested ?? 0,
             CurrentWaiting = _exchange?.CurrentWaiting ?? 0,

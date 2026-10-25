@@ -61,7 +61,8 @@ It does assume records are append-only:
 - **Each stream sends everything after a reader subscribes**, mostly in order. A row may arrive late,
   after later rows or after the database has written it, and pages stay correct; but the count of
   arrivals above a held view is right only once late rows land, and the gap fill reaches back 30 s, so
-  no row should be later than that.
+  no row should be later than that. A version sent just before the host subscribes reaches the database
+  within the gap fill's 5 s haircut.
 - **Keys are never reused.**
 
 In exchange, the host takes on:
@@ -70,7 +71,8 @@ In exchange, the host takes on:
   every half second and released five seconds later.
 - **A merge**: each page is the database read live with the tail laid over it, each order once, at the
   newest version either side knows.
-- **A gap fill** at start and on resuming, for versions in flight at subscription.
+- **A gap fill** at start, once the haircut has passed, and on resuming, for versions in flight at
+  subscription.
 - **Learned positions**: a live table has none, so each grid ties the positions it has read to the rows
   found there, and reads from their keys.
 - **Estimates, not counts**, refined off the page's path, with a tab's end learned from reads that
@@ -448,11 +450,12 @@ background, and the grid renders 60 rows beyond the view either side. At 5 milli
 ClOrdId sort 30 rows at a time, two steps in thirty briefly showed placeholder rows, and the database
 was read about once in ten.
 
-**Starting, and the gap fill.** The host subscribes to the streams, then asks the database for every
-version `order_versions` holds from the last 30 s. It takes each as if streamed, releasing at once those
-`orders_current` already shows, so a version in flight at subscription is shown even before
-`orders_current` has it. Fills need no gap fill: the blotter reads them from the table they are written
-to.
+**Starting, and the gap fill.** The host subscribes to the streams and keeps what they send. A version
+sent just before may still be in transit to the database, so the host waits out a haircut, 5 s
+(`GapFillHaircut`), then asks once for every version `order_versions` holds from 30 s before the
+subscription. It takes each as if streamed, releasing at once those `orders_current` already shows, so a
+version in flight at subscription is shown even before `orders_current` has it. Fills need no gap fill:
+the blotter reads them from the table they are written to.
 
 **Live scopes.** For each tab and distinct filter on open pages, a ChalkQL standing view over the tail
 (`LiveScope`) holds what the filter can see: for orders, every order passing the filter now or whose
@@ -513,6 +516,10 @@ arrive above, the count of arrivals above a held view against the merged page (e
 columns that change and those that do not), estimates and counts off the page's path, an order's
 history read from both sides, and alerts fired by incremental views along paths, on the wait, and on
 counts in a sliding window, of order versions and of none in an outage.
+
+Every rule a clock decides is tested at its boundary on a fake clock (`TimingTests`, catalogued in
+`TimingPartitions.md`): the host and the house read time from one `TimeProvider`, and a test turns them
+by hand, just before each boundary, on it, and a microsecond after.
 
 Run a longer check against a busy market by hand; it prints PostgreSQL's estimates and what the host
 held:
