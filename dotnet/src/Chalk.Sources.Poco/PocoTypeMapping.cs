@@ -477,9 +477,9 @@ internal static class PocoTypeMapping
             TypeKind.Date => value => Expression.Call(DaysOfMethod, value),
             TypeKind.Time => value => Expression.Call(TimeMicrosMethod, value),
             TypeKind.Timestamp => value => TicksToUnit(
-                Expression.Property(value, nameof(DateTime.Ticks)), type.Precision),
+                Expression.Property(value, nameof(DateTime.Ticks)), type.Precision, what),
             TypeKind.TimestampTz => value => TicksToUnit(
-                Expression.Property(value, nameof(DateTimeOffset.UtcTicks)), type.Precision),
+                Expression.Property(value, nameof(DateTimeOffset.UtcTicks)), type.Precision, what),
             TypeKind.IntervalDay => value => Expression.Call(IntervalMicrosMethod, value),
             TypeKind.Uuid => value => value,
             _ => throw new UnsupportedFeatureException(
@@ -496,10 +496,11 @@ internal static class PocoTypeMapping
 
     /// <summary>
     /// A .NET tick is 100 ns, so nanoseconds are exact and coarser units divide. Truncation only
-    /// happens when a host asks for a precision below the source's, which is its own choice.
+    /// happens when a host asks for a precision below the source's, which is its own choice; an
+    /// instant nanoseconds cannot reach is refused, naming the member.
     /// </summary>
-    private static Expression TicksToUnit(Expression ticks, int precision) =>
-        Expression.Call(UnitsOfMethod, ticks, Expression.Constant(precision));
+    private static Expression TicksToUnit(Expression ticks, int precision, string what) =>
+        Expression.Call(TimestampUnitsMethod, ticks, Expression.Constant(precision), Expression.Constant(what));
 
     /// <summary>
     /// <c>Enum.GetName&lt;TEnum&gt;</c> returns the cached name without allocating for a declared
@@ -548,6 +549,6 @@ internal static class PocoTypeMapping
     private static readonly MethodInfo IntervalMicrosMethod =
         typeof(ClrStorage).GetMethod(nameof(ClrStorage.MicrosOf), [typeof(TimeSpan)])!;
 
-    private static readonly MethodInfo UnitsOfMethod =
-        typeof(ClrStorage).GetMethod(nameof(ClrStorage.UnitsOf), [typeof(long), typeof(int)])!;
+    private static readonly MethodInfo TimestampUnitsMethod =
+        typeof(PocoConvert).GetMethod(nameof(PocoConvert.TimestampUnits))!;
 }

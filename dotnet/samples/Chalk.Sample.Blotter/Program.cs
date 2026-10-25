@@ -1,0 +1,88 @@
+using System.Globalization;
+using Chalk.Incremental;
+using Chalk.Sample.Blotter;
+using Chalk.Sample.Blotter.Components;
+using Chalk.Sample.Blotter.Fixtures;
+using Chalk.Sample.Blotter.Live;
+using Microsoft.AspNetCore.DataProtection;
+
+var budget = Number(Argument(args, "--budget-mb"));
+var disorder = Argument(args, "--disorder") is { } share
+    ? double.Parse(share, CultureInfo.InvariantCulture)
+    : (double?)null;
+var options = new BlotterOptions
+{
+    Orders = Number(Argument(args, "--orders")) ?? 5_000_000,
+    BudgetBytes = (budget ?? 8) << 20,
+    FindBudget = budget is null,
+    Maintenance = Argument(args, "--maintenance") == "recompute"
+        ? ViewMaintenance.Recompute
+        : ViewMaintenance.Incremental,
+    Postgres = Argument(args, "--postgres"),
+    PostgresBinaries = Argument(args, "--pg-bin"),
+    Current = Argument(args, "--current") switch
+    {
+        null or "trigger" => CurrentSync.Trigger,
+        "lagging" => CurrentSync.Lagging,
+        var other => throw new ArgumentException($"--current takes trigger or lagging, not '{other}'")
+    },
+
+    // Out of order from the start: that share of rows sent late, and half as many written to the database first.
+    Exchange = disorder is { } late
+        ? new ExchangeOptions { Disordered = true, Disorder = late, DatabaseFirst = late / 2 }
+        : new ExchangeOptions()
+};
+
+var builder = WebApplication.CreateBuilder(args);
+builder.WebHost.UseUrls(Argument(args, "--urls") ?? "http://localhost:5910");
+
+// Run from the build output rather than published, the framework's script (blazor.web.js) is
+// served from its package only when static web assets are on, which outside Development they are not.
+builder.WebHost.UseStaticWebAssets();
+
+// Served from a build, the static assets are taken for a developer's, and the browser is told to ask for
+// each again on every load, even in Production. Their addresses carry a fingerprint of what they hold
+// (condition-editor.ovlprw3vjg.js, sounds/kaching.pd1r8b6lth.wav), so a changed file has a new address
+// and a browser may keep each for good. EnableStaticAssetsDevelopmentCaching=false asks again.
+builder.Configuration["EnableStaticAssetsDevelopmentCaching"] ??= "true";
+builder.Services.AddSingleton(options);
+builder.Services.AddSingleton<BlotterHost>();
+builder.Services.AddHostedService<BlotterService>();
+builder.Services.AddRazorComponents().AddInteractiveServerComponents();
+
+// How far each page is behind the host, one per circuit: its grid reports, its status bar shows.
+builder.Services.AddScoped(services => new PageLag(services.GetRequiredService<BlotterOptions>().Time));
+
+// The keys that shroud the values in a view's link, kept in a folder so that a link opens after a
+// restart: rotated every 90 days, an old one kept to open what it shrouded.
+var linkKeys = Argument(args, "--link-keys")
+               ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                   "Chalk.Sample.Blotter", "link-keys");
+builder.Services.AddDataProtection()
+    .SetApplicationName("Chalk.Sample.Blotter")
+    .PersistKeysToFileSystem(new DirectoryInfo(linkKeys));
+builder.Services.AddSingleton<LinkShroud>();
+builder.Services.AddSingleton<AlertDesk>();
+
+var app = builder.Build();
+app.UseAntiforgery();
+app.MapStaticAssets();
+app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
+await app.RunAsync();
+return 0;
+
+static string? Argument(string[] args, string name)
+{
+    var at = Array.IndexOf(args, name);
+    return at >= 0 && at + 1 < args.Length ? args[at + 1] : null;
+}
+
+// 5M, 500k and 20m are all numbers of orders here.
+static long? Number(string? text)
+{
+    if (string.IsNullOrWhiteSpace(text)) return null;
+
+    var scale = char.ToLowerInvariant(text[^1]) switch { 'k' => 1_000L, 'm' => 1_000_000L, _ => 1L };
+    var digits = scale == 1 ? text : text[..^1];
+    return (long)(double.Parse(digits, CultureInfo.InvariantCulture) * scale);
+}

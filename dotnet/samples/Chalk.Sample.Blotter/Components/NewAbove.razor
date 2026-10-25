@@ -1,0 +1,45 @@
+@* What arrived above the rows in view while the grid holds its place. It renders on its own: the count
+   moves with nearly every page the feed brings, and the grid rendered again for it would send every
+   row in view again. *@
+
+@if (_count is not null)
+{
+    <button class="badge" @onclick="Click">
+        @if (_bell)
+        {
+            @* Alerts fired since the grid was held: among the rows above, most likely. *@
+            <Bell Muted="_muted"/>
+        }
+        @_count new above
+    </button>
+}
+
+@code {
+    [Parameter, EditorRequired] public EventCallback Click { get; set; }
+
+    // The count as shown, or none: past 999 it stays at "999+", and the badge renders no more for it.
+    private string? _count;
+    private bool _bell;
+    private bool _muted;
+
+    /// <summary>Shows a new count, and whether alerts fired since the grid was held; renders only if what it shows changed.</summary>
+    public void Show(long above, bool bell, bool muted)
+    {
+        var count = Count(above);
+        if ((count, bell, muted) == (_count, _bell, _muted))
+        {
+            return;
+        }
+
+        (_count, _bell, _muted) = (count, bell, muted);
+        StateHasChanged();
+    }
+
+    /// <summary>The count as the badge shows it: none for nothing, and no more than "999+".</summary>
+    public static string? Count(long above) => above switch
+    {
+        <= 0 => null,
+        > 999 => "999+",
+        _ => above.ToString("N0", CultureInfo.InvariantCulture)
+    };
+}

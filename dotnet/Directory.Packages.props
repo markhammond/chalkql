@@ -18,6 +18,7 @@
     <PackageVersion Include="Grpc.AspNetCore.Server" Version="2.83.0" />
     <PackageVersion Include="Grpc.Tools" Version="2.83.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.9.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="5.6.0" />
     <!-- D148a (25-coverage-graft.md §0a): the shipping DuckDB source references DuckDB.NET.Data,
          which is the provider and its Arrow export and nothing else. The `.Full` suffix adds the
@@ -50,6 +51,9 @@
     <!-- Sample only, and MIT-licensed: samples/Chalk.Sample.AkadeIndexedSet wraps it as an
          IPocoIndex<T> to prove D35's extension point. No Chalk.* package references it. -->
     <PackageVersion Include="Akade.IndexedSet" Version="1.5.0" />
+    <!-- Sample only: samples/Chalk.Sample.Blotter's grid; the sample also takes Npgsql, above, for
+         its database. No Chalk.* package references either. -->
+    <PackageVersion Include="Microsoft.AspNetCore.Components.QuickGrid" Version="10.0.11" />
   </ItemGroup>
 
   <!-- bench-only -->

@@ -1,0 +1,149 @@
+@page "/order/{OrderId:guid}"
+@implements IDisposable
+@inject BlotterHost Host
+
+<PageTitle>Order @OrderId</PageTitle>
+
+<main>
+    <div class="bar">
+        <h1>Order @OrderId</h1>
+        <span class="chip"><span class="label">versions</span><b>@_versions.Length</b></span>
+        <span class="chip" title="Versions the order stream has sent that the database does not show yet">
+            <span class="label">in the tail only</span><b>@_tailOnly.Count</b>
+        </span>
+        <span class="chip"><span class="label">fills</span><b>@_fills.Length</b></span>
+        <a href="/">Back to the blotter</a>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="refusal">@_error</div>
+    }
+
+    @if (_versions.Length == 0 && _fills.Length > 0)
+    {
+        <p class="muted">Its fills have arrived; the order itself has not yet. The fills stream runs ahead of the order
+            stream.</p>
+    }
+
+    <h2>Versions</h2>
+    <p class="muted">
+        One statement over both sides: <code>blotter.order_versions</code> in PostgreSQL, and
+        <code>live.order_versions</code>,
+        the versions the stream has sent that the database has not been seen to hold yet. A version in both is one row.
+    </p>
+    <div class="wide">
+        <table class="history">
+            <thead>
+            <tr>
+                @foreach (var column in Tabs.Orders.Columns)
+                {
+                    <th>@column.Title</th>
+                }
+                <th>Where</th>
+            </tr>
+            </thead>
+            <tbody>
+            @for (var i = 0; i < _versions.Length; i++)
+            {
+                var version = _versions[i];
+                var older = i + 1 < _versions.Length ? _versions[i + 1] : null;
+                <tr>
+                    @foreach (var column in Tabs.Orders.Columns)
+                    {
+                        <td class="@(older is not null && column.Detail(older) != column.Detail(version) ? "changed" : null)">@column.Detail(version)</td>
+                    }
+                    <td>@(_tailOnly.Contains(version.Version) ? "tail only" : "database")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+
+    <h2>Fills</h2>
+    <div class="wide">
+        <table class="history">
+            <thead>
+            <tr>
+                @foreach (var column in Tabs.Fills.Columns)
+                {
+                    <th>@column.Title</th>
+                }
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var fill in _fills)
+            {
+                <tr class="@(fill.FillId == Fill ? "marked" : null)">
+                    @foreach (var column in Tabs.Fills.Columns)
+                    {
+                        <td>@column.Detail(fill)</td>
+                    }
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</main>
+
+@code {
+    [Parameter] public Guid OrderId { get; set; }
+
+    /// <summary>A fill to mark, when the order's page was opened from that fill.</summary>
+    [SupplyParameterFromQuery]
+    public Guid? Fill { get; set; }
+
+    private Order[] _versions = [];
+    private Fill[] _fills = [];
+    private HashSet<int> _tailOnly = [];
+    private string? _error;
+    private int _busy;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        Host.Published -= OnPublished;
+        Host.Published += OnPublished;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _versions = await Host.Queries.HistoryAsync(OrderId, CancellationToken.None);
+            _tailOnly = await Host.Queries.TailOnlyAsync(OrderId, CancellationToken.None);
+            _fills = await Host.Queries.AllFillsOfAsync(OrderId, CancellationToken.None);
+            _error = null;
+        }
+        catch (Exception failure)
+        {
+            _error = failure.Message;
+        }
+    }
+
+    // An order's history is a few cheap statements: read again after a refresh, at most once a second.
+    private void OnPublished(long version)
+    {
+        if (Interlocked.Exchange(ref _busy, 1) == 1)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await LoadAsync();
+                StateHasChanged();
+                await Task.Delay(1000);
+            }
+            finally
+            {
+                Volatile.Write(ref _busy, 0);
+            }
+        });
+    }
+
+    public void Dispose() => Host.Published -= OnPublished;
+
+}

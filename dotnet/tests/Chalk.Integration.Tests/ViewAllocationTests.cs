@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Reflection;
 using Chalk.Client;
 using Chalk.Incremental;
 using Chalk.Sources.Poco;
@@ -37,6 +39,7 @@ public sealed class ViewAllocationTests(SharedSidecar sidecar, ITestOutputHelper
     public async Task A_maintained_views_update_allocates_little_beside_its_statements()
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        SkipUnoptimised();
         var (viewBytes, statementBytes) = await SteadyUpdatesAsync();
 
         Assert.True(
@@ -53,6 +56,7 @@ public sealed class ViewAllocationTests(SharedSidecar sidecar, ITestOutputHelper
     public async Task A_maintained_statements_update_of_five_keys_allocates_under_two_kilobytes()
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        SkipUnoptimised();
         var (_, statementBytes) = await SteadyUpdatesAsync();
 
         Assert.True(statementBytes <= 2_048, $"the statement's update allocated {statementBytes} bytes");
@@ -165,6 +169,15 @@ public sealed class ViewAllocationTests(SharedSidecar sidecar, ITestOutputHelper
     }
 
     // ---- the parts ----
+
+    /// <summary>
+    /// The byte counts hold for code built with optimisation. A Debug build makes each async method's
+    /// state machine a class, allocated at every call, even one that completes at once: some 2.8 KB more
+    /// an update here.
+    /// </summary>
+    private static void SkipUnoptimised() => Assert.SkipWhen(
+        typeof(ChalkEngine).Assembly.GetCustomAttribute<DebuggableAttribute>()?.IsJITOptimizerDisabled == true,
+        "a Debug build allocates each async method's state machine at every call");
 
     private static ViewOptions<One, One> Options() => new()
     {

@@ -1,0 +1,161 @@
+@* What the host holds and what it is waiting for: at the top of the page, whether it is serving and
+   its budget; under the table, the vital statistics, from the feed to the host. *@
+@implements IDisposable
+@inject BlotterHost Host
+@inject PageLag Lag
+
+@if (!Telemetry)
+{
+    <span class="chip @(Status.State == BlotterState.Live ? "live" : "behind")" title="@Status.Refusal">
+    <b>@Status.State</b>
+</span>
+    <span class="chip"
+          title="Tail @Mb(Status.TailBytes), @Status.Scopes live scopes @Mb(Status.ScopeBytes), counts and fills cached @Mb(Status.PageBytes), alert views and their tables @Mb(Status.AlertBytes)">
+    <span class="label">host</span><b>@Two(Status.UsedBytes / 1048576.0) MB</b>
+    <span class="label">of</span>
+    <select value="@(Host.Budget >> 20)" @onchange="ChangeAsync" aria-label="Host memory budget">
+        @foreach (var megabytes in new[] { 4, 8, 16, 32, 64, 128, 256 })
+        {
+            <option value="@megabytes">@megabytes MB</option>
+        }
+    </select>
+</span>
+    <span class="chip"
+          title="How far this page is behind the host: from a change reaching the host to this browser drawing it, the worst in the last second">
+    <span class="label">lag</span><b>@(Status.State == BlotterState.Live ? Two(_lag.TotalSeconds) + " s" : "–")</b>
+</span>
+}
+else
+{
+    <span class="chip"
+          title="Changes a second the house is making now, and the versions and fills the streams have sent">
+    <span class="label">feed</span><b>@Status.FeedRate.ToString("N0", CultureInfo.InvariantCulture)/s</b>
+        <span class="label">sent</span>@Status.Published.ToString("N0", CultureInfo.InvariantCulture)
+        @if (Status.SentLate + Status.SentAfterDatabase > 0)
+        {
+            <span class="label">late</span>
+            @Status.SentLate.ToString("N0", CultureInfo.InvariantCulture)
+            <span class="label">after the database</span>
+            @Status.SentAfterDatabase.ToString("N0", CultureInfo.InvariantCulture)
+        }
+</span>
+    <span class="chip"
+          title="Order versions that have happened and that the order stream, running behind the fills, has not sent yet">
+    <span class="label">orders behind fills</span><b>@Status.OrdersHeld.ToString("N0", CultureInfo.InvariantCulture)</b>
+</span>
+    <span class="chip"
+          title="How orders_current keeps up with order_versions: a trigger in the same statement, or a job of its own that runs behind">
+    <span class="label">orders_current by</span><b>@(Status.Sync == CurrentSync.Trigger ? "trigger" : "lagging job")</b>
+        @if (Status.Sync == CurrentSync.Lagging)
+        {
+            <span class="label @(Status.CurrentStalled ? "stalled" : "")">behind by</span>
+            @Status.CurrentWaiting.ToString("N0", CultureInfo.InvariantCulture)
+        }
+</span>
+    <span class="chip @(Status.IngestionStalled ? "stalled" : "")"
+          title="The three tables in PostgreSQL on disk, indexes included, outside the host's budget; how long ago the oldest row it has not been seen to hold was sent; the process's managed heap, for comparison; and the longest any statement may run before it is stopped">
+    <span class="label">PostgreSQL</span><b>@Mb(Status.DatabaseBytes)</b>
+        <span class="label">behind</span>@Seconds(Status.Behind)
+        <span class="label">heap</span>@Mb(Status.ManagedHeapBytes)
+        <span
+            class="label">statements stopped after</span>@Status.TimeLimit.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) s
+</span>
+    <span class="chip"
+          title="Orders whose latest version the database has not been seen to hold, their versions, and the fills it has not been seen to hold; and of those, the ones it has now been seen to hold, about to leave">
+    <span class="label">tail</span><b>@Status.TailOrders.ToString("N0", CultureInfo.InvariantCulture)</b>
+        <span class="label">orders</span>@Status.TailVersions.ToString("N0", CultureInfo.InvariantCulture)
+        <span class="label">versions</span>@Status.TailFills.ToString("N0", CultureInfo.InvariantCulture)
+        <span class="label">fills</span>@Status.TailConfirmed.ToString("N0", CultureInfo.InvariantCulture)
+        <span class="label">confirmed</span>
+</span>
+    <span class="chip"
+          title="Statements ChalkQL has run against the database, and those stopped at the time limit; reads of pages from the database, of which read ahead, and reads a kept window answered; lookups of the tail's rows a read placed; the last refresh">
+    <span class="label">statements</span><b>@Status.Statements.ToString("N0", CultureInfo.InvariantCulture)</b>
+        <span class="label">stopped</span>@Status.TimedOut.ToString("N0", CultureInfo.InvariantCulture)
+        <span class="label">reads</span>@Status.PageReads.ToString("N0", CultureInfo.InvariantCulture)
+        <span class="label">ahead</span>@Status.ReadAheads.ToString("N0", CultureInfo.InvariantCulture)
+        <span class="label">kept</span>@Status.PageHits.ToString("N0", CultureInfo.InvariantCulture)
+        <span class="label">lookups</span>@Status.PageLookups.ToString("N0", CultureInfo.InvariantCulture)
+        <span class="label">refresh</span>@Status.LastRefreshMs.ToString("F1", CultureInfo.InvariantCulture) ms
+</span>
+    <span class="chip"
+          title="Lookups of the whole tail in the database, and the rows they let leave it; versions the last gap fill read, and those gap fills added to the tail">
+    <span class="label">confirmations</span><b>@Status.Confirmations.ToString("N0", CultureInfo.InvariantCulture)</b>
+        <span class="label">left</span>@Status.Evicted.ToString("N0", CultureInfo.InvariantCulture)
+        <span
+            class="label">gap fill</span>@Status.GapRead.ToString("N0", CultureInfo.InvariantCulture)/@Status.GapFilled.ToString("N0", CultureInfo.InvariantCulture)
+</span>
+}
+
+@code {
+    /// <summary>The telemetry under the table, rather than the state at the top.</summary>
+    [Parameter]
+    public bool Telemetry { get; set; }
+
+    private BlotterStatus Status { get; set; } = new();
+    private TimeSpan _lag;
+
+    // The bar reads the host again every second and renders itself alone: the page, and the grid
+    // in it, are not rendered again for it, which on a slow link would send the grid's rows again.
+    private Timer? _timer;
+
+    protected override void OnInitialized()
+    {
+        (Status, _budget) = (Host.Status, Host.Budget);
+        _timer = new Timer(_ => InvokeAsync(() =>
+        {
+            var status = Host.Status;
+            var lag = Lag.Take();
+            if (!Telemetry && !Changed(status, lag))
+            {
+                return;
+            }
+
+            (Status, _lag, _budget) = (status, lag, Host.Budget);
+            StateHasChanged();
+        }), null, 1000, 1000);
+    }
+
+    // At the top, the bar renders again only when the state or the budget changes, or the host's
+    // memory or the lag moves by 5% or more: on a slow link every render is sent, and a figure that
+    // flickers in its last digit says nothing. The statistics below, opened on purpose, follow every
+    // second.
+    private long _budget;
+
+    private bool Changed(BlotterStatus status, TimeSpan lag) =>
+        status.State != Status.State || status.Refusal != Status.Refusal || Host.Budget != _budget
+        || Moved(Status.UsedBytes / 1048576.0, status.UsedBytes / 1048576.0)
+        || Moved(_lag.TotalSeconds, lag.TotalSeconds);
+
+    /// <summary>Whether a figure shown moved enough to show again: by 5% or more, and so that it reads differently.</summary>
+    public static bool Moved(double shown, double now) =>
+        Two(shown) != Two(now) && (shown == 0 || Math.Abs(now - shown) >= 0.05 * Math.Abs(shown));
+
+    /// <summary>A figure to two significant figures; under a hundredth, nought.</summary>
+    public static string Two(double value)
+    {
+        if (value < 0.01)
+        {
+            return "0";
+        }
+
+        var step = Math.Pow(10, Math.Floor(Math.Log10(value)) - 1);
+        var rounded = Math.Round(value / step, MidpointRounding.AwayFromZero) * step;
+        var decimals = Math.Max(0, 1 - (int)Math.Floor(Math.Log10(rounded)));
+        return rounded.ToString("F" + decimals, CultureInfo.InvariantCulture);
+    }
+
+    private async Task ChangeAsync(ChangeEventArgs change)
+    {
+        await Host.SetBudgetAsync(long.Parse((string)change.Value!, CultureInfo.InvariantCulture) << 20);
+        (Status, _budget) = (Host.Status, Host.Budget);
+    }
+
+    private static string Mb(long bytes) => BlotterHost.Megabytes(bytes);
+
+    private static string Seconds(TimeSpan? time) => time is { } t
+        ? t.TotalSeconds.ToString("F1", CultureInfo.InvariantCulture) + " s"
+        : "–";
+
+    public void Dispose() => _timer?.Dispose();
+}

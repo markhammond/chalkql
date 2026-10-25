@@ -1,0 +1,1176 @@
+:root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --ink: #1c2330;
+    --muted: #667085;
+    --line: #e3e6eb;
+    --accent: #2f6fde;
+    --good: #1f8a4c;
+    --warn: #b7791f;
+    --bad: #c2362f;
+    --flash: rgba(47, 111, 222, 0.30);
+    --flash-new: rgba(31, 138, 76, 0.28);
+    --row-alt: #fafbfc;
+    --pill: rgba(255, 255, 255, 0.8);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #0f1218;
+        --panel: #161b23;
+        --ink: #e3e8ef;
+        --muted: #8b95a5;
+        --line: #252c37;
+        --accent: #6ea0ff;
+        --good: #47c27e;
+        --warn: #e0a43a;
+        --bad: #f0645c;
+        --flash: rgba(110, 160, 255, 0.32);
+        --flash-new: rgba(71, 194, 126, 0.30);
+        --row-alt: #181e27;
+        --pill: rgba(0, 0, 0, 0.8);
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+main {
+    padding: 12px 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    height: 100vh;
+}
+
+h1 {
+    font-size: 16px;
+    margin: 0;
+    font-weight: 600;
+}
+
+/* Blazor focuses the heading on each navigation, so a screen reader announces the page; the focus
+   stays, but nothing is drawn around it. */
+h1:focus {
+    outline: none;
+}
+
+.bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+}
+
+.bar.telemetry {
+    gap: 6px 10px;
+}
+
+.chip {
+    display: inline-flex;
+    gap: 6px;
+    align-items: baseline;
+    padding: 3px 8px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.chip b {
+    font-weight: 600;
+}
+
+.chip .label {
+    color: var(--muted);
+}
+
+.chip.live b {
+    color: var(--good);
+}
+
+.chip.behind b, .chip.stalled b {
+    color: var(--warn);
+}
+
+.filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    align-items: end;
+}
+
+.filters label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.filters input, .filters select, button {
+    font: inherit;
+    color: var(--ink);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+
+.filters input[type=text] {
+    width: 150px;
+}
+
+.statuses {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.statuses label {
+    flex-direction: row;
+    gap: 4px;
+    color: var(--ink);
+    font-size: 13px;
+}
+
+button {
+    cursor: pointer;
+}
+
+button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.refusal {
+    border: 1px solid var(--bad);
+    color: var(--bad);
+    background: var(--panel);
+    border-radius: 6px;
+    padding: 8px 12px;
+}
+
+.frame {
+    position: relative;
+    flex: 1;
+    min-height: 240px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Rows cut by the grid's edges fade under a band two thirds of a row high over each edge: drawn over the grid by
+   the browser alone, nothing measured or run as it scrolls. The top band shows only once the grid is
+   scrolled down, so at the top the newest row stays clear. */
+.frame::before, .frame::after {
+    content: "";
+    position: absolute;
+    left: 1px;
+    right: 1px;
+    height: 20px;
+    pointer-events: none;
+    z-index: 4;
+}
+
+.frame::before {
+    top: var(--grid-head, 32px);
+    background: linear-gradient(var(--panel), transparent);
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.frame[data-scrolled]::before {
+    opacity: 1;
+}
+
+.frame::after {
+    bottom: 1px;
+    background: linear-gradient(transparent, var(--panel));
+    border-radius: 0 0 8px 8px;
+}
+
+.scroller {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    transition: opacity 120ms ease;
+}
+
+/* Waiting, the rows dim and are still; the headers are not, so a new sort or filter can be chosen
+   at once, and the last one chosen is the one shown. */
+.scroller.waiting tbody {
+    opacity: 0.35;
+    pointer-events: none;
+}
+
+/* Across the top edge of the grid, over no more than the top quarter of the headings, so they and
+   the first row stay readable. */
+.badge {
+    position: absolute;
+    top: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+    /* White in the light theme, black in the dark, a little transparent: what passes behind shows through. */
+    background: var(--pill);
+    color: var(--accent);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 3px 10.5px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Every value, in every column, in the system's monospace: its digits line up down a column, and its
+   zeros are slashed, so 0 is never O. The headings stay in the page's font. */
+td .cell, .history td {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+}
+
+thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    padding: 0;
+    font-weight: 600;
+}
+
+/* Columns are 2em apart: three-quarters of an em after each value, an em and a quarter before it, a
+   gutter that holds the heading's funnel. */
+.sort {
+    all: unset;
+    display: flex;
+    gap: 2px;
+    align-items: center;
+    width: 100%;
+    padding: 7px 1px 7px 1.25em;
+    cursor: pointer;
+    box-sizing: border-box;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.sort .arrow.unsorted {
+    visibility: hidden;
+}
+
+/* The tab's own order, newest first: shown, but muted, as no one chose it. */
+.sort .arrow.default {
+    color: var(--muted);
+    opacity: 0.6;
+}
+
+.sort .arrow {
+    color: var(--accent);
+    font-size: 11px;
+}
+
+.sort .rank {
+    color: var(--muted);
+    font-size: 10px;
+}
+
+th.num .sort {
+    justify-content: flex-end;
+}
+
+tbody tr {
+    height: 30px;
+}
+
+tbody tr:nth-child(even) {
+    background: var(--row-alt);
+}
+
+td {
+    padding: 0;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+}
+
+td .cell {
+    display: block;
+    padding: 0 0.75em 0 1.25em;
+    line-height: 29px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+td.num .cell {
+    text-align: right;
+}
+
+/* A time is its date, cut to an ellipsis, then its time of day after a space; the date shows on hover.
+   The date is there, to copy, in a box one character wide, but the browser's own ellipsis would keep
+   its first digit in so small a box: its text is hidden, and an ellipsis drawn over it. */
+td .cell.time {
+    display: flex;
+    white-space: pre;
+}
+
+td .cell.lag.done {
+    color: var(--muted);
+}
+
+td .cell.time .date {
+    position: relative;
+    width: 1ch;
+    overflow: hidden;
+    color: transparent;
+}
+
+td .cell.time .date::before {
+    content: "…";
+    position: absolute;
+    left: 0;
+    color: var(--muted);
+}
+
+td a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+/* An id that opens its order's page: the whole id is the link, in the row's own colour; its arrow
+   shows while the pointer is anywhere on the row, and keeps its place when hidden. */
+td a.go {
+    color: inherit;
+}
+
+td a.go .arrow {
+    color: var(--accent);
+    visibility: hidden;
+    font: 13px system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+tbody tr:hover a.go .arrow, td a.go:focus-visible .arrow {
+    visibility: visible;
+}
+
+.side-Buy {
+    color: var(--good);
+}
+
+.side-Sell {
+    color: var(--bad);
+}
+
+/* Two names for one animation: a cell that changes again swaps between them, which restarts it. */
+@keyframes flash-a {
+    from {
+        background: var(--flash);
+    }
+    to {
+        background: transparent;
+    }
+}
+
+@keyframes flash-b {
+    from {
+        background: var(--flash);
+    }
+    to {
+        background: transparent;
+    }
+}
+
+/* A new row flashes as a shade over its cells, not as their background: a frozen cell keeps its own,
+   so what scrolls beneath it never shows through. */
+@keyframes new-a {
+    from {
+        box-shadow: inset 0 0 0 999px var(--flash-new);
+    }
+    to {
+        box-shadow: inset 0 0 0 999px transparent;
+    }
+}
+
+@keyframes new-b {
+    from {
+        box-shadow: inset 0 0 0 999px var(--flash-new);
+    }
+    to {
+        box-shadow: inset 0 0 0 999px transparent;
+    }
+}
+
+.cell.flash-a {
+    animation: flash-a 2.4s ease-out;
+}
+
+.cell.flash-b {
+    animation: flash-b 2.4s ease-out;
+}
+
+tr.new-a td {
+    animation: new-a 3s ease-out;
+}
+
+tr.new-b td {
+    animation: new-b 3s ease-out;
+}
+
+.explain {
+    color: var(--muted);
+}
+
+.explain pre {
+    color: var(--ink);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px;
+    overflow-x: auto;
+    font-size: 11px;
+    max-height: 260px;
+}
+
+.history {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+}
+
+.history td, .history th {
+    padding: 4px 10px;
+}
+
+.history tr.marked td {
+    background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+}
+
+.history th {
+    position: static;
+}
+
+.changed {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.wide {
+    overflow-x: auto;
+}
+
+h2 {
+    font-size: 14px;
+    margin: 8px 0 0;
+}
+
+.muted {
+    color: var(--muted);
+}
+
+.spacer {
+    flex: 1;
+}
+
+.tabs {
+    display: flex;
+    gap: 4px 8px;
+    border-bottom: 1px solid var(--line);
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.tabs .chip {
+    margin-bottom: 4px;
+}
+
+.chooser-wrap {
+    position: relative;
+    align-self: center;
+}
+
+.column-chooser {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    z-index: 20;
+    display: grid;
+    gap: 4px;
+    min-width: 140px;
+    padding: 8px 10px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
+    font-size: 12px;
+}
+
+.column-chooser label {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    white-space: nowrap;
+}
+
+.tab {
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    background: transparent;
+    padding: 6px 14px;
+    color: var(--muted);
+}
+
+.tab.selected {
+    border-color: var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    font-weight: 600;
+    margin-bottom: -1px;
+}
+
+/* The filters' pills: about half the space above and below them that the page keeps between its parts. */
+.toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    align-items: center;
+    margin: -4px 0;
+}
+
+.pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 1px 2px 1px 4px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+    white-space: nowrap;
+}
+
+.pill button {
+    border: none;
+    background: transparent;
+    padding: 0 2px;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1;
+}
+
+.pill button:hover {
+    color: var(--bad);
+}
+
+.filter-pill {
+    cursor: pointer;
+}
+
+/* What the page acts with (a burst, a stall): shown only while the pointer is on the page, or a button
+   of them has the keyboard's focus; always, where nothing hovers. */
+.actions {
+    display: inline-flex;
+    gap: 8px;
+    transition: opacity 0.15s;
+}
+
+main:not(:hover) .actions:not(:focus-within) {
+    opacity: 0;
+    pointer-events: none;
+}
+
+@media (hover: none) {
+    main .actions {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
+/* Alerts: the bell, its panel, the splash that asks for sound, and a notice of what fired while away. */
+.bell {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex: none;
+}
+
+.bell.muted {
+    opacity: 0.7;
+}
+
+.badge .bell {
+    margin-right: 4px;
+    vertical-align: -1px;
+}
+
+.alerts-wrap {
+    position: relative;
+    align-self: center;
+    display: inline-flex;
+}
+
+.unseen-dot {
+    position: absolute;
+    top: 1px;
+    right: 2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #e5383b;
+    box-shadow: 0 0 0 1.5px var(--panel);
+}
+
+.alerts-panel {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    z-index: 20;
+    width: min(640px, calc(100vw - 32px));
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.alerts-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.alerts-head label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--muted);
+}
+
+.alerts-list {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.alerts-list td {
+    padding: 4px 6px 4px 0;
+    border-top: 1px solid var(--line);
+    vertical-align: top;
+}
+
+.alerts-actions {
+    white-space: nowrap;
+    text-align: right;
+}
+
+.alerts-list td.alerts-settings {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.alerts-list code, .alerts-how code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+}
+
+.alerts-new .condition-editor {
+    flex: 1 1 100%;
+    min-width: 0;
+}
+
+.alerts-refused {
+    flex: 1 1 100%;
+    color: var(--bad, #c0392b);
+}
+
+.alerts-how {
+    margin: 0;
+}
+
+.alerts-new {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.alerts-panel select, .alerts-panel input[type=text] {
+    font: inherit;
+    color: var(--ink);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 2px 6px;
+}
+
+.splash {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgb(0 0 0 / 0.25);
+}
+
+.splash-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 20px;
+    max-width: 360px;
+    box-shadow: 0 8px 32px rgb(0 0 0 / 0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.splash-card p {
+    margin: 0;
+    color: var(--muted);
+}
+
+.splash-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.splash-buttons .primary {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+
+.notice {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+
+/* The copy and share buttons, and what they say for a moment once clicked. */
+.icon-button {
+    position: relative;
+    align-self: center;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    padding: 2px 5px;
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.icon-button:hover {
+    color: var(--accent);
+}
+
+.icon-button svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.share-wrap {
+    position: relative;
+    align-self: center;
+    display: inline-flex;
+}
+
+.share-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    z-index: 20;
+    flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 4px;
+    box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
+    white-space: nowrap;
+}
+
+.share-wrap[data-open] .share-menu {
+    display: flex;
+}
+
+.share-menu button {
+    border: none;
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+    padding: 5px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.share-menu button:hover, .share-menu button:focus-visible {
+    background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
+.icon-button[data-said]::after {
+    content: attr(data-said);
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    z-index: 20;
+    pointer-events: none;
+    white-space: nowrap;
+    background: var(--ink);
+    color: var(--panel);
+    font-size: 11px;
+    padding: 3px 7px;
+    border-radius: 6px;
+}
+
+.link-button {
+    border: none;
+    background: transparent;
+    color: var(--accent);
+    padding: 2px 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Opens a section under the grid: grey, its chevron set in a little from the edge. */
+.link-button.disclosure {
+    color: var(--muted);
+    padding-left: 0.35em;
+}
+
+/* A heading is its label, at the left of a text column, at the right of a number column, with its
+   funnel just before it, in the column's gutter, so it takes no room of its own. The funnel shows on
+   hover, or while the column is filtered or its filter open. */
+.head {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    cursor: pointer;
+}
+
+.head.num {
+    justify-content: flex-end;
+}
+
+/* A column only shown is not sorted or filtered by: its heading is a label alone. */
+.head.shown, .head.shown .sort {
+    cursor: default;
+}
+
+/* With no arrow or funnel after it, its label ends where the values do. */
+.head.shown .sort {
+    padding-right: 0.75em;
+}
+
+.head .label {
+    position: relative;
+    display: flex;
+    min-width: 0;
+}
+
+.head .sort {
+    flex: 0 1 auto;
+    width: auto;
+    min-width: 0;
+    padding-right: 1px;
+}
+
+.funnel {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    left: calc(1.25em - 16px);
+    z-index: 1;
+    border: none;
+    background: transparent;
+    padding: 4px 1px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    visibility: hidden;
+}
+
+.head:hover .funnel, .funnel:focus-visible, .funnel.on, .funnel.open {
+    visibility: visible;
+}
+
+.funnel svg {
+    fill: none;
+    stroke: var(--muted);
+    stroke-width: 1.4;
+}
+
+.funnel.on svg {
+    fill: var(--accent);
+    stroke: var(--accent);
+}
+
+.funnel.open svg {
+    stroke: var(--accent);
+}
+
+.editor {
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.editor-head {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.editor select, .editor input {
+    font: inherit;
+    color: var(--ink);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 3px 6px;
+}
+
+.pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 4px;
+    min-height: 32px;
+    cursor: text;
+    position: relative;
+}
+
+.pills input {
+    border: none !important;
+    outline: none;
+    flex: 1;
+    min-width: 160px;
+    background: transparent;
+}
+
+.clear-input {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 16px;
+    padding: 0 6px;
+}
+
+.chooser {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-height: 140px;
+    overflow-y: auto;
+}
+
+.chooser-head {
+    width: 100%;
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.choice {
+    padding: 2px 8px;
+    border-radius: 6px;
+}
+
+.choice.picked {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.range {
+    display: flex;
+    gap: 12px;
+    align-items: end;
+}
+
+.range label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+/* The chevron is drawn, not a character, and sized by the text it sits in: drawn about 0.36em tall. In the grid it stays within the row's height,
+   because every row is one height. */
+.toggle {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    padding: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 29px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.toggle:hover {
+    color: var(--accent);
+}
+
+.chevron {
+    width: 0.64em;
+    height: 0.64em;
+    flex: none;
+    vertical-align: -0.04em;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: transform 0.12s ease;
+}
+
+.chevron.open, .chevron.down {
+    transform: rotate(90deg);
+}
+
+.chevron.down.open {
+    transform: rotate(-90deg);
+}
+
+/* Frozen columns, once the widths are fixed: they stay in place as the grid scrolls sideways, over
+   what scrolls beneath them, so they keep a background of their own; a rule marks where they end. */
+table[data-pinned] .frozen {
+    position: sticky;
+    z-index: 1;
+    background: var(--panel);
+}
+
+table[data-pinned] thead th.frozen {
+    z-index: 3;
+}
+
+table[data-pinned] tbody tr:nth-child(even) td.frozen {
+    background: var(--row-alt);
+}
+
+table[data-pinned] tbody tr.child td.frozen {
+    background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+}
+
+table[data-pinned] .frozen-last {
+    box-shadow: inset -1px 0 0 var(--line);
+}
+
+/* Room before the chevron's box; after it, the next cell's own padding. */
+td.expander, th.expander {
+    width: 0.64em;
+    text-align: center;
+    padding: 0 0 0 0.75em;
+}
+
+/* After the chevron, the column's gutter is an em narrower; its funnel lies over the expander's heading,
+   which has no label. */
+td.expander + td .cell {
+    padding-left: 0.25em;
+}
+
+th.expander + th .sort {
+    padding-left: 0.25em;
+}
+
+th.expander + th .funnel {
+    left: calc(0.25em - 16px);
+}
+
+tr.child td {
+    background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.cell.link a {
+    text-decoration: underline dotted;
+}
+
+.hover-card {
+    position: fixed;
+    z-index: 10;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+    font-size: 12px;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-variant-numeric: tabular-nums;
+}
+
+.alert-when {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+.alerts-panel input.count-number {
+    font: inherit;
+    color: var(--ink);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 2px 4px;
+    width: 5.5em;
+}
+
+.alerts-panel input.count-number:invalid {
+    border-color: var(--bad);
+}
+
+/* Beside the tabs, read down to the last page of a view with more rows than a browser can scroll through;
+   its baseline on the tab labels'. */
+.scroll-cap {
+    margin: 0 0 6px 8px;
+    color: var(--warn);
+    font-size: 12px;
+    white-space: nowrap;
+}

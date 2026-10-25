@@ -36,6 +36,10 @@ The [tutorial](docs/tutorial.md) develops this step by step, culminating in a li
 
 A **standing view** keeps a statement's answer current as one row per key, and sends each reader only what changed since it last read. By default each update recomputes the statement in full; a view that asks for incremental maintenance computes only what changed, in the manner of DBSP and Differential Dataflow. Incremental maintenance is experimental (`CHALK003`). See [`Chalk.Incremental`](dotnet/src/Chalk.Incremental/README.md).
 
+### Drinking from the firehose?
+
+For real-time data needs, check out the companion [Tapline](https://github.com/markhammond/tapline) library.
+
 ### Access control you can reason about.
 
 ChalkQL’s entitlement layer is entirely optional. When used, policy is explicit and inspectable rather than reconstructed from views, predicates, ORMs or application code.

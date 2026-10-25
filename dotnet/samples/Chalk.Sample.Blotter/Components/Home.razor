@@ -1,0 +1,286 @@
+@page "/"
+@implements IDisposable
+@inject BlotterHost Host
+@inject NavigationManager Nav
+@inject LinkShroud Shroud
+@inject AlertDesk Desk
+@inject IJSRuntime JS
+@inject ILogger<Home> Log
+
+<PageTitle>Virtual blotter</PageTitle>
+
+<main>
+    <div class="bar">
+        <h1>Virtual blotter</h1>
+        <StatusBar/>
+    </div>
+
+    @if (_linkRefused is not null)
+    {
+        <div class="refusal">
+            This link could not be opened, so the blotter opens as it always does: @_linkRefused
+            <button @onclick="() => _linkRefused = null">Dismiss</button>
+        </div>
+    }
+
+    @if (_alertsRefused is not null)
+    {
+        <div class="refusal">
+            Some saved alerts could not be read, and are left out: @_alertsRefused
+            <button @onclick="() => _alertsRefused = null">Dismiss</button>
+        </div>
+    }
+
+    @if (_away is not null)
+    {
+        <div class="notice">
+            @_away
+            <button @onclick="() => _away = null">Dismiss</button>
+        </div>
+    }
+
+    @* A browser makes no sound until someone has clicked on the page: asked once, when alerts would sound. *@
+    @if (_book.Session is not null && !_book.Answered && _book.Rules.Any(r => !r.Muted))
+    {
+        <div class="splash" role="dialog" aria-label="Sound alerts">
+            <div class="splash-card">
+                <b>This blotter sounds alerts</b>
+                <p>@(_book.Rules.Count(r => !r.Muted) is 1 ? "An alert is" : $"{_book.Rules.Count(r => !r.Muted)} alerts are") set
+                    to sound. The browser lets the page make sound once you allow it.</p>
+                <div class="splash-buttons">
+                    <button type="button" class="primary" onclick="blotterAlerts.enableSound()">Enable sound</button>
+                    <button type="button" @onclick="() => _book.Answered = true">Not now</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    <BlotterGrid @key="_tab" Tab="_tab" Link="_link" Alerts="_book" Select="t => { _tab = t; _link = null; }">
+        <Toggles>
+            <button type="button" class="link-button disclosure" aria-expanded="@_vitals" @onclick="ToggleVitals">
+                <Chevron Open="_vitals"/>
+                Vital statistics
+            </button>
+        </Toggles>
+        <Actions>
+            <button @onclick="Burst" title="The house takes and fills 3,000 orders at once">Simulate burst</button>
+            <button @onclick="Stall" title="The database writes nothing for 20 s, while the streams go on">Stall
+                database 20 s
+            </button>
+            <button @onclick="ToggleDisorder" aria-pressed="@Host.Exchange.Disordered"
+                    title="Out of order: a few rows on each stream sent late, by a delay mostly short and now and then long; and a few written to the database before they are sent">
+                Out of order: @(Host.Exchange.Disordered ? "on" : "off")
+            </button>
+            <button @onclick="ToggleOutage" aria-pressed="@Host.Exchange.Paused"
+                    title="Outage: the house takes and works no orders, so nothing new reaches the streams or the database, and an alert of none in a window fires">
+                Outage: @(Host.Exchange.Paused ? "on" : "off")
+            </button>
+            @if (Host.Options.Current == CurrentSync.Lagging)
+            {
+                <button @onclick="StallCurrent"
+                        title="The job that keeps orders_current applies nothing for 20 s, while order_versions is written">
+                    Stall orders_current 20 s
+                </button>
+            }
+        </Actions>
+        <Below>
+            @* Closed, the statistics are not on the page at all, so nothing in them is rendered as they change. *@
+            @if (_vitals)
+            {
+                <div class="bar telemetry">
+                    <StatusBar Telemetry="true"/>
+                </div>
+            }
+        </Below>
+    </BlotterGrid>
+</main>
+
+@code {
+    private Tab _tab = Tabs.Orders;
+
+    // The view the page's link describes, for the tab it names, until another tab is chosen; or why
+    // the link was not understood, in which case none of it is taken.
+    private ViewLink? _link;
+    private string? _linkRefused;
+    private bool _vitals;
+
+    // The browser's alerts, which the host evaluates; why some saved ones were left out; and how many
+    // fired while no page of the browser was open.
+    private readonly AlertBook _book = new();
+    private DotNetObjectReference<Home>? _self;
+    private string? _alertsRefused;
+    private string? _away;
+
+    protected override void OnInitialized()
+    {
+        var query = new Uri(Nav.Uri).Query;
+        if (query.Length > 1)
+        {
+            try
+            {
+                _link = ViewLink.Parse(query, Tabs.All, Shroud);
+                _tab = _link.Tab;
+            }
+            catch (ArgumentException refused)
+            {
+                _linkRefused = refused.Message;
+            }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        // The browser's id and rules are in its local settings, which only the page can read.
+        _self = DotNetObjectReference.Create(this);
+        var saved = await JS.InvokeAsync<SavedAlerts>("blotterAlerts.load", _self);
+        var rules = new List<AlertRule>();
+        var refused = new List<string>();
+        foreach (var rule in saved.Rules)
+        {
+            try
+            {
+                rules.Add(AlertRule.Load(rule, Tabs.All));
+            }
+            catch (ArgumentException why)
+            {
+                refused.Add(why.Message);
+            }
+        }
+
+        _alertsRefused = refused.Count == 0 ? null : string.Join("; ", refused);
+        _book.Notify = saved.Notify;
+        _book.SoundOn = saved.Sound;
+        _book.Answered = saved.Sound;
+        _book.SaveAsync = SaveRulesAsync;
+        var session = Desk.Open(saved.Browser);
+        session.SetRules(rules);
+        session.Attach();
+        session.Fired += OnFired;
+        _book.Session = session;
+
+        // What fired while no page of this browser was open: said, and sounded once a rule.
+        var waiting = session.Waiting();
+        Log.LogInformation("alerts: browser {Browser} opened a page, {Rules} rules, {Waiting} alerts waiting", saved.Browser, rules.Count, waiting.Count);
+        if (waiting.Count > 0)
+        {
+            _away = $"While no page of this browser was open, alerts fired for {waiting.Sum(a => a.Count):N0} rows: "
+                    + string.Join(", ", waiting.GroupBy(a => a.RuleName).Select(g => $"{g.Key} ×{g.Sum(a => a.Count):N0}"));
+            foreach (var latest in waiting.GroupBy(a => a.RuleId).Select(g => g.Last()))
+            {
+                await SoundAsync(latest);
+            }
+
+            session.Acknowledge(waiting[^1].Seq);
+        }
+
+        StateHasChanged();
+    }
+
+    /// <summary>An alert the host fired: counted for the bell, sounded by the page, and then let go.</summary>
+    private void OnFired(AlertEvent alert) => _ = InvokeAsync(async () =>
+    {
+        try
+        {
+            await SoundAsync(alert);
+            _book.Session?.Acknowledge(alert.Seq);
+            StateHasChanged();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The page went: the alert waits for the next one.
+        }
+    });
+
+    private async Task SoundAsync(AlertEvent alert)
+    {
+        _book.Count(alert);
+        await JS.InvokeVoidAsync("blotterAlerts.fire", alert with { Muted = alert.Muted || !_book.SoundOn }, _book.Notify);
+    }
+
+    private async Task SaveRulesAsync(IReadOnlyList<AlertRule> rules)
+    {
+        _book.Session?.SetRules(rules);
+        await JS.InvokeVoidAsync("blotterAlerts.saveRules", rules.Select(r => r.Save()).ToList());
+        StateHasChanged();
+    }
+
+    /// <summary>Escape: the splash that asks for sound closes, as Not now.</summary>
+    [JSInvokable]
+    public void OnEscape()
+    {
+        if (_book.Session is not null && !_book.Answered)
+        {
+            _book.Answered = true;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>The page may make sound now, or may not.</summary>
+    [JSInvokable]
+    public void SoundEnabled(bool on)
+    {
+        _book.SoundOn = on;
+        _book.Answered = true;
+        StateHasChanged();
+    }
+
+    /// <summary>Whether the browser lets the page notify, now that it was asked.</summary>
+    [JSInvokable]
+    public void NotifyAllowed(bool allowed)
+    {
+        _book.Notify = allowed;
+        StateHasChanged();
+    }
+
+    /// <summary>What the page keeps of alerts in the browser's local settings.</summary>
+    private sealed record SavedAlerts(string Browser, SavedRule[] Rules, bool Notify, bool Sound);
+
+    /// <summary>Opens or closes the vital statistics; the host reads the database's size only while some page has them open.</summary>
+    private void ToggleVitals()
+    {
+        _vitals = !_vitals;
+        Host.WatchVitals(_vitals);
+    }
+
+    private void Burst() => Host.Exchange.Send(3000);
+
+    private void Stall() => Host.Exchange.StallIngestion(TimeSpan.FromSeconds(20));
+
+    private void ToggleDisorder() => Host.Exchange.Disordered = !Host.Exchange.Disordered;
+
+    private void ToggleOutage()
+    {
+        if (Host.Exchange.Paused)
+        {
+            Host.Exchange.Resume();
+        }
+        else
+        {
+            Host.Exchange.Pause();
+        }
+    }
+
+    private void StallCurrent() => Host.Exchange.StallCurrent(TimeSpan.FromSeconds(20));
+
+    public void Dispose()
+    {
+        if (_book.Session is { } session)
+        {
+            session.Fired -= OnFired;
+            session.Detach();
+            Log.LogInformation("alerts: browser {Browser} closed a page", session.Browser);
+        }
+
+        _self?.Dispose();
+        if (_vitals)
+        {
+            Host.WatchVitals(false);
+        }
+    }
+
+}

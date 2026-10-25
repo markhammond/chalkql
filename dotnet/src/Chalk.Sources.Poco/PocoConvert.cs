@@ -55,6 +55,20 @@ internal static class PocoConvert
         decimal value, int precision, int scale, Span<byte> destination, string sourceId, string table, string column) =>
         SourceEncoding.WriteDecimal(value, precision, scale, destination, sourceId, table, column);
 
+    /// <summary>
+    /// A TIMESTAMP lane's units for a CLR tick count. An instant a nanosecond lane cannot reach is
+    /// refused, naming the member: wrapped, a far future would read as a far past (D16).
+    /// </summary>
+    public static long TimestampUnits(long ticks, int precision, string what) =>
+        precision <= 6 || ClrStorage.FitsUnit(ticks, precision)
+            ? ClrStorage.UnitsOf(ticks, precision)
+            : throw new ArgumentOutOfRangeException(
+                what,
+                new DateTime(ticks).ToString("O", CultureInfo.InvariantCulture),
+                $"{what} holds an instant TIMESTAMP({precision}) cannot reach: it counts nanoseconds since 1970-01-01 "
+                + "in 64 bits, from 1677-09-21 to 2262-04-11. Declare the member [ChalkColumn(Precision = 6)], "
+                + "microseconds, which reach any instant a DateTime holds.");
+
     private static string[] BuildAsciiStrings()
     {
         var strings = new string[128];

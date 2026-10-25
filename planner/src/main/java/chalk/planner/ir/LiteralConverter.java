@@ -4,6 +4,7 @@ import chalk.ir.v1.DecimalValue;
 import chalk.ir.v1.Literal;
 import chalk.ir.v1.Type;
 import chalk.planner.ErrorCode;
+import chalk.planner.InvalidArgumentException;
 import chalk.planner.UnsupportedFeatureException;
 import com.google.protobuf.ByteString;
 import java.math.BigDecimal;
@@ -89,7 +90,7 @@ public final class LiteralConverter {
    * milliseconds, which would quietly truncate a TIMESTAMP(9) literal.
    */
   private static long timestampUnits(RexLiteral literal, int precision) {
-    TimestampString timestamp = literal.getValueAs(TimestampString.class);
+    TimestampString timestamp = read(literal, TimestampString.class);
     if (timestamp == null) {
       throw new UnsupportedFeatureException(
           ErrorCode.UNSUPPORTED_TYPE,
@@ -211,8 +212,29 @@ public final class LiteralConverter {
     return new BigInteger(bigEndian);
   }
 
+  /** What a literal of {@code clazz} is, as a refusal names it. */
+  private static String kind(Class<?> clazz) {
+    if (clazz == Integer.class || clazz == Long.class) {
+      return "a whole number";
+    }
+
+    if (clazz == Float.class || clazz == Double.class || clazz == BigDecimal.class) {
+      return "a number";
+    }
+
+    if (clazz == org.apache.calcite.util.DateString.class) {
+      return "a date";
+    }
+
+    if (clazz == org.apache.calcite.util.TimeString.class || clazz == org.apache.calcite.util.TimestampString.class) {
+      return "a time";
+    }
+
+    return "a " + clazz.getSimpleName();
+  }
+
   private static <T> T value(RexLiteral literal, Class<T> clazz) {
-    T value = literal.getValueAs(clazz);
+    T value = read(literal, clazz);
     if (value == null) {
       throw new UnsupportedFeatureException(
           ErrorCode.UNSUPPORTED_TYPE,
@@ -220,5 +242,28 @@ public final class LiteralConverter {
           "Calcite could not express it as a " + clazz.getSimpleName() + ".");
     }
     return value;
+  }
+
+  /**
+   * Calcite's value of {@code literal} as {@code clazz}. Text it cannot read as one, such as a time
+   * written with an offset, or text that is no number, asserts in Calcite: that is the statement's
+   * text, not the planner's fault, so it is refused as a validation error (F278), and a caller that
+   * only estimates, the selectivity, catches it and guesses; ChalkQL's own cast reads the text when
+   * the plan runs.
+   */
+  private static <T> T read(RexLiteral literal, Class<T> clazz) {
+    try {
+      return literal.getValueAs(clazz);
+    } catch (AssertionError unreadable) {
+      if (literal.getTypeName().getFamily() == org.apache.calcite.sql.type.SqlTypeFamily.CHARACTER) {
+        throw new InvalidArgumentException(
+            ErrorCode.SQL_VALIDATION,
+            "the text '" + literal.getValueAs(String.class) + "' cannot be read as " + kind(clazz)
+                + ", which the statement compares or combines it with",
+            unreadable);
+      }
+
+      throw unreadable;
+    }
   }
 }

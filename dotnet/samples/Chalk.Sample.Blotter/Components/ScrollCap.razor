@@ -1,0 +1,24 @@
+@* A view with more rows than the grid scrolls through, read down to its last page: a warning, beside the
+   tabs. It renders on its own, as the reader scrolls past the point and back, and not the grid. *@
+
+@if (_shown)
+{
+    <span class="scroll-cap" role="status">Too many results – only the first
+        @GridRows.ScrollRows.ToString("N0", CultureInfo.InvariantCulture) can be displayed</span>
+}
+
+@code {
+    private bool _shown;
+
+    /// <summary>Shows the warning, or takes it away; renders only if that changed.</summary>
+    public void Show(bool shown)
+    {
+        if (shown == _shown)
+        {
+            return;
+        }
+
+        _shown = shown;
+        StateHasChanged();
+    }
+}

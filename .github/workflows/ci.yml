@@ -119,6 +119,11 @@ jobs:
         # downloaded artifact lands, and launches it through PlannerProcess, which is the only way
         # a sidecar is ever started (D21, D133).
         run: dotnet test dotnet/tests/Chalk.Integration.Tests -c Release --no-build
+      - name: the blotter sample's tests
+        # The sample starts a PostgreSQL server of its own from the binaries this image carries
+        # (PgServer finds /usr/lib/postgresql/16/bin), and its planner from the jar built into
+        # Chalk.Client; CHALK_TEST_POSTGRES_REQUIRED turns a missing server into a failure here too.
+        run: dotnet test dotnet/tests/Chalk.Sample.Blotter.Tests -c Release --no-build
       - name: integration tests (tcp)
         # A host that runs the sidecar on another machine gets TCP (09-unix-socket-transport.md §6),
         # so the whole suite runs over it too rather than only the two TransportTests cases.

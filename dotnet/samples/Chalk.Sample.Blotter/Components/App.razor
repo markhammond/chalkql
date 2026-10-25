@@ -1,0 +1,28 @@
+@using System.Text.Json
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Virtual blotter</title>
+    <base href="/"/>
+    <link rel="stylesheet" href="@Assets["blotter.css"]"/>
+    <HeadOutlet @rendermode="InteractiveServer"/>
+</head>
+<body>
+<Routes @rendermode="InteractiveServer"/>
+<script src="_framework/blazor.web.js"></script>
+<script src="@Assets["blotter.js"]"></script>
+@* Each sound's versioned address: the host serves it to be kept for good, and a new file gets a new address. *@
+<script>window.blotterSoundUrls = @((MarkupString)SoundUrls());</script>
+<script src="@Assets["alerts.js"]"></script>
+<script src="@Assets["condition-editor.js"]"></script>
+</body>
+</html>
+
+@code {
+
+    // Ids and addresses the host makes, nothing a reader typed: safe to write into the script as JSON.
+    private string SoundUrls() => JsonSerializer.Serialize(AlertSounds.All.ToDictionary(s => s.Id, s => Assets[AlertSounds.Path(s.Id)]));
+
+}

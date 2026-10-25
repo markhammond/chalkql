@@ -705,6 +705,11 @@ public final class PlannerPipeline implements AutoCloseable {
     // checked again where the plan is written.
     LikeEscapeCheck.check(validated);
 
+    // Text compared with a number, a date or a time that it cannot be read as, refused with its
+    // position and what it meets (F278); before, the cast that can never succeed reached the
+    // literal conversion as an internal assertion.
+    TextLiteralCheck.check(validated, java.util.Objects.requireNonNull(planner.validator()));
+
     // Where a composite value may not stand — a sort, grouping or partition key, a comparison, a CASE
     // or COALESCE result beside a scalar or a composite of another type (D295), a built-in
     // aggregate's argument — refused on the validated statement, while every expression

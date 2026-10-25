@@ -1,0 +1,12 @@
+@* The page's one chevron, for every control that opens something: drawn, so it is the same size
+   wherever it is, about three quarters of the browser's own disclosure triangle. It points right,
+   or down when Down; open, it turns a quarter, to point down, or up. *@
+<svg class="chevron @(Open ? "open" : "") @(Down ? "down" : "")" viewBox="0 0 16 16" aria-hidden="true">
+    <path d="M6 3.5 10.5 8 6 12.5"/>
+</svg>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+
+    [Parameter] public bool Down { get; set; }
+}

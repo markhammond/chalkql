@@ -1,0 +1,108 @@
+@* An alert's condition, in SQL: CodeMirror draws it in the browser, and the host completes it and
+   checks it, the names by itself and the rest by asking ChalkQL. *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject BlotterHost Host
+@inject AlertDesk Desk
+@inject ILogger<ConditionEditor> Log
+
+<div class="condition-editor" @ref="_element"></div>
+
+@code {
+    [Parameter][EditorRequired] public Tab Tab { get; set; } = default!;
+
+    /// <summary>The condition as written; set by the page, it replaces what the editor holds.</summary>
+    [Parameter]
+    public string Text { get; set; } = "";
+
+    [Parameter] public EventCallback<string> TextChanged { get; set; }
+
+    [Parameter] public string Placeholder { get; set; } = "";
+
+    private ElementReference _element;
+    private DotNetObjectReference<ConditionEditor>? _self;
+    private string _shown = "";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _self = DotNetObjectReference.Create(this);
+            _shown = Text;
+            await JS.InvokeVoidAsync("blotterEditor.create", _element, _self, Text, Placeholder);
+        }
+        else if (Text != _shown)
+        {
+            _shown = Text;
+            await JS.InvokeVoidAsync("blotterEditor.set", _element, Text);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnChanged(string text)
+    {
+        _shown = text;
+        await TextChanged.InvokeAsync(text);
+    }
+
+    [JSInvokable]
+    public async Task<Suggestions> Complete(string text, int cursor) => await ConditionCompletion.CompleteAsync(Tab, text, cursor, ValuesAsync, CancellationToken.None);
+
+    /// <summary>What is wrong, and where: the names the host does not know, then what ChalkQL makes of the rest.</summary>
+    [JSInvokable]
+    public async Task<IReadOnlyList<Problem>> Check(string text)
+    {
+        var condition = Condition.Parse(Tab, text);
+        if (!condition.Errors.IsEmpty)
+        {
+            return [.. condition.Errors.Select(e => new Problem(e.Span.From, Math.Max(e.Span.To, e.Span.From + 1), "error", e.Message))];
+        }
+
+        if (condition.IsEmpty || Host.State != BlotterState.Live)
+        {
+            return [];
+        }
+
+        return await Desk.CheckAsync(condition, null, CancellationToken.None) is { } refused
+            ? [new Problem(0, text.Length, "error", refused)]
+            : [];
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("blotterEditor.dispose", _element);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+
+        _self?.Dispose();
+    }
+
+    /// <summary>
+    ///     A text column's values, the most frequent of the last day first: of the tab whose column it is, along a path
+    ///     or not.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> ValuesAsync(Column column, string typed, CancellationToken ct)
+    {
+        var tab = Tabs.All.First(t => t.Columns.Contains(column));
+        // As the grid's filters read them: the day to a minute from now, in the tables' wall-clock time.
+        var to = Cells.Micros(DateTime.UtcNow.AddMinutes(1));
+        try
+        {
+            return [.. (await Host.Queries.ValuesAsync(tab, column, to.AddDays(-1), to, typed, 20, ct)).Select(v => v.Value)];
+        }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            // Values are a help, not an answer: without them, the editor still offers the rest.
+            Log.LogWarning(failure, "the values of {Column} could not be read for completion", column.Name);
+            return [];
+        }
+    }
+
+    /// <summary>A diagnostic, as the editor marks it.</summary>
+    public sealed record Problem(int From, int To, string Severity, string Message);
+
+}

@@ -1,0 +1,263 @@
+@* One column's filter, docked above the grid while it is open. *@
+@inject BlotterHost Host
+@implements IDisposable
+
+<div class="editor">
+    <div class="editor-head">
+        <b>Filter @Column.Title</b>
+        @if (Column.Kind == ColumnKind.Text)
+        {
+            <select @bind="_match" aria-label="How values match">
+                <option value="@TextMatch.AnyOf">is any of</option>
+                <option value="@TextMatch.StartsWith">starts with</option>
+            </select>
+        }
+        <span class="spacer"></span>
+        <button type="button" class="primary" @onclick="ApplyAsync">Apply</button>
+        <button type="button" @onclick="ClearAsync">Clear</button>
+        <button type="button" @onclick="() => Close.InvokeAsync()" aria-label="Close">✕</button>
+    </div>
+
+    @switch (Column.Kind)
+    {
+        case ColumnKind.Text:
+            <div class="pills" @onclick="FocusAsync">
+                @foreach (var value in _values)
+                {
+                    var v = value;
+                    <span class="pill">@v <button type="button" aria-label="Remove @v" @onclick="() => Remove(v)"
+                                                  @onclick:stopPropagation>×</button></span>
+                }
+                <input @ref="_input" type="text" value="@_typed"
+                       placeholder="@(_values.Count == 0 ? "type a value, Enter to add" : "")"
+                       @oninput="TypedAsync" @onkeydown="KeyAsync"/>
+                @if (_values.Count > 0 || _typed.Length > 0)
+                {
+                    <button type="button" class="clear-input" aria-label="Clear" @onclick="ClearInput"
+                            @onclick:stopPropagation>×
+                    </button>
+                }
+            </div>
+            <div class="chooser">
+                <div class="chooser-head">
+                    @(_typed.Length > 0 ? $"Values starting {_typed}" : "Most frequent values"),
+                    @Column.Title of rows @(Tab.Time.Title.ToLowerInvariant()) @Period
+                    @if (_loading)
+                    {
+                        <span class="muted"> · reading…</span>
+                    }
+                </div>
+                @if (_chooserError is not null)
+                {
+                    <div class="refusal">@_chooserError</div>
+                }
+                @foreach (var (value, rows) in _choices)
+                {
+                    var v = value;
+                    <button type="button" class="choice @(_values.Contains(v) ? "picked" : "")" @onclick="() => Add(v)">
+                        @v <span class="muted">@rows.ToString("N0", CultureInfo.InvariantCulture)</span>
+                    </button>
+                }
+                @if (!_loading && _choices.Count == 0 && _chooserError is null)
+                {
+                    <span class="muted">No values in this period.</span>
+                }
+            </div>
+            break;
+
+        case ColumnKind.Choice:
+            <div class="statuses">
+                @foreach (var choice in Column.Choices)
+                {
+                    var c = choice;
+                    <label><input type="checkbox" checked="@_values.Contains(c)"
+                                  @onchange="e => Tick(c, (bool)e.Value!)"/> @c</label>
+                }
+            </div>
+            break;
+
+        case ColumnKind.Integer or ColumnKind.Number:
+            <div class="range">
+                <label>at least <input type="number" step="any" @bind="_min"/></label>
+                <label>at most <input type="number" step="any" @bind="_max"/></label>
+            </div>
+            break;
+
+        case ColumnKind.Time:
+            <div class="range">
+                <label>from <input type="datetime-local" step="1" @bind="_from"/></label>
+                <label>to <input type="datetime-local" step="1" @bind="_to"/></label>
+                <span class="muted">UTC</span>
+            </div>
+            break;
+    }
+</div>
+
+@code {
+    [Parameter][EditorRequired] public Tab Tab { get; set; } = default!;
+
+    [Parameter][EditorRequired] public Column Column { get; set; } = default!;
+
+    /// <summary>The column's filter now, if any.</summary>
+    [Parameter]
+    public ColumnFilter? Current { get; set; }
+
+    /// <summary>The period whose rows the chooser offers values from.</summary>
+    [Parameter][EditorRequired]
+    public (DateTime From, DateTime To) Within { get; set; }
+
+    [Parameter] public EventCallback<ColumnFilter> Apply { get; set; }
+
+    [Parameter] public EventCallback Close { get; set; }
+
+    private const int Offered = 50;
+    private readonly List<string> _values = [];
+    private List<(string Value, long Rows)> _choices = [];
+    private ElementReference _input;
+    private CancellationTokenSource? _reading;
+    private TextMatch _match;
+    private string _typed = "";
+    private bool _loading;
+    private string? _chooserError;
+    private double? _min;
+    private double? _max;
+    private DateTime? _from;
+    private DateTime? _to;
+
+    private string Period => string.Create(CultureInfo.InvariantCulture,
+        $"{Within.From:MM-dd HH:mm} to {Within.To:MM-dd HH:mm} UTC");
+
+    private (Column? Column, ColumnFilter? Current) _editing;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // The grid renders again with every refresh; the editor starts over only for another column,
+        // or once a filter has been applied.
+        if (_editing == (Column, Current))
+        {
+            return;
+        }
+
+        _editing = (Column, Current);
+        _values.Clear();
+        _values.AddRange(Current?.Values ?? []);
+        _match = Current?.Match ?? TextMatch.AnyOf;
+        _min = Current?.Min;
+        _max = Current?.Max;
+        _from = Current?.From;
+        _to = Current?.To;
+        _typed = "";
+        if (Column.Kind == ColumnKind.Text)
+        {
+            await ReadChoicesAsync();
+        }
+    }
+
+    private async Task TypedAsync(ChangeEventArgs change)
+    {
+        _typed = (string?)change.Value ?? "";
+        await ReadChoicesAsync();
+    }
+
+    private async Task KeyAsync(KeyboardEventArgs key)
+    {
+        if (key.Key is "Enter" or "," or "Tab" && _typed.Trim().Length > 0)
+        {
+            Add(_typed.Trim().TrimEnd(','));
+            _typed = "";
+            await ReadChoicesAsync();
+        }
+        else if (key.Key == "Backspace" && _typed.Length == 0 && _values.Count > 0)
+        {
+            _values.RemoveAt(_values.Count - 1);
+        }
+    }
+
+    /// <summary>
+    ///     The column's values among the rows of the period, the most frequent first, starting with what
+    ///     is typed: read when the editor opens and as the reader types, the latest read winning.
+    /// </summary>
+    private async Task ReadChoicesAsync()
+    {
+        _reading?.Cancel();
+        var reading = _reading = new CancellationTokenSource();
+        _loading = true;
+        try
+        {
+            await Task.Delay(200, reading.Token);
+            var found = await Host.Queries.ValuesAsync(
+                Tab, Column, Within.From, Within.To, _typed.Length > 0 ? _typed : null, Offered, reading.Token);
+            if (!reading.IsCancellationRequested)
+            {
+                _choices = found;
+                _chooserError = null;
+            }
+        }
+        catch (OperationCanceledException) when (reading.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception failure)
+        {
+            _chooserError = failure.Message;
+            _choices = [];
+        }
+
+        _loading = false;
+    }
+
+    private void Add(string value)
+    {
+        if (value.Length > 0 && !_values.Contains(value))
+        {
+            _values.Add(value);
+        }
+    }
+
+    private void Remove(string value) => _values.Remove(value);
+
+    private void Tick(string value, bool on)
+    {
+        if (on)
+        {
+            Add(value);
+        }
+        else
+        {
+            Remove(value);
+        }
+    }
+
+    private async Task ClearInput()
+    {
+        _values.Clear();
+        _typed = "";
+        await ReadChoicesAsync();
+    }
+
+    private async Task FocusAsync() => await _input.FocusAsync();
+
+    private async Task ApplyAsync()
+    {
+        if (_typed.Trim().Length > 0)
+        {
+            Add(_typed.Trim());
+        }
+
+        await Apply.InvokeAsync(new ColumnFilter
+        {
+            Column = Column,
+            Values = [.. _values],
+            Match = _match,
+            Min = _min,
+            Max = _max,
+            From = _from,
+            To = _to
+        });
+    }
+
+    private Task ClearAsync() => Apply.InvokeAsync(new ColumnFilter { Column = Column });
+
+    public void Dispose() => _reading?.Cancel();
+
+}

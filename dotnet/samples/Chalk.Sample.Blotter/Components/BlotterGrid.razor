@@ -1,0 +1,1269 @@
+@* One tab's grid: sorted, filtered by any column, live, and for orders, with their fills nested. *@
+@implements IAsyncDisposable
+@using System.Runtime.InteropServices
+@inject BlotterHost Host
+@inject IJSRuntime JS
+@inject ILogger<BlotterGrid> Log
+@inject NavigationManager Nav
+@inject LinkShroud Shroud
+@inject PageLag Lag
+
+<div class="tabs" role="tablist">
+    @foreach (var tab in Tabs.All)
+    {
+        var t = tab;
+        <button role="tab" aria-selected="@(t == Tab)" class="tab @(t == Tab ? "selected" : "")"
+                @onclick="() => Select.InvokeAsync(t)">@t.Title</button>
+    }
+    <ScrollCap @ref="_scrollCap"/>
+    <span class="spacer"></span>
+    @if (Alerts is not null)
+    {
+        <span class="alerts-wrap">
+            <button type="button" class="icon-button" aria-expanded="@_alerting"
+                    title="Alerts: a sound when a row comes to pass a filter, or waits too long for the database"
+                    aria-label="@(Alerts.Unseen ? "Alerts, some unseen" : "Alerts")" @onclick="ToggleAlerts">
+                <Bell Muted="!Alerts.SoundOn && !Alerts.Rules.IsEmpty"/>
+                @if (Alerts.Unseen)
+                {
+                    @* An alert has fired since the alerts were last looked at. *@
+                    <span class="unseen-dot"></span>
+                }
+            </button>
+            @if (_alerting)
+            {
+                <AlertsPanel Book="Alerts" Tab="Tab" Filter="_filter"/>
+            }
+        </span>
+    }
+    @* Both copy in the browser itself, in the click: a clipboard takes nothing written later. *@
+    <button type="button" class="icon-button" title="Copy the rows in view, to paste into a sheet or a message"
+            aria-label="Copy the rows in view" onclick="blotter.copyRows(this)">
+        <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+            <rect x="5.5" y="5.5" width="8.5" height="8.5" rx="1.5"/>
+            <path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5"/>
+        </svg>
+    </button>
+    @* The menu opens and closes in the browser alone, so a choice in it is still the click a clipboard asks for. *@
+    <span class="share-wrap">
+        <button type="button" class="icon-button"
+                title="Copy a link to this view: its sort, filters and columns, and the row at the top unless it follows the live top"
+                aria-label="Copy a link to this view" aria-haspopup="menu" onclick="blotter.toggleShare(this)">
+            <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M6.5 9.5l3-3"/><path
+                    d="M7.2 4.3l1.1-1.1a2.9 2.9 0 0 1 4.1 4.1l-1.1 1.1"/><path
+                    d="M8.8 11.7l-1.1 1.1a2.9 2.9 0 0 1-4.1-4.1l1.1-1.1"/></svg>
+        </button>
+        <span class="share-menu" role="menu">
+            <button type="button" role="menuitem"
+                    title="The filters' values and the row at the top shrouded: the link shows only the tab, the sort and the columns"
+                    onclick="blotter.shareView(this, true)">Copy private link</button>
+            <button type="button" role="menuitem"
+                    title="Everything in plain text, the filters' values and the row at the top included"
+                    onclick="blotter.shareView(this, false)">Copy readable link</button>
+        </span>
+    </span>
+    <span class="chooser-wrap">
+        <button type="button" class="link-button" aria-expanded="@_choosing" @onclick="() => _choosing = !_choosing">Columns <Chevron
+                Down="true" Open="_choosing"/></button>
+        @if (_choosing)
+        {
+            <div class="column-chooser" role="group" aria-label="Columns shown">
+                @for (var c = Tab.Frozen; c < Tab.Columns.Count; c++)
+                {
+                    var column = Tab.Columns[c];
+                    <label>
+                        <input type="checkbox" checked="@(!_hiddenColumns.Contains(column.Name))"
+                               @onchange="e => ShowColumnAsync(column, e.Value is true)"/>
+                        @column.Title
+                    </label>
+                }
+            </div>
+        }
+    </span>
+</div>
+
+@if (!_filter.Columns.IsEmpty)
+{
+    <div class="toolbar">
+        @foreach (var filter in _filter.Columns)
+        {
+            var f = filter;
+            <span class="pill filter-pill" @onclick="() => OpenEditor(f.Column)">
+            @f.Describe()
+                <button type="button" aria-label="Remove the filter on @f.Column.Title"
+                        @onclick="() => RemoveFilterAsync(f.Column)" @onclick:stopPropagation>×</button>
+        </span>
+        }
+        <button type="button" class="link-button" @onclick="ClearFiltersAsync">Clear all</button>
+    </div>
+}
+
+@if (_editing is { } editing)
+{
+    <FilterEditor Tab="Tab" Column="editing" Current="_filter.For(editing)" Within="PeriodOfInterest()"
+                  Apply="ApplyFilterAsync" Close="() => _editing = null"/>
+}
+
+@if (_refusal is not null)
+{
+    <div class="refusal">
+        Not serving: @_refusal
+        <button @onclick="RetryAsync">Try again</button>
+    </div>
+}
+
+@if (_failure is not null)
+{
+    <div class="refusal">
+        This page could not be read: @_failure
+        <button @onclick="ReloadAsync">Try again</button>
+    </div>
+}
+
+<div class="frame">
+    <NewAbove @ref="_newAbove" Click="ShowNewestAsync"/>
+
+    <div class="scroller @(_waiting || _refusal is not null || _failure is not null ? "waiting" : "")" @ref="_scroller">
+        <QuickGrid TGridItem="BlotterRow" @ref="_grid" Class="@(Tab.Overrides ? "nested" : null)"
+                   ItemsProvider="_provider" Virtualize="true" ItemSize="(float)GridRows.RowHeight"
+                   OverscanCount="_prefetch.Rows" ItemKey="r => r.Key"
+                   RowClass="@(r => r.Parent is null ? r.RowClass : "child " + r.RowClass)">
+            @if (Tab.Overrides)
+            {
+                // The expander has a column of its own, so that opening an order moves nothing in its
+                // row; its fills follow below it, each marked ↳.
+                <TemplateColumn TGridItem="BlotterRow" Title="" Class="expander frozen">
+                    @if (context.Parent is null && context.Row is Order order)
+                    {
+                        <button type="button" class="toggle"
+                                aria-label="@(_rows.IsOpen(order.OrderId) ? "Hide fills" : "Show fills")"
+                                @onclick="Toggle(order)">
+                            <Chevron Open="_rows.IsOpen(order.OrderId)"/>
+                        </button>
+                    }
+                </TemplateColumn>
+            }
+            @for (var c = 0; c < Tab.Columns.Count; c++)
+            {
+                var index = c;
+                var column = Tab.Columns[c];
+                if (_hiddenColumns.Contains(column.Name))
+                {
+                    continue;
+                }
+
+                <TemplateColumn TGridItem="BlotterRow" Title="@column.Title" Class="@ColumnClass(column, index)">
+                    <HeaderTemplate>
+                        @if (column.Derived)
+                        {
+                            @* Only shown: worked out in the host from the row, so neither sorted nor filtered by. *@
+                            <div class="head shown @(column.Numeric ? "num" : "")"
+                                 title="@column.Description; worked out from the row, so not sorted or filtered by">
+                                <span class="sort">@column.Title</span>
+                            </div>
+                        }
+                        else
+                        {
+                            @* The whole heading sorts, its label button too (a click on it reaches the heading); the funnel does not.
+                           The funnel sits just before the label, in the gutter every column keeps at its left. *@
+                            <div class="head @(column.Numeric ? "num" : "")"
+                                 @onclick="SortClick(column)"
+                                 title="@(column.Description is { } about ? about + ". " : "")Click to sort by @column.Title, descending, then ascending, then not; shift-click to do the same within a sort by several columns">
+                            <span class="label">
+                            <button type="button"
+                                    class="funnel @(_filter.For(column) is not null ? "on" : "") @(_editing == column ? "open" : "")"
+                                    title="Filter @column.Title" aria-label="Filter @column.Title"
+                                    @onclick="EditorClick(column)" @onclick:stopPropagation>
+                                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path
+                                        d="M1.5 2h13l-5 6.2V14l-3-1.6V8.2z"/></svg>
+                            </button>
+                            <button class="sort" type="button">
+                                @column.Title
+                                @* The arrow keeps its place when the column is not sorted, so the heading is as wide either way. *@
+                                <span
+                                    class="arrow @(_sort.RankOf(column) > 0 ? "" : _sort.ByDefault(column) ? "default" : "unsorted")">@(_sort.IsDescending(column) || _sort.RankOf(column) == 0 ? "▼" : "▲")</span>
+                                @if (_sort.RankOf(column) is var rank and > 0 && _sort.Chosen.Length > 1)
+                                {
+                                    <span class="rank">@rank</span>
+                                }
+                            </button>
+                            </span>
+                            </div>
+                        }
+                    </HeaderTemplate>
+                    <ChildContent>
+                        @if (column.Lag)
+                        {
+                            @LagCell(context.Reconciliation)
+                        }
+                        else if (context.Row is Fill fill && context.Parent is not null)
+                        {
+                            @if (column.Kind == ColumnKind.Time)
+                            {
+                                @TimeCell(NestedCell(column, fill), NestedCell(column, fill, full: true), "")
+                            }
+                            else
+                            {
+                                <span class="@Classes("cell", column.Kind == ColumnKind.Id ? "id" : null)">@NestedCell(column, fill)</span>
+                            }
+                        }
+                        else if (column.Name == "version")
+                        {
+                            <span class="@Classes("cell", context.Flash[index])">v@(context.Row.Version)</span>
+                        }
+                        else if (column == Tab.Key && context.Row is Order own)
+                        {
+                            <span class="@Classes("cell id", context.Flash[index])"><a class="go" href="order/@own.OrderId" target="_blank">@own.OrderId <span class="arrow">↗</span></a></span>
+                        }
+                        else if (column == Tab.Key && context.Row is Fill thisFill)
+                        {
+                            <span class="@Classes("cell id", context.Flash[index])"><a class="go" href="order/@thisFill.OrderId?fill=@thisFill.FillId" target="_blank">@thisFill.FillId <span class="arrow">↗</span></a></span>
+                        }
+                        else if (column.Name == "order_id" && context.Row is Fill parentOf)
+                        {
+                            <span class="cell link id" @onmouseenter="Hover(parentOf)"
+                                  @onmouseleave="Unhover">
+                                <a href="order/@parentOf.OrderId" target="_blank">@column.Show(context.Row)</a>
+                            </span>
+                        }
+                        else if (column.Name == "side")
+                        {
+                            <span class="@Classes("cell side-" + column.Show(context.Row), context.Flash[index])">@column.Show(context.Row)</span>
+                        }
+                        else
+                        {
+                            if (column.Kind == ColumnKind.Time)
+                            {
+                                @TimeCell(column.Show(context.Row), column.Detail(context.Row), context.Flash[index])
+                            }
+                            else
+                            {
+                                <span class="@Classes("cell", column.Kind == ColumnKind.Id ? "id" : null, context.Flash[index])">@column.Show(context.Row)</span>
+                            }
+                        }
+                    </ChildContent>
+                </TemplateColumn>
+            }
+        </QuickGrid>
+        <Receipt @ref="_receipt"/>
+    </div>
+
+    @if (_hover is { } hover)
+    {
+        <div class="hover-card" style="left: @(hover.X)px; top: @(hover.Y)px">
+            @if (hover.Looked && hover.Order is null)
+            {
+                <div><b>Order @hover.Fill.OrderId</b> · @hover.Fill.ClOrdId</div>
+                <div class="muted">Not received yet: the fills stream runs ahead of the orders stream.</div>
+            }
+            else if (hover.Order is { } o)
+            {
+                <div><b>Order @o.OrderId</b> · @o.ClOrdId · v@(o.Version)</div>
+                <div>@o.Client (@o.Region) via @o.Channel</div>
+                <div><span class="side-@o.Side">@o.Side</span> @Column.Finance(o.Qty, 4) @o.Instrument</div>
+                <div>filled @Column.Finance(o.FilledQty, 4) at @Column.Significant(o.AvgPrice) · @o.Status</div>
+                @if (o.EventTime < hover.Fill.EventTime)
+                {
+                    <div class="muted">Its version with this fill has not arrived yet.</div>
+                }
+            }
+            else
+            {
+                <div class="muted">Order @hover.Fill.OrderId…</div>
+            }
+        </div>
+    }
+</div>
+
+@* Under the grid, one row: what opens beneath it, side by side while closed, then what the page acts with. *@
+<div class="bar controls">
+    @Toggles
+    <button type="button" class="link-button disclosure" aria-expanded="@_explaining"
+            @onclick="() => _explaining = !_explaining">
+        <Chevron Open="_explaining"/>
+        How this tab is answered
+    </button>
+    <span class="spacer"></span>
+    <span class="actions">@Actions</span>
+</div>
+
+@Below
+
+@if (_explaining)
+{
+    <div class="explain">
+        <p>
+            Each page is read live from PostgreSQL (@(Tab.Overrides ? "orders_current, one row per order" : "fills"))
+            through ChalkQL,
+            from the key of a row already shown, with the sort, the filter and the limit pushed down; and merged with
+            this
+            filter's live scope, a ChalkQL standing view over the tail: what the streams have sent that the database has
+            not
+            been seen to hold yet.
+        </p>
+        <pre>@SourceQueries.ReadSql(Tab, _filter, _sort, fromKey: true)</pre>
+        <pre>@LiveScope.Sql(Tab, _filter)</pre>
+        <button @onclick="ShowPlansAsync">Show the plans</button>
+        @if (_plans is not null)
+        {
+            <pre>@_plans</pre>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Tab Tab { get; set; } = default!;
+
+    /// <summary>Toggles of the page's own, on the row under the table before this one's.</summary>
+    [Parameter]
+    public RenderFragment? Toggles { get; set; }
+
+    /// <summary>What the page acts with, at the right of the row under the table.</summary>
+    [Parameter]
+    public RenderFragment? Actions { get; set; }
+
+    /// <summary>What the page shows under that row, above how the tab is answered.</summary>
+    [Parameter]
+    public RenderFragment? Below { get; set; }
+
+    /// <summary>Another tab chosen on this one's tab bar.</summary>
+    [Parameter]
+    public EventCallback<Tab> Select { get; set; }
+
+    /// <summary>The page's alerts, for the tab bar's alerts and the bell in "new above".</summary>
+    [Parameter]
+    public AlertBook? Alerts { get; set; }
+
+    /// <summary>The view a link opened this tab on, if one did: its sort, filters, columns, and the row it was held at.</summary>
+    [Parameter]
+    public ViewLink? Link { get; set; }
+
+    private GridRows _rows = default!;
+
+    // Columns the reader has hidden, by name; the frozen ones, which tell the rows apart, are always shown.
+    private HashSet<string> _hiddenColumns = [];
+    private bool _choosing;
+    private bool _alerting;
+
+    /// <summary>Opens or closes the alerts panel; opened, its alerts are seen.</summary>
+    private void ToggleAlerts()
+    {
+        _alerting = !_alerting;
+        Alerts!.Looking = _alerting;
+        Alerts.Seen();
+    }
+
+    // How many alerts had fired on this tab when the grid was held: more since, and the bell shows.
+    private long _firedAtHold;
+    private bool _explaining;
+    private QuickGrid<BlotterRow>? _grid;
+
+    // Says when the browser has drawn the last page, so that a slow link is sent no queue of them.
+    private Receipt? _receipt;
+    private NewAbove? _newAbove;
+
+    // How many rows the grid renders beyond the view, from how long its pages take to be drawn.
+    private Prefetch _prefetch = default!;
+    private ElementReference _scroller;
+    private DotNetObjectReference<BlotterGrid>? _self;
+
+    // The clock that shows a lag still counting again, whether or not the feed sends anything: only
+    // while a lag column is shown, since otherwise nothing it would render again has changed.
+    private Timer? _ticker;
+    private volatile bool _lagShown;
+
+    private bool LagShown() => Tab.Columns.Any(c => c.Lag && !_hiddenColumns.Contains(c.Name));
+    private GridItemsProvider<BlotterRow> _provider = default!;
+    private LiveScope? _scope;
+    private FilterSpec _filter = FilterSpec.None;
+    private SortSpec _sort = default!;
+    private string? _refusal;
+
+    // Why the last page of this sort and filter could not be read. Unlike a refusal, it is not
+    // retried as the feed moves on: a new sort or filter, or "Try again", reads afresh.
+    private string? _failure;
+    private string? _plans;
+    private Column? _editing;
+
+    // The grid is waiting for the first page of a new sort or filter: it stays as it was, dimmed.
+    private bool _waiting;
+    private long _reloads;
+
+    // Scrolling up near the top of what the reader has seen lets the rows that arrived above in, a few
+    // at a time, holding the rows in view in place.
+    private const int RevealNear = 200;
+
+    // How often a page may be read: at the live top, where every row in view changes; held, where only
+    // the rows in view that have a newer version change, and the count above.
+    private const int LiveEvery = 100;
+    private const int HeldEvery = 500;
+
+    private const int RevealAtOnce = 30;
+    private bool _revealing;
+    private double _scrollTop;
+
+    private (Fill Fill, double X, double Y, bool Looked, Order? Order)? _hover;
+    private int _refreshing;
+    private bool _dirty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _hiddenColumns = [.. Link?.Hidden ?? Tab.HiddenAtFirst];
+        _sort = Link?.Sort ?? Tab.DefaultSort;
+        _filter = Link?.Filter ?? FilterSpec.None;
+        _rows = new GridRows(Host, Tab, _sort);
+        _prefetch = new Prefetch(Host.Options.Time);
+        _provider = ProvideAsync;
+        Host.Published += OnHostChanged;
+        _lagShown = LagShown();
+        _ticker = new Timer(_ =>
+        {
+            if (_lagShown && _rows.Counting) OnPublished(0);
+        }, null, 1000, 1000);
+        await AcquireAsync(_filter);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        ShowNewAbove();
+        if (firstRender)
+        {
+            _self = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("blotter.watchScroll", _scroller, _self);
+            if (Link?.At is { } at)
+            {
+                await HoldAtAsync(at);
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Opens the grid where a link was made: the row it was held at counted to its place, the grid
+    ///     scrolled there and held, as if the reader had scrolled there; what arrives above is counted.
+    /// </summary>
+    private async Task HoldAtAsync(IRow at)
+    {
+        for (var wait = 0; wait < 200 && _scope?.State is not { Ready: true }; wait++)
+        {
+            await Task.Delay(50);
+        }
+
+        if (_scope?.State is not { Ready: true } state)
+        {
+            // Refused, or not ready: the reason is shown, and the grid stays at the top.
+            return;
+        }
+
+        long rank;
+        try
+        {
+            // Placing the row, an estimate will do if the count is too slow.
+            rank = await Host.Pages.RankAsync(state, _sort, at, CancellationToken.None, orEstimate: true);
+        }
+        catch (QueryTimeLimitException limit)
+        {
+            Fail(_reloads, $"the link's row could not be placed, so the grid is at the top: {limit.Message}");
+            return;
+        }
+
+        if (rank >= GridRows.ScrollRows)
+        {
+            Fail(_reloads, $"the link's row is row {rank + 1:N0}, past the first {GridRows.ScrollRows:N0} the grid scrolls through, so the grid is at the top: sort or filter to bring it nearer");
+            return;
+        }
+
+        _rows.HoldAt(rank, at, () => _scope?.State ?? state);
+        _firedAtHold = Alerts?.FiredOn(Tab) ?? 0;
+        _scrollTop = rank * GridRows.RowHeight;
+
+        // The grid learns how many rows it has first: until then it is not tall enough to scroll there.
+        await RefreshAsync();
+        await JS.InvokeVoidAsync("blotter.scrollTo", _scroller, rank * GridRows.RowHeight);
+    }
+
+    /// <summary>
+    ///     A link to this view, for the share button: the sort, the filters, the columns hidden, and,
+    ///     scrolled away from the live top, the first row wholly in view, by its keyset; the filters'
+    ///     values and the row shrouded, if the link is to be private.
+    /// </summary>
+    [JSInvokable]
+    public async Task<string> ShareLink(double scrollTop, bool shrouded)
+    {
+        IRow? at = null;
+        if (_rows.Held && scrollTop >= GridRows.RowHeight / 2 && _scope?.State is { Ready: true } state)
+        {
+            at = await _rows.RowAtAsync(state, scrollTop, CancellationToken.None)
+                 ?? throw new InvalidOperationException("the row in view could not be read");
+        }
+
+        // Private, the filters' values and the row held at, which are data, are shrouded.
+        var query = new ViewLink(Tab, _sort, _filter, _hiddenColumns, at).Query(shrouded ? Shroud : null);
+        return Nav.BaseUri + (query.Length > 0 ? "?" + query : "");
+    }
+
+    [JSInvokable]
+    public async Task OnScrolled(double scrollTop)
+    {
+        var atTop = scrollTop < GridRows.RowHeight / 2;
+        var wasAtTop = _scrollTop < GridRows.RowHeight / 2;
+        var up = scrollTop < _scrollTop;
+        _scrollTop = scrollTop;
+        ShowScrollCap();
+        if (wasAtTop && !atTop && !_rows.Held && _scope?.State is { Ready: true } state)
+        {
+            // Leaving the top: positions hold from here on, and what arrives above is counted.
+            _firedAtHold = Alerts?.FiredOn(Tab) ?? 0;
+            try
+            {
+                await _rows.HoldAsync(state, scrollTop, () => _scope?.State ?? state);
+            }
+            catch (Exception failure)
+            {
+                // Without the row in view, nothing counts what arrives above it; the rows still hold.
+                Log.LogWarning(failure, "the row in view could not be read to hold the grid's place");
+            }
+        }
+        else if (atTop && _rows.Held)
+        {
+            // Back at the top, however fast: what arrived above is shown, and new rows push down again.
+            // The update loop reads the top rows as it reads every page; the grid may have read them
+            // already, seeing its top spacer, and a read here as well would send them twice.
+            _rows.Release();
+            OnPublished(0);
+        }
+        else if (up && !_revealing && _rows.CanReveal(scrollTop, RevealNear))
+        {
+            await RevealAsync();
+        }
+        else if (_rows.HasRevealed)
+        {
+            // Rows let in and not yet scrolled up to: the count of what is new above moves as the reader scrolls.
+            ShowNewAbove();
+        }
+    }
+
+    /// <summary>
+    ///     Lets in up to <see cref="RevealAtOnce" /> of the rows that arrived above, and no more than the
+    ///     <see cref="Prefetch" /> renders beyond the view: every position the grid
+    ///     holds moves down by as many, and the scroll with them, so the rows in view stay where they are
+    ///     and the new ones are there to scroll up to. No more than the grid renders beyond the view, so the
+    ///     rows in view are on the page already when the scroll moves; and none again until the page says
+    ///     it has moved the scroll (<see cref="OnRevealed" />), so two lots never stack.
+    /// </summary>
+    private async Task RevealAsync()
+    {
+        _revealing = true;
+        try
+        {
+            _rows.Reveal(Math.Min(RevealAtOnce, _prefetch.Rows));
+            await JS.InvokeVoidAsync("blotter.insertAbove", _scroller, _self);
+            await RefreshAsync();
+        }
+        catch
+        {
+            _revealing = false;
+            throw;
+        }
+    }
+
+    /// <summary>The page has put the rows in view back where they were: more may be let in.</summary>
+    [JSInvokable]
+    public void OnRevealed() => _revealing = false;
+
+    /// <summary>What arrived above the rows in view: not let in yet, or let in and not yet scrolled up to.</summary>
+    private void ShowNewAbove() =>
+        _newAbove?.Show(_rows.NewAbove(_scrollTop), Alerts is not null && Alerts.FiredOn(Tab) > _firedAtHold, Alerts is { SoundOn: false });
+
+    private async ValueTask<GridItemsProviderResult<BlotterRow>> ProvideAsync(GridItemsProviderRequest<BlotterRow> request)
+    {
+        var reloads = _reloads;
+        var scope = _scope;
+        _asking = true;
+        if (scope is null && _refusal is not null)
+        {
+            // Refused: the rows shown stay, faded under the reason, until the host serves again.
+            throw Keep(request.CancellationToken);
+        }
+
+        if (scope is null || !scope.State.Ready)
+        {
+            _asking = false;
+            return GridItemsProviderResult.From<BlotterRow>([], 0);
+        }
+
+        if (scope.Fault is { } fault)
+        {
+            await InvokeAsync(() => Refuse($"the live scope failed: {fault.Message}"));
+            throw Keep(request.CancellationToken);
+        }
+
+        var ct = request.CancellationToken;
+        try
+        {
+            if (!_loopReading)
+            {
+                _otherReads++;
+            }
+
+            Log.LogDebug("rows {Start} to {End} read for the {Asker}", request.StartIndex, request.StartIndex + (request.Count ?? 60), _loopReading ? "update loop" : "grid");
+
+            var asked = (request.StartIndex, request.Count ?? 60);
+            if (request.Count == 0)
+            {
+                // QuickGrid asks for no rows until its window has been measured in the page: the update
+                // loop has it measure, rather than reading nothing again.
+                _unmeasured = true;
+            }
+            else if (request.Count is not null)
+            {
+                _unmeasured = false;
+            }
+
+            // A new grid's first ask names no count at all, before its virtualiser is there: it says
+            // nothing of whether the window has been measured.
+
+            var (shown, total, hidden) = _read is { } read && (read.Start, read.Count) == asked
+                ? (read.Rows, read.Total, read.Hidden)
+                : await _rows.ReadAsync(scope.State, asked.StartIndex, asked.Item2, ct);
+            _read = null;
+
+            // Replaced by a newer ask while it was read, as fast scrolling does: QuickGrid would drop the rows,
+            // so nothing more is done for them.
+            ct.ThrowIfCancellationRequested();
+            (_asked, _shown) = (asked, (shown, total));
+            if (_waiting && reloads == _reloads)
+            {
+                _hiddenShown = hidden;
+                _waiting = false;
+                await InvokeAsync(StateHasChanged);
+            }
+            else if (_hiddenShown != hidden)
+            {
+                // Only the count of what arrived above has moved: the badge renders again, not the rows.
+                _hiddenShown = hidden;
+                await InvokeAsync(ShowNewAbove);
+            }
+
+            if (!_frozen && shown.Count > 0)
+            {
+                _ = InvokeAsync(FreezeColumnsAsync);
+            }
+
+            // More rows than a browser can scroll through: the grid is given as many as it can.
+            var beyond = total > GridRows.ScrollRows;
+            total = Math.Min(total, GridRows.ScrollRows);
+            if (beyond != _beyondScroll)
+            {
+                _beyondScroll = beyond;
+                await InvokeAsync(ShowScrollCap);
+            }
+
+            // Fewer rows than asked for, short of the end the total gives: the page is asked for again, as if
+            // unanswered, rather than left with rows missing.
+            var whole = shown.Count >= Math.Min(asked.Item2, total - asked.StartIndex);
+            if (!whole)
+            {
+                Log.LogDebug("rows {Start} to {End}: {Got} of {Wanted} came, so they are asked for again", asked.StartIndex, asked.StartIndex + asked.Item2, shown.Count, asked.Item2);
+            }
+
+            _asking = !whole;
+            return GridItemsProviderResult.From(shown, total);
+        }
+        catch (OperationCanceledException cancelled) when (ct.IsCancellationRequested || cancelled.CancellationToken == ct)
+        {
+            // A newer sort, filter or scroll took over: the grid lets a request go quietly only
+            // when it is cancelled with the request's own token.
+            throw new OperationCanceledException(ct);
+        }
+        catch (QueryTimeLimitException limit)
+        {
+            await InvokeAsync(() => Fail(reloads, limit.Message));
+            throw Keep(ct);
+        }
+        catch (BlotterRefusedException refused)
+        {
+            await InvokeAsync(() => Refuse(refused.Message));
+            throw Keep(ct);
+        }
+        catch (Exception failure)
+        {
+            Log.LogError(failure, "a page of {Tab} sorted by {Sort}, filtered by {Filter}, could not be read", Tab.Name, _sort, _filter);
+            await InvokeAsync(() => Fail(reloads, failure.Message));
+            throw Keep(ct);
+        }
+    }
+
+    /// <summary>
+    ///     A page that could not be read leaves the rows shown as they are, faded under the reason, rather
+    ///     than emptying the grid: the grid lets a request go, and keeps what it has, when it is cancelled
+    ///     with the request's own token.
+    /// </summary>
+    private static OperationCanceledException Keep(CancellationToken request) => new(request);
+
+    private long _hiddenShown;
+
+    // Columns keep the widths they first took with rows in them: the table does not size them again
+    // for the rows each render brings, so headings do not shift as the grid scrolls.
+    private bool _frozen;
+
+    /// <summary>Shows or hides a column; the columns are measured and frozen again with the new set.</summary>
+    private async Task ShowColumnAsync(Column column, bool shown)
+    {
+        if (shown ? !_hiddenColumns.Remove(column.Name) : !_hiddenColumns.Add(column.Name))
+        {
+            return;
+        }
+
+        _lagShown = LagShown();
+
+        _frozen = false;
+        await JS.InvokeVoidAsync("blotter.unfreezeColumns", _scroller);
+        await RefreshAsync();
+    }
+
+    private async Task FreezeColumnsAsync()
+    {
+        if (_frozen)
+        {
+            return;
+        }
+
+        // After the rows just provided are on the page.
+        await Task.Delay(100);
+        _frozen = await JS.InvokeAsync<bool>("blotter.freezeColumns", _scroller);
+    }
+
+    /// <summary>
+    ///     A column's classes: right-aligned for numbers; frozen for the first few, which stay in place as the grid
+    ///     scrolls sideways.
+    /// </summary>
+    private string ColumnClass(Column column, int index) => string.Join(' ', new[]
+    {
+        column.Numeric ? "num" : null,
+        index < Tab.Frozen ? "frozen" : null,
+        index == Tab.Frozen - 1 ? "frozen-last" : null
+    }.Where(c => c is not null));
+
+    /// <summary>
+    ///     A time with its date cut off at the left: the date, in a box an ellipsis wide, shown as one,
+    ///     then the time of day, whole, after a space; on hover, the time in full, date and microseconds.
+    ///     The date is still there, to copy.
+    /// </summary>
+    // A class attribute from its parts, those empty left out: no row carries stray spaces to the page.
+    private static string Classes(string first, string? second = null, string? third = null) =>
+        (string.IsNullOrEmpty(second), string.IsNullOrEmpty(third)) switch
+        {
+            (true, true) => first,
+            (false, true) => first + " " + second,
+            (true, false) => first + " " + third,
+            _ => first + " " + second + " " + third
+        };
+
+    private static RenderFragment TimeCell(string shown, string full, string? flash) => __builder =>
+    {
+        var space = shown.IndexOf(' ');
+        <span class="@Classes("cell time", flash)" title="@full"><span class="date">@shown[..space]</span>@shown[space..]</span>
+    };
+
+    /// <summary>
+    ///     A row's reconciliation lag: counting, while the database has not been seen to hold it; muted, once
+    ///     it has, until the row leaves the tail; a dash for a row the tail does not hold.
+    /// </summary>
+    private static RenderFragment LagCell(Reconciliation? reconciliation) => __builder =>
+    {
+        if (reconciliation is not { } r)
+        {
+            <span class="cell lag">@Column.Nought</span>
+        }
+        else if (r.Reconciled)
+        {
+            <span class="cell lag done"
+                  title="The database was seen to hold it @Column.Seconds(r.Lag(DateTime.UtcNow)) after the exchange sent it">@Column.Seconds(r.Lag(DateTime.UtcNow))</span>
+        }
+        else
+        {
+            <span class="cell lag waiting"
+                  title="Sent at @r.Since.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture); the database has not been seen to hold it yet">@Column.Seconds(r.Lag(DateTime.UtcNow))</span>
+        }
+    };
+
+    private string NestedCell(Column column, Fill fill, bool full = false) => column.Name switch
+    {
+        "order_id" => $"↳ fill {fill.FillId}",
+        "version" or "filled_qty" => "",
+        "order_time" or "event_time" => full ? Tabs.Fills.Named("event_time").Detail(fill) : Tabs.Fills.Named("event_time").Show(fill),
+        "avg_price" => Tabs.Fills.Named("price").Show(fill),
+        "filled_amt" => Tabs.Fills.Named("amt").Show(fill),
+        "status" => "fill",
+        var name when Tabs.Fills.Columns.Any(c => c.Name == name) => Tabs.Fills.Named(name).Show(fill),
+        _ => ""
+    };
+
+    private async Task ToggleAsync(Order order)
+    {
+        _rows.Toggle(order);
+        await RefreshAsync();
+    }
+
+    // One handler kept for each row: a lambda made afresh at each render is a new handler, and the
+    // circuit would send every row's handler again with every page, though nothing in the row changed.
+    // An order's is kept by version, since opening it keeps the version it was opened at.
+    private readonly Dictionary<(Guid, int), Func<Task>> _toggles = [];
+    private readonly Dictionary<Guid, Func<MouseEventArgs, Task>> _hovers = [];
+
+    private Func<Task> Toggle(Order order) => Kept(_toggles, (order.OrderId, order.Version), () => () => ToggleAsync(order));
+
+    private Func<MouseEventArgs, Task> Hover(Fill fill) => Kept(_hovers, fill.FillId, () => mouse => HoverAsync(mouse, fill));
+
+    // The headings' handlers likewise: the grid renders its headings again with every page.
+    private readonly Dictionary<Column, Func<MouseEventArgs, Task>> _sortClicks = [];
+    private readonly Dictionary<Column, Action> _editorClicks = [];
+
+    private Func<MouseEventArgs, Task> SortClick(Column column) => Kept(_sortClicks, column, () => mouse => SortAsync(column, mouse.ShiftKey));
+
+    private Action EditorClick(Column column) => Kept(_editorClicks, column, () => () => OpenEditor(column));
+
+    private static TValue Kept<TKey, TValue>(Dictionary<TKey, TValue> kept, TKey key, Func<TValue> make) where TKey : notnull
+    {
+        if (kept.Count >= 4096)
+        {
+            // Rows long scrolled past go; the rows in view are sent their handlers once more.
+            kept.Clear();
+        }
+
+        ref var handler = ref CollectionsMarshal.GetValueRefOrAddDefault(kept, key, out var exists);
+        if (!exists)
+        {
+            handler = make();
+        }
+
+        return handler!;
+    }
+
+    /// <summary>
+    ///     The fill's order, as both sides know it now: its latest version, from the database or the tail.
+    ///     The order, or the version that counts the fill, may not have arrived yet, and the card says so.
+    /// </summary>
+    private async Task HoverAsync(MouseEventArgs mouse, Fill fill)
+    {
+        _hover = (fill, mouse.ClientX + 14, mouse.ClientY + 10, false, null);
+        try
+        {
+            var history = await Host.Queries.HistoryAsync(fill.OrderId, CancellationToken.None);
+            if (_hover is { } hover && hover.Fill == fill)
+            {
+                _hover = hover with { Looked = true, Order = history.Length > 0 ? history[0] : null };
+            }
+        }
+        catch (Exception failure) when (failure is QueryTimeLimitException or InvalidOperationException)
+        {
+            _hover = null;
+        }
+    }
+
+    private void Unhover() => _hover = null;
+
+    private void OnHostChanged(long version)
+    {
+        Lag.Changed();
+        OnPublished(version);
+    }
+
+    // Held, the page the update loop read: given to the grid if it asks for the same rows, rather than
+    // read twice; and the rows and total the grid was last given, and for which positions.
+    private (int Start, int Count, List<BlotterRow> Rows, int Total, long Hidden)? _read;
+    private (int StartIndex, int Count) _asked;
+
+    // Whether the grid has asked for rows and not had them yet: in flight, cancelled or failed.
+    private bool _asking;
+
+    // Whether the view has more rows than the grid scrolls through; and the warning that says so once the
+    // reader is within this many rows of the last.
+    private bool _beyondScroll;
+    private ScrollCap? _scrollCap;
+    private const int LastPage = 40;
+
+    private void ShowScrollCap() =>
+        _scrollCap?.Show(_beyondScroll && _scrollTop / GridRows.RowHeight >= GridRows.ScrollRows - LastPage);
+    private (List<BlotterRow> Rows, int Total)? _shown;
+
+    /// <summary>
+    ///     Held, reads the rows the grid shows again and says whether anything in view changed: the rows, their
+    ///     versions, flashes and lags, and the total. If something did, the read is kept for the grid to take.
+    ///     The count above, which the badge shows on its own, is passed on either way.
+    /// </summary>
+    private async Task<bool> UnchangedAsync()
+    {
+        // The grid's last ask unanswered, cancelled by a newer scroll or let go on a failure, or one in
+        // flight: the grid is asked again, for the rows it is showing now, rather than the loop judging
+        // rows it may no longer show, or reading beside it.
+        if (_asking || _scope?.State is not { Ready: true } state || _shown is not { } shown)
+        {
+            return false;
+        }
+
+        var (start, count) = _asked;
+        try
+        {
+            var (rows, total, hidden) = await _rows.ReadAsync(state, start, count, CancellationToken.None);
+            if (_asking)
+            {
+                // The grid asked while this was read: what it asks for is read for it instead.
+                return false;
+            }
+
+            if (_hiddenShown != hidden)
+            {
+                _hiddenShown = hidden;
+                ShowNewAbove();
+            }
+
+            if (total == shown.Total && Same(rows, shown.Rows))
+            {
+                return true;
+            }
+
+            _read = (start, count, rows, total, hidden);
+            return false;
+        }
+        catch (Exception failure) when (failure is OperationCanceledException or QueryTimeLimitException or BlotterRefusedException or InvalidOperationException)
+        {
+            // The grid reads the page itself, and says what went wrong.
+            return false;
+        }
+    }
+
+    /// <summary>Whether two pages show the same: the same rows at the same versions, flashing alike, and no lag still counting in view.</summary>
+    private bool Same(List<BlotterRow> rows, List<BlotterRow> shown) =>
+        rows.Count == shown.Count
+        && rows.Zip(shown).All(pair =>
+            pair.First.Key == pair.Second.Key
+            && pair.First.Row.Version == pair.Second.Row.Version
+            && pair.First.RowClass == pair.Second.RowClass
+            && pair.First.Flash.AsSpan().SequenceEqual(pair.Second.Flash)
+            && (!_lagShown || pair.First.Reconciliation == pair.Second.Reconciliation && pair.First.Reconciliation is not { Reconciled: false }));
+
+    // Whether QuickGrid asked for no rows last, its window not yet measured in the page.
+    private bool _unmeasured;
+
+    // Whether the page is hidden, a tab in the background: then it is sent no pages.
+    private bool _pageHidden;
+
+    /// <summary>The page was hidden, or shown again: shown, it is brought up to date at once.</summary>
+    [JSInvokable]
+    public void OnVisibility(bool visible)
+    {
+        _pageHidden = !visible;
+        if (visible)
+        {
+            OnPublished(0);
+        }
+    }
+
+    /// <summary>The view shows so many rows: the pre-fetch, counted in views, follows.</summary>
+    [JSInvokable]
+    public async Task OnView(int rows)
+    {
+        if (!_prefetch.See(rows))
+        {
+            return;
+        }
+
+        Log.LogDebug("the view shows {Rows} rows: the grid renders {Beyond} beyond it each side", rows, _prefetch.Rows);
+        StateHasChanged();
+        await MeasureAsync();
+    }
+
+    /// <summary>Has QuickGrid measure its window, which it does when it sees its spacers change.</summary>
+    private async Task MeasureAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("blotter.remeasure", _scroller);
+        }
+        catch (Exception failure) when (failure is JSException or InvalidOperationException)
+        {
+            // Not on the page yet, or gone: the next turn asks again.
+        }
+    }
+
+    /// <summary>How long the browser takes to draw what was rendered up to now; none before the grid is on the page.</summary>
+    private async Task<TimeSpan?> DeliveredAsync() => _receipt is null ? null : await _receipt.DrawnAsync();
+
+    // Reads of the grid's rows the update loop did not ask for, by a scroll, a reveal, an opened order or
+    // the grid measuring its window again: their batches go ahead of the next page, and would be timed
+    // as part of it, so a page is timed only if there were none since the last was drawn.
+    private bool _loopReading;
+    private long _otherReads;
+    private long _otherReadsWhenDrawn;
+
+    private void OnPublished(long version)
+    {
+        if (Interlocked.Exchange(ref _refreshing, 1) == 1)
+        {
+            _dirty = true;
+            return;
+        }
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                do
+                {
+                    _dirty = false;
+                    var timed = false;
+                    if (_scope?.Fault is { } fault)
+                    {
+                        Refuse($"the live scope failed: {fault.Message}");
+                    }
+                    else if (Host.State != BlotterState.Live)
+                    {
+                        Refuse(Host.Refusal ?? "the blotter is not serving");
+                    }
+                    else if (_refusal is not null || _scope is null)
+                    {
+                        // Serving again: take a scope again and read the first page afresh.
+                        await RetryAsync();
+                    }
+                    else if (_pageHidden)
+                    {
+                        // Nothing to draw for, nor to measure: the page catches up once it is shown.
+                        await Task.Delay(HeldEvery);
+                        continue;
+                    }
+                    else if (_grid is not null && _unmeasured)
+                    {
+                        await MeasureAsync();
+                    }
+                    else if (_grid is not null && !_waiting && _failure is null)
+                    {
+                        Lag.Reading();
+                        if (_rows.Held && await UnchangedAsync())
+                        {
+                            // Nothing in view changed: nothing is rendered, and there is nothing to wait for.
+                            Lag.Drawn();
+                            await Task.Delay(HeldEvery);
+                            continue;
+                        }
+
+                        _loopReading = true;
+                        try
+                        {
+                            await _grid.RefreshDataAsync();
+                        }
+                        finally
+                        {
+                            // A read the grid did not take, asking for other rows, is not kept for later.
+                            _loopReading = false;
+                            _read = null;
+                        }
+
+                        // Held, a page brings few rows, and says little of what a page at the top costs; one
+                        // QuickGrid asked no rows for, its window not yet measured, says nothing.
+                        timed = !_rows.Held && !_unmeasured;
+                    }
+
+                    // At most ten pages a second, however fast the feed is, two while the grid holds its
+                    // place, and none until the browser has drawn the last, however slow the link is:
+                    // changes in between are in the scope's next state, not lost, nor queued on the way
+                    // to the browser.
+                    var delivered = DeliveredAsync();
+                    await Task.WhenAll(delivered, Task.Delay(_rows.Held ? HeldEvery : LiveEvery));
+                    Lag.Drawn();
+                    var alone = _otherReads == _otherReadsWhenDrawn;
+                    _otherReadsWhenDrawn = _otherReads;
+                    if (timed && alone && await delivered is { } took && _prefetch.Observe(took, out var judged))
+                    {
+                        Log.LogInformation("pages took {Took:F0} ms to be drawn: the grid renders {Rows} rows beyond the view each side", judged.TotalMilliseconds, _prefetch.Rows);
+
+                        // The grid's virtualiser takes the new size only once it measures its window
+                        // again, which it does when the page scrolls, or when asked.
+                        StateHasChanged();
+                        await JS.InvokeVoidAsync("blotter.remeasure", _scroller);
+                    }
+                } while (_dirty);
+            }
+            catch (TaskCanceledException)
+            {
+                // The page went before the browser drew the last page.
+            }
+            finally
+            {
+                Volatile.Write(ref _refreshing, 0);
+            }
+        });
+    }
+
+    private async Task SortAsync(Column column, bool shift)
+    {
+        var was = _sort;
+        _sort = _sort.Click(column, shift);
+        if (_sort.Name == was.Name)
+        {
+            // The same order, newest first, chosen or by default: only the headers change.
+            return;
+        }
+
+        await ReloadAsync();
+    }
+
+    private void OpenEditor(Column column) => _editing = _editing == column ? null : column;
+
+    /// <summary>Escape: whatever is open over the grid closes, the filter editor, the alerts and the columns.</summary>
+    [JSInvokable]
+    public void OnEscape()
+    {
+        if (_editing is null && !_alerting && !_choosing)
+        {
+            return;
+        }
+
+        (_editing, _alerting, _choosing) = (null, false, false);
+        if (Alerts is not null)
+        {
+            Alerts.Looking = false;
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task ApplyFilterAsync(ColumnFilter filter) => await FilterAsync(_filter.With(filter));
+
+    private async Task RemoveFilterAsync(Column column) => await FilterAsync(_filter.Without(column));
+
+    private async Task ClearFiltersAsync() => await FilterAsync(FilterSpec.None);
+
+    private async Task FilterAsync(FilterSpec filter)
+    {
+        _editing = null;
+        if (filter.Name == _filter.Name)
+        {
+            return;
+        }
+
+        _filter = filter;
+        _waiting = true;
+        await AcquireAsync(filter);
+        await ReloadAsync();
+    }
+
+    /// <summary>The rows the chooser offers values from: the tab's time filter, or the last day.</summary>
+    private (DateTime From, DateTime To) PeriodOfInterest()
+    {
+        var time = _filter.For(Tab.Time);
+        var to = time?.To ?? Cells.Micros(DateTime.UtcNow.AddMinutes(1));
+        return (time?.From ?? to.AddDays(-1), to);
+    }
+
+    /// <summary>A new sort or filter: the rows stay as they are, dimmed, until the first page of the new one is in.</summary>
+    private async Task ReloadAsync()
+    {
+        _reloads++;
+        _waiting = true;
+        _failure = null;
+        _rows.Reset(_sort);
+        _plans = null;
+        await JS.InvokeVoidAsync("blotter.scrollToTop", _scroller);
+        if (_grid is not null)
+        {
+            await _grid.RefreshDataAsync();
+        }
+    }
+
+    private async Task AcquireAsync(FilterSpec filter)
+    {
+        var previous = _scope;
+        try
+        {
+            _scope = await Host.AcquireAsync(Tab, filter, CancellationToken.None);
+            _refusal = null;
+        }
+        catch (BlotterRefusedException refused)
+        {
+            _scope = null;
+            Refuse(refused.Message);
+        }
+
+        if (previous is not null && previous != _scope)
+        {
+            await Host.ReleaseAsync(previous);
+        }
+    }
+
+    private async Task RetryAsync()
+    {
+        _refusal = null;
+        if (_scope is { Fault: not null } failed)
+        {
+            _scope = null;
+            await Host.ReleaseAsync(failed);
+        }
+
+        await AcquireAsync(_filter);
+        await ReloadAsync();
+    }
+
+    /// <summary>
+    ///     A page of the sort and filter chosen at <paramref name="reloads" /> failed: said, unless a newer one has been
+    ///     chosen since.
+    /// </summary>
+    private void Fail(long reloads, string why)
+    {
+        if (reloads != _reloads)
+        {
+            return;
+        }
+
+        _waiting = false;
+        _failure = why;
+        StateHasChanged();
+    }
+
+    private void Refuse(string why)
+    {
+        _waiting = false;
+        if (_refusal != why)
+        {
+            _refusal = why;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ShowNewestAsync()
+    {
+        _rows.Release();
+        await JS.InvokeVoidAsync("blotter.scrollToTop", _scroller);
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (_grid is not null)
+        {
+            await _grid.RefreshDataAsync();
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task ShowPlansAsync()
+    {
+        var page = (await Host.Queries.EstimateAsync(_filter, _sort, CancellationToken.None)).PlanText;
+        _plans = "-- a page of the database\n" + page + "\n-- the live scope\n" + (_scope?.PlanText ?? "");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Host.Published -= OnHostChanged;
+        _ticker?.Dispose();
+        _rows?.Dispose();
+        if (_scope is not null)
+        {
+            await Host.ReleaseAsync(_scope);
+        }
+
+        _self?.Dispose();
+    }
+
+}
