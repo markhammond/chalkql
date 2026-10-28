@@ -407,7 +407,13 @@ internal sealed class ResultState
     private readonly KeyEncoder _encoder = new();
     private readonly KeyEncoder _keyEncoder = new();
     private readonly ByteMap _slots = new();
-    private readonly Dictionary<byte[], List<int>> _byKey = new(ByteKeys.Instance);
+
+    // Each key's row (F283): its slot when the key holds one row, or ~i for the slots in _several[i]
+    // when it holds more, which faults the view at the update's end. Null when the key is every column
+    // of the result: a key is then its row, and _slots finds it.
+    private ByteMap? _keySlots = new();
+    private readonly List<List<int>> _several = [];
+    private readonly Stack<int> _freeSeveral = new();
 
     // The row each key the update touches held before it, or -1 for none or more than one: all an
     // update's end reads of what the key held. Kept between updates, its storage reused (F244).
@@ -421,10 +427,6 @@ internal sealed class ResultState
     private ChangeWriter? _was;
     private ColumnarBatch? _nowColumns;
     private ColumnarBatch? _wasColumns;
-
-    // Each key's array and list of rows in the key index, at their size (F223): kept as keys come and
-    // go and lists grow, so that Bytes does not walk the index.
-    private long _keyBytes;
 
     public ResultState(IReadOnlyList<ChalkType> types)
     {
@@ -440,8 +442,12 @@ internal sealed class ResultState
         set
         {
             _key = value;
-            _keyColumns = new KeyColumns(_types, value);
-            _stored = value;
+
+            // A key of every column is the row's identity: encoded alike, so _slots is its index.
+            var whole = value.Distinct().Count() == _types.Count;
+            _keyColumns = whole ? _identity : new KeyColumns(_types, value);
+            _stored = whole ? _identity.Columns : value;
+            _keySlots = whole ? null : new ByteMap();
         }
     }
 
@@ -451,7 +457,7 @@ internal sealed class ResultState
     /// </summary>
     public long Bytes =>
         _rows.Bytes + HeapSizes.Array(_counts.Length, sizeof(long)) + _slots.Bytes
-        + HeapSizes.Of(_byKey, HeapSizes.ReferenceEntry) + _keyBytes
+        + (_keySlots?.Bytes ?? 0) + SeveralBytes
         + _before.Bytes + HeapSizes.Of(_removed, sizeof(int))
         + (_now?.Bytes ?? 0) + (_was?.Bytes ?? 0)
         + (_nowColumns is null ? 0 : HeapSizes.Batch(_types.Count)) + (_wasColumns is null ? 0 : HeapSizes.Batch(_types.Count));
@@ -460,8 +466,14 @@ internal sealed class ResultState
     {
         _rows.Clear();
         _slots.Clear();
-        _byKey.Clear();
-        _keyBytes = 0;
+        _keySlots?.Clear();
+        _freeSeveral.Clear();
+        for (var i = _several.Count - 1; i >= 0; i--)
+        {
+            _several[i].Clear();
+            _freeSeveral.Push(i);
+        }
+
         _before.Clear();
         _removed.Clear();
     }
@@ -516,12 +528,7 @@ internal sealed class ResultState
                 {
                     _slots.Remove(_encoder.Span, out _);
                     _keyColumns.Encode(_keyEncoder, _rows, _stored, slot, normalise: false);
-                    var members = _byKey.GetAlternateLookup<ReadOnlySpan<byte>>();
-                    members.TryGetValue(_keyEncoder.Span, out var list);
-
-                    // A key left with no row keeps its entry until the update ends, so that a row put in
-                    // its place in the same update finds it rather than making another (F244).
-                    list!.Remove(slot);
+                    Unindex(_keyEncoder.Span, slot);
 
                     // Kept until the update ends: the view reads the row the key held before.
                     _removed.Add(slot);
@@ -541,26 +548,87 @@ internal sealed class ResultState
             _slots.Set(_encoder.Span, slot);
             if (_counts.Length < _rows.Slots)
             {
-                Array.Resize(ref _counts, Math.Max(_rows.Slots, Math.Max(16, _counts.Length * 2)));
+                Array.Resize(ref _counts, StateGrowth.Next(_counts.Length, _rows.Slots));
             }
 
             _counts[slot] = weight;
-            var byKey = _byKey.GetAlternateLookup<ReadOnlySpan<byte>>();
-            if (!byKey.TryGetValue(_keyEncoder.Span, out var held))
-            {
-                held = [];
-                byKey[_keyEncoder.Span] = held;
-                _keyBytes += KeyBytes(_keyEncoder.Span.Length, 0);
-            }
-
-            var capacity = held.Capacity;
-            held.Add(slot);
-            _keyBytes += HeapSizes.Array(held.Capacity, sizeof(int)) - HeapSizes.Array(capacity, sizeof(int));
+            Index(_keyEncoder.Span, slot);
         }
     }
 
-    /// <summary>A key of the index: its array, and its list of rows with room for <paramref name="capacity"/>.</summary>
-    private static long KeyBytes(int length, int capacity) => HeapSizes.Array(length, 1) + HeapSizes.ListOf(capacity, sizeof(int));
+    /// <summary>Records that <paramref name="key"/> holds the row in <paramref name="slot"/>, beside any it holds.</summary>
+    private void Index(ReadOnlySpan<byte> key, int slot)
+    {
+        if (_keySlots is null)
+        {
+            return;
+        }
+
+        ref var held = ref _keySlots.GetOrAdd(key, out var added);
+        if (added)
+        {
+            held = slot;
+        }
+        else if (held >= 0)
+        {
+            // A second row: an upsert that adds before it takes out, or a key the view faults on. Its
+            // list is reused from key to key, so that an upsert allocates nothing.
+            var index = _freeSeveral.Count > 0 ? _freeSeveral.Pop() : Several();
+            _several[index].Add(held);
+            _several[index].Add(slot);
+            held = ~index;
+        }
+        else
+        {
+            _several[~held].Add(slot);
+        }
+    }
+
+    /// <summary>Records that <paramref name="key"/> no longer holds the row in <paramref name="slot"/>.</summary>
+    private void Unindex(ReadOnlySpan<byte> key, int slot)
+    {
+        if (_keySlots is null)
+        {
+            return;
+        }
+
+        _keySlots.TryGet(key, out var held);
+        if (held >= 0)
+        {
+            _keySlots.Remove(key, out _);
+            return;
+        }
+
+        var several = _several[~held];
+        several.Remove(slot);
+        if (several.Count == 1)
+        {
+            _keySlots.Set(key, several[0]);
+            several.Clear();
+            _freeSeveral.Push(~held);
+        }
+    }
+
+    private int Several()
+    {
+        _several.Add(new List<int>(2));
+        return _several.Count - 1;
+    }
+
+    /// <summary>The lists of keys that hold several rows, kept for reuse: almost always none.</summary>
+    private long SeveralBytes
+    {
+        get
+        {
+            var bytes = HeapSizes.Of(_several, HeapSizes.Reference) + HeapSizes.Of(_freeSeveral, sizeof(int));
+            foreach (var several in _several)
+            {
+                bytes += HeapSizes.Of(several, sizeof(int));
+            }
+
+            return bytes;
+        }
+    }
 
     /// <summary>
     /// Ends the update: checks each changed key holds at most one row, once, and writes the changes —
@@ -574,18 +642,15 @@ internal sealed class ResultState
         var before = _was ??= new ChangeWriter(_types, int.MaxValue);
         now.Clear();
         before.Clear();
-        var byKey = _byKey.GetAlternateLookup<ReadOnlySpan<byte>>();
         if (whole)
         {
-            foreach (var (_, slots) in _byKey)
+            var keys = _keySlots ?? _slots;
+            for (var entry = 0; entry < keys.Entries; entry++)
             {
-                if (slots.Count == 0)
+                if (keys.IsLive(entry))
                 {
-                    continue;
+                    now.Write(_rows, Checked(keys.Value(entry)), 1);
                 }
-
-                Check(slots);
-                now.Write(_rows, slots[0], 1);
             }
         }
         else
@@ -597,13 +662,7 @@ internal sealed class ResultState
                     continue;
                 }
 
-                var current = byKey.TryGetValue(_before.Key(entry), out var slots) ? slots : null;
-                if (current is not null)
-                {
-                    Check(current);
-                }
-
-                var after = current is { Count: 1 } ? current[0] : -1;
+                var after = (_keySlots ?? _slots).TryGet(_before.Key(entry), out var held) ? Checked(held) : -1;
                 var was = _before.Value(entry);
                 if (was == after)
                 {
@@ -619,16 +678,6 @@ internal sealed class ResultState
                 {
                     now.Write(_rows, after, 1);
                 }
-            }
-        }
-
-        // The keys the update left with no row go now. Only a key the update touched can be one.
-        for (var entry = 0; entry < _before.Entries; entry++)
-        {
-            if (_before.IsLive(entry) && byKey.TryGetValue(_before.Key(entry), out var emptied) && emptied.Count == 0)
-            {
-                _keyBytes -= KeyBytes(_before.Key(entry).Length, emptied.Capacity);
-                byKey.Remove(_before.Key(entry));
             }
         }
 
@@ -662,13 +711,19 @@ internal sealed class ResultState
         }
     }
 
-    /// <summary>One row per key, held once (design 64 §6 a).</summary>
-    private void Check(List<int> slots)
+    /// <summary>
+    /// The row a key's index entry names, which must be one row held once (design 64 §6 a): an entry
+    /// of several rows, or a row held twice, faults the view.
+    /// </summary>
+    private int Checked(int held)
     {
-        if (slots.Count > 1 || (slots.Count == 1 && _counts[slots[0]] > 1))
+        var slot = held >= 0 ? held : _several[~held][0];
+        if (held < 0 || _counts[slot] > 1)
         {
-            throw new MaintainedKeyException(Render(slots[0]));
+            throw new MaintainedKeyException(Render(slot));
         }
+
+        return slot;
     }
 
     private string Render(int slot)
@@ -699,9 +754,7 @@ internal sealed class ResultState
             return;
         }
 
-        held = _byKey.GetAlternateLookup<ReadOnlySpan<byte>>().TryGetValue(key, out var slots) && slots.Count == 1
-            ? slots[0]
-            : -1;
+        held = (_keySlots ?? _slots).TryGet(key, out var slot) && slot >= 0 ? slot : -1;
     }
 
     private void Touch(int slot)
