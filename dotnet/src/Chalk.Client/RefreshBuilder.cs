@@ -67,6 +67,20 @@ public sealed class RefreshBuilder
     /// read from now on and must not be mutated; the one it replaces is reported released when its
     /// last reader has finished.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A POCO source holds the collection itself as the table's rows, so neither it nor the rows in it
+    /// may change while the table reads them. It is reported through <c>PocoSource.SnapshotReleased</c>,
+    /// as that same reference, once the table has moved off it (a later <c>Replace</c>, append or keyed
+    /// change) and its last reader has finished; the host may reuse it from then on. A refused refresh
+    /// holds nothing.
+    /// </para>
+    /// <para>
+    /// A host that would hand the table an array rather than a list, and have the array back in a pool
+    /// of its own, does so through <c>ChalkEngine.PrepareReplaceAsync(table, rows, count, …)</c> and
+    /// <see cref="Commit"/>, with the table declared <c>PocoTableBuilder.ArrayPool(…)</c>.
+    /// </para>
+    /// </remarks>
     /// <param name="source">A source the engine was built with, which must be able to refresh.</param>
     /// <param name="table">The table, as it is named in that source's schema.</param>
     /// <param name="rows">The new rows, of the type the table was built over.</param>
@@ -112,7 +126,8 @@ public sealed class RefreshBuilder
     /// <remarks>
     /// The <c>(source, name, rows)</c> forms stay for a host that builds its catalog from
     /// configuration at run time and has no handle to hold. What they cannot do is tell two sources
-    /// holding a table of one name over one row type apart, which is why the handle exists.
+    /// holding a table of one name over one row type apart, which is why the handle exists. The
+    /// collection is held, and reported released, exactly as that form holds it.
     /// </remarks>
     /// <param name="table">The handle a source builder yielded, or one looked up on the source.</param>
     /// <param name="rows">The new rows, of the type the table was built over.</param>
@@ -171,6 +186,12 @@ public sealed class RefreshBuilder
     /// <c>docs/design/64-incremental-views.md</c> §2). Only a table that declares <c>Keyed(…)</c>
     /// takes one; a key given twice refuses the refresh, naming both rows.
     /// </summary>
+    /// <remarks>
+    /// The list is read while the refresh runs and its rows copied into arrays Chalk owns: keep it
+    /// unchanged until <c>RefreshAsync</c> returns. It is not held after that, refused or not, and is
+    /// never reported released, so one buffer can carry every batch. The rows themselves become the
+    /// table's: for a class, give fresh objects rather than change one the table holds.
+    /// </remarks>
     /// <param name="source">A source the engine was built with.</param>
     /// <param name="table">The table, as it is named in that source's schema.</param>
     /// <param name="rows">The rows, of the type the table was built over.</param>
@@ -188,6 +209,11 @@ public sealed class RefreshBuilder
     /// read (D339). A key the table does not hold removes nothing; a key also upserted in this
     /// refresh refuses it.
     /// </summary>
+    /// <remarks>
+    /// The list is read while the refresh runs: keep it unchanged until <c>RefreshAsync</c> returns.
+    /// Neither it nor its rows are held after that, refused or not, and nothing is reported released;
+    /// the rows a removal records are the table's own.
+    /// </remarks>
     /// <param name="source">A source the engine was built with.</param>
     /// <param name="table">The table, as it is named in that source's schema.</param>
     /// <param name="rows">Rows carrying the keys to remove.</param>
