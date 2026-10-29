@@ -23,15 +23,14 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      ChalkQL 0.6.2 refuses two mistakes it used to mishandle: text compared with a number it cannot be read as, and instants a nanosecond timestamp cannot reach.
+      ChalkQL 0.6.3 makes keyed views lighter: a maintained view's result holds one slot per key, and none beyond its identity map when the key is the whole row.
 
-      - **Text beside a number:** `qty = 'x'`, where `qty` is a number, is refused while the statement is validated, at the text, coded `SqlValidation`, rather than failing as a planner `Internal` error. The same holds for `&lt;&gt;`, the orderings, `IN`, `NOT IN` and `BETWEEN`. Text that reads as the number, `qty = '1.5'`, stands.
-      - **Text beside a time:** `ts = '2026-01-08 12:00:00+02:00'`, which failed with the same internal error, now runs: ChalkQL's cast reads the text when the statement runs, and names any it cannot read.
-      - **Nanosecond timestamps:** a .NET time converted to a nanosecond timestamp is refused if it falls before 1677-09-21 or after 2262-04-11, where it wrapped into a wrong instant.
-      - **Compatibility:** no change to the API, the protocol or the IR. A 0.6.1 planner serves a 0.6.2 client, without the new refusals.
+      - **Keyed views:** the result's key index maps each key to one slot rather than a list, and a whole-row key uses the identity map as its index. A view of keys alone holds about 40% less: about 175 B a row where it held 330, in one host's measurements. Counts grow by half again rather than doubling. A key given two rows still faults the view, coded `DeclarationNotHeld`.
+      - **Refresh rows:** `RefreshBuilder` now says what becomes of the rows it is given. A POCO `Replace` holds the collection and reports it through `PocoSource.SnapshotReleased`; `Upsert` and `Delete` read their lists while the refresh runs and hold nothing after `RefreshAsync` returns. The behaviour is unchanged.
+      - **Compatibility:** no change to the API, the protocol or the IR. A 0.6.2 planner serves a 0.6.3 client, and a 0.6.3 planner serves a 0.6.2 client.
 
       Full release notes:
-      https://github.com/markhammond/chalkql/releases/tag/v0.6.2
+      https://github.com/markhammond/chalkql/releases/tag/v0.6.3
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>
