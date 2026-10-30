@@ -705,20 +705,18 @@ The benchmark covers:
 * the cheapest row through another ordered index;
 * `accumulate(amount)`, a declared widened sum over the complete set.
 
-One short run over a 200,000-row set produced:
+One run of ChalkQL 0.6.3 over a 200,000-row set produced:
 
-| Case                           |    Rows | Akade directly | Through ChalkQL | Ratio | Allocated per execution |
-| ------------------------------ | ------: | -------------: | --------------: | ----: | ----------------------: |
-| `ORDER BY unit_price LIMIT 1`  |       1 |          19 ns |          2.2 µs |  115× |                  2.8 KB |
-| `WHERE product_id = ?`         |     400 |         450 ns |          6.7 µs |   15× |                  3.3 KB |
-| `WHERE amount BETWEEN ? AND ?` |   1,000 |         1.9 µs |         14.3 µs |  7.5× |                  3.3 KB |
-| `accumulate(amount)` over every row | 200,000 |         207 µs |          3.5 ms |   17× |                  2.6 KB |
+| Case                                |    Rows | Akade directly | Through ChalkQL | Ratio | Akade allocated | ChalkQL allocated |
+| ----------------------------------- | ------: | -------------: | --------------: | ----: | --------------: | ----------------: |
+| `ORDER BY unit_price LIMIT 1`       |       1 |          11 ns |          1.4 µs |  126× |            72 B |            2.8 KB |
+| `WHERE product_id = ?`              |     400 |         263 ns |          3.9 µs |   15× |             0 B |            3.1 KB |
+| `WHERE amount BETWEEN ? AND ?`      |   1,000 |         1.1 µs |         10.0 µs |  8.8× |            72 B |            3.3 KB |
+| `accumulate(amount)` over every row | 200,000 |         119 µs |          2.8 ms |   24× |             0 B |            2.3 KB |
 
-Treat a short benchmark run as indicative rather than a performance guarantee.
+Treat a short benchmark run as indicative rather than a performance guarantee. A useful takeaway is that ChalkQL execution incurs a roughly fixed cost per-request, consisting of the execution pipeline, Arrow batches and arena bookkeeping. Allocation does not grow with the number of rows streamed.
 
-The useful shape of the result is that ChalkQL execution has a roughly fixed request-level floor — the execution pipeline, Arrow batches and arena bookkeeping — while allocation does not grow with the number of rows streamed.
-
-The cost is paid for SQL planning integration, vectorised execution, federation and the rest of the ChalkQL execution model rather than for a direct replacement of Akade's native API.
+The cost is paid for SQL integration, vectorised execution, federation and the rest of the ChalkQL execution model rather than for a direct replacement of Akade's native API.
 
 When the application already knows exactly which Akade operation it wants, calling Akade directly remains the shortest path.
 
