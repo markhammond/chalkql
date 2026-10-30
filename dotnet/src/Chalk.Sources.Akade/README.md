@@ -689,7 +689,7 @@ to a source; declare `.Window()` before `.Client()` if it is to be used with `OV
 
 `dotnet/bench/Chalk.Benchmarks.Akade` runs equivalent operations directly against Akade and through a prepared ChalkQL statement using the same values.
 
-It measures execution overhead, not query planning: each statement is prepared once beforehand, so the figures are what a request pays to run a statement that is already planned.
+It measures execution overhead rather than planning.
 
 ```bash
 dotnet run -c Release --project dotnet/bench/Chalk.Benchmarks.Akade
