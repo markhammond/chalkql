@@ -1824,7 +1824,9 @@ await engine.RefreshAsync(epoch => epoch
   clock as of the refresh the query's tables are read at, taken in one step with them, so a query's
   rows and its time are of one refresh. A view reads it as of the view's epoch.
 - The parameter named after the clock, `@now`, is the clock when the host binds none, and the host's
-  value when it binds one.
+  value when it binds one. That holds however the statement is run: by name, with a list, with no
+  values, or with a principal's context. A list binds a named statement's parameters in the order
+  they first appear; one value short, it leaves `@now` to the clock and fills the others in order.
 - Before any refresh sets the clock, a query that reads the time is refused with
   `ClockRequiredException`; one that does not runs.
 

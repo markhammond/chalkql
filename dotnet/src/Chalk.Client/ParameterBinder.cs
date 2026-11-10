@@ -35,17 +35,21 @@ internal static class ParameterBinder
     public static object?[] ResolvePositional(
         IReadOnlyList<ParameterDescriptor> parameters, IReadOnlyList<object?>? values, ParameterStyle style)
     {
-        if (parameters.Count == 0 && values is null || values?.Count == 0)
+        if (parameters.Count == 0 && (values is null || values.Count == 0))
             return [];
 
         values ??= [];
         if (values.Count != parameters.Count)
         {
-            throw new ArgumentException(
-                style == ParameterStyle.Ordinal
-                    ? $"the statement has {parameters.Count} ordinal parameters (up to "
-                      + $"${parameters.Count}) but {values.Count} values were bound"
-                    : $"the statement has {parameters.Count} '?' placeholders but {values.Count} values were bound");
+            throw new ArgumentException(style switch
+            {
+                ParameterStyle.Ordinal => $"the statement has {parameters.Count} ordinal parameters (up to "
+                    + $"${parameters.Count}) but {values.Count} values were bound",
+                ParameterStyle.Named => $"the statement has {parameters.Count} named parameters ("
+                    + string.Join(", ", parameters.Select(p => "@" + p.Name))
+                    + $") but {values.Count} values were bound, in that order",
+                _ => $"the statement has {parameters.Count} '?' placeholders but {values.Count} values were bound",
+            });
         }
 
         return [.. values];

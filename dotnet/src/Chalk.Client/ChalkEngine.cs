@@ -981,8 +981,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(query);
-        var values = ParameterBinder.ResolvePositional(query.Parameters, parameters, query.ParameterStyle);
-        return query.ExecuteAsync(values, arena, ct);
+        var (values, clock) = Positional(query, parameters);
+        return query.ExecuteAsync(values, context: null, arena, ct, clockParameter: clock);
     }
 
     /// <summary>
@@ -1005,8 +1005,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(context);
-        var values = ParameterBinder.ResolvePositional(query.Parameters, parameters, query.ParameterStyle);
-        return query.ExecuteAsync(values, context, arena, ct);
+        var (values, clock) = Positional(query, parameters);
+        return query.ExecuteAsync(values, context, arena, ct, clockParameter: clock);
     }
 
     /// <summary>Binds <c>@name</c> parameters from a dictionary.</summary>
@@ -1107,8 +1107,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(pool);
-        var values = ParameterBinder.ResolvePositional(query.Parameters, parameters, query.ParameterStyle);
-        return query.ExecuteAsync(values, context: null, pool, ct);
+        var (values, clock) = Positional(query, parameters);
+        return query.ExecuteAsync(values, context: null, arena: null, ct, pool, clock);
     }
 
     /// <inheritdoc cref="ExecuteAsync(PreparedQuery, IReadOnlyList{object?}, ArenaPool, CancellationToken)"
@@ -1123,8 +1123,8 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(pool);
-        var values = ParameterBinder.ResolvePositional(query.Parameters, parameters, query.ParameterStyle);
-        return query.ExecuteAsync(values, context, pool, ct);
+        var (values, clock) = Positional(query, parameters);
+        return query.ExecuteAsync(values, context, arena: null, ct, pool, clock);
     }
 
     /// <inheritdoc cref="ExecuteAsync(PreparedQuery, IReadOnlyList{object?}, ArenaPool, CancellationToken)"
@@ -1764,12 +1764,13 @@ public sealed partial class ChalkEngine : IAsyncDisposable
     private (object?[] Values, int Clock) Named(PreparedQuery query, object parameters)
     {
         var bag = ParameterBinder.Properties(parameters);
-        if (_engineClock is null || _options.Clock is not { } name)
+        var clock = ClockParameter(query);
+        if (clock < 0)
         {
             return (ParameterBinder.ResolveNamed(query.Parameters, bag), -1);
         }
 
-        var bare = name.TrimStart('@');
+        var bare = query.Parameters[clock].Name!.TrimStart('@');
         foreach (var key in bag.Keys)
         {
             if (string.Equals(key.TrimStart('@'), bare, StringComparison.OrdinalIgnoreCase))
@@ -1778,30 +1779,68 @@ public sealed partial class ChalkEngine : IAsyncDisposable
             }
         }
 
-        for (var i = 0; i < query.Parameters.Count; i++)
+        var filled = new Dictionary<string, object?>(bag, StringComparer.OrdinalIgnoreCase)
         {
-            var parameter = query.Parameters[i];
-            if (!string.Equals(parameter.Name?.TrimStart('@'), bare, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
+            [bare] = ClockPlaceholder(query.Parameters[clock]),
+        };
+        return (ParameterBinder.ResolveNamed(query.Parameters, filled), clock);
+    }
 
-            // A placeholder of the parameter's own type, so the binding takes it; boxed apart (F189).
-            object placeholder;
-            if (parameter.Type.Kind == Chalk.Ir.TypeKind.TimestampTz)
-            {
-                placeholder = DateTimeOffset.UnixEpoch;
-            }
-            else
-            {
-                placeholder = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Unspecified);
-            }
-
-            var filled = new Dictionary<string, object?>(bag, StringComparer.OrdinalIgnoreCase) { [bare] = placeholder };
-            return (ParameterBinder.ResolveNamed(query.Parameters, filled), i);
+    /// <summary>
+    /// A statement's values from a list, with the engine's clock binding the parameter named after it
+    /// when the list leaves it out (D341): a named statement given one value fewer than it has
+    /// parameters, the list filling the others in their order. A list that binds every parameter binds
+    /// the clock's too, as the host's value.
+    /// </summary>
+    private (object?[] Values, int Clock) Positional(PreparedQuery query, IReadOnlyList<object?>? parameters)
+    {
+        var clock = query.ParameterStyle == ParameterStyle.Named
+            && (parameters?.Count ?? 0) == query.Parameters.Count - 1
+                ? ClockParameter(query)
+                : -1;
+        if (clock < 0)
+        {
+            return (ParameterBinder.ResolvePositional(query.Parameters, parameters, query.ParameterStyle), -1);
         }
 
-        return (ParameterBinder.ResolveNamed(query.Parameters, bag), -1);
+        var values = new object?[query.Parameters.Count];
+        for (int i = 0, given = 0; i < values.Length; i++)
+        {
+            values[i] = i == clock ? ClockPlaceholder(query.Parameters[i]) : parameters![given++];
+        }
+
+        return (values, clock);
+    }
+
+    /// <summary>The position of the parameter named after this engine's clock, or -1.</summary>
+    private int ClockParameter(PreparedQuery query)
+    {
+        if (_engineClock is null || _options.Clock is not { } name)
+        {
+            return -1;
+        }
+
+        var bare = name.TrimStart('@');
+        for (var i = 0; i < query.Parameters.Count; i++)
+        {
+            if (string.Equals(query.Parameters[i].Name?.TrimStart('@'), bare, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>A placeholder of the clock parameter's own type, so the binding takes it; boxed apart (F189).</summary>
+    private static object ClockPlaceholder(ParameterDescriptor parameter)
+    {
+        if (parameter.Type.Kind == Chalk.Ir.TypeKind.TimestampTz)
+        {
+            return DateTimeOffset.UnixEpoch;
+        }
+
+        return new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Unspecified);
     }
 
     /// <summary>Whether this engine names a clock that no refresh has set yet (D341).</summary>
